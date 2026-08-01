@@ -41,11 +41,19 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Apply to connections if it exists
-DROP TRIGGER IF EXISTS set_connections_updated_at ON public.connections;
-CREATE TRIGGER set_connections_updated_at
-  BEFORE UPDATE ON public.connections
-  FOR EACH ROW
-  EXECUTE FUNCTION public.set_updated_at();
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'connections'
+  ) THEN
+    DROP TRIGGER IF EXISTS set_connections_updated_at ON public.connections;
+    CREATE TRIGGER set_connections_updated_at
+      BEFORE UPDATE ON public.connections
+      FOR EACH ROW
+      EXECUTE FUNCTION public.set_updated_at();
+  END IF;
+END $$;
 
 -- 4) no-self-follow constraint
 ALTER TABLE public.follows

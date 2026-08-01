@@ -1,10 +1,21 @@
 -- LiTTree Agent Platform Schema
 -- Run this in Supabase SQL Editor
+--
+-- NOTE: The `notifications` table is created here with a `user_id` schema for
+-- agent/platform alerts. However, `20240614030000_social_graph.sql` may have
+-- already created `public.notifications` with a `recipient_id` schema (the
+-- canonical user inbox). When that happens, `CREATE TABLE IF NOT EXISTS` is a
+-- no-op and the `user_id`-based indexes/policies below must be guarded so they
+-- do not fail on a fresh `supabase db reset`.
+--
+-- The separate `agent_system_notifications` table (the canonical home for
+-- agent/platform alerts) is created by the forward migration
+-- `20260801000000_create_agent_system_notifications.sql`.
 
 -- Conversations for agent chat persistence
-CREATE TABLE IF NOT EXISTS conversations (
+CREATE TABLE IF NOT EXISTS public.conversations (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   agent_id TEXT NOT NULL,
   title TEXT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived', 'deleted')),
@@ -14,9 +25,9 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 
 -- Messages within conversations
-CREATE TABLE IF NOT EXISTS conversation_messages (
+CREATE TABLE IF NOT EXISTS public.conversation_messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  conversation_id UUID NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
   content TEXT NOT NULL,
   metadata JSONB DEFAULT '{}',
@@ -24,10 +35,10 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 );
 
 -- Real-time agent sessions
-CREATE TABLE IF NOT EXISTS agent_sessions (
+CREATE TABLE IF NOT EXISTS public.agent_sessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   agent_id TEXT NOT NULL,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   status TEXT DEFAULT 'offline' CHECK (status IN ('online', 'busy', 'offline', 'error')),
   socket_id TEXT,
   last_activity TIMESTAMPTZ DEFAULT NOW(),
@@ -37,7 +48,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
 );
 
 -- Agent analytics
-CREATE TABLE IF NOT EXISTS agent_analytics (
+CREATE TABLE IF NOT EXISTS public.agent_analytics (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   agent_id TEXT NOT NULL,
   date DATE DEFAULT CURRENT_DATE,
@@ -50,10 +61,13 @@ CREATE TABLE IF NOT EXISTS agent_analytics (
   UNIQUE(agent_id, date)
 );
 
--- Notifications system (Jarvis)
-CREATE TABLE IF NOT EXISTS notifications (
+-- Notifications table (agent/platform alerts).
+-- On a fresh reset, social_graph may have already created this table with a
+-- recipient_id schema. CREATE TABLE IF NOT EXISTS is a no-op in that case.
+-- The user_id-based indexes and policies are guarded below.
+CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('sale', 'signup', 'agent_created', 'system_alert', 'chat', 'marketing')),
   priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'critical')),
   title TEXT NOT NULL,
@@ -66,11 +80,11 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- Agent sales marketplace
-CREATE TABLE IF NOT EXISTS agent_sales (
+CREATE TABLE IF NOT EXISTS public.agent_sales (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   agent_id TEXT NOT NULL,
-  buyer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  seller_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  buyer_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  seller_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   price_lbc INTEGER NOT NULL,
   price_usd_cents INTEGER,
   platform_fee_lbc INTEGER DEFAULT 0,
@@ -82,9 +96,9 @@ CREATE TABLE IF NOT EXISTS agent_sales (
 );
 
 -- Creator earnings tracking
-CREATE TABLE IF NOT EXISTS creator_earnings (
+CREATE TABLE IF NOT EXISTS public.creator_earnings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   date DATE DEFAULT CURRENT_DATE,
   sales_count INTEGER DEFAULT 0,
   total_earnings_lbc INTEGER DEFAULT 0,
@@ -96,10 +110,10 @@ CREATE TABLE IF NOT EXISTS creator_earnings (
 );
 
 -- Agent reviews
-CREATE TABLE IF NOT EXISTS agent_reviews (
+CREATE TABLE IF NOT EXISTS public.agent_reviews (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   agent_id TEXT NOT NULL,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
   review TEXT,
   helpful_count INTEGER DEFAULT 0,
@@ -108,9 +122,9 @@ CREATE TABLE IF NOT EXISTS agent_reviews (
 );
 
 -- CLI Bridge sessions (for terminal access)
-CREATE TABLE IF NOT EXISTS cli_sessions (
+CREATE TABLE IF NOT EXISTS public.cli_sessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   tool_name TEXT NOT NULL CHECK (tool_name IN ('qwen', 'hermes', 'openclaw', 'gemini', 'terminal')),
   session_token TEXT NOT NULL UNIQUE,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'closed', 'error')),
@@ -121,61 +135,92 @@ CREATE TABLE IF NOT EXISTS cli_sessions (
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
-CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON conversations(agent_id);
-CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_id ON conversation_messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_conversation_messages_created_at ON conversation_messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id ON agent_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_id_read ON notifications(user_id, read_at);
-CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
-CREATE INDEX IF NOT EXISTS idx_agent_sales_buyer_id ON agent_sales(buyer_id);
-CREATE INDEX IF NOT EXISTS idx_agent_sales_seller_id ON agent_sales(seller_id);
-CREATE INDEX IF NOT EXISTS idx_agent_sales_created_at ON agent_sales(created_at);
-CREATE INDEX IF NOT EXISTS idx_agent_reviews_agent_id ON agent_reviews(agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON public.conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON public.conversations(agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_id ON public.conversation_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_created_at ON public.conversation_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id ON public.agent_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON public.agent_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_agent_sales_buyer_id ON public.agent_sales(buyer_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sales_seller_id ON public.agent_sales(seller_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sales_created_at ON public.agent_sales(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_reviews_agent_id ON public.agent_reviews(agent_id);
+
+-- Guarded notifications indexes: only create if the `user_id` column exists.
+-- On a fresh reset, social_graph creates `notifications` with `recipient_id`
+-- (no `user_id`), so these indexes must be skipped to avoid errors.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'user_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id_read ON public.notifications(user_id, read_at);
+    CREATE INDEX IF NOT EXISTS idx_notifications_type ON public.notifications(type);
+  END IF;
+END $$;
 
 -- RLS Policies
-ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_sales ENABLE ROW LEVEL SECURITY;
-ALTER TABLE creator_earnings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cli_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conversation_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.creator_earnings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cli_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own data
-CREATE POLICY conversations_user_isolation ON conversations
+DROP POLICY IF EXISTS conversations_user_isolation ON public.conversations;
+CREATE POLICY conversations_user_isolation ON public.conversations
   FOR ALL USING (user_id = auth.uid()::UUID);
 
-CREATE POLICY conversation_messages_user_isolation ON conversation_messages
+DROP POLICY IF EXISTS conversation_messages_user_isolation ON public.conversation_messages;
+CREATE POLICY conversation_messages_user_isolation ON public.conversation_messages
   FOR ALL USING (
     conversation_id IN (
-      SELECT id FROM conversations WHERE user_id = auth.uid()::UUID
+      SELECT id FROM public.conversations WHERE user_id = auth.uid()::UUID
     )
   );
 
-CREATE POLICY notifications_user_isolation ON notifications
-  FOR ALL USING (user_id = auth.uid()::UUID);
+-- Guarded notifications policy: only create if `user_id` column exists.
+-- On a fresh reset, social_graph's `notifications` table uses `recipient_id`
+-- and has its own policies — this one must be skipped.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'user_id'
+  ) THEN
+    DROP POLICY IF EXISTS notifications_user_isolation ON public.notifications;
+    CREATE POLICY notifications_user_isolation ON public.notifications
+      FOR ALL USING (user_id = auth.uid()::UUID);
+  END IF;
+END $$;
 
-CREATE POLICY agent_sales_buyer_isolation ON agent_sales
+DROP POLICY IF EXISTS agent_sales_buyer_isolation ON public.agent_sales;
+CREATE POLICY agent_sales_buyer_isolation ON public.agent_sales
   FOR SELECT USING (buyer_id = auth.uid()::UUID OR seller_id = auth.uid()::UUID);
 
-CREATE POLICY creator_earnings_user_isolation ON creator_earnings
+DROP POLICY IF EXISTS creator_earnings_user_isolation ON public.creator_earnings;
+CREATE POLICY creator_earnings_user_isolation ON public.creator_earnings
   FOR ALL USING (user_id = auth.uid()::UUID);
 
-CREATE POLICY agent_reviews_user_isolation ON agent_reviews
+DROP POLICY IF EXISTS agent_reviews_user_isolation ON public.agent_reviews;
+CREATE POLICY agent_reviews_user_isolation ON public.agent_reviews
   FOR ALL USING (user_id = auth.uid()::UUID);
 
-CREATE POLICY cli_sessions_user_isolation ON cli_sessions
+DROP POLICY IF EXISTS cli_sessions_user_isolation ON public.cli_sessions;
+CREATE POLICY cli_sessions_user_isolation ON public.cli_sessions
   FOR ALL USING (user_id = auth.uid()::UUID);
 
 -- Public reads for analytics (aggregated only)
-CREATE POLICY agent_analytics_public ON agent_analytics
+DROP POLICY IF EXISTS agent_analytics_public ON public.agent_analytics;
+CREATE POLICY agent_analytics_public ON public.agent_analytics
   FOR SELECT USING (true);
 
 -- Functions for updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = NOW();
@@ -183,15 +228,16 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_conversations_updated_at ON public.conversations;
 CREATE TRIGGER update_conversations_updated_at
-  BEFORE UPDATE ON conversations
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  BEFORE UPDATE ON public.conversations
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Function to update creator earnings when sale happens
-CREATE OR REPLACE FUNCTION update_creator_earnings()
+CREATE OR REPLACE FUNCTION public.update_creator_earnings()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO creator_earnings (user_id, date, sales_count, total_earnings_lbc, platform_fees_lbc, available_lbc)
+  INSERT INTO public.creator_earnings (user_id, date, sales_count, total_earnings_lbc, platform_fees_lbc, available_lbc)
   VALUES (NEW.seller_id, CURRENT_DATE, 1, NEW.seller_earnings_lbc, NEW.platform_fee_lbc, NEW.seller_earnings_lbc)
   ON CONFLICT (user_id, date)
   DO UPDATE SET
@@ -203,8 +249,9 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS trigger_update_creator_earnings ON public.agent_sales;
 CREATE TRIGGER trigger_update_creator_earnings
-  AFTER INSERT ON agent_sales
+  AFTER INSERT ON public.agent_sales
   FOR EACH ROW
   WHEN (NEW.status = 'completed' AND NEW.seller_id IS NOT NULL)
-  EXECUTE FUNCTION update_creator_earnings();
+  EXECUTE FUNCTION public.update_creator_earnings();

@@ -1,0 +1,107 @@
+name: Migration Reproducibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/tests/**"
+      - "supabase/upgrade-validation/**"
+      - "supabase/config.toml"
+      - ".github/workflows/migration-reproducibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  db-reset:
+    name: supabase db reset (clean replay)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Start Supabase
+        run: npx supabase start
+        env:
+          CI: true
+
+      - name: Reset database (replay all migrations)
+        run: npx supabase db reset
+        env:
+          CI: true
+
+      - name: Verify migration count
+        run: |
+          MIGRATION_COUNT=$(ls supabase/migrations/*.sql 2>/dev/null | wc -l)
+          echo "Migration files on disk: $MIGRATION_COUNT"
+          if [ "$MIGRATION_COUNT" -eq 0 ]; then
+            echo "ERROR: No migration files found"
+            exit 1
+          fi
+
+      - name: Run database contract tests
+        run: npx supabase test db
+        env:
+          CI: true
+
+      - name: Stop Supabase
+        if: always()
+        run: npx supabase stop --no-backup
+        env:
+          CI: true
+
+  production-upgrade:
+    name: Production-style migration upgrade
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Start Supabase
+        run: npx supabase start
+        env:
+          CI: true
+
+      - name: Run upgrade validation (run.sh)
+        shell: bash
+        run: bash supabase/upgrade-validation/run.sh
+        env:
+          CI: true
+
+      - name: Stop Supabase
+        if: always()
+        run: npx supabase stop --no-backup
+        env:
+          CI: true
