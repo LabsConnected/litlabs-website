@@ -288,6 +288,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const workspaceId = req.params.workspaceId;
   const userId = String(req.body?.userId || "");
   const command = String(req.body?.command || "");
+  const stdinInput = typeof req.body?.stdin === "string" ? req.body.stdin : undefined;
 
   if (!userId || !command) {
     res.status(400).json({ error: "Missing userId or command" });
@@ -322,7 +323,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const shell = isWin ? "powershell.exe" : "bash";
   const shellArgs = isWin ? ["-NoProfile", "-Command", command] : ["-c", command];
 
-  execFile(
+  const child = execFile(
     shell,
     shellArgs,
     {
@@ -343,6 +344,11 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
       });
     },
   );
+
+  // Pipe stdin to the child process if provided (e.g. for `git commit --file=-`)
+  if (stdinInput !== undefined && child.stdin) {
+    child.stdin.end(stdinInput);
+  }
 });
 
 function getUserWorkspace(userId: string) {
