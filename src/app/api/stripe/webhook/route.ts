@@ -98,11 +98,11 @@ export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
 
   if (!key) {
-    return NextResponse.json({ error: "No secret key" }, { status: 500 });
+    return NextResponse.json({ error: "Stripe secret key not configured" }, { status: 400 });
   }
 
   if (!signingSecret) {
-    return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
+    return NextResponse.json({ error: "Stripe webhook secret not configured" }, { status: 400 });
   }
 
   const stripe = new Stripe(key, { apiVersion: "2025-08-27.basil" });

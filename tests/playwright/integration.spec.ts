@@ -183,7 +183,7 @@ test.describe("Vercel Preview — API endpoints (bypassed)", () => {
 
   test("stripe checkout API returns 401 (not 500)", async ({ request }) => {
     const resp = await request.post(`${DEPLOYMENT_URL}/api/stripe/checkout`, {
-      data: { productId: "test_invalid" },
+      data: { priceId: "price_test_invalid" },
       headers: { "Content-Type": "application/json", ...bypassHeaders() },
     });
     expect(resp.status()).toBeLessThan(500);
@@ -191,13 +191,13 @@ test.describe("Vercel Preview — API endpoints (bypassed)", () => {
     console.log(`Stripe checkout API: ${resp.status()}`);
   });
 
-  test("stripe webhook endpoint does not 500", async ({ request }) => {
+  test("stripe webhook endpoint returns 400 for missing/invalid signature", async ({ request }) => {
     const resp = await request.post(`${DEPLOYMENT_URL}/api/stripe/webhook`, {
       data: {},
       headers: { "Content-Type": "application/json", ...bypassHeaders() },
     });
-    expect(resp.status()).toBeLessThan(500);
-    expect(resp.status()).not.toBe(404);
+    expect(resp.status(), "Stripe webhook should return 400 for missing config or invalid signature").toBe(400);
+    assertJsonContentType(resp, "stripe webhook");
     console.log(`Stripe webhook endpoint: ${resp.status()}`);
   });
 

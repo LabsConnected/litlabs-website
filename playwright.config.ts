@@ -43,7 +43,6 @@ export default defineConfig({
           reuseExistingServer: false,
           cwd: ".",
           env: (() => {
-            // Strip VERCEL env vars so test bypass is valid
             const env: Record<string, string> = {};
             for (const [key, value] of Object.entries(process.env)) {
               if (!key.startsWith("VERCEL") && value !== undefined) {
@@ -52,7 +51,15 @@ export default defineConfig({
             }
             env.CI = "true";
             env.PLAYWRIGHT_TEST = "true";
-            env.PLAYWRIGHT_AUTH_DISABLED = "true";
+            // Ensure dev Clerk keys from .env.test override .env.local production
+            // keys at runtime. NEXT_PUBLIC_* is baked at build time, but
+            // CLERK_SECRET_KEY is a runtime var that Next.js loads from .env.local.
+            if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+              env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+            }
+            if (process.env.CLERK_SECRET_KEY) {
+              env.CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
+            }
             return env;
           })(),
         },
