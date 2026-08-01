@@ -83,57 +83,67 @@ step "Step 2: Run preconditions"
 psql_exec < "${PRECONDITIONS}"
 
 # -----------------------------------------------------------------------------
-# Step 3: Verify ONLY the forward migration is pending.
+# Step 3: Verify pending migrations.
 #         (a) No migration newer than RESET_VERSION is recorded as applied.
 #         (b) The forward migration is NOT yet in the migration history.
-#         (c) Exactly one migration file on disk is newer than RESET_VERSION.
+#         (c) At least one migration file on disk is newer than RESET_VERSION.
 # -----------------------------------------------------------------------------
-step "Step 3: Verify only the forward migration is pending"
+step "Step 3: Verify pending migrations"
 
+# List all migration files newer than RESET_VERSION, sorted by version.
+# Each filename is YYYYMMDDHHMMSS_description.sql — the version prefix sorts
+# chronologically.
 NEWER_FILES="$(ls supabase/migrations/*.sql | awk -F/ '{print $NF}' \
-  | awk -F_ '{if ($1 > "'${RESET_VERSION}'") print}' || true)"
+  | awk -F_ '{if ($1 > "'${RESET_VERSION}'") print}' | sort || true)"
 NEWER_COUNT="$(printf '%s\n' "${NEWER_FILES}" | grep -c . || true)"
-if [ "${NEWER_COUNT}" -ne 1 ]; then
-  echo "FAIL: expected exactly 1 migration file newer than ${RESET_VERSION}, found ${NEWER_COUNT}:" >&2
-  printf '%s\n' "${NEWER_FILES}" >&2
+if [ "${NEWER_COUNT}" -lt 1 ]; then
+  echo "FAIL: expected at least 1 migration file newer than ${RESET_VERSION}, found ${NEWER_COUNT}" >&2
   exit 1
 fi
-echo "OK: exactly 1 migration file newer than ${RESET_VERSION} -> $(printf '%s' "${NEWER_FILES}")"
+echo "OK: ${NEWER_COUNT} migration file(s) newer than ${RESET_VERSION}:"
+printf '      %s\n' ${NEWER_FILES}
 
 FORWARD_APPLIED="$(psql_scalar \
   "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '${FORWARD_VERSION}';")"
 if [ "${FORWARD_APPLIED}" != "0" ]; then
-  echo "FAIL: forward migration ${FORWARD_VERSION} already recorded as applied (count=${FORWARD_APPLIED}) before 'migration up'" >&2
+  echo "FAIL: forward migration ${FORWARD_VERSION} already recorded as applied (count=${FORWARD_APPLIED}) before apply" >&2
   exit 1
 fi
 echo "OK: forward migration ${FORWARD_VERSION} is pending (not yet applied)"
 
 # -----------------------------------------------------------------------------
-# Step 4: Apply the forward migration directly via psql.
+# Step 4: Apply ALL pending migrations directly via psql (in version order).
 #         We do NOT use `supabase migration up` because it always fetches
 #         remote migration history (even with --db-url), which contains stale
 #         entries (20260712, 20260719) that cause a hard error requiring
 #         `migration repair`. Instead, we apply the SQL directly and record
-#         the version in schema_migrations manually — exactly what migration
+#         each version in schema_migrations manually — exactly what migration
 #         up does internally, without the remote check.
 # -----------------------------------------------------------------------------
-step "Step 4: Apply forward migration (psql direct + record in schema_migrations)"
-psql_exec < "${FORWARD_MIGRATION}"
-echo "OK: forward migration SQL applied (exit 0)"
+step "Step 4: Apply all pending migrations (psql direct + record in schema_migrations)"
 
-# Record the forward migration version in schema_migrations, matching what
-# `supabase migration up` does internally. Use ON_ERROR_STOP=1 so a failure
-# to record is caught.
-psql_exec <<SQL
+for FILE in ${NEWER_FILES}; do
+  VERSION="$(printf '%s' "${FILE}" | awk -F_ '{print $1}')"
+  NAME="$(printf '%s' "${FILE}" | sed 's/^[0-9]*_//; s/\.sql$//')"
+  MIGRATION_PATH="supabase/migrations/${FILE}"
+
+  echo "  Applying migration ${FILE}..."
+  psql_exec < "${MIGRATION_PATH}"
+  echo "  OK: ${FILE} SQL applied (exit 0)"
+
+  # Record the migration version in schema_migrations, matching what
+  # `supabase migration up` does internally.
+  psql_exec <<SQL
 INSERT INTO supabase_migrations.schema_migrations (version, statements, name)
 VALUES (
-  '${FORWARD_VERSION}',
+  '${VERSION}',
   ARRAY['-- applied by supabase/upgrade-validation/run.sh (direct psql)'],
-  'create_agent_system_notifications'
+  '${NAME}'
 )
 ON CONFLICT (version) DO NOTHING;
 SQL
-echo "OK: forward migration recorded in schema_migrations"
+  echo "  OK: ${VERSION} recorded in schema_migrations"
+done
 
 # Confirm the forward migration is now recorded as applied.
 FORWARD_APPLIED="$(psql_scalar \
@@ -151,13 +161,18 @@ step "Step 5: Run postconditions (after upgrade)"
 psql_exec < "${POSTCONDITIONS}"
 
 # -----------------------------------------------------------------------------
-# Step 6: Re-run the ENTIRE forward migration SQL with ON_ERROR_STOP=1.
-#         This proves the migration is idempotent — safe to re-apply on a
-#         database where it has already run (e.g. a repaired/replayed prod DB).
+# Step 6: Re-run ALL pending migration SQL files with ON_ERROR_STOP=1.
+#         This proves the migrations are idempotent — safe to re-apply on a
+#         database where they have already run (e.g. a repaired/replayed prod DB).
 # -----------------------------------------------------------------------------
-step "Step 6: Re-run entire forward migration SQL (idempotency, ON_ERROR_STOP=1)"
-psql_exec < "${FORWARD_MIGRATION}"
-echo "OK: idempotency re-run succeeded (exit 0)"
+step "Step 6: Re-run all pending migration SQL (idempotency, ON_ERROR_STOP=1)"
+for FILE in ${NEWER_FILES}; do
+  MIGRATION_PATH="supabase/migrations/${FILE}"
+  echo "  Re-running ${FILE}..."
+  psql_exec < "${MIGRATION_PATH}"
+  echo "  OK: ${FILE} idempotency re-run succeeded (exit 0)"
+done
+echo "OK: all pending migrations idempotency re-run succeeded"
 
 # -----------------------------------------------------------------------------
 # Step 7: Run postconditions again (idempotency didn't break anything).
