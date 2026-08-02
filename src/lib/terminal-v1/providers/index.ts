@@ -4,11 +4,12 @@
  * Returns the appropriate provider based on TERMINAL_PROVIDER env var.
  * Currently supports:
  *   - "disabled" (default) — refuses all operations
- *   - "managed-sandbox" — reserved for PR 2 implementation
+ *   - "managed-sandbox" — Docker-based isolated sandbox provider
  */
 
 import type { SandboxProvider } from "../sandbox-provider";
 import { DisabledProvider } from "./disabled-provider";
+import { DockerSandboxProvider } from "./docker-provider";
 
 export type ProviderType = "disabled" | "managed-sandbox";
 
@@ -24,9 +25,7 @@ export function getSandboxProvider(): SandboxProvider {
       cachedProvider = new DisabledProvider();
       break;
     case "managed-sandbox":
-      // PR 2 will implement the managed sandbox provider.
-      // Until then, fall back to disabled.
-      cachedProvider = new DisabledProvider();
+      cachedProvider = new DockerSandboxProvider();
       break;
     default:
       cachedProvider = new DisabledProvider();
