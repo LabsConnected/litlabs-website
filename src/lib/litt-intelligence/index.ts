@@ -34,3 +34,6 @@ export { executeWebIntelligence, detectWebIntelligenceIntent } from "./web-intel
 export type { WebIntelligenceOperation, WebIntelligenceRequest, WebIntelligenceResult } from "./web-intelligence";
 export { getSourceRegistry, SourceRegistry } from "./source-registry";
 export type { WebSource, WebSourceType, ConfidenceLevel, WebSourceClaim } from "./source-registry";
+
+export { ActionPlanner, ActionExecutor, verifyStepResult, verifyPlanCompletion } from "./action-loop";
+export type { ExecutionEvent } from "./action-loop";
