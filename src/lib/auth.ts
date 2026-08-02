@@ -71,8 +71,16 @@ export async function auth(req?: NextRequest): Promise<AuthResult> {
     return { userId: null, clerkId: null };
   }
 
-  // Try Clerk's cookie-based auth first (reads from middleware context)
-  const { userId: clerkId } = await clerkAuth();
+  // Try Clerk's cookie-based auth first (reads from middleware context).
+  // Wrap in try-catch — clerkAuth() can throw when the middleware context
+  // is missing or the session is in an intermediate ("interstitial") state.
+  let clerkId: string | null = null;
+  try {
+    const result = await clerkAuth();
+    clerkId = result.userId;
+  } catch {
+    // Cookie auth failed — try Bearer token fallback below
+  }
 
   if (clerkId) {
     return { userId: clerkId, clerkId };
