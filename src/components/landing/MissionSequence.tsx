@@ -62,12 +62,15 @@ export function MissionSequence() {
   }, []);
 
   useEffect(() => {
-    if (paused || completed || reducedMotion) return;
+    // Reduced-motion users: immediately show the final static state.
+    // This must run BEFORE the paused/completed early-return below,
+    // otherwise reduced-motion users stay stuck at the opening stage.
     if (reducedMotion) {
       setStageIndex(STAGES.length - 1);
       setCompleted(true);
       return;
     }
+    if (paused || completed) return;
     const timer = setTimeout(advance, STAGE_DURATION);
     return () => clearTimeout(timer);
   }, [stageIndex, paused, completed, reducedMotion, advance]);

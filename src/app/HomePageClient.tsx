@@ -72,13 +72,13 @@ function LandingPage() {
             <h1 className="max-w-2xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl">
               Bring the idea.
               <span className="mt-3 block bg-linear-to-r from-[#a8ff2f] via-[#7efbff] to-[#a970ff] bg-clip-text text-transparent">
-                LiTT builds the rest.
+                LiTT helps you build the rest.
               </span>
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/60">
               LiTTree is an AI project workspace where LiTT helps you turn ideas
               into working apps, websites, and creative media—with project memory,
-              real files, human approvals, and one-click deployment.
+              real files, human approvals, and deployment from inside Studio.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
@@ -92,7 +92,7 @@ function LandingPage() {
                 data-testid="cta-watch-product"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-bold text-white transition hover:border-[#65f4ff]/50 hover:bg-white/10"
               >
-                <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> Watch LiTT build something
+                <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> See how it works
               </a>
             </div>
             <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/40">
@@ -185,19 +185,20 @@ function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ 4. REAL CREATIONS ═══ */}
+      {/* ═══ 4. PRODUCT DEMONSTRATIONS ═══ */}
       <section id="creations" className="relative border-b border-white/8 bg-[#05070d] px-5 py-20 lg:px-10 lg:py-28">
         <div className="mx-auto max-w-screen-2xl">
           <div className="mx-auto max-w-3xl text-center">
             <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">
-              Built inside LiTTree
+              See the workflow
             </div>
             <h2 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em] sm:text-5xl">
-              Real projects. Real results.
+              Product demonstrations.
             </h2>
             <p className="mt-5 text-lg leading-8 text-white/50">
-              These are demonstration projects created by the LiTTree team to show
-              what the platform produces. Each one has a working result you can view.
+              These are illustrative simulations showing how LiTTree takes a prompt
+              through mission, plan, build, and result. Each demo walks through the
+              complete workflow.
             </p>
           </div>
           <div className="mt-12">

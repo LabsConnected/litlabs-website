@@ -1,97 +1,81 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, Check, Clock, GitFork, Music, BarChart3, Code2 } from "lucide-react";
+import { ArrowRight, CircleDot, Music, BarChart3, Code2, Sparkles } from "lucide-react";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { SITE_NAME, SITE_URL, buildMetadata } from "@/lib/seo";
 
-interface ShowcaseProject {
+/**
+ * Product demonstration pages.
+ *
+ * These are NOT real deployed projects. They are illustrative simulations
+ * showing the LiTTree workflow: how a prompt becomes a mission, plan,
+ * build steps, and result. No file sizes, durations, deployment URLs, or
+ * live results are claimed.
+ */
+
+interface DemoProject {
   slug: string;
   title: string;
-  mission: string;
-  result: string;
+  prompt: string;
+  outcome: string;
   tools: string[];
   icon: typeof Music;
   accent: string;
   steps: { label: string; detail: string }[];
-  duration: string;
-  files: { name: string; size: string }[];
 }
 
-const PROJECTS: Record<string, ShowcaseProject> = {
+const PROJECTS: Record<string, DemoProject> = {
   "artist-launch-site": {
     slug: "artist-launch-site",
     title: "Artist Launch Site",
-    mission: "Build a premium website for a music artist with a hero, player, tour dates, and merch link.",
-    result: "A responsive, deployed artist website with an embedded music player, tour dates, and social integration.",
+    prompt: "Build a premium website for a music artist with a hero, player, tour dates, and merch link.",
+    outcome: "A responsive artist website with an embedded music player, tour dates, and social integration.",
     tools: ["HTML", "CSS", "JavaScript", "Image Generation", "Audio"],
     icon: Music,
     accent: "#b58cff",
-    duration: "~4 min",
     steps: [
-      { label: "Mission created", detail: "LiTT parsed the prompt and defined a premium music artist website with 5 sections." },
-      { label: "Plan generated", detail: "6-step execution plan: hero, layout, player, tour dates, merch, deploy." },
-      { label: "Files built", detail: "index.html, styles.css, player.js, and hero image generated in the workspace." },
-      { label: "Preview rendered", detail: "Live preview showed the responsive layout with the music player functioning." },
-      { label: "Approved for deploy", detail: "User reviewed the preview and approved deployment to a public URL." },
-      { label: "Deployed live", detail: "Production bundle built and deployed to the edge network. Site is live." },
-    ],
-    files: [
-      { name: "index.html", size: "4.2 KB" },
-      { name: "styles.css", size: "8.1 KB" },
-      { name: "player.js", size: "3.7 KB" },
-      { name: "assets/hero.jpg", size: "124 KB" },
+      { label: "Mission created", detail: "LiTT parses the prompt and defines a premium music artist website with 5 sections." },
+      { label: "Plan generated", detail: "A 6-step execution plan: hero, layout, player, tour dates, merch, deploy." },
+      { label: "Files built", detail: "index.html, styles.css, player.js, and a hero image are created in the workspace." },
+      { label: "Preview rendered", detail: "A live preview shows the responsive layout with the music player functioning." },
+      { label: "Approved for deploy", detail: "The user reviews the preview and approves deployment to a public URL." },
+      { label: "Deployed", detail: "The production bundle is built and deployed. The site is live." },
     ],
   },
   "small-business-dashboard": {
     slug: "small-business-dashboard",
     title: "Small Business Dashboard",
-    mission: "Create a data dashboard for a small business showing sales, inventory, and customer metrics.",
-    result: "An interactive dashboard with charts, filters, and exportable reports.",
+    prompt: "Create a data dashboard for a small business showing sales, inventory, and customer metrics.",
+    outcome: "An interactive dashboard with charts, filters, and exportable reports.",
     tools: ["React", "Charts", "Data", "Responsive"],
     icon: BarChart3,
     accent: "#65f4ff",
-    duration: "~6 min",
     steps: [
-      { label: "Mission created", detail: "LiTT defined a business dashboard with sales, inventory, and customer panels." },
-      { label: "Plan generated", detail: "8-step plan: data model, chart components, filters, layout, export, deploy." },
-      { label: "Data structure built", detail: "Mock data layer created with sales, inventory, and customer records." },
-      { label: "Chart components built", detail: "Bar, line, and pie chart components generated with responsive sizing." },
-      { label: "Filter system added", detail: "Date range and category filters connected to the data layer." },
-      { label: "Layout assembled", detail: "Grid layout with sidebar navigation and main content area." },
-      { label: "Export feature built", detail: "CSV export functionality added to all report views." },
-      { label: "Deployed live", detail: "Dashboard deployed and accessible via public URL." },
-    ],
-    files: [
-      { name: "index.html", size: "6.8 KB" },
-      { name: "app.js", size: "12.3 KB" },
-      { name: "charts.js", size: "9.4 KB" },
-      { name: "styles.css", size: "11.2 KB" },
-      { name: "data/sales.json", size: "2.1 KB" },
+      { label: "Mission created", detail: "LiTT defines a business dashboard with sales, inventory, and customer panels." },
+      { label: "Plan generated", detail: "An 8-step plan: data model, chart components, filters, layout, export, deploy." },
+      { label: "Data structure built", detail: "A mock data layer is created with sales, inventory, and customer records." },
+      { label: "Chart components built", detail: "Bar, line, and pie chart components are generated with responsive sizing." },
+      { label: "Filter system added", detail: "Date range and category filters are connected to the data layer." },
+      { label: "Layout assembled", detail: "A grid layout with sidebar navigation and main content area." },
+      { label: "Export feature built", detail: "CSV export functionality is added to all report views." },
+      { label: "Deployed", detail: "The dashboard is deployed and accessible via a public URL." },
     ],
   },
   "music-campaign": {
     slug: "music-campaign",
     title: "Music Campaign",
-    mission: "Generate cover artwork, promotional copy, and social assets for a single release campaign.",
-    result: "Cover art, three social posts, and a press kit — all brand-consistent and ready to publish.",
+    prompt: "Generate cover artwork, promotional copy, and social assets for a single release campaign.",
+    outcome: "Cover art, three social posts, and a press kit — all brand-consistent and ready to publish.",
     tools: ["Image Generation", "Copywriting", "Social", "Branding"],
     icon: Code2,
     accent: "#a8ff2f",
-    duration: "~3 min",
     steps: [
-      { label: "Mission created", detail: "LiTT defined a single release campaign with cover art, social posts, and press kit." },
-      { label: "Plan generated", detail: "5-step plan: brand direction, cover art, social copy, social assets, press kit." },
-      { label: "Cover art generated", detail: "AI-generated cover artwork in 3 variations, user selected the final design." },
+      { label: "Mission created", detail: "LiTT defines a single release campaign with cover art, social posts, and press kit." },
+      { label: "Plan generated", detail: "A 5-step plan: brand direction, cover art, social copy, social assets, press kit." },
+      { label: "Cover art generated", detail: "AI-generated cover artwork in 3 variations. The user selects the final design." },
       { label: "Social copy written", detail: "Promotional copy for 3 social posts with hashtags and call-to-action." },
-      { label: "Press kit assembled", detail: "One-page press kit with artist bio, release info, and downloadable assets." },
-    ],
-    files: [
-      { name: "cover-art-final.png", size: "2.4 MB" },
-      { name: "social-post-1.png", size: "890 KB" },
-      { name: "social-post-2.png", size: "1.1 MB" },
-      { name: "social-post-3.png", size: "920 KB" },
-      { name: "press-kit.pdf", size: "340 KB" },
+      { label: "Press kit assembled", detail: "A one-page press kit with artist bio, release info, and downloadable assets." },
     ],
   },
 };
@@ -103,10 +87,10 @@ export function generateStaticParams() {
 export function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   return params.then((p) => {
     const project = PROJECTS[p.slug];
-    if (!project) return buildMetadata({ title: "Project not found", path: "/showcase", index: false });
+    if (!project) return buildMetadata({ title: "Demo not found", path: "/showcase", index: false });
     return buildMetadata({
-      title: `${project.title} — LiTTree Showcase`,
-      description: project.mission,
+      title: `${project.title} — LiTTree Product Demo`,
+      description: project.prompt,
       path: `/showcase/${project.slug}`,
       index: true,
     });
@@ -124,7 +108,7 @@ export default async function ShowcasePage({ params }: { params: Promise<{ slug:
     "@context": "https://schema.org",
     "@type": "CreativeWork",
     name: project.title,
-    description: project.mission,
+    description: project.prompt,
     creator: { "@type": "Organization", name: SITE_NAME },
     url: `${SITE_URL}/showcase/${project.slug}`,
   };
@@ -135,58 +119,98 @@ export default async function ShowcasePage({ params }: { params: Promise<{ slug:
 
       <header className="border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-5">
-          <Link href="/#creations" className="flex items-center gap-2 text-sm font-bold text-white/60 transition hover:text-white"><ArrowRight size={14} className="rotate-180" /> Back to showcase</Link>
-          <Link href="/sign-up?redirect=/studio" className="inline-flex items-center gap-2 rounded-full bg-[#a8ff2f] px-4 py-2 text-xs font-black text-[#03050a] transition hover:bg-[#b8ff5f]"><GitFork size={12} /> Remix this project</Link>
+          <Link href="/#creations" className="flex items-center gap-2 text-sm font-bold text-white/60 transition hover:text-white">
+            <ArrowRight size={14} className="rotate-180" /> Back to demos
+          </Link>
+          <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[#a8ff2f] px-4 py-2 text-xs font-black text-[#03050a] transition hover:bg-[#b8ff5f]">
+            <Sparkles size={12} /> Try it yourself
+          </Link>
         </div>
       </header>
 
       <div className="mx-auto max-w-4xl px-5 py-12 lg:py-16">
+        {/* Demo disclaimer banner */}
+        <div className="mb-8 rounded-xl border border-white/10 bg-white/3 px-4 py-3 text-center text-xs text-white/50">
+          <strong className="text-white/70">Product demonstration.</strong> This is an illustrative simulation of the LiTTree workflow, not a live deployed project.
+        </div>
+
+        {/* Project header */}
         <div className="flex items-start gap-4">
-          <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl border" style={{ borderColor: `${project.accent}30`, backgroundColor: `${project.accent}10`, color: project.accent }}><Icon size={28} /></div>
+          <div
+            className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl border"
+            style={{ borderColor: `${project.accent}30`, backgroundColor: `${project.accent}10`, color: project.accent }}
+          >
+            <Icon size={28} />
+          </div>
           <div>
-            <div className="text-xs font-black uppercase tracking-[.2em]" style={{ color: project.accent }}>LiTTree Showcase</div>
+            <div className="text-xs font-black uppercase tracking-[.2em]" style={{ color: project.accent }}>
+              Product Demo
+            </div>
             <h1 className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">{project.title}</h1>
-            <div className="mt-2 flex items-center gap-4 text-xs font-bold text-white/40"><span className="flex items-center gap-1.5"><Clock size={11} /> {project.duration}</span><span className="flex items-center gap-1.5"><Check size={11} /> {project.steps.length} steps</span></div>
+            <div className="mt-2 flex items-center gap-4 text-xs font-bold text-white/40">
+              <span className="flex items-center gap-1.5"><CircleDot size={11} /> {project.steps.length} steps</span>
+            </div>
           </div>
         </div>
 
+        {/* Prompt */}
         <section className="mt-10 rounded-2xl border border-white/10 bg-[#0a0d14] p-6">
-          <div className="text-xs font-black uppercase tracking-wider text-white/40">Original Mission</div>
-          <p className="mt-2 text-lg leading-7 text-white/80">{project.mission}</p>
+          <div className="text-xs font-black uppercase tracking-wider text-white/40">User Prompt</div>
+          <p className="mt-2 text-lg leading-7 text-white/80">{project.prompt}</p>
         </section>
 
+        {/* Outcome */}
         <section className="mt-6 rounded-2xl border p-6" style={{ borderColor: `${project.accent}20`, backgroundColor: `${project.accent}05` }}>
-          <div className="text-xs font-black uppercase tracking-wider" style={{ color: project.accent }}>Final Result</div>
-          <p className="mt-2 text-lg leading-7 text-white/80">{project.result}</p>
+          <div className="text-xs font-black uppercase tracking-wider" style={{ color: project.accent }}>Expected Outcome</div>
+          <p className="mt-2 text-lg leading-7 text-white/80">{project.outcome}</p>
         </section>
 
+        {/* Workflow steps */}
         <section className="mt-10">
-          <h2 className="text-xl font-black">Build steps</h2>
+          <h2 className="text-xl font-black">Workflow simulation</h2>
+          <p className="mt-1 text-xs text-white/40">These steps illustrate what LiTTree does during a typical project.</p>
           <div className="mt-4 space-y-2">
             {project.steps.map((step, i) => (
               <div key={step.label} className="flex items-start gap-4 rounded-xl border border-white/8 bg-[#0a0d14] p-4">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-black" style={{ backgroundColor: `${project.accent}12`, color: project.accent }}>{i + 1}</span>
-                <div><div className="text-sm font-black text-white">{step.label}</div><div className="mt-1 text-xs leading-5 text-white/50">{step.detail}</div></div>
+                <span
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-black"
+                  style={{ backgroundColor: `${project.accent}12`, color: project.accent }}
+                >
+                  {i + 1}
+                </span>
+                <div>
+                  <div className="text-sm font-black text-white">{step.label}</div>
+                  <div className="mt-1 text-xs leading-5 text-white/50">{step.detail}</div>
+                </div>
               </div>
             ))}
           </div>
         </section>
 
+        {/* Tools */}
         <section className="mt-10">
           <h2 className="text-xl font-black">Tools used</h2>
-          <div className="mt-4 flex flex-wrap gap-2">{project.tools.map((tool) => (<span key={tool} className="rounded-lg border border-white/10 bg-white/3 px-3 py-2 text-xs font-bold text-white/60">{tool}</span>))}</div>
-        </section>
-
-        <section className="mt-10">
-          <h2 className="text-xl font-black">Files generated</h2>
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/8">
-            {project.files.map((file, i) => (<div key={file.name} className={`flex items-center justify-between px-4 py-3 text-sm ${i % 2 === 0 ? "bg-[#0a0d14]" : "bg-white/3"}`}><span className="font-mono text-white/70">{file.name}</span><span className="text-xs font-bold text-white/30">{file.size}</span></div>))}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {project.tools.map((tool) => (
+              <span key={tool} className="rounded-lg border border-white/10 bg-white/3 px-3 py-2 text-xs font-bold text-white/60">
+                {tool}
+              </span>
+            ))}
           </div>
         </section>
 
+        {/* CTA */}
         <div className="mt-12 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0a0d14] p-6 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
-          <div><div className="text-lg font-black">Want to build something like this?</div><div className="mt-1 text-sm text-white/50">Start your own project in LiTTree Studio.</div></div>
-          <Link href="/sign-up" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-3 text-sm font-black text-[#03050a] transition hover:bg-[#b8ff5f]">Start building free <ArrowRight size={14} /></Link>
+          <div>
+            <div className="text-lg font-black">Want to build something like this?</div>
+            <div className="mt-1 text-sm text-white/50">Start your own project in LiTTree Studio.</div>
+          </div>
+          <Link
+            href="/sign-up"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-3 text-sm font-black text-[#03050a] transition hover:bg-[#b8ff5f]"
+          >
+            Start building free <ArrowRight size={14} />
+          </Link>
         </div>
       </div>
     </main>
