@@ -76,6 +76,8 @@ jobs:
           echo "Health check passed"
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           ALLOW_ANONYMOUS_DEV: "true"
           CI: "true"
           PLAYWRIGHT_TEST: "true"
