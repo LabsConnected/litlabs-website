@@ -3,10 +3,9 @@ import { ArrowRight, Play, Shield } from "lucide-react";
 
 const PRODUCT_FACTS = [
   "Approval required for sensitive actions",
-  "Exportable work — your files, your code, your assets",
+  "You retain ownership of your files, code, and assets",
   "Project memory across sessions",
-  "Version history and checkpoints",
-  "Server-backed files with audit logging",
+  "Project file and checkpoint foundations are being finalized",
   "No credit card required to start",
 ];
 

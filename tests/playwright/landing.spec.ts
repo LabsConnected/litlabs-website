@@ -51,6 +51,9 @@ test.describe("Landing page — remastered homepage", () => {
     await expect(watchProduct).toBeVisible();
     const heroSection = page.locator("section").first();
     await expect(heroSection.getByText("Try Studio without signing in")).toHaveCount(0);
+    // Truly count all links in the hero — must be exactly 2
+    const heroLinks = heroSection.getByRole("link");
+    await expect(heroLinks).toHaveCount(2);
   });
 
   test("no fake creator handles or concept disclaimer", async ({ page }) => {
@@ -84,13 +87,14 @@ test.describe("Landing page — remastered homepage", () => {
     expect(body).not.toContain("Deployment previews before going live");
   });
 
-  test("no invented deployment evidence on full homepage (mission animation included)", async ({ page }) => {
+  test("no invented deployment evidence on full homepage (mission animation + interactive demo included)", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const body = (await page.locator("body").textContent()) || "";
-    // The mission animation must not present invented operational evidence
+    // The mission animation and interactive demo must not present invented operational evidence
     expect(body).not.toContain("edge network");
     expect(body).not.toContain("CDN distribution active");
     expect(body).not.toContain("Deployment complete");
+    expect(body).not.toContain("Deployment successful");
     expect(body).not.toContain("Deployed live");
     expect(body).not.toContain("3 files, 0 errors");
     // Must not show fake public URLs
@@ -98,6 +102,16 @@ test.describe("Landing page — remastered homepage", () => {
     expect(body).not.toContain("your-music.litlabs");
     // Must not claim deployment is complete (only "ready for deployment")
     expect(body).not.toContain("is deployed and ready to share");
+    expect(body).not.toContain("Your project is live");
+    expect(body).not.toContain("DNS propagation");
+    // Must not show fake file sizes
+    expect(body).not.toContain("4.2 KB");
+    expect(body).not.toContain("8.1 KB");
+    expect(body).not.toContain("3.7 KB");
+    expect(body).not.toContain("124 KB");
+    // Must not claim one-click deployment
+    expect(body).not.toContain("one click");
+    expect(body).not.toContain("goes live instantly");
   });
 
   test("mission sequence shows 'Interactive product demonstration' label", async ({ page }) => {
@@ -241,16 +255,41 @@ test.describe("Landing page — remastered homepage", () => {
     expect(page.url()).not.toMatch(/\/sign-in/);
   });
 
-  test("keyboard navigation works for interactive demo", async ({ page }) => {
+  test("keyboard navigation works for interactive demo (ARIA tablist)", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const productSection = page.locator("#product");
     const tabs = productSection.getByRole("tab");
+    const panel = productSection.getByRole("tabpanel");
+
+    // Focus the first tab
     await tabs.first().focus();
     await expect(tabs.first()).toBeFocused();
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Enter");
-    const panel = productSection.getByRole("tabpanel");
     await expect(panel).toBeVisible();
+
+    // ArrowRight should move to the next tab and activate it
+    await page.keyboard.press("ArrowRight");
+    await expect(tabs.nth(1)).toBeFocused();
+    await expect(panel).toContainText("Plan");
+
+    // ArrowRight again
+    await page.keyboard.press("ArrowRight");
+    await expect(tabs.nth(2)).toBeFocused();
+    await expect(panel).toContainText("Build");
+
+    // ArrowLeft should move back
+    await page.keyboard.press("ArrowLeft");
+    await expect(tabs.nth(1)).toBeFocused();
+    await expect(panel).toContainText("Plan");
+
+    // End should jump to the last tab
+    await page.keyboard.press("End");
+    await expect(tabs.last()).toBeFocused();
+    await expect(panel).toContainText("Launch");
+
+    // Home should jump to the first tab
+    await page.keyboard.press("Home");
+    await expect(tabs.first()).toBeFocused();
+    await expect(panel).toContainText("Mission");
   });
 
   test("footer links resolve to real routes", async ({ request }) => {
