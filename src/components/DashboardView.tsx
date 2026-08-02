@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 
 const DashboardV2 = dynamic(
-  () => import("@/components/dashboard/DashboardV2").then((m) => m.DashboardV2),
+  () => import("@/components/dashboard/v2/DashboardV2").then((m) => m.DashboardV2),
   {
     ssr: false,
     loading: () => (
