@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- test mocks require any
+   for Clerk auth returns, NextRequest casts, and mock repository values */
+
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(() => Promise.resolve({ userId: "test-user-id" })),
 }));
