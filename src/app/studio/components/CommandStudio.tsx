@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
@@ -101,6 +102,7 @@ function AgentVoiceSync() {
  */
 export default function CommandStudio() {
   const { theme } = useTheme();
+  const { userId } = useClerkAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -194,17 +196,18 @@ export default function CommandStudio() {
     } catch {
       // ignore
     }
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("tool", legacyTool);
-      router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
-      return;
-    }
+    // Compare target tool with current URL tool — skip if already correct
+    const currentTool = searchParams.get("tool");
+    if (currentTool === legacyTool) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set("tool", legacyTool);
-    router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
-  }, [destination, studioMode, createMode, moreMode, pathname, router, searchParams]);
+    const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (target !== current) {
+      router.replace(target, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destination, studioMode, createMode, moreMode, pathname, router]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -271,6 +274,17 @@ export default function CommandStudio() {
         return;
       }
       const { project } = await res.json();
+      // Persist the new project ID to localStorage immediately so that
+      // the conversation controller can find it via getActiveProjectId's
+      // localStorage fallback. The key is scoped by user.
+      if (typeof window !== "undefined") {
+        try {
+          const key = userId ? `litt:active-project-id:${userId}` : "litt:active-project-id";
+          localStorage.setItem(key, project.id);
+        } catch {
+          // ignore
+        }
+      }
       // Update URL with project ID
       const params = new URLSearchParams(searchParams.toString());
       params.set("project", project.id);
@@ -292,7 +306,7 @@ export default function CommandStudio() {
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation]);
+  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation, userId]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {

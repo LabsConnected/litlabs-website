@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
 import { detectIntent, type IntentResult } from "../lib/studio-intent";
 import { useConnectionSummary } from "./useConnectionSummary";
@@ -28,13 +29,45 @@ export interface SendResult {
   reply?: string;
 }
 
-const ACTIVE_PROJECT_KEY = "litt:active-project-id";
+const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
 
-function getActiveProjectId(serverProjectId?: string | null): string | null {
+/**
+ * Build a user-scoped localStorage key for the active project ID.
+ * This prevents cross-user contamination when multiple users share
+ * the same browser (sign out → sign in as different user).
+ */
+function activeProjectKey(userId: string | null): string {
+  return userId ? `${ACTIVE_PROJECT_KEY_PREFIX}:${userId}` : ACTIVE_PROJECT_KEY_PREFIX;
+}
+
+function getActiveProjectId(serverProjectId: string | null | undefined, userId: string | null | undefined): string | null {
   if (typeof window === "undefined") return serverProjectId ?? null;
   // Server-resolved project ID is authoritative.
-  // localStorage is only a fallback cache.
-  return serverProjectId ?? localStorage.getItem(ACTIVE_PROJECT_KEY) ?? null;
+  // localStorage is only a fallback cache, scoped by user.
+  return serverProjectId ?? localStorage.getItem(activeProjectKey(userId ?? null)) ?? null;
+}
+
+/**
+ * Persist the active project ID to localStorage, scoped by user.
+ */
+function setActiveProjectId(projectId: string, userId: string | null | undefined) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(activeProjectKey(userId ?? null), projectId);
+}
+
+/**
+ * Clear stale project IDs for other users (called on sign-in).
+ */
+function clearStaleProjectIds(currentUserId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const keys = Object.keys(localStorage).filter(
+      (k) => k.startsWith(ACTIVE_PROJECT_KEY_PREFIX) && k !== activeProjectKey(currentUserId),
+    );
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    // ignore
+  }
 }
 
 function generateClientRequestId(): string {
@@ -76,6 +109,7 @@ export function useCanonicalConversation({
   const [sendError, setSendError] = useState<string | null>(null);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
+  const { userId } = useClerkAuth();
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
@@ -143,7 +177,7 @@ export function useCanonicalConversation({
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
-    const projectId = getActiveProjectId(serverProjectId);
+    const projectId = getActiveProjectId(serverProjectId, userId);
     if (!projectId) return;
 
     const s = getStore();
@@ -174,11 +208,11 @@ export function useCanonicalConversation({
     } finally {
       getStore().setLoading(false);
     }
-  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId]);
+  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
-    let projectId = getActiveProjectId(serverProjectId);
+    let projectId = getActiveProjectId(serverProjectId, userId);
 
     // Auto-provision a blank project if the user has none yet. Without this,
     // chat is completely dead for new users — createConversation fails and the
@@ -197,8 +231,8 @@ export function useCanonicalConversation({
         if (projRes.ok) {
           const projData = await projRes.json();
           projectId = projData.project?.id ?? null;
-          if (projectId && typeof window !== "undefined") {
-            localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+          if (projectId) {
+            setActiveProjectId(projectId, userId);
           }
         }
       } catch {
@@ -236,7 +270,7 @@ export function useCanonicalConversation({
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [getStore, activeAgentId, serverProjectId]);
+  }, [getStore, activeAgentId, serverProjectId, userId]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
@@ -278,6 +312,13 @@ export function useCanonicalConversation({
     syncUrl();
   }, [syncUrl]);
 
+  // Clear stale project IDs from other users on sign-in
+  useEffect(() => {
+    if (userId) {
+      clearStaleProjectIds(userId);
+    }
+  }, [userId]);
+
   // Load conversations on mount
   useEffect(() => {
     void loadConversations();
@@ -293,18 +334,40 @@ export function useCanonicalConversation({
       const localCommand = parseBuilderLocalCommand(text);
       if (localCommand) {
         const s = getStore();
+        const convId = s.selectedConversationId ?? "";
+        // Helper to add a local-only ephemeral message (not persisted to server)
+        const addLocalMessage = (content: string) => {
+          if (!convId) return;
+          s.addMessage(convId, {
+            id: `local_assistant_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            role: "assistant",
+            content,
+            agentSlug: activeAgentId as AgentSlug,
+            status: "completed",
+            createdAt: new Date().toISOString(),
+            parentMessageId: null,
+            regenerationOfMessageId: null,
+          });
+        };
         switch (localCommand.type) {
           case "clear":
-            s.setMessages(s.selectedConversationId ?? "", []);
+            s.setMessages(convId, []);
+            addLocalMessage("Screen cleared. Previous messages are still saved on the server and will reappear on refresh.");
             return { accepted: true };
           case "new":
             void createConversation();
             return { accepted: true };
           case "terminal":
             onRouteTool?.("terminal");
+            addLocalMessage("Opening Terminal.");
             return { accepted: true };
-          case "sessions":
+          case "sessions": {
+            const sessionsList = s.conversations.length > 0
+              ? s.conversations.map((c, i) => `${i + 1}. ${c.title || "Untitled"}${c.id === convId ? " (active)" : ""}`).join("\n")
+              : "No conversations yet. Type /new to start one.";
+            addLocalMessage(`Your conversations:\n\n${sessionsList}`);
             return { accepted: true };
+          }
           case "delete": {
             const convId = s.selectedConversationId;
             const conv = s.getSelectedConversation();
@@ -336,6 +399,16 @@ export function useCanonicalConversation({
             return { accepted: true };
           }
           case "help":
+            addLocalMessage([
+              "Studio Commands:",
+              "  /new — Start a new conversation",
+              "  /rename <title> — Rename this conversation",
+              "  /delete — Delete this conversation",
+              "  /sessions — List your conversations",
+              "  /clear — Clear the screen (messages stay on server)",
+              "  /terminal — Open the terminal",
+              "  /help — Show this help",
+            ].join("\n"));
             return { accepted: true };
           default:
             return { accepted: true };
@@ -446,16 +519,27 @@ export function useCanonicalConversation({
         const data = await response.json();
 
         if (response.status === 409) {
+          // Revision conflict — reload messages from server, restore unsent text
           await loadMessages(conversationId);
+          // Remove optimistic messages — the server has newer state
+          const s409 = getStore();
+          s409.setMessages(
+            conversationId,
+            s409.getMessages().filter((m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId),
+          );
+          setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
           return { accepted: false };
         }
 
         if (!response.ok) {
+          // HTTP failure — mark assistant as failed, set sendError, return not accepted
+          // so the composer restores the user's text.
           getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
             content: data.error || "Failed to get response",
           });
-          return { accepted: true, reply: data.error || "Failed" };
+          setSendError(data.error || `Request failed (${response.status})`);
+          return { accepted: false };
         }
 
         // Check for duplicate (idempotent response)
@@ -501,6 +585,20 @@ export function useCanonicalConversation({
           createdAt: userMsg.createdAt,
         });
 
+        // Guard against empty assistant response — don't leave an empty
+        // streaming bubble permanently. If the response is empty, mark
+        // as failed with a helpful message.
+        if (!assistantMsg.content || !assistantMsg.content.trim()) {
+          s3.updateMessage(conversationId, optimisticAssistantId, {
+            id: assistantMsg.id,
+            content: "The response was empty. Please try again.",
+            status: "failed",
+            createdAt: assistantMsg.createdAt,
+          });
+          setSendError("The AI returned an empty response. Please try again.");
+          return { accepted: false };
+        }
+
         s3.updateMessage(conversationId, optimisticAssistantId, {
           id: assistantMsg.id,
           content: assistantMsg.content,
@@ -516,13 +614,27 @@ export function useCanonicalConversation({
 
         return { accepted: true, reply: assistantMsg.content };
       } catch (error) {
+        const isAbort = error instanceof Error && error.name === "AbortError";
+        // Remove the empty streaming bubble on failure — it should not
+        // remain permanently as an empty or error-filled bubble.
+        const s = getStore();
+        if (isAbort) {
+          // Timeout/abort — distinguish from other errors
+          s.setMessages(
+            conversationId!,
+            s.getMessages().filter((m) => m.id !== optimisticAssistantId),
+          );
+          setSendError("The request timed out. Please try again.");
+          return { accepted: false };
+        }
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
-        getStore().updateMessage(conversationId!, optimisticAssistantId, {
+        s.updateMessage(conversationId!, optimisticAssistantId, {
           status: "failed",
           content: reply,
         });
-        return { accepted: true, reply };
+        setSendError(reply);
+        return { accepted: false };
       } finally {
         setBusy(false);
       }

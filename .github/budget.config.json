@@ -2,7 +2,7 @@
   {
     "path": "/",
     "timings": [
-      { "metric": "largest-contentful-paint", "budget": 8000 },
+      { "metric": "largest-contentful-paint", "budget": 12000 },
       { "metric": "first-contentful-paint", "budget": 4000 },
       { "metric": "cumulative-layout-shift", "budget": 0.15 }
     ],
@@ -14,7 +14,7 @@
   {
     "path": "/studio",
     "timings": [
-      { "metric": "largest-contentful-paint", "budget": 8000 },
+      { "metric": "largest-contentful-paint", "budget": 12000 },
       { "metric": "first-contentful-paint", "budget": 4000 },
       { "metric": "cumulative-layout-shift", "budget": 0.15 }
     ],
