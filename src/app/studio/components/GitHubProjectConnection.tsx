@@ -54,7 +54,7 @@ type Project = {
 
 export default function GitHubProjectConnection() {
   const { resolvedColors: T, tokens } = useTheme();
-  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
 
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -70,10 +70,24 @@ export default function GitHubProjectConnection() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Build auth headers with a Clerk Bearer token — same pattern as the
+  // Studio chat (useCanonicalConversation). Cookies alone may not reach
+  // the API route across CDN/proxy boundaries, causing 401 "Unauthorized".
+  const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
+    const token = await getToken?.();
+    return {
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, [getToken]);
+
   const fetchConnectionState = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
     try {
-      const res = await fetch("/api/github/connection-state");
+      const res = await fetch("/api/github/connection-state", {
+        credentials: "include",
+        headers: await authHeaders(),
+      });
       if (!res.ok) throw new Error("Failed to load connection state");
       const data = await res.json();
       setInstallations(data.installations || []);
@@ -86,7 +100,7 @@ export default function GitHubProjectConnection() {
     } finally {
       setLoading(false);
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, authHeaders]);
 
   useEffect(() => {
     fetchConnectionState();
@@ -100,20 +114,25 @@ export default function GitHubProjectConnection() {
     }
     setLoadingRepos(true);
     setError(null);
-    fetch(
-      `/api/github/repositories?installation_id=${selectedInstallation}`,
-    )
-      .then(async (res) => {
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/github/repositories?installation_id=${selectedInstallation}`,
+          { credentials: "include", headers: await authHeaders() },
+        );
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to load repositories");
         }
-        return res.json();
-      })
-      .then((data) => setRepositories(data.repositories || []))
-      .catch((err) => setError(err instanceof Error ? err.message : "Unknown error"))
-      .finally(() => setLoadingRepos(false));
-  }, [selectedInstallation]);
+        const data = await res.json();
+        setRepositories(data.repositories || []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoadingRepos(false);
+      }
+    })();
+  }, [selectedInstallation, authHeaders]);
 
   // Fetch branches when a repo is selected
   useEffect(() => {
@@ -123,23 +142,26 @@ export default function GitHubProjectConnection() {
     }
     setLoadingBranches(true);
     setError(null);
-    fetch(
-      `/api/github/branches?installation_id=${selectedInstallation}&owner=${selectedRepo.owner}&repo=${selectedRepo.name}`,
-    )
-      .then(async (res) => {
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/github/branches?installation_id=${selectedInstallation}&owner=${selectedRepo.owner}&repo=${selectedRepo.name}`,
+          { credentials: "include", headers: await authHeaders() },
+        );
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to load branches");
         }
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         setBranches(data.branches || []);
         setSelectedBranch(selectedRepo.defaultBranch || (data.branches?.[0]?.name ?? ""));
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Unknown error"))
-      .finally(() => setLoadingBranches(false));
-  }, [selectedRepo, selectedInstallation]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoadingBranches(false);
+      }
+    })();
+  }, [selectedRepo, selectedInstallation, authHeaders]);
 
   const createProject = async () => {
     if (!selectedRepo || !selectedInstallation || !selectedBranch) return;
@@ -149,7 +171,8 @@ export default function GitHubProjectConnection() {
     try {
       const res = await fetch("/api/projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: await authHeaders(true),
         body: JSON.stringify({
           github_installation_id: selectedInstallation,
           repository_id: selectedRepo.id,
@@ -182,7 +205,11 @@ export default function GitHubProjectConnection() {
   const deleteProject = async (projectId: string) => {
     if (!window.confirm("Remove this project? The GitHub installation will remain.")) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: await authHeaders(),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to delete project");

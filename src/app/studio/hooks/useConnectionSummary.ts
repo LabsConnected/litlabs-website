@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTerminalStore } from "@/stores/useTerminalStore";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -82,13 +83,16 @@ export function useConnectionSummary() {
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
+  const { getToken } = useClerkAuth();
 
   const refresh = useCallback(async () => {
     try {
+      const token = await getToken?.();
+      const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const [capsRes, termRes, voiceRes] = await Promise.allSettled([
-        fetch("/api/capabilities", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
-        fetch("/api/capabilities/project-terminal", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
-        fetch("/api/voice/health", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
+        fetch("/api/capabilities", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
       ]);
 
       const next = { ...DEFAULT_CAPABILITIES };
@@ -175,7 +179,7 @@ export function useConnectionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError]);
+  }, [terminalStatus, terminalSessionId, terminalError, getToken]);
 
   useEffect(() => {
     void refresh();
