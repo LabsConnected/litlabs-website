@@ -19,6 +19,7 @@ import type { StudioTool } from "../components/StudioSidebar";
 import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
 import {
   useConversationStore,
+  EMPTY_CONVERSATION_MESSAGES,
   toChatMessage as toCanonicalChatMessage,
   parseConversationFromUrl,
   serializeConversationToUrl,
@@ -154,7 +155,9 @@ export function useCanonicalConversation({
   // CanvasPanel). The no-selector + store.getMessages() approach relies on the
   // whole-state object identity changing on every set(), which is fragile.
   const canonicalMessages = useConversationStore(
-    (s) => s.messagesByConversationId[s.selectedConversationId ?? ""] ?? [],
+    (s) =>
+      s.messagesByConversationId[s.selectedConversationId ?? ""] ??
+      EMPTY_CONVERSATION_MESSAGES,
   );
 
   // Convert canonical store messages to UI ChatMessage format

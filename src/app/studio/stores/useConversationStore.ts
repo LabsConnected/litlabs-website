@@ -14,6 +14,11 @@ export interface ChatMessage {
   regenerationOfMessageId: string | null;
 }
 
+// Zustand selectors are backed by useSyncExternalStore. Returning a fresh []
+// for an empty conversation makes every snapshot look different to React 19
+// and can trigger "Maximum update depth exceeded" before data finishes loading.
+export const EMPTY_CONVERSATION_MESSAGES: ChatMessage[] = [];
+
 interface ConversationStore {
   // State
   conversations: Conversation[];

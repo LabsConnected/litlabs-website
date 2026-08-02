@@ -187,3 +187,5 @@ tests/playwright/screenshots/
 tests/playwright/.auth/
 playwright-report/
 tests/playwright/.clerk/
+
+.vercel
