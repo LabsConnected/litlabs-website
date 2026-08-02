@@ -11,19 +11,75 @@ permissions:
 
 jobs:
   lighthouse:
-    name: Run Lighthouse and upload reports
+    name: Build, serve, and run Lighthouse
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Lighthouse
-        uses: treosh/lighthouse-ci-action@v9
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          urls: |
-            https://litlabs.net
-            https://litlabs.net/studio
-          budgetPath: .github/budget.config.json
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production bundle
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Start production server
+        run: |
+          pnpm start &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for server health
+        run: |
+          echo "Waiting for server on http://127.0.0.1:3000 ..."
+          for i in $(seq 1 60); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000 || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Server is healthy (status $STATUS)"
+              break
+            fi
+            echo "Attempt $i: status $STATUS"
+            sleep 2
+          done
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000 || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Server did not become healthy (final status: $STATUS)"
+            exit 1
+          fi
+
+      - name: Health check /studio
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/studio || echo "000")
+          echo "/studio status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::/studio did not return 200 (got $STATUS)"
+            exit 1
+          fi
+
+      - name: Run Lighthouse
+        run: |
+          npx @lhci/cli@0.15.x autorun \
+            --collect.url="http://127.0.0.1:3000" \
+            --collect.url="http://127.0.0.1:3000/studio" \
+            --collect.numberOfRuns=1 \
+            --assertion.budgetPath=.github/budget.config.json \
+            --upload.target=temporary-public-storage
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - name: Upload Lighthouse reports
         if: always()
@@ -31,3 +87,19 @@ jobs:
         with:
           name: lighthouse-reports
           path: .lighthouseci/**/*
+
+      - name: Upload server logs on failure
+        if: failure()
+        run: |
+          echo "=== Server process check ==="
+          ps aux | grep "next start" || echo "No next start process found"
+          echo "=== Curl diagnostics ==="
+          curl -v http://127.0.0.1:3000 2>&1 || true
+          curl -v http://127.0.0.1:3000/studio 2>&1 || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+          fi
