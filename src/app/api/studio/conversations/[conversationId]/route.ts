@@ -13,7 +13,7 @@ interface RouteParams {
 }
 
 async function getHandler(req: NextRequest, ctx?: RouteParams) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -28,7 +28,7 @@ async function getHandler(req: NextRequest, ctx?: RouteParams) {
 }
 
 async function patchHandler(req: NextRequest, ctx?: RouteParams) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -84,7 +84,7 @@ async function patchHandler(req: NextRequest, ctx?: RouteParams) {
 }
 
 async function deleteHandler(req: NextRequest, ctx?: RouteParams) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

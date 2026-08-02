@@ -1,5 +1,5 @@
 // API Route: Messages for a specific conversation
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { generateText } from "@/lib/llm";

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getMission } from "@/lib/missions/mission-repository";
 import { listSteps, listValidationResults } from "@/lib/missions/mission-repository";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";

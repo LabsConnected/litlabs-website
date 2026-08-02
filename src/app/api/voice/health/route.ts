@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { createHmac } from "crypto";
 
@@ -32,8 +32,8 @@ export const dynamic = "force-dynamic";
  *   "message": "Voice is configured, but the token service could not be reached."
  * }
  */
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

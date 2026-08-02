@@ -2,7 +2,7 @@
 // NOTE: Serverless-incompatible patterns (setInterval, in-memory state) removed.
 // For production, use a queue system (e.g. Supabase Edge Functions + pg_cron).
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { orchestrator, CONVERSATION_TOPERS } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { supabaseAdmin } from "@/lib/supabase";

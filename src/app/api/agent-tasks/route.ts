@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import {
   validateAgentTaskInput,

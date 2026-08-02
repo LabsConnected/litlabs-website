@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const REDIRECT_BASE = "/studio/github";
 
 export async function GET(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

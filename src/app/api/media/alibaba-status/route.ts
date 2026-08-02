@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
 

@@ -1,6 +1,6 @@
 // List deployment records
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getDeployments } from "@/lib/deployments";
 
 export const dynamic = "force-dynamic";

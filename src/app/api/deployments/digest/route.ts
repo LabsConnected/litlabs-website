@@ -1,6 +1,6 @@
 // Daily deploy digest endpoint — can be triggered by cron or manually
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { buildDeployDigest } from "@/lib/deployments";
 import { sendDiscordMessage } from "@/lib/discord";
 

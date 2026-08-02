@@ -2,7 +2,7 @@
 // Auth required. Revokes an API key by setting revoked_at.
 // Users can only revoke their own keys.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 

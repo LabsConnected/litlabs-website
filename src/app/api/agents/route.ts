@@ -1,7 +1,7 @@
 // API Route: List marketplace agents from Supabase + create custom agents
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function getHandler(req: NextRequest) {
