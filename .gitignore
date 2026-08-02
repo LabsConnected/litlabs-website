@@ -76,6 +76,9 @@ src/mobile/
 __pycache__/
 *.pyc
 
+# Git worktrees (local only, never commit)
+.worktrees/
+
 # Temporary / local scratch files
 .tmp.driveupload/
 .vs/
