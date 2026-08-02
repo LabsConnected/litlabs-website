@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   actions: write
+  deployments: read
 
 jobs:
   lighthouse:
@@ -17,32 +18,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Wait for Vercel preview
+        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
+        id: waitForVercel
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-        env:
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          max_timeout: 300
 
       - name: Run Lighthouse
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            http://localhost:3000
-            http://localhost:3000/studio
+            ${{ steps.waitForVercel.outputs.url }}
+            ${{ steps.waitForVercel.outputs.url }}/studio
           budgetPath: .github/budget.config.json
-          configPath: .github/lighthouserc.json
 
       - name: Upload Lighthouse reports
         if: always()
