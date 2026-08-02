@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(request);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
 
@@ -42,7 +42,7 @@ export async function PATCH(
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(request);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
     const body = await request.json();

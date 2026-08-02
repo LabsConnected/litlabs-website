@@ -16,7 +16,7 @@ function cleanMessages(value: unknown): SessionMessage[] {
 }
 
 async function getHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { data, error } = await supabaseAdmin.from("builder_chat_sessions").select("*").eq("clerk_user_id", userId).order("pinned", { ascending: false }).order("updated_at", { ascending: false }).limit(100);
   if (error) return NextResponse.json({ error: "Session storage unavailable" }, { status: 503 });

@@ -31,7 +31,7 @@ interface BridgeMessage {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return new Response("Unauthorized", { status: 401 });
@@ -208,7 +208,7 @@ export async function GET(req: NextRequest) {
 
 // POST endpoint to send input to running CLI session
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -249,7 +249,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE endpoint to kill session
 export async function DELETE(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

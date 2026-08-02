@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth";
 export const runtime = "nodejs";
 
 async function getUserId(req: NextRequest): Promise<string | null> {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   return userId;
 }
 

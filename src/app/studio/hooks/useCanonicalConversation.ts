@@ -26,9 +26,13 @@ import {
   serializeConversationToUrl,
 } from "../stores/useConversationStore";
 
+export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation";
+
 export interface SendResult {
   accepted: boolean;
+  persisted: boolean;
   reply?: string;
+  errorKind?: SendErrorKind;
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
@@ -85,8 +89,11 @@ function toUIMessage(
   msg: ReturnType<typeof useConversationStore.getState>["messagesByConversationId"][string][number],
 ): ChatMessage {
   return {
+    id: msg.id,
     role: msg.role,
     content: msg.content,
+    status: msg.status,
+    agentSlug: msg.agentSlug,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
     reasoning: msg.reasoning,
   };
@@ -111,9 +118,10 @@ export function useCanonicalConversation({
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [requiresReauth, setRequiresReauth] = useState(false);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
-  const { userId, getToken } = useClerkAuth();
+  const { userId, getToken, isLoaded, isSignedIn } = useClerkAuth();
 
   // Same-origin cookies normally carry Clerk auth, but an explicit bearer
   // token keeps Studio API calls authenticated across production proxy/CDN
@@ -340,6 +348,13 @@ export function useCanonicalConversation({
     }
   }, [userId]);
 
+  // Clear requiresReauth when Clerk reports a valid signed-in session again
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      setRequiresReauth(false);
+    }
+  }, [isLoaded, isSignedIn]);
+
   // Load conversations on mount
   useEffect(() => {
     void loadConversations();
@@ -349,7 +364,12 @@ export function useCanonicalConversation({
   const send = useCallback(
     async (value: string, attachments?: string[]): Promise<SendResult> => {
       const text = value.trim();
-      if ((!text && !attachments?.length) || busy) return { accepted: false };
+      if ((!text && !attachments?.length) || busy) return { accepted: false, persisted: false };
+
+      // Do not send until Clerk has loaded the session, and block sends
+      // while reauthentication is required (expired session banner shown).
+      if (!isLoaded) return { accepted: false, persisted: false };
+      if (requiresReauth) return { accepted: false, persisted: false, errorKind: "auth" };
 
       // 1. Slash commands — local, no server call
       const localCommand = parseBuilderLocalCommand(text);
@@ -374,20 +394,20 @@ export function useCanonicalConversation({
           case "clear":
             s.setMessages(convId, []);
             addLocalMessage("Screen cleared. Previous messages are still saved on the server and will reappear on refresh.");
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "new":
             void createConversation();
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "terminal":
             onRouteTool?.("terminal");
             addLocalMessage("Opening Terminal.");
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "sessions": {
             const sessionsList = s.conversations.length > 0
               ? s.conversations.map((c, i) => `${i + 1}. ${c.title || "Untitled"}${c.id === convId ? " (active)" : ""}`).join("\n")
               : "No conversations yet. Type /new to start one.";
             addLocalMessage(`Your conversations:\n\n${sessionsList}`);
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "delete": {
             const convId = s.selectedConversationId;
@@ -405,7 +425,7 @@ export function useCanonicalConversation({
                 // Non-fatal
               }
             }
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "rename": {
             const convId = s.selectedConversationId;
@@ -422,7 +442,7 @@ export function useCanonicalConversation({
                 // Non-fatal
               }
             }
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "help":
             addLocalMessage([
@@ -435,9 +455,9 @@ export function useCanonicalConversation({
               "  /terminal — Open the terminal",
               "  /help — Show this help",
             ].join("\n"));
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           default:
-            return { accepted: true };
+            return { accepted: true, persisted: true };
         }
       }
 
@@ -473,12 +493,16 @@ export function useCanonicalConversation({
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
           window.location.href = "/api/github/install";
         }
-        return { accepted: true, reply: intentMessage };
+        return { accepted: true, persisted: true, reply: intentMessage };
       }
 
       // 3. Ensure we have a conversation
       const s = getStore();
       let conversationId = s.selectedConversationId;
+      // Snapshot state before seeding optimistic messages so we can roll back
+      // cleanly on any failure (401, 403, network, conflict, abort).
+      const previousConversationId = s.selectedConversationId;
+      const previousMessagesByConversationId = { ...s.messagesByConversationId };
       const clientRequestId = generateClientRequestId();
       const optimisticUserId = `optimistic_${clientRequestId}`;
       const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
@@ -516,15 +540,46 @@ export function useCanonicalConversation({
         ]);
       };
 
+      // Rollback helper — removes both optimistic messages and restores the
+      // previous conversation selection. Called on every failure path where
+      // the user message was NOT persisted to the server.
+      const rollbackOptimistic = (targetConversationId: string | null) => {
+        const rb = getStore();
+        if (targetConversationId) {
+          const existing = previousMessagesByConversationId[targetConversationId] ?? [];
+          rb.setMessages(targetConversationId, existing);
+        }
+        // If a temporary pending_* conversation was created, clean up its
+        // messages and restore the previous selection.
+        if (
+          previousConversationId !== targetConversationId &&
+          targetConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
+        ) {
+          rb.setMessages(targetConversationId, []);
+          rb.selectConversation(previousConversationId);
+        }
+      };
+
       setBusy(true);
+
+      // Track whether the user message was persisted to the server.
+      // Used to decide whether the composer should restore the draft text.
+      let userMessagePersisted = false;
 
       if (!conversationId) {
         const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;
         seedOptimisticMessages(optimisticConversationId);
         const conv = await createConversation({ optimisticConversationId });
         if (!conv) {
+          // Conversation creation failed (401/403/network) — roll back all
+          // optimistic state and require reauthentication if it was a 401.
+          rollbackOptimistic(optimisticConversationId);
           setBusy(false);
-          return { accepted: false };
+          if (sendError?.includes("session expired")) {
+            setRequiresReauth(true);
+            return { accepted: false, persisted: false, errorKind: "auth" };
+          }
+          return { accepted: false, persisted: false, errorKind: "network" };
         }
         conversationId = conv.id;
       } else {
@@ -573,21 +628,25 @@ export function useCanonicalConversation({
             s409.getMessages().filter((m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId),
           );
           setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
-          return { accepted: false };
+          return { accepted: false, persisted: false, errorKind: "conflict" };
         }
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
-          // HTTP failure — mark assistant as failed, set sendError, return not accepted
-          // so the composer restores the user's text.
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
-            status: "failed",
-            content: data.error || "Failed to get response",
-          });
-          setSendError(response.status === 401
-            ? "Your Studio session expired. Refresh the page and sign in again."
-            : data.error || `Request failed (${response.status})`);
-          return { accepted: false };
+          const isAuthError = response.status === 401 || response.status === 403;
+          if (isAuthError) {
+            // Auth failure — roll back optimistic messages entirely (the
+            // user message was NOT persisted) and require reauthentication.
+            rollbackOptimistic(conversationId);
+            setRequiresReauth(true);
+            setSendError("Your Studio session expired. Refresh the page and sign in again.");
+            return { accepted: false, persisted: false, errorKind: "auth" };
+          }
+          // Non-auth HTTP failure — the user message was not persisted.
+          // Roll back optimistic messages and show the error.
+          rollbackOptimistic(conversationId);
+          setSendError(data.error || `Request failed (${response.status})`);
+          return { accepted: false, persisted: false, errorKind: "network" };
         }
 
         const contentType = response.headers.get("content-type") || "";
@@ -613,7 +672,7 @@ export function useCanonicalConversation({
                 createdAt: assistantMsg.createdAt,
               });
               s2.setRevision(data.revision ?? expectedRevision);
-              return { accepted: true, reply: assistantMsg.content };
+              return { accepted: true, persisted: true, reply: assistantMsg.content };
             } else {
               // Still processing — remove optimistic assistant, poll for result
               s2.setMessages(
@@ -622,7 +681,7 @@ export function useCanonicalConversation({
               );
               s2.setRevision(data.revision ?? expectedRevision);
               setTimeout(() => void loadMessages(conversationId!), 2000);
-              return { accepted: true };
+              return { accepted: true, persisted: true };
             }
           }
           // Unexpected JSON on a 200 — treat as failure
@@ -631,7 +690,7 @@ export function useCanonicalConversation({
             content: data.error || "Unexpected response format",
           });
           setSendError(data.error || "Unexpected response format");
-          return { accepted: false };
+          return { accepted: false, persisted: false, errorKind: "validation" };
         }
 
         // ---- SSE streaming path ----
@@ -643,7 +702,7 @@ export function useCanonicalConversation({
             content: "No response body from server.",
           });
           setSendError("No response body from server.");
-          return { accepted: false };
+          return { accepted: false, persisted: false, errorKind: "network" };
         }
 
         const reader = response.body.getReader();
@@ -701,7 +760,9 @@ export function useCanonicalConversation({
             reasoning: reasoningText || undefined,
           });
           setSendError(reply);
-          return { accepted: false };
+          // User message was persisted (server accepted the 200), but the
+          // provider failed. Don't restore the draft — show Retry instead.
+          return { accepted: false, persisted: true, errorKind: "provider" };
         }
 
         if (donePayload) {
@@ -723,7 +784,8 @@ export function useCanonicalConversation({
               createdAt: assistantMsg.createdAt,
             });
             setSendError("The AI returned an empty response. Please try again.");
-            return { accepted: false };
+            // User message persisted, provider returned empty — don't restore draft.
+            return { accepted: false, persisted: true, errorKind: "provider" };
           }
 
           s3.updateMessage(conversationId, optimisticAssistantId, {
@@ -740,7 +802,7 @@ export function useCanonicalConversation({
             setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
           }
 
-          return { accepted: true, reply: assistantMsg.content };
+          return { accepted: true, persisted: true, reply: assistantMsg.content };
         }
 
         // Stream ended without an explicit done/error event — keep whatever
@@ -752,27 +814,30 @@ export function useCanonicalConversation({
             reasoning: reasoningText || undefined,
             status: "completed",
           });
-          return { accepted: true, reply: assistantText };
+          return { accepted: true, persisted: true, reply: assistantText };
         }
         sFinal.updateMessage(conversationId, optimisticAssistantId, {
           status: "failed",
           content: "The stream ended unexpectedly. Please try again.",
         });
         setSendError("The stream ended unexpectedly. Please try again.");
-        return { accepted: false };
+        // User message was persisted (200 received), stream just ended early.
+        return { accepted: false, persisted: true, errorKind: "network" };
       } catch (error) {
         const isAbort = error instanceof Error && error.name === "AbortError";
         // Remove the empty streaming bubble on failure — it should not
         // remain permanently as an empty or error-filled bubble.
         const s = getStore();
         if (isAbort) {
-          // Timeout/abort — distinguish from other errors
+          // Timeout/abort — distinguish from other errors. The user message
+          // may or may not have been persisted; roll back the assistant bubble
+          // but keep the user message (the server may have persisted it).
           s.setMessages(
             conversationId!,
             s.getMessages().filter((m) => m.id !== optimisticAssistantId),
           );
           setSendError("The request timed out. Please try again.");
-          return { accepted: false };
+          return { accepted: false, persisted: true, errorKind: "network" };
         }
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
@@ -781,12 +846,13 @@ export function useCanonicalConversation({
           content: reply,
         });
         setSendError(reply);
-        return { accepted: false };
+        // Network error during streaming — user message was likely persisted.
+        return { accepted: false, persisted: true, errorKind: "network" };
       } finally {
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice, authHeaders],
+    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -883,6 +949,8 @@ export function useCanonicalConversation({
     loading: loadingState,
     sendError,
     clearSendError: () => setSendError(null),
+    requiresReauth,
+    clearRequiresReauth: () => setRequiresReauth(false),
   };
 }
 

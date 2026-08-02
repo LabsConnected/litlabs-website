@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
 
 const isProtectedRoute = createRouteMatcher([
+  "/studio(.*)",
   "/marketplace(.*)",
   "/settings(.*)",
   "/profile(.*)",

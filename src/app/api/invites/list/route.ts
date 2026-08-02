@@ -13,7 +13,7 @@ function isAdmin(userId: string) {
 }
 
 async function getHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId || !isAdmin(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
