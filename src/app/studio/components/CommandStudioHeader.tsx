@@ -100,7 +100,7 @@ export default function CommandStudioHeader({
       ? "AI setup required"
       : hasAi
         ? "Chat ready"
-        : "Workspace setup required";
+        : "Chat unavailable";
 
   return (
     <header
