@@ -53,7 +53,12 @@ jobs:
         env:
           CI: true
           PLAYWRIGHT_TEST: true
-          PLAYWRIGHT_AUTH_DISABLED: true
+          # Auth is enabled when Clerk test user secrets are available.
+          # Falls back to PLAYWRIGHT_AUTH_DISABLED when secrets are absent
+          # (e.g., forked PRs) so tests can still run unauthenticated.
+          PLAYWRIGHT_AUTH_DISABLED: ${{ secrets.CLERK_TEST_USER_A == '' && 'true' || 'false' }}
+          CLERK_TEST_USER_A: ${{ secrets.CLERK_TEST_USER_A }}
+          CLERK_TEST_USER_B: ${{ secrets.CLERK_TEST_USER_B }}
 
       - name: Terminal server type check
         run: pnpm --filter terminal-server build

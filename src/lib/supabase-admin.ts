@@ -7,15 +7,12 @@ const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 let _client: SupabaseClient | null = null;
 
-export function getAdminSupabase(): SupabaseClient {
-  if (!url || !key) {
-    throw new Error("Admin Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-  }
-  if (!_client) {
-    _client = createClient(url, key, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-  }
+export function getAdminSupabase(): SupabaseClient | null {
+  if (!url || !key || url.length < 10 || key.length < 10) return null;
+  if (_client) return _client;
+  _client = createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
   return _client;
 }
 

@@ -532,12 +532,14 @@ export function useCanonicalConversation({
         }
 
         if (!response.ok) {
-          // HTTP failure — mark assistant as failed, set sendError, return not accepted
-          // so the composer restores the user's text.
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
-            status: "failed",
-            content: data.error || "Failed to get response",
-          });
+          // HTTP failure — remove both optimistic messages so the composer
+          // can restore the user's text without transcript duplication.
+          getStore().setMessages(
+            conversationId,
+            getStore().getMessages().filter(
+              (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+            ),
+          );
           setSendError(data.error || `Request failed (${response.status})`);
           return { accepted: false };
         }
@@ -596,7 +598,7 @@ export function useCanonicalConversation({
             createdAt: assistantMsg.createdAt,
           });
           setSendError("The AI returned an empty response. Please try again.");
-          return { accepted: false };
+          return { accepted: true };
         }
 
         s3.updateMessage(conversationId, optimisticAssistantId, {
@@ -619,20 +621,25 @@ export function useCanonicalConversation({
         // remain permanently as an empty or error-filled bubble.
         const s = getStore();
         if (isAbort) {
-          // Timeout/abort — distinguish from other errors
+          // Timeout/abort — remove both optimistic messages, distinguish from other errors
           s.setMessages(
             conversationId!,
-            s.getMessages().filter((m) => m.id !== optimisticAssistantId),
+            s.getMessages().filter(
+              (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+            ),
           );
           setSendError("The request timed out. Please try again.");
           return { accepted: false };
         }
+        // Network error — remove both optimistic messages so composer can restore text
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
-        s.updateMessage(conversationId!, optimisticAssistantId, {
-          status: "failed",
-          content: reply,
-        });
+        s.setMessages(
+          conversationId!,
+          s.getMessages().filter(
+            (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+          ),
+        );
         setSendError(reply);
         return { accepted: false };
       } finally {
