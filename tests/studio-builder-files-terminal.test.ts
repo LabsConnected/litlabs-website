@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* eslint-disable @typescript-eslint/no-explicit-any -- test mocks require any
-   for Clerk auth returns, NextRequest casts, and mock repository values */
-
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(() => Promise.resolve({ userId: "test-user-id" })),
 }));
@@ -40,33 +37,33 @@ describe("Project Files API", () => {
 
   it("PUT returns 401 for unauthenticated requests", async () => {
     const { auth } = await import("@clerk/nextjs/server");
-    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as any);
+    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as unknown as never);
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { path: "test.html", content: "test" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(401);
   });
 
   it("DELETE returns 401 for unauthenticated requests", async () => {
     const { auth } = await import("@clerk/nextjs/server");
-    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as any);
+    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as unknown as never);
     const { DELETE } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files?path=test.html", "DELETE");
-    const response = await DELETE(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await DELETE(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(401);
   });
 
   it("PUT returns 400 when path is missing", async () => {
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { content: "test" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("DELETE returns 400 when path is missing", async () => {
     const { DELETE } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "DELETE");
-    const response = await DELETE(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await DELETE(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
@@ -74,7 +71,7 @@ describe("Project Files API", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { path: "index.html", content: "<h1>Hello</h1>" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(200);
     expect(String(fetchSpy.mock.calls[0][0])).toContain("/ws-files/write");
     fetchSpy.mockRestore();
@@ -84,7 +81,7 @@ describe("Project Files API", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const { DELETE } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files?path=old-file.html", "DELETE");
-    const response = await DELETE(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await DELETE(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(200);
     expect(String(fetchSpy.mock.calls[0][0])).toContain("/ws-files/delete");
     fetchSpy.mockRestore();
@@ -93,42 +90,42 @@ describe("Project Files API", () => {
   it("PUT rejects path traversal (../)", async () => {
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { path: "../../../etc/passwd", content: "evil" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("PUT rejects absolute paths", async () => {
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { path: "/etc/passwd", content: "evil" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("PUT rejects null bytes in path", async () => {
     const { PUT } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "PUT", { path: "safe.txt\0../../etc/passwd", content: "evil" });
-    const response = await PUT(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await PUT(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("DELETE rejects path traversal (../)", async () => {
     const { DELETE } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files?path=../../../etc/passwd", "DELETE");
-    const response = await DELETE(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await DELETE(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("DELETE rejects absolute paths", async () => {
     const { DELETE } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files?path=/etc/passwd", "DELETE");
-    const response = await DELETE(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await DELETE(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 
   it("POST read rejects path traversal", async () => {
     const { POST } = await import("@/app/api/studio-projects/[projectId]/files/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/files", "POST", { action: "read", path: "../../secret" });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1" }) });
     expect(response.status).toBe(400);
   });
 });
@@ -138,37 +135,37 @@ describe("Checkpoint Rollback API", () => {
 
   it("POST rollback returns 401 for unauthenticated requests", async () => {
     const { auth } = await import("@clerk/nextjs/server");
-    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as any);
+    vi.mocked(auth).mockResolvedValueOnce({ userId: null } as unknown as never);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(401);
   });
 
   it("POST rollback returns 404 for non-existent checkpoint", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce(null as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce(null as unknown as never);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-missing/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-missing" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-missing" }) });
     expect(response.status).toBe(404);
   });
 
   it("POST rollback returns 403 when checkpoint belongs to different project", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "different-project", gitSha: "abc123", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "different-project", gitSha: "abc123", label: "Test", userId: "test-user-id" } as unknown as never);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(403);
   });
 
   it("POST rollback returns 400 when confirm is missing", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as unknown as never);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", {});
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.error).toContain("confirmation");
@@ -176,10 +173,10 @@ describe("Checkpoint Rollback API", () => {
 
   it("POST rollback returns 400 for invalid gitSha format", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "../../etc/passwd", label: "Bad", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "../../etc/passwd", label: "Bad", userId: "test-user-id" } as unknown as never);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.error).toContain("Invalid checkpoint git SHA");
@@ -187,19 +184,19 @@ describe("Checkpoint Rollback API", () => {
 
   it("POST rollback returns 503 when terminal service key is missing", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as unknown as never);
     const originalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     delete process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(503);
     if (originalKey) process.env.TERMINAL_INTERNAL_SERVICE_KEY = originalKey;
   });
 
   it("POST rollback returns 500 when git reset fails and does not run git clean", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as unknown as never);
     const originalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "a".repeat(32);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -209,7 +206,7 @@ describe("Checkpoint Rollback API", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ exitCode: 1, stdout: "", stderr: "fatal: bad ref" }), { status: 200 }));
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(500);
     // Only 2 fetch calls: ls-files + reset. Clean should NOT have been called.
     expect(fetchSpy.mock.calls.length).toBe(2);
@@ -220,7 +217,7 @@ describe("Checkpoint Rollback API", () => {
 
   it("POST rollback succeeds and returns file summary", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as unknown as never);
     const originalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "a".repeat(32);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -232,7 +229,7 @@ describe("Checkpoint Rollback API", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ exitCode: 0, stdout: "index.html\n", stderr: "" }), { status: 200 }));
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.ok).toBe(true);
@@ -246,7 +243,7 @@ describe("Checkpoint Rollback API", () => {
 
   it("POST rollback fails (500) when git clean returns nonzero exitCode — no false success", async () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
-    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as unknown as never);
     const originalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "a".repeat(32);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -257,7 +254,7 @@ describe("Checkpoint Rollback API", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ exitCode: 1, stdout: "", stderr: "clean failed" }), { status: 200 }));
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
     const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
-    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    const response = await POST(req as unknown as never, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(500);
     const data = await response.json();
     // Explicit no-false-success: a failed clean must never look like a rollback.
@@ -278,9 +275,9 @@ describe("CanvasTool loadServerFiles (regression: saved files must reload)", () 
     // The terminal-server /ws-files GET returns entries with {name, type} only —
     // NOT {path, content}. The old code read e.path/e.content and crashed on
     // `e.path.split("/")` because path was undefined. This test proves the fix.
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
-      const url = String(typeof input === "string" ? input : input.url);
-      const method = init?.method ?? (typeof input === "object" && input ? input.method : undefined);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(typeof input === "string" ? input : (input as Request).url);
+      const method = init?.method ?? (typeof input === "object" && input ? (input as Request).method : undefined);
       if (url.includes("/files") && (method === undefined || method === "GET")) {
         return new Response(
           JSON.stringify({
@@ -295,7 +292,7 @@ describe("CanvasTool loadServerFiles (regression: saved files must reload)", () 
           { status: 200 },
         );
       }
-      const raw = init?.body ?? "";
+      const raw = typeof init?.body === "string" ? init.body : "";
       const parsed = (() => { try { return JSON.parse(raw); } catch { return {}; } })();
       const path: string = parsed.path ?? "";
       const contentMap: Record<string, string> = {
