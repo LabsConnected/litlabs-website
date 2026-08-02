@@ -219,6 +219,12 @@ import { useCanonicalConversation } from "@/app/studio/hooks/useCanonicalConvers
 
 // ─── Test helpers ─────────────────────────────────────────────────────────
 
+function getStore(): StoreApi<TestStoreState> {
+  const store = hoistedData.storeRef.current;
+  if (!store) throw new Error("Test store not initialized");
+  return store;
+}
+
 function resetStore() {
   const store = hoistedData.storeRef.current;
   if (!store) return;
@@ -302,7 +308,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
     });
 
     expect(sendResult!.accepted).toBe(false);
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     expect(messages.filter((m) => m.id.startsWith("optimistic_"))).toHaveLength(0);
     expect(result.current.sendError).toContain("Internal Server Error");
   });
@@ -324,7 +330,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
     });
 
     expect(sendResult!.accepted).toBe(false);
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     expect(messages.filter((m) => m.id.startsWith("optimistic_"))).toHaveLength(0);
     expect(result.current.sendError).toBeTruthy();
   });
@@ -350,7 +356,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
     });
 
     expect(sendResult!.accepted).toBe(false);
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     expect(messages.filter((m) => m.id.startsWith("optimistic_"))).toHaveLength(0);
     expect(result.current.sendError).toContain("timed out");
   });
@@ -375,7 +381,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
     });
 
     expect(sendResult!.accepted).toBe(false);
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     expect(messages.filter((m) => m.id.startsWith("optimistic_"))).toHaveLength(0);
     expect(result.current.sendError).toContain("updated by another session");
   });
@@ -397,7 +403,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
 
     expect(sendResult!.accepted).toBe(true);
     expect(result.current.sendError).toContain("empty response");
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     const userMsgs = messages.filter((m) => m.role === "user");
     expect(userMsgs).toHaveLength(1);
     expect(userMsgs[0].id).toBe("real-user-1");
@@ -424,7 +430,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
     expect(sendResult!.accepted).toBe(true);
     expect(sendResult!.reply).toBe("2+2 equals 4.");
     expect(result.current.sendError).toBeNull();
-    const messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    const messages: ChatMessage[] = getStore().getState().getMessages();
     const userMsgs = messages.filter((m) => m.role === "user");
     expect(userMsgs).toHaveLength(1);
     expect(userMsgs[0].id).toBe("real-user-2");
@@ -444,7 +450,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
       await result.current.send("Resend me");
     });
 
-    let messages: ChatMessage[] = hoistedData.storeRef.current.getState().getMessages();
+    let messages: ChatMessage[] = getStore().getState().getMessages();
     expect(messages.filter((m) => m.id.startsWith("optimistic_"))).toHaveLength(0);
     expect(messages.filter((m) => m.role === "user")).toHaveLength(0);
 
@@ -460,7 +466,7 @@ describe("useCanonicalConversation send() — real hook integration", () => {
       await result.current.send("Resend me");
     });
 
-    messages = hoistedData.storeRef.current.getState().getMessages();
+    messages = getStore().getState().getMessages();
     const userMsgs = messages.filter((m) => m.role === "user");
     expect(userMsgs).toHaveLength(1);
     expect(userMsgs[0].id).toBe("real-user-3");
