@@ -14,9 +14,12 @@ interface FileNode {
 
 interface FileExplorerProps {
   onOpenFile?: (path: string) => void;
+  /** When provided, file operations route through /api/studio-projects/[projectId]/files
+   *  (audit-logged, server-side) instead of the terminal-server directly. */
+  projectId?: string | null;
 }
 
-export function FileExplorer({ onOpenFile }: FileExplorerProps) {
+export function FileExplorer({ onOpenFile, projectId }: FileExplorerProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +30,18 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
 
   const fetchEntries = useCallback(
     async (path: string) => {
+      if (projectId) {
+        // Server-backed: route through the project files API
+        const res = await fetch(
+          `/api/studio-projects/${projectId}/files?path=${encodeURIComponent(path)}`,
+        );
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        return (data.entries as { name: string; type: "folder" | "file" }[]).map((entry) => ({
+          ...entry,
+          path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
+        }));
+      }
       if (!wsUrl) {
         throw new Error("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
       }
@@ -40,7 +55,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
         path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
       }));
     },
-    [wsUrl]
+    [wsUrl, projectId]
   );
 
   const loadRoot = useCallback(async () => {
@@ -104,19 +119,28 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   };
 
   const createFile = async () => {
-    // TODO(P0-2): Route through /api/studio-projects/[projectId]/files instead
-    // of the terminal-server directly, so file operations are audit-logged
-    // server-side. Requires passing projectId into FileExplorer as a prop.
     const name = prompt("New file name?");
     if (!name) return;
     try {
-      const res = await fetch(`${wsUrl}/files/write`, {
-        method: "POST",
-        headers: await terminalAuthHeaders(),
-        body: JSON.stringify({ path: name, content: "" }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (projectId) {
+        // Server-backed: route through the project files API (audit-logged)
+        const res = await fetch(`/api/studio-projects/${projectId}/files`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: name, content: "" }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      } else {
+        // Fallback: terminal-server directly
+        const res = await fetch(`${wsUrl}/files/write`, {
+          method: "POST",
+          headers: await terminalAuthHeaders(),
+          body: JSON.stringify({ path: name, content: "" }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      }
       loadRoot();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create file");
@@ -126,13 +150,24 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const deleteFile = async (path: string) => {
     if (!confirm(`Delete ${path}?`)) return;
     try {
-      const res = await fetch(`${wsUrl}/files/delete`, {
-        method: "POST",
-        headers: await terminalAuthHeaders(),
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (projectId) {
+        // Server-backed: route through the project files API (audit-logged)
+        const res = await fetch(
+          `/api/studio-projects/${projectId}/files?path=${encodeURIComponent(path)}`,
+          { method: "DELETE" },
+        );
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      } else {
+        // Fallback: terminal-server directly
+        const res = await fetch(`${wsUrl}/files/delete`, {
+          method: "POST",
+          headers: await terminalAuthHeaders(),
+          body: JSON.stringify({ path }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      }
       loadRoot();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete file");

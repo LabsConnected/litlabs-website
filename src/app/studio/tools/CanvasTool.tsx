@@ -80,14 +80,15 @@ const QUALITY_LEVELS = [
 
 const PERSIST_KEY = "litlabs:canvas:files";
 const PERSIST_MSG_KEY = "litlabs:canvas:messages";
-// TODO(P0-4): Replace localStorage with server-backed storage (Supabase table
-// with RLS). This requires: (1) a canvas_files table, (2) an API endpoint for
-// save/load, (3) passing userId + projectId into CanvasTool as props. Currently
-// deferred because CanvasTool is a standalone component with no projectId
-// context, and this is a data-persistence issue (not cross-user leakage —
-// localStorage is origin-scoped). Will be addressed in the Studio rebuild.
 
-export default function CanvasTool() {
+export interface CanvasToolProps {
+  /** Canonical project ID — when provided, files are loaded/saved via
+   *  /api/studio-projects/[projectId]/files instead of localStorage. */
+  projectId?: string | null;
+  projectName?: string | null;
+}
+
+export default function CanvasTool({ projectId, projectName }: CanvasToolProps = {}) {
   const { resolvedColors: T } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -107,29 +108,66 @@ export default function CanvasTool() {
 
   // Load persisted files and messages on mount
   useEffect(() => {
-    try {
-      const savedFiles = localStorage.getItem(PERSIST_KEY);
-      if (savedFiles) {
-        const files = JSON.parse(savedFiles) as GeneratedFile[];
-        if (files.length > 0) {
-          setGeneratedFiles(files);
-          setActiveFile(files[0].name);
+    if (projectId) {
+      // Server-backed: load files from the project files API
+      fetch(`/api/studio-projects/${projectId}/files`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const entries = (data?.entries ?? []) as { path: string; content?: string }[];
+          if (entries.length > 0) {
+            const files: GeneratedFile[] = entries
+              .filter((e) => /\.(html|css|js|ts|tsx|jsx|json|md)$/.test(e.path))
+              .map((e) => ({
+                name: e.path.split("/").pop() ?? e.path,
+                content: e.content ?? "",
+                language: e.path.split(".").pop() ?? "text",
+              }));
+            if (files.length > 0) {
+              setGeneratedFiles(files);
+              setActiveFile(files[0].name);
+            }
+          }
+        })
+        .catch(() => {});
+    } else {
+      // Fallback: localStorage
+      try {
+        const savedFiles = localStorage.getItem(PERSIST_KEY);
+        if (savedFiles) {
+          const files = JSON.parse(savedFiles) as GeneratedFile[];
+          if (files.length > 0) {
+            setGeneratedFiles(files);
+            setActiveFile(files[0].name);
+          }
         }
-      }
+      } catch { /* ignore corrupt storage */ }
+    }
+    // Messages always use localStorage (chat history is local-only)
+    try {
       const savedMsgs = localStorage.getItem(PERSIST_MSG_KEY);
       if (savedMsgs) {
         const msgs = JSON.parse(savedMsgs) as Message[];
         if (msgs.length > 0) setMessages(msgs);
       }
     } catch { /* ignore corrupt storage */ }
-  }, []);
+  }, [projectId]);
 
   // Persist files when they change
   useEffect(() => {
-    if (generatedFiles.length > 0) {
+    if (generatedFiles.length === 0) return;
+    if (projectId) {
+      // Server-backed: save each file via the project files API
+      for (const file of generatedFiles) {
+        fetch(`/api/studio-projects/${projectId}/files`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: file.name, content: file.content }),
+        }).catch(() => {});
+      }
+    } else {
       localStorage.setItem(PERSIST_KEY, JSON.stringify(generatedFiles));
     }
-  }, [generatedFiles]);
+  }, [generatedFiles, projectId]);
 
   // Persist messages when they change
   useEffect(() => {
