@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 const TerminalPanel = dynamic(
   () => import("@/components/litt-terminal/TerminalPanel").then((m) => m.TerminalPanel),
@@ -25,6 +26,7 @@ interface StudioTerminalDrawerProps {
 export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawerProps) {
   const [workspaceStatus, setWorkspaceStatus] = useState<"idle" | "preparing" | "ready" | "error">("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const { getToken } = useClerkAuth();
 
   // Auto-prepare workspace when projectId is available
   useEffect(() => {
@@ -38,8 +40,13 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
     let cancelled = false;
     (async () => {
       try {
+        const token = await getToken?.();
         const res = await fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
           method: "POST",
+          credentials: "include",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
         });
         if (cancelled) return;
         if (res.ok) {
@@ -119,9 +126,20 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
             setWorkspaceStatus("preparing");
             setWorkspaceError(null);
             // Re-trigger preparation by changing the effect dependency
-            void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
-              .then(() => setWorkspaceStatus("ready"))
-              .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Retry failed"); });
+            void (async () => {
+              try {
+                const token = await getToken?.();
+                await fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
+                  method: "POST",
+                  credentials: "include",
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                setWorkspaceStatus("ready");
+              } catch {
+                setWorkspaceStatus("error");
+                setWorkspaceError("Retry failed");
+              }
+            })();
           }}
           className="grid h-7 w-7 place-items-center rounded-lg hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
