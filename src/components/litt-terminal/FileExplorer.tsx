@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { terminalAuthHeaders } from "@/lib/terminal-client";
-import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2, Loader2 } from "lucide-react";
 
 interface FileNode {
   name: string;
@@ -13,52 +13,104 @@ interface FileNode {
 }
 
 interface FileExplorerProps {
+  projectId?: string | null;
   onOpenFile?: (path: string) => void;
 }
 
-export function FileExplorer({ onOpenFile }: FileExplorerProps) {
+/**
+ * FileExplorer — project-scoped file browser.
+ *
+ * All file operations route through the authenticated Next.js API:
+ *   GET  /api/studio-projects/[projectId]/files?path=...
+ *   POST /api/studio-projects/[projectId]/files  { action, path, content? }
+ *
+ * The browser NEVER talks to terminal-server directly for project files.
+ * When projectId is absent, mutations are disabled and a prompt is shown.
+ */
+export function FileExplorer({ projectId, onOpenFile }: FileExplorerProps) {
+  const { getToken } = useClerkAuth();
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl =
-    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "";
+  const [mutating, setMutating] = useState(false);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const abortRef = useRef<AbortController | null>(null);
+
+  const hasProject = Boolean(projectId);
+
+  const authHeaders = useCallback(
+    async (json = false): Promise<HeadersInit> => {
+      const token = await getToken?.();
+      return {
+        ...(json ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+    },
+    [getToken],
+  );
 
   const fetchEntries = useCallback(
-    async (path: string) => {
-      if (!wsUrl) {
-        throw new Error("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+    async (path: string): Promise<FileNode[]> => {
+      if (!projectId) throw new Error("No project selected");
+      const res = await fetch(
+        `/api/studio-projects/${projectId}/files?path=${encodeURIComponent(path)}`,
+        { headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(sanitizeError(data?.error, res.status));
       }
-      const res = await fetch(`${wsUrl}/files?path=${encodeURIComponent(path)}`, {
-        headers: await terminalAuthHeaders(),
-      });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(sanitizeError(data.error));
       return (data.entries as { name: string; type: "folder" | "file" }[]).map((entry) => ({
         ...entry,
         path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
       }));
     },
-    [wsUrl]
+    [projectId, authHeaders],
   );
 
   const loadRoot = useCallback(async () => {
+    if (!projectId) {
+      setTree([]);
+      setError(null);
+      return;
+    }
+    // Abort any in-flight load
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     setLoading(true);
     setError(null);
     try {
       const entries = await fetchEntries(".");
-      setTree(entries);
+      if (ac.signal.aborted) return;
+      // Re-expand previously expanded folders
+      const expanded = expandedPaths;
+      if (expanded.size > 0) {
+        const withChildren = await expandPaths(entries, expanded, fetchEntries);
+        setTree(withChildren);
+      } else {
+        setTree(entries);
+      }
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Failed to load files");
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setLoading(false);
     }
-  }, [fetchEntries]);
+  }, [projectId, fetchEntries, expandedPaths]);
 
   useEffect(() => {
     loadRoot();
+    return () => abortRef.current?.abort();
   }, [loadRoot]);
+
+  // Reload when project changes, preserving nothing (fresh tree)
+  useEffect(() => {
+    setExpandedPaths(new Set());
+  }, [projectId]);
 
   const toggleNode = async (node: FileNode, currentTree: FileNode[]) => {
     if (node.type === "file") {
@@ -79,6 +131,17 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
         }
         return n;
       });
+
+    // Toggle expanded state tracking
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (node.loaded && node.children) {
+        next.delete(node.path);
+      } else {
+        next.add(node.path);
+      }
+      return next;
+    });
 
     if (node.loaded && node.children) {
       setTree(updateTree(currentTree));
@@ -104,38 +167,51 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   };
 
   const createFile = async () => {
-    // TODO(P0-2): Route through /api/studio-projects/[projectId]/files instead
-    // of the terminal-server directly, so file operations are audit-logged
-    // server-side. Requires passing projectId into FileExplorer as a prop.
+    if (!projectId) return;
+    if (mutating) return; // Prevent duplicate submission
     const name = prompt("New file name?");
     if (!name) return;
+    setMutating(true);
+    setError(null);
     try {
-      const res = await fetch(`${wsUrl}/files/write`, {
+      const res = await fetch(`/api/studio-projects/${projectId}/files`, {
         method: "POST",
-        headers: await terminalAuthHeaders(),
-        body: JSON.stringify({ path: name, content: "" }),
+        headers: await authHeaders(true),
+        body: JSON.stringify({ action: "write", path: name, content: "" }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      loadRoot();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(sanitizeError(data?.error, res.status));
+      }
+      await loadRoot();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create file");
+    } finally {
+      setMutating(false);
     }
   };
 
   const deleteFile = async (path: string) => {
+    if (!projectId) return;
+    if (mutating) return; // Prevent duplicate submission
     if (!confirm(`Delete ${path}?`)) return;
+    setMutating(true);
+    setError(null);
     try {
-      const res = await fetch(`${wsUrl}/files/delete`, {
+      const res = await fetch(`/api/studio-projects/${projectId}/files`, {
         method: "POST",
-        headers: await terminalAuthHeaders(),
-        body: JSON.stringify({ path }),
+        headers: await authHeaders(true),
+        body: JSON.stringify({ action: "delete", path }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      loadRoot();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(sanitizeError(data?.error, res.status));
+      }
+      await loadRoot();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete file");
+    } finally {
+      setMutating(false);
     }
   };
 
@@ -152,6 +228,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
           <button
             onClick={() => toggleNode(node, tree)}
             className="flex min-w-0 flex-1 items-center gap-2"
+            aria-label={isFolder ? `${open ? "Collapse" : "Expand"} folder ${node.name}` : `Open file ${node.name}`}
           >
             {isFolder ? (
               <>
@@ -166,12 +243,16 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
             )}
             <span className="truncate">{node.name}</span>
           </button>
-          <button
-            onClick={() => deleteFile(node.path)}
-            className="opacity-0 group-hover:opacity-100 text-neutral-600 hover:text-red-400"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
+          {hasProject && (
+            <button
+              onClick={() => deleteFile(node.path)}
+              disabled={mutating}
+              className="opacity-0 text-neutral-600 hover:text-red-400 group-hover:opacity-100 disabled:opacity-30"
+              aria-label={`Delete ${node.name}`}
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
         {isFolder && open && node.children?.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} />)}
@@ -184,22 +265,87 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[10px] font-black uppercase tracking-wider text-neutral-500">Files</div>
         <div className="flex gap-1">
-          <button onClick={loadRoot} disabled={loading} className="text-neutral-500 hover:text-white disabled:opacity-50">
+          <button
+            onClick={loadRoot}
+            disabled={loading || !hasProject}
+            className="text-neutral-500 hover:text-white disabled:opacity-30"
+            aria-label="Refresh file list"
+          >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
-          <button onClick={createFile} className="text-neutral-500 hover:text-white">
-            <Plus className="h-3.5 w-3.5" />
+          <button
+            onClick={createFile}
+            disabled={!hasProject || mutating}
+            className="text-neutral-500 hover:text-white disabled:opacity-30"
+            aria-label="Create new file"
+          >
+            {mutating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>
 
       {error && <div className="mb-2 text-xs text-red-400">{error}</div>}
 
-      <div className="flex-1 space-y-1 overflow-y-auto">
-        {tree.map((node) => (
-          <TreeNode key={node.path} node={node} />
-        ))}
-      </div>
+      {!hasProject && (
+        <div className="flex flex-1 items-center justify-center p-4 text-center text-xs text-neutral-600">
+          Open or create a project first.
+        </div>
+      )}
+
+      {hasProject && (
+        <div className="flex-1 space-y-1 overflow-y-auto">
+          {loading && tree.length === 0 ? (
+            <div className="flex items-center justify-center p-4 text-xs text-neutral-600">
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+              Loading...
+            </div>
+          ) : (
+            tree.map((node) => <TreeNode key={node.path} node={node} />)
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+/**
+ * Recursively expand folders whose paths are in the expanded set.
+ * Used to restore expanded state after a refresh.
+ */
+async function expandPaths(
+  nodes: FileNode[],
+  expanded: Set<string>,
+  fetchEntries: (path: string) => Promise<FileNode[]>,
+): Promise<FileNode[]> {
+  const result: FileNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "folder" && expanded.has(node.path)) {
+      try {
+        const children = await fetchEntries(node.path);
+        const expandedChildren = await expandPaths(children, expanded, fetchEntries);
+        result.push({ ...node, children: expandedChildren, loaded: true });
+      } catch {
+        result.push(node);
+      }
+    } else {
+      result.push(node);
+    }
+  }
+  return result;
+}
+
+/**
+ * Sanitize error messages for user display.
+ * Never expose raw terminal-server errors or internal paths.
+ */
+function sanitizeError(error: unknown, status?: number): string {
+  if (status === 401) return "Your session expired. Please sign in again.";
+  if (status === 403) return "You do not have access to this project.";
+  if (status === 404) return "Project or file not found.";
+  if (status === 503) return "Workspace is not ready yet. Try again in a moment.";
+  if (typeof error === "string" && error.length > 0 && error.length < 200) {
+    // Strip any potential path leaks
+    return error.replace(/\/[a-zA-Z]:\/[^\s]+/g, "[path]");
+  }
+  return "File operation failed. Please try again.";
 }
