@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { generateText, type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { streamText, type ModelCategory, type LLMProvider } from "@/lib/llm";
 import {
   getConversation,
   listMessages,
@@ -19,7 +19,7 @@ import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/l
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;
@@ -240,90 +240,121 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
   }
 
-  // 12. Call the LLM provider
-  try {
-    const category = (body.category as ModelCategory | undefined) ?? "auto";
-    const provider = typeof body.provider === "string" ? (body.provider as LLMProvider) : undefined;
-    const modelOverride = typeof body.model === "string" && provider
-      ? { [provider]: body.model } as Record<string, string>
-      : undefined;
+  // 12. Call the LLM provider — streamed as SSE so the client sees tokens
+  // (and reasoning) arrive live instead of an empty bubble that either pops
+  // in all at once or times out at the 55s/60s cap.
+  const category = (body.category as ModelCategory | undefined) ?? "auto";
+  const provider = typeof body.provider === "string" ? (body.provider as LLMProvider) : undefined;
+  const modelOverride = typeof body.model === "string" && provider
+    ? { [provider]: body.model } as Record<string, string>
+    : undefined;
 
-    const r = await generateText(
-      prompt,
-      {
-        task: "chat",
-        provider: category ? undefined : provider,
-        category,
-        maxTokens: 2048,
-        modelOverride,
-      },
-      undefined,
-    );
+  const encoder = new TextEncoder();
+  const sse = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: Record<string, unknown>) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
-    // 13. Persist the assistant response
-    await updateMessageStatus(assistantMessage.id, userId, "completed", r.text);
+      let assistantText = "";
+      let reasoningText = "";
+      try {
+        const r = await streamText(
+          prompt,
+          (chunk) => {
+            assistantText += chunk;
+            send({ type: "text", text: chunk });
+          },
+          {
+            task: "chat",
+            provider: category ? undefined : provider,
+            category,
+            maxTokens: 2048,
+            modelOverride,
+            timeoutMs: 110_000,
+          },
+          undefined,
+          (reasoning) => {
+            reasoningText += reasoning;
+            send({ type: "reasoning", text: reasoning });
+          },
+        );
 
-    // 14. Revision was already incremented atomically by the RPC at step 2
+        // Persist the final assistant response
+        await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
 
-    // 15. Persist memory (project-scoped, non-blocking)
-    void persistMemory(
-      `User: ${message}\n${agent.displayName}: ${r.text}`,
-      userId,
-      conversation.projectId,
-      {
-        agentSlug,
-        conversationId: conversation.id,
-        memoryType: "conversation_summary",
-      },
-    );
+        // Persist memory (project-scoped, non-blocking)
+        void persistMemory(
+          `User: ${message}\n${agent.displayName}: ${assistantText}`,
+          userId,
+          conversation.projectId,
+          {
+            agentSlug,
+            conversationId: conversation.id,
+            memoryType: "conversation_summary",
+          },
+        );
 
-    studioLog("message:sent", {
-      conversationId: conversation.id,
-      projectId: conversation.projectId,
-      userId,
-      agentSlug,
-      provider: r.provider,
-      latencyMs: r.latencyMs,
-      revisionBefore: conversation.revision,
-      revisionAfter: newRevision,
-      memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
-    });
+        studioLog("message:sent", {
+          conversationId: conversation.id,
+          projectId: conversation.projectId,
+          userId,
+          agentSlug,
+          provider: r.provider,
+          latencyMs: r.latencyMs,
+          revisionBefore: conversation.revision,
+          revisionAfter: newRevision,
+          memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
+        });
 
-    return NextResponse.json({
-      userMessage,
-      assistantMessage: {
-        ...assistantMessage,
-        content: r.text,
-        status: "completed" as const,
-      },
-      revision: newRevision,
-      provider: r.provider,
-      model: r.model,
-      latencyMs: r.latencyMs,
-    });
-  } catch (err) {
-    // Mark assistant message as failed
-    await updateMessageStatus(assistantMessage.id, userId, "failed");
+        send({
+          type: "done",
+          userMessage,
+          assistantMessage: {
+            ...assistantMessage,
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "completed" as const,
+          },
+          revision: newRevision,
+          provider: r.provider,
+          model: r.model,
+          latencyMs: r.latencyMs,
+        });
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } catch (err) {
+        await updateMessageStatus(assistantMessage.id, userId, "failed", assistantText || undefined);
 
-    const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-    studioLog("message:failed", {
-      conversationId: conversation.id,
-      userId,
-      agentSlug,
-      errorClass: errorMsg,
-    });
+        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
+        studioLog("message:failed", {
+          conversationId: conversation.id,
+          userId,
+          agentSlug,
+          errorClass: errorMsg,
+        });
 
-    return NextResponse.json(
-      {
-        error: "Provider unavailable",
-        detail: errorMsg,
-        userMessage,
-        assistantMessage: { ...assistantMessage, status: "failed" as const },
-        revision: conversation.revision,
-      },
-      { status: 502 },
-    );
-  }
+        send({
+          type: "error",
+          message: errorMsg,
+          userMessage,
+          assistantMessage: { ...assistantMessage, status: "failed" as const },
+          revision: conversation.revision,
+          partialText: assistantText || undefined,
+        });
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(sse, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 /**

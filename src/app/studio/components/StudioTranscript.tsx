@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -13,6 +13,47 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
+
+/**
+ * ReasoningBlock — a collapsible "Thinking…" trace shown above an
+ * assistant answer when the provider emitted reasoning/thinking tokens
+ * (DeepSeek-R1, Qwen3 thinking, Gemini 2.5 thinking, etc.). The trace
+ * is client-side only and is not persisted to the database.
+ */
+function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; color: string; streaming: boolean }) {
+  const [open, setOpen] = useState(streaming);
+  return (
+    <div className="mb-1 w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.14em] transition hover:opacity-80"
+        style={{ color: `${color}cc` }}
+        aria-expanded={open}
+      >
+        <span
+          className="inline-block h-0 w-0 border-y-[3px] border-l-[5px] border-y-transparent transition-transform"
+          style={{ borderLeftColor: color, transform: open ? "rotate(90deg)" : "none" }}
+        />
+        {streaming ? "Thinking…" : "Thought process"}
+      </button>
+      {open && (
+        <div
+          className="mt-1 max-h-60 overflow-y-auto rounded-xl border px-3 py-2 text-[11px] leading-5 italic"
+          style={{
+            borderColor: `${color}1f`,
+            background: `${color}08`,
+            color: "var(--text-muted)",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
+          }}
+        >
+          {reasoning}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * StudioTranscript — the single visible conversation transcript for
@@ -115,6 +156,13 @@ export default function StudioTranscript({
                     </button>
                     {!ptyUsable && <span className="text-[8px]" style={{ color: "#e3b341" }}>Terminal not connected</span>}
                   </div>
+                )}
+                {!isUser && message.reasoning && message.reasoning.trim() && (
+                  <ReasoningBlock
+                    reasoning={message.reasoning}
+                    color={agentColor}
+                    streaming={busy && index === messages.length - 1}
+                  />
                 )}
                 <div
                   className="relative min-w-0 max-w-full overflow-hidden rounded-2xl border px-4 py-3 text-[13px] leading-6"

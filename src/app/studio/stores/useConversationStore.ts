@@ -12,6 +12,8 @@ export interface ChatMessage {
   createdAt: string;
   parentMessageId: string | null;
   regenerationOfMessageId: string | null;
+  /** Provider reasoning/thinking trace (client-side only, not persisted). */
+  reasoning?: string;
 }
 
 // Zustand selectors are backed by useSyncExternalStore. Returning a fresh []

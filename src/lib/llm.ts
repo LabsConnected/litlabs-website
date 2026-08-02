@@ -532,6 +532,7 @@ export async function streamText(
   onChunk: (text: string) => void,
   options: LLMOptions = {},
   systemPrompt?: string,
+  onReasoning?: (text: string) => void,
 ): Promise<{
   provider: LLMProvider;
   model: string;
@@ -558,6 +559,7 @@ export async function streamText(
           onChunk,
           t0,
           failover,
+          onReasoning,
         );
       }
       if (provider === "groq" || provider === "groq-whisper") {
@@ -568,6 +570,7 @@ export async function streamText(
           t0,
           failover,
           timeoutMs,
+          onReasoning,
         );
       }
       return await streamViaOpenRouter(
@@ -577,6 +580,7 @@ export async function streamText(
         t0,
         failover,
         timeoutMs,
+        onReasoning,
       );
     } catch (err) {
       lastErr = err;
@@ -603,6 +607,7 @@ async function streamViaGemini(
   onChunk: (text: string) => void,
   t0: number,
   failover: LLMProvider[],
+  onReasoning?: (text: string) => void,
 ): Promise<{
   provider: LLMProvider;
   model: string;
@@ -619,8 +624,22 @@ async function streamViaGemini(
     : p.prompt;
   const result = await model.generateContentStream(fullPrompt);
   for await (const chunk of result.stream) {
+    // Gemini 2.5 thinking models emit thought parts separately from text.
+    // chunk.text() concatenates only the non-thought text parts, so we also
+    // inspect parts for thoughtSignature/thought markers when present.
     const t = chunk.text();
     if (t) onChunk(t);
+    if (onReasoning) {
+      try {
+        const parts = (chunk as { candidates?: Array<{ content?: { parts?: Array<{ thought?: boolean; text?: string }> } }> })
+          .candidates?.[0]?.content?.parts ?? [];
+        for (const part of parts) {
+          if (part.thought && part.text) onReasoning(part.text);
+        }
+      } catch {
+        // thought extraction is best-effort; ignore shape mismatches
+      }
+    }
   }
   return {
     provider: "gemini",
@@ -637,6 +656,7 @@ async function streamViaOpenRouter(
   t0: number,
   failover: LLMProvider[],
   timeoutMs: number,
+  onReasoning?: (text: string) => void,
 ): Promise<{
   provider: LLMProvider;
   model: string;
@@ -699,8 +719,12 @@ async function streamViaOpenRouter(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) onChunk(delta);
+        const delta = json.choices?.[0]?.delta;
+        if (delta?.content) onChunk(delta.content);
+        // OpenRouter emits `reasoning` on reasoning models (DeepSeek-R1,
+        // Qwen3 thinking, etc.). Forward it separately so the UI can show
+        // a "Thinking…" trace alongside the final answer.
+        if (onReasoning && delta?.reasoning) onReasoning(delta.reasoning);
       } catch {
         // ignore malformed chunk
       }
@@ -716,6 +740,7 @@ async function streamViaGroq(
   t0: number,
   failover: LLMProvider[],
   timeoutMs: number,
+  onReasoning?: (text: string) => void,
 ): Promise<{
   provider: LLMProvider;
   model: string;
@@ -775,8 +800,9 @@ async function streamViaGroq(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) onChunk(delta);
+        const delta = json.choices?.[0]?.delta;
+        if (delta?.content) onChunk(delta.content);
+        if (onReasoning && delta?.reasoning) onReasoning(delta.reasoning);
       } catch {
         // ignore malformed chunk
       }
