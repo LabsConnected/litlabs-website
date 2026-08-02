@@ -10,6 +10,8 @@ export interface ChatMessage {
   images?: string[];
   /** Canvas actions proposed by LiTT alongside this response. */
   actions?: ArtifactAction[];
+  /** Provider reasoning/thinking trace (client-side only, not persisted). */
+  reasoning?: string;
 }
 
 export interface AgentMeta {

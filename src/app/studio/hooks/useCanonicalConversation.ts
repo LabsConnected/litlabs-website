@@ -88,6 +88,7 @@ function toUIMessage(
     role: msg.role,
     content: msg.content,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
+    reasoning: msg.reasoning,
   };
 }
 
@@ -538,10 +539,11 @@ export function useCanonicalConversation({
         const s = getStore();
         const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
-        // Abort after 55s so a hanging provider doesn't leave an empty
-        // streaming bubble forever (the route has maxDuration=60s).
+        // Abort after 120s — the route now streams (maxDuration=120), so
+        // reasoning/thinking models get room to think before emitting text
+        // instead of being killed at 55s ("cut out").
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 55_000);
+        const timeoutId = setTimeout(() => controller.abort(), 120_000);
         const response = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
           credentials: "include",
@@ -560,8 +562,7 @@ export function useCanonicalConversation({
         });
         clearTimeout(timeoutId);
 
-        const data = await response.json();
-
+        // Error / conflict paths still return JSON.
         if (response.status === 409) {
           // Revision conflict — reload messages from server, restore unsent text
           await loadMessages(conversationId);
@@ -576,6 +577,7 @@ export function useCanonicalConversation({
         }
 
         if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
           // HTTP failure — mark assistant as failed, set sendError, return not accepted
           // so the composer restores the user's text.
           getStore().updateMessage(conversationId, optimisticAssistantId, {
@@ -588,77 +590,176 @@ export function useCanonicalConversation({
           return { accepted: false };
         }
 
-        // Check for duplicate (idempotent response)
-        if (data.duplicate) {
-          const s2 = getStore();
-          const userMsg = data.userMessage as ConversationMessage;
-          s2.updateMessage(conversationId, optimisticUserId, {
+        const contentType = response.headers.get("content-type") || "";
+
+        // Duplicate (idempotent) responses come back as JSON, not SSE.
+        if (!contentType.includes("text/event-stream")) {
+          const data = await response.json();
+          if (data.duplicate) {
+            const s2 = getStore();
+            const userMsg = data.userMessage as ConversationMessage;
+            s2.updateMessage(conversationId, optimisticUserId, {
+              id: userMsg.id,
+              content: userMsg.content,
+              createdAt: userMsg.createdAt,
+            });
+
+            if (data.assistantMessage) {
+              const assistantMsg = data.assistantMessage as ConversationMessage;
+              s2.updateMessage(conversationId, optimisticAssistantId, {
+                id: assistantMsg.id,
+                content: assistantMsg.content,
+                status: "completed",
+                createdAt: assistantMsg.createdAt,
+              });
+              s2.setRevision(data.revision ?? expectedRevision);
+              return { accepted: true, reply: assistantMsg.content };
+            } else {
+              // Still processing — remove optimistic assistant, poll for result
+              s2.setMessages(
+                conversationId,
+                s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
+              );
+              s2.setRevision(data.revision ?? expectedRevision);
+              setTimeout(() => void loadMessages(conversationId!), 2000);
+              return { accepted: true };
+            }
+          }
+          // Unexpected JSON on a 200 — treat as failure
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: data.error || "Unexpected response format",
+          });
+          setSendError(data.error || "Unexpected response format");
+          return { accepted: false };
+        }
+
+        // ---- SSE streaming path ----
+        // Consume the event stream and update the optimistic assistant
+        // message incrementally so tokens (and reasoning) appear live.
+        if (!response.body) {
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: "No response body from server.",
+          });
+          setSendError("No response body from server.");
+          return { accepted: false };
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let assistantText = "";
+        let reasoningText = "";
+        let donePayload: Record<string, unknown> | null = null;
+        let errorPayload: { message?: string; partialText?: string } | null = null;
+
+        const flushUpdate = () => {
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "streaming",
+          });
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === "[DONE]") continue;
+            try {
+              const evt = JSON.parse(payload) as { type: string; text?: string; message?: string; partialText?: string };
+              if (evt.type === "text" && typeof evt.text === "string") {
+                assistantText += evt.text;
+                flushUpdate();
+              } else if (evt.type === "reasoning" && typeof evt.text === "string") {
+                reasoningText += evt.text;
+                flushUpdate();
+              } else if (evt.type === "done") {
+                donePayload = evt as unknown as Record<string, unknown>;
+              } else if (evt.type === "error") {
+                errorPayload = { message: evt.message, partialText: evt.partialText };
+              }
+            } catch {
+              // ignore malformed chunk
+            }
+          }
+        }
+
+        if (errorPayload) {
+          const partial = errorPayload.partialText;
+          const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: partial ? partial : reply,
+            reasoning: reasoningText || undefined,
+          });
+          setSendError(reply);
+          return { accepted: false };
+        }
+
+        if (donePayload) {
+          const userMsg = donePayload.userMessage as ConversationMessage;
+          const assistantMsg = donePayload.assistantMessage as ConversationMessage;
+          const s3 = getStore();
+          s3.updateMessage(conversationId, optimisticUserId, {
             id: userMsg.id,
             content: userMsg.content,
             createdAt: userMsg.createdAt,
           });
 
-          if (data.assistantMessage) {
-            const assistantMsg = data.assistantMessage as ConversationMessage;
-            s2.updateMessage(conversationId, optimisticAssistantId, {
+          // Guard against empty assistant response
+          if (!assistantMsg.content || !assistantMsg.content.trim()) {
+            s3.updateMessage(conversationId, optimisticAssistantId, {
               id: assistantMsg.id,
-              content: assistantMsg.content,
-              status: "completed",
+              content: "The response was empty. Please try again.",
+              status: "failed",
               createdAt: assistantMsg.createdAt,
             });
-            s2.setRevision(data.revision ?? expectedRevision);
-            return { accepted: true, reply: assistantMsg.content };
-          } else {
-            // Still processing — remove optimistic assistant, poll for result
-            s2.setMessages(
-              conversationId,
-              s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
-            );
-            s2.setRevision(data.revision ?? expectedRevision);
-            setTimeout(() => void loadMessages(conversationId!), 2000);
-            return { accepted: true };
+            setSendError("The AI returned an empty response. Please try again.");
+            return { accepted: false };
           }
-        }
 
-        // Normal response — replace optimistic messages with real ones
-        const userMsg = data.userMessage as ConversationMessage;
-        const assistantMsg = data.assistantMessage as ConversationMessage;
-        const s3 = getStore();
-
-        s3.updateMessage(conversationId, optimisticUserId, {
-          id: userMsg.id,
-          content: userMsg.content,
-          createdAt: userMsg.createdAt,
-        });
-
-        // Guard against empty assistant response — don't leave an empty
-        // streaming bubble permanently. If the response is empty, mark
-        // as failed with a helpful message.
-        if (!assistantMsg.content || !assistantMsg.content.trim()) {
           s3.updateMessage(conversationId, optimisticAssistantId, {
             id: assistantMsg.id,
-            content: "The response was empty. Please try again.",
-            status: "failed",
+            content: assistantMsg.content,
+            reasoning: reasoningText || undefined,
+            status: "completed",
             createdAt: assistantMsg.createdAt,
           });
-          setSendError("The AI returned an empty response. Please try again.");
-          return { accepted: false };
+
+          s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
+
+          if (donePayload.usedFallbackModel) {
+            setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
+          }
+
+          return { accepted: true, reply: assistantMsg.content };
         }
 
-        s3.updateMessage(conversationId, optimisticAssistantId, {
-          id: assistantMsg.id,
-          content: assistantMsg.content,
-          status: "completed",
-          createdAt: assistantMsg.createdAt,
+        // Stream ended without an explicit done/error event — keep whatever
+        // text we accumulated but mark completed so the bubble doesn't hang.
+        const sFinal = getStore();
+        if (assistantText.trim()) {
+          sFinal.updateMessage(conversationId, optimisticAssistantId, {
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "completed",
+          });
+          return { accepted: true, reply: assistantText };
+        }
+        sFinal.updateMessage(conversationId, optimisticAssistantId, {
+          status: "failed",
+          content: "The stream ended unexpectedly. Please try again.",
         });
-
-        s3.setRevision(data.revision ?? expectedRevision + 1);
-
-        if (data.usedFallbackModel) {
-          setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
-        }
-
-        return { accepted: true, reply: assistantMsg.content };
+        setSendError("The stream ended unexpectedly. Please try again.");
+        return { accepted: false };
       } catch (error) {
         const isAbort = error instanceof Error && error.name === "AbortError";
         // Remove the empty streaming bubble on failure — it should not
