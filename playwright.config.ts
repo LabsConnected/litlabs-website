@@ -52,7 +52,7 @@ export default defineConfig({
             }
             env.CI = "true";
             env.PLAYWRIGHT_TEST = "true";
-            env.PLAYWRIGHT_AUTH_DISABLED = "true";
+            env.PLAYWRIGHT_AUTH_DISABLED = hasTestUsers ? "false" : "true";
             return env;
           })(),
         },

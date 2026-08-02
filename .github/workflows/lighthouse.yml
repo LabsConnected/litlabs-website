@@ -17,13 +17,92 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Start production server and health check
+        id: health
+        run: |
+          set -e
+          pnpm start > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+
+          READY=false
+          for i in $(seq 1 30); do
+            if curl --fail --silent --output /dev/null http://localhost:3000 2>/dev/null; then
+              echo "Server is ready (attempt $i)"
+              READY=true
+              break
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+
+          if [ "$READY" != "true" ]; then
+            echo "::error::Production server failed to start or returned non-200"
+            echo "::group::Server logs"
+            cat server.log
+            echo "::endgroup::"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          if ! curl --fail --silent --output /dev/null http://localhost:3000/studio 2>/dev/null; then
+            echo "::error::/studio route returned non-200"
+            echo "::group::Server logs"
+            cat server.log
+            echo "::endgroup::"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Health check passed"
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          ALLOW_ANONYMOUS_DEV: "true"
+          CI: "true"
+          PLAYWRIGHT_TEST: "true"
+          PLAYWRIGHT_AUTH_DISABLED: "true"
+
       - name: Run Lighthouse
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            https://litlabs.net
-            https://litlabs.net/studio
+            http://localhost:3000
+            http://localhost:3000/studio
           budgetPath: .github/budget.config.json
+          configPath: .github/lighthouserc.json
+
+      - name: Stop production server
+        if: always()
+        run: |
+          if [ -n "${{ env.SERVER_PID }}" ]; then
+            kill ${{ env.SERVER_PID }} 2>/dev/null || true
+          fi
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: server.log
 
       - name: Upload Lighthouse reports
         if: always()
