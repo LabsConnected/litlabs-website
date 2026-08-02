@@ -96,6 +96,13 @@ export function MissionSequence() {
       return;
     }
     if (paused || completed) return;
+    // When we've reached the final stage, mark as completed instead of
+    // calling setCompleted inside the setStageIndex updater (which caused
+    // React error #185 — nested setState during render).
+    if (stageIndex >= STAGES.length - 1) {
+      setCompleted(true);
+      return;
+    }
     const timer = setTimeout(advance, STAGE_DURATION);
     return () => clearTimeout(timer);
   }, [stageIndex, paused, completed, reducedMotion, advance]);
