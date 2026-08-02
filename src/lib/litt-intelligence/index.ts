@@ -25,3 +25,7 @@ export {
 } from "./research-providers";
 export { CandidateEvaluator, EVALUATION_DIMENSIONS } from "./evaluator";
 export type { CandidateInput, EvaluationDimension } from "./evaluator";
+export { toolRegistry, registerInternalTools } from "./tool-registry";
+export { MCPAdapter } from "./mcp-adapter";
+export type { MCPServerConfig } from "./mcp-adapter";
+export { OpenAPIAdapter } from "./openapi-adapter";
