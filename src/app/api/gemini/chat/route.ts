@@ -3,6 +3,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { streamText, generateText, type ModelCategory } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
+import { isAnonymousDevAllowed } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
@@ -193,20 +194,82 @@ async function handler(req: NextRequest) {
       images = [],
       capabilities = {},
       pageContext,
+      systemPrompt: _clientSystemPrompt, // never trusted — always ignored
     } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
+    // ─── Auth gate ─────────────────────────────────────────────
+    // Unauthenticated requests are only allowed for the Global Companion
+    // (a strict, limited contract). Studio and Agent requests require
+    // authentication. ALLOW_ANONYMOUS_DEV bypasses in local development.
+    const isCompanion = pageContext?.surface === "global_companion";
+    const isDev = isAnonymousDevAllowed();
+
+    if (!userId && !isDev) {
+      if (!isCompanion) {
+        return NextResponse.json(
+          { error: "Authentication required" },
+          { status: 401 },
+        );
+      }
+      // Companion mode for unauthenticated users — strict limits below.
+    }
+
+    const isAuthenticated = Boolean(userId);
+    const uid = userId ?? (isDev ? "anonymous-dev" : null);
+
     const agent =
       AGENTS[agentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
 
-    const uid = userId || "anonymous-dev";
-    const memoryContext = userId ? await fetchMemories(message, uid) : "";
+    // Memories only for authenticated users — never for anonymous companion.
+    const memoryContext = isAuthenticated && uid ? await fetchMemories(message, uid) : "";
 
-    // ─── LiTT Kernel routing ──────────────────────────────────
+    // ─── Companion mode (unauthenticated) ──────────────────────
+    // Unauthenticated companion requests get a strict, limited contract:
+    // no Kernel routing, no capabilities, no tools, no canvas actions,
+    // no expensive provider selection. Server-owned system prompt only.
+    const isAnonymousCompanion = !isAuthenticated && !isDev && isCompanion;
+
+    if (isAnonymousCompanion) {
+      const companionHistory = history.slice(-HISTORY_LIMIT);
+      const transcript = companionHistory
+        .map((entry: HistoryEntry) =>
+          entry.role === "user" ? `User: ${entry.content}` : `${agent.name}: ${entry.content}`,
+        )
+        .join("\n");
+      const prompt = [
+        "You are LiTT, the LiTTree LabStudios companion.",
+        "You are NOT in Studio. You cannot edit files, run commands, access projects,",
+        "or use any tools. You can answer questions, explain features, navigate, and",
+        "suggest actions. If the user needs deep work (files, code, terminal, canvas,",
+        "deployments), suggest they sign in and open Studio.",
+        "Keep responses concise and helpful. Do not claim capabilities you do not have.",
+        "",
+        transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+        `User: ${message}`,
+        "",
+        `${agent.name}:`,
+      ].join("\n");
+
+      const r = await generateText(
+        prompt,
+        { task: "chat", category: "free", maxTokens: 1024 },
+        undefined,
+      );
+      const cleanText = sanitizeOutput(r.text);
+      return NextResponse.json({
+        response: cleanText,
+        provider: r.provider,
+        model: r.model,
+        latencyMs: r.latencyMs,
+      });
+    }
+
+    // ─── LiTT Kernel routing (authenticated or dev only) ───────
     // The Kernel classifies intent, checks capabilities, and composes
     // a system prompt with mode-specific guidance + verified capabilities.
     // This replaces the static agent prompt with a context-aware one.
@@ -295,7 +358,7 @@ async function handler(req: NextRequest) {
     if (imageArray.length > 0 && !stream) {
       const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
       const cleanText = sanitizeOutput(r.text);
-      if (userId) {
+      if (isAuthenticated && uid) {
         await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
       return NextResponse.json({
@@ -343,7 +406,7 @@ async function handler(req: NextRequest) {
       );
       const cleanText = sanitizeOutput(r.text);
       await logConversation(agent, userId, message, cleanText);
-      if (userId) {
+      if (isAuthenticated && uid) {
         await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
 
@@ -413,7 +476,7 @@ async function handler(req: NextRequest) {
           controller.close();
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
-            if (userId) {
+            if (isAuthenticated && uid) {
               await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
             }
           }

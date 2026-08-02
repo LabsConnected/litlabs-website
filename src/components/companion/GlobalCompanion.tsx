@@ -217,8 +217,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug,
-          systemPrompt: AGENT_META[agentSlug].systemPrompt,
-          message: trimmed,
+                    message: trimmed,
           history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
           stream: false,
           userName: profile?.displayName || "Member",
