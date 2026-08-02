@@ -70,26 +70,25 @@ interface WorkspaceToolProps {
 
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
-// Components receive WorkspaceToolProps (projectId, projectName) from
-// CommandStudio. Using React.ComponentType<any> because some tools have
-// optional props (CanvasTool) and others have different prop shapes.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<any>>> = {
-  canvas: CanvasTool,
-  image: ImageTool,
-  video: VideoTool,
-  audio: AudioTool,
-  build: BuilderTool,
-  code: CanvasTool,
-  agents: AgentTool,
-  assets: GalleryTool,
-  plugins: PluginsTool,
-  camera: CameraTool,
-  screen: ScreenTool,
-  workflows: MissionForge,
-  space: SpaceTool,
-  clibridge: CLIBridgeTool,
-  color: ColorByNumberTool,
+// BuilderTool accepts WorkspaceToolProps directly. All other tools
+// are cast to accept WorkspaceToolProps — they simply ignore the
+// projectId/projectName fields they don't use.
+const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<WorkspaceToolProps>>> = {
+  canvas: CanvasTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  image: ImageTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  video: VideoTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  audio: AudioTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  build: BuilderTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  code: CanvasTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  agents: AgentTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  assets: GalleryTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  plugins: PluginsTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  camera: CameraTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  screen: ScreenTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  workflows: MissionForge as unknown as React.ComponentType<WorkspaceToolProps>,
+  space: SpaceTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  clibridge: CLIBridgeTool as unknown as React.ComponentType<WorkspaceToolProps>,
+  color: ColorByNumberTool as unknown as React.ComponentType<WorkspaceToolProps>,
 };
 
 function AgentVoiceSync() {
@@ -479,7 +478,7 @@ export default function CommandStudio() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent />
+                    <WorkspaceComponent projectId={capabilities.projectId} projectName={capabilities.projectName} />
                   </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-[12px]" style={{ color: "var(--text-muted)" }}>

@@ -88,6 +88,59 @@ export interface CanvasToolProps {
   projectName?: string | null;
 }
 
+const CODE_FILE_PATTERN = /\.(html|css|js|ts|tsx|jsx|json|md)$/;
+
+/**
+ * Load server-backed project files for CanvasTool.
+ *
+ * The project files GET endpoint proxies to the terminal-server /ws-files
+ * listing, which returns `{ entries: [{ name, type }], workspaceId }` —
+ * entries have only `name` and `type` ("folder" | "file"), NOT `path` or
+ * `content`. So we list the directory, filter to code files, then fetch each
+ * file's content via the read endpoint (POST with action: "read").
+ *
+ * Returns [] when the project has no saved files yet (so a freshly created
+ * project appears empty rather than crashing on undefined `path`).
+ */
+export async function loadServerFiles(projectId: string): Promise<GeneratedFile[]> {
+  const listResp = await fetch(`/api/studio-projects/${projectId}/files`);
+  if (!listResp.ok) return [];
+  const data = (await listResp.json()) as {
+    entries?: { name?: string; path?: string; type?: string }[];
+  };
+  const entries = data?.entries ?? [];
+  const fileEntries = entries.filter(
+    (e) => e && (e.type === "file" || e.type === undefined) && (e.name || e.path),
+  );
+  const candidates = fileEntries
+    .map((e) => e.path ?? e.name ?? "")
+    .filter((p) => CODE_FILE_PATTERN.test(p));
+  if (candidates.length === 0) return [];
+
+  // Fetch content for each file in parallel via the read endpoint.
+  const files = await Promise.all(
+    candidates.map(async (filePath) => {
+      try {
+        const readResp = await fetch(`/api/studio-projects/${projectId}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "read", path: filePath }),
+        });
+        const readData = (await readResp.json()) as { content?: string; error?: string };
+        return {
+          name: filePath.split("/").pop() ?? filePath,
+          content: readData.content ?? "",
+          language: filePath.split(".").pop() ?? "text",
+        } satisfies GeneratedFile;
+      } catch {
+        // Skip unreadable files rather than failing the whole load.
+        return null;
+      }
+    }),
+  );
+  return files.filter((f): f is GeneratedFile => f !== null);
+}
+
 export default function CanvasTool({ projectId, projectName }: CanvasToolProps = {}) {
   const { resolvedColors: T } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -109,23 +162,16 @@ export default function CanvasTool({ projectId, projectName }: CanvasToolProps =
   // Load persisted files and messages on mount
   useEffect(() => {
     if (projectId) {
-      // Server-backed: load files from the project files API
-      fetch(`/api/studio-projects/${projectId}/files`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          const entries = (data?.entries ?? []) as { path: string; content?: string }[];
-          if (entries.length > 0) {
-            const files: GeneratedFile[] = entries
-              .filter((e) => /\.(html|css|js|ts|tsx|jsx|json|md)$/.test(e.path))
-              .map((e) => ({
-                name: e.path.split("/").pop() ?? e.path,
-                content: e.content ?? "",
-                language: e.path.split(".").pop() ?? "text",
-              }));
-            if (files.length > 0) {
-              setGeneratedFiles(files);
-              setActiveFile(files[0].name);
-            }
+      // Server-backed: list files via the project files API, then fetch each
+      // file's content. The directory listing returns { name, type } only —
+      // content is loaded separately via the read endpoint. This matches the
+      // terminal-server /ws-files response shape (entries have name+type, NOT
+      // path+content).
+      loadServerFiles(projectId)
+        .then((files) => {
+          if (files.length > 0) {
+            setGeneratedFiles(files);
+            setActiveFile(files[0].name);
           }
         })
         .catch(() => {});

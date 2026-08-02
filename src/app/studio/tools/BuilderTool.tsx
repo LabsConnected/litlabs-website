@@ -4,12 +4,13 @@ import { useState } from "react";
 import { Code2, Eye, FolderGit2, Play } from "lucide-react";
 import PreviewPanel from "@/components/studio/PreviewPanel";
 
-interface WorkspaceToolProps {
-  projectId: string | null;
-  projectName: string | null;
-}
-
-export default function BuilderTool({ projectId, projectName }: WorkspaceToolProps) {
+export default function BuilderTool({
+  projectId,
+  projectName,
+}: {
+  projectId?: string | null;
+  projectName?: string | null;
+}) {
   const [prompt, setPrompt] = useState("Create a branded landing page for a creative production system.");
   const [quality, setQuality] = useState<"draft" | "polished" | "cinematic">("polished");
   const [visualSource, setVisualSource] = useState<"auto" | "real-photos" | "ai-generated" | "project-assets">("auto");

@@ -20,6 +20,18 @@ const TERMINAL_BASE = () =>
   "http://localhost:4001";
 
 /**
+ * Validate that a file path is safe — no traversal, no absolute paths,
+ * no null bytes. Prevents writes outside the project workspace.
+ */
+function isUnsafePath(path: string): boolean {
+  if (!path) return true;
+  if (path.includes("\0")) return true;
+  if (path.startsWith("/")) return true;
+  if (path.includes("..")) return true;
+  return false;
+}
+
+/**
  * GET /api/studio-projects/[projectId]/files?path=...
  * List directory contents in the project workspace.
  */
@@ -89,6 +101,10 @@ export async function POST(
 
   if (!["read", "write", "delete"].includes(action)) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  }
+
+  if (isUnsafePath(path)) {
+    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
 
   try {
@@ -177,6 +193,10 @@ export async function PUT(
     return NextResponse.json({ error: "Missing path" }, { status: 400 });
   }
 
+  if (isUnsafePath(path)) {
+    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+  }
+
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
     const { token } = createTerminalToken(userId);
@@ -247,6 +267,10 @@ export async function DELETE(
 
   if (!path) {
     return NextResponse.json({ error: "Missing path" }, { status: 400 });
+  }
+
+  if (isUnsafePath(path)) {
+    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
 
   try {

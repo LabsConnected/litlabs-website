@@ -48,7 +48,18 @@ export async function POST(
 
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
-    const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
+
+    // Fail closed when the internal service key is not configured. The
+    // terminal-server rejects requests without a valid >=32-char key, but we
+    // check here too so we never silently send an empty header and so the
+    // error message is explicit rather than a downstream 401.
+    const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+    if (!internalKey || internalKey.length < 32) {
+      return NextResponse.json(
+        { error: "Rollback unavailable: terminal service key not configured" },
+        { status: 503 },
+      );
+    }
     const terminalBase = TERMINAL_BASE();
 
     const execInWorkspace = async (command: string) => {
@@ -57,8 +68,17 @@ export async function POST(
         headers: { "Content-Type": "application/json", "X-Internal-Service-Key": internalKey },
         body: JSON.stringify({ command, userId }),
       });
-      if (!resp.ok) throw new Error(`Git command failed: ${resp.status}`);
-      return (await resp.json()) as { exitCode: number; stdout: string; stderr: string };
+      if (!resp.ok) throw new Error(`Git command failed: HTTP ${resp.status}`);
+      const result = (await resp.json()) as { exitCode: number; stdout: string; stderr: string };
+      // Treat a nonzero exit code as failure — HTTP 200 with exitCode != 0
+      // means the command ran but failed (e.g. bad ref, dirty tree). Reporting
+      // success here would let a failed `git reset` look like a rollback.
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Git command failed (exit ${result.exitCode}): ${result.stderr || result.stdout || command}`,
+        );
+      }
+      return result;
     };
 
     // Capture list of files before rollback for summary
@@ -70,7 +90,8 @@ export async function POST(
       userId, projectId, workspaceId, action: "delete", path: "* (rollback initiated)", source: "system", ok: true, error: undefined,
     });
 
-    // Execute rollback — use the checkpoint's validated gitSha
+    // Execute rollback — use the checkpoint's validated gitSha. Each command
+    // throws on a nonzero exit code, aborting the rollback mid-flight.
     await execInWorkspace(`git reset --hard ${checkpoint.gitSha}`);
     await execInWorkspace("git clean -fd");
 
