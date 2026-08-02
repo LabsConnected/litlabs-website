@@ -23,3 +23,5 @@ export {
   PackageRegistryProvider,
   OpenAPIDirectoryProvider,
 } from "./research-providers";
+export { CandidateEvaluator, EVALUATION_DIMENSIONS } from "./evaluator";
+export type { CandidateInput, EvaluationDimension } from "./evaluator";
