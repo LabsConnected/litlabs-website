@@ -1,0 +1,27 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "pnpm start",
+      "startServerReadyPattern": "Ready in|started server on|Local:",
+      "url": [
+        "http://localhost:3000",
+        "http://localhost:3000/studio"
+      ],
+      "numberOfRuns": 1,
+      "settings": {
+        "preset": "desktop"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.3 }],
+        "categories:accessibility": ["warn", { "minScore": 0.5 }],
+        "categories:best-practices": ["warn", { "minScore": 0.5 }],
+        "categories:seo": ["warn", { "minScore": 0.5 }]
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}

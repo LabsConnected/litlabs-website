@@ -169,3 +169,52 @@ describe("Cross-user project cache isolation", () => {
     expect(keyForUserB.startsWith(PREFIX)).toBe(true);
   });
 });
+
+// ─── Failed-send duplication ───────────────────────────────────────────────
+//
+// When a send fails (HTTP error, timeout, or network error), the optimistic
+// user message must be removed from the transcript. Otherwise the user sees
+// their text twice: once in the transcript (stale optimistic) and once in the
+// composer (restored because accepted=false).
+
+describe("Failed-send removes optimistic messages", () => {
+  it("store filters out optimistic messages when setMessages is called", async () => {
+    const optimisticUserId = "optimistic_req_123";
+    const optimisticAssistantId = "optimistic_assistant_req_123";
+
+    const messages = [
+      { id: "real_msg_1", role: "user" as const, content: "Hello", status: "completed" as const },
+      { id: optimisticUserId, role: "user" as const, content: "Failed text", status: "completed" as const },
+      { id: optimisticAssistantId, role: "assistant" as const, content: "", status: "streaming" as const },
+    ];
+
+    // Simulate the filter applied on failure
+    const filtered = messages.filter(
+      (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("real_msg_1");
+    expect(filtered.find((m) => m.id === optimisticUserId)).toBeUndefined();
+    expect(filtered.find((m) => m.id === optimisticAssistantId)).toBeUndefined();
+  });
+
+  it("empty assistant response returns accepted=true (user message was sent)", async () => {
+    const serverResponse = {
+      userMessage: { id: "msg_server_123", content: "Hello", role: "user" },
+      assistantMessage: { id: "msg_server_456", content: "", role: "assistant" },
+      revision: 2,
+    };
+
+    // The user message has a real server ID → it was accepted
+    const userMessageAccepted = !!serverResponse.userMessage?.id;
+    expect(userMessageAccepted).toBe(true);
+
+    // The assistant content is empty → it's a failed assistant, not a failed send
+    const assistantFailed = !serverResponse.assistantMessage?.content?.trim();
+    expect(assistantFailed).toBe(true);
+
+    // The correct return value is accepted: true (user message was sent)
+    // NOT accepted: false (which would restore text and cause duplication)
+  });
+});

@@ -17,13 +17,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Lighthouse
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Production build
+        run: pnpm build
+        env:
+          CI: true
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Run Lighthouse against local build
         uses: treosh/lighthouse-ci-action@v9
         with:
-          urls: |
-            https://litlabs.net
-            https://litlabs.net/studio
+          configPath: .github/lighthouserc.json
           budgetPath: .github/budget.config.json
+          uploadArtifacts: true
+          temporaryPublicStorage: true
 
       - name: Upload Lighthouse reports
         if: always()

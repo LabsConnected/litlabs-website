@@ -587,7 +587,8 @@ export function useCanonicalConversation({
 
         // Guard against empty assistant response — don't leave an empty
         // streaming bubble permanently. If the response is empty, mark
-        // as failed with a helpful message.
+        // as failed with a helpful message. The user message was accepted
+        // by the server, so return accepted: true (don't restore text).
         if (!assistantMsg.content || !assistantMsg.content.trim()) {
           s3.updateMessage(conversationId, optimisticAssistantId, {
             id: assistantMsg.id,
@@ -596,7 +597,7 @@ export function useCanonicalConversation({
             createdAt: assistantMsg.createdAt,
           });
           setSendError("The AI returned an empty response. Please try again.");
-          return { accepted: false };
+          return { accepted: true };
         }
 
         s3.updateMessage(conversationId, optimisticAssistantId, {
@@ -615,24 +616,31 @@ export function useCanonicalConversation({
         return { accepted: true, reply: assistantMsg.content };
       } catch (error) {
         const isAbort = error instanceof Error && error.name === "AbortError";
-        // Remove the empty streaming bubble on failure — it should not
-        // remain permanently as an empty or error-filled bubble.
+        // On failure, remove BOTH optimistic messages — the user text will
+        // be restored to the composer by the caller (accepted: false).
+        // Leaving the optimistic user message would cause the text to
+        // appear twice: once in the transcript and once in the composer.
         const s = getStore();
         if (isAbort) {
-          // Timeout/abort — distinguish from other errors
+          // Timeout/abort — remove both optimistic messages
           s.setMessages(
             conversationId!,
-            s.getMessages().filter((m) => m.id !== optimisticAssistantId),
+            s.getMessages().filter(
+              (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+            ),
           );
           setSendError("The request timed out. Please try again.");
           return { accepted: false };
         }
+        // Network error or other exception — remove both optimistic messages
+        s.setMessages(
+          conversationId!,
+          s.getMessages().filter(
+            (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+          ),
+        );
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
-        s.updateMessage(conversationId!, optimisticAssistantId, {
-          status: "failed",
-          content: reply,
-        });
         setSendError(reply);
         return { accepted: false };
       } finally {
