@@ -97,45 +97,6 @@ export default function StudioTranscript({
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
           const isUser = message.role === "user";
-          // Skip empty assistant bubbles that are not actively streaming.
-          // This prevents the "empty LiTT bubble" artifact when a send fails
-          // before any text is received.
-          if (!isUser && !message.content?.trim() && message.status !== "streaming") {
-            return null;
-          }
-          const isFailed = !isUser && message.status === "failed";
-          const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
-          const isStreaming = !isUser && message.status === "streaming";
-          const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
-          // Use stable canonical ID as key — never the array index, which
-          // breaks when messages are inserted/removed/rolled back.
-          const key = message.id || `msg_${index}`;
-          return (
-            <div
-              key={key}
-              className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-            >
-  const { speakText } = useVoiceSession();
-  const ptyUsable = useTerminalStore((s) => s.isUsable());
-  const agentMeta = AGENT_META[activeAgentId];
-  const agentColor = agentMeta.color;
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom on new messages / busy changes.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
-
-  return (
-    <div
-      ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
-      style={{ color: "var(--text-primary)" }}
-    >
-      <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
-        {messages.map((message, index) => {
-          const isUser = message.role === "user";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
           return (
@@ -208,14 +169,10 @@ export default function StudioTranscript({
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
-                    borderColor: isFailed
-                      ? "rgba(239,68,68,0.3)"
-                      : isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
-                    background: isFailed
-                      ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
-                      : isUser
-                        ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
-                        : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
+                    borderColor: isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
+                    background: isUser
+                      ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
+                      : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
                     color: isUser ? "#fff" : "var(--text-primary)",
                   }}
                 >
@@ -251,8 +208,7 @@ export default function StudioTranscript({
                   <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                   </span>
-                  {/* Show Read only for non-empty, non-failed assistant messages */}
-                  {!isUser && !isFailed && message.content?.trim() && (
+                  {!isUser && (
                     <button
                       type="button"
                       onClick={() => speakText(message.content)}
@@ -264,21 +220,7 @@ export default function StudioTranscript({
                       Read
                     </button>
                   )}
-                  {/* Show Retry for failed assistant messages */}
-                  {!isUser && isFailed && onRegenerate && (
-                    <button
-                      type="button"
-                      onClick={onRegenerate}
-                      className="flex items-center gap-1 text-[9px] font-bold transition hover:opacity-80"
-                      style={{ color: "#fca5a5" }}
-                      title="Retry"
-                      aria-label="Retry"
-                    >
-                      Retry
-                    </button>
-                  )}
-                  {/* Show Regenerate only for completed last assistant message */}
-                  {isLastAssistant && !isFailed && onRegenerate && (
+                  {isLastAssistant && onRegenerate && (
                     <button
                       type="button"
                       onClick={onRegenerate}
@@ -295,10 +237,7 @@ export default function StudioTranscript({
             </div>
           );
         })}
-        {/* Busy indicator — only show when the last message is not already
-            streaming (avoids duplicate busy indicators when the optimistic
-            assistant bubble is already showing streaming status). */}
-        {busy && !messages.some((m) => m.status === "streaming") && (
+        {busy && (
           <div className="flex gap-3">
             <div
               className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
