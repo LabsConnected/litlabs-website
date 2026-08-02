@@ -5,7 +5,7 @@ import { getUserByClerkId, getUserPreferences, upsertUserPreferences } from "@/l
 
 async function getHandler() {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

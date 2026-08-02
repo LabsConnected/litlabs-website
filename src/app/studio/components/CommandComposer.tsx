@@ -50,6 +50,7 @@ interface CommandComposerProps {
   onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult | undefined>;
   onAgentChange?: (agentId: AgentId) => void;
   busy?: boolean;
+  disabled?: boolean;
   onToggleCamera?: () => void;
   cameraActive?: boolean;
   contextLine?: ComposerContextLine;
@@ -61,6 +62,7 @@ export default function CommandComposer({
   onSend,
   onAgentChange,
   busy = false,
+  disabled = false,
   onToggleCamera,
   cameraActive = false,
   contextLine,
@@ -127,7 +129,7 @@ export default function CommandComposer({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || submittingRef.current) return; // prevent duplicate submits
+    if (busy || disabled || submittingRef.current) return; // prevent duplicate submits
     if (!value.trim() && snapshots.length === 0) return;
     submittingRef.current = true;
     const attachments = [...snapshots];
@@ -138,8 +140,11 @@ export default function CommandComposer({
     setSnapshots([]);
     try {
       const result = await onSend(textToSend, attachments.length ? attachments : undefined);
-      if (!result?.accepted) {
-        // Controller rejected — restore text and attachments
+      // Only restore the draft if the user message was NOT persisted to the
+      // server. If the server persisted the user message but the provider
+      // failed (persisted=true, accepted=false), keep the text out of the
+      // composer and show a failed assistant bubble with Retry instead.
+      if (!result?.accepted && !result?.persisted) {
         onChange(textToSend);
         setSnapshots(attachments);
       }
@@ -391,6 +396,7 @@ export default function CommandComposer({
           }}
           rows={1}
           aria-label="Message input"
+          disabled={disabled}
         />
 
         {/* Camera — directly beside microphone */}
@@ -438,7 +444,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={submit}
-          disabled={busy || (!value.trim() && snapshots.length === 0)}
+          disabled={busy || disabled || (!value.trim() && snapshots.length === 0)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             backgroundColor: value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",

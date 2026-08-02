@@ -4,8 +4,11 @@ import type { ArtifactAction } from "@/lib/canvas/types";
 export type AgentId = "litt" | "spark";
 
 export interface ChatMessage {
+  id?: string;
   role: "user" | "assistant";
   content: string;
+  status?: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  agentSlug?: string | null;
   createdAt?: number;
   images?: string[];
   /** Canvas actions proposed by LiTT alongside this response. */

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import {
@@ -9,8 +9,8 @@ import { logAgentEvent } from "@/lib/agent-logger";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -39,8 +39,8 @@ export async function GET() {
   return NextResponse.json({ tasks: data || [], configured: true });
 }
 
-export async function POST(request: Request) {
-  const { userId } = await auth();
+export async function POST(request: NextRequest) {
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

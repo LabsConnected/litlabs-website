@@ -5,15 +5,15 @@ import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-async function getUserId(): Promise<string | null> {
-  const { userId } = await auth();
+async function getUserId(req: NextRequest): Promise<string | null> {
+  const { userId } = await auth(req);
   return userId;
 }
 
 // PATCH: Enable/disable an installation
 async function patchHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const userId = await getUserId();
+    const userId = await getUserId(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -47,7 +47,7 @@ async function patchHandler(req: NextRequest, ctx: { params: Promise<{ id: strin
 // DELETE: Uninstall a capability
 async function deleteHandler(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const userId = await getUserId();
+    const userId = await getUserId(_req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

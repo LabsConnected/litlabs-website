@@ -492,32 +492,54 @@ export default function CommandStudio() {
             </StudioDrawer>
 
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
-            {/* Send error banner — visible when conversation creation fails */}
-            {isStudioWorkConversation && conversation.sendError && (
+            {/* Reauthentication banner — visible when session expires during Studio use.
+                Disables the composer and offers a real recovery action. */}
+            {isStudioWorkConversation && (conversation.requiresReauth || conversation.sendError) && (
               <div
-                className="flex shrink-0 items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+                className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
                 style={{
                   borderColor: "rgba(239,68,68,0.3)",
                   backgroundColor: "rgba(239,68,68,0.08)",
                   color: "#fca5a5",
                 }}
               >
-                <span className="flex-1 font-medium">{conversation.sendError}</span>
-                <button
-                  type="button"
-                  onClick={() => conversation.clearSendError()}
-                  className="rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                  aria-label="Dismiss error"
-                >
-                  ✕
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10 disabled:opacity-50"
-                >
-                  Refresh session
-                </button>
+                <span className="min-w-0 flex-1 font-medium">
+                  {conversation.requiresReauth
+                    ? "Your session expired. Sign in again to continue."
+                    : conversation.sendError}
+                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {!conversation.requiresReauth && conversation.sendError && (
+                    <button
+                      type="button"
+                      onClick={() => conversation.clearSendError()}
+                      className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                      aria-label="Dismiss error"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {conversation.requiresReauth ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        conversation.clearRequiresReauth();
+                        window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                      }}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Sign in again
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Refresh session
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -528,6 +550,7 @@ export default function CommandStudio() {
                 onSend={handleComposerSend}
                 onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
+                disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
                 contextLine={contextLine}
