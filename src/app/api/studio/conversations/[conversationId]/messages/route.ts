@@ -43,7 +43,7 @@ const HISTORY_LIMIT = 12;
  * 10. Increments conversation revision
  * 11. Returns canonical IDs and revision
  */
-async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
+async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -330,7 +330,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
  * GET /api/studio/conversations/[conversationId]/messages
  * Returns all messages for a conversation, scoped by owner.
  */
-async function getHandler(req: NextRequest, routeCtx?: RouteParams) {
+async function getHandler(req: NextRequest, routeCtx: RouteParams) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

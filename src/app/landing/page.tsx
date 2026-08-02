@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 import { LandingHeader } from "./_components/LandingHeader";
 import { LandingHero } from "./_components/LandingHero";
 import { LandingLogos } from "./_components/LandingLogos";
@@ -11,11 +12,13 @@ import { LandingCTA } from "./_components/LandingCTA";
 import { LandingFooter } from "./_components/LandingFooter";
 import { LandingBackground } from "./_components/LandingBackground";
 
-export const metadata: Metadata = {
-  title: "LiTTree LabStudios — Bring the idea. LiTT helps you build the rest.",
+export const metadata: Metadata = buildMetadata({
+  title: "Bring the idea. LiTT helps you build the rest.",
   description:
     "Build apps, create art, make media, and launch real projects with an AI crew that remembers your goals, style, and decisions. Free to join.",
-};
+  path: "/landing",
+  index: true,
+});
 
 export default function ModernLandingPage() {
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Image from "next/image";
 import { Check, CircleDot, FileCode, Folder, GitBranch, Play, Rocket, Send, Sparkles, Terminal } from "lucide-react";
 
 /**
@@ -84,7 +85,7 @@ export function InteractiveProductDemo() {
       <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} className="overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
         <div className="flex items-center gap-2 border-b border-white/8 bg-[#0d1018] px-4 py-3">
           <span className="h-3 w-3 rounded-full bg-red-400/60" /><span className="h-3 w-3 rounded-full bg-amber-400/60" /><span className="h-3 w-3 rounded-full bg-green-400/60" />
-          <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40"><span className="grid h-5 w-5 place-items-center rounded bg-[#a8ff2f]/15 text-[10px] text-[#a8ff2f]">L</span>LiTTree Studio &mdash; {current.label}</div>
+          <div className="ml-3 flex min-w-0 items-center gap-2 text-xs font-bold text-white/40"><span className="relative h-5 w-5 shrink-0 overflow-hidden rounded"><Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="20px" className="object-cover" /></span><span className="truncate">LiTTree Studio &mdash; {current.label}</span></div>
           <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30"><span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />Connected</div>
         </div>
 

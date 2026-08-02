@@ -11,7 +11,7 @@ async function getUserId(): Promise<string | null> {
 }
 
 // PATCH: Enable/disable an installation
-async function patchHandler(req: NextRequest, ctx?: { params: Promise<{ id: string }> }) {
+async function patchHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const userId = await getUserId();
     if (!userId) {
@@ -45,7 +45,7 @@ async function patchHandler(req: NextRequest, ctx?: { params: Promise<{ id: stri
 }
 
 // DELETE: Uninstall a capability
-async function deleteHandler(_req: NextRequest, ctx?: { params: Promise<{ id: string }> }) {
+async function deleteHandler(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const userId = await getUserId();
     if (!userId) {

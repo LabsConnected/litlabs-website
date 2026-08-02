@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 
 async function handler(
   _req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const { clerkId } = await auth();
   if (!clerkId) {

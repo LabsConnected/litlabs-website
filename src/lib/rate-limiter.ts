@@ -59,8 +59,18 @@ export async function rateLimit(
   };
 }
 
-export function withRateLimit<T = unknown>(
-  handler: (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>,
+export function withRateLimit(
+  handler: (req: NextRequest) => Promise<NextResponse | Response>,
+  limit?: number,
+  window?: number,
+): (request: NextRequest) => Promise<NextResponse | Response>;
+export function withRateLimit<T>(
+  handler: (req: NextRequest, ctx: T) => Promise<NextResponse | Response>,
+  limit?: number,
+  window?: number,
+): (request: NextRequest, context: T) => Promise<NextResponse | Response>;
+export function withRateLimit<T>(
+  handler: ((req: NextRequest, ctx: T) => Promise<NextResponse | Response>) | ((req: NextRequest) => Promise<NextResponse | Response>),
   limit: number = 100,
   window: number = 60,
 ) {
@@ -86,7 +96,7 @@ export function withRateLimit<T = unknown>(
       );
     }
 
-    const response = await handler(request, context);
+    const response = await (handler as (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>)(request, context);
     try {
       response.headers.set("X-RateLimit-Limit", String(limit));
       response.headers.set("X-RateLimit-Remaining", String(remaining));

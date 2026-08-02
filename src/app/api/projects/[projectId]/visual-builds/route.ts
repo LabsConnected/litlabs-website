@@ -11,7 +11,7 @@ export const maxDuration = 300;
 
 async function getHandler(
   _request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string }> },
+  ctx: { params: Promise<{ projectId: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {
@@ -25,7 +25,7 @@ async function getHandler(
 
 async function postHandler(
   request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string }> },
+  ctx: { params: Promise<{ projectId: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {

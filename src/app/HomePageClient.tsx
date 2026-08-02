@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { ArrowRight, Bot, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import { MissionSequence } from "@/components/landing/MissionSequence";
@@ -19,10 +20,11 @@ function Header() {
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
         <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
-          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_25px_rgba(168,255,47,.18)]">
-            <Bot size={18} />
+          <span className="relative h-9 w-9 overflow-hidden rounded-xl border border-[#a8ff2f]/30 shadow-[0_0_25px_rgba(168,255,47,.18)]">
+            <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="36px" className="object-cover" priority />
           </span>
-          <span>LiTTree LabStudios</span>
+          <span className="hidden sm:inline">LiTTree LabStudios</span>
+          <span className="sm:hidden">LiTTree</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
           <a href="#product" className="transition hover:text-[#a8ff2f]">Product</a>

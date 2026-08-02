@@ -170,16 +170,6 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Cache Next.js static chunks for 1 year
-      {
-        source: "/_next/static/(.*)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
       // Versioned EmulatorJS runtime assets — immutable.
       // NOTE: CORP same-origin was removed — it may block the 7z decompression
       // worker from reading responses inside the srcdoc iframe in some browsers.

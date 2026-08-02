@@ -71,14 +71,11 @@ function stripeFailure() {
 
 async function handler(
   req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const { clerkId } = await auth();
   if (!clerkId) return unauthorized();
 
-  if (!ctx?.params) {
-    return NextResponse.json({ error: "Missing route params" }, { status: 400 });
-  }
   const { id: agentId } = await ctx.params;
 
   // 2. Resolve internal user server-side.

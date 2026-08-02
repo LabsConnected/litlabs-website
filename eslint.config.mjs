@@ -19,12 +19,14 @@ const eslintConfig = defineConfig([
     "node_modules/**",
     ".next/**",
     ".vercel/**",
+    "supabase/.temp/**",
     "out/**",
     "build/**",
     "**/dist/**",
     "next-env.d.ts",
     // Git worktrees — local only, 376K files
     ".worktrees/**",
+    ".codex-deploy-stage*/**",
     // Test artifacts
     "coverage/**",
     "test-results/**",

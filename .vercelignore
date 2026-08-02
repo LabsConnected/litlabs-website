@@ -38,11 +38,11 @@ next-env.d.ts
 # Heavy local artifacts — DO NOT deploy
 # (These live on disk but are never in the build output.)
 # ============================================
-docs
-scripts
-tasks
-prompts
-prds
+/docs/
+/scripts/
+/tasks/
+/prompts/
+/prds/
 outputs/
 plans/
 .tmp.driveupload/
@@ -58,8 +58,8 @@ work/
 .codex-reference/
 Zoo-Code/
 OmniRoute/
-meta/
-voice-server/
+/meta/
+/voice-server/
 
 # Chrome browser binaries and profiles
 chrome/

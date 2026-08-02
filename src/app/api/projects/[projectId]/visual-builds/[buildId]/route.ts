@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 async function getHandler(
   _request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string; buildId: string }> },
+  ctx: { params: Promise<{ projectId: string; buildId: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {
@@ -34,7 +34,7 @@ async function getHandler(
 
 async function postHandler(
   request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string; buildId: string }> },
+  ctx: { params: Promise<{ projectId: string; buildId: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {
