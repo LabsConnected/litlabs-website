@@ -14,3 +14,12 @@ export { scanProject, partialScan } from "./project-scanner";
 export type { ScanInput } from "./project-scanner";
 export { KnowledgeService } from "./knowledge-service";
 export type { StoreKnowledgeInput } from "./knowledge-service";
+export { ResearchEngine } from "./research-engine";
+export type { ResearchProvider, ResearchResult } from "./research-engine";
+export { planResearchQuery } from "./research-engine";
+export {
+  GitHubSearchProvider,
+  WebSearchProvider,
+  PackageRegistryProvider,
+  OpenAPIDirectoryProvider,
+} from "./research-providers";
