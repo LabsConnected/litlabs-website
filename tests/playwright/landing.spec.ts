@@ -9,7 +9,8 @@ const BASE_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
  * - Homepage renders and returns 200
  * - Hero has exactly 2 CTAs
  * - No fake creator handles or "concept examples" disclaimer
- * - No unsupported "real/deployed" claims
+ * - No unsupported "real/deployed" claims on FULL HOMEPAGE (not just showcase)
+ * - No invented deployment evidence in mission animation
  * - Interactive product demo has 6 selectable stages
  * - Product demonstration cards (3) with honest labeling
  * - All showcase project pages return 200
@@ -25,6 +26,7 @@ const BASE_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
  * - No horizontal overflow at any width
  * - Anonymous users can access homepage without redirect
  * - Footer links resolve to real routes
+ * - No console errors
  */
 
 test.describe("Landing page — remastered homepage", () => {
@@ -64,10 +66,10 @@ test.describe("Landing page — remastered homepage", () => {
     expect(body).not.toContain("These are concept examples");
   });
 
-  test("no unsupported 'real/deployed' claims on homepage", async ({ page }) => {
+  test("no unsupported claims on full homepage (scans entire body)", async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     const body = (await page.locator("body").textContent()) || "";
-    // The creations section must not claim "Real projects. Real results."
+    // Must not claim "Real projects. Real results."
     expect(body).not.toContain("Real projects. Real results.");
     // Must not claim SOC2-ready
     expect(body).not.toContain("SOC2-ready");
@@ -80,6 +82,34 @@ test.describe("Landing page — remastered homepage", () => {
     expect(body).not.toContain("Private projects by default");
     // Must not claim deployment previews before going live
     expect(body).not.toContain("Deployment previews before going live");
+  });
+
+  test("no invented deployment evidence on full homepage (mission animation included)", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const body = (await page.locator("body").textContent()) || "";
+    // The mission animation must not present invented operational evidence
+    expect(body).not.toContain("edge network");
+    expect(body).not.toContain("CDN distribution active");
+    expect(body).not.toContain("Deployment complete");
+    expect(body).not.toContain("Deployed live");
+    expect(body).not.toContain("3 files, 0 errors");
+    // Must not show fake public URLs
+    expect(body).not.toContain("litlabs.net");
+    expect(body).not.toContain("your-music.litlabs");
+    // Must not claim deployment is complete (only "ready for deployment")
+    expect(body).not.toContain("is deployed and ready to share");
+  });
+
+  test("mission sequence shows 'Interactive product demonstration' label", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const demoLabel = page.getByText(/Interactive product demonstration/i);
+    await expect(demoLabel).toHaveCount(1);
+  });
+
+  test("mission sequence uses After Midnight golden demo", async ({ page }) => {
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    const body = (await page.locator("body").textContent()) || "";
+    expect(body).toContain("After Midnight");
   });
 
   test("no /studio?demo=1 link (not implemented)", async ({ page }) => {
@@ -194,13 +224,13 @@ test.describe("Landing page — remastered homepage", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
     await expect(page.locator("h1")).toContainText("Bring the idea");
-    // The mission sequence should show the final "Live" stage, not "Prompt"
+    // The mission sequence should show the final "Ready for Deployment" stage, not "Prompt"
     const sequence = page.locator("section").first().locator(".rounded-2xl").first();
     await expect(sequence).toBeVisible();
-    // Wait a moment and check that the stage label shows "Live" (the final stage)
+    // Wait a moment and check that the stage label shows "Ready for Deployment"
     await page.waitForTimeout(500);
     const stageText = await sequence.textContent();
-    expect(stageText).toContain("Live");
+    expect(stageText).toContain("Ready for Deployment");
     expect(stageText).not.toContain("Prompt");
   });
 
