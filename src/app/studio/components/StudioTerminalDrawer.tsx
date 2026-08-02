@@ -38,7 +38,7 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/studio-projects/${projectId}/prepare`, {
+        const res = await fetch(`/api/studio-projects/${projectId}/workspace/prepare`, {
           method: "POST",
         });
         if (cancelled) return;
@@ -119,7 +119,7 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
             setWorkspaceStatus("preparing");
             setWorkspaceError(null);
             // Re-trigger preparation by changing the effect dependency
-            void fetch(`/api/studio-projects/${projectId}/prepare`, { method: "POST" })
+            void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
               .then(() => setWorkspaceStatus("ready"))
               .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Retry failed"); });
           }}
