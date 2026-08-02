@@ -79,12 +79,12 @@ export function MissionSequence() {
   const advance = useCallback(() => {
     setStageIndex((prev) => {
       if (prev >= STAGES.length - 1) {
-        setCompleted(true);
         return prev;
       }
       return prev + 1;
     });
-  }, []);
+    setCompleted((prev) => prev || stageIndex >= STAGES.length - 2);
+  }, [stageIndex]);
 
   useEffect(() => {
     // Reduced-motion users: immediately show the final static state.
