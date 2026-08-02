@@ -7,22 +7,29 @@ import { PLANS, getStripePriceId } from "@/config/plans";
 export const runtime = "nodejs";
 
 export async function GET() {
+  const secretKey = process.env.STRIPE_SECRET_KEY ?? "";
+  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+
   const report = {
     timestamp: new Date().toISOString(),
-    secretKey: !!process.env.STRIPE_SECRET_KEY,
-    publishableKey: !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-    webhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
+    secretKey: secretKey.length > 10,
+    publishableKey: publishableKey.length > 10,
+    webhookSecret: webhookSecret.length > 10,
     plans: Object.fromEntries(
       Object.values(PLANS)
         .filter((p) => p.billingType !== "free")
-        .map((p) => [
-          p.id,
-          {
-            name: p.name,
-            priceIdConfigured: !!getStripePriceId(p),
-            envVar: p.stripePriceIdEnv ?? null,
-          },
-        ]),
+        .map((p) => {
+          const priceId = getStripePriceId(p);
+          return [
+            p.id,
+            {
+              name: p.name,
+              priceIdConfigured: !!priceId && priceId.startsWith("price_"),
+              envVar: p.stripePriceIdEnv ?? null,
+            },
+          ];
+        }),
     ),
   };
 
