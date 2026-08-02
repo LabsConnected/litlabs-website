@@ -79,12 +79,17 @@ export const useStudioModelStore = create<StudioModelStore>((set) => ({
   providerHealth: {},
   fallbackNotice: null,
 
-  selectModel: (model) =>
-    set({
-      selectedModel: "apiModel" in model && "label" in model
-        ? model as SelectedModel
-        : toSelectedModel(model as StudioModel),
-    }),
+  selectModel: (model) => {
+    const selectedModel = "apiModel" in model && "label" in model
+      ? model as SelectedModel
+      : toSelectedModel(model as StudioModel);
+    try {
+      localStorage.setItem("litt-selected-model-v2", selectedModel.id);
+    } catch {
+      // Storage may be unavailable in private or restricted browser contexts.
+    }
+    set({ selectedModel });
+  },
 
   setFallbackNotice: (fallbackNotice) => set({ fallbackNotice }),
   setProviderHealth: (provider, health) =>

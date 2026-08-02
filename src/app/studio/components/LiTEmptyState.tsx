@@ -11,6 +11,7 @@ import {
   FilePlus2,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import type { AgentId } from "../stores/useStudioAgentStore";
 
 /* Inline GitHub mark — lucide-react is pinned to ^1.24.0 and lacks Github. */
 function GithubMark({ size = 16, className }: { size?: number; className?: string }) {
@@ -55,6 +56,7 @@ const PROJECT_SUGGESTIONS = [
 ];
 
 export default function LiTEmptyState({
+  activeAgentId = "litt",
   hasProject,
   projectId,
   projectName,
@@ -64,6 +66,7 @@ export default function LiTEmptyState({
   onConnectRepo,
   onStartBlank,
 }: {
+  activeAgentId?: AgentId;
   hasProject: boolean;
   projectId: string | null;
   projectName: string | null;
@@ -77,12 +80,36 @@ export default function LiTEmptyState({
 
   return (
     <div
-      className="flex min-h-full flex-col items-center justify-center px-4 py-8"
+      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6"
       style={{ color: "var(--text-primary)" }}
     >
-      {/* LiTT cutout mascot — full body with green platform */}
-      <div className="mb-4">
-        <LiTTPresence state="idle" variant="empty-state" size="md" />
+      {/* Active character — clean transparent art, no framed black bars. */}
+      <div className="relative mb-2 grid min-h-[104px] place-items-center">
+        {activeAgentId === "litt" ? (
+          <LiTTPresence state="idle" variant="empty-state" size="sm" />
+        ) : (
+          <div
+            className="relative grid h-24 w-24 place-items-center overflow-hidden rounded-full border"
+            style={{
+              borderColor: "rgba(244,114,182,.35)",
+              background: "radial-gradient(circle, rgba(244,114,182,.14), transparent 70%)",
+              boxShadow: "0 0 32px rgba(244,114,182,.14)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/spark-agent-portrait.png" alt="Spark" className="h-full w-full object-cover" />
+          </div>
+        )}
+        <span
+          className="absolute -bottom-1 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[.16em]"
+          style={{
+            borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.35)" : "rgba(114,242,56,.35)",
+            backgroundColor: "var(--studio-bg)",
+            color: activeAgentId === "spark" ? "var(--spark-primary)" : "var(--litt-primary)",
+          }}
+        >
+          {activeAgentId === "spark" ? "Spark · Creative" : "LiTT · Operating"}
+        </span>
       </div>
 
       {/* Headline */}
@@ -90,7 +117,7 @@ export default function LiTEmptyState({
         className="text-center text-xl font-black tracking-tight sm:text-2xl"
         style={{ color: "var(--text-primary)" }}
       >
-        What are we building today?
+        {activeAgentId === "spark" ? "What should we create today?" : "What are we building today?"}
       </h1>
 
       {/* Supporting copy */}

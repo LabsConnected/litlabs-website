@@ -113,7 +113,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("create", "image")).toBe("image");
       expect(destinationToLegacyTool("create", "video")).toBe("video");
       expect(destinationToLegacyTool("create", "audio")).toBe("audio");
-      expect(destinationToLegacyTool("create", "music")).toBe("audio");
+      expect(destinationToLegacyTool("create", "music")).toBe("music");
       expect(destinationToLegacyTool("create", "brand")).toBe("color");
     });
 

@@ -48,6 +48,7 @@ interface CommandComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult | undefined>;
+  onAgentChange?: (agentId: AgentId) => void;
   busy?: boolean;
   onToggleCamera?: () => void;
   cameraActive?: boolean;
@@ -58,6 +59,7 @@ export default function CommandComposer({
   value,
   onChange,
   onSend,
+  onAgentChange,
   busy = false,
   onToggleCamera,
   cameraActive = false,
@@ -70,13 +72,10 @@ export default function CommandComposer({
 
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const agentTriggerRef = useRef<HTMLButtonElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
-  const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
   const [modelRect, setModelRect] = useState<DOMRect | null>(null);
   const selectModel = useStudioModelStore((s) => s.selectModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
@@ -108,19 +107,6 @@ export default function CommandComposer({
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
   }, [value]);
-
-  // Position agent popover on open.
-  useEffect(() => {
-    if (!agentOpen) return;
-    if (agentTriggerRef.current) setAgentRect(agentTriggerRef.current.getBoundingClientRect());
-    const update = () => agentTriggerRef.current && setAgentRect(agentTriggerRef.current.getBoundingClientRect());
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [agentOpen]);
 
   // Position model popover on open.
   useEffect(() => {
@@ -190,9 +176,6 @@ export default function CommandComposer({
   })();
   const MicIcon = micState.icon;
 
-  const agentAccent =
-    activeAgentId === "spark" ? "var(--spark-primary)" : "var(--litt-primary)";
-
   return (
     <div
       className="relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
@@ -250,9 +233,76 @@ export default function CommandComposer({
         </div>
       )}
 
+      {/* Always-visible agent + model toolbar. These are primary controls,
+          not mystery icons buried inside the text field. */}
+      <div
+        className="mx-auto flex w-full max-w-[var(--studio-composer-max-w)] items-center justify-between gap-2 px-1"
+      >
+        <div
+          className="flex items-center gap-1 rounded-xl border p-1"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(255,255,255,0.025)" }}
+          role="group"
+          aria-label="Choose your agent"
+        >
+          {(["litt", "spark"] as AgentId[]).map((id) => {
+            const meta = AGENT_META[id];
+            const active = activeAgentId === id;
+            const accent = id === "spark" ? "var(--spark-primary)" : "var(--litt-primary)";
+            const avatar = id === "spark"
+              ? "/brand/spark-agent-portrait.png"
+              : "/brand/litt/litt-avatar-64.webp";
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onAgentChange ? onAgentChange(id) : setActiveAgent(id)}
+                className="flex h-9 items-center gap-2 rounded-lg border px-2.5 text-[11px] font-black transition"
+                style={{
+                  borderColor: active ? `${accent}70` : "transparent",
+                  backgroundColor: active ? `${accent}16` : "transparent",
+                  color: active ? accent : "var(--text-muted)",
+                }}
+                aria-pressed={active}
+                aria-label={`Use ${meta.displayName}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={avatar} alt="" className="h-6 w-6 rounded-md object-cover" />
+                <span>{meta.displayName}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          ref={modelTriggerRef}
+          type="button"
+          onClick={() => setModelOpen((v) => !v)}
+          className="flex h-10 min-w-0 items-center gap-2 rounded-xl border px-3 text-[11px] font-bold transition hover:bg-white/5"
+          style={{ borderColor: "var(--studio-border-strong)", color: "var(--text-secondary)" }}
+          title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
+          aria-label={`Model: ${selectedModel.label}. Choose model`}
+          aria-expanded={modelOpen}
+        >
+          <span className="shrink-0">{selectedModel.icon}</span>
+          <span className="truncate">{selectedModel.label}</span>
+          <ChevronDown size={12} className="pointer-events-none shrink-0 opacity-60" />
+        </button>
+        {modelOpen && modelRect &&
+          createPortal(
+            <ModelPopover
+              rect={modelRect}
+              selectedId={selectedModel.id}
+              providerHealth={providerHealth}
+              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
+              onClose={() => setModelOpen(false)}
+            />,
+            document.body,
+          )}
+      </div>
+
       {/* Input row — capped at composer max width, centered */}
       <div
-        className="relative flex items-end gap-1.5 rounded-2xl border px-2 py-2"
+        className="relative flex items-end gap-1 rounded-2xl border px-2 py-2 shadow-[0_12px_36px_rgba(0,0,0,.28)] focus-within:border-white/25"
         style={{
           borderColor: "var(--studio-border-strong)",
           backgroundColor: "var(--studio-card)",
@@ -317,70 +367,6 @@ export default function CommandComposer({
           }}
         />
 
-        {/* Agent selector */}
-        <button
-          ref={agentTriggerRef}
-          type="button"
-          onClick={() => setAgentOpen((v) => !v)}
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 transition hover:bg-white/5"
-          style={{
-            borderColor: "var(--studio-border-strong)",
-            color: agentAccent,
-          }}
-          aria-label="Select agent"
-          title={agentMeta.displayName}
-          aria-expanded={agentOpen}
-        >
-          <span
-            className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-black"
-            style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
-          >
-            {agentMeta.displayName[0]}
-          </span>
-          <span className="hidden sm:inline text-[11px] font-bold">{agentMeta.displayName}</span>
-        </button>
-        {agentOpen && agentRect &&
-          createPortal(
-            <AgentPopover
-              rect={agentRect}
-              activeId={activeAgentId}
-              onSelect={(id) => { setActiveAgent(id); setAgentOpen(false); }}
-              onClose={() => setAgentOpen(false)}
-            />,
-            document.body,
-          )}
-
-        {/* Model picker — interactive button + popover */}
-        <button
-          ref={modelTriggerRef}
-          type="button"
-          onClick={() => setModelOpen((v) => !v)}
-          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold transition hover:bg-white/5"
-          style={{
-            borderColor: "var(--studio-border-strong)",
-            color: "var(--text-secondary)",
-          }}
-          title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
-          aria-label="Select model"
-          aria-expanded={modelOpen}
-        >
-          <span>{selectedModel.icon}</span>
-          <span className="hidden sm:inline">{selectedModel.label}</span>
-          <span className="sm:hidden">{selectedModel.label.split(" ")[0]}</span>
-          <ChevronDown size={10} className="pointer-events-none opacity-50" />
-        </button>
-        {modelOpen && modelRect &&
-          createPortal(
-            <ModelPopover
-              rect={modelRect}
-              selectedId={selectedModel.id}
-              providerHealth={providerHealth}
-              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
-              onClose={() => setModelOpen(false)}
-            />,
-            document.body,
-          )}
-
         {/* Text input — min 14px font */}
         <textarea
           id="command-composer-message"
@@ -395,7 +381,7 @@ export default function CommandComposer({
             }
           }}
           placeholder={agentMeta.placeholder}
-          className="min-w-0 flex-1 resize-none bg-transparent py-2.5 outline-none"
+          className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 outline-none"
           style={{
             color: "var(--text-primary)",
             fontSize: "14px",
@@ -480,85 +466,6 @@ export default function CommandComposer({
   );
 }
 
-/* ── Agent selector popover ────────────────────────────────────── */
-function AgentPopover({
-  rect,
-  activeId,
-  onSelect,
-  onClose,
-}: {
-  rect: DOMRect;
-  activeId: AgentId;
-  onSelect: (id: AgentId) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const left = Math.min(rect.left, window.innerWidth - 240);
-  const top = rect.bottom + 6;
-  const agents: AgentId[] = ["litt", "spark"];
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Select agent"
-      className="fixed z-[200] w-56 overflow-hidden rounded-xl border shadow-2xl"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
-    >
-      <div
-        className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)" }}
-      >
-        Agent
-      </div>
-      {agents.map((id) => {
-        const meta = AGENT_META[id];
-        const accent = id === "spark" ? "var(--spark-primary)" : "var(--litt-primary)";
-        const isActive = activeId === id;
-        return (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onSelect(id)}
-            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-            style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
-          >
-            <span
-              className="grid h-7 w-7 place-items-center rounded-lg text-[11px] font-black"
-              style={{ backgroundColor: `${accent}20`, color: accent }}
-            >
-              {meta.displayName[0]}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{meta.displayName}</div>
-              <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{meta.role}</div>
-            </div>
-            {isActive && (
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /* ── Model selector popover ────────────────────────────────────── */
 const MODEL_CATEGORIES: { id: NonNullable<SelectedModel["category"]>; label: string }[] = [
   { id: "auto", label: "Auto" },
@@ -595,8 +502,8 @@ function ModelPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 280);
-  const top = rect.bottom + 6;
+  const left = Math.max(12, Math.min(rect.right - 288, window.innerWidth - 300));
+  const top = Math.max(12, rect.top - Math.min(410, window.innerHeight - 24));
 
   return (
     <div

@@ -94,6 +94,8 @@ export function mapLegacyToolToDestination(
       return { destination: "create", legacyTool: "video", mode: "video" };
     case "audio":
       return { destination: "create", legacyTool: "audio", mode: "audio" };
+    case "music":
+      return { destination: "create", legacyTool: "music", mode: "music" };
     case "color":
       return { destination: "create", legacyTool: "color", mode: "brand" };
 
@@ -136,7 +138,8 @@ export function destinationToLegacyTool(
       return "chat";
     case "create":
       if (mode === "video") return "video";
-      if (mode === "audio" || mode === "music") return "audio";
+      if (mode === "audio") return "audio";
+      if (mode === "music") return "music";
       if (mode === "brand") return "color";
       return "image";
     case "assets":

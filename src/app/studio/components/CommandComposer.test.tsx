@@ -178,7 +178,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(textareas).toHaveLength(1);
   });
 
-  it("does not render a mode dropdown (only Auto label)", () => {
+  it("shows the active model picker without an execution-mode dropdown", () => {
     const onSend = vi.fn();
     render(
       <CommandComposer
@@ -188,10 +188,26 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
         busy={false}
       />,
     );
-    // The mode selector should be a static span, not a button
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    // "Auto" text should be visible
-    expect(screen.getByText("Auto")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /model: auto best/i })).toBeTruthy();
+  });
+
+  it("keeps LiTT and Spark visible and switches through the canonical callback", () => {
+    const onAgentChange = vi.fn();
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onAgentChange={onAgentChange}
+        busy={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Use LiTT" })).toBeTruthy();
+    const spark = screen.getByRole("button", { name: "Use Spark" });
+    fireEvent.click(spark);
+    expect(onAgentChange).toHaveBeenCalledWith("spark");
   });
 
   it("camera button toggles camera", () => {

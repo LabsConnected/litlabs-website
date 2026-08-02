@@ -38,6 +38,7 @@ const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.C
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
+const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
@@ -69,6 +70,7 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
+  music: MusicTool,
   build: BuilderTool,
   code: CanvasTool,
   agents: AgentTool,
@@ -233,24 +235,22 @@ export default function CommandStudio() {
     return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
-    // If no project, save the message and prompt project creation
-    if (!capabilities.projectId) {
-      setPendingMessage(value);
-      setComposerValue("");
-      return;
-    }
-    // Direct call to the real controller — no custom-event bridge.
+    // The canonical controller provisions a starter project and conversation
+    // when needed. Do not block first-time users at the composer boundary.
     try {
-      return await conversation.send(value, attachments);
+      const result = await conversation.send(value, attachments);
+      if (result?.accepted && !capabilities.projectId) {
+        await refreshCapabilities();
+      }
+      return result;
     } catch {
       // Restore the typed message so the user doesn't lose input
       setComposerValue(value);
     }
-  }, [conversation, capabilities.projectId]);
+  }, [conversation, capabilities.projectId, refreshCapabilities]);
 
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
@@ -294,19 +294,12 @@ export default function CommandStudio() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
-      // Retry pending message if any
-      if (pendingMessage) {
-        const msg = pendingMessage;
-        setPendingMessage(null);
-        setComposerValue("");
-        await conversation.send(msg);
-      }
     } catch (err) {
       console.error("[handleStartBlank] Error:", err);
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation, userId]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -344,7 +337,8 @@ export default function CommandStudio() {
     }
     if (destination === "create") {
       if (createMode === "video") return "video";
-      if (createMode === "audio" || createMode === "music") return "audio";
+      if (createMode === "audio") return "audio";
+      if (createMode === "music") return "music";
       if (createMode === "brand") return "color";
       return "image";
     }
@@ -540,6 +534,7 @@ export default function CommandStudio() {
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
+                onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
@@ -649,6 +644,7 @@ function StudioWorkSurface({
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
+            activeAgentId={activeAgentId}
             hasProject={hasProject}
             projectId={projectId}
             projectName={projectName}

@@ -141,6 +141,8 @@ export function useCanonicalConversation({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isSyncingFromUrl = useRef(false);
+  const activeAgentIdRef = useRef(activeAgentId);
+  useEffect(() => { activeAgentIdRef.current = activeAgentId; }, [activeAgentId]);
 
   // Ref to read current searchParams inside loadConversations without
   // depending on it — prevents the loadConversations → syncUrl →
@@ -309,12 +311,12 @@ export function useCanonicalConversation({
         s.selectConversation(null);
       }
     }
-    if (agentSlug && agentSlug !== activeAgentId) {
+    if (agentSlug && agentSlug !== activeAgentIdRef.current) {
       s.setActiveAgent(agentSlug);
       setActiveAgentId(agentSlug);
     }
     isSyncingFromUrl.current = false;
-  }, [searchParams, getStore, loadMessages, activeAgentId, setActiveAgentId]);
+  }, [searchParams, getStore, loadMessages, setActiveAgentId]);
 
   // Sync URL when state changes
   useEffect(() => {
