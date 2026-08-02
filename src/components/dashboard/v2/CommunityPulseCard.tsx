@@ -10,10 +10,12 @@ export function CommunityPulseCard({
   socialPosts,
   socialLoading,
   socialError,
+  socialMock,
 }: {
   socialPosts: SocialPost[];
   socialLoading: boolean;
   socialError: string | null;
+  socialMock: boolean;
 }) {
   const T = useTheme().resolvedColors;
 
@@ -26,6 +28,25 @@ export function CommunityPulseCard({
         title="Community activity could not be loaded."
         message="Try again later."
         color="#ef4444"
+      />
+    );
+  }
+
+  if (socialMock) {
+    return (
+      <EmptyState
+        icon="globe"
+        title="Community feed is in demo mode."
+        message="Real posts will appear once the community is active."
+        color="#F97316"
+        action={
+          <ActionButton
+            href="/discover"
+            label="Open Discover"
+            icon="globe"
+            color="#F97316"
+          />
+        }
       />
     );
   }

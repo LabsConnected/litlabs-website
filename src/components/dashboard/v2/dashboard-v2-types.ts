@@ -89,7 +89,7 @@ export type SocialPost = {
   likes_count: number;
   comments_count: number;
   created_at: string;
-  author?: { name: string; username: string; avatar_url: string } | null;
+  author?: { name: string; username: string; avatar_url: string | null } | null;
 };
 
 export type InboxItem = {

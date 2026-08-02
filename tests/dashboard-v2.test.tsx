@@ -215,13 +215,19 @@ describe("UnifiedInboxCard", () => {
 
 describe("CommunityPulseCard", () => {
   it("shows empty state when no posts", () => {
-    render(<CommunityPulseCard socialPosts={[]} socialLoading={false} socialError={null} />);
+    render(<CommunityPulseCard socialPosts={[]} socialLoading={false} socialError={null} socialMock={false} />);
     expect(screen.getByText("Nothing new in your community yet.")).toBeTruthy();
   });
 
   it("shows error state when API fails", () => {
-    render(<CommunityPulseCard socialPosts={[]} socialLoading={false} socialError="Failed to load" />);
+    render(<CommunityPulseCard socialPosts={[]} socialLoading={false} socialError="Failed to load" socialMock={false} />);
     expect(screen.getByText("Community activity could not be loaded.")).toBeTruthy();
+  });
+
+  it("rejects mock data and shows demo mode state", () => {
+    render(<CommunityPulseCard socialPosts={[]} socialLoading={false} socialError={null} socialMock={true} />);
+    expect(screen.getByText("Community feed is in demo mode.")).toBeTruthy();
+    expect(screen.queryByText("Nothing new in your community yet.")).toBeNull();
   });
 
   it("shows posts when they exist", () => {
@@ -233,7 +239,7 @@ describe("CommunityPulseCard", () => {
       created_at: new Date().toISOString(),
       author: { name: "Alice", username: "alice", avatar_url: null },
     }];
-    render(<CommunityPulseCard socialPosts={posts} socialLoading={false} socialError={null} />);
+    render(<CommunityPulseCard socialPosts={posts} socialLoading={false} socialError={null} socialMock={false} />);
     expect(screen.getByText("Just shipped a new feature!")).toBeTruthy();
     expect(screen.getByText("Alice")).toBeTruthy();
   });

@@ -30,6 +30,7 @@ export function DashboardV2() {
   const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
   const [socialLoading, setSocialLoading] = useState(true);
   const [socialError, setSocialError] = useState<string | null>(null);
+  const [socialMock, setSocialMock] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -48,20 +49,27 @@ export function DashboardV2() {
       }
       if (socialRes.status === "fulfilled" && socialRes.value.ok) {
         const socialJson = await socialRes.value.json();
-        setSocialPosts(socialJson.posts ?? socialJson ?? []);
+        if (socialJson.mock === true) {
+          setSocialMock(true);
+          setSocialPosts([]);
+        } else {
+          setSocialMock(false);
+          setSocialPosts(socialJson.posts ?? socialJson ?? []);
+        }
         setSocialError(null);
       } else if (socialRes.status === "fulfilled" && !socialRes.value.ok) {
+        setSocialError("Failed to load community feed.");
+      }
+      if (socialRes.status === "rejected") {
         setSocialError("Failed to load community feed.");
       }
       if (dashRes.status === "rejected") {
         setError("Could not load dashboard data.");
       }
-      if (socialRes.status === "rejected") {
-        setSocialError("Failed to load community feed.");
-      }
     } catch {
       setError("Could not load dashboard data.");
       setSocialError("Failed to load community feed.");
+      setSocialMock(false);
     } finally {
       setLoading(false);
       setSocialLoading(false);
@@ -266,6 +274,7 @@ export function DashboardV2() {
               socialPosts={socialPosts}
               socialLoading={socialLoading}
               socialError={socialError}
+              socialMock={socialMock}
             />
           </Card>
 
