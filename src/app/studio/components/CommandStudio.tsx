@@ -463,7 +463,7 @@ export default function CommandStudio() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent />
+                    <WorkspaceComponent projectId={capabilities.projectId} projectName={capabilities.projectName} />
                   </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-[12px]" style={{ color: "var(--text-muted)" }}>

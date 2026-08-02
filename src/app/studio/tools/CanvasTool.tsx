@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { CODE_MODELS as MODELS } from "@/lib/studio-models";
+import { useProjectCanvas, type SaveStatus } from "../hooks/useProjectCanvas";
 import {
   Bot,
   Copy,
@@ -23,6 +24,8 @@ import {
   Play,
   Brain,
   RotateCcw,
+  CloudOff,
+  AlertCircle,
 } from "lucide-react";
 
 type Message = {
@@ -78,44 +81,46 @@ const QUALITY_LEVELS = [
   { id: "production", label: "Production", desc: "Tests, types, deployment-ready" },
 ];
 
-const PERSIST_KEY = "litlabs:canvas:files";
 const PERSIST_MSG_KEY = "litlabs:canvas:messages";
-// TODO(P0-4): Replace localStorage with server-backed storage (Supabase table
-// with RLS). This requires: (1) a canvas_files table, (2) an API endpoint for
-// save/load, (3) passing userId + projectId into CanvasTool as props. Currently
-// deferred because CanvasTool is a standalone component with no projectId
-// context, and this is a data-persistence issue (not cross-user leakage —
-// localStorage is origin-scoped). Will be addressed in the Studio rebuild.
 
-export default function CanvasTool() {
+interface CanvasToolProps {
+  projectId?: string | null;
+  projectName?: string | null;
+}
+
+export default function CanvasTool({ projectId, projectName }: CanvasToolProps) {
   const { resolvedColors: T } = useTheme();
+  const {
+    files: generatedFiles,
+    setFiles: setGeneratedFiles,
+    activeFile,
+    setActiveFile,
+    previewMode,
+    setPreviewMode,
+    qualityLevel,
+    setQualityLevel,
+    saveStatus,
+    isScratch,
+    clearAll: clearCanvas,
+    lastSavedAt,
+  } = useProjectCanvas({ projectId, projectName });
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [model, setModel] = useState("gemini-flash");
-  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
-  const [activeFile, setActiveFile] = useState<string>("");
-  const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [memories, setMemories] = useState<string[]>([]);
-  const [qualityLevel, setQualityLevel] = useState("polished");
   const [selectedIntent, setSelectedIntent] = useState("");
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load persisted files and messages on mount
+  // Load persisted messages on mount (messages stay in localStorage for now —
+  // they are conversation history, not project files)
   useEffect(() => {
     try {
-      const savedFiles = localStorage.getItem(PERSIST_KEY);
-      if (savedFiles) {
-        const files = JSON.parse(savedFiles) as GeneratedFile[];
-        if (files.length > 0) {
-          setGeneratedFiles(files);
-          setActiveFile(files[0].name);
-        }
-      }
       const savedMsgs = localStorage.getItem(PERSIST_MSG_KEY);
       if (savedMsgs) {
         const msgs = JSON.parse(savedMsgs) as Message[];
@@ -123,13 +128,6 @@ export default function CanvasTool() {
       }
     } catch { /* ignore corrupt storage */ }
   }, []);
-
-  // Persist files when they change
-  useEffect(() => {
-    if (generatedFiles.length > 0) {
-      localStorage.setItem(PERSIST_KEY, JSON.stringify(generatedFiles));
-    }
-  }, [generatedFiles]);
 
   // Persist messages when they change
   useEffect(() => {
@@ -366,35 +364,24 @@ export default function CanvasTool() {
         if (activeFile === fileName) {
           setActiveFile(next.length > 0 ? next[0].name : "");
         }
-        if (next.length === 0) {
-          localStorage.removeItem(PERSIST_KEY);
-        } else {
-          localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
-        }
         return next;
       });
     },
-    [activeFile],
+    [activeFile, setGeneratedFiles, setActiveFile],
   );
 
   const startNew = useCallback(() => {
-    setGeneratedFiles([]);
+    clearCanvas();
     setMessages([]);
-    setActiveFile("");
     setInput("");
     setSelectedIntent("");
-    localStorage.removeItem(PERSIST_KEY);
     localStorage.removeItem(PERSIST_MSG_KEY);
-  }, []);
+  }, [clearCanvas]);
 
   const createBlankFile = useCallback(() => {
     const name = `untitled-${Date.now()}.html`;
     const newFile: GeneratedFile = { name, content: "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <title>Untitled</title>\n</head>\n<body>\n  \n</body>\n</html>", language: "html" };
-    setGeneratedFiles((prev) => {
-      const next = [...prev, newFile];
-      localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
-      return next;
-    });
+    setGeneratedFiles((prev) => [...prev, newFile]);
     setActiveFile(name);
     setPreviewMode("code");
   }, []);
@@ -414,6 +401,16 @@ export default function CanvasTool() {
           <span className="text-sm font-black" style={{ color: T.headerColor }}>
             Canvas
           </span>
+          {isScratch && (
+            <span
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+              style={{ backgroundColor: "#f59e0b15", color: "#f59e0b" }}
+              title="No project selected — changes will not be saved to a project"
+            >
+              <AlertCircle size={9} /> Temporary draft
+            </span>
+          )}
+          <SaveStatusIndicator status={saveStatus} lastSavedAt={lastSavedAt} />
           <button
             onClick={startNew}
             title="Start fresh — clear all files and chat"
@@ -944,5 +941,37 @@ export default function CanvasTool() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Save Status Indicator ────────────────────────────────────
+
+function SaveStatusIndicator({ status, lastSavedAt }: { status: SaveStatus; lastSavedAt: string | null }) {
+  const config: Record<SaveStatus, { icon: React.ReactNode; label: string; color: string }> = {
+    idle: { icon: null, label: "", color: "" },
+    loading: { icon: <Loader2 size={10} className="animate-spin" />, label: "Loading", color: "#888" },
+    saving: { icon: <Loader2 size={10} className="animate-spin" />, label: "Saving", color: "#3b82f6" },
+    saved: { icon: <Check size={10} />, label: "Saved", color: "#22c55e" },
+    conflict: { icon: <AlertCircle size={10} />, label: "Conflict", color: "#f59e0b" },
+    offline: { icon: <CloudOff size={10} />, label: "Offline", color: "#ef4444" },
+    failed: { icon: <AlertCircle size={10} />, label: "Failed", color: "#ef4444" },
+  };
+
+  const c = config[status];
+  if (!c.icon) return null;
+
+  const title = lastSavedAt && status === "saved"
+    ? `Saved at ${new Date(lastSavedAt).toLocaleTimeString()}`
+    : c.label;
+
+  return (
+    <span
+      className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+      style={{ backgroundColor: c.color + "15", color: c.color }}
+      title={title}
+    >
+      {c.icon}
+      {c.label}
+    </span>
   );
 }
