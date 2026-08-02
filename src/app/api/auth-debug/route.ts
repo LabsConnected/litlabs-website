@@ -5,7 +5,6 @@ import { isClerkConfigured } from "@/lib/env";
 /**
  * DEBUG ENDPOINT — shows exactly which auth method works and which fails.
  * Visit /api/auth-debug while signed in to see the auth state.
- * This will be removed once the auth issue is resolved.
  */
 export async function GET(request: NextRequest) {
   const debug: Record<string, unknown> = {
@@ -17,6 +16,21 @@ export async function GET(request: NextRequest) {
     hasFrontendApiUrl: !!process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL,
     frontendApiUrl: process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL ?? null,
   };
+
+  // Check ALL Clerk-related headers
+  const clerkHeaders: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    if (key.startsWith("x-clerk")) {
+      clerkHeaders[key] = value;
+    }
+  });
+  debug.clerkHeaders = clerkHeaders;
+
+  // Check cookies
+  const cookieNames: string[] = [];
+  request.cookies.forEach((_value, name) => cookieNames.push(name));
+  debug.cookieNames = cookieNames;
+  debug.hasClerkCookie = cookieNames.some((n) => n.includes("clerk") || n.includes("__clerk"));
 
   // Check if Authorization header is present
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
@@ -50,13 +64,6 @@ export async function GET(request: NextRequest) {
   } else {
     debug.verifyTokenSuccess = "skipped (no bearer token)";
   }
-
-  // Test 3: Check all request headers (to see if Clerk middleware set auth headers)
-  const headerKeys: string[] = [];
-  request.headers.forEach((_value, key) => headerKeys.push(key));
-  debug.allHeaderKeys = headerKeys;
-  debug.hasClerkAuthStatus = request.headers.has("x-auth-status");
-  debug.clerkAuthStatus = request.headers.get("x-auth-status");
 
   return NextResponse.json(debug, { status: 200 });
 }
