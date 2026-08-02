@@ -2,7 +2,6 @@
 
 import { useTheme } from "@/context/ThemeContext";
 import { ActionButton } from "./DashboardV2Primitives";
-import { Icon } from "./dashboard-v2-utils";
 import type { DashboardData } from "./dashboard-v2-types";
 
 export function LiTTDailyBrief({
