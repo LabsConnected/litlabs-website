@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { trackFunnelEvent } from "@/lib/analytics/funnel";
 
 /**
  * POST /api/start/mission
@@ -53,6 +54,12 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 401 });
   }
+
+  await trackFunnelEvent({
+    event: "onboarding_goal_selected",
+    userId: user.id,
+    properties: { goal, source, agentSlug },
+  });
 
   // Get agent
   const { data: agent } = await supabaseAdmin
@@ -185,6 +192,12 @@ export async function POST(req: NextRequest) {
     if (runError || !run) {
       return NextResponse.json({ error: "Failed to create run" }, { status: 500 });
     }
+
+    await trackFunnelEvent({
+      event: "run_created",
+      userId: user.id,
+      properties: { agentSlug: agent.slug, projectId, runId: run.id },
+    });
 
     return NextResponse.json({
       runId: run.id,
