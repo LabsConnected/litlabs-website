@@ -67,7 +67,7 @@ export default function StudioTranscript({
                 <UserMessageAvatar size={30} />
               ) : (
                 <div
-                  className="grid place-items-center rounded-full border"
+                  className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
                   style={{
                     width: 32,
                     height: 32,
@@ -75,9 +75,12 @@ export default function StudioTranscript({
                     backgroundColor: `${agentColor}10`,
                   }}
                 >
-                  <span className="text-[13px] font-black" style={{ color: agentColor }}>
-                    {agentMeta.displayName[0]}
-                  </span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
+                    alt={agentMeta.displayName}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
               )}
               <div
@@ -189,10 +192,15 @@ export default function StudioTranscript({
         {busy && (
           <div className="flex gap-3">
             <div
-              className="grid place-items-center rounded-full border"
+              className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
               style={{ width: 32, height: 32, borderColor: `${agentColor}30`, backgroundColor: `${agentColor}10` }}
             >
-              <span className="text-[13px] font-black" style={{ color: agentColor }}>{agentMeta.displayName[0]}</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
+                alt={agentMeta.displayName}
+                className="h-full w-full object-cover"
+              />
             </div>
             <div className="flex items-center gap-1.5 rounded-2xl border px-4 py-3" style={{ borderColor: `${agentColor}26` }}>
               {[0, 1, 2].map((i) => (

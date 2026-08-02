@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import {
   ArrowRight,
   Check,
@@ -139,7 +140,7 @@ export function MissionSequence() {
           <span className="h-3 w-3 rounded-full bg-amber-400/60" />
           <span className="h-3 w-3 rounded-full bg-green-400/60" />
           <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40">
-            <span className="grid h-5 w-5 place-items-center rounded bg-[#a8ff2f]/15 text-[10px] text-[#a8ff2f]">L</span>
+            <span className="relative h-5 w-5 overflow-hidden rounded"><Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="20px" className="object-cover" /></span>
             LiTTree Studio
           </div>
           <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30">

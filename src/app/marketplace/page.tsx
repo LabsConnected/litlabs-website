@@ -134,9 +134,12 @@ function MarketplaceInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">(() =>
-    searchParams.get("tab") === "beta" ? "beta" : "marketplace",
-  );
+  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
+
+  // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
+  useEffect(() => {
+    if (searchParams.get("tab") === "beta") setActiveTab("beta");
+  }, [searchParams]);
 
   const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });

@@ -121,8 +121,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(destinationToLegacyTool("create", "brand")).not.toBe("image");
     });
 
-    it("Music selection writes ?tool=audio", () => {
-      expect(destinationToLegacyTool("create", "music")).toBe("audio");
+    it("Music selection writes ?tool=music", () => {
+      expect(destinationToLegacyTool("create", "music")).toBe("music");
     });
 
     it("Studio/Work writes ?tool=chat", () => {

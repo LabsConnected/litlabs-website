@@ -274,8 +274,15 @@ export function VoiceSessionProvider({
     inworldOnErrorRef.current = (msg: string) => {
       setVoiceState("error");
       voiceStateRef.current = "error";
-      setVoiceOutputState("error");
-      voiceOutputStateRef.current = "error";
+      // A failed microphone/transport start must not claim that TTS or audio
+      // playback failed. Keep the independent output path usable.
+      if (
+        voiceOutputStateRef.current === "connecting" ||
+        voiceOutputStateRef.current === "speaking"
+      ) {
+        setVoiceOutputState("error");
+        voiceOutputStateRef.current = "error";
+      }
       setVoiceInputState("error");
       voiceInputStateRef.current = "error";
       setErrorMessage(msg);
@@ -601,8 +608,11 @@ export function VoiceSessionProvider({
       voiceOutputStateRef.current = "speaking";
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
-      setErrorMessage(null);
-      updateDiagnostics({ voicePhase: "assistant_speaking", outputState: "speaking" });
+      updateDiagnostics({
+        provider: "inworld",
+        voicePhase: "assistant_speaking",
+        outputState: "speaking",
+      });
 
       // Cancel any currently playing TTS
       if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -650,6 +660,7 @@ export function VoiceSessionProvider({
           setVoiceTransportConnected(false);
           updateDiagnostics({ transportConnected: false });
         }
+        updateDiagnostics({ provider: "browser", transportConnected: false });
       }
 
       // Fallback: browser SpeechSynthesis

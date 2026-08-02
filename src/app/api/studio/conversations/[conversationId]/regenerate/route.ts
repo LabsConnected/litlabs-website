@@ -34,7 +34,7 @@ const HISTORY_LIMIT = 12;
  * Regenerates an assistant response. Does NOT duplicate the user message.
  * Stores the new assistant message with regenerationOfMessageId linking.
  */
-async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
+async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

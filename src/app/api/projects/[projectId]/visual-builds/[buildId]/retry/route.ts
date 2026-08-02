@@ -7,7 +7,7 @@ import { runVisualBuild } from "@/lib/visual-builds/orchestrator";
 
 async function postHandler(
   _request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string; buildId: string }> },
+  ctx: { params: Promise<{ projectId: string; buildId: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {

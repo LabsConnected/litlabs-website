@@ -3,7 +3,10 @@
 import { useEffect, useCallback, useState, useMemo } from "react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
 import { useStudioAgentStore, AGENT_META, type ChatMessage } from "../../stores/useStudioAgentStore";
-import { useConversationStore } from "../../stores/useConversationStore";
+import {
+  EMPTY_CONVERSATION_MESSAGES,
+  useConversationStore,
+} from "../../stores/useConversationStore";
 import { BlockRenderer } from "./BlockRenderer";
 import { RevisionHistory } from "./RevisionHistory";
 import { cn } from "@/lib/utils";
@@ -46,7 +49,11 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  const canonicalMessages = useConversationStore((s) => s.messagesByConversationId[s.selectedConversationId ?? ""] ?? []);
+  const canonicalMessages = useConversationStore(
+    (s) =>
+      s.messagesByConversationId[s.selectedConversationId ?? ""] ??
+      EMPTY_CONVERSATION_MESSAGES,
+  );
   const chatMessages = useMemo(
     () => canonicalMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, createdAt: new Date(m.createdAt).getTime() || Date.now() }) as ChatMessage),
     [canonicalMessages],

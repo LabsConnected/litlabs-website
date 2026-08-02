@@ -42,7 +42,7 @@ function forbidden(message: string) {
 
 async function postHandler(
   _req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const { clerkId } = await auth();
   if (!clerkId) return unauthorized();
@@ -117,7 +117,7 @@ async function postHandler(
 
 async function deleteHandler(
   _req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const { clerkId } = await auth();
   if (!clerkId) return unauthorized();
@@ -137,7 +137,7 @@ async function deleteHandler(
 
 async function patchHandler(
   req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
   const { clerkId } = await auth();
   if (!clerkId) return unauthorized();

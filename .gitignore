@@ -27,6 +27,10 @@
 /.next/
 /out/
 
+# Codex deploy staging artifacts
+.codex-deploy-stage-*
+.codex-prod.*.log
+
 # Build artifacts
 /build
 dist/
@@ -76,6 +80,9 @@ src/mobile/
 __pycache__/
 *.pyc
 
+# Git worktrees (local only, never commit)
+.worktrees/
+
 # Temporary / local scratch files
 .tmp.driveupload/
 .vs/
@@ -108,6 +115,9 @@ work/
 .codex-reference/
 Zoo-Code/
 OmniRoute/
+
+# Git worktrees — local only, never commit
+.worktrees/
 
 # Generated docs and file listings
 BLUEPRINT.md
@@ -177,3 +187,5 @@ tests/playwright/screenshots/
 tests/playwright/.auth/
 playwright-report/
 tests/playwright/.clerk/
+
+.vercel

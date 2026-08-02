@@ -23,7 +23,7 @@ type CardPlan = {
   futurePrice: string;
   description: string;
   credits: string;
-  projects: string;
+  projectLimit: number;
   featured?: boolean;
   accent: Accent;
   cta: string;
@@ -40,7 +40,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
     credits: PLANS.starter.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.starter.activeProjectLimit} active project`,
+    projectLimit: PLANS.starter.activeProjectLimit,
     accent: "neutral",
     cta: "Start free",
     free: true,
@@ -54,7 +54,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.creator_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.creator_beta.activeProjectLimit,
     featured: true,
     accent: "cyan",
     cta: "Choose Creator",
@@ -69,7 +69,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.pro_builder_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.pro_builder_beta.activeProjectLimit,
     accent: "purple",
     cta: "Choose Pro",
     free: false,
@@ -184,8 +184,8 @@ function PlanCard({
           <span>LiTTBits monthly</span>
         </div>
         <div className={styles.allowance}>
-          <strong>{plan.projects.replace(" active project", "").replace(" active projects", "")}</strong>
-          <span>{plan.projects.includes("projects") ? "active projects" : "active project"}</span>
+          <strong>{plan.projectLimit}</strong>
+          <span>{plan.projectLimit === 1 ? "active project" : "active projects"}</span>
         </div>
       </div>
 
