@@ -291,6 +291,10 @@ export function useProjectCanvas({ projectId, projectName: _projectName }: UsePr
   );
 
   // Save state.json when metadata changes (debounced)
+  // Use a ref for saveState to avoid infinite re-render loops
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
+
   useEffect(() => {
     if (!projectId || !loadedProjectRef.current) return;
     if (loadedProjectRef.current !== projectId) return;
@@ -300,7 +304,7 @@ export function useProjectCanvas({ projectId, projectName: _projectName }: UsePr
     }
 
     saveTimerRef.current = setTimeout(() => {
-      saveState(pendingFilesRef.current);
+      saveStateRef.current(pendingFilesRef.current);
     }, DEBOUNCE_MS);
 
     return () => {
@@ -308,7 +312,7 @@ export function useProjectCanvas({ projectId, projectName: _projectName }: UsePr
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [activeFile, previewMode, qualityLevel, projectId, saveState]);
+  }, [activeFile, previewMode, qualityLevel, projectId]);
 
   // Cleanup on unmount
   useEffect(() => {

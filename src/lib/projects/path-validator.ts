@@ -123,8 +123,14 @@ export function validateWorkspacePath(
     if (segment === "..") {
       throw new PathValidationError("TRAVERSAL", "Parent directory traversal is not allowed");
     }
-    // Also check for encoded traversal attempts
-    if (segment === "%2e%2e" || segment === "..%2f" || segment === "..%5c") {
+    // Also check for encoded traversal attempts (both full-segment and embedded)
+    // Decode URL-encoded segment to catch %2e%2e, %2f, %5c patterns
+    const decoded = tryDecodeSegment(segment);
+    if (decoded === ".." || decoded.includes("../") || decoded.includes("..\\")) {
+      throw new PathValidationError("TRAVERSAL", "Encoded traversal is not allowed");
+    }
+    // Raw pattern check for undecodable encoded traversal
+    if (/%2e%2e/i.test(segment) || /\.\.%2f/i.test(segment) || /\.\.%5c/i.test(segment)) {
       throw new PathValidationError("TRAVERSAL", "Encoded traversal is not allowed");
     }
   }
@@ -187,5 +193,17 @@ export function pathErrorStatus(code: PathValidationCode): number {
       return 413;
     default:
       return 400;
+  }
+}
+
+/**
+ * Try to URL-decode a path segment.
+ * Returns the original segment if decoding fails.
+ */
+function tryDecodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
   }
 }
