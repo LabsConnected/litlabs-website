@@ -7,7 +7,8 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 const supabase =
-  SUPABASE_URL && SUPABASE_KEY
+  SUPABASE_URL && SUPABASE_URL.length >= 10 && SUPABASE_URL.startsWith("http") &&
+  SUPABASE_KEY && SUPABASE_KEY.length >= 10
     ? createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
 
