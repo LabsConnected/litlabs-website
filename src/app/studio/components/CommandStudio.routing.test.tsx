@@ -34,6 +34,12 @@ vi.mock("@/context/WalletContext", () => ({
 
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
+  useAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
+}));
+
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
+  useAppUser: () => ({ user: { id: "test-user-id", firstName: "Test", username: "test" } }),
 }));
 
 vi.mock("../context/VoiceSessionContext", () => ({
