@@ -64,7 +64,7 @@ vi.mock("@/app/studio/context/VoiceSessionContext", () => ({
 }));
 
 vi.mock("@/app/studio/stores/useStudioAgentStore", () => ({
-  useStudioAgentStore: (selector?: (s: any) => any) => {
+  useStudioAgentStore: <T,>(selector?: (s: { activeAgentId: string; setActiveAgent: (id: string) => void }) => T) => {
     const state = { activeAgentId: "litt", setActiveAgent: vi.fn() };
     return selector ? selector(state) : state;
   },
@@ -75,7 +75,13 @@ vi.mock("@/app/studio/stores/useStudioAgentStore", () => ({
 }));
 
 vi.mock("@/app/studio/stores/useStudioModelStore", () => ({
-  useStudioModelStore: (selector?: (s: any) => any) => {
+  useStudioModelStore: <T,>(selector?: (s: {
+    selectedModel: {
+      id: string; label: string; provider: string; name: string;
+      model: string; cost: string; speed: string; icon: string; category: string;
+    };
+    setSelectedModel: (m: unknown) => void;
+  }) => T) => {
     const state = {
       selectedModel: {
         id: "test-model", label: "Test Model", provider: "openrouter", name: "Test Model",
@@ -92,20 +98,25 @@ vi.mock("@/app/studio/components/StudioSidebar", () => ({ StudioTool: {} }));
 
 // ─── Mock useConversationStore with a controllable test store ─────────────
 
-import { create } from "zustand";
+import { create, type StoreApi } from "zustand";
 import type { ChatMessage } from "@/app/studio/stores/useConversationStore";
 
 const CONV_ID = "conv-test-1";
 
+interface MockConversation {
+  id: string;
+  activeAgentSlug: string;
+  revision: number;
+}
+
 // Use vi.hoisted so the store ref is available inside vi.mock factories
 const hoistedData = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const storeRef: { current: any } = { current: null };
+  const storeRef: { current: StoreApi<TestStoreState> | null } = { current: null };
   return { storeRef, CONV_ID: "conv-test-1" };
 });
 
 interface TestStoreState {
-  conversations: any[];
+  conversations: MockConversation[];
   selectedConversationId: string | null;
   messagesByConversationId: Record<string, ChatMessage[]>;
   activeAgentSlug: string;
@@ -124,12 +135,11 @@ interface TestStoreState {
   setStreaming: (streaming: boolean) => void;
   setSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
-  setConversations: (conversations: any[]) => void;
+  setConversations: (conversations: MockConversation[]) => void;
   setActiveAgent: (slug: string) => void;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createTestStore(): any {
+function createTestStore(): StoreApi<TestStoreState> {
   const CID = hoistedData.CONV_ID;
   return create<TestStoreState>((set, get) => ({
     conversations: [{ id: CID, activeAgentSlug: "litt", revision: 1 }],
@@ -184,7 +194,6 @@ function createTestStore(): any {
 }
 
 vi.mock("@/app/studio/stores/useConversationStore", async () => {
-  const { create } = await import("zustand");
   const store = createTestStore();
   hoistedData.storeRef.current = store;
   return {
