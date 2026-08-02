@@ -29,3 +29,5 @@ export { toolRegistry, registerInternalTools } from "./tool-registry";
 export { MCPAdapter } from "./mcp-adapter";
 export type { MCPServerConfig } from "./mcp-adapter";
 export { OpenAPIAdapter } from "./openapi-adapter";
+export { ActionPlanner, ActionExecutor, verifyStepResult, verifyPlanCompletion } from "./action-loop";
+export type { ExecutionEvent } from "./action-loop";
