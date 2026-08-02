@@ -20,6 +20,7 @@ import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/
 import {
   useConversationStore,
   EMPTY_CONVERSATION_MESSAGES,
+  type ChatMessage as CanonicalChatMessage,
   toChatMessage as toCanonicalChatMessage,
   parseConversationFromUrl,
   serializeConversationToUrl,
@@ -31,6 +32,7 @@ export interface SendResult {
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
+const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
 
 /**
  * Build a user-scoped localStorage key for the active project ID.
@@ -222,7 +224,9 @@ export function useCanonicalConversation({
   }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
 
   // Create a new conversation
-  const createConversation = useCallback(async (): Promise<Conversation | null> => {
+  const createConversation = useCallback(async (
+    options?: { optimisticConversationId?: string },
+  ): Promise<Conversation | null> => {
     let projectId = getActiveProjectId(serverProjectId, userId);
 
     // Auto-provision a blank project if the user has none yet. Without this,
@@ -272,9 +276,17 @@ export function useCanonicalConversation({
       const data = await res.json();
       const conversation = data.conversation as Conversation;
       const s = getStore();
+      if (options?.optimisticConversationId) {
+        const optimisticMessages = s.messagesByConversationId[options.optimisticConversationId] ?? [];
+        if (optimisticMessages.length > 0) {
+          s.setMessages(conversation.id, optimisticMessages);
+        }
+      }
       s.setConversations([conversation, ...s.conversations]);
       s.selectConversation(conversation.id);
-      s.setMessages(conversation.id, []);
+      if (!options?.optimisticConversationId) {
+        s.setMessages(conversation.id, []);
+      }
       s.setRevision(1);
       return conversation;
     } catch {
@@ -286,8 +298,11 @@ export function useCanonicalConversation({
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
     if (isSyncingFromUrl.current) return;
+    const conversationForUrl = selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
+      ? null
+      : selectedConversationId;
     const params = serializeConversationToUrl(
-      selectedConversationId,
+      conversationForUrl,
       activeAgentId as AgentSlug,
       searchParams,
     );
@@ -302,6 +317,10 @@ export function useCanonicalConversation({
   useEffect(() => {
     isSyncingFromUrl.current = true;
     const s = getStore();
+    if (s.selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) {
+      isSyncingFromUrl.current = false;
+      return;
+    }
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
     if (conversationId !== s.selectedConversationId) {
       if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
@@ -462,49 +481,58 @@ export function useCanonicalConversation({
       }
 
       // 3. Ensure we have a conversation
-      let conversationId = getStore().selectedConversationId;
+      const s = getStore();
+      let conversationId = s.selectedConversationId;
+      const clientRequestId = generateClientRequestId();
+      const optimisticUserId = `optimistic_${clientRequestId}`;
+      const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
+      const optimisticTimestamp = new Date().toISOString();
+      const optimisticUserMessage = {
+        id: optimisticUserId,
+        role: "user",
+        content: text,
+        agentSlug: null,
+        status: "completed",
+        createdAt: optimisticTimestamp,
+        parentMessageId: null,
+        regenerationOfMessageId: null,
+      } as CanonicalChatMessage;
+      const optimisticAssistantMessage = {
+        id: optimisticAssistantId,
+        role: "assistant",
+        content: "",
+        agentSlug: activeAgentId as AgentSlug,
+        status: "streaming",
+        createdAt: optimisticTimestamp,
+        parentMessageId: optimisticUserId,
+        regenerationOfMessageId: null,
+      } as CanonicalChatMessage;
+
+      const seedOptimisticMessages = (id: string) => {
+        const current = getStore();
+        current.selectConversation(id);
+        current.setMessages(id, [optimisticUserMessage, optimisticAssistantMessage]);
+      };
+
+      setBusy(true);
+
       if (!conversationId) {
-        const conv = await createConversation();
+        const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;
+        seedOptimisticMessages(optimisticConversationId);
+        const conv = await createConversation({ optimisticConversationId });
         if (!conv) return { accepted: false };
         conversationId = conv.id;
+      } else {
+        seedOptimisticMessages(conversationId);
       }
 
       // Clear any previous send error
       setSendError(null);
 
       // 4. Real LLM call through canonical API
-      const clientRequestId = generateClientRequestId();
-      const s = getStore();
-      const expectedRevision = s.revision;
-
-      // Optimistic: add user message to UI
-      const optimisticUserId = `optimistic_${clientRequestId}`;
-      s.addMessage(conversationId, {
-        id: optimisticUserId,
-        role: "user",
-        content: text,
-        agentSlug: null,
-        status: "completed",
-        createdAt: new Date().toISOString(),
-        parentMessageId: null,
-        regenerationOfMessageId: null,
-      });
-
-      // Optimistic: add pending assistant message
-      const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
-      s.addMessage(conversationId, {
-        id: optimisticAssistantId,
-        role: "assistant",
-        content: "",
-        agentSlug: activeAgentId as AgentSlug,
-        status: "streaming",
-        createdAt: new Date().toISOString(),
-        parentMessageId: optimisticUserId,
-        regenerationOfMessageId: null,
-      });
-
-      setBusy(true);
       try {
+        const s = getStore();
+        const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
         // Abort after 55s so a hanging provider doesn't leave an empty
         // streaming bubble forever (the route has maxDuration=60s).
