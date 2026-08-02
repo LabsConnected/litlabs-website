@@ -95,7 +95,7 @@ describe("Checkpoint Rollback API", () => {
     const { auth } = await import("@clerk/nextjs/server");
     vi.mocked(auth).mockResolvedValueOnce({ userId: null } as any);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
-    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST");
+    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
     const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(401);
   });
@@ -104,7 +104,7 @@ describe("Checkpoint Rollback API", () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
     vi.mocked(getCheckpoint).mockResolvedValueOnce(null as any);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
-    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-missing/rollback", "POST");
+    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-missing/rollback", "POST", { confirm: true });
     const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-missing" }) });
     expect(response.status).toBe(404);
   });
@@ -113,8 +113,30 @@ describe("Checkpoint Rollback API", () => {
     const { getCheckpoint } = await import("@/lib/missions/mission-repository");
     vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "different-project", gitSha: "abc123", label: "Test", userId: "test-user-id" } as any);
     const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
-    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST");
+    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
     const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
     expect(response.status).toBe(403);
+  });
+
+  it("POST rollback returns 400 when confirm is missing", async () => {
+    const { getCheckpoint } = await import("@/lib/missions/mission-repository");
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "abc123def456", label: "Test", userId: "test-user-id" } as any);
+    const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
+    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", {});
+    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toContain("confirmation");
+  });
+
+  it("POST rollback returns 400 for invalid gitSha format", async () => {
+    const { getCheckpoint } = await import("@/lib/missions/mission-repository");
+    vi.mocked(getCheckpoint).mockResolvedValueOnce({ id: "cp-1", projectId: "proj-1", gitSha: "../../etc/passwd", label: "Bad", userId: "test-user-id" } as any);
+    const { POST } = await import("@/app/api/studio-projects/[projectId]/checkpoints/[checkpointId]/route");
+    const req = createReq("http://localhost/api/studio-projects/proj-1/checkpoints/cp-1/rollback", "POST", { confirm: true });
+    const response = await POST(req as any, { params: Promise.resolve({ projectId: "proj-1", checkpointId: "cp-1" }) });
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toContain("Invalid checkpoint git SHA");
   });
 });

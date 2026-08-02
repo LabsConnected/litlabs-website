@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { terminalAuthHeaders } from "@/lib/terminal-client";
 import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
 
 interface FileNode {
@@ -23,10 +22,6 @@ export function FileExplorer({ onOpenFile, projectId }: FileExplorerProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl =
-    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "";
 
   const fetchEntries = useCallback(
     async (path: string) => {
@@ -42,20 +37,10 @@ export function FileExplorer({ onOpenFile, projectId }: FileExplorerProps) {
           path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
         }));
       }
-      if (!wsUrl) {
-        throw new Error("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
-      }
-      const res = await fetch(`${wsUrl}/files?path=${encodeURIComponent(path)}`, {
-        headers: await terminalAuthHeaders(),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      return (data.entries as { name: string; type: "folder" | "file" }[]).map((entry) => ({
-        ...entry,
-        path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
-      }));
+      // No projectId — local demo mode only, no terminal-server fallback
+      throw new Error("No project selected. File operations require an authenticated project.");
     },
-    [wsUrl, projectId]
+    [projectId]
   );
 
   const loadRoot = useCallback(async () => {
@@ -132,14 +117,7 @@ export function FileExplorer({ onOpenFile, projectId }: FileExplorerProps) {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
       } else {
-        // Fallback: terminal-server directly
-        const res = await fetch(`${wsUrl}/files/write`, {
-          method: "POST",
-          headers: await terminalAuthHeaders(),
-          body: JSON.stringify({ path: name, content: "" }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        throw new Error("No project selected. File creation requires an authenticated project.");
       }
       loadRoot();
     } catch (err) {
@@ -159,14 +137,7 @@ export function FileExplorer({ onOpenFile, projectId }: FileExplorerProps) {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
       } else {
-        // Fallback: terminal-server directly
-        const res = await fetch(`${wsUrl}/files/delete`, {
-          method: "POST",
-          headers: await terminalAuthHeaders(),
-          body: JSON.stringify({ path }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        throw new Error("No project selected. File deletion requires an authenticated project.");
       }
       loadRoot();
     } catch (err) {

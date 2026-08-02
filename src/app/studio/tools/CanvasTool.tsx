@@ -130,7 +130,9 @@ export default function CanvasTool({ projectId, projectName }: CanvasToolProps =
         })
         .catch(() => {});
     } else {
-      // Fallback: localStorage
+      // Local demo mode only — no project context, files stay in browser.
+      // This is explicitly NOT a production fallback; signed-in users always
+      // have a projectId from CommandStudio.
       try {
         const savedFiles = localStorage.getItem(PERSIST_KEY);
         if (savedFiles) {
@@ -165,6 +167,7 @@ export default function CanvasTool({ projectId, projectName }: CanvasToolProps =
         }).catch(() => {});
       }
     } else {
+      // Local demo mode only — not a production fallback
       localStorage.setItem(PERSIST_KEY, JSON.stringify(generatedFiles));
     }
   }, [generatedFiles, projectId]);
@@ -404,7 +407,13 @@ export default function CanvasTool({ projectId, projectName }: CanvasToolProps =
         if (activeFile === fileName) {
           setActiveFile(next.length > 0 ? next[0].name : "");
         }
-        if (next.length === 0) {
+        if (projectId) {
+          // Server-backed: delete via project files API
+          fetch(`/api/studio-projects/${projectId}/files?path=${encodeURIComponent(fileName)}`, {
+            method: "DELETE",
+          }).catch(() => {});
+        } else if (next.length === 0) {
+          // Local demo mode only
           localStorage.removeItem(PERSIST_KEY);
         } else {
           localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
@@ -412,30 +421,43 @@ export default function CanvasTool({ projectId, projectName }: CanvasToolProps =
         return next;
       });
     },
-    [activeFile],
+    [activeFile, projectId],
   );
 
   const startNew = useCallback(() => {
+    // When projectId is set, delete all tracked files via the server API.
+    // In local demo mode, just clear localStorage.
+    if (projectId) {
+      for (const file of generatedFiles) {
+        fetch(`/api/studio-projects/${projectId}/files?path=${encodeURIComponent(file.name)}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+    } else {
+      localStorage.removeItem(PERSIST_KEY);
+    }
     setGeneratedFiles([]);
     setMessages([]);
     setActiveFile("");
     setInput("");
     setSelectedIntent("");
-    localStorage.removeItem(PERSIST_KEY);
     localStorage.removeItem(PERSIST_MSG_KEY);
-  }, []);
+  }, [projectId, generatedFiles]);
 
   const createBlankFile = useCallback(() => {
     const name = `untitled-${Date.now()}.html`;
     const newFile: GeneratedFile = { name, content: "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <title>Untitled</title>\n</head>\n<body>\n  \n</body>\n</html>", language: "html" };
     setGeneratedFiles((prev) => {
       const next = [...prev, newFile];
-      localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+      if (!projectId) {
+        // Local demo mode only
+        localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+      }
       return next;
     });
     setActiveFile(name);
     setPreviewMode("code");
-  }, []);
+  }, [projectId]);
 
   return (
     <div

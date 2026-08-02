@@ -9,8 +9,10 @@ const TERMINAL_BASE = () =>
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
   "http://localhost:4001";
 
+const GIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectId: string; checkpointId: string }> },
 ) {
   const { userId } = await auth();
@@ -23,6 +25,26 @@ export async function POST(
   const checkpoint = await getCheckpoint(checkpointId, userId);
   if (!checkpoint) return NextResponse.json({ error: "Checkpoint not found" }, { status: 404 });
   if (checkpoint.projectId !== projectId) return NextResponse.json({ error: "Checkpoint does not belong to this project" }, { status: 403 });
+  if (checkpoint.userId !== userId) return NextResponse.json({ error: "Checkpoint does not belong to this user" }, { status: 403 });
+
+  // Validate gitSha format — reject arbitrary commit values
+  if (!GIT_SHA_PATTERN.test(checkpoint.gitSha)) {
+    return NextResponse.json({ error: "Invalid checkpoint git SHA format" }, { status: 400 });
+  }
+
+  // Require explicit confirmation in the request body
+  let body: { confirm?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (!body.confirm) {
+    return NextResponse.json(
+      { error: "Rollback requires explicit confirmation. Send { confirm: true } to proceed." },
+      { status: 400 },
+    );
+  }
 
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
@@ -39,16 +61,50 @@ export async function POST(
       return (await resp.json()) as { exitCode: number; stdout: string; stderr: string };
     };
 
+    // Capture list of files before rollback for summary
+    const beforeResult = await execInWorkspace("git ls-files");
+    const beforeFiles = beforeResult.stdout.trim().split("\n").filter(Boolean);
+
+    // Audit before execution
+    await logFileOperation({
+      userId, projectId, workspaceId, action: "delete", path: "* (rollback initiated)", source: "system", ok: true, error: undefined,
+    });
+
+    // Execute rollback — use the checkpoint's validated gitSha
     await execInWorkspace(`git reset --hard ${checkpoint.gitSha}`);
     await execInWorkspace("git clean -fd");
 
+    // Capture list of files after rollback for summary
+    const afterResult = await execInWorkspace("git ls-files");
+    const afterFiles = afterResult.stdout.trim().split("\n").filter(Boolean);
+
+    const deletedFiles = beforeFiles.filter((f) => !afterFiles.includes(f));
+    const addedFiles = afterFiles.filter((f) => !beforeFiles.includes(f));
+
+    // Audit after execution
     await logFileOperation({
-      userId, projectId, workspaceId, action: "delete", path: "* (rollback)", source: "system", ok: true, error: undefined,
+      userId, projectId, workspaceId, action: "delete", path: "* (rollback completed)", source: "system", ok: true, error: undefined,
     });
 
-    return NextResponse.json({ ok: true, checkpoint, message: `Rolled back to ${checkpoint.label} (${checkpoint.gitSha.slice(0, 8)})` });
+    return NextResponse.json({
+      ok: true,
+      checkpoint,
+      message: `Rolled back to ${checkpoint.label} (${checkpoint.gitSha.slice(0, 8)})`,
+      summary: {
+        deletedFiles,
+        addedFiles,
+        beforeCount: beforeFiles.length,
+        afterCount: afterFiles.length,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Rollback failed";
+
+    // Audit failed rollback
+    await logFileOperation({
+      userId, projectId, workspaceId: "unknown", action: "delete", path: "* (rollback failed)", source: "system", ok: false, error: msg,
+    }).catch(() => {});
+
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
