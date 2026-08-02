@@ -239,7 +239,6 @@ export default function MusicTool() {
     failed: "#ef4444",
     cancelled: "#f59e0b",
   };
-
   return (
     <div style={{ height: "100%", overflow: "auto", padding: "16px" }}>
       {/* Generation Form */}
