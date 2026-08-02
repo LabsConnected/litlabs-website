@@ -109,6 +109,9 @@ work/
 Zoo-Code/
 OmniRoute/
 
+# Git worktrees — local only, never commit
+.worktrees/
+
 # Generated docs and file listings
 BLUEPRINT.md
 all-src-files.txt
