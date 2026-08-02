@@ -3,9 +3,18 @@ import { existsSync, readFileSync } from "fs";
 
 const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
 
-// Check if .env.local has real Clerk credentials for integration tests
+// Check if real Clerk credentials are available for integration tests.
+// In CI, env vars are set directly (no .env.local file). In local dev,
+// .env.local is the source of truth.
 const hasRealClerk = (() => {
   if (process.env.SMOKE_TEST_URL) return true; // External server with real env
+  // Check process.env first (CI sets these directly)
+  const envPub = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const envSec = process.env.CLERK_SECRET_KEY;
+  if (envPub && envSec && envPub.length > 10 && envSec.length > 10) {
+    return true;
+  }
+  // Fall back to .env.local for local development
   if (!existsSync(".env.local")) return false;
   const content = readFileSync(".env.local", "utf-8");
   return (
