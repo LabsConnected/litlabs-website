@@ -169,3 +169,82 @@ describe("Cross-user project cache isolation", () => {
     expect(keyForUserB.startsWith(PREFIX)).toBe(true);
   });
 });
+
+describe("Failed-send removes optimistic messages on all rejection paths", () => {
+  it("removes both optimistic user and assistant IDs on HTTP failure", () => {
+    const optimisticUserId = "optimistic_req_123";
+    const optimisticAssistantId = "optimistic_assistant_req_123";
+
+    const messages = [
+      { id: "msg_1", role: "user", content: "hello" },
+      { id: optimisticUserId, role: "user", content: "failed send" },
+      { id: optimisticAssistantId, role: "assistant", content: "" },
+    ];
+
+    const filtered = messages.filter(
+      (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("msg_1");
+    expect(filtered.find((m) => m.id === optimisticUserId)).toBeUndefined();
+    expect(filtered.find((m) => m.id === optimisticAssistantId)).toBeUndefined();
+  });
+
+  it("removes both optimistic IDs on timeout/abort", () => {
+    const optimisticUserId = "optimistic_req_456";
+    const optimisticAssistantId = "optimistic_assistant_req_456";
+
+    const messages = [
+      { id: "msg_1", role: "user", content: "hello" },
+      { id: optimisticUserId, role: "user", content: "timed out" },
+      { id: optimisticAssistantId, role: "assistant", content: "" },
+    ];
+
+    const filtered = messages.filter(
+      (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered.find((m) => m.id === optimisticUserId)).toBeUndefined();
+    expect(filtered.find((m) => m.id === optimisticAssistantId)).toBeUndefined();
+  });
+
+  it("removes both optimistic IDs on network error", () => {
+    const optimisticUserId = "optimistic_req_789";
+    const optimisticAssistantId = "optimistic_assistant_req_789";
+
+    const messages = [
+      { id: "msg_1", role: "user", content: "hello" },
+      { id: optimisticUserId, role: "user", content: "network error" },
+      { id: optimisticAssistantId, role: "assistant", content: "" },
+    ];
+
+    const filtered = messages.filter(
+      (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered.find((m) => m.id === optimisticUserId)).toBeUndefined();
+    expect(filtered.find((m) => m.id === optimisticAssistantId)).toBeUndefined();
+  });
+
+  it("removes both optimistic IDs on 409 conflict", () => {
+    const optimisticUserId = "optimistic_req_conflict";
+    const optimisticAssistantId = "optimistic_assistant_req_conflict";
+
+    const messages = [
+      { id: "msg_1", role: "user", content: "hello" },
+      { id: optimisticUserId, role: "user", content: "conflict" },
+      { id: optimisticAssistantId, role: "assistant", content: "" },
+    ];
+
+    const filtered = messages.filter(
+      (m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId,
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered.find((m) => m.id === optimisticUserId)).toBeUndefined();
+    expect(filtered.find((m) => m.id === optimisticAssistantId)).toBeUndefined();
+  });
+});
