@@ -112,7 +112,18 @@ export function useCanonicalConversation({
   const [sendError, setSendError] = useState<string | null>(null);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
-  const { userId } = useClerkAuth();
+  const { userId, getToken } = useClerkAuth();
+
+  // Same-origin cookies normally carry Clerk auth, but an explicit bearer
+  // token keeps Studio API calls authenticated across production proxy/CDN
+  // boundaries and makes a lost session distinguishable from project setup.
+  const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
+    const token = await getToken?.();
+    return {
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, [getToken]);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
@@ -175,6 +186,8 @@ export function useCanonicalConversation({
     try {
       const res = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
         cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -186,7 +199,7 @@ export function useCanonicalConversation({
     } catch {
       // Non-fatal
     }
-  }, [getStore]);
+  }, [getStore, authHeaders]);
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
@@ -198,6 +211,8 @@ export function useCanonicalConversation({
     try {
       const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
         cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -221,7 +236,7 @@ export function useCanonicalConversation({
     } finally {
       getStore().setLoading(false);
     }
-  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
+  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId, authHeaders]);
 
   // Create a new conversation
   const createConversation = useCallback(async (
@@ -229,52 +244,27 @@ export function useCanonicalConversation({
   ): Promise<Conversation | null> => {
     let projectId = getActiveProjectId(serverProjectId, userId);
 
-    // Auto-provision a blank project if the user has none yet. Without this,
-    // chat is completely dead for new users — createConversation fails and the
-    // only feedback is a buried red banner, so the transcript stays empty.
-    if (!projectId) {
-      try {
-        const projRes = await fetch("/api/studio-projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sourceType: "blank",
-            name: "My First Project",
-            templateId: "blank-static",
-          }),
-        });
-        if (projRes.ok) {
-          const projData = await projRes.json();
-          projectId = projData.project?.id ?? null;
-          if (projectId) {
-            setActiveProjectId(projectId, userId);
-          }
-        }
-      } catch {
-        // fall through to the error below
-      }
-    }
-
-    if (!projectId) {
-      setSendError("LiTT couldn't start this conversation because no active project was resolved.");
-      return null;
-    }
-
     try {
       const res = await fetch("/api/studio/conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: await authHeaders(true),
         body: JSON.stringify({
-          projectId,
+          projectId: projectId || undefined,
           activeAgentSlug: activeAgentId,
         }),
       });
       if (!res.ok) {
-        setSendError(`Failed to create conversation (${res.status}).`);
+        const errorBody = await res.json().catch(() => null);
+        setSendError(res.status === 401
+          ? "Your Studio session expired. Refresh the page and sign in again."
+          : errorBody?.error || `Failed to create conversation (${res.status}).`);
         return null;
       }
       const data = await res.json();
       const conversation = data.conversation as Conversation;
+      projectId = data.projectId ?? conversation.projectId ?? projectId;
+      if (projectId) setActiveProjectId(projectId, userId);
       const s = getStore();
       if (options?.optimisticConversationId) {
         const optimisticMessages = s.messagesByConversationId[options.optimisticConversationId] ?? [];
@@ -293,7 +283,7 @@ export function useCanonicalConversation({
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [getStore, activeAgentId, serverProjectId, userId]);
+  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
@@ -403,7 +393,11 @@ export function useCanonicalConversation({
             const conv = s.getSelectedConversation();
             if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
               try {
-                await fetch(`/api/studio/conversations/${convId}`, { method: "DELETE" });
+                await fetch(`/api/studio/conversations/${convId}`, {
+                  method: "DELETE",
+                  credentials: "include",
+                  headers: await authHeaders(),
+                });
                 s.setConversations(s.conversations.filter((c) => c.id !== convId));
                 s.selectConversation(null);
               } catch {
@@ -418,7 +412,8 @@ export function useCanonicalConversation({
               try {
                 await fetch(`/api/studio/conversations/${convId}`, {
                   method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  headers: await authHeaders(true),
                   body: JSON.stringify({ expectedRevision: s.revision, patch: { title: localCommand.title } }),
                 });
                 s.setConversations(s.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
@@ -511,7 +506,13 @@ export function useCanonicalConversation({
       const seedOptimisticMessages = (id: string) => {
         const current = getStore();
         current.selectConversation(id);
-        current.setMessages(id, [optimisticUserMessage, optimisticAssistantMessage]);
+        // Preserve the visible transcript. Replacing this array on every send
+        // made earlier LiTT replies appear to vanish from the page.
+        current.setMessages(id, [
+          ...current.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+          optimisticUserMessage,
+          optimisticAssistantMessage,
+        ]);
       };
 
       setBusy(true);
@@ -520,7 +521,10 @@ export function useCanonicalConversation({
         const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;
         seedOptimisticMessages(optimisticConversationId);
         const conv = await createConversation({ optimisticConversationId });
-        if (!conv) return { accepted: false };
+        if (!conv) {
+          setBusy(false);
+          return { accepted: false };
+        }
         conversationId = conv.id;
       } else {
         seedOptimisticMessages(conversationId);
@@ -540,7 +544,8 @@ export function useCanonicalConversation({
         const timeoutId = setTimeout(() => controller.abort(), 55_000);
         const response = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          headers: await authHeaders(true),
           body: JSON.stringify({
             message: text,
             clientRequestId,
@@ -577,7 +582,9 @@ export function useCanonicalConversation({
             status: "failed",
             content: data.error || "Failed to get response",
           });
-          setSendError(data.error || `Request failed (${response.status})`);
+          setSendError(response.status === 401
+            ? "Your Studio session expired. Refresh the page and sign in again."
+            : data.error || `Request failed (${response.status})`);
           return { accepted: false };
         }
 
@@ -678,7 +685,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice],
+    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice, authHeaders],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -696,7 +703,8 @@ export function useCanonicalConversation({
     try {
       const response = await fetch(`/api/studio/conversations/${conversationId}/regenerate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: await authHeaders(true),
         body: JSON.stringify({
           assistantMessageId: lastAssistant.id,
           clientRequestId: generateClientRequestId(),
@@ -722,7 +730,7 @@ export function useCanonicalConversation({
     } finally {
       setBusy(false);
     }
-  }, [busy, getStore, loadMessages]);
+  }, [busy, getStore, loadMessages, authHeaders]);
 
   // Clear — clears visible transcript
   const clear = useCallback(() => {
@@ -744,7 +752,8 @@ export function useCanonicalConversation({
         try {
           await fetch(`/api/studio/conversations/${conversationId}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            headers: await authHeaders(true),
             body: JSON.stringify({
               expectedRevision: s.revision,
               patch: { activeAgentSlug: id },
@@ -755,7 +764,7 @@ export function useCanonicalConversation({
         }
       })();
     }
-  }, [setActiveAgentId, getStore]);
+  }, [setActiveAgentId, getStore, authHeaders]);
 
   return {
     messages,
