@@ -11,6 +11,7 @@
  */
 
 import type { StudioTool } from "../components/StudioSidebar";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 /** The five top-level navigation destinations. */
 export type StudioDestination =
@@ -82,6 +83,9 @@ export function mapLegacyToolToDestination(
       return { destination: "studio", legacyTool: "build", mode: "work", command };
     // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
+      if (isTerminalDisabled()) {
+        return { destination: "studio", legacyTool: "chat", mode: "work" };
+      }
       return { destination: "studio", legacyTool: "terminal", mode: "work", command, openDrawer: "terminal" };
     // Studio / Work with the right inspector open on Plan
     case "workflows":

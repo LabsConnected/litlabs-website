@@ -36,6 +36,7 @@ import {
   Layout,
   Repeat,
 } from "lucide-react";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 export type StudioTool =
   | "home"
@@ -79,7 +80,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
   { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },
   { id: "camera", label: "Camera", icon: Camera, shortcut: "M" },
-];
+].filter((t): t is ToolItem => !(t.id === "terminal" && isTerminalDisabled()));
 
 /* ── Secondary tools (in More Tools drawer) ──────────────────────── */
 const MORE_TOOLS: ToolItem[] = [

@@ -14,6 +14,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { getTerminalToken } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle } from "lucide-react";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 import "@xterm/xterm/css/xterm.css";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
@@ -55,7 +56,7 @@ export const TerminalPanel = forwardRef<
   const CONNECTION_TIMEOUT_MS = 10_000;
 
   useEffect(() => {
-    if (!containerRef.current || !isLoaded || !isSignedIn) return;
+    if (isTerminalDisabled() || !containerRef.current || !isLoaded || !isSignedIn) return;
     let disposed = false;
 
     const term = new Terminal({

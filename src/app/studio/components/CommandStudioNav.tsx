@@ -24,6 +24,7 @@ import type {
   StudioDestination,
   MoreMode,
 } from "../lib/studio-destinations";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 interface NavItem {
   id: StudioDestination;
@@ -48,7 +49,7 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle }[] = [
   { id: "color", label: "Color", icon: Palette },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "workflows", label: "Mission Forge", icon: Network },
-];
+].filter((t): t is { id: MoreMode; label: string; icon: typeof Puzzle } => !(t.id === "terminal" && isTerminalDisabled()));
 
 /**
  * CommandStudioNav — five destinations only.

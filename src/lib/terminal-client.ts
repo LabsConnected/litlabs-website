@@ -1,5 +1,7 @@
 "use client";
 
+import { isTerminalDisabled } from "@/lib/terminal-config";
+
 type CachedTerminalToken = {
   token: string;
   expiresAt: number;
@@ -12,6 +14,10 @@ export async function getTerminalToken(
   forceRefresh = false,
   projectId?: string,
 ): Promise<string> {
+  if (isTerminalDisabled()) {
+    throw new Error("Terminal feature is disabled");
+  }
+
   const now = Date.now();
   if (!forceRefresh && cached && cached.expiresAt - now > 30_000) {
     return cached.token;

@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 export async function GET(req: NextRequest) {
+  if (isTerminalDisabled()) {
+    return NextResponse.json(
+      { error: "Terminal feature is disabled", disabled: true },
+      { status: 503 },
+    );
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -31,6 +39,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (isTerminalDisabled()) {
+    return NextResponse.json(
+      { error: "Terminal feature is disabled", disabled: true },
+      { status: 503 },
+    );
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

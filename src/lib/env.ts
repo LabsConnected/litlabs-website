@@ -37,6 +37,7 @@ const publicSchema = z.object({
   NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: z.string().optional(),
   NEXT_PUBLIC_TERMINAL_WS_URL: z.string().optional(),
   NEXT_PUBLIC_TERMINAL_HTTP_URL: z.string().optional(),
+  NEXT_PUBLIC_TERMINAL_ENABLED: z.string().optional(),
   NEXT_PUBLIC_VOICE_WS_URL: z.string().optional(),
   NEXT_PUBLIC_API_BASE: z.string().optional(),
   NEXT_PUBLIC_MEDIA_BASE: z.string().optional(),

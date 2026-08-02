@@ -16,6 +16,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { StudioTool } from "./StudioSidebar";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 export type DockAction = {
   id: string;
@@ -85,7 +86,7 @@ export default function StudioCommandDock({
     { id: "color", label: "Color", icon: Palette, tool: "color" },
     { id: "agents", label: "Agent", icon: Bot, tool: "agents" },
     { id: "terminal", label: "Term", icon: TerminalSquare, tool: "terminal" },
-  ];
+  ].filter((s): s is { id: string; label: string; icon: typeof Sparkles; tool: StudioTool } => !(s.tool === "terminal" && isTerminalDisabled()));
 
   return (
     <div

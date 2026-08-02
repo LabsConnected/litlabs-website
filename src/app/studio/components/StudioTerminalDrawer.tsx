@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlertCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, RotateCcw, Terminal } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 const TerminalPanel = dynamic(
   () => import("@/components/litt-terminal/TerminalPanel").then((m) => m.TerminalPanel),
@@ -25,10 +26,11 @@ interface StudioTerminalDrawerProps {
 export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawerProps) {
   const [workspaceStatus, setWorkspaceStatus] = useState<"idle" | "preparing" | "ready" | "error">("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const terminalDisabled = isTerminalDisabled();
 
-  // Auto-prepare workspace when projectId is available
+  // Auto-prepare workspace when projectId is available and terminal is enabled
   useEffect(() => {
-    if (!projectId) {
+    if (terminalDisabled || !projectId) {
       setWorkspaceStatus("idle");
       return;
     }
@@ -58,7 +60,27 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
     })();
 
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, terminalDisabled]);
+
+  // When terminal is disabled, show Coming Soon card
+  if (terminalDisabled) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-8 text-center" data-testid="terminal-coming-soon">
+        <div
+          className="grid h-12 w-12 place-items-center rounded-xl border opacity-50"
+          style={{ borderColor: "rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.03)" }}
+        >
+          <Terminal size={20} className="opacity-40" style={{ color: "var(--text-muted)" }} />
+        </div>
+        <div className="text-sm font-bold" style={{ color: "var(--text-secondary)" }}>
+          Terminal — Coming Soon
+        </div>
+        <p className="max-w-[240px] text-[11px]" style={{ color: "var(--text-muted)" }}>
+          The integrated terminal is being prepared for production. Check back soon.
+        </p>
+      </div>
+    );
+  }
 
   if (!projectId) {
     return (

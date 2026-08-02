@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 export const runtime = "nodejs";
 
@@ -12,8 +13,17 @@ export const runtime = "nodejs";
  * Issues a terminal token. If projectId is provided, verifies that the
  * user owns the project and that the workspace is ready, then includes
  * workspaceId and projectId in the token claims.
+ *
+ * Returns 503 when the terminal feature is disabled.
  */
 export async function GET(request: NextRequest) {
+  if (isTerminalDisabled()) {
+    return NextResponse.json(
+      { error: "Terminal feature is disabled", disabled: true },
+      { status: 503 },
+    );
+  }
+
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

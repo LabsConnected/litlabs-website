@@ -14,6 +14,7 @@ import {
   Terminal,
 } from "lucide-react";
 import type { InspectorTab, DrawerTab } from "../lib/studio-destinations";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 /**
  * StudioWorkspaceFrame — collapsible right inspector + bottom drawer.
@@ -39,7 +40,7 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
   { id: "activity", label: "Activity", icon: Activity },
   { id: "terminal", label: "Terminal", icon: Terminal },
-];
+].filter((t): t is { id: DrawerTab; label: string; icon: typeof Activity } => !(t.id === "terminal" && isTerminalDisabled()));
 
 export function StudioInspector({
   open,

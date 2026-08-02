@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import type { TerminalCapability } from "@/lib/capabilities/types";
+import { isTerminalDisabled } from "@/lib/terminal-config";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,14 @@ async function handler() {
     lastVerifiedAt: new Date().toISOString(),
     error: null,
   };
+
+  if (isTerminalDisabled()) {
+    return NextResponse.json({
+      ...baseCapability,
+      status: "not_configured",
+      error: "Terminal feature is disabled.",
+    });
+  }
 
   if (!endpoint) {
     return NextResponse.json({
