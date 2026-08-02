@@ -27,6 +27,7 @@ import {
   saveMusicPreferences,
   type MusicTrack,
 } from "@/lib/music";
+import { normalizeMediaUrl, filterValidMediaUrls } from "@/lib/media-url";
 
 type RepeatMode = "off" | "all" | "one";
 
@@ -90,6 +91,10 @@ export default function MusicPlayer({ mode = "mini", initialTrackId }: MusicPlay
   const currentTrack = queue[currentIdx] ?? null;
   const isYT = isYouTubeUrl(currentTrack?.url ?? "");
   const accent = "#ff00a0";
+  // True when the current track has a URL that failed validation.
+  // Even though we filter on load, custom tracks added via the UI
+  // or stale localStorage entries could still have bad URLs.
+  const trackUnavailable = !!currentTrack && !isYT && !normalizeMediaUrl(currentTrack.url);
 
   /* ── Load tracks ─────────────────────────────────────────────── */
   useEffect(() => {
@@ -105,6 +110,11 @@ export default function MusicPlayer({ mode = "mini", initialTrackId }: MusicPlay
         }
       } catch { /* fall through */ }
       if (list.length === 0) list = DEFAULT_PLAYLIST;
+      // Quarantine tracks with invalid URLs before they enter the queue.
+      // The /api/tracks endpoint can return url: null for tracks without
+      // a stored audio file — without this filter, null coerces to "null"
+      // and the browser requests https://litlabs.net/null.
+      list = filterValidMediaUrls(list);
       if (targetId) {
         const idx = list.findIndex((t) => t.id === targetId);
         if (idx >= 0) resolvedIdxRef.current = idx;
@@ -129,7 +139,16 @@ export default function MusicPlayer({ mode = "mini", initialTrackId }: MusicPlay
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack || isYT) return;
-    audio.src = currentTrack.url;
+    const validUrl = normalizeMediaUrl(currentTrack.url);
+    if (!validUrl) {
+      // Invalid URL — pause, clear src, and show unavailable state
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      setPlaying(false);
+      return;
+    }
+    audio.src = validUrl;
     audio.volume = (muted ? 0 : volume) / 100;
     if (playing) audio.play().catch(() => setPlaying(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,12 +246,13 @@ export default function MusicPlayer({ mode = "mini", initialTrackId }: MusicPlay
   };
 
   const addCustomTrack = () => {
-    if (!addUrl.trim()) return;
+    const validUrl = normalizeMediaUrl(addUrl);
+    if (!validUrl) return;
     const track: MusicTrack = {
       id: `custom-${Date.now()}`,
       title: addTitle.trim() || "Custom Track",
       artist: addArtist.trim() || "Unknown",
-      url: addUrl.trim(),
+      url: validUrl,
     };
     setTracks((t) => [...t, track]);
     setQueue((q) => [...q, track]);
@@ -274,12 +294,21 @@ export default function MusicPlayer({ mode = "mini", initialTrackId }: MusicPlay
         <div className="flex items-center gap-3 px-3 py-2.5">
           <CoverArt track={currentTrack} size={38} accent={accent} />
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-bold truncate" style={{ color: T.textColor }}>{currentTrack?.title ?? "—"}</div>
-            <div className="text-[10px] truncate" style={{ color: T.textMuted }}>{currentTrack?.artist ?? "—"}</div>
+            {trackUnavailable ? (
+              <>
+                <div className="text-xs font-bold truncate" style={{ color: T.textMuted }}>Track unavailable</div>
+                <div className="text-[10px] truncate" style={{ color: T.textMuted }}>{currentTrack?.title ?? "—"}</div>
+              </>
+            ) : (
+              <>
+                <div className="text-xs font-bold truncate" style={{ color: T.textColor }}>{currentTrack?.title ?? "—"}</div>
+                <div className="text-[10px] truncate" style={{ color: T.textMuted }}>{currentTrack?.artist ?? "—"}</div>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-0.5">
             <button onClick={prev} className="p-1 rounded hover:bg-white/10 transition-all" style={{ color: T.textMuted }}><SkipBack size={12} /></button>
-            <button onClick={togglePlay} className="w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: accent, color: "#000" }}>
+            <button onClick={togglePlay} disabled={trackUnavailable} className="w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-40" style={{ backgroundColor: accent, color: "#000" }}>
               {playing ? <Pause size={12} /> : <Play size={12} />}
             </button>
             <button onClick={next} className="p-1 rounded hover:bg-white/10 transition-all" style={{ color: T.textMuted }}><SkipForward size={12} /></button>

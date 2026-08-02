@@ -17,6 +17,7 @@ import {
   Mic,
   Volume2,
 } from "lucide-react";
+import { normalizeMediaUrl } from "@/lib/media-url";
 
 const VOICES = [
   { id: "Kore", label: "Kore", desc: "Warm & clear" },
@@ -171,12 +172,14 @@ export default function AudioTool() {
   }, [text, voice, musicModel, mode, cost, canAfford, refreshWallet]);
 
   const togglePlay = (id: string, url: string) => {
+    const validUrl = normalizeMediaUrl(url);
+    if (!validUrl) return;
     if (playingId === id) {
       audioRef.current?.pause();
       setPlayingId(null);
     } else {
       audioRef.current?.pause();
-      const a = new Audio(url);
+      const a = new Audio(validUrl);
       a.play().catch(() => {});
       a.onended = () => setPlayingId(null);
       audioRef.current = a;

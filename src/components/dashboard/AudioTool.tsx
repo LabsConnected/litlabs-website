@@ -18,6 +18,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { normalizeMediaUrl } from "@/lib/media-url";
 
 type Tab = "tts" | "music";
 
@@ -156,7 +157,7 @@ function AudioResultPlayer({
         border: `1px solid ${T.borderColor}15`,
       }}
     >
-      <audio ref={audioRef} src={result.url} preload="metadata" />
+      <audio ref={audioRef} src={normalizeMediaUrl(result.url) ?? undefined} preload="metadata" />
 
       {/* Header row */}
       <div className="flex items-center gap-2">
