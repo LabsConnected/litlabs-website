@@ -98,18 +98,22 @@ export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
 
   if (!key) {
-    return NextResponse.json({ error: "No secret key" }, { status: 500 });
+    return NextResponse.json({ error: "Stripe server not configured" }, { status: 503 });
   }
 
   if (!signingSecret) {
-    return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
+    return NextResponse.json({ error: "Webhook secret not configured" }, { status: 503 });
+  }
+
+  if (!sig) {
+    return NextResponse.json({ error: "Missing stripe-signature header" }, { status: 400 });
   }
 
   const stripe = new Stripe(key, { apiVersion: "2025-08-27.basil" });
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig || "", signingSecret);
+    event = stripe.webhooks.constructEvent(body, sig, signingSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(

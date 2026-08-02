@@ -58,8 +58,7 @@ if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
   );
 }
 
-const useClerkMiddleware = clerkConfigured && !isTestAuthDisabled;
-const middleware = useClerkMiddleware
+const middleware = clerkConfigured
   ? clerkMiddleware(async (auth, req) => {
       let userId: string | null = null;
       try {
@@ -81,7 +80,9 @@ const middleware = useClerkMiddleware
 
       response.headers.set("Vary", "Accept-Encoding");
 
-      if (isProtectedRoute(req) && !userId) {
+      // When test auth is disabled, skip route protection so Playwright
+      // can access protected routes without Clerk sessions.
+      if (!isTestAuthDisabled && isProtectedRoute(req) && !userId) {
         return NextResponse.redirect(new URL("/sign-in", req.url));
       }
 
