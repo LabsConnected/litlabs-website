@@ -23,6 +23,8 @@ const nextConfig: NextConfig = {
       "@supabase/supabase-js",
       "lucide-react",
       "@clerk/nextjs",
+      "react-markdown",
+      "zustand",
     ],
   },
 
