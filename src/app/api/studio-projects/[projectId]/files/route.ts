@@ -3,6 +3,11 @@ import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
+import {
+  validateWorkspacePath,
+  PathValidationError,
+  pathErrorStatus,
+} from "@/lib/projects/path-validator";
 
 /**
  * Project-bound file operations.
@@ -34,7 +39,23 @@ export async function GET(
 
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
-    const path = request.nextUrl.searchParams.get("path") || ".";
+    const rawPath = request.nextUrl.searchParams.get("path") || ".";
+
+    // Validate path before forwarding to terminal-server
+    let path: string;
+    try {
+      path = validateWorkspacePath(rawPath);
+      // For GET (listing), "." is valid — return as-is for terminal-server
+      if (rawPath === "." || rawPath === "./") {
+        path = ".";
+      }
+    } catch (e) {
+      if (e instanceof PathValidationError) {
+        return NextResponse.json({ error: e.message, code: e.code }, { status: pathErrorStatus(e.code) });
+      }
+      throw e;
+    }
+
     const { token } = createTerminalToken(userId);
 
     const resp = await fetch(
@@ -91,6 +112,20 @@ export async function POST(
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
+  // Validate path before any forwarding
+  let validatedPath: string;
+  try {
+    validatedPath = validateWorkspacePath(path, {
+      isDelete: action === "delete",
+      contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
+    });
+  } catch (e) {
+    if (e instanceof PathValidationError) {
+      return NextResponse.json({ error: e.message, code: e.code }, { status: pathErrorStatus(e.code) });
+    }
+    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+  }
+
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
     const { token } = createTerminalToken(userId);
@@ -102,7 +137,7 @@ export async function POST(
         Authorization: `Bearer ${token}`,
         "X-Workspace-Id": workspaceId,
       },
-      body: JSON.stringify({ path, content: body.content }),
+      body: JSON.stringify({ path: validatedPath, content: body.content }),
     });
 
     const ok = resp.ok;
@@ -114,7 +149,7 @@ export async function POST(
         projectId,
         workspaceId,
         action,
-        path,
+        path: validatedPath,
         contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
         source: "user",
         ok,
@@ -138,7 +173,7 @@ export async function POST(
         projectId,
         workspaceId: "unknown",
         action,
-        path,
+        path: validatedPath,
         contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
         source: "user",
         ok: false,
