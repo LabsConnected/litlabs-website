@@ -37,3 +37,5 @@ export type { WebSource, WebSourceType, ConfidenceLevel, WebSourceClaim } from "
 
 export { ActionPlanner, ActionExecutor, verifyStepResult, verifyPlanCompletion } from "./action-loop";
 export type { ExecutionEvent } from "./action-loop";
+export { ApprovalManager, approvalManager } from "./approval-system";
+export type { ApprovalRequest, PermissionContext, PermissionCheckResult } from "./approval-system";
