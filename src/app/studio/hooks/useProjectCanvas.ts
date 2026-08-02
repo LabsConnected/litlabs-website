@@ -26,7 +26,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
  * - Scratch mode when no projectId (temporary, labeled)
  */
 
-export type SaveStatus = "idle" | "loading" | "saving" | "saved" | "conflict" | "offline" | "failed";
+export type SaveStatus = "idle" | "loading" | "saving" | "saved" | "unsaved" | "conflict" | "offline" | "failed";
 
 export interface CanvasState {
   version: number;
@@ -278,7 +278,7 @@ export function useProjectCanvas({ projectId, projectName: _projectName }: UsePr
 
         // Only debounce-save if we have a project
         if (projectId) {
-          setSaveStatus("unsaved" as SaveStatus);
+          setSaveStatus("unsaved");
           saveTimerRef.current = setTimeout(() => {
             saveState(pendingFilesRef.current);
           }, DEBOUNCE_MS);

@@ -564,7 +564,7 @@ export function useCanonicalConversation({
 
       // Track whether the user message was persisted to the server.
       // Used to decide whether the composer should restore the draft text.
-      let userMessagePersisted = false;
+      const userMessagePersisted = false;
 
       if (!conversationId) {
         const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;

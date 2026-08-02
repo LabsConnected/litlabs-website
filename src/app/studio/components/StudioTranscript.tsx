@@ -14,12 +14,6 @@ import {
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
 
-/**
- * ReasoningBlock — a collapsible "Thinking…" trace shown above an
- * assistant answer when the provider emitted reasoning/thinking tokens
- * (DeepSeek-R1, Qwen3 thinking, Gemini 2.5 thinking, etc.). The trace
- * is client-side only and is not persisted to the database.
- */
 function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; color: string; streaming: boolean }) {
   const [open, setOpen] = useState(streaming);
   return (
@@ -35,7 +29,7 @@ function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; co
           className="inline-block h-0 w-0 border-y-[3px] border-l-[5px] border-y-transparent transition-transform"
           style={{ borderLeftColor: color, transform: open ? "rotate(90deg)" : "none" }}
         />
-        {streaming ? "Thinking…" : "Thought process"}
+        {streaming ? "ThinkingΓÇª" : "Thought process"}
       </button>
       {open && (
         <div
@@ -55,14 +49,6 @@ function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; co
   );
 }
 
-/**
- * StudioTranscript — the single visible conversation transcript for
- * the Command Studio. Replaces the hidden opacity-0 ChatTool.
- *
- * Renders compact right-aligned user messages, full-width LiTT
- * responses, agent avatar + name, readable 13px response text, code
- * blocks, action chips, and a busy indicator. No invisible controls.
- */
 export default function StudioTranscript({
   messages,
   busy,
@@ -82,7 +68,6 @@ export default function StudioTranscript({
   const agentColor = agentMeta.color;
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages / busy changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -97,50 +82,16 @@ export default function StudioTranscript({
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
           const isUser = message.role === "user";
-          // Skip empty assistant bubbles that are not actively streaming.
-          // This prevents the "empty LiTT bubble" artifact when a send fails
-          // before any text is received.
           if (!isUser && !message.content?.trim() && message.status !== "streaming") {
             return null;
           }
           const isFailed = !isUser && message.status === "failed";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
-          const isStreaming = !isUser && message.status === "streaming";
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
-          // Use stable canonical ID as key — never the array index, which
-          // breaks when messages are inserted/removed/rolled back.
           const key = message.id || `msg_${index}`;
           return (
             <div
               key={key}
-              className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-            >
-  const { speakText } = useVoiceSession();
-  const ptyUsable = useTerminalStore((s) => s.isUsable());
-  const agentMeta = AGENT_META[activeAgentId];
-  const agentColor = agentMeta.color;
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom on new messages / busy changes.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
-
-  return (
-    <div
-      ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
-      style={{ color: "var(--text-primary)" }}
-    >
-      <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
-        {messages.map((message, index) => {
-          const isUser = message.role === "user";
-          const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
-          const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
-          return (
-            <div
-              key={index}
               className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
             >
               {isUser ? (
@@ -251,7 +202,6 @@ export default function StudioTranscript({
                   <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                   </span>
-                  {/* Show Read only for non-empty, non-failed assistant messages */}
                   {!isUser && !isFailed && message.content?.trim() && (
                     <button
                       type="button"
@@ -264,7 +214,6 @@ export default function StudioTranscript({
                       Read
                     </button>
                   )}
-                  {/* Show Retry for failed assistant messages */}
                   {!isUser && isFailed && onRegenerate && (
                     <button
                       type="button"
@@ -277,7 +226,6 @@ export default function StudioTranscript({
                       Retry
                     </button>
                   )}
-                  {/* Show Regenerate only for completed last assistant message */}
                   {isLastAssistant && !isFailed && onRegenerate && (
                     <button
                       type="button"
@@ -295,9 +243,6 @@ export default function StudioTranscript({
             </div>
           );
         })}
-        {/* Busy indicator — only show when the last message is not already
-            streaming (avoids duplicate busy indicators when the optimistic
-            assistant bubble is already showing streaming status). */}
         {busy && !messages.some((m) => m.status === "streaming") && (
           <div className="flex gap-3">
             <div

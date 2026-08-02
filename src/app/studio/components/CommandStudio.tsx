@@ -64,7 +64,8 @@ type WorkSurface = "conversation" | "builder";
 
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
-const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<any>>> = {
   canvas: CanvasTool,
   image: ImageTool,
   video: VideoTool,

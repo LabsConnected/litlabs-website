@@ -952,6 +952,7 @@ function SaveStatusIndicator({ status, lastSavedAt }: { status: SaveStatus; last
     loading: { icon: <Loader2 size={10} className="animate-spin" />, label: "Loading", color: "#888" },
     saving: { icon: <Loader2 size={10} className="animate-spin" />, label: "Saving", color: "#3b82f6" },
     saved: { icon: <Check size={10} />, label: "Saved", color: "#22c55e" },
+    unsaved: { icon: <AlertCircle size={10} />, label: "Unsaved", color: "#f59e0b" },
     conflict: { icon: <AlertCircle size={10} />, label: "Conflict", color: "#f59e0b" },
     offline: { icon: <CloudOff size={10} />, label: "Offline", color: "#ef4444" },
     failed: { icon: <AlertCircle size={10} />, label: "Failed", color: "#ef4444" },

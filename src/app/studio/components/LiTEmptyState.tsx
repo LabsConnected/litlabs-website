@@ -253,7 +253,7 @@ export default function LiTEmptyState({
               className="px-1 text-[10px] font-black uppercase tracking-[0.18em]"
               style={{ color: "var(--text-muted)" }}
             >
-              Chat ready · workspace optional
+              No project connected
             </div>
             <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
               Add one only when you want LiTT to edit files, run terminal commands, preview, or deploy.
