@@ -141,6 +141,12 @@ export function useCanonicalConversation({
   const searchParams = useSearchParams();
   const isSyncingFromUrl = useRef(false);
 
+  // Ref to read current searchParams inside loadConversations without
+  // depending on it — prevents the loadConversations → syncUrl →
+  // router.replace → searchParams change → loadConversations infinite loop.
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
+
   const { profile } = useProfile();
   const initialPrompt = searchParams.get("mission") || "";
 
@@ -191,7 +197,7 @@ export function useCanonicalConversation({
       const conversations = (data.conversations || []) as Conversation[];
       s.setConversations(conversations);
 
-      const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
+      const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
       if (conversationId && conversations.some((c) => c.id === conversationId)) {
         s.selectConversation(conversationId);
         if (agentSlug) {
@@ -208,7 +214,7 @@ export function useCanonicalConversation({
     } finally {
       getStore().setLoading(false);
     }
-  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
+  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
