@@ -19,18 +19,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Wait for Vercel preview
-        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
-        id: waitForVercel
+        id: deployment
+        uses: vercel/wait-for-deployment-action@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          max_timeout: 300
+          environment: preview
+          timeout: 300
 
       - name: Run Lighthouse
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            ${{ steps.waitForVercel.outputs.url }}
-            ${{ steps.waitForVercel.outputs.url }}/studio
+            ${{ steps.deployment.outputs.deployment-url }}
+            ${{ steps.deployment.outputs.deployment-url }}/studio
           budgetPath: .github/budget.config.json
 
       - name: Upload Lighthouse reports
