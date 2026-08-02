@@ -14,12 +14,6 @@ import {
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
 
-/**
- * ReasoningBlock — a collapsible "Thinking…" trace shown above an
- * assistant answer when the provider emitted reasoning/thinking tokens
- * (DeepSeek-R1, Qwen3 thinking, Gemini 2.5 thinking, etc.). The trace
- * is client-side only and is not persisted to the database.
- */
 function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; color: string; streaming: boolean }) {
   const [open, setOpen] = useState(streaming);
   return (
@@ -55,14 +49,6 @@ function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; co
   );
 }
 
-/**
- * StudioTranscript — the single visible conversation transcript for
- * the Command Studio. Replaces the hidden opacity-0 ChatTool.
- *
- * Renders compact right-aligned user messages, full-width LiTT
- * responses, agent avatar + name, readable 13px response text, code
- * blocks, action chips, and a busy indicator. No invisible controls.
- */
 export default function StudioTranscript({
   messages,
   busy,
@@ -82,7 +68,6 @@ export default function StudioTranscript({
   const agentColor = agentMeta.color;
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages / busy changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -97,11 +82,16 @@ export default function StudioTranscript({
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
           const isUser = message.role === "user";
+          if (!isUser && !message.content?.trim() && message.status !== "streaming") {
+            return null;
+          }
+          const isFailed = !isUser && message.status === "failed";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
+          const key = message.id || `msg_${index}`;
           return (
             <div
-              key={index}
+              key={key}
               className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
             >
               {isUser ? (
@@ -169,10 +159,14 @@ export default function StudioTranscript({
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
-                    borderColor: isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
-                    background: isUser
-                      ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
-                      : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
+                    borderColor: isFailed
+                      ? "rgba(239,68,68,0.3)"
+                      : isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
+                    background: isFailed
+                      ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
+                      : isUser
+                        ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
+                        : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
                     color: isUser ? "#fff" : "var(--text-primary)",
                   }}
                 >
@@ -208,7 +202,7 @@ export default function StudioTranscript({
                   <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                   </span>
-                  {!isUser && (
+                  {!isUser && !isFailed && message.content?.trim() && (
                     <button
                       type="button"
                       onClick={() => speakText(message.content)}
@@ -220,7 +214,19 @@ export default function StudioTranscript({
                       Read
                     </button>
                   )}
-                  {isLastAssistant && onRegenerate && (
+                  {!isUser && isFailed && onRegenerate && (
+                    <button
+                      type="button"
+                      onClick={onRegenerate}
+                      className="flex items-center gap-1 text-[9px] font-bold transition hover:opacity-80"
+                      style={{ color: "#fca5a5" }}
+                      title="Retry"
+                      aria-label="Retry"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  {isLastAssistant && !isFailed && onRegenerate && (
                     <button
                       type="button"
                       onClick={onRegenerate}
@@ -237,7 +243,7 @@ export default function StudioTranscript({
             </div>
           );
         })}
-        {busy && (
+        {busy && !messages.some((m) => m.status === "streaming") && (
           <div className="flex gap-3">
             <div
               className="grid shrink-0 place-items-center overflow-hidden rounded-full border"

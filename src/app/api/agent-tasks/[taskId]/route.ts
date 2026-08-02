@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { logAgentEvent } from "@/lib/agent-logger";
@@ -6,7 +6,7 @@ import { logAgentEvent } from "@/lib/agent-logger";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
@@ -38,7 +38,7 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {

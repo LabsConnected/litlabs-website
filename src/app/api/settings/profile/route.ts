@@ -11,7 +11,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
  * GET /api/settings/profile
  * Returns the current user's profile from the database.
  */
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth(req);
     if (!clerkId) {
