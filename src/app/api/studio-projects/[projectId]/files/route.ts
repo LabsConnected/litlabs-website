@@ -150,3 +150,153 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status });
   }
 }
+
+/**
+ * PUT /api/studio-projects/[projectId]/files
+ * Body: { path: string, content: string }
+ * Write/create a file in the project workspace (audit-logged).
+ */
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> },
+) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { projectId } = await params;
+
+  let body: { path?: string; content?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const path = body.path ?? "";
+  if (!path) {
+    return NextResponse.json({ error: "Missing path" }, { status: 400 });
+  }
+
+  try {
+    const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+    const { token } = createTerminalToken(userId);
+
+    const resp = await fetch(`${TERMINAL_BASE()}/ws-files/write`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "X-Workspace-Id": workspaceId,
+      },
+      body: JSON.stringify({ path, content: body.content ?? "" }),
+    });
+
+    const ok = resp.ok;
+
+    await logFileOperation({
+      userId,
+      projectId,
+      workspaceId,
+      action: "write",
+      path,
+      contentLength: body.content?.length ?? 0,
+      source: "user",
+      ok,
+      error: ok ? undefined : `HTTP ${resp.status}`,
+    });
+
+    if (!ok) {
+      const text = await resp.text().catch(() => "Unknown error");
+      return NextResponse.json({ error: text }, { status: resp.status });
+    }
+
+    return NextResponse.json(await resp.json());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "File write failed";
+
+    await logFileOperation({
+      userId,
+      projectId,
+      workspaceId: "unknown",
+      action: "write",
+      path,
+      contentLength: body.content?.length ?? 0,
+      source: "user",
+      ok: false,
+      error: msg,
+    }).catch(() => {});
+
+    const status = msg.includes("not found") ? 404 : msg.includes("Forbidden") ? 403 : 500;
+    return NextResponse.json({ error: msg }, { status });
+  }
+}
+
+/**
+ * DELETE /api/studio-projects/[projectId]/files?path=...
+ * Delete a file in the project workspace (audit-logged).
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> },
+) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { projectId } = await params;
+  const path = new URL(request.url).searchParams.get("path") || "";
+
+  if (!path) {
+    return NextResponse.json({ error: "Missing path" }, { status: 400 });
+  }
+
+  try {
+    const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+    const { token } = createTerminalToken(userId);
+
+    const resp = await fetch(`${TERMINAL_BASE()}/ws-files/delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "X-Workspace-Id": workspaceId,
+      },
+      body: JSON.stringify({ path }),
+    });
+
+    const ok = resp.ok;
+
+    await logFileOperation({
+      userId,
+      projectId,
+      workspaceId,
+      action: "delete",
+      path,
+      source: "user",
+      ok,
+      error: ok ? undefined : `HTTP ${resp.status}`,
+    });
+
+    if (!ok) {
+      const text = await resp.text().catch(() => "Unknown error");
+      return NextResponse.json({ error: text }, { status: resp.status });
+    }
+
+    return NextResponse.json(await resp.json());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "File delete failed";
+
+    await logFileOperation({
+      userId,
+      projectId,
+      workspaceId: "unknown",
+      action: "delete",
+      path,
+      source: "user",
+      ok: false,
+      error: msg,
+    }).catch(() => {});
+
+    const status = msg.includes("not found") ? 404 : msg.includes("Forbidden") ? 403 : 500;
+    return NextResponse.json({ error: msg }, { status });
+  }
+}

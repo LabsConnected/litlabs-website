@@ -61,9 +61,19 @@ type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | 
  */
 type WorkSurface = "conversation" | "builder";
 
+/** Props passed to every workspace tool component. */
+interface WorkspaceToolProps {
+  projectId: string | null;
+  projectName: string | null;
+}
+
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
-const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
+// Components receive WorkspaceToolProps (projectId, projectName) from
+// CommandStudio. Using React.ComponentType<any> because some tools have
+// optional props (CanvasTool) and others have different prop shapes.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<any>>> = {
   canvas: CanvasTool,
   image: ImageTool,
   video: VideoTool,

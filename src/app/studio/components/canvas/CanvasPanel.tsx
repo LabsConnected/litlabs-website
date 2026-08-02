@@ -13,6 +13,8 @@ interface CanvasPanelProps {
   /** When an action chip is clicked in chat, pass it here to execute */
   pendingAction?: ArtifactAction | null;
   onActionExecuted?: (action: ArtifactAction) => void;
+  /** Canonical project ID — used for server-backed file operations */
+  projectId?: string | null;
 }
 
 /**
@@ -24,7 +26,7 @@ interface CanvasPanelProps {
  * On desktop: renders as a full-height panel (placed in a split-pane by StudioOS).
  * On mobile: rendered inside a bottom sheet (Phase 3).
  */
-export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProps) {
+export function CanvasPanel({ pendingAction, onActionExecuted, projectId }: CanvasPanelProps) {
   const {
     canvases,
     activeCanvasId,

@@ -153,10 +153,12 @@ export default function StudioTerminalDrawer({ projectId }: StudioTerminalDrawer
         </div>
       )}
 
-      {/* Terminal PTY — only render when workspace is ready or preparing */}
+      {/* PTY only mounts after workspace is prepared — not during preparation
+          or on error. This prevents connecting to an unprepared workspace.
+          The key prop forces remount on project switch, disconnecting the old socket. */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {(workspaceStatus === "ready" || workspaceStatus === "preparing") && (
-          <TerminalPanel projectId={projectId} />
+        {workspaceStatus === "ready" && (
+          <TerminalPanel key={projectId} projectId={projectId} />
         )}
       </div>
     </div>
