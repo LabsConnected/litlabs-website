@@ -44,7 +44,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   }
 
   // Auth
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!isAdmin(userId)) {
     return NextResponse.json(
       { error: "Access denied. Admin only." },

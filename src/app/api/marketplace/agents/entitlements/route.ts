@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 export const runtime = "nodejs";
 
 export async function GET(_req: NextRequest) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(_req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

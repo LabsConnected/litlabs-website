@@ -6,15 +6,15 @@ import { CAPABILITY_REGISTRY } from "@/lib/capability-registry";
 
 export const runtime = "nodejs";
 
-async function getUserId(): Promise<string | null> {
+async function getUserId(req: NextRequest): Promise<string | null> {
   const { userId } = await auth();
   return userId;
 }
 
 // GET: List user's installed marketplace capabilities
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
-    const userId = await getUserId();
+    const userId = await getUserId(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -59,7 +59,7 @@ async function getHandler() {
 // POST: Install a marketplace capability
 async function postHandler(req: NextRequest) {
   try {
-    const userId = await getUserId();
+    const userId = await getUserId(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

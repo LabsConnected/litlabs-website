@@ -40,7 +40,7 @@ Rules:
 - Vary the motion styles and vibes across ideas`;
 
 async function handler(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY)
     return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });

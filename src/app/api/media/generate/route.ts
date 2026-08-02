@@ -439,7 +439,7 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 /*  Main handler                                                        */
 /* ------------------------------------------------------------------ */
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json(
       { error: "Unauthorized — sign in to generate media" },

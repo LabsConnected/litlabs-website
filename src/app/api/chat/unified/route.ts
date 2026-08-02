@@ -269,7 +269,7 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     const body = (await req.json()) as UnifiedChatRequest;
     const { mode = "llm" } = body;
 

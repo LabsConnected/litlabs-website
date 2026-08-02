@@ -153,7 +153,7 @@ If a request requires approval or is ambiguous, ask one clear question. Prefer a
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

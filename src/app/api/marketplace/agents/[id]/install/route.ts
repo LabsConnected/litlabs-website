@@ -44,7 +44,7 @@ async function postHandler(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(_req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {
@@ -119,7 +119,7 @@ async function deleteHandler(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(_req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {
@@ -139,7 +139,7 @@ async function patchHandler(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {

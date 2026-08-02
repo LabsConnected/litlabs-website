@@ -15,7 +15,7 @@ function getSupermemory() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }

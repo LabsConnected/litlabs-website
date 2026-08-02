@@ -1,5 +1,5 @@
 // Notifications Unread Count API
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
@@ -7,8 +7,8 @@ import {
 } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 
-async function getHandler() {
-  const { userId } = await auth();
+async function getHandler(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ count: 0 });
 
   if (!isAdminSupabaseConfigured()) {

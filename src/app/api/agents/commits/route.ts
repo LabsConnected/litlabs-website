@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { execSync } from "child_process";
 
@@ -15,8 +15,8 @@ const FALLBACK_COMMITS = [
   "0d41c97 feat: LiTTBits wallet with Supabase sync",
 ];
 
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

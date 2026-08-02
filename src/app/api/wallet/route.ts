@@ -15,7 +15,7 @@ const EMPTY_WALLET = {
  * GET /api/wallet
  * Returns the user's LiTTBits wallet balance.
  */
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth();
     if (!clerkId) {
@@ -56,7 +56,7 @@ async function getHandler() {
  */
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -153,7 +153,7 @@ async function postHandler(req: NextRequest) {
  */
 async function putHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

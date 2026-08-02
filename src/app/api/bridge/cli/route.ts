@@ -3,6 +3,7 @@
 // Only admin user can access this
 
 import { spawn, ChildProcess } from "child_process";
+import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 
 // Admin user ID - only this user can use CLI bridge
@@ -29,7 +30,7 @@ interface BridgeMessage {
   rows?: number;
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const { userId } = await auth();
 
   if (!userId || userId !== ADMIN_USER_ID) {
@@ -206,7 +207,7 @@ export async function GET(req: Request) {
 }
 
 // POST endpoint to send input to running CLI session
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const { userId } = await auth();
 
   if (!userId || userId !== ADMIN_USER_ID) {
@@ -247,7 +248,7 @@ export async function POST(req: Request) {
 }
 
 // DELETE endpoint to kill session
-export async function DELETE(req: Request) {
+export async function DELETE(req: NextRequest) {
   const { userId } = await auth();
 
   if (!userId || userId !== ADMIN_USER_ID) {
@@ -271,7 +272,7 @@ export async function DELETE(req: Request) {
 }
 
 // GET sessions list
-export async function PATCH() {
+export async function PATCH(req: NextRequest) {
   const { userId } = await auth();
 
   if (!userId || userId !== ADMIN_USER_ID) {

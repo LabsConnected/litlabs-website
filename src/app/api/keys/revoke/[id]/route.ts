@@ -13,7 +13,7 @@ async function handler(
   _req: NextRequest,
   ctx?: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

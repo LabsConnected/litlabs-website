@@ -12,7 +12,7 @@ function isAdmin(userId: string) {
   return ADMIN_IDS.length === 0 || ADMIN_IDS.includes(userId);
 }
 
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   const { userId } = await auth();
   if (!userId || !isAdmin(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
@@ -36,7 +36,7 @@ async function getHandler() {
 }
 
 async function deleteHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId || !isAdmin(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }

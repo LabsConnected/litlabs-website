@@ -85,7 +85,7 @@ async function fetchRealEvents(): Promise<AdminEvent[]> {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return new Response("Unauthorized", { status: 401 });

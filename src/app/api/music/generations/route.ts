@@ -41,7 +41,7 @@ const GenerateSchema = z.object({
  */
 async function handler(req: NextRequest) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     console.info(`${TAG} 401 userId=anon dur=${Date.now() - start}ms`);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

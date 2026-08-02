@@ -184,7 +184,7 @@ async function getHandler(req: NextRequest) {
     }
 
     // Get current user (if authenticated)
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     let currentUserId: string | null = null;
 
     if (clerkId) {
@@ -299,7 +299,7 @@ async function getHandler(req: NextRequest) {
 
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -362,7 +362,7 @@ async function postHandler(req: NextRequest) {
 
 async function deleteHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -412,7 +412,7 @@ async function deleteHandler(req: NextRequest) {
 
 async function patchHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

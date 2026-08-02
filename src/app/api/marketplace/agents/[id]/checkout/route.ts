@@ -73,7 +73,7 @@ async function handler(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   const { id: agentId } = await ctx.params;
