@@ -19,7 +19,7 @@ export interface FileOperationAuditEntry {
   action: FileAction;
   path: string;
   contentLength?: number;
-  source: "user" | "mission" | "system";
+  source: "user" | "mission" | "system" | "agent";
   approvalId?: string;
   ok: boolean;
   error?: string;
