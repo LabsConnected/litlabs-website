@@ -23,8 +23,8 @@ const PROJECTS: DemoProject[] = [
   {
     slug: "artist-launch-site",
     title: "Artist Launch Site",
-    prompt: "Build a premium website for a music artist with a hero, player, tour dates, and merch link.",
-    outcome: "A responsive artist website with an embedded music player and social integration.",
+    prompt: "Build a premium launch page for an independent music artist named After Midnight with a hero, player, tour dates, and release copy.",
+    outcome: "A responsive artist launch page with an embedded music player, release copy, and social integration.",
     tools: ["HTML", "CSS", "JavaScript", "Image Gen", "Audio"],
     icon: Music,
     accent: "#b58cff",

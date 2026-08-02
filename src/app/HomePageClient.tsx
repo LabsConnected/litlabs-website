@@ -103,6 +103,7 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
+            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">Interactive product demonstration</div>
             <MissionSequence />
           </div>
         </div>
@@ -143,7 +144,7 @@ function LandingPage() {
                 title: "Build working products",
                 copy: "Sites, apps, dashboards, and tools—generated with real code, organized in your workspace, and deployed with one click.",
                 accent: "#65f4ff",
-                steps: ["Describe the outcome", "LiTT creates a plan", "Files are generated", "Preview and approve", "Deploy to live URL"],
+                steps: ["Describe the outcome", "LiTT creates a plan", "Files are generated", "Preview and approve", "Deploy when ready"],
               },
               {
                 title: "Create complete media and branding",

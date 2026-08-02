@@ -29,8 +29,8 @@ const PROJECTS: Record<string, DemoProject> = {
   "artist-launch-site": {
     slug: "artist-launch-site",
     title: "Artist Launch Site",
-    prompt: "Build a premium website for a music artist with a hero, player, tour dates, and merch link.",
-    outcome: "A responsive artist website with an embedded music player, tour dates, and social integration.",
+    prompt: "Build a premium launch page for an independent music artist named After Midnight with a hero, player, tour dates, and release copy.",
+    outcome: "A responsive artist launch page with an embedded music player, release copy, and social integration.",
     tools: ["HTML", "CSS", "JavaScript", "Image Generation", "Audio"],
     icon: Music,
     accent: "#b58cff",
@@ -39,8 +39,8 @@ const PROJECTS: Record<string, DemoProject> = {
       { label: "Plan generated", detail: "A 6-step execution plan: hero, layout, player, tour dates, merch, deploy." },
       { label: "Files built", detail: "index.html, styles.css, player.js, and a hero image are created in the workspace." },
       { label: "Preview rendered", detail: "A live preview shows the responsive layout with the music player functioning." },
-      { label: "Approved for deploy", detail: "The user reviews the preview and approves deployment to a public URL." },
-      { label: "Deployed", detail: "The production bundle is built and deployed. The site is live." },
+      { label: "Approved for deployment", detail: "The user reviews the preview and approves deployment preparation." },
+      { label: "Ready for deployment", detail: "The production bundle is prepared. The project is ready to ship when the user confirms." },
     ],
   },
   "small-business-dashboard": {
@@ -59,7 +59,7 @@ const PROJECTS: Record<string, DemoProject> = {
       { label: "Filter system added", detail: "Date range and category filters are connected to the data layer." },
       { label: "Layout assembled", detail: "A grid layout with sidebar navigation and main content area." },
       { label: "Export feature built", detail: "CSV export functionality is added to all report views." },
-      { label: "Deployed", detail: "The dashboard is deployed and accessible via a public URL." },
+      { label: "Ready for deployment", detail: "The dashboard is prepared and ready to ship when the user confirms deployment." },
     ],
   },
   "music-campaign": {
