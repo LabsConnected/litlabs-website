@@ -9,7 +9,15 @@ const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 let supabase: SupabaseClient | null = null;
 
 function getSupabaseClient(): SupabaseClient | null {
-  if (!SUPABASE_KEY || SUPABASE_KEY.length < 10) return null;
+  if (
+    !SUPABASE_URL ||
+    SUPABASE_URL.length < 10 ||
+    !SUPABASE_URL.startsWith("http") ||
+    !SUPABASE_KEY ||
+    SUPABASE_KEY.length < 10
+  ) {
+    return null;
+  }
   if (!supabase) {
     supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   }
