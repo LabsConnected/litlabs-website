@@ -3,7 +3,7 @@ import { auth as clerkAuth, verifyToken } from "@clerk/nextjs/server";
 import { isClerkConfigured } from "@/lib/env";
 
 /**
- * DEBUG ENDPOINT — shows exactly which auth method works and which fails.
+ * DEBUG ENDPOINT - shows exactly which auth method works and which fails.
  * Visit /api/auth-debug while signed in to see the auth state.
  */
 export async function GET(request: NextRequest) {
@@ -27,8 +27,7 @@ export async function GET(request: NextRequest) {
   debug.clerkHeaders = clerkHeaders;
 
   // Check cookies
-  const cookieNames: string[] = [];
-  request.cookies.forEach((_value, name) => cookieNames.push(name));
+  const cookieNames: string[] = request.cookies.getAll().map((c) => c.name);
   debug.cookieNames = cookieNames;
   debug.hasClerkCookie = cookieNames.some((n) => n.includes("clerk") || n.includes("__clerk"));
 
