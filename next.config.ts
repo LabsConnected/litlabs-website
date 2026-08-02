@@ -120,7 +120,7 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "script-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
               "script-src-attr 'none'",
               "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
