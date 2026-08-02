@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTerminalStore } from "@/stores/useTerminalStore";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -82,8 +83,13 @@ export function useConnectionSummary() {
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
+  const { isLoaded, isSignedIn } = useClerkAuth();
 
   const refresh = useCallback(async () => {
+    if (!isLoaded || !isSignedIn) {
+      setLoading(false);
+      return;
+    }
     try {
       const [capsRes, termRes, voiceRes] = await Promise.allSettled([
         fetch("/api/capabilities", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
@@ -175,7 +181,7 @@ export function useConnectionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError]);
+  }, [terminalStatus, terminalSessionId, terminalError, isLoaded, isSignedIn]);
 
   useEffect(() => {
     void refresh();

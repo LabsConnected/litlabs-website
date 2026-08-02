@@ -149,9 +149,12 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let active = true;
     fetch("/api/voice/health", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
       .then((data) => {
-        if (active) {
+        if (active && data) {
           setVoiceHealth({
             configured: !!data.configured,
             tokenService: data.tokenService === "healthy" ? "healthy" : "error",

@@ -13,7 +13,15 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((names) => Promise.all(names.map((n) => caches.delete(n))))
       .then(() => self.registration.unregister())
-      .then(() => self.clients.claim()),
+      .then(() => {
+        // clients.claim() can throw InvalidStateError if the worker
+        // is no longer active after unregister — swallow it
+        try {
+          return self.clients.claim();
+        } catch {
+          /* ignore */
+        }
+      }),
   );
 });
 

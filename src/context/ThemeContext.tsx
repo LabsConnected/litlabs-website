@@ -675,8 +675,10 @@ function mixMuted(hex: string): string {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return defaultTheme;
+  const [theme, setTheme] = useState<Theme>(defaultTheme);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const stored = localStorage.getItem("litlabs-theme");
     if (stored) {
       try {
@@ -690,15 +692,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           saved.backgroundMode === "constellation" &&
           !saved.customColors
         ) {
-          return defaultTheme;
+          return;
         }
-        return saved;
+        setTheme(saved);
       } catch {
         /* ignore */
       }
     }
-    return defaultTheme;
-  });
+  }, []);
   const getResolvedColors = (t: Theme) => {
     // Get base skin based on mode
     const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
