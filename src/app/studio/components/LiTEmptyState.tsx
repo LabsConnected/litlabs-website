@@ -253,8 +253,11 @@ export default function LiTEmptyState({
               className="px-1 text-[10px] font-black uppercase tracking-[0.18em]"
               style={{ color: "var(--text-muted)" }}
             >
-              No project connected
+              Chat ready · workspace optional
             </div>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              Add one only when you want LiTT to edit files, run terminal commands, preview, or deploy.
+            </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <NoProjectAction
                 icon={FilePlus2}

@@ -103,7 +103,7 @@ function AgentVoiceSync() {
  */
 export default function CommandStudio() {
   const { theme } = useTheme();
-  const { userId } = useClerkAuth();
+  const { userId, getToken } = useClerkAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -256,9 +256,14 @@ export default function CommandStudio() {
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);
     try {
+      const token = await getToken?.();
       const res = await fetch("/api/studio-projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           sourceType: "blank",
           name: "Untitled Project",
@@ -296,7 +301,7 @@ export default function CommandStudio() {
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, userId]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -508,18 +513,10 @@ export default function CommandStudio() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { window.location.href = "/api/github/install"; }}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                >
-                  Choose Project
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { void handleStartBlank(); conversation.clearSendError(); }}
-                  disabled={creatingProject}
+                  onClick={() => window.location.reload()}
                   className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10 disabled:opacity-50"
                 >
-                  {creatingProject ? "Creating…" : "Start Blank"}
+                  Refresh session
                 </button>
               </div>
             )}
