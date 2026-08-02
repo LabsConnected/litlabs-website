@@ -77,12 +77,12 @@ describe("Terminal V1 Safety Boundary — PR 1", () => {
     expect(provider.name).toBe("disabled");
   });
 
-  it("getSandboxProvider returns disabled for managed-sandbox (not yet implemented)", () => {
+  it("getSandboxProvider returns managed-sandbox provider when configured", () => {
     vi.stubEnv("TERMINAL_PROVIDER", "managed-sandbox");
     resetSandboxProvider();
     const provider = getSandboxProvider();
-    // PR 2 will replace this with a real provider
-    expect(provider.name).toBe("disabled");
+    // PR 2 implements the Docker-based managed-sandbox provider
+    expect(provider.name).toBe("managed-sandbox");
   });
 
   it("getSandboxProvider returns disabled for unknown provider", () => {
