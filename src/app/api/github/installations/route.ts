@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getAppOctokit } from "@/lib/github-app";
 

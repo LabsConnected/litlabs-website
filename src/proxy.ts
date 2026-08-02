@@ -59,7 +59,7 @@ if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
 }
 
 const useClerkMiddleware = clerkConfigured && !isTestAuthDisabled;
-const middleware = useClerkMiddleware
+const proxy = useClerkMiddleware
   ? clerkMiddleware(async (auth, req) => {
       let userId: string | null = null;
       try {
@@ -108,7 +108,7 @@ const middleware = useClerkMiddleware
       return response;
     };
 
-export default middleware;
+export default proxy;
 
 export const config = {
   matcher: [

@@ -20,12 +20,14 @@ import {
   Trash2,
   X,
   Mic,
-  Volume2,
   Clock,
   Eye,
   EyeOff,
   Globe,
   Plus,
+  SlidersHorizontal,
+  Library,
+  Disc3,
 } from "lucide-react";
 
 const MUSIC_LBC_COST = {
@@ -69,6 +71,12 @@ export default function MusicTool() {
   const { tracks: vaultTracks, loading: vaultLoading, deleteTrack, updateTrack, refresh } = useMusicVault();
 
   const [prompt, setPrompt] = useState("");
+  const [creationMode, setCreationMode] = useState<"simple" | "custom">("simple");
+  const [title, setTitle] = useState("");
+  const [styles, setStyles] = useState("");
+  const [negativeStyles, setNegativeStyles] = useState("");
+  const [weirdness, setWeirdness] = useState(35);
+  const [styleInfluence, setStyleInfluence] = useState(70);
   const [instrumental, setInstrumental] = useState(false);
   const [duration, setDuration] = useState<"concept" | "full">("concept");
   const [vocalType, setVocalType] = useState("male");
@@ -85,10 +93,18 @@ export default function MusicTool() {
       ? MUSIC_LBC_COST.instrumentalFull
       : MUSIC_LBC_COST.songFull;
 
+  const generationPrompt = [
+    prompt.trim(),
+    creationMode === "custom" && title.trim() ? `Working title: ${title.trim()}.` : "",
+    creationMode === "custom" && styles.trim() ? `Style: ${styles.trim()}.` : "",
+    creationMode === "custom" && negativeStyles.trim() ? `Avoid: ${negativeStyles.trim()}.` : "",
+    creationMode === "custom" ? `Creative variation ${weirdness}%. Style influence ${styleInfluence}%.` : "",
+  ].filter(Boolean).join(" ").slice(0, 500);
+
   const handleGenerate = useCallback(() => {
-    if (!prompt.trim() || isGenerating) return;
+    if (!generationPrompt || isGenerating) return;
     void startGeneration({
-      prompt: prompt.trim(),
+      prompt: generationPrompt,
       instrumental,
       duration,
       vocalType: instrumental ? undefined : vocalType,
@@ -96,7 +112,7 @@ export default function MusicTool() {
       lyrics: instrumental ? undefined : lyrics.trim() || undefined,
       energy,
     });
-  }, [prompt, instrumental, duration, vocalType, explicit, lyrics, energy, isGenerating, startGeneration]);
+  }, [generationPrompt, instrumental, duration, vocalType, explicit, lyrics, energy, isGenerating, startGeneration]);
 
   const handleCancel = useCallback(() => {
     void cancelGeneration();
@@ -230,19 +246,24 @@ export default function MusicTool() {
     padding: "16px",
   };
 
-  const statusColors: Record<string, string> = {
-    queued: T.textColor || "#888",
-    preparing: accent,
-    generating: accent,
-    processing: accent,
-    completed: "#22c55e",
-    failed: "#ef4444",
-    cancelled: "#f59e0b",
-  };
   return (
-    <div style={{ height: "100%", overflow: "auto", padding: "16px" }}>
+    <div style={{ height: "100%", overflow: "auto", padding: "clamp(12px, 2vw, 24px)", background: "radial-gradient(circle at 12% 0%, rgba(114,242,56,.08), transparent 28%)" }}>
+      <div style={{ maxWidth: "1480px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ ...labelStyle, color: accent, marginBottom: 6 }}>LiTTree Audio</div>
+            <h1 style={{ margin: 0, fontSize: "clamp(24px, 4vw, 42px)", lineHeight: 1, letterSpacing: "-.04em", color: "var(--text-primary)" }}>Make the track in your head.</h1>
+            <p style={{ margin: "9px 0 0", maxWidth: 620, fontSize: 13, color: "var(--text-secondary)" }}>Start with one sentence or shape the lyrics, voice, style, and production controls yourself.</p>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ ...btnGhost, cursor: "default" }}><Disc3 size={12} /> Studio Music v1</span>
+            <span style={{ ...btnGhost, cursor: "default", color: accent }}><Coins size={12} /> {cost} LBC</span>
+          </div>
+        </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 430px), 1fr))", gap: "16px", alignItems: "start" }}>
       {/* Generation Form */}
-      <div style={{ ...cardStyle, marginBottom: "16px" }}>
+      <div style={{ ...cardStyle, padding: "clamp(16px, 2vw, 24px)", background: "linear-gradient(180deg, rgba(255,255,255,.025), transparent), var(--studio-card)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
           <div style={{
             width: "32px", height: "32px", borderRadius: "8px",
@@ -252,28 +273,37 @@ export default function MusicTool() {
             <Music size={18} style={{ color: accent }} />
           </div>
           <div>
-            <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-primary)" }}>Music Lab</div>
-            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Generate tracks with AI</div>
+            <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--text-primary)" }}>Create</div>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Two original versions per generation</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", ...labelStyle }}>
             <Coins size={12} style={{ color: accent }} />
-            <span>{cost} LBC</span>
+            <span>Private by default</span>
           </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, padding: 4, marginBottom: 14, borderRadius: 10, background: "var(--studio-bg)" }}>
+          {(["simple", "custom"] as const).map((mode) => (
+            <button key={mode} onClick={() => setCreationMode(mode)} disabled={isBusy} style={{ ...btnGhost, justifyContent: "center", border: 0, padding: "9px 12px", background: creationMode === mode ? "var(--studio-surface)" : "transparent", color: creationMode === mode ? "var(--text-primary)" : "var(--text-muted)", boxShadow: creationMode === mode ? "0 4px 16px rgba(0,0,0,.2)" : "none" }}>
+              {mode === "simple" ? <Sparkles size={12} /> : <SlidersHorizontal size={12} />}
+              {mode === "simple" ? "Simple" : "Custom"}
+            </button>
+          ))}
         </div>
 
         {/* Prompt Input */}
         <div style={{ marginBottom: "12px" }}>
-          <div style={{ ...labelStyle, marginBottom: "6px" }}>Prompt</div>
+          <div style={{ ...labelStyle, marginBottom: "6px" }}>{creationMode === "simple" ? "Describe your song" : "Song concept"}</div>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the music you want to generate..."
-            rows={3}
-            style={{ ...inputStyle, resize: "vertical", minHeight: "60px", fontFamily: "inherit" }}
+            placeholder="A soulful late-night R&B track with warm keys, deep bass and a huge final chorus..."
+            rows={4}
+            style={{ ...inputStyle, resize: "vertical", minHeight: "96px", fontFamily: "inherit", fontSize: 14, lineHeight: 1.55 }}
             disabled={isBusy}
           />
           <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
-            {GENRE_PRESETS.slice(0, 4).map((preset) => (
+            {GENRE_PRESETS.map((preset) => (
               <button
                 key={preset}
                 onClick={() => setPrompt(preset)}
@@ -286,6 +316,20 @@ export default function MusicTool() {
             ))}
           </div>
         </div>
+
+        {creationMode === "custom" && (
+          <div style={{ display: "grid", gap: 10, marginBottom: 14, padding: 14, border: "1px solid var(--studio-border)", borderRadius: 12, background: "rgba(0,0,0,.12)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled track" style={inputStyle} disabled={isBusy} /></label>
+              <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Styles</span><input value={styles} onChange={(e) => setStyles(e.target.value)} placeholder="R&B, neo-soul, cinematic" style={inputStyle} disabled={isBusy} /></label>
+            </div>
+            <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Exclude styles</span><input value={negativeStyles} onChange={(e) => setNegativeStyles(e.target.value)} placeholder="No harsh distortion, no comedy vocals" style={inputStyle} disabled={isBusy} /></label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <label><span style={{ ...labelStyle, display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span>Variation</span><b>{weirdness}%</b></span><input type="range" min={0} max={100} value={weirdness} onChange={(e) => setWeirdness(Number(e.target.value))} disabled={isBusy} style={{ width: "100%", accentColor: accent }} /></label>
+              <label><span style={{ ...labelStyle, display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span>Style influence</span><b>{styleInfluence}%</b></span><input type="range" min={0} max={100} value={styleInfluence} onChange={(e) => setStyleInfluence(Number(e.target.value))} disabled={isBusy} style={{ width: "100%", accentColor: accent }} /></label>
+            </div>
+          </div>
+        )}
 
         {/* Options Row */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
@@ -519,10 +563,10 @@ export default function MusicTool() {
       </div>
 
       {/* Track Vault */}
-      <div style={cardStyle}>
+      <div style={{ ...cardStyle, padding: "clamp(16px, 2vw, 24px)", minHeight: 430 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
-          <Volume2 size={14} style={{ color: accent }} />
-          <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>Your Tracks</span>
+          <Library size={14} style={{ color: accent }} />
+          <span style={{ fontSize: "13px", fontWeight: 800, color: "var(--text-primary)" }}>Library</span>
           <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
             ({vaultTracks.length})
           </span>
@@ -538,9 +582,9 @@ export default function MusicTool() {
           </div>
         ) : vaultTracks.length === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--text-muted)" }}>
-            <Music size={28} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
-            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>No tracks yet</div>
-            <div style={{ fontSize: "11px" }}>Generate your first track above</div>
+            <div style={{ width: 76, height: 76, margin: "0 auto 16px", borderRadius: 18, display: "grid", placeItems: "center", background: `linear-gradient(135deg, ${accent}22, rgba(168,85,247,.18))`, border: "1px solid var(--studio-border)" }}><Music size={30} style={{ color: accent, opacity: .8 }} /></div>
+            <div style={{ fontSize: "15px", color: "var(--text-primary)", fontWeight: 800, marginBottom: "6px" }}>Your next sound starts here</div>
+            <div style={{ fontSize: "12px", lineHeight: 1.5 }}>Generate a pair of versions, compare them, then keep building from the strongest idea.</div>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -558,6 +602,8 @@ export default function MusicTool() {
             ))}
           </div>
         )}
+      </div>
+      </div>
       </div>
     </div>
   );

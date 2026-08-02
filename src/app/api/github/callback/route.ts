@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { verifyInstallState } from "@/lib/github-install-state";
 import { upsertConnection } from "@/lib/connections/state";

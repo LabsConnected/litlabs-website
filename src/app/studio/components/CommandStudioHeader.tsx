@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
-import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import {
   useStudioModelStore,
   type ProviderHealth,
@@ -15,7 +14,6 @@ import {
   Eye,
   Rocket,
   Sparkles,
-  Home,
   CircleAlert,
   CircleCheck,
   CircleDot,
@@ -78,28 +76,30 @@ export default function CommandStudioHeader({
     };
   }, [statusOpen, updateRect]);
 
-  const providerCount = capabilities.connectedProviders.length;
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = providerHealth[selectedModel.provider] ?? "available";
+  const hasAi = modelHealth === "available" || modelHealth === "degraded";
+  const providerCount = hasAi ? 1 : 0;
 
   // Truthful aggregate status — calculated from actual capabilities,
   // never from provider count alone. "Workspace ready" requires a
   // project (repo OR terminal) AND an AI provider.
   const hasProject = repoConnected || ptyAvailable;
-  const hasAi = providerCount > 0;
   const statusColor = hasProject && hasAi
     ? "var(--litt-primary)"
     : hasProject
       ? "#e3b341"
-      : "var(--text-muted)";
+      : hasAi
+        ? "var(--litt-primary)"
+        : "var(--text-muted)";
   const statusLabel = hasProject && hasAi
     ? "Workspace available"
     : hasProject
       ? "AI setup required"
       : hasAi
-        ? "Project setup required"
+        ? "Chat ready"
         : "Workspace setup required";
 
   return (
@@ -187,7 +187,11 @@ export default function CommandStudioHeader({
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
             walletBalance={walletLoading ? null : balance}
-            connectionSummary={capabilities.connectionSummary}
+            connectionSummary={
+              hasAi
+                ? `${selectedModel.label} is ready. Add a project for files, preview, terminal, and deployment.`
+                : "Configure an AI provider to start chatting."
+            }
           />,
           document.body,
         )}

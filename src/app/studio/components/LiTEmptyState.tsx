@@ -58,7 +58,6 @@ const PROJECT_SUGGESTIONS = [
 export default function LiTEmptyState({
   activeAgentId = "litt",
   hasProject,
-  projectId,
   projectName,
   sourceType,
   githubInstalled,
@@ -68,7 +67,8 @@ export default function LiTEmptyState({
 }: {
   activeAgentId?: AgentId;
   hasProject: boolean;
-  projectId: string | null;
+  /** Accepted for backwards compatibility; readiness is derived from hasProject. */
+  projectId?: string | null;
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | null;
   githubInstalled: boolean;
@@ -125,8 +125,9 @@ export default function LiTEmptyState({
         className="mt-2 max-w-md text-center text-[13px] leading-relaxed"
         style={{ color: "var(--text-secondary)" }}
       >
-        I can inspect your project, edit code, run checks, create media,
-        repair issues, and prepare a preview.
+        {hasProject
+          ? "I can inspect your project, edit code, run checks, create media, repair issues, and prepare a preview."
+          : "Chat with me now. Add a project only when you want files, code edits, preview, terminal, or deployment."}
       </p>
 
       {/* Primary actions */}

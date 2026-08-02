@@ -6,7 +6,6 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
-import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -370,7 +369,6 @@ export default function CommandStudio() {
   return (
     <VoiceSessionProvider>
       <AgentVoiceSync />
-      <VoiceDiagnosticsDrawer />
 
       <div
         className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
@@ -448,7 +446,6 @@ export default function CommandStudio() {
                     onRegenerate={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
                     hasProject={projectReady}
-                    projectId={capabilities.projectId}
                     projectName={capabilities.projectName}
                     sourceType={capabilities.sourceType}
                     githubInstalled={capabilities.githubInstalled}
@@ -601,7 +598,6 @@ function StudioWorkSurface({
   onRegenerate,
   onEmptyAction,
   hasProject,
-  projectId,
   projectName,
   sourceType,
   githubInstalled,
@@ -616,7 +612,6 @@ function StudioWorkSurface({
   onRegenerate: () => void;
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
-  projectId: string | null;
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | null;
   githubInstalled: boolean;
@@ -644,7 +639,6 @@ function StudioWorkSurface({
           <LiTEmptyState
             activeAgentId={activeAgentId}
             hasProject={hasProject}
-            projectId={projectId}
             projectName={projectName}
             sourceType={sourceType}
             githubInstalled={githubInstalled}
