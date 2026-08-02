@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   getProject,
   deleteProject,
@@ -13,7 +13,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -44,7 +44,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

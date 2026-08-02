@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { executeCommand } from "@/lib/command-executor";
 import { logCommandExecution } from "@/lib/agent-logger";

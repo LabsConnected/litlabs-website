@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import type { TerminalCapability } from "@/lib/capabilities/types";
 
@@ -11,8 +11,8 @@ function getTerminalHttpUrl(): string {
   return ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
 }
 
-async function handler() {
-  const { userId } = await auth().catch(() => ({ userId: null }));
+async function handler(req: NextRequest) {
+  const { userId } = await auth(req).catch(() => ({ userId: null }));
 
   const endpoint = getTerminalHttpUrl();
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";

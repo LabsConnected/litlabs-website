@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getUserContext } from "@/lib/litt-intelligence/user-context";
 
 export async function GET() {

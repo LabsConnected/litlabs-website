@@ -11,7 +11,7 @@ export const revalidate = 0;
  * and projects with their connection status.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
  * Update connection status for a specific project (e.g. mark as connected/disconnected).
  */
 export async function PATCH(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

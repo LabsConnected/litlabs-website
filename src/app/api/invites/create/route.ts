@@ -1,7 +1,7 @@
 // POST /api/invites/create
 // Admin-only: generate a new invite code and store its hash in Supabase.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { generateInviteCode, hashToken } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";

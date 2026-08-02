@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
@@ -6,8 +6,8 @@ import type { CapabilitySummary, CapabilityStatus } from "@/lib/capabilities/typ
 
 export const runtime = "nodejs";
 
-async function handler() {
-  const { userId } = await auth().catch(() => ({ userId: null }));
+async function handler(req: NextRequest) {
+  const { userId } = await auth(req).catch(() => ({ userId: null }));
 
   const capabilities: CapabilitySummary = {
     capabilities: [

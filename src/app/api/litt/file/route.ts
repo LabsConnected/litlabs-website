@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";

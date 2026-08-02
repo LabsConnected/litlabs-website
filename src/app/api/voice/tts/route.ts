@@ -14,7 +14,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
  */
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
