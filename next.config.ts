@@ -87,56 +87,7 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
-      // Public preview route — allow v0.app iframe embedding via CSP frame-ancestors
-      {
-        source: "/studio-preview",
-        headers: [
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin",
-          },
-          {
-            key: "Permissions-Policy",
-            value:
-              "geolocation=(), microphone=(self), camera=(self), display-capture=(self), payment=(), usb=(), interest-cohort=(), gamepad=(self)",
-          },
-          {
-            key: "Cross-Origin-Opener-Policy",
-            value: "same-origin-allow-popups",
-          },
-          {
-            key: "Cross-Origin-Embedder-Policy",
-            value: "unsafe-none",
-          },
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "script-src-attr 'none'",
-              "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com https://thumbnails.libretro.com",
-              "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com https://vercel.live",
-              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com ws://localhost:* wss://localhost:* https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone",
-              "frame-src 'self' blob: data: https: http: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
-              "worker-src 'self' blob: https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "media-src 'self' blob: data:",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
-              "frame-ancestors 'self' https://v0.app https://*.v0.app",
-              "upgrade-insecure-requests",
-            ].join("; "),
-          },
-        ],
-      },
-      // Security headers for all other routes
+      // Security headers for all routes (catch-all applied first)
       {
         source: "/(.*)",
         headers: [
@@ -220,6 +171,35 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=2592000, stale-while-revalidate=86400",
+          },
+        ],
+      },
+      // Public preview route — allow v0.app iframe embedding via CSP frame-ancestors
+      // MUST be after catch-all so it overrides the DENY headers for this specific route
+      {
+        source: "/studio-preview",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "script-src-attr 'none'",
+              "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com https://thumbnails.libretro.com",
+              "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com https://vercel.live",
+              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com ws://localhost:* wss://localhost:* https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone",
+              "frame-src 'self' blob: data: https: http: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
+              "worker-src 'self' blob: https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "media-src 'self' blob: data:",
+              "object-src 'none'",
+              "base-uri 'self'",
+              "form-action 'self' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
+              "frame-ancestors 'self' https://v0.app https://*.v0.app",
+              "upgrade-insecure-requests",
+            ].join("; "),
           },
         ],
       },
