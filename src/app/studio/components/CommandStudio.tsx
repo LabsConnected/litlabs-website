@@ -17,6 +17,7 @@ import CommandStudioHeader from "./CommandStudioHeader";
 import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
+import StudioFloatingPresence from "./StudioFloatingPresence";
 import StudioTranscript from "./StudioTranscript";
 import { StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import {
@@ -629,6 +630,10 @@ export default function CommandStudio() {
         onCameraPosChange={(pos) => setCameraDock((v) => ({ ...v, pos }))}
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
+
+      {/* Persistent floating LiTT presence — never disappears, reflects
+          real busy + voice state. Clicking opens the Activity drawer. */}
+      <StudioFloatingPresence busy={conversation.busy} onOpenActivity={handleOpenActivity} />
     </VoiceSessionProvider>
   );
 }
