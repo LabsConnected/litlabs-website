@@ -92,6 +92,11 @@ const middleware = useClerkMiddleware
 
       response.headers.set("Vary", "Accept-Encoding");
 
+      // Apply X-Frame-Options: DENY for all routes except /studio-preview
+      if (req.nextUrl.pathname !== "/studio-preview") {
+        response.headers.set("X-Frame-Options", "DENY");
+      }
+
       if (isProtectedRoute(req) && !userId) {
         // API routes should return JSON 401, not redirect to sign-in.
         // Page routes redirect to sign-in with the intended destination preserved.
@@ -128,6 +133,11 @@ const middleware = useClerkMiddleware
       }
 
       response.headers.set("Vary", "Accept-Encoding");
+
+      // Apply X-Frame-Options: DENY for all routes except /studio-preview
+      if (req.nextUrl.pathname !== "/studio-preview") {
+        response.headers.set("X-Frame-Options", "DENY");
+      }
 
       // Redirect protected routes to sign-in when Clerk is not configured
       if (isProtectedRoute(req)) {
