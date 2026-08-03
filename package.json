@@ -68,6 +68,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@clerk/testing": "^2.2.15",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",

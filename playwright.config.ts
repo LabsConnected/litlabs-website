@@ -1,11 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 import { existsSync, readFileSync } from "fs";
+import path from "path";
 
-const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
+const baseURL =
+  process.env.PLAYWRIGHT_BASE_URL ??
+  process.env.SMOKE_TEST_URL ??
+  "http://127.0.0.1:3000";
+
+const authDir = path.join(__dirname, "tests/playwright/.clerk");
 
 // Check if .env.local has real Clerk credentials for integration tests
 const hasRealClerk = (() => {
-  if (process.env.SMOKE_TEST_URL) return true; // External server with real env
+  if (process.env.PLAYWRIGHT_BASE_URL || process.env.SMOKE_TEST_URL) return true;
   if (!existsSync(".env.local")) return false;
   const content = readFileSync(".env.local", "utf-8");
   return (
@@ -21,29 +27,79 @@ const hasTestUsers = !!(
   process.env.CLERK_TEST_USER_B_EMAIL
 );
 
+// Only include auth-dependent projects when credentials are available
+const authProjects = (hasRealClerk && hasTestUsers) ? [
+  {
+    name: "auth-setup",
+    testMatch: /auth\.setup\.ts/,
+    use: { ...devices["Desktop Chrome"] },
+  },
+  {
+    name: "mobile-chromium",
+    testMatch: /mobile|golden/,
+    use: {
+      ...devices["Pixel 7"],
+      storageState: path.join(authDir, "user-a.json"),
+    },
+    dependencies: ["auth-setup"],
+  },
+  {
+    name: "authenticated-chromium",
+    testMatch: /studio|chat|image|files|agents|billing|golden|projects|settings|profile|marketplace/,
+    use: {
+      ...devices["Desktop Chrome"],
+      storageState: path.join(authDir, "user-a.json"),
+    },
+    dependencies: ["auth-setup"],
+  },
+  {
+    name: "buyer-b",
+    testMatch: /isolation|marketplace/,
+    use: {
+      ...devices["Desktop Chrome"],
+      storageState: path.join(authDir, "user-b.json"),
+    },
+    dependencies: ["auth-setup"],
+  },
+] : [];
+
 export default defineConfig({
   testDir: "./tests/playwright",
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
-  fullyParallel: false,
-  retries: 0,
-  workers: 1,
-  reporter: [["list"], ["html", { open: "never" }]],
 
-  // Automatically start the production server before tests.
+  timeout: 90_000,
+  expect: {
+    timeout: 15_000,
+    toHaveScreenshot: {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    },
+  },
+
+  fullyParallel: true,
+  forbidOnly: Boolean(process.env.CI),
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 2 : undefined,
+  maxFailures: process.env.CI ? 10 : undefined,
+
+  reporter: [
+    ["list"],
+    ["html", { open: "never", outputFolder: "playwright-report" }],
+    ["junit", { outputFile: "test-results/playwright-junit.xml" }],
+  ],
+
+  // Automatically start the production server before tests when testing locally.
   // Requires `pnpm build` to have been run first.
-  // Set SMOKE_TEST_URL to test a remote deployment instead.
-  ...(process.env.SMOKE_TEST_URL
+  // Set PLAYWRIGHT_BASE_URL or SMOKE_TEST_URL to test a remote deployment instead.
+  ...(process.env.PLAYWRIGHT_BASE_URL || process.env.SMOKE_TEST_URL
     ? {}
     : {
         webServer: {
           command: "pnpm start",
-          url: "http://localhost:3000",
+          url: "http://127.0.0.1:3000",
           timeout: 60_000,
           reuseExistingServer: false,
           cwd: ".",
           env: (() => {
-            // Strip VERCEL env vars so test bypass is valid
             const env: Record<string, string> = {};
             for (const [key, value] of Object.entries(process.env)) {
               if (!key.startsWith("VERCEL") && value !== undefined) {
@@ -59,49 +115,42 @@ export default defineConfig({
       }),
 
   use: {
-    baseURL: DEPLOYMENT_URL,
+    baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
   },
+
   projects: [
+    // ── Public (signed-out) projects — always run ──
     {
-      name: "credential-free",
-      testMatch: /smoke\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      name: "public-chromium",
+      testMatch: /public|routes|visual|accessibility|navigation|error-states|security/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: { cookies: [], origins: [] },
+      },
     },
-    // Clerk authenticated setup — runs before integration tests
-    ...(hasRealClerk && hasTestUsers
-      ? [
-          {
-            name: "clerk-setup",
-            testMatch: /auth\.setup\.ts/,
-            use: { ...devices["Desktop Chrome"] },
-          },
-        ]
-      : []),
-    // Integration tests — depends on clerk-setup for auth state files
-    ...(hasRealClerk && hasTestUsers
-      ? [
-          {
-            name: "preview-integration",
-            testMatch: /integration\.spec\.ts/,
-            dependencies: ["clerk-setup"],
-            use: {
-              ...devices["Desktop Chrome"],
-            },
-          },
-        ]
-      : hasRealClerk
-        ? [
-            {
-              name: "preview-integration",
-              testMatch: /integration\.spec\.ts/,
-              use: {
-                ...devices["Desktop Chrome"],
-              },
-            },
-          ]
-        : []),
+    {
+      name: "public-firefox",
+      testMatch: /public-critical|routes-critical/,
+      use: {
+        ...devices["Desktop Firefox"],
+        storageState: { cookies: [], origins: [] },
+      },
+    },
+    {
+      name: "public-webkit",
+      testMatch: /public-critical|routes-critical/,
+      use: {
+        ...devices["Desktop Safari"],
+        storageState: { cookies: [], origins: [] },
+      },
+    },
+
+    // ── Authenticated projects — only when Clerk credentials are available ──
+    ...authProjects,
   ],
 });
