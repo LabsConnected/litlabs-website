@@ -188,23 +188,27 @@ export async function persistMemory(
   const metadata = options.metadata ?? {};
 
   try {
+    // Build payload conditionally — agent_instance_id and memory_namespace
+    // columns may not exist yet if the migration hasn't been applied.
+    const basePayload: Record<string, unknown> = {
+      owner_id: ownerId,
+      project_id: projectId,
+      conversation_id: options.conversationId ?? null,
+      agent_slug: agentSlug,
+      memory_type: memoryType,
+      dedupe_key: dedupeKey,
+      content,
+      metadata,
+      sync_status: "pending",
+    };
+    if (agentInstanceId != null) basePayload.agent_instance_id = agentInstanceId;
+    if (memoryNamespace != null) basePayload.memory_namespace = memoryNamespace;
+
     // Try upsert by dedupe key
     const { data, error } = await supabaseAdmin
       .from("memories")
       .upsert(
-        {
-          owner_id: ownerId,
-          project_id: projectId,
-          conversation_id: options.conversationId ?? null,
-          agent_slug: agentSlug,
-          agent_instance_id: agentInstanceId,
-          memory_namespace: memoryNamespace,
-          memory_type: memoryType,
-          dedupe_key: dedupeKey,
-          content,
-          metadata,
-          sync_status: "pending",
-        },
+        basePayload,
         {
           onConflict: "owner_id,project_id,agent_slug,memory_type,dedupe_key",
         },
@@ -216,19 +220,7 @@ export async function persistMemory(
       // If upsert failed (e.g., dedupe index doesn't exist yet), try plain insert
       const { data: insertData, error: insertError } = await supabaseAdmin
         .from("memories")
-        .insert({
-          owner_id: ownerId,
-          project_id: projectId,
-          conversation_id: options.conversationId ?? null,
-          agent_slug: agentSlug,
-          agent_instance_id: agentInstanceId,
-          memory_namespace: memoryNamespace,
-          memory_type: memoryType,
-          dedupe_key: dedupeKey,
-          content,
-          metadata,
-          sync_status: "pending",
-        })
+        .insert(basePayload)
         .select()
         .single();
 
