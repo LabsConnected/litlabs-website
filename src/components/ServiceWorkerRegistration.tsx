@@ -2,60 +2,41 @@
 
 import { useEffect } from "react";
 
+/**
+ * Cleanup-only service worker unregistration.
+ *
+ * The previous implementation registered /sw.js on every page load and
+ * force-reloaded when a new SW was detected. Combined with sw.js being a
+ * self-destructing SW (it unregisters itself on activate + calls
+ * clients.claim()), this created an infinite reload loop that froze every
+ * page — including /sign-in.
+ *
+ * This component now ONLY unregisters any existing service workers and clears
+ * their caches. It never registers a new SW. The static /sw.js file remains
+ * in public/ as a self-destructing fallback for browsers that already have it
+ * registered, so they will fetch it, self-destruct, and be unregistered.
+ */
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
-    const registerSW = async () => {
+    const unregisterAll = async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js", {
-          scope: "/",
-        });
+        const registrations =
+          await navigator.serviceWorker.getRegistrations();
+        await Promise.all(
+          registrations.map((reg) => reg.unregister()),
+        );
 
-        // If a new service worker is waiting, reload the page so it activates
-        // immediately. This guarantees returning visitors see the latest landing page.
-        const reloadIfWaiting = () => {
-          if (registration.waiting) {
-            registration.waiting.postMessage({ type: "SKIP_WAITING" });
-            // Give the SW a moment to activate, then reload once.
-            setTimeout(() => {
-              window.location.reload();
-            }, 100);
-          }
-        };
-
-        registration.addEventListener("updatefound", () => {
-          const newWorker = registration.installing;
-          if (!newWorker) return;
-
-          newWorker.addEventListener("statechange", () => {
-            if (
-              newWorker.state === "installed" &&
-              navigator.serviceWorker.controller
-            ) {
-              // New content available — force activation and reload.
-              newWorker.postMessage({ type: "SKIP_WAITING" });
-              setTimeout(() => {
-                window.location.reload();
-              }, 100);
-            }
-          });
-        });
-
-        // Check on initial load too.
-        reloadIfWaiting();
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map((name) => caches.delete(name)));
       } catch {
-        /* SW registration failed silently */
+        /* ignore — best-effort cleanup */
       }
     };
 
-    if (document.readyState === "complete") {
-      registerSW();
-    } else {
-      window.addEventListener("load", registerSW);
-      return () => window.removeEventListener("load", registerSW);
-    }
+    unregisterAll();
   }, []);
 
   return null;
