@@ -207,7 +207,7 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
@@ -299,7 +299,7 @@ export default function CommandStudioHeader({
       <button
         type="button"
         onClick={onOpenActivity}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",

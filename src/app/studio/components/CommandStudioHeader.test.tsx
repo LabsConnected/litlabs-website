@@ -49,6 +49,9 @@ vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
 }));
 
+// Mock fetch so the notifications poll doesn't trigger async act warnings
+vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+
 import CommandStudioHeader from "./CommandStudioHeader";
 
 describe("CommandStudioHeader — Phase 1.1 truthful status", () => {

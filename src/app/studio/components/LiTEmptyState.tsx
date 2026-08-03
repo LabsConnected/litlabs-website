@@ -133,12 +133,16 @@ function WorkspaceBriefing({
       style={{
         borderColor: "rgba(114,242,56,0.18)",
         backgroundColor: "rgba(114,242,56,0.04)",
+        boxShadow: "inset 0 1px 0 rgba(114,242,56,0.06)",
       }}
       data-testid="workspace-briefing"
     >
       <div
         className="mb-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--litt-primary)" }}
+        style={{
+          color: "#9dff5e",
+          textShadow: "0 0 12px rgba(157,255,94,0.35)",
+        }}
       >
         Workspace Briefing
       </div>
@@ -276,10 +280,11 @@ export default function LiTEmptyState({
               onClick={() => onPick(action.prompt)}
               onMouseEnter={() => setHovered(action.id)}
               onMouseLeave={() => setHovered(null)}
-              className="group flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-all"
+              className="group flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-all hover:-translate-y-0.5 active:scale-95"
               style={{
                 borderColor: isHovered ? "rgba(114,242,56,0.4)" : "var(--studio-border-strong)",
                 backgroundColor: isHovered ? "rgba(114,242,56,0.06)" : "var(--studio-card)",
+                boxShadow: isHovered ? "0 0 0 1px rgba(114,242,56,0.15), 0 8px 24px rgba(114,242,56,0.08)" : "none",
               }}
               aria-label={action.label}
             >
@@ -345,7 +350,7 @@ export default function LiTEmptyState({
                 key={s}
                 type="button"
                 onClick={() => onPick(s)}
-                className="group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[12px] font-bold transition-all hover:translate-x-0.5"
+                className="group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[12px] font-bold transition-all hover:translate-x-0.5 hover:border-[rgba(114,242,56,0.3)] active:scale-[0.98]"
                 style={{
                   color: "var(--text-primary)",
                   borderColor: "var(--studio-border-strong)",
@@ -453,7 +458,7 @@ function NoProjectAction({
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 transition-all hover:bg-white/5"
+      className="flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 transition-all hover:-translate-y-0.5 hover:bg-white/5 active:scale-95"
       style={{
         borderColor: "var(--studio-border-strong)",
         backgroundColor: "var(--studio-card)",
