@@ -97,7 +97,7 @@ function LandingPage() {
                 <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> See how it works
               </a>
             </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/40">
+            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/55">
               <span>Free to join</span>
               <span>No credit card</span>
               <span>Your work stays yours</span>
@@ -105,7 +105,7 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">Interactive product demonstration</div>
+            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/50">Interactive product demonstration</div>
             <MissionSequence />
           </div>
         </div>
@@ -233,7 +233,7 @@ function LandingPage() {
 
       {/* ═══ FOOTER ═══ */}
       <footer className="bg-[#050706] px-5 py-8 lg:px-10">
-        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
+        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/50 sm:flex-row">
           <div className="flex items-center gap-2 font-black text-white">
             <Sparkles size={14} className="text-[#a8ff2f]" /> LiTTree LabStudios
           </div>
