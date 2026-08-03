@@ -575,7 +575,7 @@ function CommandStudioContent() {
               onTabChange={setDrawerTab}
             >
               {drawerTab === "terminal" ? (
-                <StudioTerminalDrawer projectId={capabilities.projectId} />
+                <StudioTerminalDrawer projectId={capabilities.projectId} repositoryName={capabilities.repositoryName} branch={capabilities.activeBranch ?? capabilities.defaultBranch} />
               ) : (
                 <StudioActivityPanel
                   messages={conversation.messages}

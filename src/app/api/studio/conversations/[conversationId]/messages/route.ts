@@ -50,6 +50,12 @@ type RuntimeContext = {
     tokenService: "healthy" | "error" | "unknown";
     available: boolean;
   };
+  writeAccess?: boolean;
+  activeBranch?: string;
+  repositoryName?: string;
+  workspaceStatus?: string;
+  selectedModelLabel?: string;
+  selectedModelId?: string;
 };
 
 function parseVoiceHealth(value: unknown): RuntimeContext["voiceHealth"] {
@@ -82,6 +88,12 @@ function parseRuntimeContext(value: unknown): RuntimeContext {
     voiceState: isValue(VOICE_STATES, input.voiceState) ? input.voiceState : undefined,
     voiceOutputState: isValue(VOICE_OUTPUT_STATES, input.voiceOutputState) ? input.voiceOutputState : undefined,
     voiceHealth: parseVoiceHealth(input.voiceHealth),
+    writeAccess: input.writeAccess === true,
+    activeBranch: typeof input.activeBranch === "string" && input.activeBranch.length <= 200 ? input.activeBranch : undefined,
+    repositoryName: typeof input.repositoryName === "string" && input.repositoryName.length <= 200 ? input.repositoryName : undefined,
+    workspaceStatus: typeof input.workspaceStatus === "string" && input.workspaceStatus.length <= 100 ? input.workspaceStatus : undefined,
+    selectedModelLabel: typeof input.selectedModelLabel === "string" && input.selectedModelLabel.length <= 100 ? input.selectedModelLabel : undefined,
+    selectedModelId: typeof input.selectedModelId === "string" && input.selectedModelId.length <= 100 ? input.selectedModelId : undefined,
   };
 }
 
@@ -284,6 +296,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const rawCaps: RawCapabilities = {
     repository: ctx.capabilities.repositoryConnected ? "connected" : "none",
     repositoryIndexed: ctx.capabilities.repositoryConnected,
+    repositoryName: runtimeContext.repositoryName ?? ctx.repositoryName ?? undefined,
+    activeBranch: runtimeContext.activeBranch ?? ctx.activeBranch ?? undefined,
+    writeAccess: runtimeContext.writeAccess,
+    workspaceStatus: runtimeContext.workspaceStatus,
+    selectedModelLabel: runtimeContext.selectedModelLabel,
     terminalExecution: runtimeContext.terminalExecution ?? (ctx.capabilities.terminalConnected ? "available" : "unavailable"),
     terminalStatus: runtimeContext.terminalStatus,
     terminalSessionId: runtimeContext.terminalSessionId,
@@ -299,11 +316,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   };
   const translated = translateCapabilities(rawCaps);
 
+  const conversationContext = conversation.title
+    ? `CURRENT CONVERSATION: "${conversation.title}"`
+    : "CURRENT CONVERSATION: (untitled)";
+
   const systemPrompt = [
     // Use the runtime agent's version prompt for marketplace agents, or the
     // kernel system prompt for builtin agents.
     runtimeAgent?.systemPrompt || kernelSystemPrompt,
     projectBlock,
+    conversationContext,
     translated.contextBlock,
     memoryContext,
   ].filter(Boolean).join("\n");
