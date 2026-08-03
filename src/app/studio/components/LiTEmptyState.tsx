@@ -58,17 +58,14 @@ const PROJECT_SUGGESTIONS = [
   "Make this project more premium",
 ];
 
-type BriefingFact = {
-  label: string;
-  /** ok = green check, warn = amber, pending = muted */
-  tone: "ok" | "warn" | "muted";
-};
-
 /**
- * WorkspaceBriefing — truthful, live snapshot of the workspace, derived only
- * from real capabilities + model health. No fabricated metrics. Renders only
- * when a capabilities object is supplied, so the empty state degrades
- * gracefully to the legacy headline-only layout when no data is wired in.
+ * WorkspaceBriefing — proactive, truthful report framed as LiTT's checks.
+ * Derived only from real capabilities + model health. No fabricated metrics.
+ * Renders only when a capabilities object is supplied, so the empty state
+ * degrades gracefully to the legacy headline-only layout when no data is wired.
+ *
+ * Framed as a checklist ("Checked GitHub ✓ / Checked AI ✓ / ...") so the AI
+ * feels proactive rather than waiting, per the UX audit's #1 ask.
  */
 function WorkspaceBriefing({
   capabilities,
@@ -79,52 +76,61 @@ function WorkspaceBriefing({
   modelHealth?: ProviderHealth;
   modelLabel?: string;
 }) {
-  const facts: BriefingFact[] = [];
-
   const repoConnected =
     capabilities.repository === "connected" || !!capabilities.repositoryName;
-  if (repoConnected) {
-    facts.push({ label: "GitHub synced", tone: "ok" });
-  } else if (capabilities.githubInstalled) {
-    facts.push({ label: "GitHub ready · no repo", tone: "warn" });
-  }
-
   const aiReady = modelHealth === "available" || modelHealth === "degraded";
-  if (aiReady) {
-    facts.push({ label: `${modelLabel || "AI"} ready`, tone: "ok" });
-  } else {
-    facts.push({ label: "AI setup required", tone: "warn" });
-  }
+  const termReady = capabilities.terminalExecution === "available";
+  const termConnecting = capabilities.terminalExecution === "connecting";
+  const projectLoaded = !!capabilities.projectId;
 
-  if (capabilities.terminalExecution === "available") {
-    facts.push({ label: "Terminal ready", tone: "ok" });
-  } else if (capabilities.terminalExecution === "connecting") {
-    facts.push({ label: "Terminal connecting", tone: "muted" });
-  }
+  // Each "check" LiTT performs on load — state is real, not fabricated.
+  type CheckState = "ok" | "warn" | "pending";
+  const checks: { label: string; state: CheckState; detail?: string }[] = [
+    {
+      label: "Checked GitHub",
+      state: repoConnected ? "ok" : capabilities.githubInstalled ? "warn" : "pending",
+      detail: repoConnected
+        ? capabilities.repositoryName ?? "repository synced"
+        : capabilities.githubInstalled
+          ? "app installed, no repo linked"
+          : "not connected",
+    },
+    {
+      label: "Checked AI provider",
+      state: aiReady ? "ok" : "warn",
+      detail: aiReady ? `${modelLabel || "AI"} ready` : "setup required",
+    },
+    {
+      label: "Checked terminal",
+      state: termReady ? "ok" : termConnecting ? "pending" : "pending",
+      detail: termReady ? "ready" : termConnecting ? "connecting…" : "open Activity to connect",
+    },
+    {
+      label: "Loaded project",
+      state: projectLoaded ? "ok" : "pending",
+      detail: projectLoaded ? (capabilities.projectName ?? "loaded") : "no project yet",
+    },
+  ];
 
-  if (capabilities.projectId) {
-    facts.push({ label: "Project loaded", tone: "ok" });
-  }
+  const okCount = checks.filter((c) => c.state === "ok").length;
+  const warnCount = checks.filter((c) => c.state === "warn").length;
+  const pendingCount = checks.filter((c) => c.state === "pending").length;
 
-  if (capabilities.writeAccess) {
-    facts.push({ label: "Writes allowed", tone: "ok" });
-  } else if (capabilities.projectId || repoConnected) {
-    facts.push({ label: "Writes need approval", tone: "warn" });
-  }
+  // Findings — only real ones. Warnings come from connection gaps; no
+  // fabricated "improvements" since there's no project-scan backend.
+  const findings: string[] = [];
+  if (warnCount > 0) findings.push(`${warnCount} need${warnCount === 1 ? "s" : ""} attention`);
+  if (pendingCount > 0 && warnCount === 0) findings.push(`${pendingCount} pending`);
 
-  if (facts.length === 0) return null;
+  const ready = warnCount === 0;
+  const headline = ready
+    ? "Workspace ready"
+    : `${warnCount} need${warnCount === 1 ? "" : "s"} attention`;
 
-  const okCount = facts.filter((f) => f.tone === "ok").length;
-  const warnCount = facts.filter((f) => f.tone === "warn").length;
-  const headline =
-    warnCount > 0
-      ? `Workspace ready · ${warnCount} need${warnCount === 1 ? "" : "s"} attention`
-      : `${okCount} service${okCount === 1 ? "" : "s"} connected`;
-
-  const toneColor: Record<BriefingFact["tone"], string> = {
+  const stateColor: Record<CheckState, string> = {
     ok: "var(--litt-primary)",
     warn: "#e3b341",
-    muted: "var(--text-muted)",
+    pending: "var(--text-muted)",
   };
 
   return (
@@ -138,39 +144,56 @@ function WorkspaceBriefing({
       data-testid="workspace-briefing"
     >
       <div
-        className="mb-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        className="mb-2.5 text-[10px] font-black uppercase tracking-[0.18em]"
         style={{
           color: "#9dff5e",
           textShadow: "0 0 12px rgba(157,255,94,0.35)",
         }}
       >
-        Workspace Briefing
+        LiTT checked your workspace
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {facts.map((f) => (
-          <span
-            key={f.label}
-            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold"
-            style={{
-              borderColor: `${toneColor[f.tone]}33`,
-              backgroundColor: `${toneColor[f.tone]}10`,
-              color: toneColor[f.tone],
-            }}
-          >
+      <ul className="space-y-1.5">
+        {checks.map((c) => (
+          <li key={c.label} className="flex items-center gap-2 text-[11px]">
             <span
-              className="h-1.5 w-1.5 rounded-full"
+              className="grid h-4 w-4 shrink-0 place-items-center rounded-full"
+              style={{
+                backgroundColor: `${stateColor[c.state]}18`,
+                border: `1px solid ${stateColor[c.state]}40`,
+                color: stateColor[c.state],
+              }}
               aria-hidden
-              style={{ backgroundColor: toneColor[f.tone] }}
-            />
-            {f.label}
-          </span>
+            >
+              {c.state === "ok" ? (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              ) : c.state === "warn" ? (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4 M12 17h.01 M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
+              ) : (
+                <span className="h-1 w-1 rounded-full" style={{ backgroundColor: stateColor[c.state] }} />
+              )}
+            </span>
+            <span className="font-bold" style={{ color: "var(--text-primary)" }}>{c.label}</span>
+            <span className="ml-auto truncate text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+              {c.detail}
+            </span>
+          </li>
         ))}
-      </div>
+      </ul>
       <div
-        className="mt-2 text-[10px] font-medium"
-        style={{ color: "var(--text-muted)" }}
+        className="mt-2.5 flex items-center gap-2 border-t pt-2 text-[11px] font-bold"
+        style={{ borderColor: "rgba(114,242,56,0.12)", color: ready ? "var(--litt-primary)" : "#e3b341" }}
       >
-        {headline}
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          aria-hidden
+          style={{ backgroundColor: ready ? "var(--litt-primary)" : "#e3b341" }}
+        />
+        {ready ? "Ready to continue?" : headline}
+        {ready && (
+          <span className="ml-auto text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+            {okCount}/{checks.length} checks passed
+          </span>
+        )}
       </div>
     </div>
   );
