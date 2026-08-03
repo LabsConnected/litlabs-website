@@ -201,7 +201,7 @@ export default function StudioTranscript({
                   <img
                     src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
                     alt={agentMeta.displayName}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain p-0.5"
                   />
                 </div>
               )}

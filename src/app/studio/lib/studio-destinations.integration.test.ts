@@ -82,10 +82,10 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.mode).toBe("audio");
     });
 
-    it("?tool=color → Create / Brand", () => {
+    it("?tool=color → Create / Image (color tool removed, legacy redirect)", () => {
       const r = mapLegacyToolToDestination("color");
       expect(r.destination).toBe("create");
-      expect(r.mode).toBe("brand");
+      expect(r.mode).toBe("image");
     });
 
     it("?tool=assets → Assets", () => {
@@ -114,11 +114,6 @@ describe("Phase 1.1 — Legacy routing integration", () => {
     it("Video selection writes ?tool=video (not ?tool=image)", () => {
       expect(destinationToLegacyTool("create", "video")).toBe("video");
       expect(destinationToLegacyTool("create", "video")).not.toBe("image");
-    });
-
-    it("Brand selection writes ?tool=color (not ?tool=image)", () => {
-      expect(destinationToLegacyTool("create", "brand")).toBe("color");
-      expect(destinationToLegacyTool("create", "brand")).not.toBe("image");
     });
 
     it("Music selection writes ?tool=music", () => {

@@ -15,11 +15,11 @@ export const VOICE_GATE_CONFIG = {
   // ── Client-side VAD (Voice Activity Detection) ──
   vad: {
     /** RMS threshold (0-1) below which audio is considered silence. */
-    silenceRmsThreshold: 0.015,
+    silenceRmsThreshold: 0.025,
     /** Minimum continuous speech duration (ms) before accepting audio as real speech. */
-    minSpeechDurationMs: 350,
+    minSpeechDurationMs: 450,
     /** Silence duration (ms) after speech before finalizing the utterance. */
-    endOfSpeechSilenceMs: 900,
+    endOfSpeechSilenceMs: 1400,
     /** Maximum recording duration (ms) before auto-stopping (safety cap). */
     maxRecordingMs: 60_000,
     /** How often to sample audio level (ms). */

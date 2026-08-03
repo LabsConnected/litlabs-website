@@ -180,7 +180,6 @@ vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="galler
 vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
-vi.mock("../tools/ColorByNumberTool", () => ({ default: () => <div data-testid="color-tool" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
 vi.mock("../tools/PluginsTool", () => ({ default: () => <div data-testid="plugins-tool" /> }));
 vi.mock("../tools/CameraTool", () => ({ default: () => <div data-testid="camera-tool" /> }));

@@ -290,28 +290,29 @@ export default function LiTEmptyState({
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-5">
       {/* Active character — clean transparent art, no framed black bars. */}
-      <div className="relative mb-2 grid min-h-[132px] place-items-center">
+      <div className="relative mb-3 grid min-h-[160px] place-items-center">
         {activeAgentId === "litt" ? (
           <LiTTPresence state="idle" variant="empty-state" size="xl" />
         ) : (
           <div
-            className="relative grid h-32 w-32 place-items-center overflow-hidden rounded-full border"
+            className="relative grid h-36 w-36 place-items-center overflow-hidden rounded-full border"
             style={{
-              borderColor: "rgba(244,114,182,.35)",
-              background: "radial-gradient(circle, rgba(244,114,182,.14), transparent 70%)",
-              boxShadow: "0 0 32px rgba(244,114,182,.14)",
+              borderColor: "rgba(244,114,182,.45)",
+              background: "radial-gradient(circle, rgba(244,114,182,.2), transparent 70%)",
+              boxShadow: "0 0 36px rgba(244,114,182,.25)",
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/spark-agent-portrait.png" alt="Spark" className="h-full w-full object-cover" />
+            <img src="/brand/spark-agent-portrait.png" alt="Spark" className="h-full w-full object-contain p-1" />
           </div>
         )}
         <span
-          className="absolute -bottom-1 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[.16em]"
+          className="absolute -bottom-2 rounded-full border px-3 py-0.5 text-[9.5px] font-black uppercase tracking-[.18em]"
           style={{
-            borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.35)" : "rgba(114,242,56,.35)",
-            backgroundColor: "var(--studio-bg)",
+            borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.45)" : "rgba(114,242,56,.45)",
+            backgroundColor: "#0D0916",
             color: activeAgentId === "spark" ? "var(--spark-primary)" : "var(--litt-primary)",
+            boxShadow: activeAgentId === "spark" ? "0 0 12px rgba(244,114,182,.2)" : "0 0 12px rgba(114,242,56,.2)",
           }}
         >
           {activeAgentId === "spark" ? "Spark · Creative" : "LiTT · Operating"}

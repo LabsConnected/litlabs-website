@@ -56,7 +56,6 @@ export type StudioTool =
   | "workflows"
   | "space"
   | "clibridge"
-  | "color"
   | "loops";
 
 type ToolItem = {
@@ -85,7 +84,6 @@ const PRIMARY_TOOLS: ToolItem[] = [
 /* ── Secondary tools (in More Tools drawer) ──────────────────────── */
 const MORE_TOOLS: ToolItem[] = [
   { id: "screen", label: "Screen", icon: MonitorUp, shortcut: "S" },
-  { id: "color", label: "Color", icon: Palette, shortcut: "4" },
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
   { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },

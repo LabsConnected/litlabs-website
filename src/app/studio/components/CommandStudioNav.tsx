@@ -12,7 +12,6 @@ import {
   Camera,
   MonitorUp,
   Rocket,
-  Palette,
   Terminal,
   Network,
   X,
@@ -47,7 +46,6 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle }[] = [
   { id: "screen", label: "Screen", icon: MonitorUp },
   { id: "space", label: "Space", icon: Rocket },
   { id: "clibridge", label: "CLI Bridge", icon: Terminal },
-  { id: "color", label: "Color", icon: Palette },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "workflows", label: "Mission Forge", icon: Network },
 ];

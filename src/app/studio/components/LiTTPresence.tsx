@@ -124,7 +124,7 @@ export default function LiTTPresence({
           height: dims.h,
           border: `1.5px solid ${colors.ring}`,
           boxShadow: `0 0 12px ${colors.glow}`,
-          backgroundColor: "rgba(114,242,56,0.06)",
+          backgroundColor: "transparent",
           overflow: "hidden",
         }}
         aria-label={`LiTT ${state}`}
@@ -135,7 +135,7 @@ export default function LiTTPresence({
           alt="LiTT"
           width={dims.w}
           height={dims.h}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-contain p-0.5"
         />
       </div>
     );

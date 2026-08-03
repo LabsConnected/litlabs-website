@@ -1,0 +1,25 @@
+fix: AI provider health always showed "setup required" — wire /api/llm/health
+
+The /api/llm/health endpoint existed but was never called by any
+component, so providerHealth stayed {} forever and the empty-state
+briefing always showed "Checked AI provider — setup required" even
+when API keys were configured.
+
+Changes:
+- useConnectionSummary now fetches /api/llm/health in parallel with
+  the existing capabilities/terminal/voice checks
+- Calls setProviderHealth for gemini, groq, openrouter, and Auto
+  (the default model routes to gemini under the hood)
+- CommandStudio modelHealth lookup now falls back to apiProvider
+  when provider has no health entry (e.g. "Auto" -> "gemini")
+- If the health endpoint fails, all providers are marked unavailable
+  so the UI shows a truthful "setup required" instead of stale unknown
+
+Verification:
+- tsc --noEmit: 0 errors
+- pnpm build: passes (183 routes)
+- pnpm test: 904/904 pass
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

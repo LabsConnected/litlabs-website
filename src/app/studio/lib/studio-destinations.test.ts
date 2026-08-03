@@ -64,9 +64,9 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("audio").mode).toBe("audio");
     });
 
-    it("maps color to Create/Brand", () => {
+    it("maps legacy color to Create/Image (color tool removed)", () => {
       expect(mapLegacyToolToDestination("color").destination).toBe("create");
-      expect(mapLegacyToolToDestination("color").mode).toBe("brand");
+      expect(mapLegacyToolToDestination("color").mode).toBe("image");
     });
 
     it("maps assets to Assets", () => {
@@ -113,7 +113,6 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("create", "video")).toBe("video");
       expect(destinationToLegacyTool("create", "audio")).toBe("audio");
       expect(destinationToLegacyTool("create", "music")).toBe("music");
-      expect(destinationToLegacyTool("create", "brand")).toBe("color");
     });
 
     it("round-trips Assets and Agents", () => {
@@ -127,7 +126,6 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("more", "screen")).toBe("screen");
       expect(destinationToLegacyTool("more", "space")).toBe("space");
       expect(destinationToLegacyTool("more", "clibridge")).toBe("clibridge");
-      expect(destinationToLegacyTool("more", "color")).toBe("color");
       expect(destinationToLegacyTool("more", "terminal")).toBe("terminal");
       expect(destinationToLegacyTool("more", "workflows")).toBe("workflows");
     });

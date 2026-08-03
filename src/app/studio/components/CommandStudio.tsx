@@ -48,7 +48,6 @@ const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false }
 const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
 const MissionForge = dynamic(() => import("../tools/MissionForge"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), { ssr: false });
-const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), { ssr: false });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const PluginsTool = dynamic(() => import("../tools/PluginsTool"), { ssr: false });
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
@@ -83,7 +82,6 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   workflows: MissionForge,
   space: SpaceTool,
   clibridge: CLIBridgeTool,
-  color: ColorByNumberTool,
 };
 
 function AgentVoiceSync() {
@@ -403,7 +401,6 @@ function CommandStudioContent() {
       if (createMode === "video") return "video";
       if (createMode === "audio") return "audio";
       if (createMode === "music") return "music";
-      if (createMode === "brand") return "color";
       return "image";
     }
     if (destination === "assets") return "assets";
@@ -430,7 +427,6 @@ function CommandStudioContent() {
     { id: "video", label: "Video" },
     { id: "audio", label: "Audio" },
     { id: "music", label: "Music" },
-    { id: "brand", label: "Brand" },
   ];
 
   return (
