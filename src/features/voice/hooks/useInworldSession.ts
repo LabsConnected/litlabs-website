@@ -681,7 +681,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
+    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback, decodePcm16ToAudioBuffer, schedulePendingChunks],
   );
 
   const disconnect = useCallback(() => {
@@ -870,7 +870,7 @@ export function useInworldSession(
         explicitTtsRef.current = false;
       }
     },
-    [connect, decodePcm16ToAudioBuffer, ensureAudioContextRunning, setError, setState, stopPlayback],
+    [connect, ensureAudioContextRunning, setError, setState, stopPlayback],
   );
 
   useEffect(() => {

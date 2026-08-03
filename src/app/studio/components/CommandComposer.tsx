@@ -462,7 +462,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={submit}
-          disabled={busy || (!value.trim() && snapshots.length === 0)}
+          disabled={busy || disabled || (!value.trim() && snapshots.length === 0)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             backgroundColor: value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",

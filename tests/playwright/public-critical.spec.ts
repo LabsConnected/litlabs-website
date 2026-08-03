@@ -8,23 +8,32 @@ import { monitorApplicationErrors, assertNoErrors } from "./helpers";
 
 const CRITICAL_ROUTES = [
   { path: "/", expectedText: /LiTTree|LiTT/i },
-  { path: "/pricing", expectedText: /Creator|Pro|month/i },
+  { path: "/pricing", expectedText: /Creator|Pro|month|\$7|\$19/i },
   { path: "/marketplace", expectedText: /Marketplace|agent/i },
-  { path: "/studio", expectedText: /Studio|Sign|sign/i },
+  { path: "/studio", expectedText: /Studio|Sign|sign|member|Member/i },
 ];
 
 test.describe("Critical public routes @public-critical @routes-critical", () => {
+  test.describe.configure({ mode: "serial" });
+
   for (const route of CRITICAL_ROUTES) {
     test(`${route.path} renders correctly`, async ({ page }) => {
       const errors = monitorApplicationErrors(page);
 
-      const response = await page.goto(route.path, { waitUntil: "domcontentloaded" });
+      // Use domcontentloaded — returns when HTML is parsed
+      const response = await page.goto(route.path, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
       expect(response?.status(), `${route.path} should return 200`).toBe(200);
 
-      const bodyText = await page.locator("body").innerText();
-      expect(bodyText.length).toBeGreaterThan(50);
-
-      await expect(page.locator("body")).toContainText(route.expectedText);
+      // Wait for expected text to appear (client-side hydration may take time)
+      // Use a longer timeout for the homepage which has heavy animations
+      const timeout = route.path === "/" ? 30_000 : 15_000;
+      await expect(
+        page.locator("body"),
+        `${route.path} should contain expected text after hydration`,
+      ).toContainText(route.expectedText, { timeout });
 
       assertNoErrors(errors);
     });

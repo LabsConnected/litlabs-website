@@ -110,6 +110,7 @@ export default function CommandStudioHeader({
         backgroundColor: "var(--studio-bg)",
         borderColor: "var(--studio-border)",
       }}
+      data-testid="studio-header"
     >
       {/* LiTT Studio logo — clickable to go to dashboard */}
       <Link
@@ -262,7 +263,7 @@ export default function CommandStudioHeader({
       </Link>
 
       {/* User avatar */}
-      <div className="shrink-0">
+      <div className="shrink-0" data-testid="user-avatar">
         <UserButton
           afterSignOutUrl="/"
           appearance={{

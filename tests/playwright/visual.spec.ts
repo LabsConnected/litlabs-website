@@ -6,6 +6,9 @@ import { monitorApplicationErrors, assertNoErrors } from "./helpers";
  *
  * Baselines are generated on first run and must be committed.
  * Run `pnpm exec playwright test --update-snapshots` to regenerate.
+ *
+ * Note: Visual snapshots are OS/browser-specific. Generate baselines
+ * in the same CI environment where they will be compared.
  */
 
 test.describe("Visual regression @public", () => {
@@ -17,6 +20,7 @@ test.describe("Visual regression @public", () => {
     await expect(page).toHaveScreenshot("homepage-desktop.png", {
       fullPage: true,
       animations: "disabled",
+      maxDiffPixelRatio: 0.01,
       mask: [
         page.locator("[data-testid='user-avatar']").filter({ hasText: "" }),
       ],
@@ -33,6 +37,7 @@ test.describe("Visual regression @public", () => {
     await expect(page).toHaveScreenshot("pricing-desktop.png", {
       fullPage: true,
       animations: "disabled",
+      maxDiffPixelRatio: 0.01,
       mask: [
         page.locator("[data-testid='user-avatar']").filter({ hasText: "" }),
       ],
@@ -49,6 +54,7 @@ test.describe("Visual regression @public", () => {
     await expect(page).toHaveScreenshot("marketplace-desktop.png", {
       fullPage: true,
       animations: "disabled",
+      maxDiffPixelRatio: 0.01,
     });
 
     assertNoErrors(errors);

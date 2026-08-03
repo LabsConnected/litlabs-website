@@ -288,6 +288,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   }}
                   title={link.label}
                   aria-label={link.label}
+                  data-testid={link.href === "/" ? "nav-home" : `nav-${link.href.slice(1)}`}
                 >
                   <Icon size={12} strokeWidth={active ? 2.5 : 2} />
                   <span className="hidden xl:inline">{link.label}</span>

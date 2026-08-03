@@ -1197,6 +1197,7 @@ export default function ImageTool() {
                   color: T.textColor,
                   lineHeight: "1.6",
                 }}
+                data-testid="image-prompt-input"
               />
               <div className="flex items-center justify-between">
                 <button
@@ -1319,6 +1320,7 @@ export default function ImageTool() {
                   color: T.bgColor,
                   boxShadow: isWorking ? "none" : `0 0 24px ${T.accentColor}40`,
                 }}
+                data-testid="generate-image-button"
               >
                 {isWorking ? (
                   <><Loader2 size={15} className="animate-spin" /> Forging...</>
@@ -1419,7 +1421,7 @@ export default function ImageTool() {
                   </div>
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={currentResult.fileUrl} alt={currentResult.prompt} className="w-full" onError={() => setImgError("Failed to load image")} />
+                <img src={currentResult.fileUrl} alt={currentResult.prompt} className="w-full" onError={() => setImgError("Failed to load image")} data-testid="generated-image" />
                 <div className="px-3 py-2 text-[10px] opacity-50" style={{ color: T.textMuted }}>
                   {currentResult.prompt}
                 </div>
@@ -1447,7 +1449,7 @@ export default function ImageTool() {
                     >
                       {g.fileUrl ? (
                         /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                        <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} data-testid="generated-image" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
                           <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />
@@ -1531,6 +1533,7 @@ export default function ImageTool() {
                     color: T.textColor,
                     lineHeight: "1.6",
                   }}
+                  data-testid="image-prompt-input"
                 />
                 <div
                   className="text-right text-[9px]"
@@ -2613,6 +2616,7 @@ export default function ImageTool() {
                 color: T.bgColor,
                 boxShadow: isWorking ? "none" : `0 0 24px ${T.accentColor}40`,
               }}
+              data-testid="generate-image-button"
             >
               {isWorking ? (
                 <>
@@ -2970,7 +2974,7 @@ export default function ImageTool() {
                             >
                               {g.fileUrl ? (
                                 /* eslint-disable-next-line @next/next/no-img-element */
-                                <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                                <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} data-testid="generated-image" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
                                   <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />

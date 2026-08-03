@@ -82,6 +82,7 @@ export default function LiTEmptyState({
     <div
       className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6"
       style={{ color: "var(--text-primary)" }}
+      data-testid="empty-state"
     >
       {/* Active character — clean transparent art, no framed black bars. */}
       <div className="relative mb-2 grid min-h-[104px] place-items-center">
@@ -182,6 +183,7 @@ export default function LiTEmptyState({
                   backgroundColor: "rgba(114,242,56,0.06)",
                   color: "var(--litt-primary)",
                 }}
+                data-testid="active-project-name"
               >
                 Blank project ready — {projectName ?? "Untitled"}
               </div>
@@ -194,6 +196,7 @@ export default function LiTEmptyState({
                   backgroundColor: "rgba(114,242,56,0.06)",
                   color: "var(--litt-primary)",
                 }}
+                data-testid="active-project-name"
               >
                 {projectName}
               </div>
@@ -302,6 +305,7 @@ function NoProjectAction({
         color: "var(--text-secondary)",
       }}
       aria-label={label}
+      data-testid={label === "Start blank" ? "new-project-button" : undefined}
     >
       <Icon size={16} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
       <span className="text-[11px] font-bold">{label}</span>

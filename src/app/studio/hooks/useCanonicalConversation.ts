@@ -856,7 +856,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
+    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
   );
 
   // Regenerate — calls canonical regenerate API

@@ -93,6 +93,7 @@ export default function StudioTranscript({
             <div
               key={key}
               className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+              data-testid={isUser ? "user-message" : "assistant-message"}
             >
               {isUser ? (
                 <UserMessageAvatar size={30} />

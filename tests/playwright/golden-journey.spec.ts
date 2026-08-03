@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { monitorApplicationErrors, assertNoErrors, waitForPageReady } from "./helpers";
 
 /**
@@ -9,58 +9,6 @@ import { monitorApplicationErrors, assertNoErrors, waitForPageReady } from "./he
  *
  * Uses mocked AI responses for deterministic, fast, free testing.
  */
-
-function monitorApplicationErrors(page: Page): string[] {
-  const errors: string[] = [];
-  const ALLOWED_FAILURES = [
-    "google-analytics.com",
-    "googletagmanager.com",
-    "clerk.google.dev",
-    "fonts.gstatic.com",
-    "vitals.vercel-insights.com",
-  ];
-
-  const isAllowed = (url: string): boolean =>
-    ALLOWED_FAILURES.some((pattern) => url.includes(pattern));
-
-  page.on("pageerror", (error) => {
-    errors.push(`PAGE ERROR: ${error.message}`);
-  });
-
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      const text = message.text();
-      if (
-        !text.includes("Clerk") &&
-        !text.includes("Warning:") &&
-        !text.includes("Download the React DevTools")
-      ) {
-        errors.push(`CONSOLE ERROR: ${text}`);
-      }
-    }
-  });
-
-  page.on("requestfailed", (request) => {
-    const url = request.url();
-    if (!isAllowed(url)) {
-      errors.push(
-        `REQUEST FAILED: ${request.method()} ${url} — ${request.failure()?.errorText ?? "unknown"}`,
-      );
-    }
-  });
-
-  page.on("response", (response) => {
-    const url = response.url();
-    if (
-      (url.includes("litlabs.net") || url.includes("127.0.0.1:3000") || url.includes("localhost:3000")) &&
-      response.status() >= 500
-    ) {
-      errors.push(`HTTP ${response.status()}: ${url}`);
-    }
-  });
-
-  return errors;
-}
 
 test("customer can create, chat, generate an image, and persist work @golden", async ({
   page,

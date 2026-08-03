@@ -5,7 +5,7 @@ import path from "path";
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ??
   process.env.SMOKE_TEST_URL ??
-  "http://127.0.0.1:3000";
+  "http://127.0.0.1:3001";
 
 const authDir = path.join(__dirname, "tests/playwright/.clerk");
 
@@ -95,9 +95,9 @@ export default defineConfig({
     : {
         webServer: {
           command: "pnpm start",
-          url: "http://127.0.0.1:3000",
+          url: "http://127.0.0.1:3001",
           timeout: 60_000,
-          reuseExistingServer: false,
+          reuseExistingServer: true,
           cwd: ".",
           env: (() => {
             const env: Record<string, string> = {};
@@ -109,6 +109,8 @@ export default defineConfig({
             env.CI = "true";
             env.PLAYWRIGHT_TEST = "true";
             env.PLAYWRIGHT_AUTH_DISABLED = "true";
+            env.HOSTNAME = "0.0.0.0";
+            env.PORT = "3001";
             return env;
           })(),
         },
