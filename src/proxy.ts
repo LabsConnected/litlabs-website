@@ -72,6 +72,14 @@ const middleware = useClerkMiddleware
         // Clerk unreachable — allow request through, API will 401
       }
 
+      // Redirect "/" to "/studio-preview?embed=1" on v0 sandbox hostname (*.vercel.run)
+      if (req.nextUrl.pathname === "/" && req.nextUrl.hostname.endsWith(".vercel.run")) {
+        const url = req.nextUrl.clone();
+        url.pathname = "/studio-preview";
+        url.searchParams.set("embed", "1");
+        return NextResponse.redirect(url);
+      }
+
       const response = NextResponse.next();
 
       if (["/about", "/contact", "/docs", "/pricing"].includes(req.nextUrl.pathname)) {
@@ -101,6 +109,14 @@ const middleware = useClerkMiddleware
       return response;
     })
   : function passthroughMiddleware(req: NextRequest) {
+      // Redirect "/" to "/studio-preview?embed=1" on v0 sandbox hostname (*.vercel.run)
+      if (req.nextUrl.pathname === "/" && req.nextUrl.hostname.endsWith(".vercel.run")) {
+        const url = req.nextUrl.clone();
+        url.pathname = "/studio-preview";
+        url.searchParams.set("embed", "1");
+        return NextResponse.redirect(url);
+      }
+
       const response = NextResponse.next();
 
       if (["/about", "/contact", "/docs", "/pricing"].includes(req.nextUrl.pathname)) {
