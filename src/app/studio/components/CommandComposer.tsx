@@ -20,10 +20,13 @@ import {
 import {
   useStudioAgentStore,
   AGENT_META,
+  STUDIO_AGENTS,
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
-import { ChevronDown, Check } from "lucide-react";
+import { useUserPlan } from "../hooks/useUserPlan";
+import { ChevronDown, Check, Lock } from "lucide-react";
+import Link from "next/link";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -190,8 +193,7 @@ export default function CommandComposer({
   })();
   const MicIcon = micState.icon;
 
-  const agentAccent =
-    activeAgentId === "spark" ? "var(--spark-primary)" : "var(--litt-primary)";
+  const agentAccent = agentMeta.color;
 
   return (
     <div
@@ -493,6 +495,7 @@ function AgentPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { hasAccess, loading } = useUserPlan();
   useEffect(() => {
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -504,16 +507,15 @@ function AgentPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 240);
+  const left = Math.min(rect.left, window.innerWidth - 260);
   const top = rect.bottom + 6;
-  const agents: AgentId[] = ["litt", "spark"];
 
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label="Select agent"
-      className="fixed z-[200] w-56 overflow-hidden rounded-xl border shadow-2xl"
+      className="fixed z-[200] w-64 max-h-[70vh] overflow-y-auto rounded-xl border shadow-2xl"
       style={{
         left,
         top,
@@ -522,41 +524,66 @@ function AgentPopover({
       }}
     >
       <div
-        className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)" }}
+        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)", backgroundColor: "var(--studio-elevated)" }}
       >
-        Agent
+        AI Team
       </div>
-      {agents.map((id) => {
-        const meta = AGENT_META[id];
-        const accent = id === "spark" ? "var(--spark-primary)" : "var(--litt-primary)";
-        const isActive = activeId === id;
+      {STUDIO_AGENTS.map((meta) => {
+        const accent = meta.color;
+        const isActive = activeId === meta.id;
+        const unlocked = loading || hasAccess(meta.minimumPlan);
         return (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onSelect(id)}
-            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-            style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
-          >
-            <span
-              className="grid h-7 w-7 place-items-center rounded-lg text-[11px] font-black"
-              style={{ backgroundColor: `${accent}20`, color: accent }}
+          <div key={meta.id}>
+            <button
+              type="button"
+              disabled={!unlocked}
+              onClick={() => unlocked && onSelect(meta.id)}
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
             >
-              {meta.displayName[0]}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{meta.displayName}</div>
-              <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{meta.role}</div>
-            </div>
-            {isActive && (
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
+              <span
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[11px] font-black"
+                style={{ backgroundColor: `${accent}20`, color: accent }}
+              >
+                {unlocked ? meta.displayName[0] : <Lock size={11} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
+                  {meta.displayName}
+                </div>
+                <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
+                  {unlocked ? meta.role : `Requires ${planLabel(meta.minimumPlan)}`}
+                </div>
+              </div>
+              {isActive && unlocked && (
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
+              )}
+            </button>
+            {!unlocked && (
+              <Link
+                href={`/pricing?upgrade=${meta.minimumPlan}`}
+                onClick={onClose}
+                className="flex items-center gap-1 px-3 pb-2 pl-[3.25rem] text-[10px] font-bold transition hover:opacity-80"
+                style={{ color: accent }}
+              >
+                Upgrade to {planLabel(meta.minimumPlan)} →
+              </Link>
             )}
-          </button>
+          </div>
         );
       })}
     </div>
   );
+}
+
+function planLabel(plan: string): string {
+  switch (plan) {
+    case "creator_beta": return "Creator Beta";
+    case "pro_builder_beta": return "Pro Builder Beta";
+    case "founder": return "Founding Member";
+    default: return plan;
+  }
 }
 
 /* ── Model selector popover ────────────────────────────────────── */

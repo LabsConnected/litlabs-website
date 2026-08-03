@@ -86,7 +86,11 @@ function AgentVoiceSync() {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setVoiceAgent = useVoiceStore((s) => s.setActiveAgent);
   useEffect(() => {
-    setVoiceAgent(activeAgentId);
+    // Legacy agent names (nova/forge/echo) map to LiTT for voice purposes.
+    const voiceAgent = ["litt", "spark", "researcher", "writer", "marketer", "coder", "analyst"].includes(activeAgentId)
+      ? (activeAgentId as import("@/features/voice/types").VoiceAgentId)
+      : "litt";
+    setVoiceAgent(voiceAgent);
   }, [activeAgentId, setVoiceAgent]);
   return null;
 }

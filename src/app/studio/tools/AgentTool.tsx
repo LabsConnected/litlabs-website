@@ -9,7 +9,6 @@ import {
   Loader2,
   X,
   ChevronRight,
-  Settings,
   Package,
   Brain,
   Shield,
@@ -23,6 +22,7 @@ import {
   Wand2,
   Cpu,
 } from "lucide-react";
+import { MyAITeam } from "../components/MyAITeam";
 import { AGENT_AVATAR_META } from "@/lib/avatars";
 import Link from "next/link";
 
@@ -682,82 +682,12 @@ export default function AgentTool() {
 
   return (
     <div className="flex h-full overflow-hidden select-none">
-      {/* ── LEFT ASSISTANT RAIL (desktop) ── */}
+      {/* ── LEFT: MY AI TEAM RAIL (desktop) ── */}
       <div
         className="hidden md:flex w-[260px] shrink-0 flex-col border-r"
         style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "90" }}
       >
-        {/* Header */}
-        <div className="px-3 py-3 border-b" style={{ borderColor: T.borderColor + "15" }}>
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>
-            LiTT &amp; Spark
-          </span>
-        </div>
-
-        {/* Assistant list */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          <div className="text-[8px] font-bold uppercase tracking-widest px-2 mb-1 opacity-40" style={{ color: T.textMuted }}>
-            Assistants
-          </div>
-          {PRIMARY_ASSISTANTS.map((a) => {
-            const isActive = selectedAgent.id === a.id;
-            const avatar = getAgentAvatar(a);
-            return (
-              <button
-                key={a.id}
-                onClick={() => switchAgent(a)}
-                className="w-full text-left rounded-lg px-3 py-3 transition-all"
-                style={{
-                  backgroundColor: isActive ? a.color + "12" : "transparent",
-                  border: `1px solid ${isActive ? a.color + "35" : "transparent"}`,
-                  minHeight: "64px",
-                }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-[20px] leading-none shrink-0">{avatar.emoji}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-bold truncate" style={{ color: isActive ? a.color : T.textColor }}>
-                        {a.name}
-                      </span>
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: a.color, boxShadow: `0 0 4px ${a.color}`, opacity: isActive ? 1 : 0.3 }} />
-                    </div>
-                    <div className="text-[9px] truncate mt-0.5" style={{ color: T.textMuted }}>{a.role}</div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-
-          {/* Capabilities link */}
-          <div className="pt-3 mt-2 border-t" style={{ borderColor: T.borderColor + "10" }}>
-            <div className="text-[8px] font-bold uppercase tracking-widest px-2 mb-1 opacity-40" style={{ color: T.textMuted }}>
-              Installed
-            </div>
-            <Link
-              href={`/marketplace?assistant=${selectedAgent.id}`}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] transition-all hover:opacity-80"
-              style={{ color: T.textMuted }}
-            >
-              <Package size={12} style={{ color: selectedAgent.color }} />
-              <span>{enabledCapCount} capabilities</span>
-              <ChevronRight size={9} className="ml-auto opacity-30" />
-            </Link>
-          </div>
-
-          {/* Settings link */}
-          <div className="pt-1">
-            <Link
-              href="/settings"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] transition-all hover:opacity-80"
-              style={{ color: T.textMuted }}
-            >
-              <Settings size={12} style={{ color: T.accentColor }} />
-              <span>Assistant preferences</span>
-              <ChevronRight size={9} className="ml-auto opacity-30" />
-            </Link>
-          </div>
-        </div>
+        <MyAITeam />
       </div>
 
       {/* ── CENTER: CHAT WORKSPACE ── */}
@@ -976,6 +906,13 @@ export default function AgentTool() {
             {a.name}
           </button>
         ))}
+        <Link
+          href="/marketplace"
+          className="flex items-center justify-center px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all"
+          style={{ color: T.accentColor }}
+        >
+          +
+        </Link>
       </div>
 
       {/* ── MOBILE: INSPECTOR BOTTOM SHEET ── */}

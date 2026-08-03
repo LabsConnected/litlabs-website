@@ -1,4 +1,14 @@
-export type AgentSlug = "litt" | "spark";
+export type AgentSlug =
+  | "litt"
+  | "spark"
+  | "researcher"
+  | "writer"
+  | "marketer"
+  | "coder"
+  | "analyst"
+  | "nova"
+  | "forge"
+  | "echo";
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 

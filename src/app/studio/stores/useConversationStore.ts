@@ -145,8 +145,12 @@ export function parseConversationFromUrl(searchParams: URLSearchParams): {
 } {
   const conversationId = searchParams.get("conversation");
   const agentRaw = searchParams.get("agent");
+  const VALID_AGENT_SLUGS: AgentSlug[] = [
+    "litt", "spark", "researcher", "writer", "marketer",
+    "coder", "analyst", "nova", "forge", "echo",
+  ];
   const agentSlug: AgentSlug | null =
-    agentRaw === "litt" || agentRaw === "spark" ? agentRaw : null;
+    agentRaw && VALID_AGENT_SLUGS.includes(agentRaw as AgentSlug) ? (agentRaw as AgentSlug) : null;
   return { conversationId, agentSlug };
 }
 

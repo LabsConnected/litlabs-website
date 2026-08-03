@@ -74,7 +74,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
-  { id: "agents", label: "LiTT & Spark", icon: Bot, shortcut: "5" },
+  { id: "agents", label: "AI Team", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
   { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },

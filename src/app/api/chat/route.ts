@@ -4,6 +4,8 @@ import { orchestrator } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { AGENTS } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
+import { auth } from "@/lib/auth";
+import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
 
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
@@ -17,6 +19,30 @@ async function handler(req: NextRequest) {
     // Backward-compatible gallery/chat payload: { message, agent }
     const agentSlug = body.agent || body.agentSlug;
     if ((!from || !to) && message && agentSlug) {
+      // This path runs the model for the user — require auth + entitlement.
+      const { clerkId } = await auth();
+      if (!clerkId) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      const entitlement = await resolveAgentEntitlement({ clerkId, agentSlug });
+      if (!entitlement.allowed) {
+        if (entitlement.reason === "agent_not_found") {
+          return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 });
+        }
+        return NextResponse.json(
+          { error: "Agent requires an upgraded plan", requiredPlan: entitlement.requiredPlan },
+          { status: 403 },
+        );
+      }
+
+      // Pre-charge LiTTBits (atomic, idempotent).
+      const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${Date.now()}`;
+      const charge = await chargeAgentRun({ clerkId, agentSlug, idempotencyKey });
+      if (charge.error) {
+        return NextResponse.json({ error: charge.error, code: "insufficient_credits" }, { status: 402 });
+      }
+
       const agent = AGENTS[agentSlug as keyof typeof AGENTS];
       if (!agent) {
         return NextResponse.json(

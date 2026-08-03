@@ -4,6 +4,9 @@ import { streamText, generateText, type LLMProvider, type ModelCategory } from "
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
+import { getAgentDefinition } from "@/lib/agent-registry";
+import type { PlanId } from "@/config/plans";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -263,13 +266,55 @@ async function handleSimpleChat(body: UnifiedChatRequest, userId: string | null)
   });
 }
 
+/**
+ * Authorize an agent run: check entitlement and pre-charge LiTTBits.
+ * Returns null on success (with the idempotency key for refund on failure),
+ * or an error NextResponse on failure.
+ *
+ * Pre-charging before the model call means streaming responses can still
+ * bill correctly (we can't charge after headers are sent). If the model
+ * fails, the caller refunds via refundAgentRun with the same key.
+ */
+async function authorizeAgentRun(
+  clerkId: string,
+  agentSlug: string,
+): Promise<{ idempotencyKey: string } | NextResponse> {
+  const entitlement = await resolveAgentEntitlement({ clerkId, agentSlug });
+
+  if (!entitlement.allowed) {
+    if (entitlement.reason === "agent_not_found") {
+      return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 });
+    }
+    return NextResponse.json(
+      {
+        error: "Agent requires an upgraded plan",
+        requiredPlan: entitlement.requiredPlan,
+        reason: entitlement.reason,
+      },
+      { status: 403 },
+    );
+  }
+
+  // Pre-charge LiTTBits (atomic, idempotent). Free agents skip charging.
+  const idempotencyKey = `agentrun:${clerkId}:${agentSlug}:${Date.now()}`;
+  const charge = await chargeAgentRun({ clerkId, agentSlug, idempotencyKey });
+  if (charge.error) {
+    return NextResponse.json(
+      { error: charge.error, code: "insufficient_credits" },
+      { status: 402 },
+    );
+  }
+
+  return { idempotencyKey };
+}
+
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
     return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
   }
 
   try {
-    const { userId } = await auth();
+    const { userId, clerkId } = await auth();
     const body = (await req.json()) as UnifiedChatRequest;
     const { mode = "llm" } = body;
 
@@ -281,9 +326,23 @@ async function handler(req: NextRequest) {
       else detectedMode = "llm";
     }
 
+    // Agent-to-agent mode is internal orchestration — no entitlement check.
+    if (detectedMode === "agent") {
+      return await handleAgentChat(body);
+    }
+
+    // LLM and simple modes run the model for the user — require auth + entitlement.
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const agentSlug = (body.agentSlug || body.agent || "litt") as string;
+    const authz = await authorizeAgentRun(clerkId, agentSlug);
+    if (authz instanceof NextResponse) {
+      return authz;
+    }
+
     switch (detectedMode) {
-      case "agent":
-        return await handleAgentChat(body);
       case "simple":
         return await handleSimpleChat(body, userId);
       case "llm":

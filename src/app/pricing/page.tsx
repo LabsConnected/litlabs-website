@@ -281,18 +281,18 @@ export default function PricingPage() {
         </div>
 
         <h1>
-          Build more.
-          <span> Pay for what actually runs.</span>
+          Your AI business team.
+          <span> Research, write, code, market, and analyze.</span>
         </h1>
 
         <p className={styles.heroCopy}>
-          Start free, then unlock private projects, GitHub workflows, voice,
-          terminal runtime, advanced models, and deployment when your work needs
-          it.
+          One workspace, seven AI agents. Start free with LiTT and Spark, then
+          unlock Researcher, Writer, and Marketer with Creator Beta — or add
+          Coder and Analyst with Pro Builder Beta.
         </p>
 
         <div className={styles.heroMeta}>
-          <span>No fake unlimited claims</span>
+          <span>7 specialist AI agents</span>
           <span>Clear LiTTBit allowances</span>
           <span>Projects stay yours</span>
         </div>

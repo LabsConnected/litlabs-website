@@ -149,7 +149,7 @@ export function useCanonicalConversation({
   useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
 
   const { profile } = useProfile();
-  const initialPrompt = searchParams.get("mission") || "";
+  const initialPrompt = searchParams.get("mission") || searchParams.get("prompt") || "";
 
   // Subscribe to the messages slice reactively (selector pattern, matching
   // CanvasPanel). The no-selector + store.getMessages() approach relies on the

@@ -98,6 +98,38 @@ describe("useConversationStore", () => {
       expect(result.conversationId).toBeNull();
       expect(result.agentSlug).toBeNull();
     });
+
+    it("parses nova agent slug", () => {
+      const params = new URLSearchParams("?agent=nova");
+      const result = parseConversationFromUrl(params);
+      expect(result.agentSlug).toBe("nova");
+    });
+
+    it("parses forge agent slug", () => {
+      const params = new URLSearchParams("?agent=forge");
+      const result = parseConversationFromUrl(params);
+      expect(result.agentSlug).toBe("forge");
+    });
+
+    it("parses echo agent slug", () => {
+      const params = new URLSearchParams("?agent=echo");
+      const result = parseConversationFromUrl(params);
+      expect(result.agentSlug).toBe("echo");
+    });
+
+    it("parses specialist agent slugs", () => {
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=researcher")).agentSlug).toBe("researcher");
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=writer")).agentSlug).toBe("writer");
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=marketer")).agentSlug).toBe("marketer");
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=coder")).agentSlug).toBe("coder");
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=analyst")).agentSlug).toBe("analyst");
+    });
+
+    it("rejects invalid agent slugs", () => {
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=director")).agentSlug).toBeNull();
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=LiTT")).agentSlug).toBeNull();
+      expect(parseConversationFromUrl(new URLSearchParams("?agent=")).agentSlug).toBeNull();
+    });
   });
 
   describe("serializeConversationToUrl", () => {

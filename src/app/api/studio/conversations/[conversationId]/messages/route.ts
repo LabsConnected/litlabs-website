@@ -9,7 +9,7 @@ import {
   insertMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
-import { resolveAgent } from "@/lib/studio/agent-registry";
+import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
 import { recallMemories, persistMemory, formatMemoryContext } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
@@ -97,8 +97,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
 
   // 3. Resolve agent
-  const agentSlug: AgentSlug = requestedAgentSlug && (requestedAgentSlug === "litt" || requestedAgentSlug === "spark")
-    ? requestedAgentSlug
+  const agentSlug: AgentSlug = requestedAgentSlug && isValidAgentSlug(String(requestedAgentSlug))
+    ? (requestedAgentSlug as AgentSlug)
     : conversation.activeAgentSlug;
   const agent = resolveAgent(agentSlug);
   if (!agent) {
