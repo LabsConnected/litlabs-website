@@ -285,9 +285,21 @@ export function VoiceSessionProvider({
   useEffect(() => { autoSendEnabledRef.current = autoSendEnabled; }, [autoSendEnabled]);
   useEffect(() => { pendingTranscriptRef.current = pendingTranscript; }, [pendingTranscript]);
 
-  // Update diagnostics helper
+  // Update diagnostics helper — shallow-compares the patch to avoid
+  // infinite setState loops when the effect deps trigger but values
+  // haven't actually changed.
   const updateDiagnostics = useCallback((patch: Partial<VoiceDiagnostics>) => {
-    setDiagnostics((prev) => ({ ...prev, ...patch }));
+    setDiagnostics((prev) => {
+      let changed = false;
+      for (const key in patch) {
+        if (prev[key as keyof VoiceDiagnostics] !== patch[key as keyof VoiceDiagnostics]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return prev;
+      return { ...prev, ...patch };
+    });
   }, []);
 
   // --- Inworld session (primary voice provider) ---
@@ -439,6 +451,12 @@ export function VoiceSessionProvider({
   useEffect(() => { voiceInputStateRef.current = voiceInputState; }, [voiceInputState]);
   useEffect(() => { voiceOutputStateRef.current = voiceOutputState; }, [voiceOutputState]);
 
+  // Keep a ref to inworldSession so the diagnostics effect doesn't depend on
+  // its identity (useInworldSession returns a new object every render, which
+  // would cause an infinite setState loop if used as a useEffect dependency).
+  const inworldSessionRef = useRef(inworldSession);
+  useEffect(() => { inworldSessionRef.current = inworldSession; });
+
   // Sync diagnostics from state
   useEffect(() => {
     updateDiagnostics({
@@ -447,11 +465,11 @@ export function VoiceSessionProvider({
       voicePhase: voiceState,
       inputState: voiceInputState,
       outputState: voiceOutputState,
-      vadState: inworldSession.getVadState(),
+      vadState: inworldSessionRef.current.getVadState(),
       sessionGeneration: sessionGenerationRef.current,
       activeStreamCount: streamRef.current?.getTracks().length ?? 0,
     });
-  }, [voiceState, voiceInputState, voiceOutputState, updateDiagnostics, inworldSession]);
+  }, [voiceState, voiceInputState, voiceOutputState, updateDiagnostics]);
 
   // ---------------------------------------------------------------------------
   // cleanup — fully idempotent
