@@ -260,7 +260,11 @@ export default function VideoTool() {
         const statusRes = await fetch(pollEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ [pollBodyKey]: pollBodyValue }),
+          body: JSON.stringify({
+            [pollBodyKey]: pollBodyValue,
+            cost,
+            model: apiModel,
+          }),
         });
         if (!statusRes.ok) {
           const err = await statusRes.json().catch(() => ({}));
@@ -289,17 +293,8 @@ export default function VideoTool() {
             ),
           );
 
-          const wres = await fetch("/api/wallet", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: "spend",
-              amount: cost,
-              reason: `video_${model}`,
-              idempotencyKey: `video:${id}`,
-            }),
-          });
-          await wres.json();
+          // NOTE: The backend already charges LiTTBits in /api/media/generate-video.
+          // Do NOT charge again here — that was the double-billing bug.
           refreshWallet().catch(() => {});
           break;
         }
@@ -309,10 +304,22 @@ export default function VideoTool() {
       }
 
       if (Date.now() - pollStart >= POLL_TIMEOUT) {
+        // Request refund for timed-out video
+        await fetch(pollEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            [pollBodyKey]: pollBodyValue,
+            cost,
+            model: apiModel,
+          }),
+        }).catch(() => {});
         throw new Error(`Video generation timed out after ${POLL_TIMEOUT / 1000} seconds.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Video generation failed");
+      // Refresh wallet in case a refund was processed
+      refreshWallet().catch(() => {});
       setCurrent((prev) =>
         prev?.id === id
           ? {

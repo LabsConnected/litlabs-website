@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { GoogleGenAI, Modality } from "@google/genai";
 import {
   MEDIA_PROVIDERS,
   MediaFormat,
@@ -78,43 +79,30 @@ async function handleGeminiImage(
   if (!GEMINI_API_KEY)
     throw new Error("Gemini key missing — set GEMINI_API_KEY");
 
-  const finalAspect = resolveGeminiAspect(width, height, aspectRatio);
+  // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
+  // Imagen 3 shuts down August 17, 2026. Nano Banana uses generateContent
+  // with responseModalities: [IMAGE] instead of the predict API.
+  const model = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-  // Use stable Imagen 3 predict API - correct model name
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": "litlabs-studio",
-      },
-      body: JSON.stringify({
-        instances: [{ prompt: prompt.trim() }],
-        parameters: { sampleCount: 1, aspectRatio: finalAspect },
-      }),
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt.trim(),
+    config: {
+      responseModalities: [Modality.IMAGE],
     },
-  );
+  });
 
-  if (!res.ok) {
-    const err = await res.text().catch(() => "");
-    // Try fallback to older model if 404
-    if (res.status === 404) {
-      throw new Error(
-        `Gemini Imagen 3 model not found. Please check your API key or try Pollinations/Together.ai instead.`,
-      );
-    }
-    throw new Error(
-      `Gemini Imagen 3 error: ${err.slice(0, 300) || res.statusText}`,
-    );
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find((p) => p.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    throw new Error("Gemini image generation returned no image data");
   }
 
-  const data = await res.json();
-  const b64 = data.predictions?.[0]?.bytesBase64Encoded;
-  if (!b64) throw new Error("Gemini Imagen 3 returned no image data");
+  const mimeType = imagePart.inlineData.mimeType || "image/png";
 
   return {
-    downloadUrl: `data:image/png;base64,${b64}`,
+    downloadUrl: `data:${mimeType};base64,${imagePart.inlineData.data}`,
     id: `gemini_${Date.now()}`,
     status: "complete",
     title: prompt.slice(0, 60),
@@ -439,7 +427,7 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 /*  Main handler                                                        */
 /* ------------------------------------------------------------------ */
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json(
       { error: "Unauthorized — sign in to generate media" },

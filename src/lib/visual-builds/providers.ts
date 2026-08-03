@@ -1,3 +1,4 @@
+import { GoogleGenAI, Modality } from "@google/genai";
 import { AssetInspection, VisualSourceType } from "./types";
 
 export interface StockSearchInput {
@@ -175,37 +176,33 @@ class GeminiImageGenerationProvider implements ImageGenerationProvider {
   }
 
   async generate(input: ImageGenerationInput): Promise<GeneratedAssetResult> {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${this.apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          instances: [{ prompt: input.prompt.trim() }],
-          parameters: {
-            sampleCount: 1,
-            aspectRatio: input.aspectRatio,
-          },
-        }),
+    // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
+    // Imagen 3 shuts down August 17, 2026.
+    const model = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: input.prompt.trim(),
+      config: {
+        responseModalities: [Modality.IMAGE],
       },
-    );
+    });
 
-    if (!response.ok) {
-      throw new Error(`Gemini image generation failed: ${response.status}`);
-    }
-
-    const payload = (await response.json()) as { predictions?: Array<{ bytesBase64Encoded?: string }> };
-    const image = payload.predictions?.[0]?.bytesBase64Encoded;
-    if (!image) {
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
+    const imagePart = parts.find((p) => p.inlineData?.data);
+    if (!imagePart?.inlineData?.data) {
       throw new Error("Gemini returned no image data");
     }
+
+    const mimeType = imagePart.inlineData.mimeType || "image/png";
 
     return {
       sourceType: "generated",
       provider: "gemini",
       id: `gemini-${Date.now()}`,
       prompt: input.prompt,
-      downloadUrl: `data:image/png;base64,${image}`,
+      downloadUrl: `data:${mimeType};base64,${imagePart.inlineData.data}`,
       originalUrl: null,
       attribution: null,
       license: null,

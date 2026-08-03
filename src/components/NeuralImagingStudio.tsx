@@ -18,9 +18,9 @@ const PROVIDERS = [
   },
   {
     id: "gemini",
-    name: "Gemini (Imagen 3)",
+    name: "Gemini (Nano Banana)",
     cost: "1",
-    description: "Google Imagen 3, needs GEMINI_API_KEY · 1 🪙",
+    description: "Google Nano Banana, needs GEMINI_API_KEY · 1 🪙",
   },
   {
     id: "together",

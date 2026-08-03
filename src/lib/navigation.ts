@@ -111,7 +111,6 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Image,
     accent: GROUP_ACCENTS.Gallery,
     items: [
-      { label: "Community", href: "/gallery", icon: Image },
       { label: "Showcase", href: "/showcase", icon: Star },
     ],
   },
@@ -127,22 +126,22 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Creator Hub", href: "/creator", icon: BarChart3 },
     ],
   },
-  {
-    label: "Discover",
-    href: "/discover",
-    icon: Users,
-    accent: GROUP_ACCENTS.Social,
-    items: [
-      { label: "Community", href: "/discover", icon: Users },
-    ],
-  },
+  // Community/Discover hidden — social features disabled for v1
+  // {
+  //   label: "Discover",
+  //   href: "/discover",
+  //   icon: Users,
+  //   accent: GROUP_ACCENTS.Social,
+  //   items: [
+  //     { label: "Community", href: "/discover", icon: Users },
+  //   ],
+  // },
   {
     label: "More",
-    href: "/games",
+    href: "/wallet",
     icon: Menu,
     accent: GROUP_ACCENTS.More,
     items: [
-      { label: "Games", href: "/games", icon: Gamepad2 },
       { label: "Wallet", href: "/wallet", icon: Wallet },
       { label: "Docs", href: "/docs", icon: FileText },
       { label: "Settings", href: "/settings", icon: Settings },
@@ -170,9 +169,7 @@ export const AI_SUGGESTIONS = [
   "Open my agents",
   "Continue yesterday's song",
   "Show my revenue",
-  "Play Hextris",
   "Open Studio",
-  "Show trending games",
   "Create a new post",
 ];
 

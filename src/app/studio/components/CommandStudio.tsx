@@ -358,12 +358,12 @@ export default function CommandStudio() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
-  // Studio internal tabs (Work | Preview | Code | Files)
+  // Studio internal tabs (Work | Preview | Code)
+  // "Files" (Canvas) tab disabled for v1 — persistence is unfinished.
   const studioTabs: { id: StudioMode; label: string }[] = [
     { id: "work", label: "Work" },
     { id: "preview", label: "Preview" },
     { id: "code", label: "Code" },
-    { id: "files", label: "Files" },
   ];
 
   // Create internal tabs (Image | Video | Audio | Music | Brand)

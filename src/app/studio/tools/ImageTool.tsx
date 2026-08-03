@@ -270,7 +270,7 @@ const PROVIDER_OPTIONS = [
   {
     id: "gemini" as const,
     label: "Gemini",
-    tag: "Imagen3",
+    tag: "Nano Banana",
     desc: "GEMINI_API_KEY",
     cost: 1,
     ready: false,

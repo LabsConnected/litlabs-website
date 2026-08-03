@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
+import { adjustWalletBalance } from "@/lib/wallet-ledger";
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { taskId, saveToR2 = true } = await req.json();
+    const { taskId, saveToR2 = true, cost = 0, model = "happyhorse" } = await req.json();
     if (!taskId)
       return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
 
@@ -41,11 +42,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If the task failed, refund the reserved LiTTBits
+    if (result.taskStatus === "FAILED" && cost > 0) {
+      await adjustWalletBalance({
+        clerkId: userId,
+        amount: cost,
+        type: "refund",
+        reason: `Video refund: ${model} task failed`,
+        idempotencyKey: `video_refund_${taskId}`,
+      });
+    }
+
     return NextResponse.json({
       done: result.taskStatus === "SUCCEEDED" || result.taskStatus === "FAILED",
       taskStatus: result.taskStatus,
       videoUrl: result.videoUrl,
       error: result.error,
+      refunded: result.taskStatus === "FAILED" && cost > 0,
     });
   } catch (err: unknown) {
     return NextResponse.json(
