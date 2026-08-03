@@ -18,6 +18,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSessionAuth } from "@/hooks/useSessionAuth";
+import { isFeatureEnabled } from "@/config/feature-flags";
 import dynamic from "next/dynamic";
 import {
   Home,
@@ -54,11 +55,18 @@ const leftNavLinks = [
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
-  { href: "/games", label: "Games", icon: Gamepad2 },
-  { href: "/discover", label: "Community", icon: MessageCircle },
+  // Games hidden — retro game runtime disabled for v1
+  // { href: "/games", label: "Games", icon: Gamepad2 },
+  // Community hidden — social features disabled for v1
+  // { href: "/discover", label: "Community", icon: MessageCircle },
   { href: "/pricing", label: "Pricing", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
-];
+].filter((link) => {
+  // Feature flag filtering for v1 release
+  if (link.href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
+  if (link.href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
+  return true;
+});
 
 const agentsLink = { href: "/agents", label: "Agents", icon: BrainCircuit };
 const AgentsIcon = agentsLink.icon;
@@ -75,9 +83,10 @@ const userLinks = [
 
 const mobileDrawerGroups = [
   { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
-  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/agents", label: "LiTT Agent", icon: BrainCircuit }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
-  { label: "Discover", links: [{ href: "/discover", label: "Community", icon: MessageCircle }] },
-  { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
+  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
+  // Individual agent purchases disabled for v1 — marketplace browsing is the public surface
+  // { label: "Discover", links: [{ href: "/discover", label: "Community", icon: MessageCircle }] },
+  // { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
   { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },
 ];
 

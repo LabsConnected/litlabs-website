@@ -103,7 +103,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   founder: {
     id: "founder",
     name: "Founding Supporter",
-    description: "6 months of Creator + founder perks",
+    description: "Coming soon — pricing and duration being finalized",
     billingType: "one_time",
     monthlyPriceCents: 4900,
     standardPriceCents: null,
@@ -120,7 +120,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       "Priority feedback channel",
     ],
     beta: true,
-    enabled: true,
+    enabled: false,
     founderLimit: 100,
   },
 };

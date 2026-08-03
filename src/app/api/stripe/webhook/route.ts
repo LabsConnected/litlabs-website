@@ -244,7 +244,9 @@ export async function POST(req: NextRequest) {
               .single();
             if (user) {
               await grantSubscriptionCredits(sb, user.id, planId, `founder_${session.id}`);
-              // Record as a permanent subscription
+              // Record as a time-limited subscription (6 months of Creator access)
+              // Founder is currently DISABLED for v1 — this code path is retained
+              // for when the pricing/duration conflict is resolved.
               await sb.from("subscriptions").upsert({
                 user_id: user.id,
                 stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,

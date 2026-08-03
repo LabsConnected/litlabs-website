@@ -25,6 +25,7 @@ import {
   getAgentAuthorization,
 } from "@/lib/agent-entitlements";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isFeatureEnabled } from "@/config/feature-flags";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,13 @@ async function postHandler(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  // v1 release freeze: individual agent installs are disabled
+  if (!isFeatureEnabled("marketplaceAgentInstall")) {
+    return NextResponse.json(
+      { error: "Individual agent installation is coming soon. Agent access is included with Creator and Pro plans." },
+      { status: 503 },
+    );
+  }
   const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 

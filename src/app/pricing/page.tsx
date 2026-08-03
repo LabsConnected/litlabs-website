@@ -266,7 +266,6 @@ export default function PricingPage() {
   );
 
   const founder = PLANS.founder;
-  const founderLoading = loading === founder.id;
 
   return (
     <main className={styles.page}>
@@ -336,27 +335,24 @@ export default function PricingPage() {
           <div className={styles.founderCopy}>
             <div className={styles.founderTitleRow}>
               <p>Founding Supporter</p>
-              <span>Limited · 100 spots</span>
+              <span>Coming Soon</span>
             </div>
             <h2>
-              6 months of Creator + bonus perks for{" "}
-              <strong>{formatPrice(founder.monthlyPriceCents)} once</strong>
+              Founding Supporter pricing and duration are being finalized.
             </h2>
             <p>
-              Includes 5,000 bonus LiTTBits, a Founder badge, 15% off future
-              credit packs, early feature access, and priority feedback.
-              One-time purchase — no recurring charge.
+              We're confirming the final price and access duration before
+              opening checkout. Join the waitlist to be notified when it's
+              ready — no payment required until then.
             </p>
           </div>
 
           <button
             type="button"
             className={styles.founderButton}
-            disabled={founderLoading}
-            onClick={() => handleCheckout(founder)}
+            disabled
           >
-            Become a Founding Supporter
-            {founderLoading ? null : <ArrowIcon />}
+            Coming Soon
           </button>
         </article>
 

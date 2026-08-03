@@ -257,7 +257,12 @@ async function callPatch(agentId: string, action: string) {
 // -- Tests -----------------------------------------------------------------
 
 describe("Phase 2: Agent installation authorization", () => {
-  it("free agent installs without purchase (version price = 0)", async () => {
+  // Disabled for v1 — individual agent purchases/install are feature-flagged off.
+  // The marketplaceAgentInstall flag is false, so POST /install returns 503
+  // before any auth/DB logic runs. These tests verify the full install flow
+  // and will be re-enabled when the flag is turned on.
+  describe.skip("POST install — disabled for v1 (marketplaceAgentInstall flag off)", () => {
+    it("free agent installs without purchase (version price = 0)", async () => {
     mockAgent = { id: "agent-free", slug: "litt-free", is_public: true };
     mockVersion = {
       id: "ver-free", version: "1.0.0", price_cents: 0, currency: "usd",
@@ -383,6 +388,7 @@ describe("Phase 2: Agent installation authorization", () => {
     expect(data.state).toBe("open");
     expect(data.message).toContain("re-enabled");
   });
+  }); // end describe.skip — POST install disabled for v1
 
   it("uninstall does not delete the financial entitlement", async () => {
     mockAgent = { id: "agent-paid", slug: "litt-growth", is_public: true };
@@ -485,6 +491,8 @@ describe("Phase 2: Agent installation authorization", () => {
     expect(res.status).toBe(404);
   });
 
+  // Disabled for v1 — individual agent purchases/install are feature-flagged off.
+  describe.skip("POST install (price drift) — disabled for v1 (marketplaceAgentInstall flag off)", () => {
   it("price drift: version.price_cents>0 requires payment even if agent row differs", async () => {
     mockAgent = { id: "agent-drift", slug: "litt-drift", is_public: true };
     mockVersion = {
@@ -501,6 +509,7 @@ describe("Phase 2: Agent installation authorization", () => {
     const data = await res.json();
     expect(data.error).toContain("Payment required");
   });
+  }); // end describe.skip — POST install (price drift) disabled for v1
 
   it("v1 entitlement allows v1.1 (within range)", async () => {
     mockAgent = { id: "agent-v1", slug: "litt-v1", is_public: true };
@@ -538,6 +547,8 @@ describe("Phase 2: Agent installation authorization", () => {
     expect(data.canInstall).toBe(false);
   });
 
+  // Disabled for v1 — individual agent purchases/install are feature-flagged off.
+  describe.skip("POST install (re-enable) — disabled for v1 (marketplaceAgentInstall flag off)", () => {
   it("lapsed plan blocks re-enable (canEnable false)", async () => {
     mockAgent = { id: "agent-lapsed", slug: "litt-lapsed", is_public: true };
     mockVersion = {
@@ -571,6 +582,7 @@ describe("Phase 2: Agent installation authorization", () => {
     const data = await res.json();
     expect(data.error).toContain("revoked");
   });
+  }); // end describe.skip — POST install (re-enable) disabled for v1
 
   it("PATCH enable enforces canEnable (lapsed plan rejected)", async () => {
     mockAgent = { id: "agent-patch", slug: "litt-patch", is_public: true };
@@ -643,5 +655,21 @@ describe("Phase 2: Agent installation authorization", () => {
     const data = await res.json();
     expect(data.state).toBe("upgrade_required");
     expect(data.canInstall).toBe(false);
+  });
+
+  // Active tests for v1 — verify the POST install route respects the feature flag.
+  it("POST install returns 503 when marketplaceAgentInstall flag is disabled", async () => {
+    const res = await callInstall("agent-uuid-001");
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error).toContain("Individual agent installation is coming soon");
+  });
+
+  it("POST install returns 503 before checking authentication (flag check is first)", async () => {
+    // Even unauthenticated requests get 503, not 401, because the flag
+    // check runs before auth.
+    mockClerkId = null;
+    const res = await callInstall("agent-uuid-001");
+    expect(res.status).toBe(503);
   });
 });
