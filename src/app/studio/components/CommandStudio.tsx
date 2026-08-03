@@ -204,7 +204,7 @@ export default function CommandStudio() {
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
-    onRouteTool: handleRouteTool,
+    onRouteToolAction: handleRouteTool,
     serverProjectId: capabilities.projectId,
   });
 
@@ -413,8 +413,9 @@ export default function CommandStudio() {
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
           branch={contextLine.branch}
-          onPreview={handlePreview}
-          onOpenActivity={handleOpenActivity}
+          onPreviewAction={handlePreview}
+          onOpenActivityAction={handleOpenActivity}
+          onClearChatAction={conversation.clear}
           projectReady={projectReady}
           capabilities={capabilities}
           busy={conversation.busy}

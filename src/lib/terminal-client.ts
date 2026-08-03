@@ -8,9 +8,15 @@ type CachedTerminalToken = {
 let cached: CachedTerminalToken | null = null;
 let pending: Promise<string> | null = null;
 
+export function clearTerminalTokenCache() {
+  cached = null;
+  pending = null;
+}
+
 export async function getTerminalToken(
   forceRefresh = false,
   projectId?: string,
+  authToken?: string,
 ): Promise<string> {
   const now = Date.now();
   if (!forceRefresh && cached && cached.expiresAt - now > 30_000) {
@@ -22,9 +28,14 @@ export async function getTerminalToken(
     ? `/api/terminal/token?projectId=${encodeURIComponent(projectId)}`
     : "/api/terminal/token";
 
+  const headers: HeadersInit = authToken
+    ? { Authorization: `Bearer ${authToken}` }
+    : {};
+
   pending = fetch(url, {
     credentials: "include",
     cache: "no-store",
+    headers,
   })
     .then(async (response) => {
       const body = (await response.json().catch(() => ({}))) as Partial<

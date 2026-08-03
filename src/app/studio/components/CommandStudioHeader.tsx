@@ -20,6 +20,7 @@ import {
   Bell,
   Bot,
   MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
@@ -42,15 +43,17 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
  */
 export default function CommandStudioHeader({
   branch,
-  onPreview,
-  onOpenActivity,
+  onPreviewAction,
+  onOpenActivityAction,
+  onClearChatAction,
   projectReady,
   capabilities,
   busy = false,
 }: {
   branch?: string;
-  onPreview?: () => void;
-  onOpenActivity?: () => void;
+  onPreviewAction?: () => void;
+  onOpenActivityAction?: () => void;
+  onClearChatAction?: () => void;
   projectReady?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   /** True while an agent/conversation turn is in flight. */
@@ -298,7 +301,7 @@ export default function CommandStudioHeader({
       {/* Activity — opens the Activity drawer (kept visible; useful) */}
       <button
         type="button"
-        onClick={onOpenActivity}
+        onClick={onOpenActivityAction}
         className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
@@ -329,7 +332,8 @@ export default function CommandStudioHeader({
           <OverflowMenu
             rect={overflowRect}
             onClose={() => setOverflowOpen(false)}
-            onPreview={onPreview}
+            onPreviewAction={onPreviewAction}
+            onClearChatAction={onClearChatAction}
             previewDisabled={!projectReady}
             settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
           />,
@@ -559,13 +563,15 @@ function WritePermissionPill({ writesAllowed, hasProject }: { writesAllowed: boo
 function OverflowMenu({
   rect,
   onClose,
-  onPreview,
+  onPreviewAction,
+  onClearChatAction,
   previewDisabled,
   settingsHref,
 }: {
   rect: DOMRect;
   onClose: () => void;
-  onPreview?: () => void;
+  onPreviewAction?: () => void;
+  onClearChatAction?: () => void;
   previewDisabled: boolean;
   settingsHref: string;
 }) {
@@ -602,12 +608,21 @@ function OverflowMenu({
       <button
         type="button"
         disabled={previewDisabled}
-        onClick={() => { onClose(); onPreview?.(); }}
+        onClick={() => { onClose(); onPreviewAction?.(); }}
         className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
         style={{ color: "var(--text-primary)" }}
       >
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Preview
+      </button>
+      <button
+        type="button"
+        onClick={() => { onClose(); onClearChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Trash2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Clear chat
       </button>
       <button
         type="button"

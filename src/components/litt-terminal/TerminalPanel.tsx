@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { getTerminalToken } from "@/lib/terminal-client";
+import { clearTerminalTokenCache, getTerminalToken } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -48,7 +48,7 @@ export const TerminalPanel = forwardRef<
   const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string } | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
   const terminalStore = useTerminalStore();
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,7 +134,14 @@ export const TerminalPanel = forwardRef<
       });
     };
 
-    void getTerminalToken(false, projectId)
+    let attemptedUnauthorizedRetry = false;
+
+    const connect = async () => {
+      const authToken = await getToken?.();
+      return getTerminalToken(false, projectId, authToken || undefined);
+    };
+
+    void connect()
       .then((token) => {
         if (disposed) return;
         const connectedSocket = io(wsUrl, {
@@ -200,6 +207,45 @@ export const TerminalPanel = forwardRef<
         });
 
         connectedSocket.on("connect_error", (err: Error) => {
+          const isUnauthorized = /unauthorized/i.test(err.message || "");
+          if (isUnauthorized && !attemptedUnauthorizedRetry) {
+            attemptedUnauthorizedRetry = true;
+            clearTerminalTokenCache();
+            onLog?.("[WS] Unauthorized — refreshing terminal token and retrying...");
+            connectedSocket.disconnect();
+            socketRef.current = null;
+            setConnected(false);
+            terminalStore.setStatus("connecting");
+            void connect().then((freshToken) => {
+              if (disposed) return;
+              const retrySocket = io(wsUrl, {
+                auth: { token: freshToken },
+                transports: ["websocket", "polling"],
+                reconnectionAttempts: 5,
+              });
+              socketRef.current = retrySocket;
+              retrySocket.on("connect_error", (nextErr: Error) => {
+                terminalStore.setError(nextErr.message);
+                terminalStore.setStatus("error");
+                term.writeln(`\x1b[31m❌ PTY connection failed: ${nextErr.message}\x1b[0m`);
+                onLog?.(`[WS] Connect error: ${nextErr.message}`);
+              });
+              retrySocket.on("connect", () => {
+                setConnected(true);
+                terminalStore.setStatus("connecting");
+                onConnectionChange?.(true);
+                term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+                onLog?.("[WS] Connected to terminal server");
+              });
+            }).catch((authErr: unknown) => {
+              const message = authErr instanceof Error ? authErr.message : "Terminal authentication failed";
+              terminalStore.setError(message);
+              terminalStore.setStatus("error");
+              term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
+              onLog?.(`[AUTH] ${message}`);
+            });
+            return;
+          }
           if (connectTimeoutRef.current) {
             clearTimeout(connectTimeoutRef.current);
             connectTimeoutRef.current = null;

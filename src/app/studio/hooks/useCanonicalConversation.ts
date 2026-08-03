@@ -110,10 +110,10 @@ function toUIMessage(
  * - URL syncs with ?conversation= and ?agent=
  */
 export function useCanonicalConversation({
-  onRouteTool,
+  onRouteToolAction,
   serverProjectId,
 }: {
-  onRouteTool?: (tool: StudioTool, command?: string) => void;
+  onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   serverProjectId?: string | null;
 } = {}) {
   const [busy, setBusy] = useState(false);
@@ -406,7 +406,7 @@ export function useCanonicalConversation({
             void createConversation();
             return { accepted: true, persisted: true };
           case "terminal":
-            onRouteTool?.("terminal");
+            onRouteToolAction?.("terminal");
             addLocalMessage("Opening Terminal.");
             return { accepted: true, persisted: true };
           case "sessions": {
@@ -496,7 +496,7 @@ export function useCanonicalConversation({
             regenerationOfMessageId: null,
           });
         }
-        if (intent.tool) onRouteTool?.(intent.tool);
+        if (intent.tool) onRouteToolAction?.(intent.tool);
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
           window.location.href = "/api/github/install";
         }
@@ -602,14 +602,14 @@ export function useCanonicalConversation({
         // instead of being killed at 55s ("cut out").
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 120_000);
-        const response = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
+        const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
           credentials: "include",
           headers: await authHeaders(true),
           body: JSON.stringify({
             message: text,
             clientRequestId,
-            expectedRevision,
+            expectedRevision: revision,
             requestedAgentSlug: activeAgentId,
             agentInstanceId: activeAgentInstanceId || undefined,
             provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
@@ -619,21 +619,33 @@ export function useCanonicalConversation({
           }),
           signal: controller.signal,
         });
-        clearTimeout(timeoutId);
+        let response = await makeRequest(expectedRevision);
 
         // Error / conflict paths still return JSON.
         if (response.status === 409) {
-          // Revision conflict — reload messages from server, restore unsent text
+          // Revision conflict — reload messages from server and retry once with
+          // the refreshed revision so the user's message still sends.
           await loadMessages(conversationId);
-          // Remove optimistic messages — the server has newer state
           const s409 = getStore();
           s409.setMessages(
             conversationId,
-            s409.getMessages().filter((m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId),
+            s409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
           );
-          setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
-          return { accepted: false, persisted: false, errorKind: "conflict" };
+          seedOptimisticMessages(conversationId);
+          response = await makeRequest(s409.revision);
+          if (response.status === 409) {
+            await loadMessages(conversationId);
+            const sFinal409 = getStore();
+            sFinal409.setMessages(
+              conversationId,
+              sFinal409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+            );
+            setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
+            return { accepted: false, persisted: false, errorKind: "conflict" };
+          }
         }
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
@@ -859,7 +871,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -913,6 +925,7 @@ export function useCanonicalConversation({
     if (convId) {
       s.setMessages(convId, []);
     }
+    setSendError(null);
   }, [getStore]);
 
   // Agent switching — stays within the same conversation
