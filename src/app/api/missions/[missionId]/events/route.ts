@@ -11,10 +11,10 @@ import { supabaseAdmin } from "@/lib/supabase";
  * This is a polling endpoint (SSE could be added later).
  */
 export async function GET(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ missionId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { missionId } = await params;

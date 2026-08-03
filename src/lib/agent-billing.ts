@@ -69,7 +69,30 @@ export async function reserveCredits(
     .maybeSingle();
 
   if (existing) {
-    // Already processed — return the existing run
+    // Idempotent retry — validate that this run belongs to the same
+    // user, agent instance, and conversation before reusing it.
+    const { data: existingRun } = await supabaseAdmin
+      .from("agent_runs")
+      .select("user_id, agent_instance_id, conversation_id")
+      .eq("id", existing.id)
+      .maybeSingle();
+
+    if (existingRun) {
+      // Look up the clerk_id for this run's user to verify ownership
+      const { data: existingUser } = await supabaseAdmin
+        .from("users")
+        .select("clerk_id")
+        .eq("id", existingRun.user_id)
+        .maybeSingle();
+
+      if (existingUser?.clerk_id !== ctx.clerkId) {
+        return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another user", reservedCredits: 0 };
+      }
+      if (existingRun.agent_instance_id !== ctx.agentInstanceId) {
+        return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another agent instance", reservedCredits: 0 };
+      }
+    }
+
     return {
       ok: true,
       runId: existing.id,
@@ -96,7 +119,7 @@ export async function reserveCredits(
     });
 
     if (reserveError) {
-      // Check if it's an insufficient-balance error
+      // Check if it's an insufficient-balance error (402)
       if (reserveError.message.includes("insufficient")) {
         return {
           ok: false,
@@ -106,9 +129,17 @@ export async function reserveCredits(
           reservedCredits: 0,
         };
       }
-      // If the reserve_credits RPC doesn't exist (e.g., migration not run yet),
-      // skip reservation and proceed — the run still completes
-      console.warn(`[agent-billing] reserve_credits failed: ${reserveError.message}`);
+      // Any other RPC error (missing function, permission denied,
+      // schema mismatch, timeout, database unavailable) must ABORT.
+      // Never proceed with the model call unless reservation is confirmed.
+      console.error(`[agent-billing] reserve_credits FAILED — aborting run. Error: ${reserveError.message}`);
+      return {
+        ok: false,
+        runId: null,
+        status: 503,
+        error: `Credit reservation failed: ${reserveError.message}`,
+        reservedCredits: 0,
+      };
     }
   }
 
@@ -134,17 +165,39 @@ export async function reserveCredits(
 
   if (runError) {
     if (runError.code === "23505") {
-      // Duplicate key race — fetch existing
+      // Duplicate key race — fetch existing and validate ownership
       const { data: race } = await supabaseAdmin
         .from("agent_runs")
-        .select("id, credits_charged")
+        .select("id, credits_charged, user_id, agent_instance_id")
         .eq("idempotency_key", ctx.idempotencyKey)
         .maybeSingle();
-      return {
-        ok: true,
-        runId: race?.id ?? null,
-        reservedCredits: race?.credits_charged || 0,
-      };
+      if (race) {
+        // Validate ownership before reusing
+        const { data: raceUser } = await supabaseAdmin
+          .from("users")
+          .select("clerk_id")
+          .eq("id", race.user_id)
+          .maybeSingle();
+        if (raceUser?.clerk_id !== ctx.clerkId) {
+          return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another user", reservedCredits: 0 };
+        }
+        if (race.agent_instance_id !== ctx.agentInstanceId) {
+          return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another agent instance", reservedCredits: 0 };
+        }
+        return { ok: true, runId: race.id, reservedCredits: race.credits_charged || 0 };
+      }
+      return { ok: false, runId: null, status: 500, error: "Duplicate key but existing run not found", reservedCredits: 0 };
+    }
+    // Run-row insert failed — refund the reservation if it was made
+    if (estimatedCredits > 0) {
+      const { error: refundErr } = await supabaseAdmin.rpc("refund_credits", {
+        p_run_id: null,
+        p_credits: estimatedCredits,
+      });
+      if (refundErr) {
+        console.error(`[agent-billing] CRITICAL: run insert failed AND refund failed. User ${ctx.clerkId} may have lost ${estimatedCredits} credits. Error: ${refundErr.message}`);
+        await createReconciliationRecord(ctx, estimatedCredits, "refund_after_insert_failure", refundErr.message);
+      }
     }
     return { ok: false, runId: null, status: 500, error: runError.message, reservedCredits: 0 };
   }
@@ -187,7 +240,14 @@ export async function settleRun(
     });
 
     if (refundError) {
-      console.warn(`[agent-billing] refund_credits failed for run ${runId}: ${refundError.message}`);
+      console.error(`[agent-billing] CRITICAL: refund_credits failed for run ${runId}. Credits to refund: ${creditsToRefund}. Error: ${refundError.message}`);
+      await createReconciliationRecord({
+        clerkId: "",
+        agentInstanceId: "",
+        agentId: null,
+        agentVersionId: null,
+        idempotencyKey: runId,
+      }, creditsToRefund, "refund_failed", refundError.message);
     }
   }
 
@@ -205,6 +265,14 @@ export async function settleRun(
     .eq("id", runId);
 
   if (updateError) {
+    console.error(`[agent-billing] CRITICAL: agent_runs update failed for run ${runId}. Error: ${updateError.message}`);
+    await createReconciliationRecord({
+      clerkId: "",
+      agentInstanceId: "",
+      agentId: null,
+      agentVersionId: null,
+      idempotencyKey: runId,
+    }, creditsToCharge, "settlement_update_failed", updateError.message);
     return { ok: false, runId, creditsCharged: creditsToCharge, creditsRefunded: 0 };
   }
 
@@ -269,4 +337,30 @@ export async function completeAgentRun(
   }, result.creditsCharged);
 
   return { runId, ok: settleResult.ok, creditsCharged: settleResult.creditsCharged };
+}
+
+/**
+ * Create a reconciliation record when settlement or refund fails.
+ * This ensures failed financial operations are tracked and can be retried.
+ */
+async function createReconciliationRecord(
+  ctx: AgentRunContext,
+  credits: number,
+  reason: string,
+  errorMessage: string,
+): Promise<void> {
+  if (!supabaseAdmin) return;
+  try {
+    await supabaseAdmin.from("billing_reconciliations").insert({
+      idempotency_key: ctx.idempotencyKey,
+      agent_instance_id: ctx.agentInstanceId,
+      credits_expected: credits,
+      reason,
+      error_message: errorMessage,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error(`[agent-billing] FATAL: Could not create reconciliation record: ${err}`);
+  }
 }

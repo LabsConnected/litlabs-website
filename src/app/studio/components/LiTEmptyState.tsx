@@ -11,7 +11,10 @@ import {
   FilePlus2,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import StudioActivityTimeline from "./StudioActivityTimeline";
 import type { AgentId } from "../stores/useStudioAgentStore";
+import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
+import type { ProviderHealth } from "../stores/useStudioModelStore";
 
 /* Inline GitHub mark — lucide-react is pinned to ^1.24.0 and lacks Github. */
 function GithubMark({ size = 16, className }: { size?: number; className?: string }) {
@@ -55,6 +58,151 @@ const PROJECT_SUGGESTIONS = [
   "Make this project more premium",
 ];
 
+/**
+ * WorkspaceBriefing — proactive, truthful report framed as LiTT's checks.
+ * Derived only from real capabilities + model health. No fabricated metrics.
+ * Renders only when a capabilities object is supplied, so the empty state
+ * degrades gracefully to the legacy headline-only layout when no data is wired.
+ *
+ * Framed as a checklist ("Checked GitHub ✓ / Checked AI ✓ / ...") so the AI
+ * feels proactive rather than waiting, per the UX audit's #1 ask.
+ */
+function WorkspaceBriefing({
+  capabilities,
+  modelHealth,
+  modelLabel,
+}: {
+  capabilities: ConnectionCapabilities;
+  modelHealth?: ProviderHealth;
+  modelLabel?: string;
+}) {
+  const repoConnected =
+    capabilities.repository === "connected" || !!capabilities.repositoryName;
+  const aiReady = modelHealth === "available" || modelHealth === "degraded";
+  const termReady = capabilities.terminalExecution === "available";
+  const termConnecting = capabilities.terminalExecution === "connecting";
+  const projectLoaded = !!capabilities.projectId;
+
+  // Each "check" LiTT performs on load — state is real, not fabricated.
+  type CheckState = "ok" | "warn" | "pending";
+  const checks: { label: string; state: CheckState; detail?: string }[] = [
+    {
+      label: "Checked GitHub",
+      state: repoConnected ? "ok" : capabilities.githubInstalled ? "warn" : "pending",
+      detail: repoConnected
+        ? capabilities.repositoryName ?? "repository synced"
+        : capabilities.githubInstalled
+          ? "app installed, no repo linked"
+          : "not connected",
+    },
+    {
+      label: "Checked AI provider",
+      state: aiReady ? "ok" : "warn",
+      detail: aiReady ? `${modelLabel || "AI"} ready` : "setup required",
+    },
+    {
+      label: "Checked terminal",
+      state: termReady ? "ok" : termConnecting ? "pending" : "pending",
+      detail: termReady ? "ready" : termConnecting ? "connecting…" : "open Activity to connect",
+    },
+    {
+      label: "Loaded project",
+      state: projectLoaded ? "ok" : "pending",
+      detail: projectLoaded ? (capabilities.projectName ?? "loaded") : "no project yet",
+    },
+  ];
+
+  const okCount = checks.filter((c) => c.state === "ok").length;
+  const warnCount = checks.filter((c) => c.state === "warn").length;
+  const pendingCount = checks.filter((c) => c.state === "pending").length;
+
+  // Findings — only real ones. Warnings come from connection gaps; no
+  // fabricated "improvements" since there's no project-scan backend.
+  const findings: string[] = [];
+  if (warnCount > 0) findings.push(`${warnCount} need${warnCount === 1 ? "s" : ""} attention`);
+  if (pendingCount > 0 && warnCount === 0) findings.push(`${pendingCount} pending`);
+
+  const ready = warnCount === 0;
+  const headline = ready
+    ? "Workspace ready"
+    : `${warnCount} need${warnCount === 1 ? "" : "s"} attention`;
+
+  const stateColor: Record<CheckState, string> = {
+    ok: "var(--litt-primary)",
+    warn: "#e3b341",
+    pending: "var(--text-muted)",
+  };
+
+  return (
+    <div
+      className="mt-4 w-full max-w-md rounded-xl border px-3.5 py-3"
+      style={{
+        borderColor: "rgba(114,242,56,0.18)",
+        backgroundColor: "rgba(114,242,56,0.04)",
+        boxShadow: "inset 0 1px 0 rgba(114,242,56,0.06)",
+      }}
+      data-testid="workspace-briefing"
+    >
+      <div
+        className="mb-2.5 text-[10px] font-black uppercase tracking-[0.18em]"
+        style={{
+          color: "#9dff5e",
+          textShadow: "0 0 12px rgba(157,255,94,0.35)",
+        }}
+      >
+        LiTT checked your workspace
+      </div>
+      <ul className="space-y-1.5">
+        {checks.map((c, i) => (
+          <li
+            key={c.label}
+            className="flex items-center gap-2 text-[11px] animate-fadeInUp"
+            style={{ animationDelay: `${i * 60}ms` }}
+          >
+            <span
+              className="grid h-4 w-4 shrink-0 place-items-center rounded-full"
+              style={{
+                backgroundColor: `${stateColor[c.state]}18`,
+                border: `1px solid ${stateColor[c.state]}40`,
+                color: stateColor[c.state],
+              }}
+              aria-hidden
+            >
+              {c.state === "ok" ? (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              ) : c.state === "warn" ? (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4 M12 17h.01 M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
+              ) : (
+                <span className="h-1 w-1 rounded-full" style={{ backgroundColor: stateColor[c.state] }} />
+              )}
+            </span>
+            <span className="font-bold" style={{ color: "var(--text-primary)" }}>{c.label}</span>
+            <span className="ml-auto truncate text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+              {c.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div
+        className="mt-2.5 flex items-center gap-2 border-t pt-2 text-[11px] font-bold"
+        style={{ borderColor: "rgba(114,242,56,0.12)", color: ready ? "var(--litt-primary)" : "#e3b341" }}
+      >
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          aria-hidden
+          style={{ backgroundColor: ready ? "var(--litt-primary)" : "#e3b341" }}
+        />
+        {ready ? "Ready to continue?" : headline}
+        {ready && (
+          <span className="ml-auto text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+            {okCount}/{checks.length} checks passed
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LiTEmptyState({
   activeAgentId = "litt",
   hasProject,
@@ -64,6 +212,9 @@ export default function LiTEmptyState({
   onPick,
   onConnectRepo,
   onStartBlank,
+  capabilities,
+  modelHealth,
+  modelLabel,
 }: {
   activeAgentId?: AgentId;
   hasProject: boolean;
@@ -75,13 +226,18 @@ export default function LiTEmptyState({
   onPick: (prompt: string) => void;
   onConnectRepo?: () => void;
   onStartBlank?: () => void;
+  /** Live workspace capabilities. When omitted, the briefing panel is skipped. */
+  capabilities?: ConnectionCapabilities;
+  modelHealth?: ProviderHealth;
+  modelLabel?: string;
 }) {
   const [hovered, setHovered] = useState<PrimaryAction | null>(null);
 
   return (
     <div
-      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6"
+      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6 animate-fadeInUp"
       style={{ color: "var(--text-primary)" }}
+      data-testid="empty-state"
     >
       {/* Active character — clean transparent art, no framed black bars. */}
       <div className="relative mb-2 grid min-h-[104px] place-items-center">
@@ -130,6 +286,15 @@ export default function LiTEmptyState({
           : "Chat with me now. Add a project only when you want files, code edits, preview, terminal, or deployment."}
       </p>
 
+      {/* Proactive workspace briefing — only when live capabilities are wired in */}
+      {capabilities && (
+        <WorkspaceBriefing
+          capabilities={capabilities}
+          modelHealth={modelHealth}
+          modelLabel={modelLabel}
+        />
+      )}
+
       {/* Primary actions */}
       <div className="mt-6 grid w-full max-w-md grid-cols-2 gap-2">
         {PRIMARY_ACTIONS.map((action) => {
@@ -142,10 +307,11 @@ export default function LiTEmptyState({
               onClick={() => onPick(action.prompt)}
               onMouseEnter={() => setHovered(action.id)}
               onMouseLeave={() => setHovered(null)}
-              className="group flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-all"
+              className="group flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left transition-all hover:-translate-y-0.5 active:scale-95"
               style={{
                 borderColor: isHovered ? "rgba(114,242,56,0.4)" : "var(--studio-border-strong)",
                 backgroundColor: isHovered ? "rgba(114,242,56,0.06)" : "var(--studio-card)",
+                boxShadow: isHovered ? "0 0 0 1px rgba(114,242,56,0.15), 0 8px 24px rgba(114,242,56,0.08)" : "none",
               }}
               aria-label={action.label}
             >
@@ -182,6 +348,7 @@ export default function LiTEmptyState({
                   backgroundColor: "rgba(114,242,56,0.06)",
                   color: "var(--litt-primary)",
                 }}
+                data-testid="active-project-name"
               >
                 Blank project ready — {projectName ?? "Untitled"}
               </div>
@@ -194,6 +361,7 @@ export default function LiTEmptyState({
                   backgroundColor: "rgba(114,242,56,0.06)",
                   color: "var(--litt-primary)",
                 }}
+                data-testid="active-project-name"
               >
                 {projectName}
               </div>
@@ -204,20 +372,36 @@ export default function LiTEmptyState({
             >
               Suggestions
             </div>
-            {PROJECT_SUGGESTIONS.map((s) => (
+            {PROJECT_SUGGESTIONS.map((s, i) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => onPick(s)}
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium transition-colors hover:bg-white/5"
-                style={{ color: "var(--text-secondary)" }}
+                className="group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[12px] font-bold transition-all hover:translate-x-0.5 hover:border-[rgba(114,242,56,0.3)] active:scale-[0.98]"
+                style={{
+                  color: "var(--text-primary)",
+                  borderColor: "var(--studio-border-strong)",
+                  backgroundColor: "var(--studio-card)",
+                }}
+                aria-label={s}
               >
                 <span
-                  className="h-1 w-1 shrink-0 rounded-full"
-                  style={{ backgroundColor: "var(--litt-primary)" }}
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[10px] font-black"
+                  style={{
+                    backgroundColor: "rgba(114,242,56,0.10)",
+                    color: "var(--litt-primary)",
+                    border: "1px solid rgba(114,242,56,0.22)",
+                  }}
                   aria-hidden
+                >
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="flex-1">{s}</span>
+                <ArrowRight
+                  size={12}
+                  className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  style={{ color: "var(--litt-primary)" }}
                 />
-                {s}
               </button>
             ))}
           </div>
@@ -278,6 +462,12 @@ export default function LiTEmptyState({
           </div>
         )}
       </div>
+
+      {/* Live activity timeline — fills dead space with real recent chats
+          and deploys. Only when a project is loaded so the no-project state
+          stays focused on connect actions. Renders nothing if both sources
+          are empty. */}
+      {hasProject && <StudioActivityTimeline />}
     </div>
   );
 }
@@ -295,13 +485,14 @@ function NoProjectAction({
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 transition-all hover:bg-white/5"
+      className="flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 transition-all hover:-translate-y-0.5 hover:bg-white/5 active:scale-95"
       style={{
         borderColor: "var(--studio-border-strong)",
         backgroundColor: "var(--studio-card)",
         color: "var(--text-secondary)",
       }}
       aria-label={label}
+      data-testid={label === "Start blank" ? "new-project-button" : undefined}
     >
       <Icon size={16} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
       <span className="text-[11px] font-bold">{label}</span>

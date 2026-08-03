@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { auth } from "@/lib/auth";
 
 const FALLBACK_COMPLETED = [
   "Merge social feed into Home page",
@@ -14,7 +15,10 @@ const FALLBACK_COMPLETED = [
   "Gallery Lightbox with keyboard nav",
 ];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
+  if (!userId)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { data, error } = await supabaseAdmin
       .from("active_tasks")

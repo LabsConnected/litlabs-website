@@ -61,9 +61,11 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle }[] = [
 export default function CommandStudioNav({
   active,
   onSelect,
+  onSelectMoreMode,
 }: {
   active: StudioDestination;
   onSelect: (dest: StudioDestination) => void;
+  onSelectMoreMode?: (mode: MoreMode) => void;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -201,7 +203,7 @@ export default function CommandStudioNav({
                   key={m.id}
                   type="button"
                   onClick={() => {
-                    onSelect("more");
+                    onSelectMoreMode?.(m.id);
                     setMoreOpen(false);
                   }}
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"

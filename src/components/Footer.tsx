@@ -14,9 +14,7 @@ const PRODUCT_LINKS = [
 
 const RESOURCE_LINKS = [
   { href: "/docs", label: "Docs" },
-  { href: "/flow", label: "Flow" },
-  { href: "/discover", label: "Discover" },
-  { href: "/code", label: "Code Scanner" },
+  { href: "/gallery", label: "Gallery" },
 ];
 
 const COMPANY_LINKS = [

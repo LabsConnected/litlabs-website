@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
@@ -6,9 +6,9 @@ import {
 } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
 
     if (!isAdminSupabaseConfigured()) {
       return NextResponse.json({

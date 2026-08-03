@@ -201,6 +201,7 @@ export default function CommandComposer({
 
   return (
     <div
+      data-testid="studio-command-composer"
       className="relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
       style={{
         backgroundColor: "var(--studio-bg)",
@@ -336,6 +337,7 @@ export default function CommandComposer({
           aria-label="Select agent"
           title={agentMeta.displayName}
           aria-expanded={agentOpen}
+          data-testid="agent-trigger"
         >
           <span
             className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-black"
@@ -369,6 +371,7 @@ export default function CommandComposer({
           title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
           aria-label="Select model"
           aria-expanded={modelOpen}
+          data-testid="model-trigger"
         >
           <span>{selectedModel.icon}</span>
           <span className="hidden sm:inline">{selectedModel.label}</span>
@@ -411,6 +414,7 @@ export default function CommandComposer({
           }}
           rows={1}
           aria-label="Message input"
+          data-testid="studio-command-input"
         />
 
         {/* Camera — directly beside microphone */}
@@ -458,7 +462,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={submit}
-          disabled={busy || (!value.trim() && snapshots.length === 0)}
+          disabled={busy || disabled || (!value.trim() && snapshots.length === 0)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             backgroundColor: value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",

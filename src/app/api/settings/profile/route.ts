@@ -95,7 +95,7 @@ async function getHandler(req: NextRequest) {
  */
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

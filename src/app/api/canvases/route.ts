@@ -9,7 +9,7 @@ import { CanvasTypeSchema } from "@/lib/canvas/types";
  * Optional query params: ?projectId=...&conversationId=...&status=active|archived
  */
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
  *     sourceMessageId?: string }
  */
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

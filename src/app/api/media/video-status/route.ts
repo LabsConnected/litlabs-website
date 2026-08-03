@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
+import { adjustWalletBalance } from "@/lib/wallet-ledger";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY)
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
     );
 
   try {
-    const { operationName } = await req.json();
+    const { operationName, cost = 0, model = "veo" } = await req.json();
     if (!operationName)
       return NextResponse.json(
         { error: "Missing operationName" },
@@ -34,7 +35,22 @@ export async function POST(req: NextRequest) {
       videoUri = updated.response.generatedVideos[0].video.uri;
     }
 
-    return NextResponse.json({ done: updated.done, videoUri });
+    // If the operation failed (done but no video), refund the user
+    if (updated.done && !videoUri && cost > 0) {
+      await adjustWalletBalance({
+        clerkId: userId,
+        amount: cost,
+        type: "refund",
+        reason: `Video refund: ${model} operation failed (no video output)`,
+        idempotencyKey: `video_refund_${operationName}`,
+      });
+    }
+
+    return NextResponse.json({
+      done: updated.done,
+      videoUri,
+      refunded: updated.done && !videoUri && cost > 0,
+    });
   } catch (err: unknown) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Polling failed" },

@@ -293,7 +293,7 @@ export function VoiceSessionProvider({
       // TTS is handled by Inworld's speakText which has its own response.done.
       setVoiceOutputState("idle");
       voiceOutputStateRef.current = "idle";
-      if (voiceStateRef.current === "assistant_speaking") {
+      if (voiceStateRef.current === "assistant_speaking" || voiceStateRef.current === "processing") {
         if (handsFreeEnabledRef.current && activeRef.current) {
           setVoiceState("listening");
           voiceStateRef.current = "listening";
@@ -523,35 +523,45 @@ export function VoiceSessionProvider({
     console.debug("[Voice] stopVoice");
     const wasSpeaking = voiceOutputStateRef.current === "speaking";
     if (inworldConnectedRef.current) {
+      // Stop the mic and commit the audio buffer so Inworld can finish STT.
+      // Do NOT disconnect the WebSocket — the STT response
+      // (conversation.item.input_audio_transcription.completed) arrives
+      // AFTER input_audio_buffer.commit, and disconnecting here kills it.
       inworldSession.stopListening();
-      if (!wasSpeaking) {
-        inworldSession.disconnect();
-        inworldConnectedRef.current = false;
-        setVoiceTransportConnected(false);
-      }
     }
-    activeRef.current = false;
+    // Do NOT set activeRef.current = false here — the transcript handler
+    // checks activeRef and would silently drop the STT result.
     micActiveRef.current = false;
     micStartInProgressRef.current = false;
-    sessionGenerationRef.current += 1;
     setVoiceInputState("idle");
     voiceInputStateRef.current = "idle";
     if (wasSpeaking) {
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
     } else {
-      setVoiceState("idle");
-      voiceStateRef.current = "idle";
-      setVoiceOutputState("idle");
-      voiceOutputStateRef.current = "idle";
+      // Transition to "processing" — waiting for STT to complete.
+      // The transcript handler will fire onSend → speakText, then
+      // onResponseComplete transitions back to idle.
+      setVoiceState("processing");
+      voiceStateRef.current = "processing";
     }
-    cleanup();
-    setTranscript("");
     setMicLevel(0);
-    setVoiceMode(null);
-    submittedTranscriptRef.current = "";
     updateDiagnostics({ micActive: false, transportConnected: inworldConnectedRef.current });
-  }, [cleanup, inworldSession, updateDiagnostics]);
+
+    // Safety timeout: if STT doesn't produce a transcript within 8s,
+    // transition back to idle so the user isn't stuck in "processing".
+    const gen = sessionGenerationRef.current;
+    window.setTimeout(() => {
+      if (
+        gen === sessionGenerationRef.current &&
+        voiceStateRef.current === "processing"
+      ) {
+        console.debug("[Voice] STT timeout — returning to idle");
+        setVoiceState("idle");
+        voiceStateRef.current = "idle";
+      }
+    }, 8_000);
+  }, [inworldSession, updateDiagnostics]);
 
   // ---------------------------------------------------------------------------
   // toggleMute

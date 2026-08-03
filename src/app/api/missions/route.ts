@@ -8,7 +8,7 @@ import { getProject } from "@/lib/projects/project-repository";
  * List missions for a project.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const projectId = request.nextUrl.searchParams.get("projectId");
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
  * Body: { projectId, name, description?, graph? }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: { projectId?: string; name?: string; description?: string; graph?: Record<string, unknown> };

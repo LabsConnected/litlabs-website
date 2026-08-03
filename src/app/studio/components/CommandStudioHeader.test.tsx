@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 // Mock wallet
 vi.mock("@/context/WalletContext", () => ({
@@ -49,6 +49,9 @@ vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
 }));
 
+// Mock fetch so the notifications poll doesn't trigger async act warnings
+vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+
 import CommandStudioHeader from "./CommandStudioHeader";
 
 describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
@@ -70,7 +73,7 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     expect(screen.getByText("Chat ready")).toBeTruthy();
   });
 
-  it("Deploy button is disabled (no handler wired in Phase 1)", () => {
+  it("Deploy button is disabled (lives in overflow menu, no handler wired)", () => {
     render(
       <CommandStudioHeader
         onPreview={vi.fn()}
@@ -79,12 +82,14 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
+    // Deploy now lives behind the overflow menu — open it first.
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const deployBtn = screen.getByRole("button", { name: /deploy/i });
     expect(deployBtn).toBeTruthy();
     expect(deployBtn.hasAttribute("disabled")).toBe(true);
   });
 
-  it("Preview button calls onPreview (not onOpenActivity)", () => {
+  it("Preview button calls onPreview (lives in overflow menu)", () => {
     const onPreview = vi.fn();
     const onOpenActivity = vi.fn();
     render(
@@ -95,8 +100,10 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
+    // Preview now lives behind the overflow menu — open it first.
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const previewBtn = screen.getByRole("button", { name: /preview/i });
-    previewBtn.click();
+    fireEvent.click(previewBtn);
     expect(onPreview).toHaveBeenCalledTimes(1);
     expect(onOpenActivity).not.toHaveBeenCalled();
   });

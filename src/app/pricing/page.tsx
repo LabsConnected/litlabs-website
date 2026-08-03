@@ -341,8 +341,8 @@ export default function PricingPage() {
               Founding Supporter pricing and duration are being finalized.
             </h2>
             <p>
-              We're confirming the final price and access duration before
-              opening checkout. Join the waitlist to be notified when it's
+              We&apos;re confirming the final price and access duration before
+              opening checkout. Join the waitlist to be notified when it&apos;s
               ready — no payment required until then.
             </p>
           </div>

@@ -48,11 +48,10 @@ describe("studio-destinations", () => {
       expect(result.openDrawer).toBe("terminal");
     });
 
-    it("maps workflows to Studio/Work with inspector open on Plan", () => {
+    it("maps workflows to More / Mission Forge", () => {
       const result = mapLegacyToolToDestination("workflows");
-      expect(result.destination).toBe("studio");
-      expect(result.mode).toBe("work");
-      expect(result.openInspector).toBe("plan");
+      expect(result.destination).toBe("more");
+      expect(result.mode).toBe("workflows");
     });
 
     it("maps image/video/audio to Create with correct modes", () => {
@@ -91,7 +90,7 @@ describe("studio-destinations", () => {
     it("maps pipeline (legacy) to workflows", () => {
       // The StudioOS component normalizes "pipeline" -> "workflows" before
       // calling this function, but the adapter should still handle it.
-      expect(mapLegacyToolToDestination("workflows").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("more");
     });
 
     it("falls back to Studio/Work for unknown tools", () => {

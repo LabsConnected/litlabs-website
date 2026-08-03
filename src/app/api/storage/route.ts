@@ -5,7 +5,7 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import { auth } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);

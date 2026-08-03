@@ -6,7 +6,7 @@ const MINIMAX_API_URL = "https://api.minimax.io/v1/music_generation";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

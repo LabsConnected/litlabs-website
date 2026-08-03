@@ -241,8 +241,6 @@ function LandingPage() {
             <Link href="/studio">Studio</Link>
             <Link href="/marketplace">Marketplace</Link>
             <Link href="/gallery">Gallery</Link>
-            <Link href="/games">Games</Link>
-            <Link href="/discover">Community</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>

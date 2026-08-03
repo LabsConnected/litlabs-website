@@ -17,6 +17,9 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDot,
+  Bell,
+  Bot,
+  MoreHorizontal,
 } from "lucide-react";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
@@ -43,12 +46,15 @@ export default function CommandStudioHeader({
   onOpenActivity,
   projectReady,
   capabilities,
+  busy = false,
 }: {
   branch?: string;
   onPreview?: () => void;
   onOpenActivity?: () => void;
   projectReady?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  /** True while an agent/conversation turn is in flight. */
+  busy?: boolean;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -56,17 +62,42 @@ export default function CommandStudioHeader({
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
   const [statusOpen, setStatusOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
+  const [overflowRect, setOverflowRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
       setStatusRect(statusTriggerRef.current.getBoundingClientRect());
     }
+    if (overflowTriggerRef.current) {
+      setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
+    }
+  }, []);
+
+  // Poll unread notification count (truthful; falls back to null on error).
+  useEffect(() => {
+    let cancelled = false;
+    const fetchNotifs = async () => {
+      try {
+        const res = await fetch("/api/notifications/count", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
+      } catch {
+        if (!cancelled) setNotifCount(null);
+      }
+    };
+    void fetchNotifs();
+    const id = window.setInterval(fetchNotifs, 45_000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
   useEffect(() => {
-    if (!statusOpen) return;
+    if (!statusOpen && !overflowOpen) return;
     updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
@@ -74,7 +105,7 @@ export default function CommandStudioHeader({
       window.removeEventListener("scroll", updateRect, true);
       window.removeEventListener("resize", updateRect);
     };
-  }, [statusOpen, updateRect]);
+  }, [statusOpen, overflowOpen, updateRect]);
 
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
@@ -110,6 +141,7 @@ export default function CommandStudioHeader({
         backgroundColor: "var(--studio-bg)",
         borderColor: "var(--studio-border)",
       }}
+      data-testid="studio-header"
     >
       {/* LiTT Studio logo — clickable to go to dashboard */}
       <Link
@@ -135,10 +167,30 @@ export default function CommandStudioHeader({
         </span>
       </Link>
 
-      {/* Branch */}
-      {branch && (
+      {/* Connected repo — visible chip when a repository is linked */}
+      {repoConnected && capabilities.repositoryName && (
         <span
-          className="hidden md:inline shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          className="hidden md:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          style={{
+            borderColor: "rgba(114,242,56,0.25)",
+            color: "var(--litt-primary)",
+            backgroundColor: "rgba(114,242,56,0.06)",
+          }}
+          title={`Repository: ${capabilities.repositoryName}`}
+        >
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            aria-hidden
+            style={{ backgroundColor: "var(--litt-primary)" }}
+          />
+          {capabilities.repositoryName}
+        </span>
+      )}
+
+      {/* Branch — only when a repo is connected */}
+      {branch && repoConnected && (
+        <span
+          className="hidden lg:inline shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold"
           style={{
             borderColor: "var(--studio-border)",
             color: "var(--text-secondary)",
@@ -155,7 +207,7 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
@@ -196,31 +248,58 @@ export default function CommandStudioHeader({
           document.body,
         )}
 
+      {/* Write-permission pill — colored so the approval state is obvious.
+          🟢 Writes allowed · 🟡 Approval needed · (locked shown in popover) */}
+      <WritePermissionPill writesAllowed={writesAllowed} hasProject={hasProject} />
+
+      {/* Agent-active indicator — truthful: only while a turn is in flight */}
+      {busy && (
+        <span
+          className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          style={{
+            borderColor: "rgba(167,139,250,0.3)",
+            color: "#a78bfa",
+            backgroundColor: "rgba(167,139,250,0.08)",
+          }}
+          title="An agent is working"
+          data-testid="agent-active-pill"
+        >
+          <Bot size={10} className="pointer-events-none" />
+          <span className="pointer-events-none">Agent working</span>
+          <span
+            className="h-1.5 w-1.5 rounded-full animate-pulse"
+            aria-hidden
+            style={{ backgroundColor: "#a78bfa" }}
+          />
+        </span>
+      )}
+
       <div className="flex-1" />
 
-      {/* Preview — switches Studio to the Preview surface */}
-      <button
-        type="button"
-        disabled={!projectReady}
-        onClick={onPreview}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-        style={{
-          borderColor: "var(--studio-border)",
-          color: "var(--text-secondary)",
-          backgroundColor: "var(--studio-surface)",
-        }}
-        title={projectReady ? "Preview" : "Connect a project to preview"}
-        aria-label="Preview"
+      {/* Notifications — wired to /api/notifications/count */}
+      <Link
+        href="/notifications"
+        className="relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        style={{ color: "var(--text-secondary)" }}
+        aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
+        title="Notifications"
       >
-        <Eye size={11} className="pointer-events-none" />
-        <span className="hidden sm:inline pointer-events-none">Preview</span>
-      </button>
+        <Bell size={13} />
+        {notifCount ? (
+          <span
+            className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
+            style={{ backgroundColor: "#ff00a0", color: "#fff" }}
+          >
+            {notifCount > 99 ? "99+" : notifCount}
+          </span>
+        ) : null}
+      </Link>
 
-      {/* Activity — opens the Activity drawer */}
+      {/* Activity — opens the Activity drawer (kept visible; useful) */}
       <button
         type="button"
         onClick={onOpenActivity}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
@@ -232,37 +311,33 @@ export default function CommandStudioHeader({
         <span className="hidden sm:inline pointer-events-none">Activity</span>
       </button>
 
-      {/* Deploy — truthful. No deploy handler is wired in Phase 1, so
-          the button is disabled with a truthful explanation rather than
-          claiming success or opening the Activity drawer. */}
+      {/* Overflow menu — Preview + Deploy + Settings collapsed here */}
       <button
+        ref={overflowTriggerRef}
         type="button"
-        disabled
-        className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black transition-all disabled:cursor-not-allowed"
-        style={{
-          backgroundColor: "var(--studio-card)",
-          color: "var(--text-muted)",
-        }}
-        title="Deploy unavailable — not wired in this phase"
-        aria-label="Deploy unavailable"
-      >
-        <Rocket size={11} className="pointer-events-none" />
-        <span className="hidden sm:inline pointer-events-none">Deploy</span>
-      </button>
-
-      {/* Overflow menu — settings + account */}
-      <Link
-        href={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+        onClick={() => setOverflowOpen((v) => !v)}
         className="grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
-        aria-label="Settings"
-        title="Settings"
+        aria-label="More actions"
+        aria-expanded={overflowOpen}
+        title="More"
       >
-        <span className="text-[14px] leading-none">⋯</span>
-      </Link>
+        <MoreHorizontal size={14} />
+      </button>
+      {overflowOpen && overflowRect &&
+        createPortal(
+          <OverflowMenu
+            rect={overflowRect}
+            onClose={() => setOverflowOpen(false)}
+            onPreview={onPreview}
+            previewDisabled={!projectReady}
+            settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+          />,
+          document.body,
+        )}
 
       {/* User avatar */}
-      <div className="shrink-0">
+      <div className="shrink-0" data-testid="user-avatar">
         <UserButton
           afterSignOutUrl="/"
           appearance={{
@@ -447,6 +522,113 @@ function WorkspaceStatusPopover({
           detail="Current deployment environment"
         />
       </div>
+    </div>
+  );
+}
+
+/* ── Write-permission pill ──────────────────────────────────────── */
+function WritePermissionPill({ writesAllowed, hasProject }: { writesAllowed: boolean; hasProject: boolean }) {
+  // No project yet → no writes possible → muted "Read-only" pill.
+  // Project + writes allowed → green.
+  // Project + approval required → amber.
+  const tone = !hasProject ? "muted" : writesAllowed ? "ok" : "warn";
+  const label = !hasProject ? "Read-only" : writesAllowed ? "Writes allowed" : "Approval needed";
+  const cfg = {
+    ok: { color: "var(--litt-primary)", bg: "rgba(114,242,56,0.08)", border: "rgba(114,242,56,0.3)" },
+    warn: { color: "#e3b341", bg: "rgba(227,179,65,0.08)", border: "rgba(227,179,65,0.3)" },
+    muted: { color: "var(--text-muted)", bg: "var(--studio-surface)", border: "var(--studio-border)" },
+  }[tone];
+  return (
+    <span
+      className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+      style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}
+      title={label}
+      data-testid="write-permission-pill"
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        aria-hidden
+        style={{ backgroundColor: cfg.color }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/* ── Overflow menu (Preview + Deploy + Settings) ────────────────── */
+function OverflowMenu({
+  rect,
+  onClose,
+  onPreview,
+  previewDisabled,
+  settingsHref,
+}: {
+  rect: DOMRect;
+  onClose: () => void;
+  onPreview?: () => void;
+  previewDisabled: boolean;
+  settingsHref: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const top = rect.bottom + 6;
+  const right = window.innerWidth - rect.right;
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label="More actions"
+      className="fixed z-[200] w-48 overflow-hidden rounded-xl border shadow-2xl"
+      style={{
+        top,
+        right,
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border-strong)",
+      }}
+    >
+      <button
+        type="button"
+        disabled={previewDisabled}
+        onClick={() => { onClose(); onPreview?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Preview
+      </button>
+      <button
+        type="button"
+        disabled
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors disabled:cursor-not-allowed"
+        style={{ color: "var(--text-muted)" }}
+        title="Deploy unavailable — not wired in this phase"
+      >
+        <Rocket size={13} className="pointer-events-none" />
+        Deploy
+      </button>
+      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+      <Link
+        href={settingsHref}
+        onClick={onClose}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <span className="text-[14px] leading-none" style={{ color: "var(--text-secondary)" }}>⋯</span>
+        Settings
+      </Link>
     </div>
   );
 }

@@ -8,10 +8,10 @@ import { supabaseAdmin } from "@/lib/supabase";
  * Cancel a running mission.
  */
 export async function POST(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ missionId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { missionId } = await params;

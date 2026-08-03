@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
@@ -17,9 +17,9 @@ const TAG = "[music:tracks]";
  * Ownership: rows are scoped by the server-derived user_id; the raw R2 storage
  * key is stripped from the response (callers receive a resolved audioUrl only).
  */
-async function handler() {
+async function handler(req: NextRequest) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

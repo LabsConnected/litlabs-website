@@ -16,11 +16,11 @@ const TAG = "[music:status]";
  * server-side and the query is scoped by user_id.
  */
 async function handler(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ generationId: string }> },
 ) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

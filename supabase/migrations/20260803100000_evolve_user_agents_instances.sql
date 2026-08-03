@@ -168,25 +168,17 @@ DECLARE
 BEGIN
   IF p_credits <= 0 THEN RETURN; END IF;
 
-  BEGIN
-    SELECT COALESCE(credits, 0) INTO v_balance
-    FROM public.users WHERE id = p_user_id FOR UPDATE;
+  SELECT COALESCE(credits, 0) INTO v_balance
+  FROM public.users WHERE id = p_user_id FOR UPDATE;
 
-    IF v_balance < p_credits THEN
-      RAISE EXCEPTION 'insufficient balance: have %, need %', v_balance, p_credits;
-    END IF;
+  IF v_balance < p_credits THEN
+    RAISE EXCEPTION 'insufficient balance: have %, need %', v_balance, p_credits;
+  END IF;
 
-    UPDATE public.users
-    SET credits = v_balance - p_credits,
-        updated_at = now()
-    WHERE id = p_user_id;
-  EXCEPTION WHEN OTHERS THEN
-    -- If the credits column doesn't exist, skip reservation
-    IF SQLERRM LIKE 'insufficient%' THEN
-      RAISE;
-    END IF;
-    NULL;
-  END;
+  UPDATE public.users
+  SET credits = v_balance - p_credits,
+      updated_at = now()
+  WHERE id = p_user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -208,14 +200,10 @@ BEGIN
 
   IF v_user_id IS NULL THEN RETURN; END IF;
 
-  BEGIN
-    UPDATE public.users
-    SET credits = COALESCE(credits, 0) + p_credits,
-        updated_at = now()
-    WHERE id = v_user_id;
-  EXCEPTION WHEN OTHERS THEN
-    NULL;
-  END;
+  UPDATE public.users
+  SET credits = COALESCE(credits, 0) + p_credits,
+      updated_at = now()
+  WHERE id = v_user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

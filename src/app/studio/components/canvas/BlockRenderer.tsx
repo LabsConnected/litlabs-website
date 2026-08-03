@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type { CanvasBlock } from "@/lib/canvas/types";
 import { cn } from "@/lib/utils";
 
@@ -178,7 +178,7 @@ function ParagraphBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
 
 function ChecklistBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
   const content = block.content as { items: Array<{ id: string; text: string; checked: boolean }> };
-  const items = content.items ?? [];
+  const items = useMemo(() => content.items ?? [], [content.items]);
 
   const toggleItem = useCallback((id: string) => {
     if (readOnly) return;
@@ -247,7 +247,7 @@ function TaskBlock({ block, onUpdate, readOnly }: BlockRendererProps) {
     const currentIdx = order.indexOf(content.status);
     const next = order[(currentIdx + 1) % order.length];
     onUpdate({ status: next });
-  }, [content.status, onUpdate, readOnly]);
+  }, [content, onUpdate, readOnly]);
 
   return (
     <BlockWrapper block={block} onDelete={() => {}} readOnly={readOnly}>

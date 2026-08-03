@@ -8,7 +8,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const COST = 3;
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY)
@@ -52,14 +52,20 @@ async function handler(req: NextRequest) {
       config: { responseModalities: [Modality.AUDIO] },
     });
 
-    const audioBase64 =
-      response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? "";
-    if (!audioBase64) throw new Error("Music generation returned empty audio.");
+    // Lyria can return both audio and text (lyrics) parts.
+    // Find the audio part — don't assume the first part is audio.
+    const allParts = response.candidates?.[0]?.content?.parts ?? [];
+    const audioPart = allParts.find((p) => p.inlineData?.data);
+    if (!audioPart?.inlineData?.data) {
+      throw new Error("Music generation returned empty audio.");
+    }
 
+    // Lyria Clip output is MP3, not WAV.
+    const audioMime = audioPart.inlineData.mimeType || "audio/mp3";
     const newBalance = await updateWalletBalance(userId, -COST);
 
     return NextResponse.json({
-      audioBase64: `data:audio/wav;base64,${audioBase64}`,
+      audioBase64: `data:${audioMime};base64,${audioPart.inlineData.data}`,
       cost: COST,
       balance: newBalance,
     });

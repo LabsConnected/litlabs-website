@@ -10,7 +10,7 @@ const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     
     // Only admin or server can trigger notifications
     if (!userId || userId !== ADMIN_USER_ID) {
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 // Quick notification helpers
 export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     
     if (!userId || userId !== ADMIN_USER_ID) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

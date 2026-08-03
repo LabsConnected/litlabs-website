@@ -217,7 +217,7 @@ export async function insertMessage(
     regenerationOfMessageId?: string | null;
     clientRequestId?: string | null;
   },
-): Promise<{ message: ConversationMessage | null; duplicate: boolean }> {
+): Promise<{ message: ConversationMessage | null; duplicate: boolean; error?: string }> {
   // Check for existing message with same client_request_id (idempotency)
   if (message.clientRequestId) {
     const { data: existing } = await supabaseAdmin
@@ -233,25 +233,42 @@ export async function insertMessage(
     }
   }
 
+  const insertPayload: Record<string, unknown> = {
+    conversation_id: message.conversationId,
+    owner_id: message.ownerId,
+    project_id: message.projectId,
+    role: message.role,
+    content: message.content,
+    status: message.status ?? "pending",
+  };
+
+  if (message.agentSlug != null) {
+    insertPayload.agent_slug = message.agentSlug;
+  }
+  if (message.agentInstanceId != null) {
+    insertPayload.agent_instance_id = message.agentInstanceId;
+  }
+  if (message.parentMessageId != null) {
+    insertPayload.parent_message_id = message.parentMessageId;
+  }
+  if (message.regenerationOfMessageId != null) {
+    insertPayload.regeneration_of_message_id = message.regenerationOfMessageId;
+  }
+  if (message.clientRequestId != null) {
+    insertPayload.client_request_id = message.clientRequestId;
+  }
+
   const { data, error } = await supabaseAdmin
     .from("studio_conversation_messages")
-    .insert({
-      conversation_id: message.conversationId,
-      owner_id: message.ownerId,
-      project_id: message.projectId,
-      role: message.role,
-      agent_slug: message.agentSlug ?? null,
-      agent_instance_id: message.agentInstanceId ?? null,
-      content: message.content,
-      status: message.status ?? "pending",
-      parent_message_id: message.parentMessageId ?? null,
-      regeneration_of_message_id: message.regenerationOfMessageId ?? null,
-      client_request_id: message.clientRequestId ?? null,
-    })
+    .insert(insertPayload)
     .select()
     .single();
 
-  if (error || !data) return { message: null, duplicate: false };
+  if (error || !data) {
+    const errMsg = error?.message || "Unknown error";
+    console.error("[conversation-service] insertMessage failed:", errMsg);
+    return { message: null, duplicate: false, error: errMsg };
+  }
   return { message: mapMessage(data as DbMessage), duplicate: false };
 }
 

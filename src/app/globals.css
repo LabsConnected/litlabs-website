@@ -2285,6 +2285,140 @@ main {
   transform: translateY(1px) scale(0.995);
 }
 
+@keyframes litt-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes litt-breathe {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1);
+  }
+  50% {
+    transform: translate3d(var(--litt-x, 0px), calc(var(--litt-y, 0px) - 4px), 0) scale(1.025);
+  }
+}
+
+@keyframes litt-working {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1) rotate(var(--litt-rot, 0deg));
+  }
+  50% {
+    transform: translate3d(calc(var(--litt-x, 0px) * 1.08), calc(var(--litt-y, 0px) - 6px), 0) scale(1.04) rotate(calc(var(--litt-rot, 0deg) + 0.8deg));
+  }
+}
+
+@keyframes litt-listening {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1) rotate(var(--litt-rot, 0deg));
+  }
+  50% {
+    transform: translate3d(calc(var(--litt-x, 0px) * 0.7), calc(var(--litt-y, 0px) - 2px), 0) scale(1.015) rotate(calc(var(--litt-rot, 0deg) - 0.4deg));
+  }
+}
+
+@keyframes litt-blink {
+  0%,
+  86%,
+  100% {
+    opacity: 0;
+    transform: scaleY(0.15);
+  }
+  88% {
+    opacity: 0.85;
+    transform: scaleY(1);
+  }
+  90% {
+    opacity: 0;
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes litt-grid-drift {
+  from {
+    background-position: 0 0, 0 0, 0 0;
+  }
+  to {
+    background-position: 96px 96px, -64px -64px, 0 0;
+  }
+}
+
+@keyframes litt-pulse-ring {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: translate3d(var(--litt-x, 0px), calc(var(--litt-y, 0px) - 2px), 0) scale(1.08);
+  }
+}
+
+.animate-fadeInUp {
+  animation: litt-fade-in-up 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.litt-presence-shell {
+  position: relative;
+  isolation: isolate;
+  will-change: transform;
+}
+
+.litt-presence-shell[data-state="idle"] .litt-presence-figure {
+  animation: litt-breathe 5.6s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="listening"] .litt-presence-figure {
+  animation: litt-listening 2s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="thinking"] .litt-presence-figure,
+.litt-presence-shell[data-state="working"] .litt-presence-figure,
+.litt-presence-shell[data-state="success"] .litt-presence-figure {
+  animation: litt-working 2.8s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="error"] .litt-presence-figure {
+  animation: litt-working 1.6s ease-in-out infinite;
+}
+
+.litt-presence-shell .litt-presence-figure {
+  transform-origin: center bottom;
+}
+
+.litt-presence-shell .litt-eye-blink {
+  animation: litt-blink 6.4s infinite;
+  transform-origin: center;
+}
+
+.litt-presence-shell .litt-ambient-grid {
+  animation: litt-grid-drift 22s linear infinite;
+}
+
+.litt-presence-shell .litt-pulse-ring {
+  animation: litt-pulse-ring 4.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeInUp,
+  .litt-presence-shell .litt-presence-figure,
+  .litt-presence-shell .litt-eye-blink,
+  .litt-presence-shell .litt-ambient-grid,
+  .litt-presence-shell .litt-pulse-ring {
+    animation: none !important;
+  }
+}
+
 @media (max-width: 640px) {
   .studio-tool-surface {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
