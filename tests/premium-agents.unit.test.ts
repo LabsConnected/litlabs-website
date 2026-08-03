@@ -192,7 +192,11 @@ async function callCheckout(agentId: string) {
 
 // -- Tests -----------------------------------------------------------------
 
-describe("marketplace/agents/[id]/checkout", () => {
+// Disabled for v1 — individual agent purchases are feature-flagged off.
+// The individualAgentPurchases flag is false, so the checkout route returns
+// 503 before any auth/DB logic runs. These tests verify the full checkout
+// flow and will be re-enabled when the flag is turned on.
+describe.skip("marketplace/agents/[id]/checkout — disabled for v1 (individualAgentPurchases flag off)", () => {
   it("returns 401 when unauthenticated", async () => {
     mockClerkId = null;
     const res = await callCheckout("agent-uuid-001");
@@ -357,5 +361,23 @@ describe("marketplace/agents/[id]/checkout", () => {
     // and the order ID appears in Stripe metadata
     const body = parseBody(lastFetchBody);
     expect(body["metadata[marketplace_order_id]"]).toBe("order-uuid-456");
+  });
+});
+
+// Active tests for v1 — verify the route respects the feature flag.
+describe("marketplace/agents/[id]/checkout — feature flag disabled (v1)", () => {
+  it("returns 503 when individualAgentPurchases flag is disabled", async () => {
+    const res = await callCheckout("agent-uuid-001");
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.error).toContain("Individual agent purchases are coming soon");
+  });
+
+  it("returns 503 before checking authentication (flag check is first)", async () => {
+    // Even unauthenticated requests get 503, not 401, because the flag
+    // check runs before auth.
+    mockClerkId = null;
+    const res = await callCheckout("agent-uuid-001");
+    expect(res.status).toBe(503);
   });
 });
