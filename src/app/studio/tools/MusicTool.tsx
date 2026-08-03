@@ -1,826 +1,695 @@
-// src/app/studio/tools/MusicTool.tsx
-// Native Studio tool for the Music Lab. Renders at /studio?tool=music.
-// Two modes: Quick Create (prompt + controls) and Custom (lyrics + style).
-// Includes the Music Vault (track library) below.
-
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { CSSProperties } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { useWallet } from "@/context/WalletContext";
 import { useMusicGeneration } from "@/hooks/use-music-generation";
 import { useMusicVault, type VaultTrack } from "@/hooks/use-music-vault";
+import {
+  Music,
+  Wand2,
+  Download,
+  RefreshCw,
+  Coins,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Sparkles,
+  Play,
+  Pause,
+  Trash2,
+  X,
+  Mic,
+  Clock,
+  Eye,
+  EyeOff,
+  Globe,
+  Plus,
+  SlidersHorizontal,
+  Library,
+  Disc3,
+} from "lucide-react";
 
-const COST_CONCEPT = 8;
-const COST_INSTRUMENTAL = 20;
-const COST_SONG = 30;
+const MUSIC_LBC_COST = {
+  concept: 8,
+  instrumentalFull: 20,
+  songFull: 30,
+};
+
+const VOCAL_TYPES = [
+  { id: "male", label: "Male", desc: "Deep & resonant" },
+  { id: "female", label: "Female", desc: "Warm & clear" },
+  { id: "choir", label: "Choir", desc: "Layered harmonies" },
+  { id: "rap", label: "Rap", desc: "Rhythmic flow" },
+];
+
+const GENRE_PRESETS = [
+  "Energetic EDM festival anthem",
+  "Dark trap beat with heavy 808s",
+  "Dreamy lo-fi hip hop for studying",
+  "Uplifting house with piano chords",
+  "Aggressive techno for the club",
+  "Melancholic piano ballad",
+  "Epic orchestral cinematic score",
+  "Chillwave retro synthwave",
+];
 
 export default function MusicTool() {
   const { resolvedColors: T } = useTheme();
-  const { balance, refresh: refreshWallet } = useWallet();
-  const [mode, setMode] = useState<"quick" | "custom">("quick");
-
-  return (
-    <div
-      className="flex h-full w-full flex-col overflow-y-auto"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
-    >
-      <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-3">
-          <MusicIcon size={26} color={T.accentColor} />
-          <div>
-            <h1 className="text-xl font-bold tracking-tight" style={{ color: T.textColor }}>
-              Music Lab
-            </h1>
-            <p className="text-xs opacity-60">
-              Turn a thought into a finished track. Two versions per generation.
-            </p>
-          </div>
-          <div
-            className="ml-auto rounded-lg px-3 py-1.5 text-xs font-semibold"
-            style={{
-              backgroundColor: `${T.accentColor}15`,
-              color: T.accentColor,
-            }}
-          >
-            {balance === null ? "—" : balance} LBC
-          </div>
-        </div>
-
-        {/* Mode tabs */}
-        <div
-          className="mb-6 flex gap-1 rounded-xl p-1"
-          style={{ backgroundColor: `${T.textColor}08` }}
-        >
-          <ModeTab label="Quick Create" active={mode === "quick"} onClick={() => setMode("quick")} T={T} />
-          <ModeTab label="Custom" active={mode === "custom"} onClick={() => setMode("custom")} T={T} />
-        </div>
-
-        {mode === "quick" ? <QuickCreate T={T} onGenerated={refreshWallet} /> : <CustomMode T={T} onGenerated={refreshWallet} />}
-
-        {/* Divider */}
-        <div className="my-8 h-px w-full" style={{ backgroundColor: `${T.textColor}10` }} />
-
-        {/* Music Vault */}
-        <MusicVaultSection T={T} />
-      </div>
-    </div>
-  );
-}
-
-function ModeTab({
-  label,
-  active,
-  onClick,
-  T,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-      style={{
-        backgroundColor: active ? `${T.accentColor}20` : "transparent",
-        color: active ? T.accentColor : `${T.textColor}99`,
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-// ── Quick Create ────────────────────────────────────────────────────────────
-
-function QuickCreate({
-  T,
-  onGenerated,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  onGenerated: () => void;
-}) {
-  const { balance } = useWallet();
-  const [prompt, setPrompt] = useState("");
-  const [instrumental, setInstrumental] = useState(false);
-  const [duration, setDuration] = useState<"concept" | "full">("full");
-  const [vocalType, setVocalType] = useState("male");
-  const [explicit, setExplicit] = useState(false);
-  const [energy, setEnergy] = useState(7);
-
+  const accent = T.accentColor || "#38bdf8";
   const {
-    isGenerating,
     status,
     progress,
-    error,
+    error: genError,
     lbcCharged,
     lbcRefunded,
-    tracks,
+    tracks: genTracks,
+    isGenerating,
     startGeneration,
     cancelGeneration,
   } = useMusicGeneration();
+  const { tracks: vaultTracks, loading: vaultLoading, deleteTrack, updateTrack, refresh } = useMusicVault();
 
-  const cost = duration === "concept" ? COST_CONCEPT : instrumental ? COST_INSTRUMENTAL : COST_SONG;
-  const canAfford = balance === null || balance >= cost;
+  const [prompt, setPrompt] = useState("");
+  const [creationMode, setCreationMode] = useState<"simple" | "custom">("simple");
+  const [title, setTitle] = useState("");
+  const [styles, setStyles] = useState("");
+  const [negativeStyles, setNegativeStyles] = useState("");
+  const [weirdness, setWeirdness] = useState(35);
+  const [styleInfluence, setStyleInfluence] = useState(70);
+  const [instrumental, setInstrumental] = useState(false);
+  const [duration, setDuration] = useState<"concept" | "full">("concept");
+  const [vocalType, setVocalType] = useState("male");
+  const [explicit, setExplicit] = useState(false);
+  const [lyrics, setLyrics] = useState("");
+  const [energy, setEnergy] = useState(5);
+  const [showLyrics, setShowLyrics] = useState(false);
+  const [nowPlaying, setNowPlaying] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const cost = duration === "concept"
+    ? MUSIC_LBC_COST.concept
+    : instrumental
+      ? MUSIC_LBC_COST.instrumentalFull
+      : MUSIC_LBC_COST.songFull;
+
+  const generationPrompt = [
+    prompt.trim(),
+    creationMode === "custom" && title.trim() ? `Working title: ${title.trim()}.` : "",
+    creationMode === "custom" && styles.trim() ? `Style: ${styles.trim()}.` : "",
+    creationMode === "custom" && negativeStyles.trim() ? `Avoid: ${negativeStyles.trim()}.` : "",
+    creationMode === "custom" ? `Creative variation ${weirdness}%. Style influence ${styleInfluence}%.` : "",
+  ].filter(Boolean).join(" ").slice(0, 500);
+
+  const handleGenerate = useCallback(() => {
+    if (!generationPrompt || isGenerating) return;
+    void startGeneration({
+      prompt: generationPrompt,
+      instrumental,
+      duration,
+      vocalType: instrumental ? undefined : vocalType,
+      explicit,
+      lyrics: instrumental ? undefined : lyrics.trim() || undefined,
+      energy,
+    });
+  }, [generationPrompt, instrumental, duration, vocalType, explicit, lyrics, energy, isGenerating, startGeneration]);
+
+  const handleCancel = useCallback(() => {
+    void cancelGeneration();
+  }, [cancelGeneration])
+
+  const handleDelete = useCallback(async (trackId: string) => {
+    if (nowPlaying === trackId) {
+      audioRef.current?.pause();
+      setNowPlaying(null);
+    }
+    await deleteTrack(trackId);
+  }, [deleteTrack, nowPlaying]);
+
+  const togglePlay = useCallback(async (track: VaultTrack) => {
+    if (nowPlaying === track.id) {
+      audioRef.current?.pause();
+      setNowPlaying(null);
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+
+    try {
+      const res = await fetch(`/api/music/tracks/${track.id}/stream`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to get stream URL");
+      const { url } = await res.json();
+
+      const audio = new Audio(url);
+      audio.crossOrigin = "anonymous";
+      audio.onended = () => setNowPlaying(null);
+      await audio.play();
+      audioRef.current = audio;
+      setNowPlaying(track.id);
+    } catch {
+      setNowPlaying(null);
+    }
+  }, [nowPlaying]);
+
+  const handleDownload = useCallback(async (track: VaultTrack) => {
+    try {
+      const res = await fetch(`/api/music/tracks/${track.id}/stream`, { credentials: "include" });
+      if (!res.ok) return;
+      const { url } = await res.json();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${track.title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const cycleVisibility = useCallback(async (track: VaultTrack) => {
+    const order: Array<"private" | "unlisted" | "public"> = ["private", "unlisted", "public"];
+    const next = order[(order.indexOf(track.visibility) + 1) % order.length];
+    await updateTrack(track.id, { visibility: next });
+  }, [updateTrack]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  // Refresh vault when generation completes
   useEffect(() => {
     if (status === "completed") {
-      onGenerated();
+      void refresh();
     }
-  }, [status, onGenerated]);
+  }, [status, refresh]);
 
-  const handleGenerate = useCallback(() => {
-    if (!prompt.trim() || prompt.trim().length < 5) return;
-    void startGeneration({
-      prompt: prompt.trim(),
-      instrumental,
-      duration,
-      vocalType,
-      explicit,
-      energy,
-    });
-  }, [prompt, instrumental, duration, vocalType, explicit, energy, startGeneration]);
+  const isBusy = isGenerating || ["queued", "preparing", "generating", "processing"].includes(status);
+
+  const labelStyle: CSSProperties = {
+    fontSize: "10px",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: "var(--text-muted)",
+  };
+
+  const inputStyle: CSSProperties = {
+    background: "var(--studio-surface)",
+    border: "1px solid var(--studio-border)",
+    borderRadius: "8px",
+    color: "var(--text-primary)",
+    fontSize: "13px",
+    padding: "8px 12px",
+    outline: "none",
+    width: "100%",
+  };
+
+  const btnPrimary: CSSProperties = {
+    background: `linear-gradient(135deg, ${accent}, ${accent})`,
+    color: "#000",
+    fontWeight: 700,
+    border: "none",
+    borderRadius: "10px",
+    padding: "10px 20px",
+    cursor: isBusy || !prompt.trim() ? "not-allowed" : "pointer",
+    opacity: isBusy || !prompt.trim() ? 0.5 : 1,
+    fontSize: "13px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    transition: "all 0.2s",
+  };
+
+  const btnGhost: CSSProperties = {
+    background: "transparent",
+    border: "1px solid var(--studio-border)",
+    color: "var(--text-muted)",
+    borderRadius: "8px",
+    padding: "6px 12px",
+    cursor: "pointer",
+    fontSize: "11px",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  };
+
+  const cardStyle: CSSProperties = {
+    background: "var(--studio-surface)",
+    border: "1px solid var(--studio-border)",
+    borderRadius: "12px",
+    padding: "16px",
+  };
 
   return (
-    <div className="space-y-5">
-      {/* Prompt */}
-      <div className="relative">
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Describe your song... Dark aggressive EDM trap anthem with massive bass, catchy male vocals and a festival drop."
-          className="min-h-[100px] w-full resize-none rounded-xl border p-4 text-sm outline-none focus:ring-2"
-          style={{
-            backgroundColor: `${T.textColor}08`,
-            borderColor: `${T.textColor}15`,
-            color: T.textColor,
-          }}
-          disabled={isGenerating}
-        />
-        <div className="absolute bottom-3 right-3 text-[10px] opacity-40">
-          {prompt.length} chars
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Control label="Mode" T={T}>
-          <Toggle
-            options={[{ label: "Vocals", value: "vocals" }, { label: "Instrumental", value: "instrumental" }]}
-            value={instrumental ? "instrumental" : "vocals"}
-            onChange={(v) => setInstrumental(v === "instrumental")}
-            T={T}
-          />
-        </Control>
-
-        <Control label="Length" T={T}>
-          <Toggle
-            options={[{ label: "30s", value: "concept" }, { label: "Full", value: "full" }]}
-            value={duration}
-            onChange={(v) => setDuration(v as "concept" | "full")}
-            T={T}
-          />
-        </Control>
-
-        {!instrumental && (
-          <Control label="Vocal" T={T}>
-            <select
-              value={vocalType}
-              onChange={(e) => setVocalType(e.target.value)}
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-              style={{
-                backgroundColor: `${T.textColor}08`,
-                borderColor: `${T.textColor}15`,
-                color: T.textColor,
-              }}
-            >
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="auto">Auto</option>
-            </select>
-          </Control>
-        )}
-
-        <Control label={`Energy ${energy}/10`} T={T}>
-          <input
-            type="range"
-            min={1}
-            max={10}
-            value={energy}
-            onChange={(e) => setEnergy(parseInt(e.target.value, 10))}
-            className="w-full"
-            style={{ accentColor: T.accentColor }}
-          />
-        </Control>
-      </div>
-
-      {/* Explicit toggle */}
-      <label className="flex cursor-pointer items-center gap-3 text-sm opacity-70">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={explicit}
-          onClick={() => setExplicit(!explicit)}
-          className="relative h-6 w-10 rounded-full transition-colors"
-          style={{ backgroundColor: explicit ? T.warning : `${T.textColor}20` }}
-        >
-          <span
-            className="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform"
-            style={{ transform: explicit ? "translateX(22px)" : "translateX(4px)" }}
-          />
-        </button>
-        Allow explicit content
-      </label>
-
-      {/* Generate */}
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isGenerating || prompt.trim().length < 5 || !canAfford}
-          className="flex-1 rounded-xl px-6 py-3 text-base font-semibold transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            background: `linear-gradient(135deg, ${T.accentColor}, ${T.accentColor}cc)`,
-            color: "#fff",
-          }}
-        >
-          {isGenerating ? "Growing Track..." : `✨ Grow Track (${cost} LBC)`}
-        </button>
-        {isGenerating && (
-          <button
-            type="button"
-            onClick={cancelGeneration}
-            className="rounded-xl px-5 py-3 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: `${T.warning}20`,
-              color: T.warning,
-            }}
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-
-      {!canAfford && (
-        <div className="text-xs" style={{ color: T.warning }}>
-          Insufficient LBC. You need {cost} but have {balance ?? 0}.
-        </div>
-      )}
-
-      {/* Progress */}
-      {isGenerating && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs">
-            <span className="font-medium capitalize" style={{ color: T.accentColor }}>
-              {status}
-            </span>
-            <span className="opacity-50">{progress}%</span>
+    <div style={{ height: "100%", overflow: "auto", padding: "clamp(12px, 2vw, 24px)", background: "radial-gradient(circle at 12% 0%, rgba(114,242,56,.08), transparent 28%)" }}>
+      <div style={{ maxWidth: "1480px", margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ ...labelStyle, color: accent, marginBottom: 6 }}>LiTTree Audio</div>
+            <h1 style={{ margin: 0, fontSize: "clamp(24px, 4vw, 42px)", lineHeight: 1, letterSpacing: "-.04em", color: "var(--text-primary)" }}>Make the track in your head.</h1>
+            <p style={{ margin: "9px 0 0", maxWidth: 620, fontSize: 13, color: "var(--text-secondary)" }}>Start with one sentence or shape the lyrics, voice, style, and production controls yourself.</p>
           </div>
-          <div className="h-2 overflow-hidden rounded-full" style={{ backgroundColor: `${T.textColor}10` }}>
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${progress}%`, backgroundColor: T.accentColor }}
-            />
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ ...btnGhost, cursor: "default" }}><Disc3 size={12} /> Studio Music v1</span>
+            <span style={{ ...btnGhost, cursor: "default", color: accent }}><Coins size={12} /> {cost} LBC</span>
           </div>
         </div>
-      )}
 
-      {/* Error */}
-      {error && (
-        <div
-          className="rounded-xl border p-4 text-sm"
-          style={{
-            backgroundColor: `${T.warning}15`,
-            borderColor: `${T.warning}40`,
-            color: T.warning,
-          }}
-        >
-          {error}
-          {lbcRefunded && <div className="mt-1 text-xs opacity-80">LBC has been refunded.</div>}
-        </div>
-      )}
-
-      {/* Completed tracks preview */}
-      {status === "completed" && tracks.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wider opacity-50">
-            Generated versions
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 430px), 1fr))", gap: "16px", alignItems: "start" }}>
+      {/* Generation Form */}
+      <div style={{ ...cardStyle, padding: "clamp(16px, 2vw, 24px)", background: "linear-gradient(180deg, rgba(255,255,255,.025), transparent), var(--studio-card)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
+          <div style={{
+            width: "32px", height: "32px", borderRadius: "8px",
+            background: `linear-gradient(135deg, ${accent}20, ${accent}20)`,
+            display: "grid", placeItems: "center",
+          }}>
+            <Music size={18} style={{ color: accent }} />
           </div>
-          {tracks.map((t) => (
-            <div
-              key={t.id}
-              className="flex items-center gap-3 rounded-xl border p-3"
-              style={{ borderColor: `${T.textColor}10`, backgroundColor: `${T.textColor}05` }}
-            >
-              <span className="text-sm font-medium" style={{ color: T.accentColor }}>
-                {t.versionLabel}
-              </span>
-              <span className="flex-1 truncate text-sm">{t.title}</span>
-              <span className="text-xs opacity-50">
-                {t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, "0")}` : "--:--"}
-              </span>
-            </div>
+          <div>
+            <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--text-primary)" }}>Create</div>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Two original versions per generation</div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", ...labelStyle }}>
+            <Coins size={12} style={{ color: accent }} />
+            <span>Private by default</span>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, padding: 4, marginBottom: 14, borderRadius: 10, background: "var(--studio-bg)" }}>
+          {(["simple", "custom"] as const).map((mode) => (
+            <button key={mode} onClick={() => setCreationMode(mode)} disabled={isBusy} style={{ ...btnGhost, justifyContent: "center", border: 0, padding: "9px 12px", background: creationMode === mode ? "var(--studio-surface)" : "transparent", color: creationMode === mode ? "var(--text-primary)" : "var(--text-muted)", boxShadow: creationMode === mode ? "0 4px 16px rgba(0,0,0,.2)" : "none" }}>
+              {mode === "simple" ? <Sparkles size={12} /> : <SlidersHorizontal size={12} />}
+              {mode === "simple" ? "Simple" : "Custom"}
+            </button>
           ))}
-          <div className="text-xs opacity-50">
-            {lbcCharged} LBC charged. Tracks are in your Music Vault below.
+        </div>
+
+        {/* Prompt Input */}
+        <div style={{ marginBottom: "12px" }}>
+          <div style={{ ...labelStyle, marginBottom: "6px" }}>{creationMode === "simple" ? "Describe your song" : "Song concept"}</div>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="A soulful late-night R&B track with warm keys, deep bass and a huge final chorus..."
+            rows={4}
+            style={{ ...inputStyle, resize: "vertical", minHeight: "96px", fontFamily: "inherit", fontSize: 14, lineHeight: 1.55 }}
+            disabled={isBusy}
+          />
+          <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+            {GENRE_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => setPrompt(preset)}
+                style={btnGhost}
+                disabled={isBusy}
+              >
+                <Sparkles size={10} />
+                {preset.split(" ").slice(0, 3).join(" ")}...
+              </button>
+            ))}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
 
-// ── Custom Mode (Quick Create + lyrics/style) ──────────────────────────────
+        {creationMode === "custom" && (
+          <div style={{ display: "grid", gap: 10, marginBottom: 14, padding: 14, border: "1px solid var(--studio-border)", borderRadius: 12, background: "rgba(0,0,0,.12)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled track" style={inputStyle} disabled={isBusy} /></label>
+              <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Styles</span><input value={styles} onChange={(e) => setStyles(e.target.value)} placeholder="R&B, neo-soul, cinematic" style={inputStyle} disabled={isBusy} /></label>
+            </div>
+            <label><span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Exclude styles</span><input value={negativeStyles} onChange={(e) => setNegativeStyles(e.target.value)} placeholder="No harsh distortion, no comedy vocals" style={inputStyle} disabled={isBusy} /></label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <label><span style={{ ...labelStyle, display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span>Variation</span><b>{weirdness}%</b></span><input type="range" min={0} max={100} value={weirdness} onChange={(e) => setWeirdness(Number(e.target.value))} disabled={isBusy} style={{ width: "100%", accentColor: accent }} /></label>
+              <label><span style={{ ...labelStyle, display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span>Style influence</span><b>{styleInfluence}%</b></span><input type="range" min={0} max={100} value={styleInfluence} onChange={(e) => setStyleInfluence(Number(e.target.value))} disabled={isBusy} style={{ width: "100%", accentColor: accent }} /></label>
+            </div>
+          </div>
+        )}
 
-function CustomMode({
-  T,
-  onGenerated,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  onGenerated: () => void;
-}) {
-  const { balance } = useWallet();
-  const [prompt, setPrompt] = useState("");
-  const [lyrics, setLyrics] = useState("");
-  const [style, setStyle] = useState("");
-  const [instrumental, setInstrumental] = useState(false);
-  const [duration, setDuration] = useState<"concept" | "full">("full");
-  const [vocalType, setVocalType] = useState("male");
-  const [explicit, setExplicit] = useState(false);
-  const [energy, setEnergy] = useState(7);
-
-  const {
-    isGenerating,
-    status,
-    progress,
-    error,
-    lbcCharged,
-    lbcRefunded,
-    tracks,
-    startGeneration,
-    cancelGeneration,
-  } = useMusicGeneration();
-
-  const cost = duration === "concept" ? COST_CONCEPT : instrumental ? COST_INSTRUMENTAL : COST_SONG;
-  const canAfford = balance === null || balance >= cost;
-
-  useEffect(() => {
-    if (status === "completed") onGenerated();
-  }, [status, onGenerated]);
-
-  const handleGenerate = useCallback(() => {
-    if (!prompt.trim() || prompt.trim().length < 5) return;
-    void startGeneration({
-      prompt: prompt.trim(),
-      instrumental,
-      duration,
-      vocalType,
-      explicit,
-      lyrics: lyrics.trim() || undefined,
-      energy,
-    });
-    void style;
-  }, [prompt, instrumental, duration, vocalType, explicit, lyrics, energy, style, startGeneration]);
-
-  return (
-    <div className="space-y-5">
-      <div className="relative">
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Describe the vibe... Cinematic orchestral hybrid trap with epic strings and 808 drops."
-          className="min-h-[80px] w-full resize-none rounded-xl border p-4 text-sm outline-none focus:ring-2"
-          style={{ backgroundColor: `${T.textColor}08`, borderColor: `${T.textColor}15`, color: T.textColor }}
-          disabled={isGenerating}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Control label="Lyrics (optional)" T={T}>
-          <textarea
-            value={lyrics}
-            onChange={(e) => setLyrics(e.target.value)}
-            placeholder="[Verse 1]&#10;Original lyrics here..."
-            className="min-h-[100px] w-full resize-none rounded-lg border p-3 text-sm outline-none"
-            style={{ backgroundColor: `${T.textColor}08`, borderColor: `${T.textColor}15`, color: T.textColor }}
-            disabled={isGenerating || instrumental}
-          />
-        </Control>
-
-        <div className="space-y-4">
-          <Control label="Style tags (optional)" T={T}>
-            <input
-              type="text"
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder="e.g. slow, dark, ambient"
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-              style={{ backgroundColor: `${T.textColor}08`, borderColor: `${T.textColor}15`, color: T.textColor }}
-              disabled={isGenerating}
-            />
-          </Control>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Control label="Mode" T={T}>
-              <Toggle
-                options={[{ label: "Vocals", value: "vocals" }, { label: "Instr.", value: "instrumental" }]}
-                value={instrumental ? "instrumental" : "vocals"}
-                onChange={(v) => setInstrumental(v === "instrumental")}
-                T={T}
-              />
-            </Control>
-            <Control label="Length" T={T}>
-              <Toggle
-                options={[{ label: "30s", value: "concept" }, { label: "Full", value: "full" }]}
-                value={duration}
-                onChange={(v) => setDuration(v as "concept" | "full")}
-                T={T}
-              />
-            </Control>
+        {/* Options Row */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+          {/* Duration */}
+          <div>
+            <div style={{ ...labelStyle, marginBottom: "6px" }}>Duration</div>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {(["concept", "full"] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDuration(d)}
+                  disabled={isBusy}
+                  style={{
+                    ...btnGhost,
+                    flex: 1,
+                    justifyContent: "center",
+                    background: duration === d ? `${accent}15` : "transparent",
+                    borderColor: duration === d ? accent : "var(--studio-border)",
+                    color: duration === d ? accent : "var(--text-muted)",
+                  }}
+                >
+                  <Clock size={11} />
+                  {d === "concept" ? "30s" : "2m+"}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {!instrumental && (
-            <Control label="Vocal" T={T}>
-              <select
-                value={vocalType}
-                onChange={(e) => setVocalType(e.target.value)}
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ backgroundColor: `${T.textColor}08`, borderColor: `${T.textColor}15`, color: T.textColor }}
+          {/* Instrumental */}
+          <div>
+            <div style={{ ...labelStyle, marginBottom: "6px" }}>Mode</div>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <button
+                onClick={() => setInstrumental(false)}
+                disabled={isBusy}
+                style={{
+                  ...btnGhost, flex: 1, justifyContent: "center",
+                  background: !instrumental ? `${accent}15` : "transparent",
+                  borderColor: !instrumental ? accent : "var(--studio-border)",
+                  color: !instrumental ? accent : "var(--text-muted)",
+                }}
               >
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="auto">Auto</option>
-              </select>
-            </Control>
-          )}
+                <Mic size={11} />
+                Vocals
+              </button>
+              <button
+                onClick={() => setInstrumental(true)}
+                disabled={isBusy}
+                style={{
+                  ...btnGhost, flex: 1, justifyContent: "center",
+                  background: instrumental ? `${accent}15` : "transparent",
+                  borderColor: instrumental ? accent : "var(--studio-border)",
+                  color: instrumental ? accent : "var(--text-muted)",
+                }}
+              >
+                <Music size={11} />
+                Instrumental
+              </button>
+            </div>
+          </div>
 
-          <Control label={`Energy ${energy}/10`} T={T}>
+          {/* Energy */}
+          <div>
+            <div style={{ ...labelStyle, marginBottom: "6px" }}>Energy: {energy}</div>
             <input
               type="range"
               min={1}
               max={10}
               value={energy}
-              onChange={(e) => setEnergy(parseInt(e.target.value, 10))}
-              className="w-full"
-              style={{ accentColor: T.accentColor }}
+              onChange={(e) => setEnergy(Number(e.target.value))}
+              disabled={isBusy}
+              style={{ width: "100%", accentColor: accent }}
             />
-          </Control>
+          </div>
         </div>
-      </div>
 
-      <label className="flex cursor-pointer items-center gap-3 text-sm opacity-70">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={explicit}
-          onClick={() => setExplicit(!explicit)}
-          className="relative h-6 w-10 rounded-full transition-colors"
-          style={{ backgroundColor: explicit ? T.warning : `${T.textColor}20` }}
-        >
-          <span
-            className="absolute top-1 h-4 w-4 rounded-full bg-white transition-transform"
-            style={{ transform: explicit ? "translateX(22px)" : "translateX(4px)" }}
-          />
-        </button>
-        Allow explicit content
-      </label>
+        {/* Vocal Type (if vocals) */}
+        {!instrumental && (
+          <div style={{ marginBottom: "12px" }}>
+            <div style={{ ...labelStyle, marginBottom: "6px" }}>Vocal Type</div>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {VOCAL_TYPES.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setVocalType(v.id)}
+                  disabled={isBusy}
+                  style={{
+                    ...btnGhost,
+                    background: vocalType === v.id ? `${accent}15` : "transparent",
+                    borderColor: vocalType === v.id ? accent : "var(--studio-border)",
+                    color: vocalType === v.id ? accent : "var(--text-muted)",
+                  }}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isGenerating || prompt.trim().length < 5 || !canAfford}
-          className="flex-1 rounded-xl px-6 py-3 text-base font-semibold transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ background: `linear-gradient(135deg, ${T.accentColor}, ${T.accentColor}cc)`, color: "#fff" }}
-        >
-          {isGenerating ? "Growing Track..." : `✨ Grow Track (${cost} LBC)`}
-        </button>
-        {isGenerating && (
+        {/* Lyrics (collapsible) */}
+        {!instrumental && (
+          <div style={{ marginBottom: "12px" }}>
+            <button
+              onClick={() => setShowLyrics(!showLyrics)}
+              style={{ ...btnGhost, marginBottom: showLyrics ? "6px" : 0 }}
+            >
+              {showLyrics ? <X size={11} /> : <Plus size={11} />}
+              Custom Lyrics
+            </button>
+            {showLyrics && (
+              <textarea
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                placeholder="Enter custom lyrics (optional)..."
+                rows={4}
+                style={{ ...inputStyle, resize: "vertical", minHeight: "80px", fontFamily: "inherit" }}
+                disabled={isBusy}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Explicit toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
           <button
-            type="button"
-            onClick={cancelGeneration}
-            className="rounded-xl px-5 py-3 text-sm font-medium"
-            style={{ backgroundColor: `${T.warning}20`, color: T.warning }}
+            onClick={() => setExplicit(!explicit)}
+            disabled={isBusy}
+            style={{
+              ...btnGhost,
+              background: explicit ? "#ef444415" : "transparent",
+              borderColor: explicit ? "#ef4444" : "var(--studio-border)",
+              color: explicit ? "#ef4444" : "var(--text-muted)",
+            }}
           >
-            Cancel
+            <AlertTriangle size={11} />
+            Explicit Content
           </button>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button onClick={handleGenerate} style={btnPrimary} disabled={isBusy || !prompt.trim()}>
+            {isBusy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            {isBusy ? "Generating..." : `Generate (${cost} LBC)`}
+          </button>
+          {isBusy && (
+            <button onClick={handleCancel} style={{ ...btnGhost, borderColor: "#ef4444", color: "#ef4444" }}>
+              <X size={12} />
+              Cancel
+            </button>
+          )}
+        </div>
+
+        {/* Progress Bar */}
+        {isBusy && (
+          <div style={{ marginTop: "12px" }}>
+            <div style={{
+              height: "4px",
+              background: "var(--studio-border)",
+              borderRadius: "2px",
+              overflow: "hidden",
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${progress}%`,
+                background: `linear-gradient(90deg, ${accent}, ${accent})`,
+                transition: "width 0.5s ease",
+              }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px" }}>
+              <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "capitalize" }}>
+                {status}
+              </span>
+              <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{progress}%</span>
+            </div>
+          </div>
+        )}
+
+        {/* Error / Refund Notice */}
+        {genError && (
+          <div style={{
+            marginTop: "12px",
+            padding: "10px 12px",
+            background: "#ef444410",
+            border: "1px solid #ef444430",
+            borderRadius: "8px",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "8px",
+          }}>
+            <AlertTriangle size={14} style={{ color: "#ef4444", flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: "12px", color: "#ef4444", fontWeight: 600 }}>{genError}</div>
+              {lbcRefunded && (
+                <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: 2 }}>
+                  Your {lbcCharged} LBC has been refunded.
+                </div>
+              )}
+              {!isBusy && prompt.trim() && (
+                <button
+                  onClick={handleGenerate}
+                  style={{ ...btnGhost, marginTop: 8, borderColor: "#ef4444", color: "#ef4444" }}
+                >
+                  <RefreshCw size={11} />
+                  Retry
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Success Notice */}
+        {status === "completed" && genTracks.length > 0 && (
+          <div style={{
+            marginTop: "12px",
+            padding: "10px 12px",
+            background: "#22c55e10",
+            border: "1px solid #22c55e30",
+            borderRadius: "8px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}>
+            <CheckCircle2 size={14} style={{ color: "#22c55e" }} />
+            <span style={{ fontSize: "12px", color: "#22c55e", fontWeight: 600 }}>
+              Generated {genTracks.length} track{genTracks.length > 1 ? "s" : ""}! Scroll down to listen.
+            </span>
+          </div>
         )}
       </div>
 
-      {!canAfford && (
-        <div className="text-xs" style={{ color: T.warning }}>
-          Insufficient LBC. You need {cost} but have {balance ?? 0}.
+      {/* Track Vault */}
+      <div style={{ ...cardStyle, padding: "clamp(16px, 2vw, 24px)", minHeight: 430 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+          <Library size={14} style={{ color: accent }} />
+          <span style={{ fontSize: "13px", fontWeight: 800, color: "var(--text-primary)" }}>Library</span>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+            ({vaultTracks.length})
+          </span>
+          <button onClick={() => void refresh()} style={{ ...btnGhost, marginLeft: "auto", padding: "4px 8px" }}>
+            <RefreshCw size={11} />
+          </button>
         </div>
-      )}
 
-      {isGenerating && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs">
-            <span className="font-medium capitalize" style={{ color: T.accentColor }}>{status}</span>
-            <span className="opacity-50">{progress}%</span>
+        {vaultLoading ? (
+          <div style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)", fontSize: "12px" }}>
+            <Loader2 size={20} className="animate-spin" style={{ margin: "0 auto 8px" }} />
+            Loading tracks...
           </div>
-          <div className="h-2 overflow-hidden rounded-full" style={{ backgroundColor: `${T.textColor}10` }}>
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress}%`, backgroundColor: T.accentColor }} />
+        ) : vaultTracks.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--text-muted)" }}>
+            <div style={{ width: 76, height: 76, margin: "0 auto 16px", borderRadius: 18, display: "grid", placeItems: "center", background: `linear-gradient(135deg, ${accent}22, rgba(168,85,247,.18))`, border: "1px solid var(--studio-border)" }}><Music size={30} style={{ color: accent, opacity: .8 }} /></div>
+            <div style={{ fontSize: "15px", color: "var(--text-primary)", fontWeight: 800, marginBottom: "6px" }}>Your next sound starts here</div>
+            <div style={{ fontSize: "12px", lineHeight: 1.5 }}>Generate a pair of versions, compare them, then keep building from the strongest idea.</div>
           </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border p-4 text-sm" style={{ backgroundColor: `${T.warning}15`, borderColor: `${T.warning}40`, color: T.warning }}>
-          {error}
-          {lbcRefunded && <div className="mt-1 text-xs opacity-80">LBC has been refunded.</div>}
-        </div>
-      )}
-
-      {status === "completed" && tracks.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wider opacity-50">Generated versions</div>
-          {tracks.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: `${T.textColor}10`, backgroundColor: `${T.textColor}05` }}>
-              <span className="text-sm font-medium" style={{ color: T.accentColor }}>{t.versionLabel}</span>
-              <span className="flex-1 truncate text-sm">{t.title}</span>
-              <span className="text-xs opacity-50">{t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, "0")}` : "--:--"}</span>
-            </div>
-          ))}
-          <div className="text-xs opacity-50">{lbcCharged} LBC charged. Tracks are in your Music Vault below.</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Music Vault ─────────────────────────────────────────────────────────────
-
-function MusicVaultSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const { tracks, loading, error, updateTrack, deleteTrack, refresh } = useMusicVault();
-  const [filter, setFilter] = useState<"all" | "private" | "public">("all");
-
-  // Refresh vault when a generation completes (handled by parent via onGenerated,
-  // but also poll lightly while mounted to catch async completions).
-  useEffect(() => {
-    const id = setInterval(() => void refresh(), 15000);
-    return () => clearInterval(id);
-  }, [refresh]);
-
-  const filtered = tracks.filter((t) => filter === "all" || t.visibility === filter);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Music Vault</h2>
-        <div className="flex gap-1 rounded-lg p-1" style={{ backgroundColor: `${T.textColor}08` }}>
-          {(["all", "private", "public"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFilter(f)}
-              className="rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors"
-              style={{
-                backgroundColor: filter === f ? `${T.accentColor}20` : "transparent",
-                color: filter === f ? T.accentColor : `${T.textColor}99`,
-              }}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {vaultTracks.map((track) => (
+              <TrackRow
+                key={track.id}
+                track={track}
+                isPlaying={nowPlaying === track.id}
+                onTogglePlay={() => void togglePlay(track)}
+                onDelete={() => void handleDelete(track.id)}
+                onDownload={() => void handleDownload(track)}
+                onCycleVisibility={() => void cycleVisibility(track)}
+                accentColor={accent}
+              />
+            ))}
+          </div>
+        )}
       </div>
-
-      {error && (
-        <div className="rounded-lg border p-3 text-xs" style={{ borderColor: `${T.warning}40`, color: T.warning }}>
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex h-32 items-center justify-center text-sm opacity-40">Loading Music Vault...</div>
-      ) : filtered.length === 0 ? (
-        <div className="flex h-32 flex-col items-center justify-center text-sm opacity-40">
-          <MusicIcon size={32} color={T.textColor} />
-          <p className="mt-2">No tracks yet. Grow your first track above!</p>
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          {filtered.map((track) => (
-            <VaultTrackCard
-              key={track.id}
-              track={track}
-              T={T}
-              onUpdate={updateTrack}
-              onDelete={deleteTrack}
-            />
-          ))}
-        </div>
-      )}
+      </div>
+      </div>
     </div>
   );
 }
 
-function VaultTrackCard({
+function TrackRow({
   track,
-  T,
-  onUpdate,
+  isPlaying,
+  onTogglePlay,
   onDelete,
+  onDownload,
+  onCycleVisibility,
+  accentColor,
 }: {
   track: VaultTrack;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  onUpdate: (id: string, updates: { title?: string; visibility?: string }) => void;
-  onDelete: (id: string) => void;
+  isPlaying: boolean;
+  onTogglePlay: () => void;
+  onDelete: () => void;
+  onDownload: () => void;
+  onCycleVisibility: () => void;
+  accentColor: string;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const togglePlay = useCallback(() => {
-    if (!audioRef.current) {
-      if (!track.audioUrl) return;
-      audioRef.current = new Audio(track.audioUrl);
-      audioRef.current.onended = () => setPlaying(false);
-    }
-    if (playing) {
-      void audioRef.current.pause();
-      setPlaying(false);
-    } else {
-      void audioRef.current.play().catch(() => setPlaying(false));
-      setPlaying(true);
-    }
-  }, [playing, track.audioUrl]);
-
-  const visibilityIcon: Record<string, string> = { private: "🔒", unlisted: "🔗", public: "🌐" };
+  const visIcon = track.visibility === "public" ? Globe : track.visibility === "unlisted" ? Eye : EyeOff;
+  const VisIcon = visIcon;
 
   return (
-    <div
-      className="flex items-center gap-3 rounded-xl border p-3 transition-colors"
-      style={{ borderColor: `${T.textColor}10`, backgroundColor: `${T.textColor}05` }}
-    >
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      padding: "10px 12px",
+      background: "var(--studio-surface)",
+      border: "1px solid var(--studio-border)",
+      borderRadius: "10px",
+      transition: "border-color 0.2s",
+    }}>
+      {/* Play/Pause */}
       <button
-        type="button"
-        onClick={togglePlay}
-        disabled={!track.audioUrl}
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-30"
-        style={{ backgroundColor: `${T.accentColor}20`, color: T.accentColor }}
-        aria-label={playing ? "Pause" : "Play"}
+        onClick={onTogglePlay}
+        style={{
+          width: "32px", height: "32px", borderRadius: "8px",
+          background: `${accentColor}15`, border: "none",
+          display: "grid", placeItems: "center", cursor: "pointer",
+          flexShrink: 0,
+        }}
       >
-        {playing ? "⏸" : "▶"}
+        {isPlaying ? <Pause size={14} style={{ color: accentColor }} /> : <Play size={14} style={{ color: accentColor }} />}
       </button>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{track.title}</span>
-          <span className="text-xs" title={track.visibility}>
-            {visibilityIcon[track.visibility]}
-          </span>
-          <span className="shrink-0 text-[10px] opacity-40">{track.version_label}</span>
+      {/* Track Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: "12px", fontWeight: 600, color: "var(--text-primary)",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {track.title}
         </div>
-        <p className="truncate text-xs opacity-50">
-          {track.blueprint?.genre?.join(", ") || "—"}
-          {track.blueprint?.mood?.length ? ` • ${track.blueprint.mood.join(", ")}` : ""}
-        </p>
+        <div style={{ display: "flex", gap: "8px", fontSize: "10px", color: "var(--text-muted)", marginTop: "2px" }}>
+          <span>{track.version_label}</span>
+          {track.duration ? <span>{Math.floor(track.duration / 60)}:{String(Math.floor(track.duration % 60)).padStart(2, "0")}</span> : null}
+          {track.bpm ? <span>{track.bpm} BPM</span> : null}
+          <span style={{ textTransform: "capitalize" }}>{track.provider}</span>
+        </div>
       </div>
 
-      <div className="shrink-0 text-xs opacity-50">
-        {track.duration ? `${Math.floor(track.duration / 60)}:${String(track.duration % 60).padStart(2, "0")}` : "--:--"}
-      </div>
-
-      <div className="relative shrink-0">
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-lg p-2 text-sm opacity-50 transition-opacity hover:opacity-100"
-          aria-label="Track options"
-        >
-          ⋮
+      {/* Actions */}
+      <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+        <button onClick={onCycleVisibility} title={`Visibility: ${track.visibility}`} style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px", borderRadius: "6px", color: "var(--text-muted)",
+        }}>
+          <VisIcon size={13} />
         </button>
-        {menuOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-            <div
-              className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border py-1 shadow-xl"
-              style={{ backgroundColor: T.bgColor, borderColor: `${T.textColor}15` }}
-            >
-              <MenuItem
-                T={T}
-                onClick={() => {
-                  onUpdate(track.id, { visibility: track.visibility === "private" ? "public" : "private" });
-                  setMenuOpen(false);
-                }}
-              >
-                {track.visibility === "private" ? "Make Public" : "Make Private"}
-              </MenuItem>
-              <MenuItem
-                T={T}
-                onClick={() => {
-                  onUpdate(track.id, { visibility: "unlisted" });
-                  setMenuOpen(false);
-                }}
-              >
-                Make Unlisted
-              </MenuItem>
-              <div className="my-1 h-px" style={{ backgroundColor: `${T.textColor}10` }} />
-              <MenuItem
-                T={T}
-                danger
-                onClick={() => {
-                  if (confirm("Delete this track? This cannot be undone.")) {
-                    onDelete(track.id);
-                  }
-                  setMenuOpen(false);
-                }}
-              >
-                Delete
-              </MenuItem>
-            </div>
-          </>
-        )}
+        <button onClick={onDownload} title="Download" style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px", borderRadius: "6px", color: "var(--text-muted)",
+        }}>
+          <Download size={13} />
+        </button>
+        <button onClick={onDelete} title="Delete" style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px", borderRadius: "6px", color: "var(--text-muted)",
+        }}>
+          <Trash2 size={13} />
+        </button>
       </div>
     </div>
-  );
-}
-
-// ── Shared UI primitives ────────────────────────────────────────────────────
-
-function Control({
-  label,
-  T,
-  children,
-}: {
-  label: string;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <label className="text-[10px] font-semibold uppercase tracking-wider opacity-50">{label}</label>
-      {children}
-      <span style={{ display: "none" }}>{T.accentColor}</span>
-    </div>
-  );
-}
-
-function Toggle({
-  options,
-  value,
-  onChange,
-  T,
-}: {
-  options: { label: string; value: string }[];
-  value: string;
-  onChange: (v: string) => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  return (
-    <div className="flex gap-1">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className="flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
-          style={{
-            backgroundColor: value === o.value ? T.accentColor : `${T.textColor}10`,
-            color: value === o.value ? "#fff" : `${T.textColor}99`,
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function MenuItem({
-  T,
-  children,
-  onClick,
-  danger,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full px-4 py-2 text-left text-xs transition-colors hover:bg-white/5"
-      style={{ color: danger ? T.warning : T.textColor }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function MusicIcon({ size, color }: { size: number; color: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
   );
 }

@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTerminalStore } from "@/stores/useTerminalStore";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useVoiceSession } from "../context/VoiceSessionContext";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -23,6 +27,13 @@ export interface ConnectionCapabilities {
   repository: string;
   repositoryName: string | null;
   repositoryIndexed: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  defaultBranch: string | null;
+  activeBranch: string | null;
+  sourceType: "github" | "blank" | "template" | null;
+  workspaceStatus: string | null;
+  githubInstalled: boolean;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
   writeAccess: boolean;
   connectedProviders: string[];
@@ -43,6 +54,13 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   repository: "none",
   repositoryName: null,
   repositoryIndexed: false,
+  projectId: null,
+  projectName: null,
+  defaultBranch: null,
+  activeBranch: null,
+  sourceType: null,
+  workspaceStatus: null,
+  githubInstalled: false,
   terminalExecution: "unavailable",
   writeAccess: false,
   connectedProviders: [],
@@ -70,13 +88,20 @@ export function useConnectionSummary() {
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
+  const { voiceTransportConnected, voiceInputState } = useVoiceSession();
+  const { getToken } = useClerkAuth();
+  const searchParams = useSearchParams();
+  const explicitProjectId = searchParams.get("project");
 
   const refresh = useCallback(async () => {
     try {
-      const [capsRes, termRes, voiceRes] = await Promise.allSettled([
-        fetch("/api/capabilities", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
-        fetch("/api/capabilities/project-terminal", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
-        fetch("/api/voice/health", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
+      const token = await getToken?.();
+      const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const [capsRes, termRes, voiceRes, llmRes] = await Promise.allSettled([
+        fetch(`/api/capabilities${explicitProjectId ? `?projectId=${encodeURIComponent(explicitProjectId)}` : ""}`, { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/llm/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
       ]);
 
       const next = { ...DEFAULT_CAPABILITIES };
@@ -85,9 +110,20 @@ export function useConnectionSummary() {
         const data = await capsRes.value.json();
         const caps = data.capabilities ?? [];
         const repoCap = caps.find((c: { id: string }) => c.id === "repository");
+        const projectCap = caps.find((c: { id: string }) => c.id === "project");
+        const workspaceCap = caps.find((c: { id: string }) => c.id === "runtime.sandbox");
         next.repository = repoCap?.status === "ready" ? "connected" : "none";
         next.repositoryName = repoCap?.accountName ?? null;
         next.repositoryIndexed = repoCap?.status === "ready";
+        // Prefer the project capability for projectId — a blank project
+        // is valid even without a repository.
+        next.projectId = projectCap?.projectId ?? repoCap?.projectId ?? null;
+        next.projectName = projectCap?.projectName ?? repoCap?.projectName ?? null;
+        next.defaultBranch = repoCap?.defaultBranch ?? null;
+        next.activeBranch = repoCap?.activeBranch ?? repoCap?.defaultBranch ?? null;
+        next.workspaceStatus = workspaceCap?.status ?? null;
+        next.writeAccess = workspaceCap?.status === "ready";
+        next.githubInstalled = repoCap?.status === "unavailable";
         next.connectedProviders = caps
           .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
           .map((c: { id: string }) => c.id);
@@ -122,6 +158,32 @@ export function useConnectionSummary() {
         };
       }
 
+      // Voice transport and microphone are client-side runtime state.
+      next.voiceTransportConnected = voiceTransportConnected;
+      next.voiceMicrophoneOn = voiceInputState === "listening";
+
+      // LLM provider health — sync to model store so the empty-state
+      // briefing and model picker show accurate "AI ready" status.
+      const setProviderHealth = useStudioModelStore.getState().setProviderHealth;
+      if (llmRes.status === "fulfilled" && llmRes.value.ok) {
+        const llmData = await llmRes.value.json();
+        const geminiOk = !!llmData.gemini?.available;
+        const groqOk = !!llmData.groq?.available;
+        const openrouterOk = !!llmData.openrouter?.available;
+        setProviderHealth("gemini", geminiOk ? "available" : "unavailable");
+        setProviderHealth("groq", groqOk ? "available" : "unavailable");
+        setProviderHealth("openrouter", openrouterOk ? "available" : "unavailable");
+        // "Auto" models route to whichever provider is available (prefer Gemini).
+        setProviderHealth("Auto", geminiOk || groqOk || openrouterOk ? "available" : "unavailable");
+      } else {
+        // Health endpoint failed — mark all as unavailable so the UI
+        // shows a truthful "setup required" rather than a stale unknown.
+        setProviderHealth("gemini", "unavailable");
+        setProviderHealth("groq", "unavailable");
+        setProviderHealth("openrouter", "unavailable");
+        setProviderHealth("Auto", "unavailable");
+      }
+
       // Use client-side terminal store as primary source of truth for PTY status
       // Only fall back to server-side if client hasn't connected yet
       if (terminalStatus === "connected") {
@@ -150,13 +212,20 @@ export function useConnectionSummary() {
         }
       }
 
+      // Allow writes when the terminal is connected (local dev) even if
+      // the server-side workspace hasn't been provisioned. The terminal
+      // PTY can execute file writes, so it's a valid write surface.
+      if (next.terminalExecution === "available" && !next.writeAccess) {
+        next.writeAccess = true;
+      }
+
       setCapabilities(next);
     } catch {
       // leave previous state
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError]);
+  }, [terminalStatus, terminalSessionId, terminalError, voiceTransportConnected, voiceInputState, getToken, explicitProjectId]);
 
   useEffect(() => {
     void refresh();

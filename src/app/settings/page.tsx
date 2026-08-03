@@ -78,14 +78,24 @@ export default function SettingsPage() {
     [activeSection],
   );
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     setSaveStatus("saving");
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/settings/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ controlMode }),
+      });
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
       setSaveStatus("saved");
       setUnsaved(false);
       setTimeout(() => setSaveStatus("idle"), 2000);
-    }, 800);
-  }, [setUnsaved]);
+    } catch {
+      setSaveStatus("error");
+      setUnsaved(false);
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [controlMode, setUnsaved]);
 
   const handleDiscard = useCallback(() => {
     setUnsaved(false);

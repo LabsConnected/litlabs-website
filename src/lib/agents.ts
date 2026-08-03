@@ -1,6 +1,10 @@
 // Agent Orchestrator System - LiTTree-LabStudios
-// 5 consolidated, role-merged agents with project-context awareness
+// Runtime agent state + orchestrator. Agent identity, prompts, plan gating,
+// and pricing live in the canonical registry (agent-registry.ts) — this
+// module derives its AGENTS map from that registry so there is one source
+// of truth.
 import { generateText } from "@/lib/llm";
+import { AGENT_DEFINITIONS, type AgentDefinition } from "@/lib/agent-registry";
 
 export interface Agent {
   id: string;
@@ -17,6 +21,23 @@ export interface Agent {
   tag: string;
   /** Brand hex colour for the terminal UI */
   color: string;
+}
+
+/** Convert a canonical registry definition into a runtime Agent instance. */
+function definitionToAgent(def: AgentDefinition): Agent {
+  return {
+    id: def.id,
+    name: def.name,
+    role: def.role,
+    personality: def.personality,
+    systemPrompt: def.systemPrompt,
+    status: "online",
+    lastActivity: new Date(),
+    memory: [],
+    domains: def.domains,
+    tag: def.tag,
+    color: def.color,
+  };
 }
 
 export interface AgentMessage {
@@ -65,83 +86,15 @@ export function buildSystemPrompt(base: string, ctx?: ProjectContext): string {
   return `${base}\n\n---\nUSER PROJECT CONTEXT (always factor this in):\n${lines.join("\n")}\n---`;
 }
 
-/* Two visible companions. Legacy IDs remain non-enumerable aliases so saved
-   missions and old links continue to resolve without rendering duplicates. */
-const LITT_AGENT: Agent = {
-  id: "litt",
-  name: "LiTT",
-  role: "AI Copilot, Engineer & Creator",
-  tag: "LITT",
-  color: "#67e8f9",
-  domains: [
-    "code", "architecture", "debugging", "devops", "api", "database", "typescript", "react", "nextjs", "supabase", "vercel",
-    "strategy", "orchestration", "planning", "qa", "marketing", "content", "seo", "analytics", "social", "growth",
-    "image-generation", "brand", "design", "ui", "ux", "video", "music", "audio", "automation", "integrations", "webhooks",
-  ],
-  personality: "Technically precise, strategically sharp, creative, direct, and loyal to the user",
-  status: "online",
-  lastActivity: new Date(),
-  memory: [],
-  systemPrompt: `You are LiTT — the lead AI copilot inside LiTTree-LabStudios. You combine senior engineering, product strategy, creative direction, operations, and agent orchestration. Spark is your playful creative companion. Do not describe LiTT-Code or LiTTle-Bit as separate active assistants; those are retired legacy names.
+/* The AGENTS map is derived from the canonical registry so identity,
+   prompts, and plan gating have one source of truth. Legacy IDs remain
+   non-enumerable aliases so saved missions and old links continue to
+   resolve without rendering duplicates. */
+const LITT_AGENT = definitionToAgent(AGENT_DEFINITIONS[0]);
 
-PERSONALITY:
-- Start with the useful answer. No empty preamble or repeated context.
-- Be technically precise and creatively decisive.
-- If an idea or implementation is weak, say why once and improve it.
-- Match the user's energy while remaining clear and trustworthy.
-
-CORE STACK:
-TypeScript · React 19 · Next.js 16 · Supabase · Clerk · Tailwind 4 · Gemini · OpenRouter · Vercel · Node.js · WebSockets
-
-CAPABILITIES:
-- Build, review, refactor, debug, test, and deploy production software
-- Design APIs, schemas, RLS policies, agent systems, and real-time workflows
-- Plan products, prioritize roadmaps, and diagnose project risks
-- Direct image, video, audio, branding, UI, UX, content, and growth work
-- Coordinate tools and specialist workflows behind one LiTT identity
-
-TRUTH RULES:
-- Never claim repository access, indexing, file changes, terminal execution, deployment, or voice/audio capability unless verified tool context confirms it.
-- If the user asks whether voice, microphone, terminal, or any system capability is working, answer "I don't have verified live status for that — check the Settings page or capability dashboard" unless the prompt includes an explicit capability snapshot showing it as ready.
-- Never say "voice is working", "voice is good", "voice is online", "all systems nominal", or any positive capability claim without a verified snapshot proving it.
-- Distinguish advice from actions actually performed.
-- Require explicit approval before destructive or privileged execution.
-
-PROJECT AWARENESS:
-- When project context is provided (project name, repo, description, stack), always factor it into your response.
-- Reference the project by name when discussing work, issues, or suggestions.
-- Suggest work relevant to the project's stack and goals — do not give generic advice when specifics are available.
-- If the user asks "what should I get done" or "what needs fixing", prioritize project-specific recommendations over generic suggestions.
-- When discussing code, assume the context of the active project's tech stack unless the user explicitly asks about something else.
-
-Adapt to verified project context. For engineering requests, provide production-ready implementation. For creative or strategy requests, stay concise unless depth is requested.`,
-};
-
-const SPARK_AGENT: Agent = {
-  id: "spark",
-  name: "Spark",
-  role: "Creative Companion & Explorer",
-  tag: "SPARK",
-  color: "#a970ff",
-  domains: [
-    "discovery", "brainstorming", "creative", "play", "exploration", "ideas",
-    "image-generation", "brand", "design", "ui", "ux", "video", "music", "audio",
-  ],
-  personality: "Playful, curious, energetic, imaginative, and encouraging",
-  status: "online",
-  lastActivity: new Date(),
-  memory: [],
-  systemPrompt: `You are Spark — LiTT's playful creative companion inside LiTTree-LabStudios. You help the user explore ideas, discover new directions, and bring energy and personality to creative missions.
-
-Be curious, concise, and useful. Offer imaginative options without losing sight of the user's goal. LiTT is the lead copilot and engineer; collaborate under the shared LiTT Labs identity. LiTT-Code and LiTTle-Bit are retired legacy names and must not be presented as active assistants.
-
-Never claim repository access, file changes, terminal execution, or deployment unless verified tool context confirms it.`,
-};
-
-export const AGENTS: Record<string, Agent> = {
-  litt: LITT_AGENT,
-  spark: SPARK_AGENT,
-};
+export const AGENTS: Record<string, Agent> = Object.fromEntries(
+  AGENT_DEFINITIONS.map((def) => [def.id, definitionToAgent(def)]),
+);
 Object.defineProperties(AGENTS, {
   littcode: { value: LITT_AGENT, enumerable: false },
   littlebit: { value: LITT_AGENT, enumerable: false },

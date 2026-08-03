@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { createCanvas, listCanvases } from "@/lib/canvas/repository";
 import { CanvasTypeSchema } from "@/lib/canvas/types";
 
@@ -9,7 +9,7 @@ import { CanvasTypeSchema } from "@/lib/canvas/types";
  * Optional query params: ?projectId=...&conversationId=...&status=active|archived
  */
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
  *     sourceMessageId?: string }
  */
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

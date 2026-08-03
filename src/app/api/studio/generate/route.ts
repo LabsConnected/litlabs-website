@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -66,47 +67,35 @@ export async function POST(request: NextRequest) {
 
     if (provider === "gemini" && GEMINI_API_KEY) {
       try {
-        // Try Gemini Imagen 3
-        const aspectMap: Record<string, string> = {
-          "1:1": "1:1",
-          "16:9": "16:9",
-          "9:16": "9:16",
-          "4:3": "4:3",
-          "3:4": "3:4",
-        };
+        // Migrated from deprecated Imagen 3 to Nano Banana (gemini-2.5-flash-image).
+        // Imagen 3 shuts down August 17, 2026.
+        const imageModel = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${GEMINI_API_KEY}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              instances: [{ prompt: prompt.trim() }],
-              parameters: {
-                sampleCount: 1,
-                aspectRatio: aspectMap[aspectRatio] || "1:1",
-              },
-            }),
+        const response = await ai.models.generateContent({
+          model: imageModel,
+          contents: prompt.trim(),
+          config: {
+            responseModalities: [Modality.IMAGE],
           },
-        );
+        });
 
-        if (res.ok) {
-          const data = await res.json();
-          const b64 = data.predictions?.[0]?.bytesBase64Encoded;
-          if (b64) {
-            return NextResponse.json({
-              images: [
-                {
-                  url: `data:image/png;base64,${b64}`,
-                  prompt,
-                  provider: "gemini",
-                  timestamp: Date.now(),
-                },
-              ],
-              provider: "gemini",
-              cost: 1,
-            });
-          }
+        const parts = response.candidates?.[0]?.content?.parts ?? [];
+        const imagePart = parts.find((p) => p.inlineData?.data);
+        if (imagePart?.inlineData?.data) {
+          const mimeType = imagePart.inlineData.mimeType || "image/png";
+          return NextResponse.json({
+            images: [
+              {
+                url: `data:${mimeType};base64,${imagePart.inlineData.data}`,
+                prompt,
+                provider: "gemini",
+                timestamp: Date.now(),
+              },
+            ],
+            provider: "gemini",
+            cost: 1,
+          });
         }
       } catch {
         // Silenced

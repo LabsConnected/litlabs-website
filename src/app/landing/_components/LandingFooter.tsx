@@ -27,9 +27,9 @@ const COLS: Array<{
     title: "Company",
     links: [
       { label: "About", href: "/profile" },
-      { label: "Blog", href: "/social" },
-      { label: "Careers", href: "/social" },
-      { label: "Contact", href: "/social" },
+      { label: "Blog", href: "/discover" },
+      { label: "Careers", href: "/discover" },
+      { label: "Contact", href: "/discover" },
     ],
   },
   {
@@ -96,7 +96,7 @@ const SOCIALS: Array<{
     Icon: GitHubIcon,
   },
   { label: "Twitter", href: "https://twitter.com/litlabs", Icon: TwitterIcon },
-  { label: "Discord", href: "/social", Icon: DiscordIcon },
+  { label: "Discord", href: "/discover", Icon: DiscordIcon },
 ];
 
 export function LandingFooter() {

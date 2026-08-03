@@ -9,6 +9,7 @@ interface ProfileCoverProps {
   coverPreview: string | null;
   isOwner: boolean;
   saving: boolean;
+  uploadError?: string | null;
   onFileSelect: (file: File) => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -19,6 +20,7 @@ export function ProfileCover({
   coverPreview,
   isOwner,
   saving,
+  uploadError,
   onFileSelect,
   onConfirm,
   onCancel,
@@ -66,20 +68,25 @@ export function ProfileCover({
 
       {/* Upload confirm bar */}
       {coverPreview && (
-        <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/60">
-          <button
-            onClick={onConfirm}
-            disabled={saving}
-            className="px-5 py-2 rounded-xl text-sm font-bold bg-[#a855f7] text-white disabled:opacity-50 transition hover:bg-[#c084fc]"
-          >
-            {saving ? "Uploading…" : "Set cover"}
-          </button>
-          <button
-            onClick={onCancel}
-            className="px-5 py-2 rounded-xl text-sm font-bold border border-white/20 bg-black/40 text-white transition hover:bg-white/10"
-          >
-            Cancel
-          </button>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+          {uploadError && (
+            <p className="text-sm font-semibold text-red-400 px-4 text-center">{uploadError}</p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onConfirm}
+              disabled={saving}
+              className="px-5 py-2 rounded-xl text-sm font-bold bg-[#a855f7] text-white disabled:opacity-50 transition hover:bg-[#c084fc]"
+            >
+              {saving ? "Uploading…" : "Set cover"}
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-5 py-2 rounded-xl text-sm font-bold border border-white/20 bg-black/40 text-white transition hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

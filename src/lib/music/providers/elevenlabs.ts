@@ -13,6 +13,7 @@ import type {
   ProviderStatusResult,
 } from "@/types/music";
 import type { MusicProvider } from "./index";
+import { fetchWithTimeout } from "./http";
 
 export class ElevenMusicProvider implements MusicProvider {
   readonly name = "elevenlabs" as const;
@@ -35,7 +36,7 @@ export class ElevenMusicProvider implements MusicProvider {
     const { blueprint, prompt, instrumental, durationSeconds } = input;
     const b = blueprint as { genre?: string[]; mood?: string[]; production?: string[]; bpm?: number; key?: string; avoid?: string[]; lyrics?: string };
 
-    const response = await fetch(`${this.baseUrl}/music/compose`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/music/compose`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -80,7 +81,7 @@ export class ElevenMusicProvider implements MusicProvider {
   }
 
   async getStatus(providerJobId: string): Promise<ProviderStatusResult> {
-    const response = await fetch(`${this.baseUrl}/music/compose/${providerJobId}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/music/compose/${providerJobId}`, {
       headers: { "xi-api-key": this.apiKey },
     });
     if (!response.ok) {
@@ -98,7 +99,7 @@ export class ElevenMusicProvider implements MusicProvider {
   }
 
   async cancel(providerJobId: string): Promise<boolean> {
-    const response = await fetch(`${this.baseUrl}/music/compose/${providerJobId}/cancel`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/music/compose/${providerJobId}/cancel`, {
       method: "POST",
       headers: { "xi-api-key": this.apiKey },
     });

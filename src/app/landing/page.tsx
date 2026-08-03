@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 import { LandingHeader } from "./_components/LandingHeader";
 import { LandingHero } from "./_components/LandingHero";
 import { LandingLogos } from "./_components/LandingLogos";
@@ -11,11 +12,13 @@ import { LandingCTA } from "./_components/LandingCTA";
 import { LandingFooter } from "./_components/LandingFooter";
 import { LandingBackground } from "./_components/LandingBackground";
 
-export const metadata: Metadata = {
-  title: "LiTT Labs — Stop chatting. Start shipping.",
+export const metadata: Metadata = buildMetadata({
+  title: "Bring the idea. LiTT helps you build the rest.",
   description:
-    "LiTT Labs gives your project an AI crew that can see the work, change the files, test the result, and help you ship. Connect your repo, assign a mission, watch your agents work.",
-};
+    "Build apps, create art, make media, and launch real projects with an AI crew that remembers your goals, style, and decisions. Free to join.",
+  path: "/landing",
+  index: true,
+});
 
 export default function ModernLandingPage() {
   return (

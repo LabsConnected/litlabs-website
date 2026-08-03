@@ -318,18 +318,27 @@ export async function updateProjectRuntime(
 /**
  * Delete a canonical project. Only deletes from studio_projects.
  * Does NOT delete from the legacy projects table.
+ * Returns false if the project doesn't exist or doesn't belong to the user.
+ *
+ * The delete is ownership-scoped: the WHERE clause requires both the
+ * project ID and the authenticated user ID to match. If no owned row is
+ * deleted, returns false — callers should respond with a generic 404 so
+ * a foreign user cannot determine whether the project exists.
  */
 export async function deleteProject(
   projectId: string,
   userId: string,
 ): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from(TABLE)
     .delete()
     .eq("id", projectId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
 
-  return !error;
+  if (error) return false;
+  return data !== null;
 }
 
 /**

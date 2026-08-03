@@ -34,8 +34,8 @@ export interface MediaProvider {
 export const MEDIA_PROVIDERS: MediaProvider[] = [
   {
     id: "gemini",
-    label: "Gemini (Imagen)",
-    description: "Google Gemini Imagen 3 image generation via your existing GEMINI_API_KEY.",
+    label: "Gemini (Nano Banana)",
+    description: "Google Gemini Nano Banana image generation via your existing GEMINI_API_KEY.",
     supportedFormats: ["image"],
     cost: () => 1,
     requiresKey: true,

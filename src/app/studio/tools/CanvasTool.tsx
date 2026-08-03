@@ -80,6 +80,12 @@ const QUALITY_LEVELS = [
 
 const PERSIST_KEY = "litlabs:canvas:files";
 const PERSIST_MSG_KEY = "litlabs:canvas:messages";
+// TODO(P0-4): Replace localStorage with server-backed storage (Supabase table
+// with RLS). This requires: (1) a canvas_files table, (2) an API endpoint for
+// save/load, (3) passing userId + projectId into CanvasTool as props. Currently
+// deferred because CanvasTool is a standalone component with no projectId
+// context, and this is a data-persistence issue (not cross-user leakage —
+// localStorage is origin-scoped). Will be addressed in the Studio rebuild.
 
 export default function CanvasTool() {
   const { resolvedColors: T } = useTheme();

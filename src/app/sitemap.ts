@@ -18,16 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily",
       priority: 0.8,
     },
-    {
-      url: absoluteUrl("/games"),
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
-    {
-      url: absoluteUrl("/social"),
-      changeFrequency: "daily",
-      priority: 0.7,
-    },
+    // /discover removed — community features disabled for v1
     {
       url: absoluteUrl("/pricing"),
       changeFrequency: "monthly",

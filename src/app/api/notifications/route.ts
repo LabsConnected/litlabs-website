@@ -1,6 +1,6 @@
 // Notifications API — GET (list) / PATCH (mark read)
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
@@ -8,7 +8,7 @@ import {
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function getHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -65,7 +65,7 @@ async function getHandler(req: NextRequest) {
 }
 
 async function patchHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

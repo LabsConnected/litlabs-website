@@ -515,7 +515,7 @@ export default function Gallery() {
             borderBottom: `1px solid ${T.accentColor}40`,
           }}
         >
-          🛠 Demo museum — connect Supabase to see real community artifacts.
+          � No community uploads yet. Be the first to share your work!
         </div>
       )}
 

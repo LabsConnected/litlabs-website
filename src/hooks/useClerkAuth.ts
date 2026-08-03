@@ -70,6 +70,7 @@ function useSessionAuth() {
     sessionClaims: sessionUser
       ? { name: sessionUser.name, username: sessionUser.email }
       : undefined,
+    getToken: async () => null,
   };
 }
 

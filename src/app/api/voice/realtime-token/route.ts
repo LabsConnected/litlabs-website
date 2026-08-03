@@ -17,7 +17,7 @@ export const maxDuration = 30;
  */
 export async function POST(req: NextRequest) {
   try {
-    const session = await auth();
+    const session = await auth(req);
     if (!session?.userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

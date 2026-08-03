@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { runAI } from "@/lib/ai/providers";
 import {
   buildJarvisPrompt,
@@ -8,9 +8,29 @@ import {
   JarvisAction,
   parseJarvisActions,
 } from "@/lib/litt-context";
+import { getUserContext } from "@/lib/litt-intelligence/user-context";
+import { fetchWeatherForUser } from "@/lib/litt-intelligence/weather-tool";
+
+const PERSONAL_KEYWORDS = [
+  "weather",
+  "temperature",
+  "forecast",
+  "rain",
+  "umbrella",
+  "what should i wear",
+  "is it hot",
+  "is it cold",
+  "how hot",
+  "how cold",
+];
+
+function isPersonalAssistantQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+  return PERSONAL_KEYWORDS.some((kw) => lower.includes(kw));
+}
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -22,6 +42,23 @@ export async function POST(req: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
+
+    if (isPersonalAssistantQuery(message)) {
+      const ctx = await getUserContext(userId, {
+        capabilities: ["weather.current", "weather.hourly", "weather.daily"],
+      });
+      const weatherResult = await fetchWeatherForUser(ctx, { type: "current" });
+
+      if (weatherResult.success) {
+        const answer = weatherResult.formatted;
+        return NextResponse.json({ answer, actions: [] as JarvisAction[] });
+      }
+
+      return NextResponse.json({
+        answer: weatherResult.error,
+        actions: [] as JarvisAction[],
+      });
     }
 
     const context = collectJarvisContext(contextRaw || { route: "/litt" });
@@ -55,7 +92,6 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseJarvisActions(answer);
 
-    // Add context-aware fallback actions if the AI didn't return any
     const actions: JarvisAction[] = parsed.length > 0 ? parsed : [];
 
     const lower = message.toLowerCase();

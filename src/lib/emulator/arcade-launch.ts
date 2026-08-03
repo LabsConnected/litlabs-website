@@ -53,12 +53,17 @@ export interface BiosValidationResult {
   ok: boolean;
   hash?: string;
   error?: string;
+  warning?: string;
 }
 
 /**
  * Validate a user-selected BS-X BIOS file by computing its MD5 hash
  * and comparing against the expected hash. The file stays in the
  * browser — it is never uploaded.
+ *
+ * Returns `ok: true` when the hash matches. Returns `ok: false` with
+ * a `warning` (not a hard block) when the hash doesn't match — the
+ * caller can still allow the user to proceed at their own risk.
  */
 export async function validateBsxBios(file: File | Blob): Promise<BiosValidationResult> {
   try {
@@ -70,7 +75,8 @@ export async function validateBsxBios(file: File | Blob): Promise<BiosValidation
     if (hash.toLowerCase() !== EXPECTED_BSX_MD5) {
       return {
         ok: false,
-        error: `Wrong BS-X BIOS. Expected MD5 ${EXPECTED_BSX_MD5}, received ${hash}.`,
+        hash: hash.toLowerCase(),
+        warning: `This file's MD5 (${hash.slice(0, 12)}…) doesn't match the expected BS-X BIOS (${EXPECTED_BSX_MD5.slice(0, 12)}…). It may be a different revision. You can try it anyway, but the game may not boot correctly.`,
       };
     }
     return { ok: true, hash: hash.toLowerCase() };

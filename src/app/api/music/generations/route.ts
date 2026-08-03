@@ -1,105 +1,116 @@
-// src/app/api/music/generations/route.ts
-// POST /api/music/generations — create a music generation (Quick Create / Custom).
-// Auth: Clerk. LBC: charged atomically via the existing credit_ledger.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { getSupabaseAdmin } from "@/lib/supabase";
-import { rateLimit } from "@/lib/rate-limiter";
+import { auth } from "@/lib/auth";
+import { z } from "zod";
+import { getUserByClerkId } from "@/lib/user-db";
+import { withRateLimit } from "@/lib/rate-limiter";
 import { createGeneration } from "@/lib/music/generation-service";
-import type { GenerateSongInput } from "@/types/music";
+import { getConfiguredProviderName, isMockAllowed } from "@/lib/music/providers/factory";
 
-/** Resolve Clerk id → internal public.users.id UUID. */
-async function resolveUserId(clerkId: string): Promise<string | null> {
-  const admin = getSupabaseAdmin();
-  if (!admin) return null;
-  const { data } = await admin
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .maybeSingle();
-  return (data?.id as string) ?? null;
-}
+export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
-  const { success, resetTime } = await rateLimit(req, 5, 60); // 5 generations/min
-  if (!success) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429, headers: { "Retry-After": String(resetTime) } });
+const TAG = "[music:generations]";
+
+const GenerateSchema = z.object({
+  prompt: z.string().min(3, "Prompt must be at least 3 characters").max(500),
+  instrumental: z.boolean().default(false),
+  duration: z.enum(["concept", "full"]).default("concept"),
+  vocalType: z.string().optional(),
+  explicit: z.boolean().optional(),
+  lyrics: z.string().optional(),
+  energy: z.number().min(1).max(10).optional(),
+  idempotencyKey: z.string().min(8, "Idempotency key required"),
+});
+
+/**
+ * POST /api/music/generations
+ * Start a new music generation. Returns 202 with the generation ID.
+ *
+ * The generation runs asynchronously — the client polls
+ * GET /api/music/generations/:id for status updates.
+ *
+ * Billing:
+ *   - LBC is debited atomically before generation starts
+ *   - If generation fails, LBC is refunded automatically
+ *   - Idempotency key prevents duplicate charges
+ *
+ * Provider gating:
+ *   - The mock provider is rejected here unless explicitly allowed
+ *     (tests or MUSIC_ALLOW_MOCK=true). Production must set MUSIC_PROVIDER
+ *     to a real provider (elevenlabs|mureka) so a billed path can never
+ *     silently produce fake audio.
+ */
+async function handler(req: NextRequest) {
+  const start = Date.now();
+  const { userId: clerkId } = await auth(req);
+  if (!clerkId) {
+    console.info(`${TAG} 401 userId=anon dur=${Date.now() - start}ms`);
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await req.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
-    }
-
-    const {
-      prompt,
-      instrumental,
-      duration,
-      vocalType,
-      explicit,
-      lyrics,
-      style,
-      energy,
-      idempotencyKey,
-    } = body as Record<string, unknown>;
-
-    if (typeof prompt !== "string" || prompt.trim().length < 5) {
-      return NextResponse.json({ error: "Prompt must be at least 5 characters" }, { status: 400 });
-    }
-    if (typeof idempotencyKey !== "string" || idempotencyKey.length < 8) {
-      return NextResponse.json({ error: "idempotencyKey is required (min 8 chars)" }, { status: 400 });
-    }
-
-    const userId = await resolveUserId(clerkId);
-    if (!userId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    const durationSeconds =
-      duration === "concept" ? 30 : typeof duration === "number" ? duration : 180;
-
-    const input: GenerateSongInput = {
-      prompt: prompt.trim(),
-      instrumental: Boolean(instrumental),
-      durationSeconds,
-      vocalType: typeof vocalType === "string" ? vocalType : undefined,
-      explicit: Boolean(explicit),
-      lyrics: typeof lyrics === "string" ? lyrics : undefined,
-      style: typeof style === "string" ? style : undefined,
-      energy: typeof energy === "number" ? energy : undefined,
-      idempotencyKey: idempotencyKey.trim(),
-    };
-
-    const result = await createGeneration({ clerkId, userId, input });
-
+  // Mock gate — reject before any billing/DB work in production.
+  const providerName = getConfiguredProviderName();
+  if (providerName === "mock" && !isMockAllowed()) {
+    console.info(`${TAG} 503 userId=${clerkId} reason=mock-not-allowed dur=${Date.now() - start}ms`);
     return NextResponse.json(
       {
-        generationId: result.generationId,
-        status: result.status,
-        lbcCharged: result.lbcCharged,
-        replayed: result.replayed,
-        message: result.replayed ? "Existing generation returned" : "Generation started",
+        error:
+          "Music generation is not configured. Set MUSIC_PROVIDER to a supported provider (elevenlabs|mureka).",
       },
-      { status: 202 },
+      { status: 503 },
     );
-  } catch (error: unknown) {
-    const err = error as Error & { name?: string };
-    if (err.name === "SAFETY_VIOLATION") {
-      return NextResponse.json({ error: err.message, code: "SAFETY_VIOLATION" }, { status: 400 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const parsed = GenerateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message || "Invalid request" },
+      { status: 400 },
+    );
+  }
+
+  const user = await getUserByClerkId(clerkId);
+  if (!user) {
+    console.info(`${TAG} 404 userId=${clerkId} reason=user-not-found dur=${Date.now() - start}ms`);
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const { duration, ...rest } = parsed.data;
+  const durationSeconds = duration === "concept" ? 30 : 120;
+
+  try {
+    const result = await createGeneration({
+      clerkId,
+      userId: user.id,
+      input: { ...rest, durationSeconds },
+    });
+    console.info(
+      `${TAG} ${result.replayed ? 200 : 202} userId=${clerkId} genId=${result.generationId} provider=${providerName} charged=${result.lbcCharged} replayed=${result.replayed} dur=${Date.now() - start}ms`,
+    );
+    return NextResponse.json(result, { status: result.replayed ? 200 : 202 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Generation failed";
+    const name = err instanceof Error ? err.name : "";
+    console.error(`${TAG} 500 userId=${clerkId} errName=${name} msg=${message} dur=${Date.now() - start}ms`);
+
+    if (name === "INSUFFICIENT_LBC") {
+      return NextResponse.json({ error: message }, { status: 402 });
     }
-    if (err.name === "EXPLICIT_CONTENT") {
-      return NextResponse.json({ error: err.message, code: "EXPLICIT_CONTENT" }, { status: 400 });
+    if (name === "SAFETY_VIOLATION" || name === "EXPLICIT_CONTENT") {
+      return NextResponse.json({ error: message }, { status: 422 });
     }
-    if (err.name === "INSUFFICIENT_LBC") {
-      return NextResponse.json({ error: err.message, code: "INSUFFICIENT_LBC" }, { status: 402 });
-    }
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return NextResponse.json({ error: message, code: "GENERATION_FAILED" }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+// Rate limit: 10 generation starts per 60s per IP (withRateLimit is backed by
+// the Supabase rate_limit_store and keyed on the client IP). Generation is
+// expensive and billed, so the budget is tighter than the read-heavy routes.
+export const POST = withRateLimit(handler, 10, 60);
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
 import {
@@ -13,6 +13,9 @@ import {
   ShieldCheck,
   Code2,
   X,
+  Maximize2,
+  Minimize2,
+  RotateCw,
 } from "lucide-react";
 import {
   GAME_LIBRARY,
@@ -34,17 +37,94 @@ export default function GamesPage() {
   const [recentRetro, setRecentRetro] = useState<RetroGameRecord | null>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [iframeError, setIframeError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // If the iframe doesn't load within 10s, show a fallback message
+  const closeGame = useCallback(() => {
+    setSelectedGame(null);
+    setIframeLoaded(false);
+    setIframeError(null);
+    setIsFullscreen(false);
+  }, []);
+
+  // If the iframe doesn't load within 15s, show a fallback message
   useEffect(() => {
     if (!selectedGame || iframeLoaded || iframeError) return;
     const timer = window.setTimeout(() => {
       if (!iframeLoaded) {
         setIframeError("This game is taking too long to load. It may block embedding — try opening in a new tab.");
       }
-    }, 10_000);
+    }, 15_000);
     return () => window.clearTimeout(timer);
   }, [selectedGame, iframeLoaded, iframeError]);
+
+  // Escape key closes the overlay; scroll lock prevents background scrolling
+  useEffect(() => {
+    if (!selectedGame) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else {
+          closeGame();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = "";
+    };
+  }, [selectedGame, isFullscreen, closeGame]);
+
+  // Focus the iframe immediately after it loads so keyboard input reaches the game
+  useEffect(() => {
+    if (iframeLoaded && iframeRef.current) {
+      try {
+        iframeRef.current.focus();
+        // Some browsers need a second attempt
+        const t = setTimeout(() => iframeRef.current?.focus(), 100);
+        return () => clearTimeout(t);
+      } catch {
+        // cross-origin — focus may be blocked, but try anyway
+      }
+    }
+  }, [iframeLoaded]);
+
+  // Track native fullscreen changes
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const el = playerContainerRef.current;
+    if (!el) return;
+    try {
+      if (!document.fullscreenElement) {
+        await el.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // Fullscreen may be blocked — toggle the CSS fallback
+      setIsFullscreen((v) => !v);
+    }
+  }, []);
+
+  const reloadIframe = useCallback(() => {
+    if (!iframeRef.current) return;
+    setIframeLoaded(false);
+    setIframeError(null);
+    const src = iframeRef.current.src;
+    iframeRef.current.src = "about:blank";
+    setTimeout(() => {
+      if (iframeRef.current) iframeRef.current.src = src;
+    }, 50);
+  }, []);
 
   useEffect(() => {
     listRetroGames()
@@ -87,11 +167,11 @@ export default function GamesPage() {
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
             <p className="mt-3 max-w-xl text-base text-white/55">Bring games you legally own. Build your own with LiTT.</p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
-                <Play size={16} fill="currentColor" /> Quick Play
-              </Link>
-              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
+              <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
                 <Gamepad2 size={16} /> Open Retro Arcade
+              </Link>
+              <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
+                <Play size={16} fill="currentColor" /> Quick Play
               </Link>
               <Link href="/studio?tool=image" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white/70 transition hover:bg-white/5 hover:text-white">
                 <Wand2 size={16} /> Build a Game
@@ -126,6 +206,56 @@ export default function GamesPage() {
             </Link>
           </section>
         )}
+
+        {/* === LiTT RETRO ARCADE HERO === */}
+        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+          <RetroArcadeHero variant="banner" />
+        </section>
+
+        {/* === PLAY-IN-LITT PROMISE === */}
+        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+          <div className="mb-5">
+            <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">The LiTT play promise</p>
+            <h2 className="mt-1 text-xl font-black sm:text-2xl">Less link-hopping. More playing.</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              { title: "Curated, not dumped", detail: "Every title earns its place with real gameplay, clear controls, and quality cover art.", color: "#a8ff2f" },
+              { title: "Play inside LiTTree", detail: "Featured games launch in the Game Cloud player whenever the publisher supports secure embedding.", color: "#65f4ff" },
+              { title: "Private retro library", detail: "Your own legal cartridges stay in this browser with local saves and recovery controls.", color: "#a970ff" },
+            ].map((item) => (
+              <div key={item.title} className="relative overflow-hidden rounded-2xl border p-5" style={{ borderColor: `${item.color}28`, background: `linear-gradient(145deg, ${item.color}12, rgba(255,255,255,.02))` }}>
+                <div className="mb-4 h-1.5 w-12 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 18px ${item.color}` }} />
+                <h3 className="text-sm font-black text-white">{item.title}</h3>
+                <p className="mt-2 text-xs leading-5 text-white/45">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* === BUILD A GAME IN STUDIO === */}
+        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+          <div className="flex flex-col items-start gap-4 rounded-3xl border border-white/10 bg-linear-to-br from-violet-500/10 to-transparent p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[.25em] text-violet-400">Build with LiTT</p>
+              <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
+              <p className="mt-2 max-w-md text-sm text-white/55">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
+            </div>
+            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
+              <Wand2 size={16} /> Open Studio
+            </Link>
+          </div>
+        </section>
+
+        {/* === LEGAL / PRIVATE STORAGE NOTE === */}
+        <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-400/4 p-4">
+            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
+            <p className="text-xs leading-5 text-white/50">
+              LiTTree does not provide commercial ROM files. Only import games you own or public-domain homebrew. Your imported files remain in your browser.
+            </p>
+          </div>
+        </section>
 
         {/* === QUICK PLAY === */}
         <section id="quick-play" className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
@@ -204,88 +334,71 @@ export default function GamesPage() {
           )}
         </section>
 
-        {/* === LiTT RETRO ARCADE HERO === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <RetroArcadeHero variant="banner" />
-        </section>
-
-        {/* === PLAY-IN-LITT PROMISE === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <div className="mb-5">
-            <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">The LiTT play promise</p>
-            <h2 className="mt-1 text-xl font-black sm:text-2xl">Less link-hopping. More playing.</h2>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {[
-              { title: "Curated, not dumped", detail: "Every title earns its place with real gameplay, clear controls, and quality cover art.", color: "#a8ff2f" },
-              { title: "Play inside LiTTree", detail: "Featured games launch in the Game Cloud player whenever the publisher supports secure embedding.", color: "#65f4ff" },
-              { title: "Private retro library", detail: "Your own legal cartridges stay in this browser with local saves and recovery controls.", color: "#a970ff" },
-            ].map((item) => (
-              <div key={item.title} className="relative overflow-hidden rounded-2xl border p-5" style={{ borderColor: `${item.color}28`, background: `linear-gradient(145deg, ${item.color}12, rgba(255,255,255,.02))` }}>
-                <div className="mb-4 h-1.5 w-12 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 18px ${item.color}` }} />
-                <h3 className="text-sm font-black text-white">{item.title}</h3>
-                <p className="mt-2 text-xs leading-5 text-white/45">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* === BUILD A GAME IN STUDIO === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <div className="flex flex-col items-start gap-4 rounded-3xl border border-white/10 bg-linear-to-br from-violet-500/10 to-transparent p-6 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[.25em] text-violet-400">Build with LiTT</p>
-              <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
-              <p className="mt-2 max-w-md text-sm text-white/55">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
-            </div>
-            <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
-              <Wand2 size={16} /> Open Studio
-            </Link>
-          </div>
-        </section>
-
-        {/* === LEGAL / PRIVATE STORAGE NOTE === */}
-        <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">
-          <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-400/4 p-4">
-            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
-            <p className="text-xs leading-5 text-white/50">
-              LiTTree does not provide commercial ROM files. Only import games you own or public-domain homebrew. Your imported files remain in your browser.
-            </p>
-          </div>
-        </section>
-
         {/* === GAME PLAYER OVERLAY === */}
         {selectedGame && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
-            <div className="w-full max-w-5xl">
-              <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => { setSelectedGame(null); setIframeLoaded(false); setIframeError(null); }} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game">
-                    <X size={16} />
-                  </button>
-                  <div>
-                    <div className="font-black">{selectedGame.title}</div>
-                    <div className="text-[10px] text-white/40">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-2 backdrop-blur-md sm:p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) closeGame(); }}
+          >
+            <div
+              ref={playerContainerRef}
+              className={`relative w-full ${isFullscreen ? "h-full" : "max-w-5xl"}`}
+            >
+              {/* Header bar — hidden in fullscreen */}
+              {!isFullscreen && (
+                <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <button onClick={closeGame} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game">
+                      <X size={16} />
+                    </button>
+                    <div>
+                      <div className="font-black">{selectedGame.title}</div>
+                      <div className="text-[10px] text-white/40">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={reloadIframe}
+                      className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"
+                      aria-label="Reload game"
+                      title="Reload"
+                    >
+                      <RotateCw size={15} />
+                    </button>
+                    <button
+                      onClick={toggleFullscreen}
+                      className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"
+                      aria-label="Toggle fullscreen"
+                      title="Fullscreen"
+                    >
+                      <Maximize2 size={15} />
+                    </button>
+                    <button
+                      onClick={() => handleToggleFav(selectedGame.id)}
+                      className="rounded-lg border border-white/10 p-2 hover:bg-white/10"
+                      style={{ color: favorites.includes(selectedGame.id) ? "#f97316" : "rgba(255,255,255,0.4)" }}
+                      aria-label={favorites.includes(selectedGame.id) ? "Unfavorite" : "Favorite"}
+                    >
+                      <Heart size={16} fill={favorites.includes(selectedGame.id) ? "#f97316" : "none"} />
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleToggleFav(selectedGame.id)}
-                  className="rounded-lg border border-white/10 p-2 hover:bg-white/10"
-                  style={{ color: favorites.includes(selectedGame.id) ? "#f97316" : "rgba(255,255,255,0.4)" }}
-                  aria-label={favorites.includes(selectedGame.id) ? "Unfavorite" : "Favorite"}
-                >
-                  <Heart size={16} fill={favorites.includes(selectedGame.id) ? "#f97316" : "none"} />
-                </button>
-              </div>
-              <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black">
+              )}
+
+              {/* Game viewport — flexible height instead of fixed aspect-video */}
+              <div
+                className={`relative overflow-hidden rounded-2xl border border-white/10 bg-black ${isFullscreen ? "h-full rounded-none border-0" : ""}`}
+                style={isFullscreen ? undefined : { minHeight: "500px", maxHeight: "80vh" }}
+              >
                 {selectedGame.html5Url ? (
                   <>
                     <iframe
+                      ref={iframeRef}
                       title={`${selectedGame.title} game`}
                       src={selectedGame.html5Url}
                       className="h-full w-full border-0"
-                      allow="autoplay; fullscreen; gamepad; pointer-lock; cross-origin-isolated"
-                      sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock allow-modals"
+                      allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write"
+                      sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock allow-modals allow-downloads allow-popups-to-escape-sandbox"
                       referrerPolicy="origin"
                       onLoad={() => setIframeLoaded(true)}
                       onError={() => setIframeError("Failed to load game. Try opening in a new tab.")}
@@ -295,6 +408,14 @@ export default function GamesPage() {
                         <div className="text-center">
                           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
                           <p className="mt-3 text-xs text-white/40">Loading {selectedGame.title}…</p>
+                          <a
+                            href={selectedGame.html5Url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 text-[10px] font-bold text-white/60 hover:bg-white/10 hover:text-white"
+                          >
+                            <ExternalLink size={11} /> Open in new tab
+                          </a>
                         </div>
                       </div>
                     )}
@@ -319,21 +440,38 @@ export default function GamesPage() {
                     <p>No playable game available.</p>
                   </div>
                 )}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/40">
-                <span>👤 {selectedGame.players}P</span>
-                <span>🛡️ {selectedGame.licenseLabel}</span>
-                {selectedGame.sourceUrl && (
-                  <a href={selectedGame.sourceUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70" aria-label={`View ${selectedGame.title} source`}>
-                    <Code2 size={11} /> Source
-                  </a>
-                )}
-                {selectedGame.html5Url && (
-                  <a href={selectedGame.html5Url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70">
-                    <ExternalLink size={11} /> Open in new tab
-                  </a>
+
+                {/* Fullscreen exit button — only visible in fullscreen */}
+                {isFullscreen && (
+                  <button
+                    onClick={toggleFullscreen}
+                    className="absolute right-3 top-3 z-10 rounded-lg border border-white/20 bg-black/60 p-2 text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+                    aria-label="Exit fullscreen"
+                    title="Exit fullscreen (Esc)"
+                  >
+                    <Minimize2 size={16} />
+                  </button>
                 )}
               </div>
+
+              {/* Footer bar — hidden in fullscreen */}
+              {!isFullscreen && (
+                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/40">
+                  <span>👤 {selectedGame.players}P</span>
+                  <span>🛡️ {selectedGame.licenseLabel}</span>
+                  {selectedGame.sourceUrl && (
+                    <a href={selectedGame.sourceUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70" aria-label={`View ${selectedGame.title} source`}>
+                      <Code2 size={11} /> Source
+                    </a>
+                  )}
+                  {selectedGame.html5Url && (
+                    <a href={selectedGame.html5Url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-white/70">
+                      <ExternalLink size={11} /> Open in new tab
+                    </a>
+                  )}
+                  <span className="ml-auto text-white/25">Press Esc to close · Click outside to exit</span>
+                </div>
+              )}
             </div>
           </div>
         )}

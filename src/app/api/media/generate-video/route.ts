@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
+import { auth } from "@/lib/auth";
+import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
@@ -8,7 +8,7 @@ import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -39,26 +39,54 @@ async function handler(req: NextRequest) {
           { status: 400 },
         );
 
-      const wallet = await getUserWallet(userId);
-      if (wallet.balance < cost)
+      // Check balance
+      const balances = await getCreditBalances(userId);
+      if (balances.total < cost)
         return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
 
-      const result = await submitAlibabaVideoTask({
-        model,
-        prompt: prompt?.trim(),
-        imageUrl,
-        resolution: resolution === "1080p" ? "1080P" : "720P",
-        duration: Math.min(Math.max(Number(duration) || 5, 3), 15),
+      // Reserve LiTTBits (atomic debit — refunded on failure)
+      const reservation = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -cost,
+        type: "spend",
+        reason: `Video: ${model} — Alibaba i2v`,
+        idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
       });
 
-      const newBalance = await updateWalletBalance(userId, -cost);
-      return NextResponse.json({
-        provider: "alibaba",
-        taskId: result.taskId,
-        taskStatus: result.taskStatus,
-        cost,
-        balance: newBalance,
-      });
+      if (reservation.replayed) {
+        return NextResponse.json(
+          { error: "This video request was already processed." },
+          { status: 409 },
+        );
+      }
+
+      try {
+        const result = await submitAlibabaVideoTask({
+          model,
+          prompt: prompt?.trim(),
+          imageUrl,
+          resolution: resolution === "1080p" ? "1080P" : "720P",
+          duration: Math.min(Math.max(Number(duration) || 5, 3), 15),
+        });
+
+        return NextResponse.json({
+          provider: "alibaba",
+          taskId: result.taskId,
+          taskStatus: result.taskStatus,
+          cost,
+          balance: reservation.balance,
+        });
+      } catch (submitErr) {
+        // Refund the reserved LiTTBits on submission failure
+        await adjustWalletBalance({
+          clerkId: userId,
+          amount: cost,
+          type: "refund",
+          reason: `Video refund: ${model} submission failed`,
+          idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+        });
+        throw submitErr;
+      }
     }
 
     // ── Google Veo path (default) ─────────────────────────────────────
@@ -68,8 +96,9 @@ async function handler(req: NextRequest) {
         { status: 500 },
       );
 
-    const wallet = await getUserWallet(userId);
-    if (wallet.balance < cost) {
+    // Check balance
+    const balances = await getCreditBalances(userId);
+    if (balances.total < cost) {
       return NextResponse.json(
         { error: `Need ${cost} LiTTBits` },
         { status: 402 },
@@ -79,39 +108,65 @@ async function handler(req: NextRequest) {
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    // Reserve LiTTBits (atomic debit — refunded on failure)
+    const reservation = await adjustWalletBalance({
+      clerkId: userId,
+      amount: -cost,
+      type: "spend",
+      reason: `Video: ${model} — Veo generation`,
+      idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
+    });
 
-    const config = {
-      numberOfVideos: 1,
-      resolution: resolution === "1080p" ? "1080p" : "720p",
-      aspectRatio: aspectRatio || "16:9",
-    };
-
-    const payload: {
-      model: string;
-      prompt: string;
-      config: typeof config;
-      image?: { imageBytes: string; mimeType: string };
-    } = { model, prompt: prompt.trim(), config };
-    if (imageBytes) {
-      payload.image = { imageBytes, mimeType: mimeType || "image/png" };
-    }
-
-    const operation = await ai.models.generateVideos(payload);
-    if (!operation.name) {
-      throw new Error(
-        "Video generation failed to return an operation identifier.",
+    if (reservation.replayed) {
+      return NextResponse.json(
+        { error: "This video request was already processed." },
+        { status: 409 },
       );
     }
 
-    const newBalance = await updateWalletBalance(userId, -cost);
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    return NextResponse.json({
-      provider: "veo",
-      operationName: operation.name,
-      cost,
-      balance: newBalance,
-    });
+      const config = {
+        numberOfVideos: 1,
+        resolution: resolution === "1080p" ? "1080p" : "720p",
+        aspectRatio: aspectRatio || "16:9",
+      };
+
+      const payload: {
+        model: string;
+        prompt: string;
+        config: typeof config;
+        image?: { imageBytes: string; mimeType: string };
+      } = { model, prompt: prompt.trim(), config };
+      if (imageBytes) {
+        payload.image = { imageBytes, mimeType: mimeType || "image/png" };
+      }
+
+      const operation = await ai.models.generateVideos(payload);
+      if (!operation.name) {
+        throw new Error(
+          "Video generation failed to return an operation identifier.",
+        );
+      }
+
+      return NextResponse.json({
+        provider: "veo",
+        operationName: operation.name,
+        cost,
+        balance: reservation.balance,
+      });
+    } catch (genErr) {
+      // Refund the reserved LiTTBits on generation failure
+      await adjustWalletBalance({
+        clerkId: userId,
+        amount: cost,
+        type: "refund",
+        reason: `Video refund: ${model} generation failed`,
+        idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+      });
+      throw genErr;
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Video generation failed";
     return NextResponse.json(

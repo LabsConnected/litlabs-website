@@ -47,42 +47,23 @@ async function creditCoinPack(
     if (!user) {
       return;
     }
-    // Try credit_ledger first (new system)
-    try {
-      await sb.rpc("grant_credits", {
-        p_user_id: user.id,
-        p_amount: coinAmount,
-        p_category: "purchase",
-        p_balance_bucket: "purchased",
-        p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-        p_idempotency_key: `coinpack_${sessionId}`,
-        p_reference_type: "stripe_checkout",
-        p_reference_id: sessionId,
-      });
-      return;
-    } catch {
-      // Ledger not available — fall through to legacy wallet update
-    }
-    const { data: wallet } = await sb
-      .from("wallets")
-      .select("balance")
-      .eq("user_id", user.id)
-      .single();
-    const currentBalance = wallet?.balance || 0;
-    const newBalance = currentBalance + coinAmount;
-    await sb
-      .from("wallets")
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-    await sb.from("transactions").insert({
-      user_id: user.id,
-      type: "purchase",
-      amount: coinAmount,
-      balance_after: newBalance,
-      description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-      metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
+    // Use credit_ledger (atomic, idempotent). No legacy fallback —
+    // the non-atomic read-then-write on wallets was a race condition.
+    const { error } = await sb.rpc("grant_credits", {
+      p_user_id: user.id,
+      p_amount: coinAmount,
+      p_category: "purchase",
+      p_balance_bucket: "purchased",
+      p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
+      p_idempotency_key: `coinpack_${sessionId}`,
+      p_reference_type: "stripe_checkout",
+      p_reference_id: sessionId,
     });
-  } catch (_err) {
+    if (error) {
+      console.error(`[stripe] credit_ledger grant failed for coinpack ${sessionId}: ${error.message}`);
+    }
+  } catch (err) {
+    console.error(`[stripe] creditCoinPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -153,8 +134,101 @@ export async function POST(req: NextRequest) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const meta = session.metadata || {};
-        const coinAmount = parseInt(meta.coin_amount || "0", 10);
+        const productType = meta.product_type;
         const clerkId = meta.clerk_id;
+
+        // ── Agent purchase fulfillment ──
+        // Marketplace agent purchases use a transactional RPC that verifies
+        // the paid amount and creates the order + entitlement atomically.
+        // The RPC claims the Stripe event at the start (idempotent).
+        // The RPC fulfills the exact pending order created at checkout time.
+        if (productType === "agent" && clerkId && sb) {
+          const agentId = meta.agent_id;
+          const agentVersionId = meta.agent_version_id;
+          const marketplaceOrderId = meta.marketplace_order_id;
+          if (!agentId || !agentVersionId || !marketplaceOrderId) {
+            throw new Error("Agent purchase missing required metadata");
+          }
+          const amountTotal = session.amount_total ?? 0;
+          const currency = session.currency ?? "usd";
+          const paymentIntentId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : session.payment_intent?.id ?? null;
+          const { error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_clerk_id: clerkId,
+            p_agent_id: agentId,
+            p_agent_version_id: agentVersionId,
+            p_marketplace_order_id: marketplaceOrderId,
+            p_stripe_session_id: session.id,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_charge_id: null,
+            p_amount_cents: amountTotal,
+            p_currency: currency,
+          });
+          if (rpcError) {
+            throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
+          }
+
+          // ── Auto-provision the private agent instance ──
+          // After creating the entitlement, create or activate the
+          // user_agents row so the buyer can immediately open the agent
+          // in Studio. This is idempotent — if the instance already
+          // exists (e.g., from a previous install), it's reactivated.
+          const { data: agentUser } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", clerkId)
+            .maybeSingle();
+
+          if (agentUser) {
+            // Check if an instance already exists for this user + agent.
+            const { data: existingInstance } = await sb
+              .from("user_agents")
+              .select("id")
+              .eq("user_id", agentUser.id)
+              .eq("agent_id", agentId)
+              .maybeSingle();
+
+            if (existingInstance) {
+              // Reactivate the existing instance and update the version.
+              await sb
+                .from("user_agents")
+                .update({
+                  is_active: true,
+                  status: "active",
+                  agent_version_id: agentVersionId,
+                  last_active_at: new Date().toISOString(),
+                })
+                .eq("id", existingInstance.id);
+            } else {
+              // Create a new private agent instance.
+              const { data: agentTemplate } = await sb
+                .from("agents")
+                .select("display_name")
+                .eq("id", agentId)
+                .maybeSingle();
+
+              await sb.from("user_agents").insert({
+                user_id: agentUser.id,
+                agent_id: agentId,
+                agent_version_id: agentVersionId,
+                name: agentTemplate?.display_name || "Agent",
+                is_active: true,
+                status: "active",
+                approval_mode: "supervised",
+                enabled_tools: [],
+              });
+            }
+          }
+
+          break;
+        }
+
+        // ── Coin pack / plan fulfillment (existing logic) ──
+        const coinAmount = parseInt(meta.coin_amount || "0", 10);
         const planId = meta.plan_id as PlanId | undefined;
         if (coinAmount > 0 && clerkId) {
           await creditCoinPack(clerkId, coinAmount, session.id);
@@ -170,7 +244,9 @@ export async function POST(req: NextRequest) {
               .single();
             if (user) {
               await grantSubscriptionCredits(sb, user.id, planId, `founder_${session.id}`);
-              // Record as a permanent subscription
+              // Record as a time-limited subscription (6 months of Creator access)
+              // Founder is currently DISABLED for v1 — this code path is retained
+              // for when the pricing/duration conflict is resolved.
               await sb.from("subscriptions").upsert({
                 user_id: user.id,
                 stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
@@ -180,6 +256,47 @@ export async function POST(req: NextRequest) {
               }, { onConflict: "user_id", ignoreDuplicates: false });
             }
           }
+        }
+        break;
+      }
+
+      case "checkout.session.expired": {
+        // Mark the matching pending order as expired.
+        // The RPC is idempotent — if the event was already processed, it returns
+        // already_processed. If no pending order matches, it returns not_pending.
+        if (!sb) break;
+        const expiredSession = event.data.object as Stripe.Checkout.Session;
+        const expiredMeta = expiredSession.metadata || {};
+        const expiredOrderId = expiredMeta.marketplace_order_id;
+        if (expiredOrderId && expiredMeta.product_type === "agent") {
+          const { error: rpcError } = await sb.rpc("expire_pending_order", {
+            p_order_id: expiredOrderId,
+          });
+          if (rpcError) {
+            throw new Error(`expire_pending_order failed: ${rpcError.message}`);
+          }
+        }
+        break;
+      }
+
+      case "payment_intent.payment_failed": {
+        // Mark the matching pending order as failed.
+        // Look up by payment_intent_id first (primary), then by metadata.
+        if (!sb) break;
+        const failedIntent = event.data.object as Stripe.PaymentIntent;
+        const failedPiId = failedIntent.id;
+        // Try to find a pending order by payment intent ID
+        const { data: failedOrder } = await sb
+          .from("marketplace_orders")
+          .select("id, status")
+          .eq("stripe_payment_intent_id", failedPiId)
+          .eq("status", "pending")
+          .maybeSingle();
+        if (failedOrder) {
+          await sb
+            .from("marketplace_orders")
+            .update({ status: "failed", updated_at: new Date().toISOString() })
+            .eq("id", failedOrder.id);
         }
         break;
       }
@@ -315,7 +432,54 @@ export async function POST(req: NextRequest) {
         if (!sb) break;
         const charge = event.data.object as Stripe.Charge;
         const refundMeta = charge.metadata || {};
+        const refundProductType = refundMeta.product_type;
         const refundClerkId = refundMeta.clerk_id;
+        const paymentIntentId = charge.payment_intent as string | undefined;
+
+        // ── Agent refund: revoke entitlement, do NOT debit LBC ──
+        // Primary lookup: search marketplace_orders by payment_intent_id.
+        // This works even when Stripe metadata is absent, delayed, or incomplete.
+        // Secondary evidence: metadata product_type === "agent".
+        if (paymentIntentId) {
+          const { data: agentOrder } = await sb
+            .from("marketplace_orders")
+            .select("id, status")
+            .eq("stripe_payment_intent_id", paymentIntentId)
+            .maybeSingle();
+
+          if (agentOrder) {
+            // Found a matching marketplace order — process as agent refund.
+            // The RPC is idempotent (claims the Stripe event atomically).
+            // It does NOT debit LBC — agent purchases are not coin packs.
+            const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+              p_stripe_event_id: event.id,
+              p_stripe_event_type: event.type,
+              p_stripe_payment_intent_id: paymentIntentId,
+              p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
+            });
+            if (rpcError) {
+              throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
+            }
+            break;
+          }
+        }
+
+        // Fallback: use metadata product_type as secondary evidence
+        if (refundProductType === "agent" && paymentIntentId) {
+          const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
+          });
+          if (rpcError) {
+            throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
+          }
+          break;
+        }
+
+        // ── Coin pack / plan refund: debit LBC ──
+        // Only debit LBC for coin_pack or plan refunds — never for agents.
         if (refundClerkId) {
           const { data: refundUser } = await sb
             .from("users")

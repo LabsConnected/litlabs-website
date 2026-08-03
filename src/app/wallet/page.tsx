@@ -117,14 +117,14 @@ function WalletContent() {
                 {claimed ? "Claimed today" : "Claim daily +50"}
               </button>
               <Link
-                href="/marketplace?tab=subscriptions"
+                href="/pricing"
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
                 style={{
                   borderColor: T.borderColor + "40",
                   color: T.textColor,
                 }}
               >
-                <Coins size={16} /> Buy coins
+                <Coins size={16} /> Get credits
               </Link>
             </div>
           </div>
@@ -219,16 +219,16 @@ function WalletContent() {
             </div>
             <p className="text-sm opacity-60">
               {isSignedIn
-                ? "Full transaction history is coming soon. Check Marketplace → Purchases for recent orders."
+                ? "Full transaction history is coming soon. Check Settings → Billing for recent orders."
                 : "Sign in to view your transaction history."}
             </p>
             {isSignedIn && (
               <Link
-                href="/marketplace?tab=purchases"
+                href="/settings?section=billing"
                 className="inline-flex items-center gap-1 mt-4 text-sm font-bold"
                 style={{ color: T.accentColor }}
               >
-                View purchases <ArrowUpRight size={14} />
+                View billing history <ArrowUpRight size={14} />
               </Link>
             )}
           </div>

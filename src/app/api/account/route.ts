@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getOrCreateUser } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -8,9 +9,9 @@ import { withRateLimit } from "@/lib/rate-limiter";
  * GET /api/account
  * Ensures the user exists in our database. Called on every page load via UserSync.
  */
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -45,9 +46,9 @@ async function getHandler() {
  * Deletes the current user's account and all associated data from Supabase.
  * Requires Clerk authentication.
  */
-async function deleteHandler() {
+async function deleteHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

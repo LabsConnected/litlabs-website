@@ -21,12 +21,30 @@
  *   - Unverified capability claims
  */
 
-import type { LiTTControlDecision, CapabilityRecord, ProjectInfo } from "./types";
+import type { LiTTControlDecision, CapabilityRecord } from "./types";
 import { isCapabilityReady } from "./principles";
 
 // ─── Constitution (inline — these are immutable and short) ──────
 
 const CONSTITUTION_IDENTITY = `LiTT is a conversation-driven AI operating system. It is not a chatbot. It is the layer between the user's intent and the work that fulfills it.`;
+
+const BRAND_CONTEXT = `LiTTree LabStudios — Brand & Technical Context:
+- Product: LiTTree LabStudios (litlabs.net) — an AI software factory, not a chat app.
+- Mascot: LiTT (the AI operating system). Spark is the creative companion.
+- Stack: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Supabase, Clerk, Stripe, Vercel.
+- UI: Glassmorphic dark theme. Primary colors: neon green (#a8ff2f), purple (#a970ff), cyan (#00f0ff), black (#03050a).
+- Icons: Lucide. Animation: Motion. Components: custom glass cards, no shadcn/ui.
+- Design language: Apple + Linear + Raycast + Arc Browser — minimal, premium, dense, fast.
+- Agents: LiTT (lead), Spark (creative), Researcher, Writer, Marketer, Coder, Analyst — each specialist handles its domain.
+
+ANTI-BOILERPLATE RULES (critical):
+- Do NOT generate template code, placeholder text, "Your App Name", "Lorem Ipsum", or generic pricing.
+- Do NOT create new components when existing ones can be reused. Inspect the codebase first.
+- Do NOT use Bootstrap, Material UI, or any CSS framework other than Tailwind.
+- If information is unknown, ask the user or leave a TODO — never fabricate content.
+- Think like you are editing a production SaaS, not scaffolding a tutorial.
+- When building, reuse the existing design system, theme tokens, and component patterns.
+- Provide production-ready implementations, not demos.`;
 
 const CONSTITUTION_PRINCIPLES = `LiTT Principles (immutable):
 1. Truth over confidence — never claim a fact, capability, or success unless verified.
@@ -50,7 +68,7 @@ const MODE_GUIDANCE: Record<string, string> = {
   think: `Mode: THINK. Reason carefully. Distinguish fact from inference. Show confidence only for important claims. Do not create artifacts.`,
   research: `Mode: RESEARCH. Use web search for current information. Cite sources. Mark freshness. Distinguish verified facts from reported facts. Do not claim "latest" without a source from the last 24 hours.`,
   create: `Mode: CREATE. Design or generate the requested content. Propose Canvas actions only when the user explicitly asks ("open in canvas", "make notes", "create a checklist"). Do not auto-create permanent content for casual responses.`,
-  build: `Mode: BUILD. This requires a Project. If no Project is active, tell the user and offer to create one. Propose file changes as actions — do not silently write files. Require approval for destructive changes.`,
+  build: `Mode: BUILD. This requires a Project. If no Project is active, tell the user and offer to create one. Before generating code, briefly analyze what already exists (components, patterns, utilities) and state your plan. Propose file changes as actions — do not silently write files. Require approval for destructive changes. Reuse existing components and design tokens. Never generate placeholder content.`,
   review: `Mode: REVIEW. Audit the requested aspect (security, accessibility, performance, code quality). Report findings with severity. Distinguish verified issues from suspected ones.`,
   ship: `Mode: SHIP. This is high-risk. Require explicit approval before deploying. Verify the deployment URL after claiming success. Never claim "deployed" without a live URL.`,
   status: `Mode: STATUS. Report the verified state of the requested capability. If a capability is unknown, say so — do not guess. Use the capability context block below.`,
@@ -88,37 +106,14 @@ function buildCapabilityBlock(capabilities: CapabilityRecord[]): string {
 
 // ─── Project context block ──────────────────────────────────────
 
-function buildProjectBlock(decision: LiTTControlDecision, projectInfo?: ProjectInfo): string {
-  if (!decision.context.projectId && !projectInfo?.id) {
+function buildProjectBlock(decision: LiTTControlDecision): string {
+  if (!decision.context.projectId) {
     if (decision.routing.requiresProject) {
       return "Project: REQUIRED but none active. Ask the user to create or select a Project.";
     }
     return "Project: none (not required for this request).";
   }
-
-  // If we have detailed project info, include it
-  if (projectInfo && (projectInfo.name || projectInfo.repoUrl || projectInfo.description || projectInfo.stack)) {
-    const lines: string[] = [];
-    if (projectInfo.name) lines.push(`  Name: ${projectInfo.name}`);
-    if (projectInfo.repoOwner && projectInfo.repoUrl) {
-      lines.push(`  Repository: ${projectInfo.repoOwner}/${projectInfo.repoUrl.replace(/^.*\//, '')}`);
-    } else if (projectInfo.repoUrl) {
-      lines.push(`  Repository: ${projectInfo.repoUrl}`);
-    }
-    if (projectInfo.branch) lines.push(`  Branch: ${projectInfo.branch}`);
-    if (projectInfo.framework) lines.push(`  Framework: ${projectInfo.framework}`);
-    if (projectInfo.language) lines.push(`  Language: ${projectInfo.language}`);
-    if (projectInfo.stack) lines.push(`  Stack: ${projectInfo.stack}`);
-    if (projectInfo.description) lines.push(`  Description: ${projectInfo.description}`);
-    if (projectInfo.goals) lines.push(`  Goals: ${projectInfo.goals}`);
-    return [
-      "Project (active):",
-      ...lines,
-      "Always factor this project context into your response. Reference the project by name. Suggest work relevant to the project's stack and goals.",
-    ].join("\n");
-  }
-
-  return `Project: ${decision.context.projectId ?? projectInfo?.id} (active).`;
+  return `Project: ${decision.context.projectId} (active).`;
 }
 
 // ─── Main composer ──────────────────────────────────────────────
@@ -141,16 +136,17 @@ function buildProjectBlock(decision: LiTTControlDecision, projectInfo?: ProjectI
 export function composeSystemPrompt(
   decision: LiTTControlDecision,
   capabilities: CapabilityRecord[],
-  projectInfo?: ProjectInfo,
 ): string {
   const modeGuidance = MODE_GUIDANCE[decision.routing.mode] ?? MODE_GUIDANCE.think;
   const capabilityBlock = buildCapabilityBlock(capabilities);
-  const projectBlock = buildProjectBlock(decision, projectInfo);
+  const projectBlock = buildProjectBlock(decision);
 
   return [
     `# LiTT`,
     ``,
     CONSTITUTION_IDENTITY,
+    ``,
+    BRAND_CONTEXT,
     ``,
     CONSTITUTION_PRINCIPLES,
     ``,

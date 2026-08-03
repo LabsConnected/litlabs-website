@@ -3,14 +3,13 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { streamText, generateText, type ModelCategory } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
+import { isAnonymousDevAllowed } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
 import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
-import { buildChatContext } from "@/lib/chat/build-context";
-import { recallMemories, persistMemory } from "@/lib/memory/service";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,6 +18,33 @@ type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "litt";
 const HISTORY_LIMIT = 12;
+
+async function fetchMemories(query: string, userId: string): Promise<string> {
+  try {
+    const smKey = process.env.SUPERMEMORY_API_KEY;
+    if (!smKey) return "";
+    const { Supermemory } = await import("supermemory");
+    const sm = new Supermemory({ apiKey: smKey });
+    const results = await sm.search.memories({ q: query, containerTag: userId, limit: 5 });
+    const memories = (results.results || []).map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk || "").filter(Boolean);
+    if (!memories.length) return "";
+    return `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}\n---`;
+  } catch {
+    return "";
+  }
+}
+
+async function saveMemory(content: string, userId: string, agentId: string): Promise<void> {
+  try {
+    const smKey = process.env.SUPERMEMORY_API_KEY;
+    if (!smKey) return;
+    const { Supermemory } = await import("supermemory");
+    const sm = new Supermemory({ apiKey: smKey });
+    await sm.add({ content, containerTag: userId, metadata: { type: "agent-chat", agent: agentId } });
+  } catch {
+    // non-fatal
+  }
+}
 
 function sanitizeOutput(text: string): string {
   return text.replace(/\{\{?userName\}?\}/gi, "there");
@@ -71,6 +97,54 @@ async function generateWithImages(
   return { text, provider: "gemini", model: modelName, latencyMs: Date.now() - t0 };
 }
 
+function buildPrompt(
+  agent: Agent,
+  message: string,
+  history: HistoryEntry[],
+  memoryContext: string,
+  userName?: string,
+  capabilities?: Record<string, unknown>,
+): string {
+  const recentHistory = history.slice(-HISTORY_LIMIT);
+
+  const transcript = recentHistory
+    .map((entry) =>
+      entry.role === "user"
+        ? `User: ${entry.content}`
+        : `${agent.name}: ${entry.content}`,
+    )
+    .join("\n");
+
+  const resolvedName = userName?.trim() || "Member";
+  const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
+
+  const rawCaps: RawCapabilities = {
+    repository: capabilities?.repository as string | undefined,
+    repositoryIndexed: capabilities?.repositoryIndexed as boolean | undefined,
+    terminalExecution: capabilities?.terminalExecution as string | undefined,
+    writeAccess: capabilities?.writeAccess as boolean | undefined,
+    connectedProviders: capabilities?.connectedProviders as string[] | undefined,
+    availableTools: capabilities?.availableTools as string[] | undefined,
+    connectionSummary: capabilities?.connectionSummary as string | undefined,
+    voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
+    voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
+  };
+  const translated = translateCapabilities(rawCaps);
+
+  return [
+    systemPrompt,
+    translated.contextBlock,
+    memoryContext,
+    "",
+    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+    `User: ${message}`,
+    "",
+    `${agent.name}:`,
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
 async function logConversation(
   agent: Agent,
   userId: string | null,
@@ -106,7 +180,7 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     const body = await req.json();
     const {
       agentSlug = DEFAULT_AGENT_SLUG,
@@ -116,39 +190,86 @@ async function handler(req: NextRequest) {
       category,
       model: requestedModel,
       stream = false,
+      userName,
       images = [],
       capabilities = {},
       pageContext,
-      projectId: bodyProjectId,
-      repositoryName: bodyRepoName,
+      systemPrompt: _clientSystemPrompt, // never trusted — always ignored
     } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
+    // ─── Auth gate ─────────────────────────────────────────────
+    // Unauthenticated requests are only allowed for the Global Companion
+    // (a strict, limited contract). Studio and Agent requests require
+    // authentication. ALLOW_ANONYMOUS_DEV bypasses in local development.
+    const isCompanion = pageContext?.surface === "global_companion";
+    const isDev = isAnonymousDevAllowed();
+
+    if (!userId && !isDev) {
+      if (!isCompanion) {
+        return NextResponse.json(
+          { error: "Authentication required" },
+          { status: 401 },
+        );
+      }
+      // Companion mode for unauthenticated users — strict limits below.
+    }
+
+    const isAuthenticated = Boolean(userId);
+    const uid = userId ?? (isDev ? "anonymous-dev" : null);
+
     const agent =
       AGENTS[agentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
 
-    const uid = userId || "anonymous-dev";
+    // Memories only for authenticated users — never for anonymous companion.
+    const memoryContext = isAuthenticated && uid ? await fetchMemories(message, uid) : "";
 
-    // ─── Fetch project context via shared builder ─────────────
-    // This is the key fix: LiTT needs to know WHICH project the user
-    // is working on, not just that "something" is connected.
-    const ctx = await buildChatContext(userId, {
-      projectId: bodyProjectId,
-      repositoryName: bodyRepoName,
-    });
-    const projectInfo = ctx.projectInfo;
-    const activeProjectId = ctx.projectId;
+    // ─── Companion mode (unauthenticated) ──────────────────────
+    // Unauthenticated companion requests get a strict, limited contract:
+    // no Kernel routing, no capabilities, no tools, no canvas actions,
+    // no expensive provider selection. Server-owned system prompt only.
+    const isAnonymousCompanion = !isAuthenticated && !isDev && isCompanion;
 
-    // Recall memories (project-scoped if project is active)
-    const memoryContext = userId
-      ? await recallMemories(message, uid, 5, activeProjectId ?? undefined)
-      : "";
+    if (isAnonymousCompanion) {
+      const companionHistory = history.slice(-HISTORY_LIMIT);
+      const transcript = companionHistory
+        .map((entry: HistoryEntry) =>
+          entry.role === "user" ? `User: ${entry.content}` : `${agent.name}: ${entry.content}`,
+        )
+        .join("\n");
+      const prompt = [
+        "You are LiTT, the LiTTree LabStudios companion.",
+        "You are NOT in Studio. You cannot edit files, run commands, access projects,",
+        "or use any tools. You can answer questions, explain features, navigate, and",
+        "suggest actions. If the user needs deep work (files, code, terminal, canvas,",
+        "deployments), suggest they sign in and open Studio.",
+        "Keep responses concise and helpful. Do not claim capabilities you do not have.",
+        "",
+        transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+        `User: ${message}`,
+        "",
+        `${agent.name}:`,
+      ].join("\n");
 
-    // ─── LiTT Kernel routing ──────────────────────────────────
+      const r = await generateText(
+        prompt,
+        { task: "chat", category: "free", maxTokens: 1024 },
+        undefined,
+      );
+      const cleanText = sanitizeOutput(r.text);
+      return NextResponse.json({
+        response: cleanText,
+        provider: r.provider,
+        model: r.model,
+        latencyMs: r.latencyMs,
+      });
+    }
+
+    // ─── LiTT Kernel routing (authenticated or dev only) ───────
     // The Kernel classifies intent, checks capabilities, and composes
     // a system prompt with mode-specific guidance + verified capabilities.
     // This replaces the static agent prompt with a context-aware one.
@@ -173,7 +294,7 @@ async function handler(req: NextRequest) {
       message,
       userId: userId ?? null,
       conversationId: null, // not yet wired from session
-      projectId: activeProjectId,
+      projectId: (capabilities as Record<string, unknown>)?.projectId as string | null ?? null,
       missionId: null,
       canvasId: (body.activeCanvasId as string) ?? null,
       capabilities: kernelCapabilities,
@@ -182,7 +303,7 @@ async function handler(req: NextRequest) {
     // Compose the Kernel system prompt (Constitution + mode guidance +
     // verified capabilities). Falls back to the legacy agent prompt if
     // the Kernel fails for any reason.
-    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, projectInfo);
+    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
 
     // Use the Kernel prompt as the base, then layer on the legacy
     // capability translation block + memory + history (same as before).
@@ -237,8 +358,8 @@ async function handler(req: NextRequest) {
     if (imageArray.length > 0 && !stream) {
       const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
       const cleanText = sanitizeOutput(r.text);
-      if (userId) {
-        await persistMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id, activeProjectId ?? undefined);
+      if (isAuthenticated && uid) {
+        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
       return NextResponse.json({
         response: cleanText,
@@ -285,8 +406,8 @@ async function handler(req: NextRequest) {
       );
       const cleanText = sanitizeOutput(r.text);
       await logConversation(agent, userId, message, cleanText);
-      if (userId) {
-        await persistMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id, activeProjectId ?? undefined);
+      if (isAuthenticated && uid) {
+        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
 
       // Detect canvas actions from the user message (explicit) and
@@ -355,8 +476,8 @@ async function handler(req: NextRequest) {
           controller.close();
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
-            if (userId) {
-              await persistMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id, activeProjectId ?? undefined);
+            if (isAuthenticated && uid) {
+              await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
             }
           }
         }

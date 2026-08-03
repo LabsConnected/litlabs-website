@@ -21,6 +21,7 @@ interface ProfileIdentityProps {
   isOwner: boolean;
   saving: boolean;
   avatarPreview: string | null;
+  uploadError?: string | null;
   onAvatarSelect: (file: File) => void;
   onAvatarConfirm: () => void;
   onAvatarCancel: () => void;
@@ -41,6 +42,7 @@ export function ProfileIdentity({
   isOwner,
   saving,
   avatarPreview,
+  uploadError,
   onAvatarSelect,
   onAvatarConfirm,
   onAvatarCancel,
@@ -89,6 +91,9 @@ export function ProfileIdentity({
         {/* Upload confirm */}
         {avatarPreview && (
           <div className="avatar-confirm-overlay">
+            {uploadError && (
+              <p className="text-[10px] font-semibold text-red-400 text-center px-2 mb-1">{uploadError}</p>
+            )}
             <button
               onClick={onAvatarConfirm}
               disabled={saving}

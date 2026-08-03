@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { addBlocks, listBlocks } from "@/lib/canvas/repository";
 import { getCanvas } from "@/lib/canvas/repository";
 import { BlockTypeSchema } from "@/lib/canvas/types";
@@ -9,10 +9,10 @@ import { BlockTypeSchema } from "@/lib/canvas/types";
  * List all blocks in a canvas, ordered by position.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ canvasId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -48,7 +48,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ canvasId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

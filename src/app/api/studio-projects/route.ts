@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   createBlankProject,
   createGithubProject,
@@ -13,8 +13,8 @@ import type { ProjectTemplateId } from "@/lib/projects/types";
  * List all canonical projects for the authenticated user.
  * Returns both studio_projects and legacy-only projects.
  */
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(request: NextRequest) {
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -42,7 +42,7 @@ export async function GET() {
  *     githubDefaultBranch?: string, githubBranch?: string }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

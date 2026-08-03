@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { executeCommand } from "@/lib/command-executor";
 import { logCommandExecution } from "@/lib/agent-logger";
@@ -44,7 +44,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   }
 
   // Auth
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!isAdmin(userId)) {
     return NextResponse.json(
       { error: "Access denied. Admin only." },

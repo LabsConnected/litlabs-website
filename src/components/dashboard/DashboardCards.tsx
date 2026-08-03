@@ -261,8 +261,8 @@ export function CenterStage({
           {/* Mobile: Compact quick actions */}
           <div className="md:hidden grid grid-cols-4 gap-2">
             {[
-              { label: "AI", icon: Zap, href: "/agents", color: "#ff9ff3" },
-              { label: "Post", icon: Send, href: "/social", color: "#00f0ff" },
+              { label: "AI", icon: Zap, href: "/studio?tool=agents", color: "#ff9ff3" },
+              { label: "Post", icon: Send, href: "/discover", color: "#00f0ff" },
               {
                 label: "Img",
                 icon: ImageIcon,

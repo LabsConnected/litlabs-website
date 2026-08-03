@@ -104,6 +104,9 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   };
 
   const createFile = async () => {
+    // TODO(P0-2): Route through /api/studio-projects/[projectId]/files instead
+    // of the terminal-server directly, so file operations are audit-logged
+    // server-side. Requires passing projectId into FileExplorer as a prop.
     const name = prompt("New file name?");
     if (!name) return;
     try {

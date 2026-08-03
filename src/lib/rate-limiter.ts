@@ -38,18 +38,26 @@ export async function rateLimit(
 
   if (existing && existing.window_start > windowStart) {
     count = existing.count + 1;
+    // Window still active — preserve the original window_start
+    await admin.from("rate_limit_store").upsert({
+      key,
+      count,
+      window_start: existing.window_start,
+      updated_at: new Date().toISOString(),
+    });
   } else {
+    // Window expired (or first request) — start a new window
     count = 1;
+    await admin.from("rate_limit_store").upsert({
+      key,
+      count,
+      window_start: now,
+      updated_at: new Date().toISOString(),
+    });
   }
 
-  resetTime = Math.max(1, window - (now - windowStart));
-
-  await admin.from("rate_limit_store").upsert({
-    key,
-    count,
-    window_start: now,
-    updated_at: new Date().toISOString(),
-  });
+  const actualWindowStart = existing && existing.window_start > windowStart ? existing.window_start : now;
+  resetTime = Math.max(1, window - (now - actualWindowStart));
 
   const remaining = Math.max(0, limit - count);
   return {
@@ -59,8 +67,18 @@ export async function rateLimit(
   };
 }
 
-export function withRateLimit<T = unknown>(
-  handler: (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>,
+export function withRateLimit(
+  handler: (req: NextRequest) => Promise<NextResponse | Response>,
+  limit?: number,
+  window?: number,
+): (request: NextRequest) => Promise<NextResponse | Response>;
+export function withRateLimit<T>(
+  handler: (req: NextRequest, ctx: T) => Promise<NextResponse | Response>,
+  limit?: number,
+  window?: number,
+): (request: NextRequest, context: T) => Promise<NextResponse | Response>;
+export function withRateLimit<T>(
+  handler: ((req: NextRequest, ctx: T) => Promise<NextResponse | Response>) | ((req: NextRequest) => Promise<NextResponse | Response>),
   limit: number = 100,
   window: number = 60,
 ) {
@@ -86,7 +104,7 @@ export function withRateLimit<T = unknown>(
       );
     }
 
-    const response = await handler(request, context);
+    const response = await (handler as (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>)(request, context);
     try {
       response.headers.set("X-RateLimit-Limit", String(limit));
       response.headers.set("X-RateLimit-Remaining", String(remaining));

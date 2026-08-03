@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints, createCheckpoint, getCheckpoint } from "@/lib/missions/mission-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
@@ -17,7 +17,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;
@@ -37,7 +37,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;
@@ -60,21 +60,27 @@ export async function POST(
     const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ??
       process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "http://localhost:4001";
 
-    const execInWorkspace = async (command: string) => {
+    const execInWorkspace = async (command: string, stdin?: string) => {
       const resp = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Internal-Service-Key": internalKey,
         },
-        body: JSON.stringify({ command, userId }),
+        body: JSON.stringify({ command, userId, stdin }),
       });
       if (!resp.ok) throw new Error(`Git command failed: ${resp.status}`);
       return (await resp.json()) as { exitCode: number; stdout: string };
     };
 
     await execInWorkspace("git add .");
-    await execInWorkspace(`git commit -m "${body.label.replace(/"/g, '\\"')}"`);
+    // Pass the commit message via stdin (--file=-) so the label never touches
+    // the shell parser. This prevents command injection via backticks, $(),
+    // newlines, or any other shell metacharacters in the user-supplied label.
+    const commitMessage = body.description
+      ? `${body.label}\n\n${body.description}`
+      : body.label;
+    await execInWorkspace("git commit --file=-", commitMessage);
     const shaResult = await execInWorkspace("git rev-parse HEAD");
     const gitSha = shaResult.stdout.trim();
 

@@ -5,11 +5,14 @@ import { useTheme } from "@/context/ThemeContext";
 
 export default function CookieConsent() {
   const { resolvedColors: T } = useTheme();
-  const [visible, setVisible] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return !localStorage.getItem("cookie-consent");
-  });
+  // Keep the server and first client render identical. Reading localStorage in
+  // the state initializer caused React hydration error #418 for new visitors.
+  const [visible, setVisible] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
+
+  useEffect(() => {
+    setVisible(!localStorage.getItem("cookie-consent"));
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -57,8 +60,7 @@ export default function CookieConsent() {
         borderColor: T.accentColor,
         backgroundColor: T.boxBg,
         color: T.textColor,
-        fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "12px",
         transform: animateIn ? "translateY(0)" : "translateY(20px)",
         opacity: animateIn ? 1 : 0,
         boxShadow: `0 0 24px ${T.accentColor}35`,
@@ -68,42 +70,42 @@ export default function CookieConsent() {
         <span className="text-lg shrink-0">🍪</span>
         <div className="flex-1">
           <div
-            className="font-bold uppercase tracking-wider mb-1"
+            className="font-bold mb-1"
             style={{ color: T.headerColor }}
           >
-            Neural Cookie Protocol
+            Cookie preferences
           </div>
-          <p className="opacity-80 leading-relaxed mb-3 text-[10px]">
-            We use cookies and local storage to power themes, authentication,
-            and AI agent sessions. Analytics help us optimize the grid. You can
-            manage preferences anytime in Settings.
+          <p className="opacity-80 leading-relaxed mb-3 text-[11px]">
+            We use essential cookies for sign-in, settings, and Studio sessions.
+            Optional analytics help us improve LiTTree. You can change your
+            preferences anytime.
           </p>
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={acceptAll}
-              className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform"
+              className="px-3 py-1.5 text-[11px] font-bold border-2 hover:scale-105 transition-transform"
               style={{
                 borderColor: T.accentColor,
                 color: T.bgColor,
                 backgroundColor: T.accentColor,
               }}
             >
-              ✓ ACCEPT ALL
+              Accept all
             </button>
             <button
               onClick={acceptEssential}
-              className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform"
+              className="px-3 py-1.5 text-[11px] font-bold border-2 hover:scale-105 transition-transform"
               style={{
                 borderColor: T.borderColor,
                 color: T.textColor,
                 backgroundColor: "transparent",
               }}
             >
-              ESSENTIAL ONLY
+              Essential only
             </button>
             <a
               href="/cookies"
-              className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform inline-block"
+              className="px-3 py-1.5 text-[11px] font-bold border-2 hover:scale-105 transition-transform inline-block"
               style={{
                 borderColor: T.borderColor,
                 color: T.linkColor,
@@ -111,7 +113,7 @@ export default function CookieConsent() {
                 textDecoration: "none",
               }}
             >
-              DETAILS
+              Manage preferences
             </a>
           </div>
         </div>

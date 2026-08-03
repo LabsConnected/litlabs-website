@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { logFileOperation } from "@/lib/file-audit";
 
 /**
  * Project-bound file operations.
@@ -10,7 +11,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
  * to the terminal-server's workspace-scoped endpoints.
  *
  * GET  /api/studio-projects/[projectId]/files?path=...
- * POST /api/studio-projects/[projectId]/files  { action: "read"|"write"|"delete", path, content? }
+ * POST /api/studio-projects/[projectId]/files  { action: "read"|"write"|"delete"|"mkdir"|"rename", path, newPath?, content? }
  */
 
 const TERMINAL_BASE = () =>
@@ -26,7 +27,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;
@@ -67,12 +68,12 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;
 
-  let body: { action?: string; path?: string; content?: string };
+  let body: { action?: string; path?: string; newPath?: string; content?: string };
   try {
     body = await request.json();
   } catch {
@@ -81,13 +82,25 @@ export async function POST(
 
   const action = body.action;
   const path = body.path ?? "";
+  const newPath = body.newPath ?? "";
 
   if (!action || !path) {
     return NextResponse.json({ error: "Missing action or path" }, { status: 400 });
   }
 
-  if (!["read", "write", "delete"].includes(action)) {
+  if (!["read", "write", "delete", "mkdir", "rename"].includes(action)) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  }
+
+  const isSafeRelativePath = (value: string) => {
+    const normalized = value.replace(/\\/g, "/");
+    return normalized !== "." &&
+      !normalized.startsWith("/") &&
+      !normalized.split("/").some((segment) => segment === ".." || segment.includes("\u0000"));
+  };
+
+  if (!isSafeRelativePath(path) || (action === "rename" && !isSafeRelativePath(newPath))) {
+    return NextResponse.json({ error: "Invalid workspace path" }, { status: 400 });
   }
 
   try {
@@ -101,10 +114,27 @@ export async function POST(
         Authorization: `Bearer ${token}`,
         "X-Workspace-Id": workspaceId,
       },
-      body: JSON.stringify({ path, content: body.content }),
+      body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content }),
     });
 
-    if (!resp.ok) {
+    const ok = resp.ok;
+
+    // Audit log mutating operations (reads are non-mutating, skip)
+    if (action === "write" || action === "delete" || action === "mkdir" || action === "rename") {
+      await logFileOperation({
+        userId,
+        projectId,
+        workspaceId,
+        action: action as "write" | "delete" | "mkdir" | "rename",
+        path: action === "rename" ? `${path} -> ${newPath}` : path,
+        contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
+        source: "user",
+        ok,
+        error: ok ? undefined : `HTTP ${resp.status}`,
+      });
+    }
+
+    if (!ok) {
       const text = await resp.text().catch(() => "Unknown error");
       return NextResponse.json({ error: text }, { status: resp.status });
     }
@@ -112,6 +142,22 @@ export async function POST(
     return NextResponse.json(await resp.json());
   } catch (err) {
     const msg = err instanceof Error ? err.message : "File operation failed";
+
+    // Audit log failed operations
+    if (action === "write" || action === "delete" || action === "mkdir" || action === "rename") {
+      await logFileOperation({
+        userId,
+        projectId,
+        workspaceId: "unknown",
+        action: action as "write" | "delete" | "mkdir" | "rename",
+        path: action === "rename" ? `${path} -> ${newPath}` : path,
+        contentLength: action === "write" ? (body.content?.length ?? 0) : undefined,
+        source: "user",
+        ok: false,
+        error: msg,
+      }).catch(() => {});
+    }
+
     const status = msg.includes("not found") ? 404 : msg.includes("Forbidden") ? 403 : 500;
     return NextResponse.json({ error: msg }, { status });
   }

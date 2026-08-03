@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Creator Community",
+  title: "Discover",
   description:
-    "Share creations, meet collaborators, remix public projects, and build your creative world with the LiTTree community.",
-  path: "/social",
+    "Discover creations, meet collaborators, and explore the LiTTree community feed.",
+  path: "/discover",
   index: true,
 });
 

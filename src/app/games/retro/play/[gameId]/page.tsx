@@ -61,6 +61,10 @@ import {
   shouldRenderIframe,
   launchStatusLabel,
 } from "@/lib/emulator/arcade-launch";
+import {
+  type EmulatorSystemId,
+  controlSchemeForSystem,
+} from "@/lib/emulator/control-profiles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -84,6 +88,18 @@ const STATE_LABELS: Record<EmulatorSessionState, string> = {
 
 function detectBrowser(): string {
   if (typeof navigator === "undefined") return "unknown";
+  // Prefer navigator.userAgentData (modern, non-deprecated) over
+  // navigator.userAgent (deprecated in Chromium). Fall back to UA string
+  // for Firefox/Safari which don't support userAgentData yet.
+  const uad = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } }).userAgentData;
+  if (uad?.brands) {
+    const brands = uad.brands.map((b) => b.brand);
+    if (brands.some((b) => b.includes("Firefox"))) return "Firefox";
+    if (brands.some((b) => b.includes("Edge") || b.includes("Microsoft"))) return "Edge";
+    if (brands.some((b) => b.includes("Chrome"))) return "Chrome";
+    if (brands.some((b) => b.includes("Safari"))) return "Safari";
+  }
+  // Fallback for browsers without userAgentData support
   const ua = navigator.userAgent;
   if (ua.includes("Firefox/")) return "Firefox";
   if (ua.includes("Edg/")) return "Edge";
@@ -251,6 +267,11 @@ export default function RetroPlayerPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSatellaview, setIsSatellaview] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  // Sega Genesis controller type: 3-button (default for Lion King) or 6-button.
+  // Only affects which controls the LiTTree modal displays; the EmulatorJS
+  // runtime always uses the full segaMD control scheme (which includes
+  // X/Y/Z/Mode), so switching never resets emulator shortcuts.
+  const [controllerType, setControllerType] = useState<"3-button" | "6-button">("3-button");
 
   // ─── Launch state machine (single source of truth) ────────────
   const [launchState, setLaunchState] = useState<ArcadeLaunchState>({ status: "loading" });
@@ -259,6 +280,8 @@ export default function RetroPlayerPage() {
     romUrl: string;
     biosUrl: string;
     core: string;
+    systemId: EmulatorSystemId;
+    controlScheme: string;
     gameName: string;
   } | null>(null);
   const biosUrlRef = useRef<string | null>(null);
@@ -284,12 +307,15 @@ export default function RetroPlayerPage() {
   const [bootTime, setBootTime] = useState<number | null>(null);
   const [loaderReadyTime, setLoaderReadyTime] = useState<number | null>(null);
 
-  // ─── Controller state ────────────────────────────────────────────
-  const [controllerConnected, setControllerConnected] = useState(false);
-  const [controllerName, setControllerName] = useState<string | null>(null);
-  const [controllerCount, setControllerCount] = useState(0);
-
   const system = game ? getRetroSystem(game.system) : null;
+
+  // ─── System identity (product-facing) vs core identity ──────────
+  // systemId drives the control scheme + labels; coreId (ejsCore) drives
+  // which libretro core runs the game. These are deliberately separate so
+  // that, e.g., Sega Genesis loads genesis_plus_gx but renders the segaMD
+  // controller layout (not the ambiguous segaMS "BUTTON 1/2" fallback).
+  const emulatorSystemId: EmulatorSystemId = (game?.system ?? "nes") as EmulatorSystemId;
+  const controlScheme = controlSchemeForSystem(emulatorSystemId);
 
   // ─── Core config for current attempt ───────────────────────────
   const coreConfig = useMemo(() => {
@@ -352,14 +378,10 @@ export default function RetroPlayerPage() {
         setIsSatellaview(satellaview);
         setRomBlob(record.rom);
 
-        // Set initial launch state based on whether BIOS is needed.
-        // Satellaview = needs-bios. Standard = ready to launch immediately.
-        if (satellaview) {
-          setLaunchState({ status: "needs-bios" });
-        } else {
-          // Standard game: ready to launch immediately, no BIOS required
-          setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
-        }
+        // All games (including Satellaview) go straight to ready.
+        // BIOS is optional — the user can load one from the side panel
+        // if the game doesn't boot without it.
+        setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
         setSessionState("idle"); // Don't auto-start the runtime
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "The game could not be opened.");
@@ -431,6 +453,13 @@ export default function RetroPlayerPage() {
       color: system?.color ?? "#a78bfa",
       legacy: useLegacy ? "1" : "0",
       sessionId: runtimeConfig.sessionId,
+      // Control scheme override — mandatory for Sega Genesis so EmulatorJS
+      // renders the segaMD layout instead of the ambiguous segaMS fallback.
+      // This alone fixes the "BUTTON 1 / BUTTON 2" label issue.
+      // NOTE: EJS_defaultControls is intentionally NOT injected. EmulatorJS
+      // 4.2.3's setupKeys() crashes if the format isn't exactly right, and
+      // the control scheme override alone is sufficient for correct labels.
+      controlScheme: runtimeConfig.controlScheme,
     });
     // Pass BIOS URL for Satellaview/BS-X titles
     if (runtimeConfig.biosUrl) {
@@ -448,7 +477,7 @@ export default function RetroPlayerPage() {
     // is a missing BIOS for Satellaview/BS-X titles
     if (fired.failureCode === "FIRST_FRAME_TIMEOUT") {
       const biosHint = isSatellaview && !biosDataUrl
-        ? " This is a Satellaview (BS-X) title that requires the BS-X BIOS. Load BS-X.bin from the BIOS panel to launch it."
+        ? " This Satellaview title may need a BS-X BIOS to boot. Try loading BS-X.bin from the BIOS panel, or try a different core."
         : " The ROM may require a BIOS, another core, or additional subsystem support.";
       setEmulatorError(
         `Game core started but produced no video within 8 seconds.${biosHint}`,
@@ -606,27 +635,6 @@ export default function RetroPlayerPage() {
       watchdog.reset("core_download", `download ${event.percent}%`);
     });
 
-    // Gamepad connected — update controller status indicator
-    const unsubGpConnected = bridge.on("runtime.gamepad_connected", (event) => {
-      setControllerConnected(true);
-      setControllerCount(event.count ?? 1);
-      if (event.pads && event.pads.length > 0) {
-        const name = event.pads[0].id || "";
-        // Clean up Xbox controller name (remove trailing garbage)
-        const cleanName = name.replace(/\(.+?\)|standalone\s+\d+|xinput|api\s+/gi, "").trim() || "Xbox Controller";
-        setControllerName(cleanName);
-      } else {
-        setControllerName("Xbox Controller");
-      }
-    });
-
-    // Gamepad disconnected
-    const unsubGpDisconnected = bridge.on("runtime.gamepad_disconnected", () => {
-      setControllerConnected(false);
-      setControllerName(null);
-      setControllerCount(0);
-    });
-
     // Core download started — start watchdog
     const unsubDlStart = bridge.on("runtime.core_download_started", () => {
       watchdog.start("core_download", "download started");
@@ -677,8 +685,6 @@ export default function RetroPlayerPage() {
       unsubExit();
       unsubProgress();
       unsubDlProgress();
-      unsubGpConnected();
-      unsubGpDisconnected();
       unsubDlStart();
       unsubDcProgress();
       unsubDcStart();
@@ -783,22 +789,25 @@ export default function RetroPlayerPage() {
     setLaunchState({ status: "validating-bios", fileName: file.name });
     try {
       const result = await validateBsxBios(file);
-      if (!result.ok) {
-        setLaunchState({ status: "invalid-bios", reason: result.error ?? "Invalid BIOS", fileName: file.name });
+      // Hard error (empty file / read failure) — block
+      if (result.error && !result.warning) {
+        setLaunchState({ status: "invalid-bios", reason: result.error, fileName: file.name });
         setBiosHash(null);
         return;
       }
-      // MD5 matches — store the BIOS
+      // Store the BIOS (even if hash mismatch — user accepted the warning)
       const b64 = await readRomAsBase64(file);
       const dataUrl = `data:application/octet-stream;base64,${b64}`;
       setBiosDataUrl(dataUrl);
       setBiosHash(result.hash ?? null);
       setLaunchState({ status: "ready", biosHash: result.hash ?? "", biosFileName: file.name });
       setEmulatorError(null);
-      // Persist to IndexedDB
-      try {
-        await storeBiosInIndexedDB(file.name, dataUrl);
-      } catch { /* non-fatal */ }
+      // Persist to IndexedDB (only if hash matched — don't persist wrong BIOS)
+      if (result.ok) {
+        try {
+          await storeBiosInIndexedDB(file.name, dataUrl);
+        } catch { /* non-fatal */ }
+      }
     } catch (reason) {
       setLaunchState({
         status: "invalid-bios",
@@ -817,19 +826,28 @@ export default function RetroPlayerPage() {
     void clearBiosFromIndexedDB().catch(() => {});
   }
 
+  /** Let the user try launching without a BIOS. EmulatorJS may still
+   *  boot some Satellaview titles, or show its own error. */
+  function skipBios() {
+    setBiosFile(null);
+    setBiosDataUrl(null);
+    setBiosName(null);
+    setBiosHash(null);
+    setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
+  }
+
   // ─── Start Game — the ONLY path that creates blob URLs + iframe ─
   async function startGame() {
     if (launchState.status !== "ready") return;
     if (!romBlob || !game) return;
 
-    // For Satellaview titles, require a valid BIOS
-    if (isSatellaview && !biosDataUrl) return;
+    // BIOS is optional — user can try without it (EmulatorJS may still boot)
 
     // Create ROM blob URL
     const romUrl = createRomBlobUrl(romBlob);
     romBlobUrlRef.current = romUrl;
 
-    // Create BIOS blob URL (for Satellaview)
+    // Create BIOS blob URL (for Satellaview, if provided)
     let biosUrl = "";
     if (isSatellaview && biosFile) {
       biosUrl = URL.createObjectURL(biosFile);
@@ -839,11 +857,16 @@ export default function RetroPlayerPage() {
     const sessionId = crypto.randomUUID();
     const core = game.system === "snes" ? "snes9x" : ejsCore;
 
+    // EJS_defaultControls is intentionally NOT injected — EmulatorJS 4.2.3's
+    // setupKeys() crashes if the format isn't exactly right. The controlScheme
+    // override alone is sufficient for correct Sega labels.
     setRuntimeConfig({
       sessionId,
       romUrl,
       biosUrl,
       core,
+      systemId: emulatorSystemId,
+      controlScheme,
       gameName: game.title,
     });
 
@@ -884,11 +907,9 @@ export default function RetroPlayerPage() {
     setProgressText(null);
     setCanvasCreated(false);
     setFirstFrameObserved(false);
-    // Return to ready (BIOS still valid) or needs-bios
+    // Return to ready — BIOS is optional, always allow relaunch
     if (isSatellaview && biosDataUrl && biosHash) {
       setLaunchState({ status: "ready", biosHash, biosFileName: biosName ?? "" });
-    } else if (isSatellaview) {
-      setLaunchState({ status: "needs-bios" });
     } else {
       setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
     }
@@ -904,10 +925,11 @@ export default function RetroPlayerPage() {
 
   // ─── Auto-load BIOS from IndexedDB ─────────────────────────────
   // When a Satellaview title is detected, try to restore a previously
-  // saved BIOS from IndexedDB. Revalidates the MD5 — only restores if
-  // the hash still matches the expected BS-X BIOS.
+  // saved BIOS from IndexedDB. Silently restores it if available so
+  // the emulator has the best chance of booting. Non-blocking — the
+  // game is already in "ready" state and can be launched without it.
   useEffect(() => {
-    if (!isSatellaview || launchState.status !== "needs-bios") return;
+    if (!isSatellaview) return;
     let cancelled = false;
     void loadBiosFromIndexedDB().then(async (stored) => {
       if (cancelled || !stored) return;
@@ -915,20 +937,15 @@ export default function RetroPlayerPage() {
         const resp = await fetch(stored.dataUrl);
         const blob = await resp.blob();
         const result = await validateBsxBios(blob);
-        if (cancelled) return;
-        if (result.ok) {
-          setBiosDataUrl(stored.dataUrl);
-          setBiosName(stored.name);
-          setBiosHash(result.hash ?? null);
-          setBiosFile(new File([blob], stored.name));
-          setLaunchState({ status: "ready", biosHash: result.hash ?? "", biosFileName: stored.name });
-        } else {
-          await clearBiosFromIndexedDB().catch(() => {});
-        }
+        if (cancelled || !result.ok) return;
+        setBiosDataUrl(stored.dataUrl);
+        setBiosName(stored.name);
+        setBiosHash(result.hash ?? null);
+        setBiosFile(new File([blob], stored.name));
       } catch { /* non-fatal */ }
     }).catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [isSatellaview, launchState.status]);
+  }, [isSatellaview]);
 
   // ─── Derived state ─────────────────────────────────────────────
 
@@ -1052,18 +1069,24 @@ export default function RetroPlayerPage() {
               <div className="flex h-full items-center justify-center p-6 text-center">
                 <div className="max-w-md space-y-4">
                   <LockKeyhole className="mx-auto text-amber-300" size={40} />
-                  <h2 className="text-xl font-black">Advanced setup required</h2>
+                  <h2 className="text-xl font-black">BIOS recommended</h2>
                   <p className="text-sm leading-6 text-white/55">
-                    This broadcast cartridge requires a user-provided BS-X system BIOS.
-                    Most players will not have this file. LiTT does not provide or download
-                    copyrighted firmware.
+                    This Satellaview title may need a BS-X system BIOS to boot.
+                    If you have a legally obtained BS-X.bin, load it below.
+                    You can also try launching without it — some games work fine.
                   </p>
                   <div className="flex flex-wrap justify-center gap-3">
                     <button
                       onClick={() => biosInputRef.current?.click()}
                       className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-black text-black hover:bg-amber-400"
                     >
-                      <Upload size={15} /> Load My BIOS
+                      <Upload size={15} /> Load BIOS
+                    </button>
+                    <button
+                      onClick={skipBios}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-black text-black hover:bg-emerald-400"
+                    >
+                      <Gamepad2 size={15} /> Try without BIOS
                     </button>
                     <a
                       href="https://emulatorjs.org/docs/systems/snes/"
@@ -1077,7 +1100,7 @@ export default function RetroPlayerPage() {
                       href="/games/retro"
                       className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-2.5 text-sm font-black text-white/50 hover:bg-white/5"
                     >
-                      <ArrowLeft size={15} /> Return to SNES Games
+                      <ArrowLeft size={15} /> Back
                     </Link>
                   </div>
                 </div>
@@ -1096,13 +1119,24 @@ export default function RetroPlayerPage() {
               <div className="flex h-full items-center justify-center p-6 text-center">
                 <div className="max-w-sm space-y-3">
                   <LockKeyhole className="mx-auto text-rose-300" size={36} />
-                  <h2 className="text-lg font-black">Invalid BIOS</h2>
+                  <h2 className="text-lg font-black">BIOS not accepted</h2>
                   <p className="text-xs leading-5 text-rose-300/80">
                     {launchState.reason}
                   </p>
-                  <p className="text-xs leading-5 text-white/55">
-                    Select the correct BS-X.bin file from the panel on the right.
-                  </p>
+                  <div className="flex flex-wrap justify-center gap-2 pt-2">
+                    <button
+                      onClick={() => biosInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-black text-black hover:bg-amber-400"
+                    >
+                      <Upload size={13} /> Try another file
+                    </button>
+                    <button
+                      onClick={skipBios}
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-black hover:bg-emerald-400"
+                    >
+                      <Gamepad2 size={13} /> Skip BIOS
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : launchState.status === "ready" ? (
@@ -1111,7 +1145,7 @@ export default function RetroPlayerPage() {
                   <Gamepad2 className="mx-auto text-emerald-300" size={36} />
                   <h2 className="text-lg font-black">Ready to launch</h2>
                   <p className="text-xs leading-5 text-white/55">
-                    {isSatellaview ? "BIOS validated. " : ""}Press Start Game to begin.
+                    {isSatellaview && biosHash ? "BIOS loaded. " : ""}Press Start Game to begin.
                   </p>
                   <button
                     onClick={startGame}
@@ -1156,16 +1190,6 @@ export default function RetroPlayerPage() {
                 <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Running · {runtimeConfig?.core ?? ejsCore}{useLegacy ? " (legacy)" : ""}
                 {heartbeatAge !== null ? ` · hb ${heartbeatAge}ms` : ""}
-              </div>
-            )}
-
-            {/* ─── Controller status badge ───────────────────────── */}
-            {(controllerConnected || controllerCount > 0) && (
-              <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-indigo-300/20 bg-indigo-900/70 px-3 py-1.5 text-[10px] font-bold text-indigo-100 backdrop-blur">
-                <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_6px_rgba(129,140,248,0.6)]" />
-                <Gamepad2 size={11} className="mr-1 inline" />
-                {controllerName ?? "Controller"}
-                {controllerCount > 1 ? ` ×${controllerCount}` : ""}
               </div>
             )}
           </div>
@@ -1337,15 +1361,17 @@ export default function RetroPlayerPage() {
 
         <aside className="space-y-4">
           {isSatellaview && (
-            <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[.05] p-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[.02] p-5">
               <div className="flex items-center gap-2">
-                <span className="grid h-5 w-5 place-items-center rounded-full border border-amber-300/40 text-[10px] font-black text-amber-200">
+                <span className="grid h-5 w-5 place-items-center rounded-full border border-white/20 text-[10px] font-black text-white/50">
                   BS
                 </span>
-                <h2 className="text-sm font-black">Requires external firmware</h2>
+                <h2 className="text-sm font-black text-white/70">BIOS (optional)</h2>
               </div>
-              <p className="mt-2 text-xs leading-5 text-white/55">
-                This Satellaview title needs a user-provided BS-X system BIOS. LiTT does not provide or download copyrighted firmware. Select your legally obtained BS-X.bin — it stays in this browser only.
+              <p className="mt-2 text-xs leading-5 text-white/45">
+                Most Satellaview games boot without a BIOS. If yours doesn&apos;t,
+                load a legally obtained BS-X.bin here. The file stays in this
+                browser and is never uploaded.
               </p>
 
               {/* BIOS validation status */}
@@ -1392,7 +1418,7 @@ export default function RetroPlayerPage() {
                   onClick={startGame}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-2.5 text-xs font-black text-black hover:bg-emerald-400"
                 >
-                  <Gamepad2 size={13} /> Start BS-X Game
+                  <Gamepad2 size={13} /> Start Game
                 </button>
               )}
 
@@ -1425,10 +1451,10 @@ export default function RetroPlayerPage() {
             </h2>
             <p className="mt-2 text-sm leading-6 text-white/55">
               {launchState.status === "needs-bios"
-                ? "Select your legally obtained BS-X.bin file. It remains in this browser and is never uploaded."
+                ? "Load a BS-X BIOS file, or try launching without one. The file stays in this browser."
                 : launchState.status === "ready"
                   ? isSatellaview
-                    ? "BIOS validated. Press Start BS-X Game to begin."
+                    ? biosHash ? "BIOS loaded. Press Start to begin." : "Press Start Game to begin. If the game doesn't boot, try loading a BS-X BIOS from the panel above."
                     : "Press Start Game to begin."
                   : launchState.status === "launching"
                     ? "Creating local emulator session. The ROM and BIOS are being loaded into the emulator iframe."
@@ -1508,7 +1534,7 @@ export default function RetroPlayerPage() {
               {canRenderIframe
                 ? "The ROM and BIOS were loaded from this browser only — the data stays in memory as a blob URL inside the emulator iframe. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."
                 : isSatellaview && launchState.status === "needs-bios"
-                  ? "The ROM is available locally. No BIOS has been loaded and the emulator has not started. Select a BS-X.bin to proceed."
+                  ? "The ROM is available locally. Press Start to launch."
                   : "The ROM is stored in this browser only. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."}
             </p>
           </section>
@@ -1519,6 +1545,9 @@ export default function RetroPlayerPage() {
         systemId={system.id}
         systemName={system.name}
         systemShort={system.shortName}
+        emulatorSystemId={emulatorSystemId}
+        controllerType={controllerType}
+        onControllerTypeChange={setControllerType}
         open={showControls}
         onClose={() => setShowControls(false)}
       />

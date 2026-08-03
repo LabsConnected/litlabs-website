@@ -21,8 +21,10 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { VoiceSessionProvider } from "@/app/studio/context/VoiceSessionContext";
 import { AGENT_META, type ChatMessage } from "@/app/studio/stores/useStudioAgentStore";
@@ -110,6 +112,29 @@ const RING_COLORS: Record<RingColor, string> = {
   red: "#ef4444",
 };
 
+const GUEST_DESTINATIONS = [
+  { terms: ["price", "pricing", "cost", "plan"], href: "/pricing", label: "View pricing", reply: "You can compare every plan on Pricing. Starting is free and does not require a credit card." },
+  { terms: ["studio", "build", "create", "start", "app", "website"], href: "/studio", label: "Explore Studio", reply: "Studio is where LiTT turns an idea into a plan, real files, a preview, and—after approval—a deployment." },
+  { terms: ["market", "agent", "tool", "plugin"], href: "/marketplace", label: "Browse Marketplace", reply: "Marketplace is where you can discover agents, tools, workflows, and creative packs for LiTT and Spark." },
+  { terms: ["community", "discover", "social", "people"], href: "/discover", label: "Visit Community", reply: "Community is the public discovery space for creations, builders, and shared work." },
+  { terms: ["gallery", "creation", "art", "image"], href: "/gallery", label: "Open Gallery", reply: "Gallery showcases created media and finished work from across LiTTree." },
+  { terms: ["game", "retro", "play"], href: "/games", label: "Explore Games", reply: "The Games area includes LiTTree's cloud, DOS, and retro experiences." },
+  { terms: ["demo", "example", "workflow", "show me", "tour"], href: "/showcase", label: "See product demos", reply: "The product demos walk through complete missions—from idea and planning to files, approval, and launch." },
+  { terms: ["sign in", "login", "account"], href: "/sign-in", label: "Sign in", reply: "Sign in to resume your projects, memory, files, agents, and deployment history." },
+  { terms: ["join", "sign up", "free"], href: "/sign-up", label: "Start free", reply: "Create a free account to save projects and let LiTT work with real files and project memory." },
+] as const;
+
+function guestNavigationReply(text: string, currentPage: string) {
+  const query = text.toLowerCase();
+  const match = GUEST_DESTINATIONS.find((item) => item.terms.some((term) => query.includes(term)));
+  if (match) return match;
+  return {
+    href: "/showcase",
+    label: "Take the product tour",
+    reply: `You're on ${currentPage}. I can guide you to Studio, pricing, product demos, Marketplace, Community, Gallery, Games, sign-in, or free signup. Try asking “show me how it works” or “where do I build an app?”`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Companion panel (inner component — wrapped by VoiceSessionProvider)
 // ---------------------------------------------------------------------------
@@ -118,6 +143,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { profile } = useProfile();
+  const { isSignedIn } = useClerkAuth();
   const {
     voiceState,
     voiceInputState,
@@ -136,6 +162,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [withSpark, setWithSpark] = useState(false);
+  const [suggestedAction, setSuggestedAction] = useState<{ href: string; label: string } | null>(null);
   const [voiceHealth, setVoiceHealth] = useState<{
     configured: boolean;
     tokenService: "healthy" | "error" | "unknown";
@@ -147,6 +174,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
 
   // Fetch voice health on mount + when voice state changes
   useEffect(() => {
+    if (!isSignedIn) return;
     let active = true;
     fetch("/api/voice/health", { cache: "no-store" })
       .then((r) => r.json())
@@ -165,7 +193,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
         }
       });
     return () => { active = false; };
-  }, []);
+  }, [isSignedIn]);
 
   const activeAgentId = withSpark ? "spark" : "litt";
   const ringColor = deriveRingColor(voiceState, voiceInputState, voiceOutputState);
@@ -197,8 +225,8 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   }, [messages, voiceTransportConnected, speakText]);
 
   const pageContext = useMemo(
-    () => derivePageContext(pathname, !!profile),
-    [pathname, profile],
+    () => derivePageContext(pathname, isSignedIn),
+    [pathname, isSignedIn],
   );
 
   const handleSend = useCallback(async (text: string) => {
@@ -207,8 +235,17 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
 
     setInput("");
     setBusy(true);
+    setSuggestedAction(null);
     const userMsg: ChatMessage = { role: "user", content: trimmed, createdAt: Date.now() };
     setMessages((prev) => [...prev, userMsg]);
+
+    if (!isSignedIn) {
+      const guidance = guestNavigationReply(trimmed, pageContext.pageTitle);
+      setMessages((prev) => [...prev, { role: "assistant", content: guidance.reply, createdAt: Date.now() }]);
+      setSuggestedAction({ href: guidance.href, label: guidance.label });
+      setBusy(false);
+      return;
+    }
 
     try {
       const agentSlug = activeAgentId;
@@ -217,8 +254,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug,
-          systemPrompt: AGENT_META[agentSlug].systemPrompt,
-          message: trimmed,
+                    message: trimmed,
           history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
           stream: false,
           userName: profile?.displayName || "Member",
@@ -261,7 +297,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [activeAgentId, busy, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
+  }, [activeAgentId, busy, isSignedIn, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
 
   // Keep handleSendRef in sync so the voice transcript callback always calls the latest
   useEffect(() => {
@@ -308,7 +344,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed bottom-24 right-6 z-[10000] flex w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a0c13]/95 shadow-2xl backdrop-blur-xl"
+      className="fixed bottom-24 right-6 z-[10000] flex w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a0c13]/95 shadow-2xl backdrop-blur-xl max-sm:inset-x-4 max-sm:bottom-20 max-sm:w-auto max-sm:max-w-none"
       style={{ maxHeight: "75dvh" }}
     >
       {/* Header */}
@@ -319,14 +355,20 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             background: `radial-gradient(circle, ${RING_COLORS[ringColor]}40 0%, transparent 70%)`,
           }}>
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-black"
+              className="relative h-8 w-8 overflow-hidden rounded-full border-2"
               style={{
                 borderColor: RING_COLORS[ringColor],
                 color: RING_COLORS[ringColor],
                 background: "#0a0c13",
               }}
             >
-              {withSpark ? "✦" : "L"}
+              <Image
+                src={withSpark ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                alt={withSpark ? "Spark" : "LiTT"}
+                fill
+                sizes="32px"
+                className="object-cover"
+              />
             </div>
           </div>
           <div>
@@ -359,7 +401,9 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
                 : `Here to help with ${pageContext.pageTitle}`}
             </div>
             <div className="mt-2 text-xs text-white/25">
-              Type a message or tap the microphone to speak
+              {isSignedIn
+                ? "Type a message or tap the microphone to speak"
+                : "Ask where to build, browse, learn, or get started"}
             </div>
           </div>
         ) : (
@@ -392,6 +436,14 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
                   </span>
                 </div>
               </div>
+            )}
+            {suggestedAction && !busy && (
+              <button
+                onClick={() => { router.push(suggestedAction.href); onClose(); }}
+                className="w-full rounded-xl border border-[#a8ff2f]/25 bg-[#a8ff2f]/10 px-3 py-2 text-left text-xs font-black text-[#b8ff5f] transition hover:bg-[#a8ff2f]/15"
+              >
+                {suggestedAction.label} →
+              </button>
             )}
             {/* Live transcript while listening */}
             {voiceInputState === "listening" && transcript && (
@@ -433,7 +485,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             style={{ maxHeight: "100px" }}
           />
           {/* Mic button */}
-          <button
+          {isSignedIn ? <button
             onClick={handleMicClick}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition"
             style={{
@@ -448,7 +500,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <line x1="12" y1="19" x2="12" y2="22" />
             </svg>
-          </button>
+          </button> : null}
           {/* Send button */}
           <button
             onClick={() => void handleSend(input)}
@@ -513,7 +565,7 @@ export function GlobalCompanion() {
 
   if (hidden) return null;
 
-  const handleMouseDown = () => {
+  const handlePointerDown = () => {
     didHoldRef.current = false;
     holdTimerRef.current = window.setTimeout(() => {
       didHoldRef.current = true;
@@ -522,7 +574,7 @@ export function GlobalCompanion() {
     }, 500);
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = () => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -532,7 +584,7 @@ export function GlobalCompanion() {
     }
   };
 
-  const handleMouseLeave = () => {
+  const handlePointerCancel = () => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -543,11 +595,10 @@ export function GlobalCompanion() {
     <VoiceSessionProvider>
       {/* Floating LiTT launcher */}
       <button
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseLeave}
-        onTouchStart={handleMouseDown}
-        onTouchEnd={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerCancel}
+        onPointerCancel={handlePointerCancel}
         className="fixed bottom-6 right-6 z-[10000] flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95"
         style={{
           background: "radial-gradient(circle at 30% 30%, #1a1f2e 0%, #0a0c13 70%)",
@@ -557,7 +608,9 @@ export function GlobalCompanion() {
         aria-label="Open LiTT companion"
         title="LiTT — tap to chat, hold for voice"
       >
-        <span className="text-lg font-black" style={{ color: "#22d3ee" }}>L</span>
+        <span className="relative h-12 w-12 overflow-hidden rounded-full">
+          <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="48px" className="object-cover" priority />
+        </span>
       </button>
 
       {/* Companion panel */}

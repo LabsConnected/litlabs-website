@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -65,6 +65,10 @@ export async function POST(req: NextRequest) {
       params.append("subscription_data[metadata][plan_id]", plan.id);
     }
 
+    // Idempotency: use clerkId + planId + timestamp window to prevent
+    // duplicate checkout sessions from rapid double-clicks.
+    const idempotencyKey = `billing_${clerkId}_${plan.id}_${Date.now()}`;
+
     const stripeResponse = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",
       {
@@ -72,6 +76,7 @@ export async function POST(req: NextRequest) {
         headers: {
           Authorization: `Bearer ${stripeKey}`,
           "Content-Type": "application/x-www-form-urlencoded",
+          "Idempotency-Key": idempotencyKey,
         },
         body: params.toString(),
       },

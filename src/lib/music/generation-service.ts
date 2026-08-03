@@ -3,17 +3,44 @@
 //   - getSupabaseAdmin()  (NOT a parallel Supabase client)
 //   - adjustWalletBalance()  (NOT a parallel LBC ledger — uses credit_ledger
 //     via the atomic debit_credits / grant_credits RPCs)
-//   - R2 uploadAudio() / getSignedAudioUrl()  (NOT a fake storeAudio stub)
+//   - R2 uploadAudio() / getSignedAudioUrl() / deleteAudio()  (ownership-scoped:
+//     every call requires the server-derived userId as the first argument)
 //
-// LBC flow (reservation-and-settlement collapsed into the existing atomic
-// debit, which is idempotent and advisory-locked):
-//   1. Debit LBC with idempotency key `music:charge:{idempotencyKey}`.
-//      This IS the charge. Insufficient balance → throw before any work.
-//   2. On failure/cancel → grant refund with `music:refund:{idempotencyKey}`
-//      (idempotent, won't double-refund).
-// Duplicate requests with the same idempotency key return the existing
-// generation without re-charging (enforced by both the unique DB index and
-// the idempotent debit RPC).
+// ── R2 ownership contract ──────────────────────────────────────────────────
+// The current R2 helpers enforce that every object key is prefixed with
+// `{userId}/`. The generation service NEVER constructs keys manually or
+// accepts keys/userId/bucket/prefix from the request body. Instead:
+//   - uploadAudio(userId, filename, buffer, contentType, category) builds the
+//     key server-side and returns { storageKey, publicUrl }. We persist the
+//     returned storageKey — never a reconstructed one.
+//   - getSignedAudioUrl(userId, key, expiresIn) validates that `key` starts
+//     with `{userId}/` before signing. Private/unlisted audio always uses
+//     signed URLs; public audio uses getPublicAudioUrl(key) (no userId needed).
+//   - deleteAudio(userId, key) validates ownership before deleting.
+//
+// ── Exact debit/refund sequence (failure-safe) ─────────────────────────────
+//   1. Insert a placeholder generation row (lbc_charged=0). The unique index
+//      on (user_id, idempotency_key) prevents duplicates — a racing request
+//      loses here and we return the winner without re-charging.
+//   2. Debit LBC atomically via adjustWalletBalance with idempotency key
+//      `music:charge:{idempotencyKey}`. This calls the debit_credits RPC
+//      (advisory-locked, idempotent). Insufficient balance → delete the
+//      placeholder row and throw INSUFFICIENT_LBC before any work starts.
+//   3. Record the settled charge (lbc_charged = cost) on the generation row.
+//   4. Kick off async processing (provider generation → audio fetch → R2
+//      upload → track row insert).
+//   5. If ANY step in processing fails (provider error, audio fetch failure,
+//      R2 upload failure, or DB persistence failure), call failGeneration()
+//      which:
+//        a. Grants a refund via adjustWalletBalance with idempotency key
+//           `music:refund:{idempotencyKey}` (idempotent — won't double-refund
+//           even if called multiple times).
+//        b. Marks the generation as failed with lbc_refunded=true.
+//   6. User-initiated cancel follows the same refund path (step 5a).
+//
+// No charge persists if generation or persistence fails. The refund is
+// guaranteed by the idempotent grant_credits RPC — even if the serverless
+// function crashes mid-refund, a retry will complete it without duplicating.
 
 import "server-only";
 
@@ -28,6 +55,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { uploadAudio, getSignedAudioUrl, getPublicAudioUrl, deleteAudio } from "@/lib/r2";
 import { getActiveProvider, createProvider } from "./providers/factory";
+import { fetchWithTimeout } from "./providers/http";
 import type { MusicProvider } from "./providers";
 import { checkPromptSafety, checkExplicitContent } from "./safety-filter";
 
@@ -382,14 +410,23 @@ async function processGeneration(args: ProcessArgs): Promise<void> {
   for (let i = 0; i < finalized.length; i++) {
     const f = finalized[i];
     const versionLabel = `Version ${String.fromCharCode(65 + i)}`; // A, B
-    const storageKey = `music/${generationId}/${versionLabel.toLowerCase().replace(/\s+/g, "-")}.mp3`;
 
     try {
       const bytes = f.audioBytes ?? (f.audioUrl ? await fetchAudioBytes(f.audioUrl) : null);
       if (!bytes) {
         throw new Error("No audio bytes to store");
       }
-      await uploadAudio(storageKey, bytes, "audio/mpeg");
+      // R2 upload enforces ownership: the key is built server-side as
+      // `{userId}/audio/{timestamp}_{filename}` — never from the request body.
+      // We persist the returned storageKey (the canonical ownership-scoped key).
+      const filename = `${versionLabel.toLowerCase().replace(/\s+/g, "-")}.mp3`;
+      const { storageKey } = await uploadAudio(
+        userId,
+        filename,
+        bytes,
+        "audio/mpeg",
+        "audio",
+      );
 
       const trackBlueprint: MusicBlueprint = {
         ...blueprint,
@@ -618,7 +655,10 @@ function extractMood(prompt: string): string {
 
 async function fetchAudioBytes(url: string): Promise<Buffer | null> {
   try {
-    const res = await fetch(url);
+    // 60s cap — provider audio downloads can be large, but must not hang the
+    // serverless function indefinitely. A timeout surfaces as a clean failure
+    // that triggers a refund via failGeneration.
+    const res = await fetchWithTimeout(url, {}, 60_000);
     if (!res.ok) return null;
     const arrayBuffer = await res.arrayBuffer();
     return Buffer.from(arrayBuffer);
@@ -637,19 +677,52 @@ function errMessage(err: unknown): string {
 
 // ── Track access helpers (used by API routes) ──────────────────────────────
 
-/** Resolve a playable URL for a track, honoring visibility. */
+/**
+ * Resolve a playable URL for a track, honoring visibility.
+ *
+ * @param userId   - The authenticated user's internal UUID (required for
+ *                   ownership validation on signed URLs).
+ * @param storageKey - The canonical R2 key stored in music_tracks.audio_storage_key.
+ * @param visibility - Track visibility. Public tracks use a public URL;
+ *                     private/unlisted tracks use a signed URL (1h) that
+ *                     requires ownership validation.
+ *
+ * Security:
+ *   - userId is ALWAYS required and is propagated to getSignedAudioUrl.
+ *   - Private/unlisted audio NEVER falls back to a public URL.
+ *   - Missing or malformed storage keys are rejected clearly.
+ *   - The raw R2 key is not exposed in client responses (callers return the
+ *     resolved URL, not the key).
+ */
 export async function resolveTrackAudioUrl(
+  userId: string,
   storageKey: string,
   visibility: TrackVisibility,
 ): Promise<string> {
+  if (!userId || userId.length < 3) {
+    throw new Error("Invalid userId for audio URL resolution");
+  }
+  if (!storageKey || storageKey.length < 3) {
+    throw new Error("Invalid or missing storage key");
+  }
+
   if (visibility === "public") {
+    // Public audio: no ownership check needed — the key is already public.
     return getPublicAudioUrl(storageKey);
   }
-  // private + unlisted → signed URL (1h)
-  return getSignedAudioUrl(storageKey, 3600);
+  // private + unlisted → signed URL (1h). userId is required for ownership
+  // validation — the R2 helper rejects keys not prefixed with `{userId}/`.
+  // NEVER fall back to a public URL for private/unlisted audio.
+  return getSignedAudioUrl(userId, storageKey, 3600);
 }
 
-/** Delete a track + its R2 audio. Returns true if deleted. */
+/**
+ * Delete a track + its R2 audio. Returns true if deleted.
+ *
+ * @param trackId - The track UUID.
+ * @param userId  - The authenticated user's internal UUID (required for
+ *                  ownership validation on R2 delete).
+ */
 export async function deleteTrack(trackId: string, userId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("Database is not configured");
@@ -663,7 +736,7 @@ export async function deleteTrack(trackId: string, userId: string): Promise<bool
   if (!track) return false;
 
   try {
-    await deleteAudio(track.audio_storage_key as string);
+    await deleteAudio(userId, track.audio_storage_key as string);
   } catch {
     // R2 delete failure shouldn't block the DB row delete.
   }

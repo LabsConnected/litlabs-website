@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function NoIndexLayout({
+export default function ShowcaseLayout({
   children,
 }: {
   children: React.ReactNode;

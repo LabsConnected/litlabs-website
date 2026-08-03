@@ -27,6 +27,7 @@ function ProfilePageInner() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -65,24 +66,30 @@ function ProfilePageInner() {
   const confirmAvatarUpload = useCallback(async () => {
     if (!avatarFile) return;
     setSaving(true);
-    await uploadAndSave(avatarFile, "avatar_url").catch(() => {
-      updateProfile({ avatarUrl: URL.createObjectURL(avatarFile) });
-    });
+    setUploadError(null);
+    try {
+      await uploadAndSave(avatarFile, "avatar_url");
+    } catch {
+      setUploadError("Avatar upload failed — not saved. Try again.");
+    }
     setSaving(false);
     setAvatarFile(null);
     setAvatarPreview(null);
-  }, [avatarFile, uploadAndSave, updateProfile]);
+  }, [avatarFile, uploadAndSave]);
 
   const confirmCoverUpload = useCallback(async () => {
     if (!coverFile) return;
     setSaving(true);
-    await uploadAndSave(coverFile, "cover_url").catch(() => {
-      updateProfile({ coverUrl: URL.createObjectURL(coverFile) });
-    });
+    setUploadError(null);
+    try {
+      await uploadAndSave(coverFile, "cover_url");
+    } catch {
+      setUploadError("Cover upload failed — not saved. Try again.");
+    }
     setSaving(false);
     setCoverFile(null);
     setCoverPreview(null);
-  }, [coverFile, uploadAndSave, updateProfile]);
+  }, [coverFile, uploadAndSave]);
 
   const handleSaveProfile = useCallback(
     async (updates: Partial<typeof profile>) => {
@@ -168,11 +175,13 @@ function ProfilePageInner() {
           coverPreview={coverPreview}
           isOwner={true}
           saving={saving}
+          uploadError={uploadError}
           onFileSelect={handleCoverSelect}
           onConfirm={confirmCoverUpload}
           onCancel={() => {
             setCoverFile(null);
             setCoverPreview(null);
+            setUploadError(null);
           }}
         />
 
@@ -181,11 +190,13 @@ function ProfilePageInner() {
           isOwner={true}
           saving={saving}
           avatarPreview={avatarPreview}
+          uploadError={uploadError}
           onAvatarSelect={handleAvatarSelect}
           onAvatarConfirm={confirmAvatarUpload}
           onAvatarCancel={() => {
             setAvatarFile(null);
             setAvatarPreview(null);
+            setUploadError(null);
           }}
           onEditProfile={() => setEditOpen(true)}
         />

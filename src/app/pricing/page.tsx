@@ -23,7 +23,7 @@ type CardPlan = {
   futurePrice: string;
   description: string;
   credits: string;
-  projects: string;
+  projectLimit: number;
   featured?: boolean;
   accent: Accent;
   cta: string;
@@ -40,7 +40,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
     credits: PLANS.starter.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.starter.activeProjectLimit} active project`,
+    projectLimit: PLANS.starter.activeProjectLimit,
     accent: "neutral",
     cta: "Start free",
     free: true,
@@ -54,7 +54,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.creator_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.creator_beta.activeProjectLimit,
     featured: true,
     accent: "cyan",
     cta: "Choose Creator",
@@ -69,7 +69,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.pro_builder_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.pro_builder_beta.activeProjectLimit,
     accent: "purple",
     cta: "Choose Pro",
     free: false,
@@ -79,15 +79,15 @@ const CARD_PLANS: CardPlan[] = [
 const usageRules = [
   {
     title: "One visible balance",
-    copy: "Monthly, promotional, and purchased LiTTBits stay separated behind one honest total.",
+    copy: "See all your credits in one place — no hidden balances or surprise charges.",
   },
   {
     title: "Monthly credits refresh",
-    copy: "Plan LiTTBits refresh each billing period. Purchased LiTTBits do not silently expire.",
+    copy: "Plan credits refresh each billing period. Bought credits never expire.",
   },
   {
-    title: "Atomic usage ledger",
-    copy: "Every grant and charge uses an idempotency key to prevent duplicate billing or double-spend.",
+    title: "Fair usage tracking",
+    copy: "Every action shows its cost before it runs. You never get charged twice for the same thing.",
   },
 ];
 
@@ -95,7 +95,12 @@ const faq = [
   {
     question: "What are LiTTBits?",
     answer:
-      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, media processing, and terminal runtime.",
+      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime.",
+  },
+  {
+    question: "How does video generation work?",
+    answer:
+      "Video is metered usage. Create a 5-second clip starting at $0.79 in LiTTBits. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.",
   },
   {
     question: "Do I keep my existing Beta LiTTBits?",
@@ -110,7 +115,12 @@ const faq = [
   {
     question: "Is this unlimited AI?",
     answer:
-      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions should show an estimate before they run.",
+      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
+  },
+  {
+    question: "What is the Founding Supporter offer?",
+    answer:
+      "A one-time $49 purchase that grants 6 months of Creator-level access, 5,000 bonus LiTTBits, a Founder badge, 15% off future credit packs, and early feature access. Limited to 100 supporters.",
   },
 ];
 
@@ -184,8 +194,8 @@ function PlanCard({
           <span>LiTTBits monthly</span>
         </div>
         <div className={styles.allowance}>
-          <strong>{plan.projects.replace(" active project", "").replace(" active projects", "")}</strong>
-          <span>{plan.projects.includes("projects") ? "active projects" : "active project"}</span>
+          <strong>{plan.projectLimit}</strong>
+          <span>{plan.projectLimit === 1 ? "active project" : "active projects"}</span>
         </div>
       </div>
 
@@ -256,7 +266,6 @@ export default function PricingPage() {
   );
 
   const founder = PLANS.founder;
-  const founderLoading = loading === founder.id;
 
   return (
     <main className={styles.page}>
@@ -281,18 +290,18 @@ export default function PricingPage() {
         </div>
 
         <h1>
-          Build more.
-          <span> Pay for what actually runs.</span>
+          Your AI business team.
+          <span> Research, write, code, market, and analyze.</span>
         </h1>
 
         <p className={styles.heroCopy}>
-          Start free, then unlock private projects, GitHub workflows, voice,
-          terminal runtime, advanced models, and deployment when your work needs
-          it.
+          One workspace, seven AI agents. Start free with LiTT and Spark, then
+          unlock Researcher, Writer, and Marketer with Creator Beta — or add
+          Coder and Analyst with Pro Builder Beta.
         </p>
 
         <div className={styles.heroMeta}>
-          <span>No fake unlimited claims</span>
+          <span>7 specialist AI agents</span>
           <span>Clear LiTTBit allowances</span>
           <span>Projects stay yours</span>
         </div>
@@ -305,8 +314,7 @@ export default function PricingPage() {
             <h2>Simple plans. Real limits. No billing tricks.</h2>
           </div>
           <p>
-            Founder pricing stays lower during beta. All checkout flows use the
-            existing Stripe price IDs and billing handler.
+            Founder pricing stays lower during beta. Cancel anytime — your work and credits are always yours.
           </p>
         </div>
 
@@ -326,29 +334,25 @@ export default function PricingPage() {
 
           <div className={styles.founderCopy}>
             <div className={styles.founderTitleRow}>
-              <p>Founding Member</p>
-              <span>Limited</span>
+              <p>Founding Supporter</p>
+              <span>Coming Soon</span>
             </div>
             <h2>
-              Permanent Creator-level access for{" "}
-              <strong>{formatPrice(founder.monthlyPriceCents)} once</strong>
+              Founding Supporter pricing and duration are being finalized.
             </h2>
             <p>
-              Includes {founder.monthlyCredits.toLocaleString()} founding LiTTBits, a Founder
-              badge, early feature access, 20% off future usage packs, higher beta
-              limits, priority feedback, and price protection. One-time purchase
-              that does not renew.
+              We&apos;re confirming the final price and access duration before
+              opening checkout. Join the waitlist to be notified when it&apos;s
+              ready — no payment required until then.
             </p>
           </div>
 
           <button
             type="button"
             className={styles.founderButton}
-            disabled={founderLoading}
-            onClick={() => handleCheckout(founder)}
+            disabled
           >
-            Become a Founder
-            {founderLoading ? null : <ArrowIcon />}
+            Coming Soon
           </button>
         </article>
 

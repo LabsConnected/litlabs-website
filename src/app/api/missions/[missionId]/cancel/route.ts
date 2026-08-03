@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getMission, updateMissionStatus } from "@/lib/missions/mission-repository";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -8,10 +8,10 @@ import { supabaseAdmin } from "@/lib/supabase";
  * Cancel a running mission.
  */
 export async function POST(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ missionId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { missionId } = await params;

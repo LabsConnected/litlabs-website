@@ -1,11 +1,11 @@
 // API Route: Messages for a specific conversation
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { generateText } from "@/lib/llm";
 
-async function getUserId() {
-  const { userId: clerkId } = await auth();
+async function getUserId(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) return null;
   const { data: user } = await supabaseAdmin
     .from("users")
@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getUserId(req);
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -74,7 +74,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getUserId(req);
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

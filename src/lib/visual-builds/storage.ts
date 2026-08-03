@@ -78,17 +78,16 @@ export async function storeProjectAsset(input: {
   }
 
   const ext = extensionForContentType(contentType);
-  const storageKey = [
-    "projects",
-    input.projectId,
-    "visual-builds",
-    input.buildId,
-    input.sectionKey || "asset",
-    `${checksum.slice(0, 12)}.${ext}`,
-  ].join("/");
+  const filename = `${checksum.slice(0, 12)}.${ext}`;
 
-  const uploaded = await uploadBinaryAsset(storageKey, bytes, contentType);
-  const storedUrl = uploaded.publicUrl || getPublicAssetUrl(storageKey);
+  const uploaded = await uploadBinaryAsset(
+    input.userId,
+    filename,
+    bytes,
+    contentType,
+    "asset",
+  );
+  const storedUrl = uploaded.publicUrl || getPublicAssetUrl(uploaded.storageKey);
 
   return createProjectAsset({
     projectId: input.projectId,

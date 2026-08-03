@@ -38,3 +38,19 @@ export function getActiveProvider(): MusicProvider {
 export function isMurekaEnabled(): boolean {
   return process.env.ENABLE_MUREKA === "true" && !!process.env.MUREKA_API_KEY;
 }
+
+/**
+ * Whether the mock provider is allowed to run. The mock never burns real API
+ * credits, so it is permitted in tests and when an operator explicitly opts in
+ * via MUSIC_ALLOW_MOCK=true (e.g. local development). In production the mock
+ * is rejected by the API routes so a missing MUSIC_PROVIDER can never silently
+ * produce fake audio on a billed path.
+ */
+export function isMockAllowed(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.MUSIC_ALLOW_MOCK === "true";
+}
+
+/** The provider name that would be selected right now, without instantiating it. */
+export function getConfiguredProviderName(): MusicProviderName {
+  return (process.env.MUSIC_PROVIDER as MusicProviderName | undefined) || "mock";
+}

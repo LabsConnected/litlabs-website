@@ -34,7 +34,7 @@ export interface IntegrationStatus {
   workspaceReady: boolean;
   state: IntegrationState;
   displayName: string;
-  category: "required" | "code" | "ai" | "optional" | "runtime";
+  category: "required" | "code" | "ai" | "optional" | "runtime" | "personal" | "information";
   details?: string;
   lastVerifiedAt?: string;
   errorCode?: string;
@@ -95,6 +95,22 @@ export const INTEGRATION_ENV_REQUIREMENTS: Record<string, string[]> = {
   ],
   anthropic: [
     "ANTHROPIC_API_KEY",
+  ],
+  open_meteo: [
+    "WEATHER_PROVIDER",
+    "OPEN_METEO_BASE_URL",
+  ],
+  brave_search: [
+    "SEARCH_PROVIDER",
+    "BRAVE_SEARCH_API_KEY",
+  ],
+  firecrawl: [
+    "WEB_FETCH_PROVIDER",
+    "FIRECRAWL_API_KEY",
+  ],
+  nango: [
+    "NANGO_SECRET_KEY",
+    "NANGO_PUBLIC_KEY",
   ],
 };
 

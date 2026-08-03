@@ -5,6 +5,7 @@ import { Code2, Eye, FolderGit2, Play, RefreshCw } from "lucide-react";
 import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
 import PreviewPanel from "@/components/studio/PreviewPanel";
 import ProjectSourceSelector from "@/components/studio/ProjectSourceSelector";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 interface StudioProject {
   id: string;
@@ -36,12 +37,18 @@ export default function BuilderTool() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<null | Record<string, unknown>>(null);
   const [error, setError] = useState<string | null>(null);
+  const { getToken } = useClerkAuth();
 
   const refreshProjects = useCallback(async () => {
     setProjectsLoading(true);
     setProjectsError(null);
     try {
-      const response = await fetch("/api/studio-projects", { cache: "no-store" });
+      const token = await getToken?.();
+      const response = await fetch("/api/studio-projects", {
+        cache: "no-store",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const payload = (await response.json()) as ProjectListResponse;
       if (!response.ok) {
         throw new Error(payload.error || "Failed to load projects");
@@ -57,7 +64,7 @@ export default function BuilderTool() {
     } finally {
       setProjectsLoading(false);
     }
-  }, []);
+  }, [getToken]);
 
   useEffect(() => {
     void refreshProjects();
@@ -73,9 +80,14 @@ export default function BuilderTool() {
     setError(null);
     setResult(null);
     try {
+      const token = await getToken?.();
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/visual-builds`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           prompt,
           quality,

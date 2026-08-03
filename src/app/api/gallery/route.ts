@@ -1,6 +1,6 @@
 // Gallery API — GET (list) / POST (save image)
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 
@@ -177,14 +177,15 @@ async function getHandler(req: NextRequest) {
     const view = searchParams.get("view") || "community"; // "community" | "my-uploads"
 
     if (!isSupabaseConfigured()) {
+      // Return empty gallery instead of fake demo data with invented like counts.
       return NextResponse.json(
-        { items: DEMO_GALLERY, mock: true },
+        { items: [], mock: false },
         { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
       );
     }
 
     // Get current user (if authenticated)
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     let currentUserId: string | null = null;
 
     if (clerkId) {
@@ -228,8 +229,8 @@ async function getHandler(req: NextRequest) {
 
     if (error) {
       return NextResponse.json(
-        { items: DEMO_GALLERY, mock: true },
-        { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
+        { items: [], mock: false, error: "Gallery temporarily unavailable" },
+        { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" } },
       );
     }
 
@@ -271,11 +272,11 @@ async function getHandler(req: NextRequest) {
       },
     );
 
-    // An empty community database should still feel alive. Keep the founding
-    // collection visible until the first real community uploads arrive.
+    // An empty community gallery is honest — no fake demo data.
+    // Real uploads will populate this over time.
     if (view === "community" && items.length === 0) {
       return NextResponse.json(
-        { items: DEMO_GALLERY, mock: true },
+        { items: [], mock: false },
         { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
       );
     }
@@ -291,7 +292,7 @@ async function getHandler(req: NextRequest) {
     );
   } catch {
     return NextResponse.json(
-      { items: DEMO_GALLERY, mock: true },
+      { items: [], mock: false, error: "Gallery temporarily unavailable" },
       { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" } },
     );
   }
@@ -299,7 +300,7 @@ async function getHandler(req: NextRequest) {
 
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -338,7 +339,7 @@ async function postHandler(req: NextRequest) {
         url: url.trim(),
         type: mediaType,
         caption: caption ? String(caption).trim() : null,
-        is_public: isPublic !== false, // default to public
+        is_public: isPublic === true, // default to private — user must explicitly opt in to public
         category: category || "gallery",
       })
       .select()
@@ -362,7 +363,7 @@ async function postHandler(req: NextRequest) {
 
 async function deleteHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -412,7 +413,7 @@ async function deleteHandler(req: NextRequest) {
 
 async function patchHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

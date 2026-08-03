@@ -59,7 +59,6 @@ export type {
   KernelContext,
   KernelEvent,
   IntentClassification,
-  ProjectInfo,
 } from "./types";
 
 // Schemas

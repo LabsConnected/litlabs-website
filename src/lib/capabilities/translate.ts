@@ -9,8 +9,17 @@
 export interface RawCapabilities {
   repository?: string;
   repositoryIndexed?: boolean;
-  terminalExecution?: string;
+  /** Full repository name (e.g. "owner/repo") — used for precise status reporting. */
+  repositoryName?: string;
+  /** Active git branch — used for precise status reporting. */
+  activeBranch?: string;
+  /** Whether the user has write access to the workspace. */
   writeAccess?: boolean;
+  /** Workspace preparation status (e.g. "ready", "preparing", "provisioning"). */
+  workspaceStatus?: string;
+  /** Human-readable label of the selected LLM model. */
+  selectedModelLabel?: string;
+  terminalExecution?: string;
   connectedProviders?: string[];
   availableTools?: string[];
   connectionSummary?: string;
@@ -20,6 +29,9 @@ export interface RawCapabilities {
   voiceTransportConnected?: boolean;
   /** Microphone currently capturing audio. Client-derived. */
   voiceMicrophoneOn?: boolean;
+  voiceInputState?: string;
+  voiceState?: string;
+  voiceOutputState?: string;
   /** Voice health from /api/voice/health (server-side check). */
   voiceHealth?: {
     configured: boolean;
@@ -121,6 +133,9 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   const voiceHealth = caps.voiceHealth;
   const voiceTransport = caps.voiceTransportConnected === true;
   const micOn = caps.voiceMicrophoneOn === true;
+  const voiceInputState = caps.voiceInputState ?? "idle";
+  const voiceState = caps.voiceState ?? "idle";
+  const voiceOutputState = caps.voiceOutputState ?? "idle";
 
   let voiceConfigState: string;
   let voiceTransportState: string;
@@ -152,6 +167,17 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
     voiceMicState = "Microphone is off.";
   }
 
+  const voiceActivityState =
+    voiceState === "assistant_speaking" || voiceOutputState === "speaking"
+      ? "LiTT is speaking."
+      : voiceState === "processing" || voiceInputState === "connecting"
+        ? "Voice is processing."
+        : voiceState === "error" || voiceInputState === "error"
+          ? "Voice is in an error state."
+          : voiceState === "muted"
+            ? "Voice is muted."
+            : "Voice is idle.";
+
   // Combined voice state for the LLM
   if (voiceHealth?.available && voiceTransport && micOn) {
     voiceFullState = "Voice is fully operational — configured, transport connected, microphone on.";
@@ -174,6 +200,31 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
 
   if (githubAction) parts.push(`  → Next action: ${githubAction}`);
 
+  // Repository details — precise identification for repo-aware answers
+  if (caps.repositoryName) {
+    parts.push(`  Repository: ${caps.repositoryName}`);
+  }
+  if (caps.activeBranch) {
+    parts.push(`  Active branch: ${caps.activeBranch}`);
+  }
+
+  // Write access and approval requirement
+  const writeAccess = caps.writeAccess === true;
+  const workspaceStatus = caps.workspaceStatus ?? "unknown";
+  if (repo === "ready" || repo === "connected") {
+    if (writeAccess) {
+      parts.push(`  Write access: permitted (workspace status: ${workspaceStatus}).`);
+    } else {
+      parts.push(`  Write access: not permitted. File writes and shell commands require user approval. Read-only access is available.`);
+    }
+    parts.push(`  Approval: file-changing, git-changing, dependency-changing, destructive, and deployment commands require explicit user approval. Do not claim you can write files or run commands without approval.`);
+  }
+
+  // Selected model
+  if (caps.selectedModelLabel) {
+    parts.push(`  Selected model: ${caps.selectedModelLabel}`);
+  }
+
   parts.push(`Terminal: ${terminalState}`);
 
   if (terminalAction) parts.push(`  → Next action: ${terminalAction}`);
@@ -181,6 +232,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push(`Voice configuration: ${voiceConfigState}`);
   parts.push(`Voice transport: ${voiceTransportState}`);
   parts.push(`Voice microphone: ${voiceMicState}`);
+  parts.push(`Voice activity: ${voiceActivityState}`);
   parts.push(`Voice summary: ${voiceFullState}`);
 
   parts.push(
@@ -195,9 +247,16 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- A disconnected GitHub or terminal does NOT mean voice is disconnected. Voice has its own configuration, token service, transport, and microphone states.");
   parts.push("- Voice can work WITHOUT GitHub, a repository, a project, PTY, or filesystem access. Do not tell the user they need to connect GitHub or create a project to use voice.");
   parts.push("- A repository can be usable before indexing finishes. Indexing is optional for basic file access.");
-  parts.push("- Never claim you can read files, run commands, access a repository, or use voice/microphone unless the state above explicitly says it is connected and ready.");
+  parts.push("- Never claim full repository access based only on an account connection. Distinguish: GitHub connected, repository selected, repository readable, and writes permitted.");
+  parts.push("- When asked about repository status, report the exact repository name and branch if available. Example: 'Connected to owner/repo on branch main. Repository read access is available. Writes require approval. Terminal status: disconnected.'");
+  parts.push("- Never guess terminal, voice, preview, or deployment status. Only report what the connection state above explicitly says.");
   parts.push("- If voice is configured and the token service is healthy, voice is AVAILABLE even if the transport is not connected yet. Say \"voice is available\" not \"voice is disconnected\".");
-  parts.push("- If voice configuration is unknown, do NOT claim voice is working, good, online, or nominal. Say you don't have live voice status.");
+  parts.push("- If voice configuration is unknown, say: Voice status is still being checked. Do not claim voice is working or unavailable.");
+  parts.push("- NEVER say \"Yes, I can hear you\" or \"I can hear you\" merely because a text transcript arrived. Hearing is a real-time microphone state, not a transcript event.");
+  parts.push("- You may only report: microphone permission granted, microphone actively listening, speech detected, transcript received, microphone stopped, or voice output available.");
+  parts.push("- If live microphone state is unavailable, say: \"I received your voice transcript. The microphone is no longer listening.\" Do not pretend you can hear in real-time.");
+  parts.push("- Voice is push-to-talk only. Do not tell the user you are continuously listening or that they can just speak freely. They must tap the microphone to talk.");
+  parts.push("- If a transcript was rejected (filler, noise, duplicate, too short), do not respond to it. Only respond to transcripts the user explicitly sent or approved.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
   parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
   parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Report voice, GitHub, and terminal SEPARATELY. Example: 'Chat and Inworld voice are available. GitHub and the terminal are not connected, so build tools are currently unavailable.' Do NOT group voice with GitHub or terminal.");

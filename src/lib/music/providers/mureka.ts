@@ -9,6 +9,7 @@ import type {
   ProviderStatusResult,
 } from "@/types/music";
 import type { MusicProvider } from "./index";
+import { fetchWithTimeout } from "./http";
 
 export class MurekaMusicProvider implements MusicProvider {
   readonly name = "mureka" as const;
@@ -31,7 +32,7 @@ export class MurekaMusicProvider implements MusicProvider {
     const { blueprint, prompt, instrumental, durationSeconds, lyrics } = input;
     const b = blueprint as { genre?: string[]; mood?: string[]; production?: string[] };
 
-    const response = await fetch(`${this.baseUrl}/songs/generate`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/songs/generate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -61,7 +62,7 @@ export class MurekaMusicProvider implements MusicProvider {
   }
 
   async getStatus(providerJobId: string): Promise<ProviderStatusResult> {
-    const response = await fetch(`${this.baseUrl}/songs/status/${providerJobId}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/songs/status/${providerJobId}`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
     if (!response.ok) {
@@ -79,7 +80,7 @@ export class MurekaMusicProvider implements MusicProvider {
   }
 
   async cancel(providerJobId: string): Promise<boolean> {
-    const response = await fetch(`${this.baseUrl}/songs/cancel/${providerJobId}`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/songs/cancel/${providerJobId}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });

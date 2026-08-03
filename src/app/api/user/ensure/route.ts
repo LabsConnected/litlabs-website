@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { clerkClient } from "@clerk/nextjs/server";
 import { getOrCreateUser, getUserWallet } from "@/lib/user-db";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
-  const { userId: clerkId } = await auth();
+export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -47,8 +48,8 @@ export async function POST() {
   }
 }
 
-export async function GET() {
-  const { userId: clerkId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json(
       { exists: false, error: "Not authenticated" },

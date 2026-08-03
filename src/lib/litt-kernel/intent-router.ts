@@ -66,16 +66,13 @@ const MODE_PATTERNS: ModePattern[] = [
     domains: ["engineering"],
   },
 
-  // ─── review: audits, reviews, security, project assessment ────
+  // ─── review: audits, reviews, security ───────────────────────
   {
     mode: "review",
     patterns: [
       /\b(audit|review|check|analyze|inspect|assess)\b.*\b(security|accessibility|performance|seo|code|quality|compliance|vulnerab)\b/i,
       /\b(code review|pr review|security review|a11y audit)\b/i,
       /\b(lighthouse|wcag|owasp|cve)\b/i,
-      /\b(what.*should i.*(get done|do|fix|work on)|what.*needs.*(fix|done|work)|what.*highly.*needed|what.*should.*be.*done|prioriti[sz]e.*work|what.*important.*right now)\b/i,
-      /\bwhat.*(needs|need).*fix/i,
-      /\bwhat.*(should|must).*i.*(do|fix|work|tackle|prioriti[sz]e)/i,
     ],
     requiresProject: true,
     requiresExecution: true,

@@ -11,15 +11,19 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { getTerminalToken } from "@/lib/terminal-client";
+import { clearTerminalTokenCache, getTerminalToken } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
-import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle } from "lucide-react";
+import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
+import { copyToClipboard } from "@/lib/studio/message-copy";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
 interface TerminalPanelProps {
   projectId?: string;
+  repositoryName?: string | null;
+  branch?: string | null;
+  approvalMode?: "auto" | "manual";
   onLog?: (entry: string) => void;
   onCommand?: (cmd: string) => void;
   onConnectionChange?: (connected: boolean) => void;
@@ -35,7 +39,7 @@ export const TerminalPanel = forwardRef<
   TerminalPanelHandle,
   TerminalPanelProps
 >(function TerminalPanel(
-  { projectId, onLog, onCommand, onConnectionChange, onTerminalOutput },
+  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,7 +52,8 @@ export const TerminalPanel = forwardRef<
   const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string } | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const { isLoaded, isSignedIn } = useClerkAuth();
+  const [copiedAll, setCopiedAll] = useState(false);
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
   const terminalStore = useTerminalStore();
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,6 +61,7 @@ export const TerminalPanel = forwardRef<
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
+    terminalStore.setProject(projectId ?? null);
     let disposed = false;
 
     const term = new Terminal({
@@ -134,7 +140,14 @@ export const TerminalPanel = forwardRef<
       });
     };
 
-    void getTerminalToken(false, projectId)
+    let attemptedUnauthorizedRetry = false;
+
+    const connect = async () => {
+      const authToken = await getToken?.();
+      return getTerminalToken(false, projectId, authToken || undefined);
+    };
+
+    void connect()
       .then((token) => {
         if (disposed) return;
         const connectedSocket = io(wsUrl, {
@@ -200,6 +213,45 @@ export const TerminalPanel = forwardRef<
         });
 
         connectedSocket.on("connect_error", (err: Error) => {
+          const isUnauthorized = /unauthorized/i.test(err.message || "");
+          if (isUnauthorized && !attemptedUnauthorizedRetry) {
+            attemptedUnauthorizedRetry = true;
+            clearTerminalTokenCache();
+            onLog?.("[WS] Unauthorized — refreshing terminal token and retrying...");
+            connectedSocket.disconnect();
+            socketRef.current = null;
+            setConnected(false);
+            terminalStore.setStatus("connecting");
+            void connect().then((freshToken) => {
+              if (disposed) return;
+              const retrySocket = io(wsUrl, {
+                auth: { token: freshToken },
+                transports: ["websocket", "polling"],
+                reconnectionAttempts: 5,
+              });
+              socketRef.current = retrySocket;
+              retrySocket.on("connect_error", (nextErr: Error) => {
+                terminalStore.setError(nextErr.message);
+                terminalStore.setStatus("error");
+                term.writeln(`\x1b[31m❌ PTY connection failed: ${nextErr.message}\x1b[0m`);
+                onLog?.(`[WS] Connect error: ${nextErr.message}`);
+              });
+              retrySocket.on("connect", () => {
+                setConnected(true);
+                terminalStore.setStatus("connecting");
+                onConnectionChange?.(true);
+                term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+                onLog?.("[WS] Connected to terminal server");
+              });
+            }).catch((authErr: unknown) => {
+              const message = authErr instanceof Error ? authErr.message : "Terminal authentication failed";
+              terminalStore.setError(message);
+              terminalStore.setStatus("error");
+              term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
+              onLog?.(`[AUTH] ${message}`);
+            });
+            return;
+          }
           if (connectTimeoutRef.current) {
             clearTimeout(connectTimeoutRef.current);
             connectTimeoutRef.current = null;
@@ -274,6 +326,7 @@ export const TerminalPanel = forwardRef<
       term.dispose();
       terminalStore.setStatus("disconnected");
       terminalStore.setSession(null);
+      terminalStore.setProject(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -314,10 +367,19 @@ export const TerminalPanel = forwardRef<
     termRef.current?.clear();
   };
 
+  const copyAllOutput = async () => {
+    const ok = await copyToClipboard(outputBufferRef.current);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 2000);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
-        <div className="min-w-0 text-sm">
+        <div className="min-w-0 flex-1 text-sm">
+          {/* Connection state */}
           {terminalStore.status === "error" ? (
             <div className="flex flex-col gap-1">
               <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
@@ -352,14 +414,32 @@ export const TerminalPanel = forwardRef<
               <Plug size={10} /> Real PTY disconnected
             </span>
           )}
-          {connected && sessionInfo && <div className="mt-1 truncate text-[9px] text-neutral-500">Workspace: {sessionInfo.cwd} · Shell: {sessionInfo.shell}</div>}
+          {/* Repository, branch, CWD, approval mode */}
+          {(repositoryName || branch || (connected && sessionInfo)) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-neutral-500">
+              {repositoryName && <span className="truncate"><span className="text-neutral-600">repo:</span> {repositoryName}</span>}
+              {branch && <span className="truncate"><span className="text-neutral-600">branch:</span> {branch}</span>}
+              {connected && sessionInfo && <span className="truncate"><span className="text-neutral-600">cwd:</span> {sessionInfo.cwd}</span>}
+              {connected && sessionInfo && <span className="truncate"><span className="text-neutral-600">shell:</span> {sessionInfo.shell}</span>}
+              <span className="truncate"><span className="text-neutral-600">approval:</span> {approvalMode === "auto" ? "auto-approve safe commands" : "manual approval for destructive commands"}</span>
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={copyAllOutput}
+            title={copiedAll ? "Copied!" : "Copy all output"}
+            className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            aria-label="Copy all terminal output"
+          >
+            {copiedAll ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+          </button>
           <button
             onClick={resetTerminal}
             title="Reset"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            aria-label="Reset terminal"
           >
             <RotateCcw className="h-4 w-4" />
           </button>

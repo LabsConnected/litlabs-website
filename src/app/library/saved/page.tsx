@@ -16,7 +16,7 @@ export default function LibrarySavedPage() {
   };
 
   const savedLinks = [
-    { href: "/social?feed=saved", label: "Saved posts", desc: "Posts you bookmarked in the feed" },
+    { href: "/discover?feed=saved", label: "Saved posts", desc: "Posts you bookmarked in the feed" },
     { href: "/gallery?tab=favorites", label: "Favorite media", desc: "Gallery items you liked" },
     { href: "/marketplace?tab=favorites", label: "Marketplace favorites", desc: "Agents and items you saved" },
     { href: "/games?tab=continue", label: "Continue playing", desc: "Pick up where you left off" },
