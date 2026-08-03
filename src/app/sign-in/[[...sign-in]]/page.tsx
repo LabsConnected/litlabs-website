@@ -16,7 +16,7 @@ export default function SignInPage() {
           >
             LiTTree LabStudios
           </h1>
-          <p className="text-xs opacity-50" style={{ color: "#94a3b8" }}>
+          <p className="text-xs opacity-70" style={{ color: "#94a3b8" }}>
             Sign in to your AI workspace
           </p>
         </div>
@@ -78,7 +78,7 @@ export default function SignInPage() {
         <div className="text-center mt-5">
           <Link
             href="/"
-            className="text-[11px] opacity-50 hover:opacity-80 transition-opacity"
+            className="text-[11px] opacity-70 hover:opacity-100 transition-opacity"
             style={{ color: "#94a3b8", textDecoration: "none" }}
           >
             ← Back to Home

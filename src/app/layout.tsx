@@ -117,12 +117,14 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <link
-        rel="preconnect"
-        href="https://clerk.litlabs.net"
-        crossOrigin="anonymous"
-      />
-      <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
+      <head>
+        <link
+          rel="preconnect"
+          href="https://clerk.litlabs.net"
+          crossOrigin="anonymous"
+        />
+        <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
+      </head>
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#03050b" }}

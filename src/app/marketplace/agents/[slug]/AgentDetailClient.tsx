@@ -26,6 +26,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
   const [state, setState] = useState<AgentState>("loading");
   const [busy, setBusy] = useState(false);
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [instanceId, setInstanceId] = useState<string | null>(null);
 
   useEffect(() => {
     // Resolve agent DB ID from slug via the marketplace items API
@@ -33,6 +34,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
       .then((r) => r.json().catch(() => ({})))
       .then((data) => {
         if (data.agentId) setAgentId(data.agentId);
+        if (data.agentInstanceId) setInstanceId(data.agentInstanceId);
         if (data.state) setState(data.state as AgentState);
         else setState(minimumPlan === "starter" ? "install" : "buy");
       })
@@ -123,7 +125,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
       {state === "open" && (
         <div className="space-y-2">
           <Link
-            href={`/studio?agent=${slug}`}
+            href={instanceId ? `/studio?agentInstance=${instanceId}&agent=${slug}` : `/studio?agent=${slug}`}
             className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition hover:scale-[1.02]"
             style={{ background: color + "20", color }}
           >

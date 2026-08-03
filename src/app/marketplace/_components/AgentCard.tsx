@@ -70,6 +70,7 @@ function AgentCardInner({
 }: AgentCardProps) {
   const [state, setState] = useState<AgentState>("loading");
   const [busy, setBusy] = useState(false);
+  const [instanceId, setInstanceId] = useState<string | null>(null);
   const authedFetch = useAuthedFetch();
 
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
@@ -85,6 +86,7 @@ function AgentCardInner({
       if (res.ok) {
         const data = await res.json();
         setState(data.state as AgentState);
+        setInstanceId(data.agentInstanceId ?? null);
       } else {
         setState(item.price_cents === 0 ? "install" : "buy");
       }
@@ -256,7 +258,7 @@ function ActionButton({
     case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Install</button>;
     case "open": return (
       <div className="flex gap-2">
-        <Link href={`/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
+        <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
           <ArrowRight size={12} /> Open in Studio
         </Link>
         <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>

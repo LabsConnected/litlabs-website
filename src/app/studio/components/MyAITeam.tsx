@@ -24,7 +24,9 @@ interface MyAITeamProps {
 
 export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const activeAgentInstanceId = useStudioAgentStore((s) => s.activeAgentInstanceId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
+  const setActiveAgentInstance = useStudioAgentStore((s) => s.setActiveAgentInstance);
   const { isSignedIn } = useClerkAuth();
   const { plan, loading: planLoading } = useUserPlan();
   const [installed, setInstalled] = useState<InstalledAgent[]>([]);
@@ -70,11 +72,17 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   }, [isSignedIn, authedFetch]);
 
   const handleOpen = useCallback(
-    (agentId: AgentId) => {
-      setActiveAgent(agentId);
+    (agentId: AgentId, agentInstanceId?: string) => {
+      if (agentInstanceId) {
+        // Marketplace agent — select by private instance ID
+        setActiveAgentInstance(agentInstanceId, agentId);
+      } else {
+        // Builtin agent — select by slug
+        setActiveAgent(agentId);
+      }
       onOpenAgent?.(agentId);
     },
-    [setActiveAgent, onOpenAgent],
+    [setActiveAgent, setActiveAgentInstance, onOpenAgent],
   );
 
   const handleTogglePause = useCallback(
@@ -149,10 +157,12 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
           <div className="space-y-1.5">
             {STUDIO_AGENTS.map((meta) => {
               const accent = meta.color;
-              const isActive = activeAgentId === meta.id;
+              const installedAgent = installed.find((a) => a.slug === meta.id);
+              const isActive = installedAgent
+                ? activeAgentInstanceId === installedAgent.id
+                : activeAgentId === meta.id && !activeAgentInstanceId;
               const unlocked = !isSignedIn || hasAccess(meta.minimumPlan);
               const isInstalled = installedSlugs.has(meta.id);
-              const installedAgent = installed.find((a) => a.slug === meta.id);
               const isPaused = installedAgent && !installedAgent.isActive;
 
               return (
@@ -167,7 +177,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                   <button
                     type="button"
                     disabled={!unlocked}
-                    onClick={() => unlocked && handleOpen(meta.id)}
+                    onClick={() => unlocked && handleOpen(meta.id, installedAgent?.id)}
                     className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/[0.03] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {/* Avatar */}

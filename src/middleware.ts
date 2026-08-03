@@ -3,11 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
 
 const isProtectedRoute = createRouteMatcher([
-  "/marketplace(.*)",
   "/settings(.*)",
   "/profile(.*)",
   "/agent-chat(.*)",
-  "/gallery/(.*)",
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
   "/api/settings/(.*)",
@@ -15,6 +13,9 @@ const isProtectedRoute = createRouteMatcher([
   "/api/users/(.*)",
   "/api/account",
   "/api/orchestrate",
+  "/api/marketplace/agents/(.*)/install(.*)",
+  "/api/marketplace/agents/(.*)/checkout(.*)",
+  "/api/marketplace/installations(.*)",
 ]);
 
 const clerkConfigured = isClerkConfigured();

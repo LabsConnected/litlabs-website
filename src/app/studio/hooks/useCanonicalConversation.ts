@@ -113,6 +113,7 @@ export function useCanonicalConversation({
   const { userId } = useClerkAuth();
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const activeAgentInstanceId = useStudioAgentStore((s) => s.activeAgentInstanceId);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
 
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -201,9 +202,12 @@ export function useCanonicalConversation({
       s.setConversations(conversations);
 
       const { conversationId, agentSlug } = parseConversationFromUrl(searchParamsRef.current);
+      const agentInstanceFromUrl = searchParamsRef.current?.get("agentInstance") ?? null;
       if (conversationId && conversations.some((c) => c.id === conversationId)) {
         s.selectConversation(conversationId);
-        if (agentSlug) {
+        if (agentInstanceFromUrl) {
+          useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+        } else if (agentSlug) {
           s.setActiveAgent(agentSlug);
           setActiveAgentId(agentSlug);
         }
@@ -301,6 +305,7 @@ export function useCanonicalConversation({
     isSyncingFromUrl.current = true;
     const s = getStore();
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
+    const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
     if (conversationId !== s.selectedConversationId) {
       if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
         s.selectConversation(conversationId);
@@ -309,7 +314,9 @@ export function useCanonicalConversation({
         s.selectConversation(null);
       }
     }
-    if (agentSlug && agentSlug !== activeAgentId) {
+    if (agentInstanceFromUrl) {
+      useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
+    } else if (agentSlug && agentSlug !== activeAgentId) {
       s.setActiveAgent(agentSlug);
       setActiveAgentId(agentSlug);
     }
@@ -516,6 +523,7 @@ export function useCanonicalConversation({
             clientRequestId,
             expectedRevision,
             requestedAgentSlug: activeAgentId,
+            agentInstanceId: activeAgentInstanceId || undefined,
             provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
             category: isAutoBest ? "auto" : selectedModel.category,
             model: selectedModel.model,

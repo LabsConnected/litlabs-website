@@ -311,6 +311,8 @@ export interface AgentAuthorization {
   versionStatus: string | null;
   agentStatus: string | null;
   selectedVersionId: string | null;
+  /** The private user_agents.id for this user's installed instance, if installed. */
+  agentInstanceId: string | null;
   denyReason?: string;
 }
 
@@ -366,6 +368,7 @@ export async function getAgentAuthorization(
       isFree: false, isIncludedInPlan: false, isInstalled: false, isDisabled: false,
       hasPendingOrder: false, isRefunded: false, isPrivate: false, isListed: false,
       versionStatus: null, agentStatus: null, selectedVersionId: null,
+      agentInstanceId: null,
       denyReason: "user_not_found",
     };
   }
@@ -382,6 +385,7 @@ export async function getAgentAuthorization(
       isFree: false, isIncludedInPlan: false, isInstalled: false, isDisabled: false,
       hasPendingOrder: false, isRefunded: false, isPrivate: false, isListed: false,
       versionStatus: null, agentStatus: null, selectedVersionId: null,
+      agentInstanceId: null,
       denyReason: "agent_not_found",
     };
   }
@@ -456,6 +460,7 @@ export async function getAgentAuthorization(
 
   const isInstalled = !!installation;
   const isDisabled = isInstalled && !installation!.is_active;
+  const agentInstanceId = isInstalled ? installation!.id : null;
 
   let hasPendingOrder = false;
   if (!isInstalled) {
@@ -524,7 +529,7 @@ export async function getAgentAuthorization(
     isFree, isIncludedInPlan, isInstalled, isDisabled,
     hasPendingOrder, isRefunded, isPrivate, isListed,
     versionStatus, agentStatus: agentIsPublic ? (listingAvailable ? "available" : "unlisted") : "private",
-    selectedVersionId, denyReason,
+    selectedVersionId, agentInstanceId, denyReason,
   };
 }
 

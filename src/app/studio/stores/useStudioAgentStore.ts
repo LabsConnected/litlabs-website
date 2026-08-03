@@ -72,11 +72,23 @@ export const STUDIO_AGENTS: AgentMeta[] = AGENT_DEFINITIONS.filter(
 
 interface StudioAgentStore {
   activeAgentId: AgentId;
+  /** Private agent instance ID (user_agents.id) when a marketplace agent is selected. */
+  activeAgentInstanceId: string | null;
   setActiveAgent: (id: AgentId) => void;
+  /** Select a marketplace agent instance by its private user_agents.id. */
+  setActiveAgentInstance: (instanceId: string | null, fallbackSlug?: AgentId) => void;
 }
 
 export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
   activeAgentId: "litt",
+  activeAgentInstanceId: null,
 
-  setActiveAgent: (activeAgentId) => set({ activeAgentId }),
+  setActiveAgent: (activeAgentId) => set({ activeAgentId, activeAgentInstanceId: null }),
+
+  setActiveAgentInstance: (instanceId, fallbackSlug) =>
+    set({
+      activeAgentInstanceId: instanceId,
+      // Keep the slug in sync for UI display, but the server will use the instance ID
+      activeAgentId: fallbackSlug ?? "litt",
+    }),
 }));
