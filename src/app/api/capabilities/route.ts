@@ -46,8 +46,9 @@ async function handler(req: NextRequest) {
       // Non-fatal — leave githubInstalled as false
     }
 
-    // Resolve project using the shared helper
-    const project = await resolveCurrentProject({ userId });
+    // Resolve the URL-selected project first, then use the shared fallback order.
+    const explicitProjectId = req.nextUrl.searchParams.get("projectId");
+    const project = await resolveCurrentProject({ userId, explicitProjectId });
 
     if (project) {
       // A blank Studio project is still a valid project even without GitHub
@@ -61,6 +62,7 @@ async function handler(req: NextRequest) {
         projectId: project.projectId,
         projectName: project.projectName,
         defaultBranch: project.defaultBranch ?? undefined,
+        activeBranch: project.activeBranch ?? undefined,
         lastVerifiedAt: new Date().toISOString(),
       });
 

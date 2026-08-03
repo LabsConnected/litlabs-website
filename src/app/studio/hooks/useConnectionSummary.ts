@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useVoiceSession } from "../context/VoiceSessionContext";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -27,6 +29,7 @@ export interface ConnectionCapabilities {
   projectId: string | null;
   projectName: string | null;
   defaultBranch: string | null;
+  activeBranch: string | null;
   sourceType: "github" | "blank" | "template" | null;
   workspaceStatus: string | null;
   githubInstalled: boolean;
@@ -53,6 +56,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   projectId: null,
   projectName: null,
   defaultBranch: null,
+  activeBranch: null,
   sourceType: null,
   workspaceStatus: null,
   githubInstalled: false,
@@ -83,14 +87,17 @@ export function useConnectionSummary() {
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
+  const { voiceTransportConnected, voiceInputState } = useVoiceSession();
   const { getToken } = useClerkAuth();
+  const searchParams = useSearchParams();
+  const explicitProjectId = searchParams.get("project");
 
   const refresh = useCallback(async () => {
     try {
       const token = await getToken?.();
       const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const [capsRes, termRes, voiceRes] = await Promise.allSettled([
-        fetch("/api/capabilities", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch(`/api/capabilities${explicitProjectId ? `?projectId=${encodeURIComponent(explicitProjectId)}` : ""}`, { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
       ]);
@@ -102,6 +109,7 @@ export function useConnectionSummary() {
         const caps = data.capabilities ?? [];
         const repoCap = caps.find((c: { id: string }) => c.id === "repository");
         const projectCap = caps.find((c: { id: string }) => c.id === "project");
+        const workspaceCap = caps.find((c: { id: string }) => c.id === "runtime.sandbox");
         next.repository = repoCap?.status === "ready" ? "connected" : "none";
         next.repositoryName = repoCap?.accountName ?? null;
         next.repositoryIndexed = repoCap?.status === "ready";
@@ -110,6 +118,9 @@ export function useConnectionSummary() {
         next.projectId = projectCap?.projectId ?? repoCap?.projectId ?? null;
         next.projectName = projectCap?.projectName ?? repoCap?.projectName ?? null;
         next.defaultBranch = repoCap?.defaultBranch ?? null;
+        next.activeBranch = repoCap?.activeBranch ?? repoCap?.defaultBranch ?? null;
+        next.workspaceStatus = workspaceCap?.status ?? null;
+        next.writeAccess = workspaceCap?.status === "ready";
         next.githubInstalled = repoCap?.status === "unavailable";
         next.connectedProviders = caps
           .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
@@ -145,6 +156,10 @@ export function useConnectionSummary() {
         };
       }
 
+      // Voice transport and microphone are client-side runtime state.
+      next.voiceTransportConnected = voiceTransportConnected;
+      next.voiceMicrophoneOn = voiceInputState === "listening";
+
       // Use client-side terminal store as primary source of truth for PTY status
       // Only fall back to server-side if client hasn't connected yet
       if (terminalStatus === "connected") {
@@ -179,7 +194,7 @@ export function useConnectionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError, getToken]);
+  }, [terminalStatus, terminalSessionId, terminalError, voiceTransportConnected, voiceInputState, getToken, explicitProjectId]);
 
   useEffect(() => {
     void refresh();

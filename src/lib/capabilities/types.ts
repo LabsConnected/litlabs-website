@@ -19,6 +19,7 @@ export interface Capability {
   projectId?: string;
   projectName?: string;
   defaultBranch?: string;
+  activeBranch?: string;
   lastVerifiedAt?: string;
 }
 

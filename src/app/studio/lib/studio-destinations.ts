@@ -38,7 +38,7 @@ export type MoreMode =
   | "workflows";
 
 /** Internal tabs inside the right inspector. */
-export type InspectorTab = "plan" | "changes" | "checks" | "approvals";
+export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
 
 /** Internal tabs inside the bottom drawer. */
 export type DrawerTab = "activity" | "terminal";

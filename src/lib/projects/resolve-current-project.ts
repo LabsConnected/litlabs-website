@@ -23,6 +23,7 @@ export interface CurrentProject {
   repositoryOwner: string | null;
   repositoryName: string | null;
   defaultBranch: string | null;
+  activeBranch: string | null;
   workspaceStatus: string | null;
 }
 
@@ -175,6 +176,7 @@ function normalizeStudioRow(row: StudioProjectRow): CurrentProject {
     repositoryOwner: row.github_owner ?? null,
     repositoryName: row.github_repo ?? null,
     defaultBranch: row.github_default_branch ?? row.github_branch ?? null,
+    activeBranch: row.github_branch ?? row.github_default_branch ?? null,
     workspaceStatus: row.workspace_status ?? null,
   };
 }
@@ -189,6 +191,7 @@ function normalizeLegacyRow(row: LegacyProjectRow): CurrentProject {
     repositoryOwner: row.owner ?? null,
     repositoryName: row.repository ?? null,
     defaultBranch: row.default_branch ?? row.working_branch ?? null,
+    activeBranch: row.working_branch ?? row.default_branch ?? null,
     workspaceStatus: row.connection_status ?? row.status ?? null,
   };
 }

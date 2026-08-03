@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { generateText, type ModelCategory, type LLMProvider } from "@/lib/llm";
+import { streamText, type ModelCategory, type LLMProvider } from "@/lib/llm";
 import {
   getConversation,
   listMessages,
@@ -22,13 +22,68 @@ import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;
 }
 
 const HISTORY_LIMIT = 12;
+
+const TERMINAL_EXECUTION_STATES = ["available", "unavailable", "connecting", "degraded", "error"] as const;
+const TERMINAL_STATES = ["disconnected", "connecting", "connected", "error"] as const;
+const VOICE_INPUT_STATES = ["idle", "requesting_permission", "connecting", "listening", "error"] as const;
+const VOICE_STATES = ["idle", "requesting_permission", "connecting", "listening", "user_speaking", "processing", "assistant_speaking", "muted", "error"] as const;
+const VOICE_OUTPUT_STATES = ["idle", "connecting", "speaking", "error"] as const;
+
+type RuntimeContext = {
+  terminalExecution?: (typeof TERMINAL_EXECUTION_STATES)[number];
+  terminalStatus?: (typeof TERMINAL_STATES)[number];
+  terminalSessionId?: string | null;
+  voiceTransportConnected?: boolean;
+  voiceInputState?: (typeof VOICE_INPUT_STATES)[number];
+  voiceMicrophoneOn?: boolean;
+  voiceState?: (typeof VOICE_STATES)[number];
+  voiceOutputState?: (typeof VOICE_OUTPUT_STATES)[number];
+  voiceHealth?: {
+    configured: boolean;
+    tokenService: "healthy" | "error" | "unknown";
+    available: boolean;
+  };
+};
+
+function parseVoiceHealth(value: unknown): RuntimeContext["voiceHealth"] {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const tokenService = input.tokenService === "healthy" || input.tokenService === "error" || input.tokenService === "unknown"
+    ? input.tokenService
+    : "unknown";
+  return {
+    configured: input.configured === true,
+    tokenService,
+    available: input.available === true,
+  };
+}
+
+function parseRuntimeContext(value: unknown): RuntimeContext {
+  if (!value || typeof value !== "object") return {};
+  const input = value as Record<string, unknown>;
+  const isValue = <T extends readonly string[]>(values: T, candidate: unknown): candidate is T[number] =>
+    typeof candidate === "string" && values.includes(candidate);
+  return {
+    terminalExecution: isValue(TERMINAL_EXECUTION_STATES, input.terminalExecution) ? input.terminalExecution : undefined,
+    terminalStatus: isValue(TERMINAL_STATES, input.terminalStatus) ? input.terminalStatus : undefined,
+    terminalSessionId: typeof input.terminalSessionId === "string" && input.terminalSessionId.length <= 200
+      ? input.terminalSessionId
+      : null,
+    voiceTransportConnected: input.voiceTransportConnected === true,
+    voiceInputState: isValue(VOICE_INPUT_STATES, input.voiceInputState) ? input.voiceInputState : undefined,
+    voiceMicrophoneOn: input.voiceMicrophoneOn === true,
+    voiceState: isValue(VOICE_STATES, input.voiceState) ? input.voiceState : undefined,
+    voiceOutputState: isValue(VOICE_OUTPUT_STATES, input.voiceOutputState) ? input.voiceOutputState : undefined,
+    voiceHealth: parseVoiceHealth(input.voiceHealth),
+  };
+}
 
 /**
  * POST /api/studio/conversations/[conversationId]/messages
@@ -57,6 +112,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
+  const runtimeContext = parseRuntimeContext(body.runtimeContext);
   const message = body.message;
   const clientRequestId = body.clientRequestId;
   const expectedRevision = body.expectedRevision;
@@ -228,10 +284,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const rawCaps: RawCapabilities = {
     repository: ctx.capabilities.repositoryConnected ? "connected" : "none",
     repositoryIndexed: ctx.capabilities.repositoryConnected,
-    terminalExecution: ctx.capabilities.terminalConnected ? "available" : "unavailable",
+    terminalExecution: runtimeContext.terminalExecution ?? (ctx.capabilities.terminalConnected ? "available" : "unavailable"),
+    terminalStatus: runtimeContext.terminalStatus,
+    terminalSessionId: runtimeContext.terminalSessionId,
     connectedProviders: ctx.capabilities.availableTools,
     availableTools: ctx.capabilities.availableTools,
     connectionSummary: ctx.capabilities.connectionSummary,
+    voiceTransportConnected: runtimeContext.voiceTransportConnected,
+    voiceMicrophoneOn: runtimeContext.voiceMicrophoneOn,
+    voiceInputState: runtimeContext.voiceInputState,
+    voiceState: runtimeContext.voiceState,
+    voiceOutputState: runtimeContext.voiceOutputState,
+    voiceHealth: runtimeContext.voiceHealth,
   };
   const translated = translateCapabilities(rawCaps);
 
@@ -322,122 +386,129 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     reservedCredits = reserveResult.reservedCredits;
   }
 
-  // 12. Call the LLM provider
-  try {
-    const category = (body.category as ModelCategory | undefined) ?? "auto";
-    const provider = typeof body.provider === "string" ? (body.provider as LLMProvider) : undefined;
-    const modelOverride = typeof body.model === "string" && provider
-      ? { [provider]: body.model } as Record<string, string>
-      : undefined;
+  const category = (body.category as ModelCategory | undefined) ?? "auto";
+  const provider = typeof body.provider === "string" ? (body.provider as LLMProvider) : undefined;
+  const modelOverride = typeof body.model === "string" && provider
+    ? { [provider]: body.model } as Record<string, string>
+    : undefined;
+  const encoder = new TextEncoder();
+  const event = (payload: Record<string, unknown>) =>
+    encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+  const stream = new ReadableStream({
+    async start(controller) {
+      let assistantText = "";
+      let reasoningText = "";
+      try {
+        const r = await streamText(
+          prompt,
+          (chunk) => {
+            assistantText += chunk;
+            controller.enqueue(event({ type: "text", text: chunk }));
+          },
+          {
+            task: "chat",
+            provider: category === "auto" ? undefined : provider,
+            category,
+            maxTokens: 2048,
+            modelOverride,
+          },
+          undefined,
+          (reasoning) => {
+            reasoningText += reasoning;
+            controller.enqueue(event({ type: "reasoning", text: reasoning }));
+          },
+        );
 
-    const r = await generateText(
-      prompt,
-      {
-        task: "chat",
-        provider: category ? undefined : provider,
-        category,
-        maxTokens: 2048,
-        modelOverride,
-      },
-      undefined,
-    );
+        await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+        if (agentRunId) {
+          const actualCredits = runtimeAgent
+            ? estimateCredits(Math.ceil(prompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+            : 0;
+          void settleRun(agentRunId, {
+            inputTokens: Math.ceil(prompt.length / 4),
+            outputTokens: Math.ceil(assistantText.length / 4),
+            actualCredits,
+            status: "completed",
+          }, reservedCredits);
+        }
 
-    // 13. Persist the assistant response
-    await updateMessageStatus(assistantMessage.id, userId, "completed", r.text);
+        void persistMemory(
+          `User: ${message}\n${agentDisplayName}: ${assistantText}`,
+          userId,
+          conversation.projectId,
+          {
+            agentSlug,
+            agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+            memoryNamespace: runtimeAgent?.memoryNamespace,
+            conversationId: conversation.id,
+            memoryType: "conversation_summary",
+          },
+        );
 
-    // 13.5. Settle the run — charge actual cost and refund unused reserved credits
-    if (agentRunId) {
-      const actualCredits = runtimeAgent
-        ? estimateCredits(
-            Math.ceil(prompt.length / 4),
-            Math.ceil(r.text.length / 4),
-            1, // per 1k tokens
-            1, // per run
-          )
-        : 0;
-      void settleRun(agentRunId, {
-        inputTokens: Math.ceil(prompt.length / 4),
-        outputTokens: Math.ceil(r.text.length / 4),
-        actualCredits,
-        status: "completed",
-      }, reservedCredits);
-    }
+        studioLog("message:sent", {
+          conversationId: conversation.id,
+          projectId: conversation.projectId,
+          userId,
+          agentSlug,
+          agentInstanceId: runtimeAgent?.agentInstanceId || null,
+          provider: r.provider,
+          latencyMs: r.latencyMs,
+          revisionBefore: conversation.revision,
+          revisionAfter: newRevision,
+          memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
+        });
 
-    // 14. Revision was already incremented atomically by the RPC at step 2
+        controller.enqueue(event({
+          type: "done",
+          userMessage,
+          assistantMessage: {
+            ...assistantMessage,
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "completed",
+          },
+          revision: newRevision,
+          provider: r.provider,
+          model: r.model,
+          latencyMs: r.latencyMs,
+        }));
+      } catch (err) {
+        await updateMessageStatus(assistantMessage.id, userId, "failed");
+        if (agentRunId) {
+          void settleRun(agentRunId, {
+            inputTokens: 0,
+            outputTokens: 0,
+            actualCredits: 0,
+            status: "failed",
+            error: err instanceof Error ? err.message : "LLM provider unavailable",
+          }, reservedCredits);
+        }
+        const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
+        studioLog("message:failed", {
+          conversationId: conversation.id,
+          userId,
+          agentSlug,
+          errorClass: errorMsg,
+        });
+        controller.enqueue(event({
+          type: "error",
+          message: "Provider unavailable",
+          partialText: assistantText || undefined,
+        }));
+      } finally {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      }
+    },
+  });
 
-    // 15. Persist memory (project-scoped, non-blocking)
-    void persistMemory(
-      `User: ${message}\n${agentDisplayName}: ${r.text}`,
-      userId,
-      conversation.projectId,
-      {
-        agentSlug,
-        agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-        memoryNamespace: runtimeAgent?.memoryNamespace,
-        conversationId: conversation.id,
-        memoryType: "conversation_summary",
-      },
-    );
-
-    studioLog("message:sent", {
-      conversationId: conversation.id,
-      projectId: conversation.projectId,
-      userId,
-      agentSlug,
-      agentInstanceId: runtimeAgent?.agentInstanceId || null,
-      provider: r.provider,
-      latencyMs: r.latencyMs,
-      revisionBefore: conversation.revision,
-      revisionAfter: newRevision,
-      memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
-    });
-
-    return NextResponse.json({
-      userMessage,
-      assistantMessage: {
-        ...assistantMessage,
-        content: r.text,
-        status: "completed" as const,
-      },
-      revision: newRevision,
-      provider: r.provider,
-      model: r.model,
-      latencyMs: r.latencyMs,
-    });
-  } catch (err) {
-    // Mark assistant message as failed
-    await updateMessageStatus(assistantMessage.id, userId, "failed");
-
-    // Refund ALL reserved credits and mark the run as failed
-    if (agentRunId) {
-      void settleRun(agentRunId, {
-        inputTokens: 0,
-        outputTokens: 0,
-        actualCredits: 0, // no charge on failure
-        status: "failed",
-        error: err instanceof Error ? err.message : "LLM provider unavailable",
-      }, reservedCredits);
-    }
-
-    const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-    studioLog("message:failed", {
-      conversationId: conversation.id,
-      userId,
-      agentSlug,
-      errorClass: errorMsg,
-    });
-
-    return NextResponse.json(
-      {
-        error: "Provider unavailable",
-        detail: errorMsg,
-        userMessage,
-        assistantMessage: { ...assistantMessage, status: "failed" as const },
-        revision: conversation.revision,
-      },
-      { status: 502 },
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 /**

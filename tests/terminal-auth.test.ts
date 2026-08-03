@@ -41,9 +41,13 @@ describe("terminal-server auth", () => {
       aud: "littree-terminal",
       iat: now - 1,
       exp: now + 60,
+      wid: "workspace_123",
+      pid: "project_123",
     });
     const result = verifyTerminalToken(token);
     expect(result.sub).toBe("user_123");
+    expect(result.wid).toBe("workspace_123");
+    expect(result.pid).toBe("project_123");
   });
 
   it("rejects an expired token", () => {

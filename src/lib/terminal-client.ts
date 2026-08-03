@@ -3,6 +3,7 @@
 type CachedTerminalToken = {
   token: string;
   expiresAt: number;
+  projectId: string | null;
 };
 
 let cached: CachedTerminalToken | null = null;
@@ -19,7 +20,8 @@ export async function getTerminalToken(
   authToken?: string,
 ): Promise<string> {
   const now = Date.now();
-  if (!forceRefresh && cached && cached.expiresAt - now > 30_000) {
+  const requestedProjectId = projectId ?? null;
+  if (!forceRefresh && cached && cached.projectId === requestedProjectId && cached.expiresAt - now > 30_000) {
     return cached.token;
   }
   if (!forceRefresh && pending) return pending;
@@ -44,7 +46,7 @@ export async function getTerminalToken(
       if (!response.ok || !body.token || !body.expiresAt) {
         throw new Error(body.error || "Terminal authentication failed");
       }
-      cached = { token: body.token, expiresAt: body.expiresAt };
+      cached = { token: body.token, expiresAt: body.expiresAt, projectId: requestedProjectId };
       return body.token;
     })
     .finally(() => {

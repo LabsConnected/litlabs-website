@@ -119,7 +119,14 @@ export default function StudioActivityTimeline() {
     );
   }
 
-  if (state === "error" || entries.length === 0) return null;
+  if (state === "error") {
+    return (
+      <div className="mt-6 w-full max-w-md rounded-lg border px-3 py-2 text-[10px]" style={{ borderColor: "rgba(227,179,65,0.25)", color: "#e3b341" }} role="status">
+        Recent activity is temporarily unavailable.
+      </div>
+    );
+  }
+  if (entries.length === 0) return null;
 
   const toneColor: Record<TimelineEntry["tone"], string> = {
     ok: "var(--litt-primary)",

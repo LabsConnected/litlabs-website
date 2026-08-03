@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
@@ -593,11 +593,48 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
   }
 });
 
+app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
+  const filePath = String(req.body.path || "");
+  if (!filePath || filePath === ".") {
+    return res.status(400).json({ error: "Folder path is required" });
+  }
+  try {
+    const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    if (existsSync(target)) return res.status(409).json({ error: "Path already exists" });
+    mkdirSync(target, { recursive: false });
+    res.json({ created: true, workspaceId: req.workspaceId });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create folder";
+    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
+  const filePath = String(req.body.path || "");
+  const newPath = String(req.body.newPath || "");
+  if (!filePath || !newPath || filePath === "." || newPath === ".") {
+    return res.status(400).json({ error: "Both source and destination paths are required" });
+  }
+  try {
+    const source = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, newPath);
+    if (!existsSync(source)) return res.status(404).json({ error: "Source path not found" });
+    if (existsSync(target)) return res.status(409).json({ error: "Destination path already exists" });
+    renameSync(source, target);
+    res.json({ renamed: true, workspaceId: req.workspaceId });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to rename path";
+    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
 io.use((socket, next) => {
   try {
-    socket.data.userId = verifyTerminalToken(socket.handshake.auth?.token).sub;
-    // Optional: accept workspaceId from handshake for project-bound PTY
-    const workspaceId = socket.handshake.auth?.workspaceId;
+    const tokenPayload = verifyTerminalToken(socket.handshake.auth?.token);
+    socket.data.userId = tokenPayload.sub;
+    const workspaceId = tokenPayload.wid;
     if (workspaceId) {
       const ws = getWorkspace(String(workspaceId));
       if (!ws) {

@@ -48,6 +48,7 @@ describe("/api/capabilities route", () => {
       repositoryOwner: "litlabs",
       repositoryName: "litlabs-website",
       defaultBranch: "main",
+      activeBranch: "main",
       workspaceStatus: "ready",
     });
 
@@ -76,6 +77,7 @@ describe("/api/capabilities route", () => {
       repositoryOwner: "litlabs",
       repositoryName: "litlabs-website",
       defaultBranch: "main",
+      activeBranch: "main",
       workspaceStatus: "ready",
     });
 
@@ -101,6 +103,7 @@ describe("/api/capabilities route", () => {
       repositoryOwner: null,
       repositoryName: null,
       defaultBranch: null,
+      activeBranch: null,
       workspaceStatus: "not_prepared",
     });
 

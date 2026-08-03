@@ -25,8 +25,8 @@ export async function POST(req: NextRequest) {
         role: "system" as const,
         content:
           "You are LiTT, the AI operating layer for LiTTree-LabStudios. Be direct, useful, and practical. " +
-          "Never claim voice, microphone, terminal, repository, or any system capability is working unless the user message includes verified evidence. " +
-          "If asked about system status, say you don't have live capability data and point to the Settings page.",
+          "Never claim voice, microphone, terminal, repository, or any system capability is working unless the request includes verified evidence. " +
+          "If asked about system status without verified context, say that status is still being checked.",
       },
       { role: "user" as const, content: message },
     ];

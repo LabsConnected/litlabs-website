@@ -57,21 +57,22 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(onSend).toHaveBeenCalledWith("Hello LiTT", undefined);
   });
 
-  it("busy state prevents duplicate submit", async () => {
+  it("busy state exposes cancellation instead of submitting again", async () => {
     const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "response" });
+    const onCancel = vi.fn();
     render(
       <CommandComposer
         value="Hello"
         onChange={vi.fn()}
         onSend={onSend}
+        onCancel={onCancel}
         busy={true}
       />,
     );
-    const sendBtn = screen.getByRole("button", { name: /send message/i });
-    fireEvent.click(sendBtn);
-    // Wait a tick to ensure no async call happens
+    fireEvent.click(screen.getByRole("button", { name: /cancel response/i }));
     await new Promise((r) => setTimeout(r, 50));
     expect(onSend).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it("clears text after successful submission", async () => {

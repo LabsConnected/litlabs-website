@@ -10,7 +10,7 @@
  */
 import { getSupabaseAdmin } from "./supabase";
 
-export type FileAction = "write" | "delete" | "read";
+export type FileAction = "write" | "delete" | "read" | "mkdir" | "rename";
 
 export interface FileOperationAuditEntry {
   userId: string;
