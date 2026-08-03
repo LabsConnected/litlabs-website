@@ -62,8 +62,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
   it("does not say 'Workspace ready' when only AI is connected (no project)", () => {
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
@@ -76,8 +76,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
   it("Deploy button is disabled (lives in overflow menu, no handler wired)", () => {
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
@@ -94,8 +94,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
-        onPreview={onPreview}
-        onOpenActivity={onOpenActivity}
+        onPreviewAction={onPreview}
+        onOpenActivityAction={onOpenActivity}
         projectReady={true}
         capabilities={mockCapabilities}
       />,
@@ -112,8 +112,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={onOpenActivity}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={onOpenActivity}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
@@ -126,8 +126,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
   it("does not render a project selector slot", () => {
     const { container } = render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,

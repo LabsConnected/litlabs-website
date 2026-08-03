@@ -125,7 +125,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // No element should have opacity:0 style
@@ -145,7 +145,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     expect(screen.getByText("LiTT")).toBeTruthy();
@@ -196,7 +196,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // The empty assistant bubble should be skipped — no "LiTT" label
@@ -251,7 +251,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     expect(screen.queryByRole("button", { name: /read aloud/i })).toBeNull();
@@ -262,12 +262,12 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
       { id: "msg-1", role: "user", content: "First", createdAt: Date.now() },
       { id: "msg-2", role: "assistant", content: "Second", status: "completed", createdAt: Date.now() },
     ];
-    const { container } = render(
+    render(
       <StudioTranscript
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // Both messages should render

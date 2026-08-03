@@ -12,6 +12,8 @@ import {
   Plus,
   Paperclip,
   X,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import {
   useVoiceSession,
@@ -97,6 +99,8 @@ export default function CommandComposer({
     interrupt,
     setOnTurn,
     speakText,
+    ttsEnabled,
+    toggleTts,
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
@@ -416,6 +420,22 @@ export default function CommandComposer({
           aria-label="Message input"
           data-testid="studio-command-input"
         />
+
+        {/* Speak toggle — auto-read replies on/off */}
+        <button
+          type="button"
+          onClick={toggleTts}
+          className="pointer-events-auto flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          style={{ color: ttsEnabled ? "#65f4ff" : "var(--text-muted)" }}
+          aria-label={ttsEnabled ? "Turn reply speech off" : "Turn reply speech on"}
+          title={ttsEnabled ? "Reply speech on" : "Reply speech off"}
+        >
+          {ttsEnabled ? (
+            <Volume2 size={17} className="pointer-events-none shrink-0" />
+          ) : (
+            <VolumeX size={17} className="pointer-events-none shrink-0" />
+          )}
+        </button>
 
         {/* Camera — directly beside microphone */}
         <button
