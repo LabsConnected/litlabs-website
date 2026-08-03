@@ -411,6 +411,7 @@ export default function CommandStudio() {
           onOpenActivity={handleOpenActivity}
           projectReady={projectReady}
           capabilities={capabilities}
+          busy={conversation.busy}
         />
 
         {/* Body: nav rail + workspace + inspector */}
