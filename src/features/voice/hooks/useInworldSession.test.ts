@@ -213,11 +213,13 @@ describe("useInworldSession — TTS state machine", () => {
     act(() => ws.__fireMessage({ type: "session.created" }));
     expect(ws.sent.some((m) => m.type === "session.update")).toBe(true);
 
-    // User starts speaking
+    // User starts speaking — server-side VAD is disabled, so this is a no-op.
+    // Client-side VAD controls the flow now.
     act(() => ws.__fireMessage({ type: "input_audio_buffer.speech_started" }));
-    expect(useVoiceStore.getState().state).toBe("listening");
+    // State should NOT change from server-side VAD event
+    // (it stays in whatever state it was — "connecting" from the connect flow)
 
-    // User stops speaking
+    // User stops speaking — audio buffer committed by client-side VAD
     act(() => ws.__fireMessage({ type: "input_audio_buffer.speech_stopped" }));
 
     // Agent response begins
@@ -365,6 +367,8 @@ describe("useInworldSession — TTS state machine", () => {
       }),
     );
     expect(useVoiceStore.getState().transcript).toBe("hello LiTT");
-    expect(onTranscript).toHaveBeenCalledWith("hello LiTT", true);
+    expect(onTranscript).toHaveBeenCalledWith("hello LiTT", true, expect.objectContaining({
+      speechDurationMs: expect.any(Number),
+    }));
   });
 });

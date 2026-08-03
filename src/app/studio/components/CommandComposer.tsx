@@ -38,8 +38,12 @@ const STATUS_LABELS: Record<VoiceState, string> = {
   listening: "Listening",
   user_speaking: "You're speaking…",
   processing: "Processing…",
+  transcript_ready: "Review your transcript",
+  sending: "Sending…",
   assistant_speaking: "Agent speaking",
   muted: "Muted",
+  permission_denied: "Microphone permission denied",
+  unsupported: "Voice not supported in this browser",
   error: "",
 };
 
@@ -103,6 +107,14 @@ export default function CommandComposer({
     speakText,
     ttsEnabled,
     toggleTts,
+    pendingTranscript,
+    autoSendEnabled,
+    toggleAutoSend,
+    submitTranscript,
+    cancelRecording,
+    clearPendingTranscript,
+    setPendingTranscript,
+    micLevel,
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
@@ -195,8 +207,12 @@ export default function CommandComposer({
       case "listening":
       case "user_speaking": return { icon: Mic, color: "#22d3ee", disabled: false, onClick: stopVoice };
       case "processing": return { icon: Loader2, color: "#22d3ee", disabled: true, onClick: undefined };
+      case "transcript_ready": return { icon: Mic, color: "#72f238", disabled: false, onClick: startVoice };
+      case "sending": return { icon: Loader2, color: "#22d3ee", disabled: true, onClick: undefined };
       case "assistant_speaking": return { icon: Square, color: "#e3b341", disabled: false, onClick: interrupt };
       case "muted": return { icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute };
+      case "permission_denied": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
+      case "unsupported": return { icon: MicOff, color: "#ef4444", disabled: true, onClick: undefined };
       case "error": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
       default: return { icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice };
     }
@@ -506,6 +522,96 @@ export default function CommandComposer({
         <div className="px-1 text-[10px] font-bold" style={{ color: "var(--text-muted)" }}>
           {STATUS_LABELS[voiceState]}
           {isMuted && voiceState !== "muted" ? " · muted" : ""}
+          {voiceState === "listening" && micLevel > 0.01 && (
+            <span className="ml-2 inline-flex items-center gap-1">
+              <span className="inline-block h-1 w-1 rounded-full bg-cyan-400" />
+              {Math.round(micLevel * 100)}%
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Pending transcript review (push-to-talk editable draft) */}
+      {pendingTranscript !== null && voiceState === "transcript_ready" && (
+        <div
+          className="mt-1 rounded-lg border px-3 py-2"
+          style={{
+            borderColor: "rgba(114,242,56,0.25)",
+            backgroundColor: "rgba(114,242,56,0.05)",
+          }}
+        >
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              Voice transcript — review and send
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={cancelRecording}
+                className="rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
+                style={{ color: "var(--text-muted)" }}
+                aria-label="Cancel and clear transcript"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={clearPendingTranscript}
+                className="rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
+                style={{ color: "var(--text-muted)" }}
+                aria-label="Clear transcript"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={submitTranscript}
+                className="rounded px-2.5 py-0.5 text-[10px] font-bold text-black"
+                style={{ backgroundColor: "var(--litt-primary)" }}
+                aria-label="Send transcript"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+          <textarea
+            value={pendingTranscript}
+            onChange={(e) => setPendingTranscript(e.target.value)}
+            className="w-full resize-none rounded-md bg-black/20 px-2 py-1.5 text-[12px] outline-none"
+            style={{ color: "var(--text-primary)", minHeight: "44px" }}
+            rows={2}
+            autoFocus
+          />
+        </div>
+      )}
+
+      {/* Auto-send toggle (small, next to voice status) */}
+      {voiceState === "idle" && (
+        <div className="flex items-center gap-2 px-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+          <button
+            type="button"
+            onClick={toggleAutoSend}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/5"
+            aria-label="Toggle auto-send voice transcripts"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: autoSendEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+            />
+            Auto-send {autoSendEnabled ? "on" : "off"}
+          </button>
+          <button
+            type="button"
+            onClick={toggleTts}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/5"
+            aria-label="Toggle text-to-speech"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: ttsEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+            />
+            TTS {ttsEnabled ? "on" : "off"}
+          </button>
         </div>
       )}
     </div>

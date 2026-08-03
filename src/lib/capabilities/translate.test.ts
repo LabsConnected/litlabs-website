@@ -122,4 +122,40 @@ describe("translateCapabilities — workspace-aware status", () => {
     const result = translateCapabilities(caps);
     expect(result.contextBlock).not.toContain("Write access:");
   });
+
+  // ── Truthful voice response rules ──
+
+  it("includes rule: never say 'I can hear you' from transcript alone", () => {
+    const caps: RawCapabilities = {
+      voiceHealth: { configured: true, tokenService: "healthy", available: true },
+    };
+    const result = translateCapabilities(caps);
+    expect(result.contextBlock).toContain("NEVER say \"Yes, I can hear you\"");
+    expect(result.contextBlock).toContain("merely because a text transcript arrived");
+  });
+
+  it("includes rule: voice is push-to-talk only", () => {
+    const caps: RawCapabilities = {
+      voiceHealth: { configured: true, tokenService: "healthy", available: true },
+    };
+    const result = translateCapabilities(caps);
+    expect(result.contextBlock).toContain("push-to-talk only");
+    expect(result.contextBlock).toContain("Do not tell the user you are continuously listening");
+  });
+
+  it("includes rule: do not respond to rejected transcripts", () => {
+    const caps: RawCapabilities = {};
+    const result = translateCapabilities(caps);
+    expect(result.contextBlock).toContain("rejected");
+    expect(result.contextBlock).toContain("filler");
+    expect(result.contextBlock).toContain("duplicate");
+  });
+
+  it("includes rule: report only verified voice states", () => {
+    const caps: RawCapabilities = {};
+    const result = translateCapabilities(caps);
+    expect(result.contextBlock).toContain("microphone permission granted");
+    expect(result.contextBlock).toContain("microphone actively listening");
+    expect(result.contextBlock).toContain("transcript received");
+  });
 });
