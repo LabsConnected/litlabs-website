@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
 export type LiTTState =
   | "idle"
@@ -30,11 +30,13 @@ const SIZE_MAP: Record<LiTTPresenceVariant, Record<LiTTPresenceSize, { w: number
     sm: { w: 28, h: 28 },
     md: { w: 32, h: 32 },
     lg: { w: 36, h: 36 },
+    xl: { w: 36, h: 36 },
   },
   "terminal": {
     sm: { w: 36, h: 36 },
     md: { w: 42, h: 42 },
     lg: { w: 48, h: 48 },
+    xl: { w: 48, h: 48 },
   },
 };
 
@@ -77,7 +79,7 @@ export default function LiTTPresence({
   const isTerminal = variant === "terminal";
   const isEmptyState = variant === "empty-state";
 
-  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isEmptyState || reducedMotion) return;
     const rect = shellRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -178,10 +180,10 @@ export default function LiTTPresence({
       style={{
         width: dims.w,
         height: dims.h,
-        ['--litt-x' as never]: `${tilt.x}px`,
-        ['--litt-y' as never]: `${tilt.y}px`,
-        ['--litt-rot' as never]: `${tilt.rot}deg`,
-      }}
+        ["--litt-x" as never]: `${tilt.x}px`,
+        ["--litt-y" as never]: `${tilt.y}px`,
+        ["--litt-rot" as never]: `${tilt.rot}deg`,
+      } as CSSProperties}
       aria-label={`LiTT ${state}`}
     >
       {/* Ambient motion layers */}
