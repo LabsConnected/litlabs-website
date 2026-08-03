@@ -104,8 +104,10 @@ function AgentVoiceSync() {
  * optional Activity/Terminal drawer. The conversation controller
  * (useStudioConversation) is the single source of truth — no invisible
  * ChatTool, no duplicate composer, no custom-event bridge.
+ *
+ * Preview mode: Can be rendered without Clerk auth for embedded previews.
  */
-export default function CommandStudio() {
+export default function CommandStudio({ previewMode = false }: { previewMode?: boolean } = {}) {
   const { theme } = useTheme();
   const { userId, getToken } = useClerkAuth();
   const router = useRouter();
