@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useVoiceSession } from "../context/VoiceSessionContext";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -96,10 +97,11 @@ export function useConnectionSummary() {
     try {
       const token = await getToken?.();
       const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const [capsRes, termRes, voiceRes] = await Promise.allSettled([
+      const [capsRes, termRes, voiceRes, llmRes] = await Promise.allSettled([
         fetch(`/api/capabilities${explicitProjectId ? `?projectId=${encodeURIComponent(explicitProjectId)}` : ""}`, { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
         fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
+        fetch("/api/llm/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
       ]);
 
       const next = { ...DEFAULT_CAPABILITIES };
@@ -159,6 +161,28 @@ export function useConnectionSummary() {
       // Voice transport and microphone are client-side runtime state.
       next.voiceTransportConnected = voiceTransportConnected;
       next.voiceMicrophoneOn = voiceInputState === "listening";
+
+      // LLM provider health — sync to model store so the empty-state
+      // briefing and model picker show accurate "AI ready" status.
+      const setProviderHealth = useStudioModelStore.getState().setProviderHealth;
+      if (llmRes.status === "fulfilled" && llmRes.value.ok) {
+        const llmData = await llmRes.value.json();
+        const geminiOk = !!llmData.gemini?.available;
+        const groqOk = !!llmData.groq?.available;
+        const openrouterOk = !!llmData.openrouter?.available;
+        setProviderHealth("gemini", geminiOk ? "available" : "unavailable");
+        setProviderHealth("groq", groqOk ? "available" : "unavailable");
+        setProviderHealth("openrouter", openrouterOk ? "available" : "unavailable");
+        // "Auto" models route to whichever provider is available (prefer Gemini).
+        setProviderHealth("Auto", geminiOk || groqOk || openrouterOk ? "available" : "unavailable");
+      } else {
+        // Health endpoint failed — mark all as unavailable so the UI
+        // shows a truthful "setup required" rather than a stale unknown.
+        setProviderHealth("gemini", "unavailable");
+        setProviderHealth("groq", "unavailable");
+        setProviderHealth("openrouter", "unavailable");
+        setProviderHealth("Auto", "unavailable");
+      }
 
       // Use client-side terminal store as primary source of truth for PTY status
       // Only fall back to server-side if client hasn't connected yet
