@@ -58,11 +58,10 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.openDrawer).toBe("terminal");
     });
 
-    it("?tool=workflows → Studio Work with inspector open on Plan", () => {
+    it("?tool=workflows → More / Mission Forge", () => {
       const r = mapLegacyToolToDestination("workflows");
-      expect(r.destination).toBe("studio");
-      expect(r.mode).toBe("work");
-      expect(r.openInspector).toBe("plan");
+      expect(r.destination).toBe("more");
+      expect(r.mode).toBe("workflows");
     });
 
     it("?tool=image → Create / Image", () => {
@@ -97,13 +96,14 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("agents").destination).toBe("agents");
     });
 
-    it("plugins/camera/screen/space/clibridge → More with matching mode", () => {
+    it("plugins/camera/screen/space/clibridge/workflows → More with matching mode", () => {
       expect(mapLegacyToolToDestination("plugins").destination).toBe("more");
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
       expect(mapLegacyToolToDestination("camera").mode).toBe("camera");
       expect(mapLegacyToolToDestination("screen").mode).toBe("screen");
       expect(mapLegacyToolToDestination("space").mode).toBe("space");
       expect(mapLegacyToolToDestination("clibridge").mode).toBe("clibridge");
+      expect(mapLegacyToolToDestination("workflows").mode).toBe("workflows");
     });
   });
 
@@ -164,8 +164,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("terminal").openDrawer).toBe("terminal");
     });
 
-    it("workflows mapping opens inspector on plan tab", () => {
-      expect(mapLegacyToolToDestination("workflows").openInspector).toBe("plan");
+    it("workflows mapping goes to more destination", () => {
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("more");
     });
 
     it("chat mapping does NOT open drawer or inspector", () => {

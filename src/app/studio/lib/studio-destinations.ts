@@ -83,9 +83,6 @@ export function mapLegacyToolToDestination(
     // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
       return { destination: "studio", legacyTool: "terminal", mode: "work", command, openDrawer: "terminal" };
-    // Studio / Work with the right inspector open on Plan
-    case "workflows":
-      return { destination: "studio", legacyTool: "workflows", mode: "work", command, openInspector: "plan" };
 
     // Create — media workspace
     case "image":
@@ -113,6 +110,7 @@ export function mapLegacyToolToDestination(
     case "screen":
     case "space":
     case "clibridge":
+    case "workflows":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
 
     // Unknown / default → Studio

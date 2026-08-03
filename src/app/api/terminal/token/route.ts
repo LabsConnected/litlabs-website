@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  * workspaceId and projectId in the token claims.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

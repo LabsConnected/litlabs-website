@@ -5,7 +5,7 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function getHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -39,7 +39,7 @@ async function getHandler(req: NextRequest) {
 }
 
 async function postHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
@@ -74,7 +74,7 @@ async function postHandler(req: NextRequest) {
 }
 
 async function deleteHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);

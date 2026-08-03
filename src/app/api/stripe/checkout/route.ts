@@ -38,7 +38,7 @@ function getAppUrl(): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { clerkId } = await auth();
+    const { clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

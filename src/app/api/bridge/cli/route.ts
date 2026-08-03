@@ -273,7 +273,7 @@ export async function DELETE(req: NextRequest) {
 
 // GET sessions list
 export async function PATCH(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

@@ -22,11 +22,11 @@ const TAG = "[music:stream]";
  * is never returned — callers receive only the resolved, time-bounded URL.
  */
 async function handler(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ trackId: string }> },
 ) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -15,7 +15,7 @@ export const maxDuration = 60;
  * Now backed by the unified LLM client (Gemini → OpenRouter free → specific models).
  */
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

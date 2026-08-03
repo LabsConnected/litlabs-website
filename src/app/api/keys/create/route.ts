@@ -5,8 +5,8 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import { withRateLimit } from "@/lib/rate-limiter";
 import { supabaseAdmin } from "@/lib/supabase";
 
-async function getUserId() {
-  const { userId: clerkId } = await auth();
+async function getUserId(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) return null;
   const { data: user } = await supabaseAdmin
     .from("users")
@@ -17,7 +17,7 @@ async function getUserId() {
 }
 
 async function handler(req: NextRequest) {
-  const dbUserId = await getUserId();
+  const dbUserId = await getUserId(req);
   if (!dbUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

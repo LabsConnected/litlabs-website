@@ -8,10 +8,10 @@ import { resolveMissionApproval } from "@/lib/missions/mission-executor";
  * Get an approval with its diff and details.
  */
 export async function GET(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ approvalId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { approvalId } = await params;
@@ -29,16 +29,16 @@ export async function GET(
  * Body: { decision: "approved" | "denied" }
  */
 export async function POST(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ approvalId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { approvalId } = await params;
   let body: { decision?: string };
   try {
-    body = await request.json();
+    body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }

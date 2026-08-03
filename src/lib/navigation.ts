@@ -95,17 +95,6 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Agents",
-    href: "/agents",
-    icon: Bot,
-    accent: GROUP_ACCENTS.Agents,
-    items: [
-      { label: "All Agents", href: "/agents", icon: Bot },
-      { label: "Memory", href: "/memories", icon: Database },
-      { label: "Automations", href: "/studio?tool=pipeline", icon: Zap },
-    ],
-  },
-  {
     label: "Gallery",
     href: "/gallery",
     icon: Image,
@@ -177,7 +166,7 @@ export const QUICK_CREATE_ITEMS = [
   { label: "Create Image", href: "/studio?tool=image", icon: Image },
   { label: "Create Music", href: "/dashboard?app=music", icon: Music },
   { label: "Create Video", href: "/studio?tool=video", icon: Video },
-  { label: "Create Agent", href: "/agents", icon: Bot },
+  { label: "Create Agent", href: "/studio?tool=agents", icon: Bot },
   { label: "Create Workflow", href: "/studio?tool=pipeline", icon: Layers },
   { label: "Create Post", href: "/discover", icon: MessagesSquare },
 ];

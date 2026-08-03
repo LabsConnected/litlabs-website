@@ -180,7 +180,7 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     const body = await req.json();
     const {
       agentSlug = DEFAULT_AGENT_SLUG,

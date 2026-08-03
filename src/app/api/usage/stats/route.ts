@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { isAdmin } from "@/lib/roles";
@@ -61,11 +61,11 @@ function bucketize(
  *    (it was already implicit, but explicit is safer across runtimes).
  *  - Short Cache-Control header prevents stale usage between requests.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const start = Date.now();
   const tag = `[usage/stats]`;
 
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     console.info(`${tag} 401 userId=anon dur=${Date.now() - start}ms`);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

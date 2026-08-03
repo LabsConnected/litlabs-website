@@ -25,7 +25,7 @@ async function patchHandler(
   { params }: { params: Promise<{ trackId: string }> },
 ) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -87,11 +87,11 @@ async function patchHandler(
  * again server-side (key must be prefixed with {userId}/).
  */
 async function deleteHandler(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ trackId: string }> },
 ) {
   const start = Date.now();
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

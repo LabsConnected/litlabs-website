@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { buildIntegrationStatus } from "@/lib/integrations/status";
 
@@ -6,8 +6,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
-  const { userId } = await auth().catch(() => ({ userId: null }));
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req).catch(() => ({ userId: null }));
 
   try {
     const status = await buildIntegrationStatus(userId);

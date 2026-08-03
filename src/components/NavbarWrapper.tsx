@@ -9,7 +9,6 @@ import { usePathname } from "next/navigation";
 const desktopLinks = [
   ["Dashboard", "/dashboard"],
   ["Studio", "/studio"],
-  ["Agents", "/agents"],
   ["Gallery", "/gallery"],
   ["Marketplace", "/marketplace"],
   ["Pricing", "/pricing"],

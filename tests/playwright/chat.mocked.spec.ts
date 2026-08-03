@@ -104,7 +104,7 @@ test.describe("Chat (mocked) @studio @chat", () => {
     await page.goto("/studio");
     await waitForPageReady(page, { testId: "studio-command-composer" });
 
-    const input = page.getByTestId("studio-command-input") as any;
+    const input = page.getByTestId("studio-command-input") as ReturnType<typeof page.getByTestId>;
     await input.fill("Line 1");
     await input.press("Shift+Enter");
     await input.type("Line 2");

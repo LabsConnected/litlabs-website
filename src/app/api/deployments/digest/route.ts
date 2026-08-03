@@ -15,7 +15,7 @@ function isAuthorizedByApiKey(req: NextRequest): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId && !isAuthorizedByApiKey(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId && !isAuthorizedByApiKey(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
