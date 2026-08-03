@@ -3,6 +3,7 @@
   "outputDirectory": ".next",
   "framework": "nextjs",
   "installCommand": "pnpm install",
+  "ignoredBuildStep": "git diff --quiet HEAD^ HEAD -- src/ public/ package.json pnpm-lock.yaml next.config.ts vercel.json postcss.config.mjs || exit 0",
   "crons": [
     {
       "path": "/api/deployments/digest",
@@ -26,7 +27,7 @@
     "src/app/api/ai-chat/route.ts": { "maxDuration": 60 },
     "src/app/api/chat/unified/route.ts": { "maxDuration": 60 },
     "src/app/api/gemini/chat/route.ts": { "maxDuration": 60 },
-    "src/app/api/tts/route.ts": { "maxDuration": 60 },
+    "src/app/api/voice/tts/route.ts": { "maxDuration": 60 },
     "src/app/api/bridge/cli/route.ts": { "maxDuration": 60 }
   }
 }
