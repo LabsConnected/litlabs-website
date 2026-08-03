@@ -5,6 +5,8 @@ import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
 const isProtectedRoute = createRouteMatcher([
   "/settings(.*)",
   "/profile(.*)",
+  "/wallet(.*)",
+  "/dashboard(.*)",
   "/agent-chat(.*)",
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
@@ -83,7 +85,17 @@ const middleware = useClerkMiddleware
       response.headers.set("Vary", "Accept-Encoding");
 
       if (isProtectedRoute(req) && !userId) {
-        return NextResponse.redirect(new URL("/sign-in", req.url));
+        // API routes should return JSON 401, not redirect to sign-in.
+        // Page routes redirect to sign-in with the intended destination preserved.
+        if (req.nextUrl.pathname.startsWith("/api/")) {
+          return NextResponse.json(
+            { error: "Unauthorized" },
+            { status: 401 },
+          );
+        }
+        const signInUrl = new URL("/sign-in", req.url);
+        signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+        return NextResponse.redirect(signInUrl);
       }
 
       return response;
@@ -103,7 +115,16 @@ const middleware = useClerkMiddleware
 
       // Redirect protected routes to sign-in when Clerk is not configured
       if (isProtectedRoute(req)) {
-        return NextResponse.redirect(new URL("/sign-in", req.url));
+        // API routes return JSON 401, page routes redirect to sign-in
+        if (req.nextUrl.pathname.startsWith("/api/")) {
+          return NextResponse.json(
+            { error: "Unauthorized" },
+            { status: 401 },
+          );
+        }
+        const signInUrl = new URL("/sign-in", req.url);
+        signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+        return NextResponse.redirect(signInUrl);
       }
 
       return response;
