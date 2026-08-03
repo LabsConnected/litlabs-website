@@ -66,6 +66,10 @@ export interface ResolvedStudioContext {
   repositoryOwner: string | null;
   repositoryName: string | null;
   repositoryDefaultBranch: string | null;
+  activeBranch?: string | null;
+  framework?: string | null;
+  scanStatus?: string | null;
+  scanSummary?: Record<string, unknown> | null;
   activeAgentSlug: AgentSlug;
   agentInstanceId: string | null;
   capabilities: StudioCapabilities;

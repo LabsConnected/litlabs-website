@@ -7,10 +7,12 @@ type TerminalTokenPayload = {
   aud: string;
   iat: number;
   exp: number;
+  wid?: string;
+  pid?: string;
 };
 
-function sign(encodedPayload: string, secret: string): Buffer {
-  return createHmac("sha256", secret).update(encodedPayload).digest();
+function sign(encodedPayload: string, secret: string): string {
+  return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
 }
 
 export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
@@ -22,7 +24,7 @@ export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
   if (!encodedPayload || !encodedSignature || extra) throw new Error("Invalid terminal token");
 
   const supplied = Buffer.from(encodedSignature, "base64url");
-  const expected = sign(encodedPayload, secret);
+  const expected = Buffer.from(sign(encodedPayload, secret), "base64url");
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
     throw new Error("Invalid terminal token");
   }

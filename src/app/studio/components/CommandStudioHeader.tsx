@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
+import StudioProjectPicker from "./StudioProjectPicker";
 import {
   useStudioModelStore,
   type ProviderHealth,
@@ -19,7 +20,10 @@ import {
   CircleDot,
   Bell,
   Bot,
+  PanelRightOpen,
   MoreHorizontal,
+  Plus,
+  Terminal,
   Trash2,
 } from "lucide-react";
 
@@ -45,7 +49,13 @@ export default function CommandStudioHeader({
   branch,
   onPreviewAction,
   onOpenActivityAction,
+  onOpenTerminalAction,
+  onOpenInspectorAction,
+  onProjectSelectAction,
   onClearChatAction,
+  onNewChatAction,
+  onDeleteChatAction,
+  hasConversation,
   projectReady,
   capabilities,
   busy = false,
@@ -53,7 +63,13 @@ export default function CommandStudioHeader({
   branch?: string;
   onPreviewAction?: () => void;
   onOpenActivityAction?: () => void;
+  onOpenTerminalAction?: () => void;
+  onOpenInspectorAction?: () => void;
+  onProjectSelectAction?: (projectId: string) => void;
   onClearChatAction?: () => void;
+  onNewChatAction?: () => void;
+  onDeleteChatAction?: () => void;
+  hasConversation?: boolean;
   projectReady?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   /** True while an agent/conversation turn is in flight. */
@@ -170,6 +186,12 @@ export default function CommandStudioHeader({
         </span>
       </Link>
 
+      <StudioProjectPicker
+        projectId={capabilities.projectId}
+        projectName={capabilities.projectName}
+        onSelect={(projectId) => onProjectSelectAction?.(projectId)}
+      />
+
       {/* Connected repo — visible chip when a repository is linked */}
       {repoConnected && capabilities.repositoryName && (
         <span
@@ -233,6 +255,7 @@ export default function CommandStudioHeader({
           <WorkspaceStatusPopover
             rect={statusRect}
             onClose={() => setStatusOpen(false)}
+            onOpenTerminalAction={onOpenTerminalAction}
             providerCount={providerCount}
             repoConnected={repoConnected}
             repoName={capabilities.repositoryName}
@@ -279,6 +302,35 @@ export default function CommandStudioHeader({
 
       <div className="flex-1" />
 
+      {/* Conversation controls — always visible instead of being hidden in slash commands. */}
+      <button
+        type="button"
+        onClick={onNewChatAction}
+        disabled={busy}
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{
+          borderColor: "rgba(114,242,56,0.28)",
+          color: "var(--litt-primary)",
+          backgroundColor: "rgba(114,242,56,0.06)",
+        }}
+        aria-label="New chat"
+        title="Start a new chat"
+      >
+        <Plus size={12} aria-hidden />
+        <span className="hidden sm:inline">New Chat</span>
+      </button>
+      <button
+        type="button"
+        onClick={onDeleteChatAction}
+        disabled={!hasConversation || busy}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md border transition-all hover:bg-red-500/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ borderColor: "var(--studio-border)", color: "#f87171" }}
+        aria-label="Delete chat"
+        title={hasConversation ? "Delete current chat" : "No chat to delete"}
+      >
+        <Trash2 size={12} aria-hidden />
+      </button>
+
       {/* Notifications — wired to /api/notifications/count */}
       <Link
         href="/notifications"
@@ -297,6 +349,17 @@ export default function CommandStudioHeader({
           </span>
         ) : null}
       </Link>
+
+      <button
+        type="button"
+        onClick={onOpenInspectorAction}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md border transition-all hover:bg-white/5 active:scale-95"
+        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
+        title="Workspace inspector"
+        aria-label="Open workspace inspector"
+      >
+        <PanelRightOpen size={13} className="pointer-events-none" />
+      </button>
 
       {/* Activity — opens the Activity drawer (kept visible; useful) */}
       <button
@@ -403,6 +466,7 @@ function StatusRow({
 function WorkspaceStatusPopover({
   rect,
   onClose,
+  onOpenTerminalAction,
   providerCount,
   repoConnected,
   repoName,
@@ -416,6 +480,7 @@ function WorkspaceStatusPopover({
 }: {
   rect: DOMRect;
   onClose: () => void;
+  onOpenTerminalAction?: () => void;
   providerCount: number;
   repoConnected: boolean;
   repoName: string | null;
@@ -505,8 +570,28 @@ function WorkspaceStatusPopover({
           value={ptyLabel}
           ok={ptyState === "available"}
           warn={ptyState === "connecting" || ptyState === "error"}
-          detail={ptyState === "available" ? "Ready for command execution" : "Open the Activity drawer to connect"}
+          detail={ptyState === "available" ? "Ready for command execution" : "Open the terminal drawer to connect"}
         />
+        {ptyState !== "available" && onOpenTerminalAction && (
+          <div className="px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenTerminalAction();
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] font-bold transition hover:bg-white/5"
+              style={{
+                borderColor: "rgba(114,242,56,0.28)",
+                color: "var(--litt-primary)",
+                backgroundColor: "rgba(114,242,56,0.06)",
+              }}
+            >
+              <Terminal size={12} aria-hidden />
+              Open Terminal & Connect
+            </button>
+          </div>
+        )}
         <StatusRow
           label="Write Permission"
           value={writesAllowed ? "Writes allowed" : "Writes require approval"}

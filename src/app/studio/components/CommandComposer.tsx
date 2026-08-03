@@ -53,6 +53,7 @@ interface CommandComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult | undefined>;
+  onCancel?: () => void;
   busy?: boolean;
   disabled?: boolean;
   onAgentChange?: (agentId: import("../stores/useStudioAgentStore").AgentId) => void;
@@ -65,6 +66,7 @@ export default function CommandComposer({
   value,
   onChange,
   onSend,
+  onCancel,
   busy = false,
   disabled = false,
   onAgentChange,
@@ -276,7 +278,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setShowAttach((v) => !v)}
-          className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition"
+          className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition"
           style={{
             color: "var(--text-muted)",
             borderColor: showAttach ? "var(--studio-border-strong)" : "transparent",
@@ -333,7 +335,7 @@ export default function CommandComposer({
           ref={agentTriggerRef}
           type="button"
           onClick={() => setAgentOpen((v) => !v)}
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 transition hover:bg-white/5"
+          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 transition hover:bg-white/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: agentAccent,
@@ -367,7 +369,7 @@ export default function CommandComposer({
           ref={modelTriggerRef}
           type="button"
           onClick={() => setModelOpen((v) => !v)}
-          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold transition hover:bg-white/5"
+          className="flex h-11 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold transition hover:bg-white/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: "var(--text-secondary)",
@@ -425,7 +427,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={toggleTts}
-          className="pointer-events-auto flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{ color: ttsEnabled ? "#65f4ff" : "var(--text-muted)" }}
           aria-label={ttsEnabled ? "Turn reply speech off" : "Turn reply speech on"}
           title={ttsEnabled ? "Reply speech on" : "Reply speech off"}
@@ -441,7 +443,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => onToggleCamera?.()}
-          className="pointer-events-auto flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{ color: cameraActive ? "#22d3ee" : "var(--text-muted)" }}
           aria-label={cameraActive ? "Close camera" : "Open camera"}
           title="Camera"
@@ -454,7 +456,7 @@ export default function CommandComposer({
           type="button"
           onClick={micState.onClick}
           disabled={micState.disabled}
-          className={`pointer-events-auto flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all ${
+          className={`pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all ${
             !micState.disabled && "hover:bg-white/10"
           } ${micState.disabled && "cursor-not-allowed"}`}
           style={{
@@ -481,18 +483,18 @@ export default function CommandComposer({
         {/* Send */}
         <button
           type="button"
-          onClick={submit}
-          disabled={busy || disabled || (!value.trim() && snapshots.length === 0)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={busy ? onCancel : submit}
+          disabled={disabled || (!busy && !value.trim() && snapshots.length === 0)}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label={busy ? "Cancel response" : "Send message"}
+          title={busy ? "Cancel response" : "Send message"}
           style={{
-            backgroundColor: value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",
-            color: value.trim() || snapshots.length ? "#000" : "var(--text-muted)",
+            backgroundColor: busy ? "rgba(227,179,65,0.18)" : value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",
+            color: busy ? "#e3b341" : value.trim() || snapshots.length ? "#000" : "var(--text-muted)",
           }}
-          aria-label="Send message"
-          title="Send message"
         >
           {busy ? (
-            <Loader2 size={18} className="pointer-events-none shrink-0 animate-spin" />
+            <Square size={16} className="pointer-events-none shrink-0" />
           ) : (
             <Send size={18} className="pointer-events-none shrink-0" />
           )}

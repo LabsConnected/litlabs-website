@@ -7,7 +7,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
-import { useStudioAgentStore } from "../stores/useStudioAgentStore";
+import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -18,9 +18,8 @@ import CommandStudioHeader from "./CommandStudioHeader";
 import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
-import StudioFloatingPresence from "./StudioFloatingPresence";
 import StudioTranscript from "./StudioTranscript";
-import { StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
@@ -109,6 +108,14 @@ function AgentVoiceSync() {
  * ChatTool, no duplicate composer, no custom-event bridge.
  */
 export default function CommandStudio() {
+  return (
+    <VoiceSessionProvider>
+      <CommandStudioContent />
+    </VoiceSessionProvider>
+  );
+}
+
+function CommandStudioContent() {
   const { theme } = useTheme();
   const { userId, getToken } = useClerkAuth();
   const { user: appUser } = useAppUser();
@@ -154,6 +161,7 @@ export default function CommandStudio() {
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
@@ -192,19 +200,27 @@ export default function CommandStudio() {
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
-      setDrawerOpen(true);
-      setDrawerTab(mapped.openDrawer);
+      const terminalNeedsExplicitConnect =
+        mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
+      if (!terminalNeedsExplicitConnect) {
+        setDrawerOpen(true);
+        setDrawerTab(mapped.openDrawer);
+      }
     }
     if (mapped.openInspector) {
       setInspectorOpen(true);
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
-  }, []);
+  }, [capabilities.terminalStatus]);
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
     onRouteToolAction: handleRouteTool,
+    onRouteInspectorAction: (tab) => {
+      setInspectorTab(tab);
+      setInspectorOpen(true);
+    },
     serverProjectId: capabilities.projectId,
   });
 
@@ -336,6 +352,15 @@ export default function CommandStudio() {
     }
   }, []);
 
+  const handleSelectProject = useCallback((projectId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", projectId);
+    params.delete("conversation");
+    params.delete("agentInstance");
+    setWorkspaceRevision(0);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams]);
+
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
     setDestination("studio");
@@ -345,13 +370,20 @@ export default function CommandStudio() {
     setDrawerOpen(true);
     setDrawerTab("activity");
   }, []);
+  const handleOpenTerminal = useCallback(() => {
+    setDestination("studio");
+    setStudioMode("work");
+    setWorkSurface("conversation");
+    setDrawerOpen(true);
+    setDrawerTab("terminal");
+  }, []);
 
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
     repo: capabilities.repositoryName ?? undefined,
-    branch: typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined,
+    branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
-  }), [capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
 
   // Resolve the legacy tool to render for the active destination/mode.
   // Studio/Work renders the conversation (transcript + composer) unless
@@ -399,7 +431,7 @@ export default function CommandStudio() {
   ];
 
   return (
-    <VoiceSessionProvider>
+    <>
       <AgentVoiceSync />
 
       <div
@@ -415,7 +447,13 @@ export default function CommandStudio() {
           branch={contextLine.branch}
           onPreviewAction={handlePreview}
           onOpenActivityAction={handleOpenActivity}
+          onOpenTerminalAction={handleOpenTerminal}
+          onOpenInspectorAction={() => setInspectorOpen(true)}
+          onProjectSelectAction={handleSelectProject}
           onClearChatAction={conversation.clear}
+          onNewChatAction={() => { void conversation.createConversation(); }}
+          onDeleteChatAction={() => { void conversation.deleteConversation(); }}
+          hasConversation={Boolean(conversation.selectedConversationId)}
           projectReady={projectReady}
           capabilities={capabilities}
           busy={conversation.busy}
@@ -499,9 +537,11 @@ export default function CommandStudio() {
                     <WorkspaceComponent />
                   </div>
                 ) : (
-                  <div className="flex h-full items-center justify-center text-[12px]" style={{ color: "var(--text-muted)" }}>
-                    Nothing here yet
-                  </div>
+                  <StudioUnavailableSurface
+                    destination={destination}
+                    capabilities={capabilities}
+                    modelLabel={modelLabel}
+                  />
                 )}
               </div>
 
@@ -511,6 +551,19 @@ export default function CommandStudio() {
                 onToggle={() => setInspectorOpen((v) => !v)}
                 activeTab={inspectorTab}
                 onTabChange={setInspectorTab}
+                data={{
+                  capabilities,
+                  modelLabel,
+                  modelHealth,
+                  activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
+                  destination,
+                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "more" ? moreMode : "overview",
+                  messages: conversation.messages,
+                  busy: conversation.busy,
+                  workspaceRevision,
+                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                  onWorkspacePrepared: () => { void refreshCapabilities(); },
+                }}
               />
             </div>
 
@@ -521,7 +574,17 @@ export default function CommandStudio() {
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
             >
-              {drawerTab === "terminal" ? <StudioTerminalDrawer projectId={capabilities.projectId} /> : null}
+              {drawerTab === "terminal" ? (
+                <StudioTerminalDrawer projectId={capabilities.projectId} />
+              ) : (
+                <StudioActivityPanel
+                  messages={conversation.messages}
+                  busy={conversation.busy}
+                  modelLabel={modelLabel}
+                  projectName={capabilities.projectName}
+                  terminalStatus={capabilities.terminalStatus}
+                />
+              )}
             </StudioDrawer>
 
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
@@ -581,6 +644,7 @@ export default function CommandStudio() {
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
+                onCancel={conversation.cancel}
                 onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
                 disabled={conversation.requiresReauth}
@@ -638,10 +702,37 @@ export default function CommandStudio() {
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
 
-      {/* Persistent floating LiTT presence — never disappears, reflects
-          real busy + voice state. Clicking opens the Activity drawer. */}
-      <StudioFloatingPresence busy={conversation.busy} onOpenActivity={handleOpenActivity} />
-    </VoiceSessionProvider>
+    </>
+  );
+}
+
+function StudioUnavailableSurface({
+  destination,
+  capabilities,
+  modelLabel,
+}: {
+  destination: StudioDestination;
+  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  modelLabel: string;
+}) {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-4 py-8" aria-live="polite">
+      <div className="w-full max-w-lg space-y-4 rounded-2xl border p-5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--litt-primary)" }}>{destination}</div>
+          <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>Workspace status</h2>
+          <p className="mt-1 text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>
+            This surface is not available yet, but your live workspace context is still connected below.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Project</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{capabilities.projectName ?? "Not selected"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Model</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{modelLabel}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Repository</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.repository === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.repositoryName ?? "Not connected"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Terminal</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.terminalStatus === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.terminalStatus}</div></div>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -20,6 +20,9 @@ export interface RawCapabilities {
   voiceTransportConnected?: boolean;
   /** Microphone currently capturing audio. Client-derived. */
   voiceMicrophoneOn?: boolean;
+  voiceInputState?: string;
+  voiceState?: string;
+  voiceOutputState?: string;
   /** Voice health from /api/voice/health (server-side check). */
   voiceHealth?: {
     configured: boolean;
@@ -121,6 +124,9 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   const voiceHealth = caps.voiceHealth;
   const voiceTransport = caps.voiceTransportConnected === true;
   const micOn = caps.voiceMicrophoneOn === true;
+  const voiceInputState = caps.voiceInputState ?? "idle";
+  const voiceState = caps.voiceState ?? "idle";
+  const voiceOutputState = caps.voiceOutputState ?? "idle";
 
   let voiceConfigState: string;
   let voiceTransportState: string;
@@ -152,6 +158,17 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
     voiceMicState = "Microphone is off.";
   }
 
+  const voiceActivityState =
+    voiceState === "assistant_speaking" || voiceOutputState === "speaking"
+      ? "LiTT is speaking."
+      : voiceState === "processing" || voiceInputState === "connecting"
+        ? "Voice is processing."
+        : voiceState === "error" || voiceInputState === "error"
+          ? "Voice is in an error state."
+          : voiceState === "muted"
+            ? "Voice is muted."
+            : "Voice is idle.";
+
   // Combined voice state for the LLM
   if (voiceHealth?.available && voiceTransport && micOn) {
     voiceFullState = "Voice is fully operational — configured, transport connected, microphone on.";
@@ -181,6 +198,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push(`Voice configuration: ${voiceConfigState}`);
   parts.push(`Voice transport: ${voiceTransportState}`);
   parts.push(`Voice microphone: ${voiceMicState}`);
+  parts.push(`Voice activity: ${voiceActivityState}`);
   parts.push(`Voice summary: ${voiceFullState}`);
 
   parts.push(
@@ -197,7 +215,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- A repository can be usable before indexing finishes. Indexing is optional for basic file access.");
   parts.push("- Never claim you can read files, run commands, access a repository, or use voice/microphone unless the state above explicitly says it is connected and ready.");
   parts.push("- If voice is configured and the token service is healthy, voice is AVAILABLE even if the transport is not connected yet. Say \"voice is available\" not \"voice is disconnected\".");
-  parts.push("- If voice configuration is unknown, do NOT claim voice is working, good, online, or nominal. Say you don't have live voice status.");
+  parts.push("- If voice configuration is unknown, say: Voice status is still being checked. Do not claim voice is working or unavailable.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
   parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
   parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Report voice, GitHub, and terminal SEPARATELY. Example: 'Chat and Inworld voice are available. GitHub and the terminal are not connected, so build tools are currently unavailable.' Do NOT group voice with GitHub or terminal.");

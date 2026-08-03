@@ -15,6 +15,7 @@ const mockCapabilities = {
   projectId: null,
   projectName: null,
   defaultBranch: null,
+  activeBranch: null,
   sourceType: null,
   workspaceStatus: null,
   githubInstalled: false,
@@ -121,6 +122,22 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     const activityBtn = screen.getByRole("button", { name: /activity/i });
     activityBtn.click();
     expect(onOpenActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the terminal drawer from workspace status when PTY is disconnected", () => {
+    const onOpenTerminal = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        onOpenTerminalAction={onOpenTerminal}
+        projectReady={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /workspace status/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open terminal & connect/i }));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
   });
 
   it("does not render a project selector slot", () => {

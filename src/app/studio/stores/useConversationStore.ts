@@ -45,6 +45,7 @@ interface ConversationStore {
   setStreaming: (streaming: boolean) => void;
   setSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
+  resetForProject: () => void;
 
   // Computed helpers
   getMessages: () => ChatMessage[];
@@ -110,6 +111,16 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   setStreaming: (streaming) => set({ streaming }),
   setSending: (sending) => set({ sending }),
   setError: (error) => set({ error }),
+  resetForProject: () => set({
+    conversations: [],
+    selectedConversationId: null,
+    messagesByConversationId: {},
+    revision: 1,
+    loading: false,
+    streaming: false,
+    sending: false,
+    error: null,
+  }),
 
   getMessages: () => {
     const state = get();

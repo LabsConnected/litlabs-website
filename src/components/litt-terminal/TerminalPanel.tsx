@@ -56,6 +56,7 @@ export const TerminalPanel = forwardRef<
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
+    terminalStore.setProject(projectId ?? null);
     let disposed = false;
 
     const term = new Terminal({
@@ -320,6 +321,7 @@ export const TerminalPanel = forwardRef<
       term.dispose();
       terminalStore.setStatus("disconnected");
       terminalStore.setSession(null);
+      terminalStore.setProject(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [

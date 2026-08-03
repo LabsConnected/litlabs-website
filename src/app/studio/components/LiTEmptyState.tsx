@@ -268,6 +268,8 @@ export default function LiTEmptyState({
       className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-4 sm:py-6 animate-fadeInUp"
       style={{ color: "var(--text-primary)" }}
       data-testid="empty-state"
+      aria-live="polite"
+      aria-label="Workspace briefing"
     >
       <div
         className="pointer-events-none absolute inset-0 opacity-80"
@@ -373,7 +375,7 @@ export default function LiTEmptyState({
                 key={action.label}
                 type="button"
                 onClick={() => onPickAction?.(action.prompt)}
-                className="flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-bold transition hover:-translate-y-0.5 hover:border-[rgba(114,242,56,0.3)]"
+                className="flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-bold transition hover:-translate-y-0.5 hover:border-[rgba(114,242,56,0.3)]"
                 style={{
                   borderColor: "var(--studio-border-strong)",
                   backgroundColor: "var(--studio-card)",
@@ -418,7 +420,7 @@ export default function LiTEmptyState({
                 key={item.label}
                 type="button"
                 onClick={() => onPickAction?.(item.prompt)}
-                className="group flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5"
+                className="group flex min-h-11 items-center gap-2 rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5"
                 style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-card)" }}
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>

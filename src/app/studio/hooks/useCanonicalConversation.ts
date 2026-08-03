@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
 import { detectIntent, type IntentResult } from "../lib/studio-intent";
@@ -16,6 +15,7 @@ import {
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { StudioTool } from "../components/StudioSidebar";
+import type { InspectorTab } from "../lib/studio-destinations";
 import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
 import {
   useConversationStore,
@@ -111,16 +111,24 @@ function toUIMessage(
  */
 export function useCanonicalConversation({
   onRouteToolAction,
+  onRouteInspectorAction,
   serverProjectId,
 }: {
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
+  onRouteInspectorAction?: (tab: InspectorTab) => void;
   serverProjectId?: string | null;
 } = {}) {
   const [busy, setBusy] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendErrorState] = useState<string | null>(null);
+  const sendErrorRef = useRef<string | null>(null);
+  const setSendError = useCallback((value: string | null) => {
+    sendErrorRef.current = value;
+    setSendErrorState(value);
+  }, []);
   const [requiresReauth, setRequiresReauth] = useState(false);
+  const requestAbortRef = useRef<AbortController | null>(null);
   const { capabilities } = useConnectionSummary();
-  const { voiceTransportConnected, voiceInputState } = useVoiceSession();
+  const { voiceTransportConnected, voiceInputState, voiceState, voiceOutputState } = useVoiceSession();
   const { userId, getToken, isLoaded, isSignedIn } = useClerkAuth();
 
   // Same-origin cookies normally carry Clerk auth, but an explicit bearer
@@ -152,13 +160,6 @@ export function useCanonicalConversation({
   // Stable accessor — getState() always returns the latest snapshot and the
   // action functions are stable references defined once in create().
   const getStore = useConversationStore.getState;
-  const store = useMemo(
-    () =>
-      new Proxy({} as ReturnType<typeof useConversationStore.getState>, {
-        get: (_target, property) => getStore()[property as keyof ReturnType<typeof getStore>],
-      }),
-    [getStore],
-  );
 
   const router = useRouter();
   const pathname = usePathname();
@@ -172,9 +173,20 @@ export function useCanonicalConversation({
   // router.replace → searchParams change → loadConversations infinite loop.
   const searchParamsRef = useRef(searchParams);
   useEffect(() => { searchParamsRef.current = searchParams; }, [searchParams]);
+  const loadedProjectIdRef = useRef<string | null | undefined>(undefined);
 
-  const { profile } = useProfile();
   const initialPrompt = searchParams.get("mission") || searchParams.get("prompt") || "";
+  const runtimeContext = useMemo(() => ({
+    terminalExecution: capabilities.terminalExecution,
+    terminalStatus: capabilities.terminalStatus,
+    terminalSessionId: capabilities.terminalSessionId,
+    voiceTransportConnected,
+    voiceInputState,
+    voiceMicrophoneOn: voiceInputState === "listening",
+    voiceState,
+    voiceOutputState,
+    voiceHealth: capabilities.voiceHealth,
+  }), [capabilities, voiceTransportConnected, voiceInputState, voiceState, voiceOutputState]);
 
   // Subscribe to the messages slice reactively (selector pattern, matching
   // CanvasPanel). The no-selector + store.getMessages() approach relies on the
@@ -214,9 +226,13 @@ export function useCanonicalConversation({
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
     const projectId = getActiveProjectId(serverProjectId, userId);
+    const s = getStore();
+    if (loadedProjectIdRef.current !== projectId) {
+      s.resetForProject();
+      loadedProjectIdRef.current = projectId;
+    }
     if (!projectId) return;
 
-    const s = getStore();
     s.setLoading(true);
     try {
       const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
@@ -296,7 +312,7 @@ export function useCanonicalConversation({
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders]);
+  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders, setSendError]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
@@ -471,7 +487,9 @@ export function useCanonicalConversation({
       // 2. Deterministic product intents before any LLM call
       const intent = detectIntent(text);
       if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
-        const intentMessage = buildIntentResponseMessage(intent);
+        const intentMessage = buildIntentResponseMessage(intent, {
+          terminalConnected: runtimeContext.terminalStatus === "connected",
+        });
         const s = getStore();
         const convId = s.selectedConversationId ?? "";
         if (convId) {
@@ -496,7 +514,17 @@ export function useCanonicalConversation({
             regenerationOfMessageId: null,
           });
         }
-        if (intent.tool) onRouteToolAction?.(intent.tool);
+        if (intent.intent === "open_files" || intent.intent === "file_question") {
+          onRouteInspectorAction?.("files");
+        } else if (intent.intent === "open_preview" || intent.intent === "visual_output") {
+          onRouteInspectorAction?.("preview");
+        } else if (intent.intent === "project_health") {
+          onRouteInspectorAction?.("checks");
+        } else if (intent.intent === "open_approvals") {
+          onRouteInspectorAction?.("approvals");
+        } else if (intent.tool) {
+          onRouteToolAction?.(intent.tool);
+        }
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
           window.location.href = "/api/github/install";
         }
@@ -578,7 +606,7 @@ export function useCanonicalConversation({
           // optimistic state and require reauthentication if it was a 401.
           rollbackOptimistic(optimisticConversationId);
           setBusy(false);
-          if (sendError?.includes("session expired")) {
+          if (sendErrorRef.current?.includes("session expired")) {
             setRequiresReauth(true);
             return { accepted: false, persisted: false, errorKind: "auth" };
           }
@@ -593,6 +621,9 @@ export function useCanonicalConversation({
       setSendError(null);
 
       // 4. Real LLM call through canonical API
+      getStore().setStreaming(true);
+      let requestController: AbortController | null = null;
+      let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
       try {
         const s = getStore();
         const expectedRevision = s.revision;
@@ -601,7 +632,10 @@ export function useCanonicalConversation({
         // reasoning/thinking models get room to think before emitting text
         // instead of being killed at 55s ("cut out").
         const controller = new AbortController();
+        requestController = controller;
+        requestAbortRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 120_000);
+        requestTimeoutId = timeoutId;
         const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
           credentials: "include",
@@ -616,6 +650,7 @@ export function useCanonicalConversation({
             category: isAutoBest ? "auto" : selectedModel.category,
             model: selectedModel.model,
             images: attachments,
+            runtimeContext,
           }),
           signal: controller.signal,
         });
@@ -645,8 +680,11 @@ export function useCanonicalConversation({
           }
         }
 
-        clearTimeout(timeoutId);
-
+        // NOTE: Do NOT clear the timeout here — the response headers have
+        // arrived but the SSE body is still streaming. Clearing now would
+        // leave the streaming phase with no abort protection, so a stalled
+        // provider would hang the client forever. The timeout is cleared in
+        // the finally block below after the stream is fully consumed.
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
           const isAuthError = response.status === 401 || response.status === 403;
@@ -670,20 +708,57 @@ export function useCanonicalConversation({
 
         const contentType = response.headers.get("content-type") || "";
 
-        // Duplicate (idempotent) responses come back as JSON, not SSE.
+        // JSON responses are used for completed and duplicate requests.
         if (!contentType.includes("text/event-stream")) {
-          const data = await response.json();
-          if (data.duplicate) {
+          const data = await response.json().catch(() => null) as {
+            duplicate?: boolean;
+            error?: string;
+            userMessage?: ConversationMessage;
+            assistantMessage?: ConversationMessage;
+            revision?: number;
+            usedFallbackModel?: string;
+          } | null;
+          if (data?.userMessage && data.assistantMessage) {
             const s2 = getStore();
-            const userMsg = data.userMessage as ConversationMessage;
+            const userMsg = data.userMessage;
+            const assistantMsg = data.assistantMessage;
             s2.updateMessage(conversationId, optimisticUserId, {
               id: userMsg.id,
               content: userMsg.content,
               createdAt: userMsg.createdAt,
             });
-
+            if (!assistantMsg.content?.trim()) {
+              s2.updateMessage(conversationId, optimisticAssistantId, {
+                id: assistantMsg.id,
+                content: "The response was empty. Please try again.",
+                status: "failed",
+                createdAt: assistantMsg.createdAt,
+              });
+              setSendError("The AI returned an empty response. Please try again.");
+              return { accepted: false, persisted: true, errorKind: "provider" };
+            }
+            s2.updateMessage(conversationId, optimisticAssistantId, {
+              id: assistantMsg.id,
+              content: assistantMsg.content,
+              status: "completed",
+              createdAt: assistantMsg.createdAt,
+            });
+            s2.setRevision(data.revision ?? expectedRevision + 1);
+            if (data.usedFallbackModel) {
+              setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
+            }
+            return { accepted: true, persisted: true, reply: assistantMsg.content };
+          }
+          if (data?.duplicate) {
+            const s2 = getStore();
+            const userMsg = data.userMessage;
+            s2.updateMessage(conversationId, optimisticUserId, {
+              id: userMsg?.id ?? optimisticUserId,
+              content: userMsg?.content ?? text,
+              createdAt: userMsg?.createdAt ?? optimisticTimestamp,
+            });
             if (data.assistantMessage) {
-              const assistantMsg = data.assistantMessage as ConversationMessage;
+              const assistantMsg = data.assistantMessage;
               s2.updateMessage(conversationId, optimisticAssistantId, {
                 id: assistantMsg.id,
                 content: assistantMsg.content,
@@ -692,23 +767,21 @@ export function useCanonicalConversation({
               });
               s2.setRevision(data.revision ?? expectedRevision);
               return { accepted: true, persisted: true, reply: assistantMsg.content };
-            } else {
-              // Still processing — remove optimistic assistant, poll for result
-              s2.setMessages(
-                conversationId,
-                s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
-              );
-              s2.setRevision(data.revision ?? expectedRevision);
-              setTimeout(() => void loadMessages(conversationId!), 2000);
-              return { accepted: true, persisted: true };
             }
+            s2.setMessages(
+              conversationId,
+              s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
+            );
+            s2.setRevision(data.revision ?? expectedRevision);
+            setTimeout(() => void loadMessages(conversationId!), 2000);
+            return { accepted: true, persisted: true };
           }
-          // Unexpected JSON on a 200 — treat as failure
+          const errorText = data?.error || "Server returned an invalid response.";
           getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
-            content: data.error || "Unexpected response format",
+            content: errorText,
           });
-          setSendError(data.error || "Unexpected response format");
+          setSendError(errorText);
           return { accepted: false, persisted: false, errorKind: "validation" };
         }
 
@@ -868,10 +941,13 @@ export function useCanonicalConversation({
         // Network error during streaming — user message was likely persisted.
         return { accepted: false, persisted: true, errorKind: "network" };
       } finally {
+        if (requestTimeoutId) clearTimeout(requestTimeoutId);
+        if (requestController && requestAbortRef.current === requestController) requestAbortRef.current = null;
+        getStore().setStreaming(false);
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -886,6 +962,7 @@ export function useCanonicalConversation({
     const lastAssistant = allMessages[lastAssistantIdx];
 
     setBusy(true);
+    getStore().setStreaming(true);
     try {
       const response = await fetch(`/api/studio/conversations/${conversationId}/regenerate`, {
         method: "POST",
@@ -895,6 +972,7 @@ export function useCanonicalConversation({
           assistantMessageId: lastAssistant.id,
           clientRequestId: generateClientRequestId(),
           expectedRevision: s.revision,
+          runtimeContext,
         }),
       });
 
@@ -902,21 +980,35 @@ export function useCanonicalConversation({
 
       if (response.status === 409) {
         await loadMessages(conversationId);
+        setSendError("This conversation changed in another session. It was refreshed; please try again.");
         return;
       }
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        const message = typeof data?.error === "string" ? data.error : `Regeneration failed (${response.status}).`;
+        setSendError(message);
+        return;
+      }
 
       const newMsg = data.assistantMessage as ConversationMessage;
+      if (!newMsg?.content?.trim()) {
+        setSendError("The regenerated response was empty. Please try again.");
+        return;
+      }
       const s2 = getStore();
       s2.addMessage(conversationId, toCanonicalChatMessage(newMsg));
       s2.setRevision(data.revision ?? s2.revision + 1);
-    } catch {
-      // Non-fatal
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Regeneration failed. Please try again.");
     } finally {
+      getStore().setStreaming(false);
       setBusy(false);
     }
-  }, [busy, getStore, loadMessages, authHeaders]);
+  }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError]);
+
+  const cancel = useCallback(() => {
+    requestAbortRef.current?.abort();
+  }, []);
 
   // Clear — clears visible transcript
   const clear = useCallback(() => {
@@ -926,7 +1018,38 @@ export function useCanonicalConversation({
       s.setMessages(convId, []);
     }
     setSendError(null);
-  }, [getStore]);
+  }, [getStore, setSendError]);
+
+  // Delete the active server-side conversation.
+  const deleteConversation = useCallback(async (): Promise<boolean> => {
+    const s = getStore();
+    const conversationId = s.selectedConversationId;
+    const conversation = s.getSelectedConversation();
+    if (!conversationId || !conversation) return false;
+    if (!window.confirm(`Delete "${conversation.title || "this conversation"}"?`)) return false;
+
+    try {
+      const response = await fetch(`/api/studio/conversations/${conversationId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: await authHeaders(),
+      });
+      if (!response.ok) {
+        setSendError("Failed to delete this conversation.");
+        return false;
+      }
+      const remaining = s.conversations.filter((item) => item.id !== conversationId);
+      s.setConversations(remaining);
+      s.selectConversation(remaining[0]?.id ?? null);
+      if (remaining[0]) {
+        await loadMessages(remaining[0].id);
+      }
+      return true;
+    } catch {
+      setSendError("Network error while deleting this conversation.");
+      return false;
+    }
+  }, [getStore, authHeaders, loadMessages, setSendError]);
 
   // Agent switching — stays within the same conversation
   const switchAgent = useCallback((id: AgentId) => {
@@ -957,12 +1080,15 @@ export function useCanonicalConversation({
     messages,
     busy,
     send,
+    cancel,
     regenerate,
     clear,
     activeAgentId,
     fallbackNotice,
     initialPrompt,
     // Canonical conversation management (sessions are server-side conversations)
+    createConversation,
+    deleteConversation,
     switchAgent,
     selectedConversationId,
     conversations,
@@ -974,9 +1100,14 @@ export function useCanonicalConversation({
   };
 }
 
-function buildIntentResponseMessage(intent: IntentResult): string {
+function buildIntentResponseMessage(
+  intent: IntentResult,
+  runtime: { terminalConnected: boolean },
+): string {
   if (intent.intent === "open_terminal") {
-    return "Opening Terminal.\n\nYour project workspace is not ready yet, so the PTY cannot start.\n\n[Connect GitHub] [Start Blank Project]";
+    return runtime.terminalConnected
+      ? "Opening Terminal."
+      : "The terminal is not connected yet. Use Workspace status → Open Terminal & Connect when you want to start it.";
   }
   if (intent.intent === "connect_github") {
     return "Connecting GitHub. Redirecting to GitHub App installation...";
