@@ -5,8 +5,10 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
+import ModelPicker from "@/components/ModelPicker";
 import {
   useStudioModelStore,
+  MODELS,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
@@ -52,16 +54,26 @@ export default function CommandStudioHeader({
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
   const [statusOpen, setStatusOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const modelPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
+  const [modelPickerRect, setModelPickerRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
       setStatusRect(statusTriggerRef.current.getBoundingClientRect());
+    }
+  }, []);
+
+  const updateModelPickerRect = useCallback(() => {
+    if (modelPickerTriggerRef.current) {
+      setModelPickerRect(modelPickerTriggerRef.current.getBoundingClientRect());
     }
   }, []);
 
@@ -75,6 +87,17 @@ export default function CommandStudioHeader({
       window.removeEventListener("resize", updateRect);
     };
   }, [statusOpen, updateRect]);
+
+  useEffect(() => {
+    if (!modelPickerOpen) return;
+    updateModelPickerRect();
+    window.addEventListener("scroll", updateModelPickerRect, true);
+    window.addEventListener("resize", updateModelPickerRect);
+    return () => {
+      window.removeEventListener("scroll", updateModelPickerRect, true);
+      window.removeEventListener("resize", updateModelPickerRect);
+    };
+  }, [modelPickerOpen, updateModelPickerRect]);
 
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
@@ -149,6 +172,48 @@ export default function CommandStudioHeader({
           {branch}
         </span>
       )}
+
+      {/* Model Picker trigger */}
+      <button
+        ref={modelPickerTriggerRef}
+        type="button"
+        onClick={() => setModelPickerOpen((v) => !v)}
+        className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        style={{
+          borderColor: "var(--studio-border)",
+          color: "var(--text-secondary)",
+          backgroundColor: "var(--studio-surface)",
+        }}
+        aria-label="Select AI model"
+        aria-expanded={modelPickerOpen}
+        title="Change AI model"
+      >
+        <Sparkles size={11} style={{ color: "var(--litt-primary)" }} />
+        <span className="truncate">{selectedModel.label}</span>
+        <ChevronDown size={10} style={{ color: "var(--text-muted)" }} />
+      </button>
+      {modelPickerOpen && modelPickerRect &&
+        createPortal(
+          <div
+            className="fixed z-50 w-80"
+            style={{
+              top: `${modelPickerRect.bottom + 8}px`,
+              left: `${modelPickerRect.left}px`,
+              maxWidth: "calc(100vw - 16px)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ModelPicker
+              selectedModel={selectedModel.id}
+              onModelChange={(modelId) => {
+                const model = MODELS.find((m) => m.id === modelId);
+                if (model) selectModel(model);
+                setModelPickerOpen(false);
+              }}
+            />
+          </div>,
+          document.body,
+        )}
 
       {/* Workspace Status popover trigger — absorbs all permanent chips */}
       <button
