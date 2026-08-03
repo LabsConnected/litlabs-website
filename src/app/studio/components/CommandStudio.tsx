@@ -7,6 +7,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
@@ -113,6 +114,10 @@ export default function CommandStudio() {
   const searchParams = useSearchParams();
   const { capabilities, refresh: refreshCapabilities } = useConnectionSummary();
   const projectReady = Boolean(capabilities.projectId);
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const providerHealth = useStudioModelStore((s) => s.providerHealth);
+  const modelHealth = providerHealth[selectedModel.provider];
+  const modelLabel = selectedModel.label;
 
   // Resolve initial destination from legacy ?tool= query.
   const initial = useMemo(() => {
@@ -146,6 +151,18 @@ export default function CommandStudio() {
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
+  }, []);
+
+  const handleSelectMoreMode = useCallback((mode: MoreMode) => {
+    if (mode === "terminal") {
+      setDestination("studio");
+      setStudioMode("work");
+      setDrawerOpen(true);
+      setDrawerTab("terminal");
+      return;
+    }
+    setDestination("more");
+    setMoreMode(mode);
   }, []);
 
   // handleRouteTool must be declared before useStudioConversation so the
@@ -398,7 +415,7 @@ export default function CommandStudio() {
 
         {/* Body: nav rail + workspace + inspector */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <CommandStudioNav active={destination} onSelect={handleSelectDestination} />
+          <CommandStudioNav active={destination} onSelect={handleSelectDestination} onSelectMoreMode={handleSelectMoreMode} />
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* Internal tab strip for Studio + Create destinations */}
@@ -458,6 +475,9 @@ export default function CommandStudio() {
                     projectName={capabilities.projectName}
                     sourceType={capabilities.sourceType}
                     githubInstalled={capabilities.githubInstalled}
+                    capabilities={capabilities}
+                    modelHealth={modelHealth}
+                    modelLabel={modelLabel}
                     onStartBlank={handleStartBlank}
                     onConnectRepo={handleConnectRepo}
                   />
@@ -625,6 +645,9 @@ function StudioWorkSurface({
   projectName,
   sourceType,
   githubInstalled,
+  capabilities,
+  modelHealth,
+  modelLabel,
   onStartBlank,
   onConnectRepo,
 }: {
@@ -639,6 +662,9 @@ function StudioWorkSurface({
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | null;
   githubInstalled: boolean;
+  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;
+  modelLabel: string | undefined;
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
@@ -666,6 +692,9 @@ function StudioWorkSurface({
             projectName={projectName}
             sourceType={sourceType}
             githubInstalled={githubInstalled}
+            capabilities={capabilities}
+            modelHealth={modelHealth}
+            modelLabel={modelLabel}
             onPick={onEmptyAction}
             onStartBlank={onStartBlank}
             onConnectRepo={onConnectRepo}

@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
 import type { AgentId } from "../stores/useStudioAgentStore";
+import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
+import type { ProviderHealth } from "../stores/useStudioModelStore";
 
 /* Inline GitHub mark — lucide-react is pinned to ^1.24.0 and lacks Github. */
 function GithubMark({ size = 16, className }: { size?: number; className?: string }) {
@@ -55,6 +57,120 @@ const PROJECT_SUGGESTIONS = [
   "Make this project more premium",
 ];
 
+type BriefingFact = {
+  label: string;
+  /** ok = green check, warn = amber, pending = muted */
+  tone: "ok" | "warn" | "muted";
+};
+
+/**
+ * WorkspaceBriefing — truthful, live snapshot of the workspace, derived only
+ * from real capabilities + model health. No fabricated metrics. Renders only
+ * when a capabilities object is supplied, so the empty state degrades
+ * gracefully to the legacy headline-only layout when no data is wired in.
+ */
+function WorkspaceBriefing({
+  capabilities,
+  modelHealth,
+  modelLabel,
+}: {
+  capabilities: ConnectionCapabilities;
+  modelHealth?: ProviderHealth;
+  modelLabel?: string;
+}) {
+  const facts: BriefingFact[] = [];
+
+  const repoConnected =
+    capabilities.repository === "connected" || !!capabilities.repositoryName;
+  if (repoConnected) {
+    facts.push({ label: "GitHub synced", tone: "ok" });
+  } else if (capabilities.githubInstalled) {
+    facts.push({ label: "GitHub ready · no repo", tone: "warn" });
+  }
+
+  const aiReady = modelHealth === "available" || modelHealth === "degraded";
+  if (aiReady) {
+    facts.push({ label: `${modelLabel || "AI"} ready`, tone: "ok" });
+  } else {
+    facts.push({ label: "AI setup required", tone: "warn" });
+  }
+
+  if (capabilities.terminalExecution === "available") {
+    facts.push({ label: "Terminal ready", tone: "ok" });
+  } else if (capabilities.terminalExecution === "connecting") {
+    facts.push({ label: "Terminal connecting", tone: "muted" });
+  }
+
+  if (capabilities.projectId) {
+    facts.push({ label: "Project loaded", tone: "ok" });
+  }
+
+  if (capabilities.writeAccess) {
+    facts.push({ label: "Writes allowed", tone: "ok" });
+  } else if (capabilities.projectId || repoConnected) {
+    facts.push({ label: "Writes need approval", tone: "warn" });
+  }
+
+  if (facts.length === 0) return null;
+
+  const okCount = facts.filter((f) => f.tone === "ok").length;
+  const warnCount = facts.filter((f) => f.tone === "warn").length;
+  const headline =
+    warnCount > 0
+      ? `Workspace ready · ${warnCount} need${warnCount === 1 ? "" : "s"} attention`
+      : `${okCount} service${okCount === 1 ? "" : "s"} connected`;
+
+  const toneColor: Record<BriefingFact["tone"], string> = {
+    ok: "var(--litt-primary)",
+    warn: "#e3b341",
+    muted: "var(--text-muted)",
+  };
+
+  return (
+    <div
+      className="mt-4 w-full max-w-md rounded-xl border px-3.5 py-3"
+      style={{
+        borderColor: "rgba(114,242,56,0.18)",
+        backgroundColor: "rgba(114,242,56,0.04)",
+      }}
+      data-testid="workspace-briefing"
+    >
+      <div
+        className="mb-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        style={{ color: "var(--litt-primary)" }}
+      >
+        Workspace Briefing
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {facts.map((f) => (
+          <span
+            key={f.label}
+            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold"
+            style={{
+              borderColor: `${toneColor[f.tone]}33`,
+              backgroundColor: `${toneColor[f.tone]}10`,
+              color: toneColor[f.tone],
+            }}
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              aria-hidden
+              style={{ backgroundColor: toneColor[f.tone] }}
+            />
+            {f.label}
+          </span>
+        ))}
+      </div>
+      <div
+        className="mt-2 text-[10px] font-medium"
+        style={{ color: "var(--text-muted)" }}
+      >
+        {headline}
+      </div>
+    </div>
+  );
+}
+
 export default function LiTEmptyState({
   activeAgentId = "litt",
   hasProject,
@@ -64,6 +180,9 @@ export default function LiTEmptyState({
   onPick,
   onConnectRepo,
   onStartBlank,
+  capabilities,
+  modelHealth,
+  modelLabel,
 }: {
   activeAgentId?: AgentId;
   hasProject: boolean;
@@ -75,6 +194,10 @@ export default function LiTEmptyState({
   onPick: (prompt: string) => void;
   onConnectRepo?: () => void;
   onStartBlank?: () => void;
+  /** Live workspace capabilities. When omitted, the briefing panel is skipped. */
+  capabilities?: ConnectionCapabilities;
+  modelHealth?: ProviderHealth;
+  modelLabel?: string;
 }) {
   const [hovered, setHovered] = useState<PrimaryAction | null>(null);
 
@@ -130,6 +253,15 @@ export default function LiTEmptyState({
           ? "I can inspect your project, edit code, run checks, create media, repair issues, and prepare a preview."
           : "Chat with me now. Add a project only when you want files, code edits, preview, terminal, or deployment."}
       </p>
+
+      {/* Proactive workspace briefing — only when live capabilities are wired in */}
+      {capabilities && (
+        <WorkspaceBriefing
+          capabilities={capabilities}
+          modelHealth={modelHealth}
+          modelLabel={modelLabel}
+        />
+      )}
 
       {/* Primary actions */}
       <div className="mt-6 grid w-full max-w-md grid-cols-2 gap-2">
@@ -207,20 +339,36 @@ export default function LiTEmptyState({
             >
               Suggestions
             </div>
-            {PROJECT_SUGGESTIONS.map((s) => (
+            {PROJECT_SUGGESTIONS.map((s, i) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => onPick(s)}
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium transition-colors hover:bg-white/5"
-                style={{ color: "var(--text-secondary)" }}
+                className="group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[12px] font-bold transition-all hover:translate-x-0.5"
+                style={{
+                  color: "var(--text-primary)",
+                  borderColor: "var(--studio-border-strong)",
+                  backgroundColor: "var(--studio-card)",
+                }}
+                aria-label={s}
               >
                 <span
-                  className="h-1 w-1 shrink-0 rounded-full"
-                  style={{ backgroundColor: "var(--litt-primary)" }}
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[10px] font-black"
+                  style={{
+                    backgroundColor: "rgba(114,242,56,0.10)",
+                    color: "var(--litt-primary)",
+                    border: "1px solid rgba(114,242,56,0.22)",
+                  }}
                   aria-hidden
+                >
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="flex-1">{s}</span>
+                <ArrowRight
+                  size={12}
+                  className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  style={{ color: "var(--litt-primary)" }}
                 />
-                {s}
               </button>
             ))}
           </div>
