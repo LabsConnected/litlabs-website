@@ -8,6 +8,12 @@ vi.mock("@/app/studio/components/LiTTPresence", () => ({
   __esModule: true,
 }));
 
+// Mock StudioActivityTimeline to avoid async fetch in the empty-state tests
+vi.mock("@/app/studio/components/StudioActivityTimeline", () => ({
+  default: () => null,
+  __esModule: true,
+}));
+
 describe("LiTEmptyState", () => {
   beforeEach(() => {
     vi.clearAllMocks();

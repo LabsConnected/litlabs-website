@@ -11,6 +11,7 @@ import {
   FilePlus2,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
+import StudioActivityTimeline from "./StudioActivityTimeline";
 import type { AgentId } from "../stores/useStudioAgentStore";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import type { ProviderHealth } from "../stores/useStudioModelStore";
@@ -429,6 +430,12 @@ export default function LiTEmptyState({
           </div>
         )}
       </div>
+
+      {/* Live activity timeline — fills dead space with real recent chats
+          and deploys. Only when a project is loaded so the no-project state
+          stays focused on connect actions. Renders nothing if both sources
+          are empty. */}
+      {hasProject && <StudioActivityTimeline />}
     </div>
   );
 }
