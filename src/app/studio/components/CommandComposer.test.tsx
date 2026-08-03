@@ -189,7 +189,8 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /model: auto best/i })).toBeTruthy();
+    // Model picker is a button with aria-label "Select model"
+    expect(screen.getByRole("button", { name: /select model/i })).toBeTruthy();
   });
 
   it("keeps LiTT and Spark visible and switches through the canonical callback", () => {
@@ -204,9 +205,16 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Use LiTT" })).toBeTruthy();
-    const spark = screen.getByRole("button", { name: "Use Spark" });
-    fireEvent.click(spark);
+    // Open the agent popover
+    const agentBtn = screen.getByRole("button", { name: /select agent/i });
+    fireEvent.click(agentBtn);
+
+    // Agent popover renders buttons with agent names
+    const littBtn = screen.getByRole("button", { name: /LiTT/i });
+    const sparkBtn = screen.getByRole("button", { name: /Spark/i });
+    expect(littBtn).toBeTruthy();
+    expect(sparkBtn).toBeTruthy();
+    fireEvent.click(sparkBtn);
     expect(onAgentChange).toHaveBeenCalledWith("spark");
   });
 

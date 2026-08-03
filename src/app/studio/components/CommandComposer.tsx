@@ -350,7 +350,7 @@ export default function CommandComposer({
             <AgentPopover
               rect={agentRect}
               activeId={activeAgentId}
-              onSelect={(id) => { setActiveAgent(id); setAgentOpen(false); }}
+              onSelect={(id) => { if (onAgentChange) { onAgentChange(id); } else { setActiveAgent(id); } setAgentOpen(false); }}
               onClose={() => setAgentOpen(false)}
             />,
             document.body,

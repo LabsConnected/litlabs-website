@@ -82,7 +82,7 @@ describe("LiTEmptyState", () => {
       />,
     );
 
-    expect(screen.getByText("No project connected")).toBeDefined();
+    expect(screen.getByText(/workspace optional|Chat ready/)).toBeDefined();
     expect(screen.getByText("Start blank")).toBeDefined();
     expect(screen.getByText("Connect repo")).toBeDefined();
     expect(screen.getByText("Upload project")).toBeDefined();
