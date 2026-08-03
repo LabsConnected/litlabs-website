@@ -1,0 +1,75 @@
+{
+  "name": "LiTTree — Email + Social Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1-5" }] }
+      },
+      "id": "cron-1",
+      "name": "Daily 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "limit": 10,
+        "options": { "labelFilter": "INBOX", "includeSpamTrash": false }
+      },
+      "id": "gmail-digest",
+      "name": "Get Unread Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Summarize emails\nconst emails = $input.all().map(item => ({\n  from: item.json.from,\n  subject: item.json.subject,\n  date: item.json.date,\n  snippet: (item.json.textBody || '').substring(0, 200)\n}));\nreturn [{ json: { count: emails.length, emails, digest_date: new Date().toISOString() } }];"
+      },
+      "id": "func-digest",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "messageValues": [
+            { "role": "system", "content": "Summarize these emails into a brief daily digest. Highlight urgent items." },
+            { "role": "user", "content": "={{ JSON.stringify($json.emails) }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ai-digest",
+      "name": "AI Summary",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "=LiTTree Daily Digest — {{ new Date().toLocaleDateString() }}",
+        "options": {}
+      },
+      "id": "gmail-send",
+      "name": "Send Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Daily 9AM": { "main": [[{ "node": "Get Unread Emails", "type": "main", "index": 0 }]] },
+    "Get Unread Emails": { "main": [[{ "node": "Summarize", "type": "main", "index": 0 }]] },
+    "Summarize": { "main": [[{ "node": "AI Summary", "type": "main", "index": 0 }]] },
+    "AI Summary": { "main": [[{ "node": "Send Digest", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

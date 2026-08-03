@@ -1,0 +1,72 @@
+{
+  "name": "LiTTree — Stripe Customer Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stripe-onboarding",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Stripe Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "stripe-onboarding"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract Stripe event data\nconst body = $input.first().json.body || $input.first().json;\nreturn [{ json: { event: body.type, customer: body.data?.object, raw: body } }];"
+      },
+      "id": "func-1",
+      "name": "Parse Stripe Event",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "customers",
+        "options": {}
+      },
+      "id": "supabase-1",
+      "name": "Insert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "options": {}
+      },
+      "id": "gmail-1",
+      "name": "Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "webhookUrl": "",
+        "options": {}
+      },
+      "id": "slack-1",
+      "name": "Notify Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Stripe Webhook": { "main": [[{ "node": "Parse Stripe Event", "type": "main", "index": 0 }]] },
+    "Parse Stripe Event": { "main": [[{ "node": "Insert to Supabase", "type": "main", "index": 0 }]] },
+    "Insert to Supabase": { "main": [[{ "node": "Welcome Email", "type": "main", "index": 0 }]] },
+    "Welcome Email": { "main": [[{ "node": "Notify Slack", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
