@@ -226,8 +226,9 @@ export default function CommandComposer({
       data-testid="studio-command-composer"
       className="relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
       style={{
-        backgroundColor: "var(--studio-bg)",
+        backgroundColor: "var(--studio-surface)",
         borderColor: "var(--studio-border)",
+        backdropFilter: "blur(12px)",
       }}
     >
       {/* Context line: repository · branch · permission mode */}
@@ -281,13 +282,14 @@ export default function CommandComposer({
 
       {/* Input row — capped at composer max width, centered */}
       <div
-        className="relative flex items-end gap-1.5 rounded-2xl border px-2 py-2"
+        className="relative flex items-end gap-1.5 rounded-2xl border px-2 py-2 transition-all focus-within:border-purple-400/40"
         style={{
           borderColor: "var(--studio-border-strong)",
           backgroundColor: "var(--studio-card)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
+          backdropFilter: "blur(8px)",
         }}
       >
         {/* Attachment menu */}
@@ -501,12 +503,17 @@ export default function CommandComposer({
           type="button"
           onClick={busy ? onCancel : submit}
           disabled={disabled || (!busy && !value.trim() && snapshots.length === 0)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={busy ? "Cancel response" : "Send message"}
           title={busy ? "Cancel response" : "Send message"}
           style={{
-            backgroundColor: busy ? "rgba(227,179,65,0.18)" : value.trim() || snapshots.length ? "var(--litt-primary)" : "transparent",
+            background: busy
+              ? "rgba(227,179,65,0.18)"
+              : value.trim() || snapshots.length
+                ? "linear-gradient(135deg, var(--litt-primary), #2eff4a)"
+                : "transparent",
             color: busy ? "#e3b341" : value.trim() || snapshots.length ? "#000" : "var(--text-muted)",
+            boxShadow: value.trim() || snapshots.length ? "var(--studio-glow-green)" : "none",
           }}
         >
           {busy ? (
@@ -643,15 +650,15 @@ function AgentPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 260);
-  const top = rect.bottom + 6;
+  const left = Math.min(rect.left, window.innerWidth - 270);
+  const top = rect.top - 280 > 0 ? rect.top - 280 : rect.bottom + 6;
 
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label="Select agent"
-      className="fixed z-[200] w-64 max-h-[70vh] overflow-y-auto rounded-xl border shadow-2xl"
+      className="fixed z-[200] w-64 max-h-[260px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md"
       style={{
         left,
         top,
@@ -758,15 +765,15 @@ function ModelPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 280);
-  const top = rect.bottom + 6;
+  const left = Math.min(rect.left, window.innerWidth - 300);
+  const top = rect.top - 360 > 0 ? rect.top - 360 : rect.bottom + 6;
 
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label="Select model"
-      className="fixed z-[200] max-h-[400px] w-72 overflow-y-auto rounded-xl border shadow-2xl"
+      className="fixed z-[200] max-h-[350px] w-72 overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md"
       style={{
         left,
         top,

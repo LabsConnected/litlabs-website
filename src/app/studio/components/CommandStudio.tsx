@@ -19,6 +19,7 @@ import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
+import StudioActivityRail from "./StudioActivityRail";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import {
   mapLegacyToolToDestination,
@@ -413,10 +414,10 @@ function CommandStudioContent() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
-  // Studio internal tabs (Work | Preview | Code)
+  // Studio internal tabs (Chat | Code | Preview | Files | Terminal)
   // "Files" (Canvas) tab disabled for v1 — persistence is unfinished.
   const studioTabs: { id: StudioMode; label: string }[] = [
-    { id: "work", label: "Work" },
+    { id: "work", label: "Chat" },
     { id: "preview", label: "Preview" },
     { id: "code", label: "Code" },
   ];
@@ -440,6 +441,7 @@ function CommandStudioContent() {
         style={{
           backgroundColor: "var(--studio-bg)",
           color: "var(--text-primary)",
+          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(155,77,255,0.08), transparent)",
         }}
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
@@ -491,14 +493,24 @@ function CommandStudioContent() {
                           setCreateMode(t.id as CreateMode);
                         }
                       }}
-                      className="rounded-md px-3 py-1.5 text-[11px] font-bold transition"
+                      className="relative rounded-md px-3 py-1.5 text-[11px] font-bold transition-all"
                       style={{
-                        color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                        backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent",
+                        color: isActive ? "var(--text-primary)" : "var(--text-muted)",
+                        backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
                       }}
                       aria-label={t.label}
                     >
                       {t.label}
+                      {isActive && (
+                        <span
+                          className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                          style={{
+                            background: "linear-gradient(90deg, var(--spark-primary), var(--violet-accent))",
+                            boxShadow: "0 0 6px var(--spark-primary)",
+                          }}
+                          aria-hidden
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -654,6 +666,19 @@ function CommandStudioContent() {
               />
             )}
           </main>
+
+          {/* Right Activity Rail — premium three-column layout */}
+          <StudioActivityRail
+            messages={conversation.messages}
+            busy={conversation.busy}
+            activeAgentId={conversation.activeAgentId}
+            projectName={capabilities.projectName}
+            modelLabel={modelLabel}
+            terminalStatus={capabilities.terminalStatus}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch ?? contextLine.branch}
+            onOpenTerminal={handleOpenTerminal}
+          />
         </div>
 
         {/* Mobile bottom nav — 5 destinations */}

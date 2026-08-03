@@ -83,7 +83,7 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     expect(screen.getByText("Chat ready")).toBeTruthy();
   });
 
-  it("Deploy button is disabled (lives in overflow menu, no handler wired)", () => {
+  it("Deploy button is disabled when no project is ready", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
@@ -92,8 +92,7 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
-    // Deploy now lives behind the overflow menu — open it first.
-    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
+    // Deploy is now a visible button in the header (not in overflow menu)
     const deployBtn = screen.getByRole("button", { name: /deploy/i });
     expect(deployBtn).toBeTruthy();
     expect(deployBtn.hasAttribute("disabled")).toBe(true);

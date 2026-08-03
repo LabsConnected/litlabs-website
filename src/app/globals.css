@@ -49,21 +49,29 @@
      Three visible surface depths, LiTT green primary, Spark purple
      for creative mode only, neon reserved for execution/success.
      ============================================================ */
-  --studio-bg: #07080d;
-  --studio-surface: #0d1018;
-  --studio-elevated: #131722;
-  --studio-card: #181d2a;
-  --studio-border: rgba(255, 255, 255, 0.06);
-  --studio-border-strong: rgba(255, 255, 255, 0.1);
-  --litt-primary: #72f238;
-  --litt-primary-strong: #42ff18;
-  --spark-primary: #a970ff;
-  --text-primary: #f4f5f8;
-  --text-secondary: #a5a8b5;
-  --text-muted: #6f7485;
-  --studio-header-h: 46px;
-  --studio-nav-w: 64px;
+  --studio-bg: #08060f;
+  --studio-surface: #0d0916;
+  --studio-elevated: rgba(29, 20, 44, 0.8);
+  --studio-card: rgba(20, 15, 31, 0.72);
+  --studio-border: rgba(155, 77, 255, 0.12);
+  --studio-border-strong: rgba(155, 77, 255, 0.22);
+  --litt-primary: #4dff62;
+  --litt-primary-strong: #2eff4a;
+  --spark-primary: #9b4dff;
+  --spark-primary-strong: #7c3aed;
+  --purple-accent: #9b4dff;
+  --violet-accent: #7c3aed;
+  --warning: #ffcc33;
+  --error: #ff5263;
+  --text-primary: #f5f1fa;
+  --text-secondary: #a29aaf;
+  --text-muted: #70687e;
+  --studio-header-h: 48px;
+  --studio-nav-w: 56px;
+  --studio-rail-w: 300px;
   --studio-composer-max-w: 960px;
+  --studio-glow-purple: 0 0 16px rgba(155, 77, 255, 0.25);
+  --studio-glow-green: 0 0 8px rgba(77, 255, 98, 0.4);
 }
 
 @theme inline {

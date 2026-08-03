@@ -160,8 +160,9 @@ export default function CommandStudioHeader({
       className="flex shrink-0 items-center gap-2 border-b px-2 sm:px-3"
       style={{
         height: "var(--studio-header-h)",
-        backgroundColor: "var(--studio-bg)",
+        backgroundColor: "var(--studio-surface)",
         borderColor: "var(--studio-border)",
+        backdropFilter: "blur(12px)",
       }}
       data-testid="studio-header"
     >
@@ -170,22 +171,29 @@ export default function CommandStudioHeader({
         href="/dashboard"
         className="flex shrink-0 items-center gap-1.5 rounded-md transition-all hover:opacity-80"
         aria-label="Go to dashboard"
-        title="Go to dashboard"
+        title="LiTT Studio — AI Operating System"
       >
         <div
           className="grid h-6 w-6 place-items-center rounded-md"
           style={{
             background: "linear-gradient(135deg, var(--litt-primary), var(--spark-primary))",
+            boxShadow: "var(--studio-glow-purple)",
           }}
           aria-hidden
         >
           <Sparkles size={11} className="text-black" />
         </div>
         <span
-          className="hidden sm:inline text-[11px] font-black uppercase tracking-[0.15em]"
+          className="hidden lg:inline text-[11px] font-black uppercase tracking-[0.15em]"
           style={{ color: "var(--text-primary)" }}
         >
           LiTT Studio
+        </span>
+        <span
+          className="hidden lg:inline text-[8px] font-bold uppercase tracking-[0.2em]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          AI OS
         </span>
       </Link>
 
@@ -364,6 +372,27 @@ export default function CommandStudioHeader({
           </span>
         ) : null}
       </Link>
+
+      {/* Deploy button — primary gradient action, disabled when no project */}
+      <button
+        type="button"
+        disabled={!projectReady}
+        onClick={onPreviewAction}
+        className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{
+          background: projectReady
+            ? "linear-gradient(135deg, var(--spark-primary), var(--violet-accent))"
+            : "var(--studio-surface)",
+          color: projectReady ? "#fff" : "var(--text-muted)",
+          border: "1px solid rgba(155,77,255,0.4)",
+          boxShadow: projectReady ? "var(--studio-glow-purple)" : "none",
+        }}
+        title={projectReady ? "Preview / Deploy project" : "No project to deploy"}
+        aria-label="Deploy"
+      >
+        <Rocket size={11} className="pointer-events-none" />
+        <span className="pointer-events-none">Deploy</span>
+      </button>
 
       <button
         type="button"
