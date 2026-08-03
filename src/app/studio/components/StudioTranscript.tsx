@@ -53,14 +53,14 @@ export default function StudioTranscript({
   messages,
   busy,
   activeAgentId,
-  onRouteTool,
-  onRegenerate,
+  onRouteToolAction,
+  onRegenerateAction,
 }: {
   messages: ChatMessage[];
   busy: boolean;
   activeAgentId: AgentId;
-  onRouteTool?: (tool: StudioTool, command?: string) => void;
-  onRegenerate?: () => void;
+  onRouteToolAction?: (tool: StudioTool, command?: string) => void;
+  onRegenerateAction?: () => void;
 }) {
   const { speakText } = useVoiceSession();
   const ptyUsable = useTerminalStore((s) => s.isUsable());
@@ -82,11 +82,14 @@ export default function StudioTranscript({
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
           const isUser = message.role === "user";
-          if (!isUser && !message.content?.trim() && message.status !== "streaming") {
+          const isStreaming = message.status === "streaming";
+          const hasContent = Boolean(message.content?.trim());
+          if (!isUser && !hasContent && !isStreaming) {
             return null;
           }
           const isFailed = !isUser && message.status === "failed";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
+          const showThinkingPlaceholder = !isUser && isStreaming && !hasContent;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
           const key = message.id || `msg_${index}`;
           return (
@@ -136,7 +139,7 @@ export default function StudioTranscript({
                   <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
                     <button
                       type="button"
-                      onClick={() => onRouteTool?.("terminal", command)}
+                      onClick={() => onRouteToolAction?.("terminal", command)}
                       disabled={!ptyUsable}
                       className="rounded-lg border px-2.5 py-1.5 text-[9px] font-bold transition disabled:cursor-not-allowed disabled:opacity-35"
                       style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.05)", color: "#a3e635" }}
@@ -167,12 +170,24 @@ export default function StudioTranscript({
                       ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
                       : isUser
                         ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
-                        : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
+                        : isStreaming
+                          ? `linear-gradient(135deg, ${agentColor}14, rgba(255,255,255,0.03))`
+                          : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
                     color: isUser ? "#fff" : "var(--text-primary)",
                   }}
+                  aria-busy={showThinkingPlaceholder}
                 >
                   {isUser ? (
                     message.content
+                  ) : showThinkingPlaceholder ? (
+                    <div className="flex min-h-[2.25rem] items-center gap-2 text-[12px] text-white/55">
+                      <span className="flex gap-1" aria-hidden>
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.3s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.15s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)]" />
+                      </span>
+                      <span>LiTT is thinking…</span>
+                    </div>
                   ) : (
                     <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
                       <ReactMarkdown
@@ -215,10 +230,10 @@ export default function StudioTranscript({
                       Read
                     </button>
                   )}
-                  {!isUser && isFailed && onRegenerate && (
+                  {!isUser && isFailed && onRegenerateAction && (
                     <button
                       type="button"
-                      onClick={onRegenerate}
+                      onClick={onRegenerateAction}
                       className="flex items-center gap-1 text-[9px] font-bold transition hover:opacity-80"
                       style={{ color: "#fca5a5" }}
                       title="Retry"
@@ -227,10 +242,10 @@ export default function StudioTranscript({
                       Retry
                     </button>
                   )}
-                  {isLastAssistant && !isFailed && onRegenerate && (
+                  {isLastAssistant && !isFailed && onRegenerateAction && (
                     <button
                       type="button"
-                      onClick={onRegenerate}
+                      onClick={onRegenerateAction}
                       className="flex items-center gap-1 text-[9px] transition hover:opacity-80"
                       style={{ color: "var(--text-muted)" }}
                       title="Regenerate response"
