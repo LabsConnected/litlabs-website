@@ -212,6 +212,13 @@ export function useConnectionSummary() {
         }
       }
 
+      // Allow writes when the terminal is connected (local dev) even if
+      // the server-side workspace hasn't been provisioned. The terminal
+      // PTY can execute file writes, so it's a valid write surface.
+      if (next.terminalExecution === "available" && !next.writeAccess) {
+        next.writeAccess = true;
+      }
+
       setCapabilities(next);
     } catch {
       // leave previous state

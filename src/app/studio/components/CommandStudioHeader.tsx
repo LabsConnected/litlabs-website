@@ -250,7 +250,7 @@ export default function CommandStudioHeader({
           backgroundColor: "var(--studio-surface)",
         }}
         aria-label="Workspace status"
-        aria-expanded={statusOpen}
+        aria-expanded={Boolean(statusOpen)}
         title={capabilities.connectionSummary}
       >
         <span
@@ -429,7 +429,7 @@ export default function CommandStudioHeader({
         className="grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
         aria-label="More actions"
-        aria-expanded={overflowOpen}
+        aria-expanded={Boolean(overflowOpen)}
         title="More"
       >
         <MoreHorizontal size={14} />
@@ -724,7 +724,7 @@ function OverflowMenu({
   return (
     <div
       ref={ref}
-      role="menu"
+      role="dialog"
       aria-label="More actions"
       className="fixed z-[200] w-48 overflow-hidden rounded-xl border shadow-2xl"
       style={{

@@ -190,8 +190,8 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    // Model picker is a button with aria-label "Select model"
-    expect(screen.getByRole("button", { name: /select model/i })).toBeTruthy();
+    // Model picker is a button with aria-label "Select AI model"
+    expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
   });
 
   it("keeps LiTT and Spark visible and switches through the canonical callback", () => {

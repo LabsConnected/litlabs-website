@@ -341,6 +341,8 @@ export default function CommandComposer({
           type="file"
           accept="image/*"
           className="hidden"
+          title="Upload image"
+          aria-label="Upload image attachment"
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);
@@ -360,7 +362,7 @@ export default function CommandComposer({
           }}
           aria-label="Select agent"
           title={agentMeta.displayName}
-          aria-expanded={agentOpen}
+          aria-expanded={Boolean(agentOpen)}
           data-testid="agent-trigger"
         >
           <span
@@ -392,9 +394,9 @@ export default function CommandComposer({
             borderColor: "var(--studio-border-strong)",
             color: "var(--text-secondary)",
           }}
+          aria-label="Select AI model"
+          aria-expanded={Boolean(modelOpen)}
           title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
-          aria-label="Select model"
-          aria-expanded={modelOpen}
           data-testid="model-trigger"
         >
           <span>{selectedModel.icon}</span>
@@ -586,6 +588,8 @@ export default function CommandComposer({
             onChange={(e) => setPendingTranscript(e.target.value)}
             className="w-full resize-none rounded-md bg-black/20 px-2 py-1.5 text-[12px] outline-none"
             style={{ color: "var(--text-primary)", minHeight: "44px" }}
+            title="Edit voice transcript draft"
+            aria-label="Edit voice transcript draft"
             rows={2}
             autoFocus
           />
