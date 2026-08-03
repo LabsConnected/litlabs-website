@@ -5,6 +5,7 @@ export interface LogContext {
   projectId?: string;
   userId?: string;
   agentSlug?: string;
+  agentInstanceId?: string | null;
   provider?: string;
   latencyMs?: number;
   status?: string;

@@ -18,6 +18,7 @@ import {
   Palette,
   Plug,
 } from "lucide-react";
+import { AgentCard } from "./_components/AgentCard";
 
 // --- Types ---
 
@@ -480,19 +481,34 @@ function MarketplaceInner() {
               <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Featured</p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featuredItems.map((item) => (
-                  <MarketplaceCard
-                    key={item.id}
-                    item={item}
-                    installation={installations.get(item.id)}
-                    onInstall={() => installItem(item)}
-                    onUninstall={() => uninstallItem(item)}
-                    onToggleEnabled={() => toggleEnabled(item)}
-                    accentColor={T.accentColor}
-                    borderColor={T.borderColor}
-                    boxBg={T.boxBg}
-                    textMuted={T.textMuted}
-                    headerColor={T.headerColor}
-                  />
+                  item.item_type === "agent" ? (
+                    <AgentCard
+                      key={item.id}
+                      item={item}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                      isSignedIn={isSignedIn}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <MarketplaceCard
+                      key={item.id}
+                      item={item}
+                      installation={installations.get(item.id)}
+                      onInstall={() => installItem(item)}
+                      onUninstall={() => uninstallItem(item)}
+                      onToggleEnabled={() => toggleEnabled(item)}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                    />
+                  )
                 ))}
               </div>
             </div>
@@ -522,19 +538,34 @@ function MarketplaceInner() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {(searchQuery ? filteredItems : nonFeaturedItems).map((item) => (
-                  <MarketplaceCard
-                    key={item.id}
-                    item={item}
-                    installation={installations.get(item.id)}
-                    onInstall={() => installItem(item)}
-                    onUninstall={() => uninstallItem(item)}
-                    onToggleEnabled={() => toggleEnabled(item)}
-                    accentColor={T.accentColor}
-                    borderColor={T.borderColor}
-                    boxBg={T.boxBg}
-                    textMuted={T.textMuted}
-                    headerColor={T.headerColor}
-                  />
+                  item.item_type === "agent" ? (
+                    <AgentCard
+                      key={item.id}
+                      item={item}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                      isSignedIn={isSignedIn}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <MarketplaceCard
+                      key={item.id}
+                      item={item}
+                      installation={installations.get(item.id)}
+                      onInstall={() => installItem(item)}
+                      onUninstall={() => uninstallItem(item)}
+                      onToggleEnabled={() => toggleEnabled(item)}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                    />
+                  )
                 ))}
               </div>
             )}
@@ -798,7 +829,15 @@ const MarketplaceCard = memo(function MarketplaceCard({
 
         {/* Action */}
         <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
-          {isComingSoon ? (
+          {item.item_type === "agent" ? (
+            <Link
+              href={`/marketplace/agents/${item.slug}`}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
+              style={{ background: categoryColor }}
+            >
+              <ArrowRight size={12} /> View Agent
+            </Link>
+          ) : isComingSoon ? (
             <span
               className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
               style={{ background: borderColor + "10", color: textMuted }}

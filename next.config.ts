@@ -19,10 +19,13 @@ const nextConfig: NextConfig = {
   },
 
   experimental: {
+    turbopackFileSystemCacheForBuild: true,
     optimizePackageImports: [
       "@supabase/supabase-js",
       "lucide-react",
       "@clerk/nextjs",
+      "react-markdown",
+      "zustand",
     ],
   },
 

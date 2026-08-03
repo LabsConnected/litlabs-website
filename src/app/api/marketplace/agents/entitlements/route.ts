@@ -15,7 +15,7 @@ import { getAgentAuthorization } from "@/lib/agent-entitlements";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

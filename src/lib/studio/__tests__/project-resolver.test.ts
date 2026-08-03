@@ -14,6 +14,7 @@ function makeCtx(overrides: Partial<ResolvedStudioContext> = {}): ResolvedStudio
     repositoryName: "litlab",
     repositoryDefaultBranch: "main",
     activeAgentSlug: "litt",
+    agentInstanceId: null,
     capabilities: {
       repositoryConnected: true,
       repositoryName: "litbi/litlab",

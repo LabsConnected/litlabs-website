@@ -19,10 +19,10 @@ import { withRateLimit } from "@/lib/rate-limiter";
 export const runtime = "nodejs";
 
 async function handler(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

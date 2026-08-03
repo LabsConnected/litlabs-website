@@ -171,6 +171,59 @@ export async function POST(req: NextRequest) {
           if (rpcError) {
             throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
           }
+
+          // ── Auto-provision the private agent instance ──
+          // After creating the entitlement, create or activate the
+          // user_agents row so the buyer can immediately open the agent
+          // in Studio. This is idempotent — if the instance already
+          // exists (e.g., from a previous install), it's reactivated.
+          const { data: agentUser } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", clerkId)
+            .maybeSingle();
+
+          if (agentUser) {
+            // Check if an instance already exists for this user + agent.
+            const { data: existingInstance } = await sb
+              .from("user_agents")
+              .select("id")
+              .eq("user_id", agentUser.id)
+              .eq("agent_id", agentId)
+              .maybeSingle();
+
+            if (existingInstance) {
+              // Reactivate the existing instance and update the version.
+              await sb
+                .from("user_agents")
+                .update({
+                  is_active: true,
+                  status: "active",
+                  agent_version_id: agentVersionId,
+                  last_active_at: new Date().toISOString(),
+                })
+                .eq("id", existingInstance.id);
+            } else {
+              // Create a new private agent instance.
+              const { data: agentTemplate } = await sb
+                .from("agents")
+                .select("display_name")
+                .eq("id", agentId)
+                .maybeSingle();
+
+              await sb.from("user_agents").insert({
+                user_id: agentUser.id,
+                agent_id: agentId,
+                agent_version_id: agentVersionId,
+                name: agentTemplate?.display_name || "Agent",
+                is_active: true,
+                status: "active",
+                approval_mode: "supervised",
+                enabled_tools: [],
+              });
+            }
+          }
+
           break;
         }
 

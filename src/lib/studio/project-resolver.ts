@@ -135,6 +135,7 @@ export async function buildStudioContext(
     repositoryName: project.repositoryName,
     repositoryDefaultBranch: project.repositoryDefaultBranch,
     activeAgentSlug: agentSlug,
+    agentInstanceId: null,
     capabilities: project.capabilities,
   };
 }

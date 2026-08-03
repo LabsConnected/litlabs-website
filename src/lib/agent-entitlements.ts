@@ -593,9 +593,35 @@ export async function installAgent(
   const internalUserId = await resolveInternalUserId(clerkId);
   if (!internalUserId) return { success: false, error: "user_not_found" };
 
+  // Load the agent template and its latest published version to populate
+  // the private instance with the correct version and display name.
+  const { data: agentTemplate } = await supabaseAdmin
+    .from("agents")
+    .select("id, display_name, slug")
+    .eq("id", agentId)
+    .maybeSingle();
+
+  const { data: latestVersion } = await supabaseAdmin
+    .from("agent_versions")
+    .select("id")
+    .eq("agent_id", agentId)
+    .eq("version_status", "published")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const { data: installation, error } = await supabaseAdmin
     .from("user_agents")
-    .insert({ user_id: internalUserId, agent_id: agentId, is_active: true })
+    .insert({
+      user_id: internalUserId,
+      agent_id: agentId,
+      agent_version_id: latestVersion?.id ?? null,
+      name: agentTemplate?.display_name || "Agent",
+      is_active: true,
+      status: "active",
+      approval_mode: "supervised",
+      enabled_tools: [],
+    })
     .select("id")
     .single();
 

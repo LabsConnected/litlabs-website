@@ -254,7 +254,9 @@ describe("marketplace/agents/[id]/checkout", () => {
     const res = await callCheckout("agent-uuid-001");
     expect(res.status).toBe(200);
     const body = parseBody(lastFetchBody);
-    expect(body.success_url).toContain("https://litlabs.net/marketplace");
+    // Success URL redirects to Studio with the agent slug so the buyer
+    // can immediately open the purchased agent instance.
+    expect(body.success_url).toContain("https://litlabs.net/studio");
     expect(body.cancel_url).toContain("https://litlabs.net/marketplace");
   });
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import Link from "next/link";
 import { Check, ArrowRight, Sparkles, Loader2, Ban, Clock } from "lucide-react";
+import { useAuthedFetch } from "@/lib/fetch-auth";
 
 type AgentState =
   | "buy"
@@ -69,6 +70,7 @@ function AgentCardInner({
 }: AgentCardProps) {
   const [state, setState] = useState<AgentState>("loading");
   const [busy, setBusy] = useState(false);
+  const authedFetch = useAuthedFetch();
 
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
   const agentId = item.agent_id ?? null;
@@ -79,7 +81,7 @@ function AgentCardInner({
       return;
     }
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/state`);
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/state`);
       if (res.ok) {
         const data = await res.json();
         setState(data.state as AgentState);
@@ -89,7 +91,7 @@ function AgentCardInner({
     } catch {
       setState(item.price_cents === 0 ? "install" : "buy");
     }
-  }, [agentId, isSignedIn, item.price_cents]);
+  }, [agentId, isSignedIn, item.price_cents, authedFetch]);
 
   useEffect(() => {
     loadState();
@@ -100,30 +102,30 @@ function AgentCardInner({
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, { method: "POST" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok) { setState("open"); onToast(`${item.name} installed`, "success"); }
       else { onToast(data.error || "Install failed", "error"); }
     } catch { onToast("Network error during install", "error"); }
     finally { setBusy(false); }
-  }, [agentId, isSignedIn, item.name, onSignInRequired, onToast]);
+  }, [agentId, isSignedIn, item.name, onSignInRequired, onToast, authedFetch]);
 
   const handleUninstall = useCallback(async () => {
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
       if (res.ok) { setState("install"); onToast(`${item.name} removed`, "info"); }
       else { const data = await res.json().catch(() => ({})); onToast(data.error || "Uninstall failed", "error"); }
     } catch { onToast("Network error", "error"); }
     finally { setBusy(false); }
-  }, [agentId, item.name, onToast]);
+  }, [agentId, item.name, onToast, authedFetch]);
 
   const handleToggle = useCallback(async () => {
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, {
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: state === "open" ? "disable" : "enable" }),
@@ -135,19 +137,19 @@ function AgentCardInner({
       } else { onToast(data.error || "Failed to update", "error"); }
     } catch { onToast("Network error", "error"); }
     finally { setBusy(false); }
-  }, [agentId, state, item.name, onToast]);
+  }, [agentId, state, item.name, onToast, authedFetch]);
 
   const handleBuy = useCallback(async () => {
     if (!isSignedIn) { onSignInRequired(); return; }
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/checkout`, { method: "POST" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/checkout`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.url) { window.location.href = data.url; }
       else { onToast(data.error || "Checkout failed", "error"); setBusy(false); }
     } catch { onToast("Network error", "error"); setBusy(false); }
-  }, [agentId, isSignedIn, onSignInRequired, onToast]);
+  }, [agentId, isSignedIn, onSignInRequired, onToast, authedFetch]);
 
   return (
     <article

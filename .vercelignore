@@ -18,6 +18,14 @@ terminal-server/dist/
 
 # Testing
 /coverage
+/tests/
+/test-results/
+/playwright-report/
+/supabase/tests/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
 
 # Env / secrets (NEVER upload)
 .env
@@ -121,3 +129,8 @@ bun.lock
 .backup/
 .quadcodeai/
 .netlify
+
+# Non-production directories
+/.github/
+/supabase/upgrade-validation/
+/diagnostics/

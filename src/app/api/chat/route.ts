@@ -20,7 +20,7 @@ async function handler(req: NextRequest) {
     const agentSlug = body.agent || body.agentSlug;
     if ((!from || !to) && message && agentSlug) {
       // This path runs the model for the user — require auth + entitlement.
-      const { clerkId } = await auth();
+      const { clerkId } = await auth(req);
       if (!clerkId) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }

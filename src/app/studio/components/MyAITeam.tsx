@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useStudioAgentStore, STUDIO_AGENTS, type AgentId } from "../stores/useStudioAgentStore";
 import { useUserPlan } from "../hooks/useUserPlan";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { Loader2, Lock, ArrowRight } from "lucide-react";
+import { useAuthedFetch } from "@/lib/fetch-auth";
+import { Loader2, Lock, ArrowRight, Pause, Play, Settings, Trash2 } from "lucide-react";
 
 interface InstalledAgent {
   id: string;
   slug: string;
   name: string;
   isActive: boolean;
+  status: string;
+  lastActiveAt: string | null;
   installedAt: string;
 }
 
@@ -26,6 +29,8 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
   const { plan, loading: planLoading } = useUserPlan();
   const [installed, setInstalled] = useState<InstalledAgent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const authedFetch = useAuthedFetch();
 
   const hasAccess = useCallback(
     (minimumPlan: string) => {
@@ -46,7 +51,7 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
       setLoading(false);
       return;
     }
-    fetch("/api/user-agents")
+    authedFetch("/api/user-agents")
       .then((r) => r.json().catch(() => ({ agents: [] })))
       .then((data) => {
         const agents = (data.agents || []).map((a: Record<string, unknown>) => ({
@@ -54,13 +59,15 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
           slug: (a.agent as Record<string, unknown>)?.slug ?? a.slug ?? "",
           name: (a.agent as Record<string, unknown>)?.display_name ?? a.name ?? "",
           isActive: a.is_active as boolean,
+          status: (a.status as string) ?? "active",
+          lastActiveAt: (a.last_active_at as string | null) ?? null,
           installedAt: a.created_at ?? a.installed_at ?? "",
         }));
         setInstalled(agents);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [isSignedIn]);
+  }, [isSignedIn, authedFetch]);
 
   const handleOpen = useCallback(
     (agentId: AgentId) => {
@@ -68,6 +75,53 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
       onOpenAgent?.(agentId);
     },
     [setActiveAgent, onOpenAgent],
+  );
+
+  const handleTogglePause = useCallback(
+    async (agentInstanceId: string, currentStatus: string) => {
+      setActionLoading(agentInstanceId);
+      try {
+        const action = currentStatus === "active" ? "disable" : "enable";
+        const res = await authedFetch(`/api/marketplace/agents/${agentInstanceId}/install`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        if (res.ok) {
+          setInstalled((prev) =>
+            prev.map((a) =>
+              a.id === agentInstanceId
+                ? { ...a, status: action === "enable" ? "active" : "paused", isActive: action === "enable" }
+                : a,
+            ),
+          );
+        }
+      } catch {
+        // silent
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [authedFetch],
+  );
+
+  const handleRemove = useCallback(
+    async (agentInstanceId: string) => {
+      setActionLoading(agentInstanceId);
+      try {
+        const res = await authedFetch(`/api/marketplace/agents/${agentInstanceId}/install`, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          setInstalled((prev) => prev.filter((a) => a.id !== agentInstanceId));
+        }
+      } catch {
+        // silent
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [authedFetch],
   );
 
   const installedSlugs = new Set(installed.map((a) => a.slug));
@@ -169,15 +223,46 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                   )}
 
                   {/* Installed marketplace agent controls */}
-                  {unlocked && isInstalled && !isActive && (
+                  {unlocked && isInstalled && installedAgent && (
                     <div className="flex items-center gap-1 border-t border-white/5 px-3 py-1.5">
-                      <span className="text-[9px] text-white/30">Installed</span>
-                      <Link
-                        href={`/marketplace/agents/${meta.id}`}
-                        className="ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-white/60"
-                      >
-                        Settings
-                      </Link>
+                      {installedAgent.lastActiveAt && (
+                        <span className="text-[9px] text-white/30">
+                          Active {formatLastActive(installedAgent.lastActiveAt)}
+                        </span>
+                      )}
+                      <div className="ml-auto flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={actionLoading === installedAgent.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTogglePause(installedAgent.id, installedAgent.status);
+                          }}
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-white/60 disabled:opacity-30"
+                          title={installedAgent.status === "active" ? "Pause" : "Resume"}
+                        >
+                          {installedAgent.status === "active" ? <Pause size={10} /> : <Play size={10} />}
+                        </button>
+                        <Link
+                          href={`/marketplace/agents/${meta.id}`}
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-white/60"
+                          title="Settings"
+                        >
+                          <Settings size={10} />
+                        </Link>
+                        <button
+                          type="button"
+                          disabled={actionLoading === installedAgent.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemove(installedAgent.id);
+                          }}
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold text-white/40 transition hover:text-red-400 disabled:opacity-30"
+                          title="Remove"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -210,4 +295,17 @@ function planLabel(plan: string): string {
     case "founder": return "Founding Member";
     default: return plan;
   }
+}
+
+function formatLastActive(iso: string): string {
+  const date = new Date(iso);
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return date.toLocaleDateString();
 }

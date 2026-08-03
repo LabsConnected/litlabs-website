@@ -1,4 +1,5 @@
 import { auth as clerkAuth } from "@clerk/nextjs/server";
+import type { NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
 
 export interface AuthResult {
@@ -33,8 +34,14 @@ function isTestAuthDisabled(): boolean {
  * decide whether to accept that.
  *
  * ALLOW_ANONYMOUS_DEV is hard-blocked in production via isAnonymousDevAllowed().
+ *
+ * @param req — Optional NextRequest. When provided, the helper first tries
+ *   the standard Clerk session (which works for browser cookie auth). If that
+ *   fails, it falls back to extracting a Bearer token from the Authorization
+ *   header. This fixes the "signed in on frontend but 401 on API" failure that
+ *   occurs when marketplace fetch calls don't send cookies.
  */
-export async function auth(): Promise<AuthResult> {
+export async function auth(req?: NextRequest): Promise<AuthResult> {
   if (!isClerkConfigured() || isTestAuthDisabled()) {
     if (isAnonymousDevAllowed()) {
       return { userId: "anonymous-dev", clerkId: null };
@@ -42,10 +49,31 @@ export async function auth(): Promise<AuthResult> {
     return { userId: null, clerkId: null };
   }
 
-  const { userId: clerkId } = await clerkAuth();
+  // Try standard Clerk session auth (uses AsyncLocalStorage, no req needed).
+  const session = await clerkAuth();
+  const clerkId = (session as { userId?: string | null }).userId ?? null;
 
   if (clerkId) {
     return { userId: clerkId, clerkId };
+  }
+
+  // Bearer-token fallback for fetch calls that don't send cookies.
+  if (req) {
+    const authHeader = req.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      try {
+        const { verifyToken } = await import("@clerk/nextjs/server");
+        const claims = await verifyToken(token, {
+          secretKey: process.env.CLERK_SECRET_KEY,
+        });
+        if (claims.sub) {
+          return { userId: claims.sub, clerkId: claims.sub };
+        }
+      } catch {
+        // Invalid token — fall through to anonymous/dev check.
+      }
+    }
   }
 
   if (isAnonymousDevAllowed()) {
@@ -54,3 +82,4 @@ export async function auth(): Promise<AuthResult> {
 
   return { userId: null, clerkId: null };
 }
+

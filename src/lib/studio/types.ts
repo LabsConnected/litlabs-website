@@ -30,6 +30,8 @@ export interface Conversation {
   projectId: string;
   title: string | null;
   activeAgentSlug: AgentSlug;
+  /** Private agent instance ID (user_agents.id) for marketplace agents. */
+  agentInstanceId: string | null;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +45,8 @@ export interface ConversationMessage {
   projectId: string;
   role: MessageRole;
   agentSlug: AgentSlug | null;
+  /** Private agent instance ID that produced this message (if marketplace agent). */
+  agentInstanceId: string | null;
   content: string;
   status: MessageStatus;
   parentMessageId: string | null;
@@ -63,6 +67,7 @@ export interface ResolvedStudioContext {
   repositoryName: string | null;
   repositoryDefaultBranch: string | null;
   activeAgentSlug: AgentSlug;
+  agentInstanceId: string | null;
   capabilities: StudioCapabilities;
 }
 
@@ -88,6 +93,8 @@ export interface StudioChatRequest {
   clientRequestId: string;
   expectedRevision: number;
   requestedAgentSlug?: AgentSlug;
+  /** Private agent instance ID for marketplace agents. */
+  agentInstanceId?: string;
 }
 
 export interface ApiError {

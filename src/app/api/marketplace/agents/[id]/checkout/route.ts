@@ -73,7 +73,7 @@ async function handler(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   const { id: agentId } = await ctx.params;
@@ -189,7 +189,11 @@ async function handler(
   params.append("mode", "payment");
   params.append("line_items[0][price]", version.stripe_price_id);
   params.append("line_items[0][quantity]", "1");
-  params.append("success_url", `${appUrl}/marketplace?purchased=${agent.slug}`);
+  // After successful payment, the webhook creates the entitlement and
+  // auto-provisions the user_agents instance. The success URL sends the
+  // buyer to Studio with the agent slug — the Studio client will look up
+  // the instance ID from the user's installed agents.
+  params.append("success_url", `${appUrl}/studio?agent=${agent.slug}&purchase=success`);
   params.append("cancel_url", `${appUrl}/marketplace?canceled=true`);
 
   params.append("metadata[checkout_version]", MARKETPLACE_CHECKOUT_VERSION);

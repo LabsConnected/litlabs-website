@@ -17,6 +17,9 @@ import type { AgentSlug } from "@/lib/studio/types";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
+import { parseAgentSelection } from "@/lib/agent-selection";
+import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
+import { startAgentRun, completeAgentRun, estimateCredits } from "@/lib/agent-billing";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,7 +47,7 @@ const HISTORY_LIMIT = 12;
  * 11. Returns canonical IDs and revision
  */
 async function postHandler(req: NextRequest, routeCtx: RouteParams) {
-  const { userId } = await auth();
+  const { userId, clerkId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -58,6 +61,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const clientRequestId = body.clientRequestId;
   const expectedRevision = body.expectedRevision;
   const requestedAgentSlug = body.requestedAgentSlug;
+  const agentInstanceId = body.agentInstanceId;
 
   if (typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -96,13 +100,34 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
   }
 
-  // 3. Resolve agent
-  const agentSlug: AgentSlug = requestedAgentSlug && isValidAgentSlug(String(requestedAgentSlug))
-    ? (requestedAgentSlug as AgentSlug)
-    : conversation.activeAgentSlug;
-  const agent = resolveAgent(agentSlug);
-  if (!agent) {
-    return NextResponse.json({ error: "Unsupported agent" }, { status: 400 });
+  // 3. Resolve agent — either builtin slug or marketplace instance
+  let agentSlug: AgentSlug = conversation.activeAgentSlug;
+  let runtimeAgent: RuntimeAgent | null = null;
+
+  if (agentInstanceId && clerkId) {
+    // Marketplace agent instance — resolve via the runtime resolver
+    const selection = parseAgentSelection(agentInstanceId);
+    if (selection) {
+      const result = await resolveRuntimeAgent({ clerkId, selection });
+      if (!result.ok || !result.agent) {
+        return NextResponse.json(
+          { error: result.error || "Agent access denied" },
+          { status: result.status || 403 },
+        );
+      }
+      runtimeAgent = result.agent;
+      // Use the agent template slug for memory/capability routing
+      agentSlug = (result.agent.agentId ? "litt" : "litt") as AgentSlug; // fallback for type compat
+    }
+  } else {
+    // Builtin agent
+    if (requestedAgentSlug && isValidAgentSlug(String(requestedAgentSlug))) {
+      agentSlug = requestedAgentSlug as AgentSlug;
+    }
+    const agent = resolveAgent(agentSlug);
+    if (!agent) {
+      return NextResponse.json({ error: "Unsupported agent" }, { status: 400 });
+    }
   }
 
   // 4. Insert user message (idempotent)
@@ -164,6 +189,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // 8. Recall project-scoped memories
   const memories = await recallMemories(message, userId, conversation.projectId, {
     agentSlug,
+    agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+    memoryNamespace: runtimeAgent?.memoryNamespace,
     limit: 5,
   });
   const memoryContext = formatMemoryContext(memories);
@@ -198,18 +225,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const translated = translateCapabilities(rawCaps);
 
   const systemPrompt = [
-    kernelSystemPrompt,
+    // Use the runtime agent's version prompt for marketplace agents, or the
+    // kernel system prompt for builtin agents.
+    runtimeAgent?.systemPrompt || kernelSystemPrompt,
     projectBlock,
     translated.contextBlock,
     memoryContext,
   ].filter(Boolean).join("\n");
 
   // 10. Build the full prompt — current user message appears exactly once
+  const agentDisplayName = runtimeAgent?.displayName || resolveAgent(agentSlug)?.displayName || "Agent";
   const transcript = history
     .map((entry) =>
       entry.role === "user"
         ? `User: ${entry.content}`
-        : `${agent.displayName}: ${entry.content}`,
+        : `${agentDisplayName}: ${entry.content}`,
     )
     .join("\n");
 
@@ -219,7 +249,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
     `User: ${message}`,
     "",
-    `${agent.displayName}:`,
+    `${agentDisplayName}:`,
   ]
     .filter((line) => line !== undefined)
     .join("\n");
@@ -231,6 +261,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     projectId: conversation.projectId,
     role: "assistant",
     agentSlug,
+    agentInstanceId: runtimeAgent?.agentInstanceId || null,
     content: "",
     status: "streaming",
     parentMessageId: userMessage.id,
@@ -238,6 +269,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
   if (!assistantMessage) {
     return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
+  }
+
+  // 11.5. Start an agent_run record for marketplace agents (for billing audit)
+  let agentRunId: string | null = null;
+  if (runtimeAgent?.agentInstanceId && clerkId) {
+    const runResult = await startAgentRun({
+      clerkId,
+      agentInstanceId: runtimeAgent.agentInstanceId,
+      agentId: runtimeAgent.agentId,
+      agentVersionId: runtimeAgent.agentVersionId,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      idempotencyKey: clientRequestId,
+      model: runtimeAgent.model,
+    });
+    agentRunId = runResult.runId;
   }
 
   // 12. Call the LLM provider
@@ -263,15 +310,35 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     // 13. Persist the assistant response
     await updateMessageStatus(assistantMessage.id, userId, "completed", r.text);
 
+    // 13.5. Complete the agent_run and charge credits (marketplace agents only)
+    if (agentRunId) {
+      const credits = runtimeAgent
+        ? estimateCredits(
+            Math.ceil(prompt.length / 4), // rough token estimate
+            Math.ceil(r.text.length / 4),
+            1, // per 1k tokens
+            1, // per run
+          )
+        : 0;
+      void completeAgentRun(agentRunId, {
+        inputTokens: Math.ceil(prompt.length / 4),
+        outputTokens: Math.ceil(r.text.length / 4),
+        creditsCharged: credits,
+        status: "completed",
+      });
+    }
+
     // 14. Revision was already incremented atomically by the RPC at step 2
 
     // 15. Persist memory (project-scoped, non-blocking)
     void persistMemory(
-      `User: ${message}\n${agent.displayName}: ${r.text}`,
+      `User: ${message}\n${agentDisplayName}: ${r.text}`,
       userId,
       conversation.projectId,
       {
         agentSlug,
+        agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+        memoryNamespace: runtimeAgent?.memoryNamespace,
         conversationId: conversation.id,
         memoryType: "conversation_summary",
       },
@@ -282,6 +349,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       projectId: conversation.projectId,
       userId,
       agentSlug,
+      agentInstanceId: runtimeAgent?.agentInstanceId || null,
       provider: r.provider,
       latencyMs: r.latencyMs,
       revisionBefore: conversation.revision,
@@ -304,6 +372,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   } catch (err) {
     // Mark assistant message as failed
     await updateMessageStatus(assistantMessage.id, userId, "failed");
+
+    // Mark the agent_run as failed
+    if (agentRunId) {
+      void completeAgentRun(agentRunId, {
+        inputTokens: 0,
+        outputTokens: 0,
+        creditsCharged: 0,
+        status: "failed",
+        error: err instanceof Error ? err.message : "LLM provider unavailable",
+      });
+    }
 
     const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
     studioLog("message:failed", {

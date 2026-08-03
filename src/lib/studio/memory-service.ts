@@ -64,14 +64,20 @@ export async function recallMemories(
   projectId: string,
   options: {
     agentSlug?: AgentSlug;
+    agentInstanceId?: string;
+    memoryNamespace?: string;
     conversationId?: string;
     limit?: number;
   } = {},
 ): Promise<MemoryRecord[]> {
   const limit = options.limit ?? 5;
-  const agentFilter = options.agentSlug
-    ? supabaseAdmin.from("memories").select("*").eq("owner_id", ownerId).eq("project_id", projectId).eq("agent_slug", options.agentSlug)
-    : supabaseAdmin.from("memories").select("*").eq("owner_id", ownerId).eq("project_id", projectId);
+  let agentFilter = supabaseAdmin.from("memories").select("*").eq("owner_id", ownerId).eq("project_id", projectId);
+  if (options.agentSlug) {
+    agentFilter = agentFilter.eq("agent_slug", options.agentSlug);
+  }
+  if (options.memoryNamespace) {
+    agentFilter = agentFilter.eq("memory_namespace", options.memoryNamespace);
+  }
 
   // Try Supermemory first for semantic search
   if (hasSupermemory()) {
@@ -156,6 +162,8 @@ export async function persistMemory(
   projectId: string,
   options: {
     agentSlug?: AgentSlug;
+    agentInstanceId?: string;
+    memoryNamespace?: string;
     conversationId?: string;
     memoryType?: MemoryType;
     metadata?: Record<string, unknown>;
@@ -173,6 +181,8 @@ export async function persistMemory(
   }
 
   const agentSlug = options.agentSlug ?? null;
+  const agentInstanceId = options.agentInstanceId ?? null;
+  const memoryNamespace = options.memoryNamespace ?? null;
   const memoryType = options.memoryType ?? "agent_note";
   const dedupeKey = normalizeDedupeKey(content);
   const metadata = options.metadata ?? {};
@@ -187,6 +197,8 @@ export async function persistMemory(
           project_id: projectId,
           conversation_id: options.conversationId ?? null,
           agent_slug: agentSlug,
+          agent_instance_id: agentInstanceId,
+          memory_namespace: memoryNamespace,
           memory_type: memoryType,
           dedupe_key: dedupeKey,
           content,
@@ -209,6 +221,8 @@ export async function persistMemory(
           project_id: projectId,
           conversation_id: options.conversationId ?? null,
           agent_slug: agentSlug,
+          agent_instance_id: agentInstanceId,
+          memory_namespace: memoryNamespace,
           memory_type: memoryType,
           dedupe_key: dedupeKey,
           content,
