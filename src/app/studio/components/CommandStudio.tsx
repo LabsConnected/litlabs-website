@@ -136,8 +136,10 @@ export default function CommandStudio() {
 
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(!!initial.openInspector);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
+  const [inspectorWidth, setInspectorWidth] = useState(320); // pixels
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
+  const [drawerHeight, setDrawerHeight] = useState(240); // pixels
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
@@ -476,21 +478,25 @@ export default function CommandStudio() {
                 )}
               </div>
 
-              {/* Right inspector — collapsed by default */}
+              {/* Right inspector — collapsed by default, width resizable */}
               <StudioInspector
                 open={inspectorOpen}
                 onToggle={() => setInspectorOpen((v) => !v)}
                 activeTab={inspectorTab}
                 onTabChange={setInspectorTab}
+                width={inspectorWidth}
+                onWidthChange={setInspectorWidth}
               />
             </div>
 
-            {/* Bottom drawer — collapsed by default, sits above composer */}
+            {/* Bottom drawer — collapsed by default, sits above composer, height resizable */}
             <StudioDrawer
               open={drawerOpen}
               onToggle={() => setDrawerOpen((v) => !v)}
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
+              height={drawerHeight}
+              onHeightChange={setDrawerHeight}
             >
               {drawerTab === "terminal" ? <StudioTerminalDrawer projectId={capabilities.projectId} /> : null}
             </StudioDrawer>

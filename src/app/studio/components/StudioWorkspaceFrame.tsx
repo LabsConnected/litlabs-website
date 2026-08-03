@@ -47,13 +47,37 @@ export function StudioInspector({
   activeTab,
   onTabChange,
   children,
+  width = 320,
+  onWidthChange,
 }: {
   open: boolean;
   onToggle: () => void;
   activeTab: InspectorTab;
   onTabChange: (t: InspectorTab) => void;
   children?: React.ReactNode;
+  width?: number;
+  onWidthChange?: (w: number) => void;
 }) {
+  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - startX;
+      const newWidth = Math.max(240, Math.min(600, startWidth - delta));
+      onWidthChange?.(newWidth);
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+    
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
   return (
     <>
       {/* Collapse/expand handle — always visible on desktop */}
@@ -78,9 +102,17 @@ export function StudioInspector({
           style={{
             backgroundColor: "var(--studio-surface)",
             borderColor: "var(--studio-border)",
-            width: "min(320px, 30vw)",
+            width: `${width}px`,
           }}
         >
+          {/* Resize handle — draggable left edge */}
+          <div
+            onMouseDown={handleResizeStart}
+            className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-litt-primary/30 transition"
+            style={{ backgroundColor: "transparent" }}
+            aria-label="Resize inspector width"
+            title="Drag to resize"
+          />
           <div
             className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
             style={{ borderColor: "var(--studio-border)" }}
@@ -125,12 +157,16 @@ export function StudioDrawer({
   activeTab,
   onTabChange,
   children,
+  height = 240,
+  onHeightChange,
 }: {
   open: boolean;
   onToggle: () => void;
   activeTab: DrawerTab;
   onTabChange: (t: DrawerTab) => void;
   children?: React.ReactNode;
+  height?: number;
+  onHeightChange?: (h: number) => void;
 }) {
   // Lock body scroll when the drawer is open on mobile so the page
   // doesn't scroll behind it. Drawer never covers the composer — it
@@ -144,17 +180,45 @@ export function StudioDrawer({
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
+  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = height;
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientY - startY;
+      const newHeight = Math.max(120, Math.min(500, startHeight - delta));
+      onHeightChange?.(newHeight);
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+    
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
   return (
     <>
-      {/* Toggle handle — sits at the bottom edge above the composer */}
+      {/* Toggle handle — sits at the bottom edge above the composer, height resizable */}
       <div
-        className="flex shrink-0 items-center justify-center border-t"
+        className="flex shrink-0 items-center justify-center border-t relative group"
         style={{
           height: 32,
           backgroundColor: "var(--studio-surface)",
           borderColor: "var(--studio-border)",
         }}
       >
+        {/* Resize handle — draggable top edge */}
+        <div
+          onMouseDown={handleResizeStart}
+          className="absolute top-0 left-0 right-0 h-1 cursor-row-resize opacity-0 group-hover:opacity-100 transition"
+          style={{ backgroundColor: "var(--litt-primary)" }}
+          aria-label="Resize drawer height"
+          title="Drag to resize"
+        />
         <button
           type="button"
           onClick={onToggle}
@@ -174,7 +238,7 @@ export function StudioDrawer({
           style={{
             backgroundColor: "var(--studio-surface)",
             borderColor: "var(--studio-border)",
-            height: "min(240px, 30dvh)",
+            height: `${height}px`,
           }}
         >
           <div className="flex shrink-0 items-center gap-0.5 border-b px-1.5" style={{ borderColor: "var(--studio-border)" }}>
