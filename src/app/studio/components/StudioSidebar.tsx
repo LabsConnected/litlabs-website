@@ -44,6 +44,7 @@ export type StudioTool =
   | "image"
   | "video"
   | "audio"
+  | "music"
   | "build"
   | "code"
   | "agents"

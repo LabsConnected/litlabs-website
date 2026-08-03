@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -14,14 +14,41 @@ import {
 } from "../stores/useStudioAgentStore";
 import type { StudioTool } from "./StudioSidebar";
 
-/**
- * StudioTranscript — the single visible conversation transcript for
- * the Command Studio. Replaces the hidden opacity-0 ChatTool.
- *
- * Renders compact right-aligned user messages, full-width LiTT
- * responses, agent avatar + name, readable 13px response text, code
- * blocks, action chips, and a busy indicator. No invisible controls.
- */
+function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; color: string; streaming: boolean }) {
+  const [open, setOpen] = useState(streaming);
+  return (
+    <div className="mb-1 w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.14em] transition hover:opacity-80"
+        style={{ color: `${color}cc` }}
+        aria-expanded={open}
+      >
+        <span
+          className="inline-block h-0 w-0 border-y-[3px] border-l-[5px] border-y-transparent transition-transform"
+          style={{ borderLeftColor: color, transform: open ? "rotate(90deg)" : "none" }}
+        />
+        {streaming ? "Thinking…" : "Thought process"}
+      </button>
+      {open && (
+        <div
+          className="mt-1 max-h-60 overflow-y-auto rounded-xl border px-3 py-2 text-[11px] leading-5 italic"
+          style={{
+            borderColor: `${color}1f`,
+            background: `${color}08`,
+            color: "var(--text-muted)",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
+          }}
+        >
+          {reasoning}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StudioTranscript({
   messages,
   busy,
@@ -41,7 +68,6 @@ export default function StudioTranscript({
   const agentColor = agentMeta.color;
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages / busy changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -56,18 +82,23 @@ export default function StudioTranscript({
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
           const isUser = message.role === "user";
+          if (!isUser && !message.content?.trim() && message.status !== "streaming") {
+            return null;
+          }
+          const isFailed = !isUser && message.status === "failed";
           const isLastAssistant = !isUser && index === messages.length - 1 && !busy;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
+          const key = message.id || `msg_${index}`;
           return (
             <div
-              key={index}
+              key={key}
               className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
             >
               {isUser ? (
                 <UserMessageAvatar size={30} />
               ) : (
                 <div
-                  className="grid place-items-center rounded-full border"
+                  className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
                   style={{
                     width: 32,
                     height: 32,
@@ -75,9 +106,12 @@ export default function StudioTranscript({
                     backgroundColor: `${agentColor}10`,
                   }}
                 >
-                  <span className="text-[13px] font-black" style={{ color: agentColor }}>
-                    {agentMeta.displayName[0]}
-                  </span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
+                    alt={agentMeta.displayName}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
               )}
               <div
@@ -113,15 +147,26 @@ export default function StudioTranscript({
                     {!ptyUsable && <span className="text-[8px]" style={{ color: "#e3b341" }}>Terminal not connected</span>}
                   </div>
                 )}
+                {!isUser && message.reasoning && message.reasoning.trim() && (
+                  <ReasoningBlock
+                    reasoning={message.reasoning}
+                    color={agentColor}
+                    streaming={busy && index === messages.length - 1}
+                  />
+                )}
                 <div
                   className="relative min-w-0 max-w-full overflow-hidden rounded-2xl border px-4 py-3 text-[13px] leading-6"
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
-                    borderColor: isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
-                    background: isUser
-                      ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
-                      : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
+                    borderColor: isFailed
+                      ? "rgba(239,68,68,0.3)"
+                      : isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
+                    background: isFailed
+                      ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
+                      : isUser
+                        ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
+                        : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
                     color: isUser ? "#fff" : "var(--text-primary)",
                   }}
                 >
@@ -157,7 +202,7 @@ export default function StudioTranscript({
                   <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                   </span>
-                  {!isUser && (
+                  {!isUser && !isFailed && message.content?.trim() && (
                     <button
                       type="button"
                       onClick={() => speakText(message.content)}
@@ -169,7 +214,19 @@ export default function StudioTranscript({
                       Read
                     </button>
                   )}
-                  {isLastAssistant && onRegenerate && (
+                  {!isUser && isFailed && onRegenerate && (
+                    <button
+                      type="button"
+                      onClick={onRegenerate}
+                      className="flex items-center gap-1 text-[9px] font-bold transition hover:opacity-80"
+                      style={{ color: "#fca5a5" }}
+                      title="Retry"
+                      aria-label="Retry"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  {isLastAssistant && !isFailed && onRegenerate && (
                     <button
                       type="button"
                       onClick={onRegenerate}
@@ -186,13 +243,18 @@ export default function StudioTranscript({
             </div>
           );
         })}
-        {busy && (
+        {busy && !messages.some((m) => m.status === "streaming") && (
           <div className="flex gap-3">
             <div
-              className="grid place-items-center rounded-full border"
+              className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
               style={{ width: 32, height: 32, borderColor: `${agentColor}30`, backgroundColor: `${agentColor}10` }}
             >
-              <span className="text-[13px] font-black" style={{ color: agentColor }}>{agentMeta.displayName[0]}</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
+                alt={agentMeta.displayName}
+                className="h-full w-full object-cover"
+              />
             </div>
             <div className="flex items-center gap-1.5 rounded-2xl border px-4 py-3" style={{ borderColor: `${agentColor}26` }}>
               {[0, 1, 2].map((i) => (

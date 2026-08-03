@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import { promises as fs } from "fs";
 import path from "path";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";

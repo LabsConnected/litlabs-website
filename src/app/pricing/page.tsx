@@ -23,7 +23,7 @@ type CardPlan = {
   futurePrice: string;
   description: string;
   credits: string;
-  projects: string;
+  projectLimit: number;
   featured?: boolean;
   accent: Accent;
   cta: string;
@@ -40,7 +40,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
     credits: PLANS.starter.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.starter.activeProjectLimit} active project`,
+    projectLimit: PLANS.starter.activeProjectLimit,
     accent: "neutral",
     cta: "Start free",
     free: true,
@@ -54,7 +54,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.creator_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.creator_beta.activeProjectLimit,
     featured: true,
     accent: "cyan",
     cta: "Choose Creator",
@@ -69,7 +69,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
-    projects: `${PLANS.pro_builder_beta.activeProjectLimit} active projects`,
+    projectLimit: PLANS.pro_builder_beta.activeProjectLimit,
     accent: "purple",
     cta: "Choose Pro",
     free: false,
@@ -79,15 +79,15 @@ const CARD_PLANS: CardPlan[] = [
 const usageRules = [
   {
     title: "One visible balance",
-    copy: "Monthly, promotional, and purchased LiTTBits stay separated behind one honest total.",
+    copy: "See all your credits in one place — no hidden balances or surprise charges.",
   },
   {
     title: "Monthly credits refresh",
-    copy: "Plan LiTTBits refresh each billing period. Purchased LiTTBits do not silently expire.",
+    copy: "Plan credits refresh each billing period. Bought credits never expire.",
   },
   {
-    title: "Atomic usage ledger",
-    copy: "Every grant and charge uses an idempotency key to prevent duplicate billing or double-spend.",
+    title: "Fair usage tracking",
+    copy: "Every action shows its cost before it runs. You never get charged twice for the same thing.",
   },
 ];
 
@@ -194,8 +194,8 @@ function PlanCard({
           <span>LiTTBits monthly</span>
         </div>
         <div className={styles.allowance}>
-          <strong>{plan.projects.replace(" active project", "").replace(" active projects", "")}</strong>
-          <span>{plan.projects.includes("projects") ? "active projects" : "active project"}</span>
+          <strong>{plan.projectLimit}</strong>
+          <span>{plan.projectLimit === 1 ? "active project" : "active projects"}</span>
         </div>
       </div>
 
@@ -315,8 +315,7 @@ export default function PricingPage() {
             <h2>Simple plans. Real limits. No billing tricks.</h2>
           </div>
           <p>
-            Founder pricing stays lower during beta. All checkout flows use the
-            existing Stripe price IDs and billing handler.
+            Founder pricing stays lower during beta. Cancel anytime — your work and credits are always yours.
           </p>
         </div>
 

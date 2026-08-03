@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { orchestrator } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";

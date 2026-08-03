@@ -9,6 +9,8 @@ node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
+.worktrees/
+**/.worktrees/**
 
 # Build artifacts
 .next/

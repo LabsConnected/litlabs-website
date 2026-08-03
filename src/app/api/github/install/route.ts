@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 import { createInstallState } from "@/lib/github-install-state";
 
 const APP_SLUG = process.env.GITHUB_APP_SLUG;
 
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(request: NextRequest) {
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -2,7 +2,7 @@
 // Triggers notifications to Discord, webhooks, etc.
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { jarvis, NotificationPayload } from "@/lib/litt";
 
 // Admin user ID

@@ -1,6 +1,6 @@
 // Social Feed API — GET (feed) / POST (create post)
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,

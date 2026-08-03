@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
-import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -38,6 +37,7 @@ const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.C
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
+const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
@@ -69,6 +69,7 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
+  music: MusicTool,
   build: BuilderTool,
   code: CanvasTool,
   agents: AgentTool,
@@ -106,7 +107,7 @@ function AgentVoiceSync() {
  */
 export default function CommandStudio() {
   const { theme } = useTheme();
-  const { userId } = useClerkAuth();
+  const { userId, getToken } = useClerkAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -142,8 +143,6 @@ export default function CommandStudio() {
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
-
-  const isInitialMount = useRef(true);
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
@@ -237,24 +236,22 @@ export default function CommandStudio() {
     return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
-    // If no project, save the message and prompt project creation
-    if (!capabilities.projectId) {
-      setPendingMessage(value);
-      setComposerValue("");
-      return;
-    }
-    // Direct call to the real controller — no custom-event bridge.
+    // The canonical controller provisions a starter project and conversation
+    // when needed. Do not block first-time users at the composer boundary.
     try {
-      return await conversation.send(value, attachments);
+      const result = await conversation.send(value, attachments);
+      if (result?.accepted && !capabilities.projectId) {
+        await refreshCapabilities();
+      }
+      return result;
     } catch {
       // Restore the typed message so the user doesn't lose input
       setComposerValue(value);
     }
-  }, [conversation, capabilities.projectId]);
+  }, [conversation, capabilities.projectId, refreshCapabilities]);
 
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
@@ -263,9 +260,14 @@ export default function CommandStudio() {
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);
     try {
+      const token = await getToken?.();
       const res = await fetch("/api/studio-projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           sourceType: "blank",
           name: "Untitled Project",
@@ -298,19 +300,12 @@ export default function CommandStudio() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
-      // Retry pending message if any
-      if (pendingMessage) {
-        const msg = pendingMessage;
-        setPendingMessage(null);
-        setComposerValue("");
-        await conversation.send(msg);
-      }
     } catch (err) {
       console.error("[handleStartBlank] Error:", err);
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation, userId]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -348,7 +343,8 @@ export default function CommandStudio() {
     }
     if (destination === "create") {
       if (createMode === "video") return "video";
-      if (createMode === "audio" || createMode === "music") return "audio";
+      if (createMode === "audio") return "audio";
+      if (createMode === "music") return "music";
       if (createMode === "brand") return "color";
       return "image";
     }
@@ -382,7 +378,6 @@ export default function CommandStudio() {
   return (
     <VoiceSessionProvider>
       <AgentVoiceSync />
-      <VoiceDiagnosticsDrawer />
 
       <div
         className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
@@ -460,7 +455,6 @@ export default function CommandStudio() {
                     onRegenerate={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
                     hasProject={projectReady}
-                    projectId={capabilities.projectId}
                     projectName={capabilities.projectName}
                     sourceType={capabilities.sourceType}
                     githubInstalled={capabilities.githubInstalled}
@@ -502,40 +496,54 @@ export default function CommandStudio() {
             </StudioDrawer>
 
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
-            {/* Send error banner — visible when conversation creation fails */}
-            {isStudioWorkConversation && conversation.sendError && (
+            {/* Reauthentication banner — visible when session expires during Studio use.
+                Disables the composer and offers a real recovery action. */}
+            {isStudioWorkConversation && (conversation.requiresReauth || conversation.sendError) && (
               <div
-                className="flex shrink-0 items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+                className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
                 style={{
                   borderColor: "rgba(239,68,68,0.3)",
                   backgroundColor: "rgba(239,68,68,0.08)",
                   color: "#fca5a5",
                 }}
               >
-                <span className="flex-1 font-medium">{conversation.sendError}</span>
-                <button
-                  type="button"
-                  onClick={() => conversation.clearSendError()}
-                  className="rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                  aria-label="Dismiss error"
-                >
-                  ✕
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { window.location.href = "/api/github/install"; }}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                >
-                  Choose Project
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { void handleStartBlank(); conversation.clearSendError(); }}
-                  disabled={creatingProject}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10 disabled:opacity-50"
-                >
-                  {creatingProject ? "Creating…" : "Start Blank"}
-                </button>
+                <span className="min-w-0 flex-1 font-medium">
+                  {conversation.requiresReauth
+                    ? "Your session expired. Sign in again to continue."
+                    : conversation.sendError}
+                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {!conversation.requiresReauth && conversation.sendError && (
+                    <button
+                      type="button"
+                      onClick={() => conversation.clearSendError()}
+                      className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                      aria-label="Dismiss error"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {conversation.requiresReauth ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        conversation.clearRequiresReauth();
+                        window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                      }}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Sign in again
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Refresh session
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -544,7 +552,9 @@ export default function CommandStudio() {
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
+                onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
+                disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
                 contextLine={contextLine}
@@ -612,7 +622,6 @@ function StudioWorkSurface({
   onRegenerate,
   onEmptyAction,
   hasProject,
-  projectId,
   projectName,
   sourceType,
   githubInstalled,
@@ -627,7 +636,6 @@ function StudioWorkSurface({
   onRegenerate: () => void;
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
-  projectId: string | null;
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | null;
   githubInstalled: boolean;
@@ -653,8 +661,8 @@ function StudioWorkSurface({
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
+            activeAgentId={activeAgentId}
             hasProject={hasProject}
-            projectId={projectId}
             projectName={projectName}
             sourceType={sourceType}
             githubInstalled={githubInstalled}

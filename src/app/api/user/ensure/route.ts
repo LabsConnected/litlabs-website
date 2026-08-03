@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
+import { clerkClient } from "@clerk/nextjs/server";
 import { getOrCreateUser, getUserWallet } from "@/lib/user-db";
 
 export const dynamic = "force-dynamic";

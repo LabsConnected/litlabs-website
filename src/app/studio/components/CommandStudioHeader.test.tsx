@@ -65,9 +65,9 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
-    // Should say "Project setup required" not "Workspace ready"
+    // Chat is available without a project; project-only controls stay disabled.
     expect(screen.queryByText("Workspace ready")).toBeNull();
-    expect(screen.getByText("Project setup required")).toBeTruthy();
+    expect(screen.getByText("Chat ready")).toBeTruthy();
   });
 
   it("Deploy button is disabled (no handler wired in Phase 1)", () => {

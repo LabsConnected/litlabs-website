@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { updateBlock, deleteBlock, reorderBlock } from "@/lib/canvas/repository";
 import { getCanvas } from "@/lib/canvas/repository";
 

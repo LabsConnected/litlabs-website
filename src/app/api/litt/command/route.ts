@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import path from "path";
 import { promisify } from "util";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/roles";
 

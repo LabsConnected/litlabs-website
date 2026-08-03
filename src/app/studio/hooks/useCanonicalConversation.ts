@@ -20,17 +20,23 @@ import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/
 import {
   useConversationStore,
   EMPTY_CONVERSATION_MESSAGES,
+  type ChatMessage as CanonicalChatMessage,
   toChatMessage as toCanonicalChatMessage,
   parseConversationFromUrl,
   serializeConversationToUrl,
 } from "../stores/useConversationStore";
 
+export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation";
+
 export interface SendResult {
   accepted: boolean;
+  persisted: boolean;
   reply?: string;
+  errorKind?: SendErrorKind;
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
+const OPTIMISTIC_CONVERSATION_ID_PREFIX = "pending_";
 
 /**
  * Build a user-scoped localStorage key for the active project ID.
@@ -83,9 +89,13 @@ function toUIMessage(
   msg: ReturnType<typeof useConversationStore.getState>["messagesByConversationId"][string][number],
 ): ChatMessage {
   return {
+    id: msg.id,
     role: msg.role,
     content: msg.content,
+    status: msg.status,
+    agentSlug: msg.agentSlug,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
+    reasoning: msg.reasoning,
   };
 }
 
@@ -108,9 +118,21 @@ export function useCanonicalConversation({
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [requiresReauth, setRequiresReauth] = useState(false);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
-  const { userId } = useClerkAuth();
+  const { userId, getToken, isLoaded, isSignedIn } = useClerkAuth();
+
+  // Same-origin cookies normally carry Clerk auth, but an explicit bearer
+  // token keeps Studio API calls authenticated across production proxy/CDN
+  // boundaries and makes a lost session distinguishable from project setup.
+  const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
+    const token = await getToken?.();
+    return {
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, [getToken]);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const activeAgentInstanceId = useStudioAgentStore((s) => s.activeAgentInstanceId);
@@ -142,6 +164,8 @@ export function useCanonicalConversation({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isSyncingFromUrl = useRef(false);
+  const activeAgentIdRef = useRef(activeAgentId);
+  useEffect(() => { activeAgentIdRef.current = activeAgentId; }, [activeAgentId]);
 
   // Ref to read current searchParams inside loadConversations without
   // depending on it — prevents the loadConversations → syncUrl →
@@ -172,6 +196,8 @@ export function useCanonicalConversation({
     try {
       const res = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
         cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -183,7 +209,7 @@ export function useCanonicalConversation({
     } catch {
       // Non-fatal
     }
-  }, [getStore]);
+  }, [getStore, authHeaders]);
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
@@ -195,6 +221,8 @@ export function useCanonicalConversation({
     try {
       const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
         cache: "no-store",
+        credentials: "include",
+        headers: await authHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -221,75 +249,63 @@ export function useCanonicalConversation({
     } finally {
       getStore().setLoading(false);
     }
-  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId]);
+  }, [getStore, setActiveAgentId, loadMessages, serverProjectId, userId, authHeaders]);
 
   // Create a new conversation
-  const createConversation = useCallback(async (): Promise<Conversation | null> => {
+  const createConversation = useCallback(async (
+    options?: { optimisticConversationId?: string },
+  ): Promise<Conversation | null> => {
     let projectId = getActiveProjectId(serverProjectId, userId);
-
-    // Auto-provision a blank project if the user has none yet. Without this,
-    // chat is completely dead for new users — createConversation fails and the
-    // only feedback is a buried red banner, so the transcript stays empty.
-    if (!projectId) {
-      try {
-        const projRes = await fetch("/api/studio-projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sourceType: "blank",
-            name: "My First Project",
-            templateId: "blank-static",
-          }),
-        });
-        if (projRes.ok) {
-          const projData = await projRes.json();
-          projectId = projData.project?.id ?? null;
-          if (projectId) {
-            setActiveProjectId(projectId, userId);
-          }
-        }
-      } catch {
-        // fall through to the error below
-      }
-    }
-
-    if (!projectId) {
-      setSendError("LiTT couldn't start this conversation because no active project was resolved.");
-      return null;
-    }
 
     try {
       const res = await fetch("/api/studio/conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: await authHeaders(true),
         body: JSON.stringify({
-          projectId,
+          projectId: projectId || undefined,
           activeAgentSlug: activeAgentId,
         }),
       });
       if (!res.ok) {
-        setSendError(`Failed to create conversation (${res.status}).`);
+        const errorBody = await res.json().catch(() => null);
+        setSendError(res.status === 401
+          ? "Your Studio session expired. Refresh the page and sign in again."
+          : errorBody?.error || `Failed to create conversation (${res.status}).`);
         return null;
       }
       const data = await res.json();
       const conversation = data.conversation as Conversation;
+      projectId = data.projectId ?? conversation.projectId ?? projectId;
+      if (projectId) setActiveProjectId(projectId, userId);
       const s = getStore();
+      if (options?.optimisticConversationId) {
+        const optimisticMessages = s.messagesByConversationId[options.optimisticConversationId] ?? [];
+        if (optimisticMessages.length > 0) {
+          s.setMessages(conversation.id, optimisticMessages);
+        }
+      }
       s.setConversations([conversation, ...s.conversations]);
       s.selectConversation(conversation.id);
-      s.setMessages(conversation.id, []);
+      if (!options?.optimisticConversationId) {
+        s.setMessages(conversation.id, []);
+      }
       s.setRevision(1);
       return conversation;
     } catch {
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [getStore, activeAgentId, serverProjectId, userId]);
+  }, [getStore, activeAgentId, serverProjectId, userId, authHeaders]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
     if (isSyncingFromUrl.current) return;
+    const conversationForUrl = selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
+      ? null
+      : selectedConversationId;
     const params = serializeConversationToUrl(
-      selectedConversationId,
+      conversationForUrl,
       activeAgentId as AgentSlug,
       searchParams,
     );
@@ -304,6 +320,10 @@ export function useCanonicalConversation({
   useEffect(() => {
     isSyncingFromUrl.current = true;
     const s = getStore();
+    if (s.selectedConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)) {
+      isSyncingFromUrl.current = false;
+      return;
+    }
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
     const agentInstanceFromUrl = searchParams.get("agentInstance") ?? null;
     if (conversationId !== s.selectedConversationId) {
@@ -316,12 +336,12 @@ export function useCanonicalConversation({
     }
     if (agentInstanceFromUrl) {
       useStudioAgentStore.getState().setActiveAgentInstance(agentInstanceFromUrl, agentSlug ?? undefined);
-    } else if (agentSlug && agentSlug !== activeAgentId) {
+    } else if (agentSlug && agentSlug !== activeAgentIdRef.current) {
       s.setActiveAgent(agentSlug);
       setActiveAgentId(agentSlug);
     }
     isSyncingFromUrl.current = false;
-  }, [searchParams, getStore, loadMessages, activeAgentId, setActiveAgentId]);
+  }, [searchParams, getStore, loadMessages, setActiveAgentId]);
 
   // Sync URL when state changes
   useEffect(() => {
@@ -335,6 +355,13 @@ export function useCanonicalConversation({
     }
   }, [userId]);
 
+  // Clear requiresReauth when Clerk reports a valid signed-in session again
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      setRequiresReauth(false);
+    }
+  }, [isLoaded, isSignedIn]);
+
   // Load conversations on mount
   useEffect(() => {
     void loadConversations();
@@ -344,7 +371,12 @@ export function useCanonicalConversation({
   const send = useCallback(
     async (value: string, attachments?: string[]): Promise<SendResult> => {
       const text = value.trim();
-      if ((!text && !attachments?.length) || busy) return { accepted: false };
+      if ((!text && !attachments?.length) || busy) return { accepted: false, persisted: false };
+
+      // Do not send until Clerk has loaded the session, and block sends
+      // while reauthentication is required (expired session banner shown).
+      if (!isLoaded) return { accepted: false, persisted: false };
+      if (requiresReauth) return { accepted: false, persisted: false, errorKind: "auth" };
 
       // 1. Slash commands — local, no server call
       const localCommand = parseBuilderLocalCommand(text);
@@ -369,34 +401,38 @@ export function useCanonicalConversation({
           case "clear":
             s.setMessages(convId, []);
             addLocalMessage("Screen cleared. Previous messages are still saved on the server and will reappear on refresh.");
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "new":
             void createConversation();
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "terminal":
             onRouteTool?.("terminal");
             addLocalMessage("Opening Terminal.");
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           case "sessions": {
             const sessionsList = s.conversations.length > 0
               ? s.conversations.map((c, i) => `${i + 1}. ${c.title || "Untitled"}${c.id === convId ? " (active)" : ""}`).join("\n")
               : "No conversations yet. Type /new to start one.";
             addLocalMessage(`Your conversations:\n\n${sessionsList}`);
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "delete": {
             const convId = s.selectedConversationId;
             const conv = s.getSelectedConversation();
             if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
               try {
-                await fetch(`/api/studio/conversations/${convId}`, { method: "DELETE" });
+                await fetch(`/api/studio/conversations/${convId}`, {
+                  method: "DELETE",
+                  credentials: "include",
+                  headers: await authHeaders(),
+                });
                 s.setConversations(s.conversations.filter((c) => c.id !== convId));
                 s.selectConversation(null);
               } catch {
                 // Non-fatal
               }
             }
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "rename": {
             const convId = s.selectedConversationId;
@@ -404,7 +440,8 @@ export function useCanonicalConversation({
               try {
                 await fetch(`/api/studio/conversations/${convId}`, {
                   method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  headers: await authHeaders(true),
                   body: JSON.stringify({ expectedRevision: s.revision, patch: { title: localCommand.title } }),
                 });
                 s.setConversations(s.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
@@ -412,7 +449,7 @@ export function useCanonicalConversation({
                 // Non-fatal
               }
             }
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           }
           case "help":
             addLocalMessage([
@@ -425,9 +462,9 @@ export function useCanonicalConversation({
               "  /terminal — Open the terminal",
               "  /help — Show this help",
             ].join("\n"));
-            return { accepted: true };
+            return { accepted: true, persisted: true };
           default:
-            return { accepted: true };
+            return { accepted: true, persisted: true };
         }
       }
 
@@ -463,61 +500,112 @@ export function useCanonicalConversation({
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
           window.location.href = "/api/github/install";
         }
-        return { accepted: true, reply: intentMessage };
+        return { accepted: true, persisted: true, reply: intentMessage };
       }
 
       // 3. Ensure we have a conversation
-      let conversationId = getStore().selectedConversationId;
+      const s = getStore();
+      let conversationId = s.selectedConversationId;
+      // Snapshot state before seeding optimistic messages so we can roll back
+      // cleanly on any failure (401, 403, network, conflict, abort).
+      const previousConversationId = s.selectedConversationId;
+      const previousMessagesByConversationId = { ...s.messagesByConversationId };
+      const clientRequestId = generateClientRequestId();
+      const optimisticUserId = `optimistic_${clientRequestId}`;
+      const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
+      const optimisticTimestamp = new Date().toISOString();
+      const optimisticUserMessage = {
+        id: optimisticUserId,
+        role: "user",
+        content: text,
+        agentSlug: null,
+        status: "completed",
+        createdAt: optimisticTimestamp,
+        parentMessageId: null,
+        regenerationOfMessageId: null,
+      } as CanonicalChatMessage;
+      const optimisticAssistantMessage = {
+        id: optimisticAssistantId,
+        role: "assistant",
+        content: "",
+        agentSlug: activeAgentId as AgentSlug,
+        status: "streaming",
+        createdAt: optimisticTimestamp,
+        parentMessageId: optimisticUserId,
+        regenerationOfMessageId: null,
+      } as CanonicalChatMessage;
+
+      const seedOptimisticMessages = (id: string) => {
+        const current = getStore();
+        current.selectConversation(id);
+        // Preserve the visible transcript. Replacing this array on every send
+        // made earlier LiTT replies appear to vanish from the page.
+        current.setMessages(id, [
+          ...current.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
+          optimisticUserMessage,
+          optimisticAssistantMessage,
+        ]);
+      };
+
+      // Rollback helper — removes both optimistic messages and restores the
+      // previous conversation selection. Called on every failure path where
+      // the user message was NOT persisted to the server.
+      const rollbackOptimistic = (targetConversationId: string | null) => {
+        const rb = getStore();
+        if (targetConversationId) {
+          const existing = previousMessagesByConversationId[targetConversationId] ?? [];
+          rb.setMessages(targetConversationId, existing);
+        }
+        // If a temporary pending_* conversation was created, clean up its
+        // messages and restore the previous selection.
+        if (
+          previousConversationId !== targetConversationId &&
+          targetConversationId?.startsWith(OPTIMISTIC_CONVERSATION_ID_PREFIX)
+        ) {
+          rb.setMessages(targetConversationId, []);
+          rb.selectConversation(previousConversationId);
+        }
+      };
+
+      setBusy(true);
+
       if (!conversationId) {
-        const conv = await createConversation();
-        if (!conv) return { accepted: false };
+        const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;
+        seedOptimisticMessages(optimisticConversationId);
+        const conv = await createConversation({ optimisticConversationId });
+        if (!conv) {
+          // Conversation creation failed (401/403/network) — roll back all
+          // optimistic state and require reauthentication if it was a 401.
+          rollbackOptimistic(optimisticConversationId);
+          setBusy(false);
+          if (sendError?.includes("session expired")) {
+            setRequiresReauth(true);
+            return { accepted: false, persisted: false, errorKind: "auth" };
+          }
+          return { accepted: false, persisted: false, errorKind: "network" };
+        }
         conversationId = conv.id;
+      } else {
+        seedOptimisticMessages(conversationId);
       }
 
       // Clear any previous send error
       setSendError(null);
 
       // 4. Real LLM call through canonical API
-      const clientRequestId = generateClientRequestId();
-      const s = getStore();
-      const expectedRevision = s.revision;
-
-      // Optimistic: add user message to UI
-      const optimisticUserId = `optimistic_${clientRequestId}`;
-      s.addMessage(conversationId, {
-        id: optimisticUserId,
-        role: "user",
-        content: text,
-        agentSlug: null,
-        status: "completed",
-        createdAt: new Date().toISOString(),
-        parentMessageId: null,
-        regenerationOfMessageId: null,
-      });
-
-      // Optimistic: add pending assistant message
-      const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
-      s.addMessage(conversationId, {
-        id: optimisticAssistantId,
-        role: "assistant",
-        content: "",
-        agentSlug: activeAgentId as AgentSlug,
-        status: "streaming",
-        createdAt: new Date().toISOString(),
-        parentMessageId: optimisticUserId,
-        regenerationOfMessageId: null,
-      });
-
-      setBusy(true);
       try {
+        const s = getStore();
+        const expectedRevision = s.revision;
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
-        // Abort after 55s so a hanging provider doesn't leave an empty
-        // streaming bubble forever (the route has maxDuration=60s).
+        // Abort after 120s — the route now streams (maxDuration=120), so
+        // reasoning/thinking models get room to think before emitting text
+        // instead of being killed at 55s ("cut out").
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 55_000);
+        const timeoutId = setTimeout(() => controller.abort(), 120_000);
         const response = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          headers: await authHeaders(true),
           body: JSON.stringify({
             message: text,
             clientRequestId,
@@ -533,8 +621,7 @@ export function useCanonicalConversation({
         });
         clearTimeout(timeoutId);
 
-        const data = await response.json();
-
+        // Error / conflict paths still return JSON.
         if (response.status === 409) {
           // Revision conflict — reload messages from server, restore unsent text
           await loadMessages(conversationId);
@@ -545,104 +632,216 @@ export function useCanonicalConversation({
             s409.getMessages().filter((m) => m.id !== optimisticUserId && m.id !== optimisticAssistantId),
           );
           setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
-          return { accepted: false };
+          return { accepted: false, persisted: false, errorKind: "conflict" };
         }
 
         if (!response.ok) {
-          // HTTP failure — mark assistant as failed, set sendError, return not accepted
-          // so the composer restores the user's text.
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
-            status: "failed",
-            content: data.error || "Failed to get response",
-          });
+          const data = await response.json().catch(() => ({}));
+          const isAuthError = response.status === 401 || response.status === 403;
+          if (isAuthError) {
+            // Auth failure — roll back optimistic messages entirely (the
+            // user message was NOT persisted) and require reauthentication.
+            rollbackOptimistic(conversationId);
+            setRequiresReauth(true);
+            setSendError("Your Studio session expired. Refresh the page and sign in again.");
+            return { accepted: false, persisted: false, errorKind: "auth" };
+          }
+          // Non-auth HTTP failure — the user message was not persisted.
+          // Roll back optimistic messages and show the error.
+          rollbackOptimistic(conversationId);
           setSendError(data.error || `Request failed (${response.status})`);
-          return { accepted: false };
+          return { accepted: false, persisted: false, errorKind: "network" };
         }
 
-        // Check for duplicate (idempotent response)
-        if (data.duplicate) {
-          const s2 = getStore();
-          const userMsg = data.userMessage as ConversationMessage;
-          s2.updateMessage(conversationId, optimisticUserId, {
+        const contentType = response.headers.get("content-type") || "";
+
+        // Duplicate (idempotent) responses come back as JSON, not SSE.
+        if (!contentType.includes("text/event-stream")) {
+          const data = await response.json();
+          if (data.duplicate) {
+            const s2 = getStore();
+            const userMsg = data.userMessage as ConversationMessage;
+            s2.updateMessage(conversationId, optimisticUserId, {
+              id: userMsg.id,
+              content: userMsg.content,
+              createdAt: userMsg.createdAt,
+            });
+
+            if (data.assistantMessage) {
+              const assistantMsg = data.assistantMessage as ConversationMessage;
+              s2.updateMessage(conversationId, optimisticAssistantId, {
+                id: assistantMsg.id,
+                content: assistantMsg.content,
+                status: "completed",
+                createdAt: assistantMsg.createdAt,
+              });
+              s2.setRevision(data.revision ?? expectedRevision);
+              return { accepted: true, persisted: true, reply: assistantMsg.content };
+            } else {
+              // Still processing — remove optimistic assistant, poll for result
+              s2.setMessages(
+                conversationId,
+                s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
+              );
+              s2.setRevision(data.revision ?? expectedRevision);
+              setTimeout(() => void loadMessages(conversationId!), 2000);
+              return { accepted: true, persisted: true };
+            }
+          }
+          // Unexpected JSON on a 200 — treat as failure
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: data.error || "Unexpected response format",
+          });
+          setSendError(data.error || "Unexpected response format");
+          return { accepted: false, persisted: false, errorKind: "validation" };
+        }
+
+        // ---- SSE streaming path ----
+        // Consume the event stream and update the optimistic assistant
+        // message incrementally so tokens (and reasoning) appear live.
+        if (!response.body) {
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: "No response body from server.",
+          });
+          setSendError("No response body from server.");
+          return { accepted: false, persisted: false, errorKind: "network" };
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let assistantText = "";
+        let reasoningText = "";
+        let donePayload: Record<string, unknown> | null = null;
+        let errorPayload: { message?: string; partialText?: string } | null = null;
+
+        const flushUpdate = () => {
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "streaming",
+          });
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === "[DONE]") continue;
+            try {
+              const evt = JSON.parse(payload) as { type: string; text?: string; message?: string; partialText?: string };
+              if (evt.type === "text" && typeof evt.text === "string") {
+                assistantText += evt.text;
+                flushUpdate();
+              } else if (evt.type === "reasoning" && typeof evt.text === "string") {
+                reasoningText += evt.text;
+                flushUpdate();
+              } else if (evt.type === "done") {
+                donePayload = evt as unknown as Record<string, unknown>;
+              } else if (evt.type === "error") {
+                errorPayload = { message: evt.message, partialText: evt.partialText };
+              }
+            } catch {
+              // ignore malformed chunk
+            }
+          }
+        }
+
+        if (errorPayload) {
+          const partial = errorPayload.partialText;
+          const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
+            status: "failed",
+            content: partial ? partial : reply,
+            reasoning: reasoningText || undefined,
+          });
+          setSendError(reply);
+          // User message was persisted (server accepted the 200), but the
+          // provider failed. Don't restore the draft — show Retry instead.
+          return { accepted: false, persisted: true, errorKind: "provider" };
+        }
+
+        if (donePayload) {
+          const userMsg = donePayload.userMessage as ConversationMessage;
+          const assistantMsg = donePayload.assistantMessage as ConversationMessage;
+          const s3 = getStore();
+          s3.updateMessage(conversationId, optimisticUserId, {
             id: userMsg.id,
             content: userMsg.content,
             createdAt: userMsg.createdAt,
           });
 
-          if (data.assistantMessage) {
-            const assistantMsg = data.assistantMessage as ConversationMessage;
-            s2.updateMessage(conversationId, optimisticAssistantId, {
+          // Guard against empty assistant response
+          if (!assistantMsg.content || !assistantMsg.content.trim()) {
+            s3.updateMessage(conversationId, optimisticAssistantId, {
               id: assistantMsg.id,
-              content: assistantMsg.content,
-              status: "completed",
+              content: "The response was empty. Please try again.",
+              status: "failed",
               createdAt: assistantMsg.createdAt,
             });
-            s2.setRevision(data.revision ?? expectedRevision);
-            return { accepted: true, reply: assistantMsg.content };
-          } else {
-            // Still processing — remove optimistic assistant, poll for result
-            s2.setMessages(
-              conversationId,
-              s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
-            );
-            s2.setRevision(data.revision ?? expectedRevision);
-            setTimeout(() => void loadMessages(conversationId!), 2000);
-            return { accepted: true };
+            setSendError("The AI returned an empty response. Please try again.");
+            // User message persisted, provider returned empty — don't restore draft.
+            return { accepted: false, persisted: true, errorKind: "provider" };
           }
-        }
 
-        // Normal response — replace optimistic messages with real ones
-        const userMsg = data.userMessage as ConversationMessage;
-        const assistantMsg = data.assistantMessage as ConversationMessage;
-        const s3 = getStore();
-
-        s3.updateMessage(conversationId, optimisticUserId, {
-          id: userMsg.id,
-          content: userMsg.content,
-          createdAt: userMsg.createdAt,
-        });
-
-        // Guard against empty assistant response — don't leave an empty
-        // streaming bubble permanently. If the response is empty, mark
-        // as failed with a helpful message.
-        if (!assistantMsg.content || !assistantMsg.content.trim()) {
           s3.updateMessage(conversationId, optimisticAssistantId, {
             id: assistantMsg.id,
-            content: "The response was empty. Please try again.",
-            status: "failed",
+            content: assistantMsg.content,
+            reasoning: reasoningText || undefined,
+            status: "completed",
             createdAt: assistantMsg.createdAt,
           });
-          setSendError("The AI returned an empty response. Please try again.");
-          return { accepted: false };
+
+          s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
+
+          if (donePayload.usedFallbackModel) {
+            setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
+          }
+
+          return { accepted: true, persisted: true, reply: assistantMsg.content };
         }
 
-        s3.updateMessage(conversationId, optimisticAssistantId, {
-          id: assistantMsg.id,
-          content: assistantMsg.content,
-          status: "completed",
-          createdAt: assistantMsg.createdAt,
+        // Stream ended without an explicit done/error event — keep whatever
+        // text we accumulated but mark completed so the bubble doesn't hang.
+        const sFinal = getStore();
+        if (assistantText.trim()) {
+          sFinal.updateMessage(conversationId, optimisticAssistantId, {
+            content: assistantText,
+            reasoning: reasoningText || undefined,
+            status: "completed",
+          });
+          return { accepted: true, persisted: true, reply: assistantText };
+        }
+        sFinal.updateMessage(conversationId, optimisticAssistantId, {
+          status: "failed",
+          content: "The stream ended unexpectedly. Please try again.",
         });
-
-        s3.setRevision(data.revision ?? expectedRevision + 1);
-
-        if (data.usedFallbackModel) {
-          setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
-        }
-
-        return { accepted: true, reply: assistantMsg.content };
+        setSendError("The stream ended unexpectedly. Please try again.");
+        // User message was persisted (200 received), stream just ended early.
+        return { accepted: false, persisted: true, errorKind: "network" };
       } catch (error) {
         const isAbort = error instanceof Error && error.name === "AbortError";
         // Remove the empty streaming bubble on failure — it should not
         // remain permanently as an empty or error-filled bubble.
         const s = getStore();
         if (isAbort) {
-          // Timeout/abort — distinguish from other errors
+          // Timeout/abort — distinguish from other errors. The user message
+          // may or may not have been persisted; roll back the assistant bubble
+          // but keep the user message (the server may have persisted it).
           s.setMessages(
             conversationId!,
             s.getMessages().filter((m) => m.id !== optimisticAssistantId),
           );
           setSendError("The request timed out. Please try again.");
-          return { accepted: false };
+          return { accepted: false, persisted: true, errorKind: "network" };
         }
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
@@ -651,12 +850,13 @@ export function useCanonicalConversation({
           content: reply,
         });
         setSendError(reply);
-        return { accepted: false };
+        // Network error during streaming — user message was likely persisted.
+        return { accepted: false, persisted: true, errorKind: "network" };
       } finally {
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice],
+    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, sendError],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -674,7 +874,8 @@ export function useCanonicalConversation({
     try {
       const response = await fetch(`/api/studio/conversations/${conversationId}/regenerate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: await authHeaders(true),
         body: JSON.stringify({
           assistantMessageId: lastAssistant.id,
           clientRequestId: generateClientRequestId(),
@@ -700,7 +901,7 @@ export function useCanonicalConversation({
     } finally {
       setBusy(false);
     }
-  }, [busy, getStore, loadMessages]);
+  }, [busy, getStore, loadMessages, authHeaders]);
 
   // Clear — clears visible transcript
   const clear = useCallback(() => {
@@ -722,7 +923,8 @@ export function useCanonicalConversation({
         try {
           await fetch(`/api/studio/conversations/${conversationId}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            headers: await authHeaders(true),
             body: JSON.stringify({
               expectedRevision: s.revision,
               patch: { activeAgentSlug: id },
@@ -733,7 +935,7 @@ export function useCanonicalConversation({
         }
       })();
     }
-  }, [setActiveAgentId, getStore]);
+  }, [setActiveAgentId, getStore, authHeaders]);
 
   return {
     messages,
@@ -751,6 +953,8 @@ export function useCanonicalConversation({
     loading: loadingState,
     sendError,
     clearSendError: () => setSendError(null),
+    requiresReauth,
+    clearRequiresReauth: () => setRequiresReauth(false),
   };
 }
 

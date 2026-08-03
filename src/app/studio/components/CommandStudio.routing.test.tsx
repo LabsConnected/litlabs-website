@@ -158,9 +158,6 @@ vi.mock("../lib/supabase", () => ({
   getSupabaseAdmin: () => ({}),
 }));
 
-vi.mock("./VoiceDiagnosticsDrawer", () => ({
-  VoiceDiagnosticsDrawer: () => null,
-}));
 
 vi.mock("./canvas/CanvasPanel", () => ({
   CanvasPanel: () => <div data-testid="canvas-panel" />,

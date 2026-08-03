@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints, createCheckpoint, getCheckpoint } from "@/lib/missions/mission-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
@@ -17,7 +17,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;
@@ -37,7 +37,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { projectId } = await params;

@@ -52,6 +52,8 @@ interface CommandComposerProps {
   onChange: (value: string) => void;
   onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult | undefined>;
   busy?: boolean;
+  disabled?: boolean;
+  onAgentChange?: (agentId: import("../stores/useStudioAgentStore").AgentId) => void;
   onToggleCamera?: () => void;
   cameraActive?: boolean;
   contextLine?: ComposerContextLine;
@@ -62,6 +64,8 @@ export default function CommandComposer({
   onChange,
   onSend,
   busy = false,
+  disabled = false,
+  onAgentChange,
   onToggleCamera,
   cameraActive = false,
   contextLine,

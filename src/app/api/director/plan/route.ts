@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { DirectorGraphPlanner } from "@/lib/director-graph";
 
 export const dynamic = "force-dynamic";
@@ -16,9 +16,9 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(request);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getAppOctokit } from "@/lib/github-app";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(request: NextRequest) {
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

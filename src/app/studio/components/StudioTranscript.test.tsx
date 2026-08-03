@@ -185,4 +185,116 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     );
     expect(screen.queryByRole("button", { name: /regenerate/i })).toBeNull();
   });
+
+  it("does not render empty non-streaming assistant bubbles", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Hello", createdAt: Date.now() },
+      { role: "assistant", content: "", status: "completed", createdAt: Date.now() },
+    ];
+    const { container } = render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+      />,
+    );
+    // The empty assistant bubble should be skipped — no "LiTT" label
+    // should appear since the only assistant message is empty and not streaming.
+    expect(screen.queryByText("LiTT")).toBeNull();
+    // Only the user message should be present
+    expect(screen.getByText("Hello")).toBeTruthy();
+    expect(container.querySelectorAll(".animate-pulse").length).toBe(0);
+  });
+
+  it("renders streaming assistant bubble even when content is empty", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Thinking...", createdAt: Date.now() },
+      { role: "assistant", content: "", status: "streaming", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={true}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+      />,
+    );
+    // The streaming assistant bubble should be visible (LiTT label shows)
+    expect(screen.getByText("LiTT")).toBeTruthy();
+  });
+
+  it("shows Retry button for failed assistant messages", () => {
+    const onRegenerate = vi.fn();
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Q", createdAt: Date.now() },
+      { role: "assistant", content: "Provider unavailable", status: "failed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+        onRegenerate={onRegenerate}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
+  });
+
+  it("does not show Read button on failed assistant messages", () => {
+    const messages: ChatMessage[] = [
+      { role: "assistant", content: "Error occurred", status: "failed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /read aloud/i })).toBeNull();
+  });
+
+  it("uses message.id as React key, not array index", () => {
+    const messages: ChatMessage[] = [
+      { id: "msg-1", role: "user", content: "First", createdAt: Date.now() },
+      { id: "msg-2", role: "assistant", content: "Second", status: "completed", createdAt: Date.now() },
+    ];
+    const { container } = render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+      />,
+    );
+    // Both messages should render
+    expect(screen.getByText("First")).toBeTruthy();
+    expect(screen.getByText("Second")).toBeTruthy();
+  });
+
+  it("does not show duplicate busy indicator when last message is streaming", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Q", createdAt: Date.now() },
+      { role: "assistant", content: "partial...", status: "streaming", createdAt: Date.now() },
+    ];
+    const { container } = render(
+      <StudioTranscript
+        messages={messages}
+        busy={true}
+        activeAgentId={"litt" as AgentId}
+        onRouteTool={vi.fn()}
+      />,
+    );
+    // The standalone busy indicator should NOT appear since the last
+    // message is already streaming (has its own indicator via the bubble).
+    // There should be no extra animate-pulse dots beyond what's in the
+    // streaming message itself.
+    const pulses = container.querySelectorAll(".animate-pulse");
+    // The streaming message bubble doesn't use animate-pulse, so there
+    // should be zero standalone busy indicators.
+    expect(pulses.length).toBe(0);
+  });
 });

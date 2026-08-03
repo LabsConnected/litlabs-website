@@ -21,9 +21,9 @@ interface LiTTPresenceProps {
 
 const SIZE_MAP: Record<LiTTPresenceVariant, Record<LiTTPresenceSize, { w: number; h: number }>> = {
   "empty-state": {
-    sm: { w: 105, h: 130 },
-    md: { w: 180, h: 210 },
-    lg: { w: 210, h: 250 },
+    sm: { w: 104, h: 104 },
+    md: { w: 144, h: 144 },
+    lg: { w: 184, h: 184 },
   },
   "chat-avatar": {
     sm: { w: 28, h: 28 },

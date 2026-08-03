@@ -33,6 +33,7 @@ export function DashboardV2() {
   const [socialMock, setSocialMock] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
+    setError(null);
     try {
       const [dashRes, healthRes, socialRes] = await Promise.allSettled([
         fetch("/api/dashboard"),
@@ -42,7 +43,11 @@ export function DashboardV2() {
       if (dashRes.status === "fulfilled" && dashRes.value.ok) {
         setData(await dashRes.value.json());
       } else if (dashRes.status === "fulfilled" && !dashRes.value.ok) {
-        setError("Could not load dashboard data.");
+        setError(
+          dashRes.value.status === 401
+            ? "Your sign-in session needs to be refreshed."
+            : "Some connected workspace data is temporarily unavailable.",
+        );
       }
       if (healthRes.status === "fulfilled" && healthRes.value.ok) {
         setLlmHealth(await healthRes.value.json());
@@ -64,10 +69,10 @@ export function DashboardV2() {
         setSocialError("Failed to load community feed.");
       }
       if (dashRes.status === "rejected") {
-        setError("Could not load dashboard data.");
+        setError("Some connected workspace data is temporarily unavailable.");
       }
     } catch {
-      setError("Could not load dashboard data.");
+      setError("Some connected workspace data is temporarily unavailable.");
       setSocialError("Failed to load community feed.");
       setSocialMock(false);
     } finally {
@@ -126,7 +131,7 @@ export function DashboardV2() {
   const greetingSubtext = loading
     ? "Loading your workspace..."
     : error
-      ? "Could not load all dashboard data."
+      ? error
       : attentionCount > 0
         ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need attention.`
         : "Everything is quiet. Start something new.";

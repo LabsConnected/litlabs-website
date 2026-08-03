@@ -277,8 +277,24 @@ const nextConfig: NextConfig = {
   },
 
   async rewrites() {
+    const clerkFrontendApi =
+      process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL;
     return {
-      beforeFiles: [],
+      beforeFiles: [
+        // Clerk proxy: forward /__clerk/* to the Clerk Frontend API so that
+        // session cookies are set on the app domain (litlabs.net) instead of
+        // the Clerk domain (clerk.litlabs.net). Without this, API routes on
+        // litlabs.net never receive Clerk session cookies, causing 401 on
+        // every authenticated request, even after a fresh sign-in.
+        ...(clerkFrontendApi
+          ? [
+              {
+                source: "/__clerk/:path*",
+                destination: clerkFrontendApi + "/:path*",
+              },
+            ]
+          : []),
+      ],
       afterFiles: [],
       fallback: [],
     };

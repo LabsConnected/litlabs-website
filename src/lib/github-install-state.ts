@@ -10,7 +10,7 @@
 
 import { createHmac, timingSafeEqual } from "crypto";
 
-const SECRET = process.env.GITHUB_INSTALL_STATE_SECRET;
+const SECRET = process.env.GITHUB_INSTALL_STATE_SECRET || process.env.AUTH_SECRET;
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface StatePayload {
@@ -21,7 +21,7 @@ interface StatePayload {
 function getSecret(): string {
   if (!SECRET || SECRET.length < 32) {
     throw new Error(
-      "GITHUB_INSTALL_STATE_SECRET must be set to a string of at least 32 characters.",
+      "GITHUB_INSTALL_STATE_SECRET or AUTH_SECRET must be set to at least 32 characters.",
     );
   }
   return SECRET;

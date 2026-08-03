@@ -31,6 +31,31 @@
       width: 100% !important;
       height: 100% !important;
     }
+
+    /* Keep EmulatorJS controls in a dedicated bottom dock. The stock runtime
+       positions this menu over the canvas, which hides game UI and makes the
+       controls look vertically misplaced on laptop-sized screens. */
+    #game .ejs_canvas_parent {
+      height: calc(100% - 52px) !important;
+    }
+    #game .ejs_big_screen .ejs_menu_bar {
+      min-height: 52px;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      background: rgba(3, 4, 9, 0.96);
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    #game .ejs_big_screen .ejs_menu_bar_hidden {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+
+    @media (max-width: 640px) {
+      #game .ejs_canvas_parent {
+        height: 100% !important;
+      }
+    }
   </style>
 </head>
 <body>

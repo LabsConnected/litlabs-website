@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { generateComponent, directorPlan, executorCode } from "@/lib/gemini";
 
 export async function POST(req: NextRequest) {

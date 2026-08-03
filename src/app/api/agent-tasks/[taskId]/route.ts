@@ -1,16 +1,16 @@
-import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { logAgentEvent } from "@/lib/agent-logger";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(request);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
 
@@ -38,11 +38,11 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(request);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
     const body = await request.json();
