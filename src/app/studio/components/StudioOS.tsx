@@ -28,6 +28,7 @@ function CanvasPanelWrapper() {
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
+const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), {
   ssr: false,
 });
@@ -63,6 +64,7 @@ const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
+  music: MusicTool,
   build: BuilderTool,
   code: CanvasTool,
   agents: AgentTool,

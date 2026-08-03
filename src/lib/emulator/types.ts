@@ -34,7 +34,9 @@ export type RuntimeEventType =
   | "runtime.exited"
   | "runtime.heartbeat"
   | "runtime.dom_diagnostics"
-  | "runtime.rom_ready";
+  | "runtime.rom_ready"
+  | "runtime.gamepad_connected"
+  | "runtime.gamepad_disconnected";
 
 export interface RuntimeEvent {
   source: "arcade";
@@ -55,6 +57,9 @@ export interface RuntimeEvent {
   bodyChildren?: number;
   // rom_ready fields
   bytes?: number;
+  // gamepad_connected fields
+  count?: number;
+  pads?: { index: number; id: string; buttons: number; axes: number }[];
   // error fields
   stack?: string | null;
   colno?: number;

@@ -43,6 +43,7 @@ export type StudioTool =
   | "image"
   | "video"
   | "audio"
+  | "music"
   | "build"
   | "code"
   | "agents"
@@ -72,6 +73,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
+  { id: "music", label: "Music Lab", icon: Music, shortcut: "4" },
   { id: "agents", label: "LiTT & Spark", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
@@ -82,7 +84,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
 /* ── Secondary tools (in More Tools drawer) ──────────────────────── */
 const MORE_TOOLS: ToolItem[] = [
   { id: "screen", label: "Screen", icon: MonitorUp, shortcut: "S" },
-  { id: "color", label: "Color", icon: Palette, shortcut: "4" },
+  { id: "color", label: "Color", icon: Palette, shortcut: "Q" },
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
   { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },

@@ -284,6 +284,11 @@ export default function RetroPlayerPage() {
   const [bootTime, setBootTime] = useState<number | null>(null);
   const [loaderReadyTime, setLoaderReadyTime] = useState<number | null>(null);
 
+  // ─── Controller state ────────────────────────────────────────────
+  const [controllerConnected, setControllerConnected] = useState(false);
+  const [controllerName, setControllerName] = useState<string | null>(null);
+  const [controllerCount, setControllerCount] = useState(0);
+
   const system = game ? getRetroSystem(game.system) : null;
 
   // ─── Core config for current attempt ───────────────────────────
@@ -601,6 +606,27 @@ export default function RetroPlayerPage() {
       watchdog.reset("core_download", `download ${event.percent}%`);
     });
 
+    // Gamepad connected — update controller status indicator
+    const unsubGpConnected = bridge.on("runtime.gamepad_connected", (event) => {
+      setControllerConnected(true);
+      setControllerCount(event.count ?? 1);
+      if (event.pads && event.pads.length > 0) {
+        const name = event.pads[0].id || "";
+        // Clean up Xbox controller name (remove trailing garbage)
+        const cleanName = name.replace(/\(.+?\)|standalone\s+\d+|xinput|api\s+/gi, "").trim() || "Xbox Controller";
+        setControllerName(cleanName);
+      } else {
+        setControllerName("Xbox Controller");
+      }
+    });
+
+    // Gamepad disconnected
+    const unsubGpDisconnected = bridge.on("runtime.gamepad_disconnected", () => {
+      setControllerConnected(false);
+      setControllerName(null);
+      setControllerCount(0);
+    });
+
     // Core download started — start watchdog
     const unsubDlStart = bridge.on("runtime.core_download_started", () => {
       watchdog.start("core_download", "download started");
@@ -651,6 +677,8 @@ export default function RetroPlayerPage() {
       unsubExit();
       unsubProgress();
       unsubDlProgress();
+      unsubGpConnected();
+      unsubGpDisconnected();
       unsubDlStart();
       unsubDcProgress();
       unsubDcStart();
@@ -1128,6 +1156,16 @@ export default function RetroPlayerPage() {
                 <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Running · {runtimeConfig?.core ?? ejsCore}{useLegacy ? " (legacy)" : ""}
                 {heartbeatAge !== null ? ` · hb ${heartbeatAge}ms` : ""}
+              </div>
+            )}
+
+            {/* ─── Controller status badge ───────────────────────── */}
+            {(controllerConnected || controllerCount > 0) && (
+              <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-indigo-300/20 bg-indigo-900/70 px-3 py-1.5 text-[10px] font-bold text-indigo-100 backdrop-blur">
+                <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_6px_rgba(129,140,248,0.6)]" />
+                <Gamepad2 size={11} className="mr-1 inline" />
+                {controllerName ?? "Controller"}
+                {controllerCount > 1 ? ` ×${controllerCount}` : ""}
               </div>
             )}
           </div>

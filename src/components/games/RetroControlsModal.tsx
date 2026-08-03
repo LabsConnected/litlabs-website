@@ -5,16 +5,27 @@ import { X, Gamepad2, Keyboard } from "lucide-react";
 
 const SYSTEM_CONTROLS: Record<
   string,
-  { name: string; controls: { keys: string; action: string }[] }
+  {
+    name: string;
+    controls: { keys: string; action: string }[];
+    xbox: { button: string; action: string }[];
+  }
 > = {
   nes: {
     name: "NES / Famicom",
     controls: [
       { keys: "Arrow Keys", action: "D-Pad" },
-      { keys: "Z", action: "A" },
-      { keys: "X", action: "B" },
+      { keys: "Z", action: "A (B)" },
+      { keys: "X", action: "B (A)" },
       { keys: "Enter", action: "Start" },
       { keys: "Shift", action: "Select" },
+    ],
+    xbox: [
+      { button: "A", action: "A (B)" },
+      { button: "X", action: "B (A)" },
+      { button: "Start", action: "Start" },
+      { button: "Back", action: "Select" },
+      { button: "D-Pad", action: "D-Pad" },
     ],
   },
   snes: {
@@ -30,6 +41,17 @@ const SYSTEM_CONTROLS: Record<
       { keys: "Enter", action: "Start" },
       { keys: "Shift", action: "Select" },
     ],
+    xbox: [
+      { button: "A", action: "A" },
+      { button: "B", action: "B" },
+      { button: "X", action: "Y" },
+      { button: "Y", action: "X" },
+      { button: "LB", action: "L" },
+      { button: "RB", action: "R" },
+      { button: "Start", action: "Start" },
+      { button: "Back", action: "Select" },
+      { button: "D-Pad", action: "D-Pad" },
+    ],
   },
   gb: {
     name: "Game Boy",
@@ -39,6 +61,30 @@ const SYSTEM_CONTROLS: Record<
       { keys: "X", action: "B" },
       { keys: "Enter", action: "Start" },
       { keys: "Shift", action: "Select" },
+    ],
+    xbox: [
+      { button: "A", action: "A" },
+      { button: "X", action: "B" },
+      { button: "Start", action: "Start" },
+      { button: "Back", action: "Select" },
+      { button: "D-Pad", action: "D-Pad" },
+    ],
+  },
+  gbc: {
+    name: "Game Boy Color",
+    controls: [
+      { keys: "Arrow Keys", action: "D-Pad" },
+      { keys: "Z", action: "A" },
+      { keys: "X", action: "B" },
+      { keys: "Enter", action: "Start" },
+      { keys: "Shift", action: "Select" },
+    ],
+    xbox: [
+      { button: "A", action: "A" },
+      { button: "X", action: "B" },
+      { button: "Start", action: "Start" },
+      { button: "Back", action: "Select" },
+      { button: "D-Pad", action: "D-Pad" },
     ],
   },
   gba: {
@@ -52,6 +98,15 @@ const SYSTEM_CONTROLS: Record<
       { keys: "Enter", action: "Start" },
       { keys: "Shift", action: "Select" },
     ],
+    xbox: [
+      { button: "A", action: "A" },
+      { button: "X", action: "B" },
+      { button: "LB", action: "L" },
+      { button: "RB", action: "R" },
+      { button: "Start", action: "Start" },
+      { button: "Back", action: "Select" },
+      { button: "D-Pad", action: "D-Pad" },
+    ],
   },
   segaMD: {
     name: "Genesis / Mega Drive",
@@ -63,6 +118,15 @@ const SYSTEM_CONTROLS: Record<
       { keys: "A", action: "Y" },
       { keys: "S", action: "X" },
       { keys: "Enter", action: "Start" },
+    ],
+    xbox: [
+      { button: "A", action: "A" },
+      { button: "B", action: "B" },
+      { button: "X", action: "C" },
+      { button: "Y", action: "Y" },
+      { button: "LB", action: "X" },
+      { button: "Start", action: "Start" },
+      { button: "D-Pad", action: "D-Pad" },
     ],
   },
 };
@@ -148,10 +212,31 @@ export function RetroControlsModal({
           ))}
         </div>
 
-        <p className="mt-4 text-[10px] leading-relaxed text-white/45">
-          Gamepad is also supported. Press the controller icon in the emulator
-          menu to remap buttons.
-        </p>
+        {/* ─── Xbox Controller Section ────────────────────────── */}
+        <div className="mt-4 flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md border border-indigo-400/30 bg-indigo-400/10">
+            <Gamepad2 size={13} className="text-indigo-300" />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-200/80">
+            Xbox Controller
+          </span>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {controls.xbox.map((c) => (
+            <div
+              key={c.action}
+              className="flex items-center justify-between rounded-xl border border-white/8 bg-white/3 px-3 py-2"
+            >
+              <span className="text-xs font-bold text-white/85">
+                {c.action}
+              </span>
+              <span className="flex items-center gap-1 rounded-md border border-white/10 bg-indigo-950/60 px-2 py-0.5 font-mono text-[10px] font-bold text-indigo-300">
+                <Gamepad2 size={10} />
+                {c.button}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
