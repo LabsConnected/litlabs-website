@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Loader2, ArrowRight, Ban, Clock } from "lucide-react";
 import type { PlanId } from "@/config/plans";
+import { isFeatureEnabled } from "@/config/feature-flags";
 
 type AgentState =
   | "buy"
@@ -100,13 +101,19 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
   return (
     <div className="mt-5">
       {state === "buy" && (
-        <button
-          onClick={handleBuy}
-          className="w-full rounded-xl py-3 text-sm font-black text-black transition hover:scale-[1.02]"
-          style={{ background: color }}
-        >
-          Unlock {name}
-        </button>
+        isFeatureEnabled("individualAgentPurchases") ? (
+          <button
+            onClick={handleBuy}
+            className="w-full rounded-xl py-3 text-sm font-black text-black transition hover:scale-[1.02]"
+            style={{ background: color }}
+          >
+            Unlock {name}
+          </button>
+        ) : (
+          <div className="w-full rounded-xl border border-white/10 py-3 text-center text-sm font-bold text-white/50">
+            Included with Creator &amp; Pro plans
+          </div>
+        )
       )}
       {state === "processing" && (
         <div className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white/40">
@@ -114,13 +121,19 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
         </div>
       )}
       {state === "install" && (
-        <button
-          onClick={handleInstall}
-          className="w-full rounded-xl py-3 text-sm font-black text-black transition hover:scale-[1.02]"
-          style={{ background: color }}
-        >
-          Install {name}
-        </button>
+        isFeatureEnabled("marketplaceAgentInstall") ? (
+          <button
+            onClick={handleInstall}
+            className="w-full rounded-xl py-3 text-sm font-black text-black transition hover:scale-[1.02]"
+            style={{ background: color }}
+          >
+            Install {name}
+          </button>
+        ) : (
+          <div className="w-full rounded-xl border border-white/10 py-3 text-center text-sm font-bold text-white/50">
+            Included with Creator &amp; Pro plans
+          </div>
+        )
       )}
       {state === "open" && (
         <div className="space-y-2">

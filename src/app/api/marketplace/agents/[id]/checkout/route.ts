@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isFeatureEnabled } from "@/config/feature-flags";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,13 @@ async function handler(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  // v1 release freeze: individual agent purchases are disabled
+  if (!isFeatureEnabled("individualAgentPurchases")) {
+    return NextResponse.json(
+      { error: "Individual agent purchases are coming soon. Agent access is included with Creator and Pro plans." },
+      { status: 503 },
+    );
+  }
   const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
