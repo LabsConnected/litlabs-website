@@ -7,8 +7,17 @@ import {
   ScanSearch,
   Wand2,
   ArrowRight,
+  Sparkles,
   Upload,
   FilePlus2,
+  Bot,
+  BarChart3,
+  Code2,
+  FileText,
+  Globe,
+  Image as ImageIcon,
+  Music2,
+  Video,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
 import StudioActivityTimeline from "./StudioActivityTimeline";
@@ -44,18 +53,32 @@ function GithubMark({ size = 16, className }: { size?: number; className?: strin
 type PrimaryAction = "build" | "fix" | "review" | "create";
 
 const PRIMARY_ACTIONS: { id: PrimaryAction; label: string; icon: typeof Hammer; prompt: string }[] = [
-  { id: "build", label: "Build something", icon: Hammer, prompt: "Help me build " },
-  { id: "fix", label: "Fix an issue", icon: Wrench, prompt: "Help me fix an issue in " },
-  { id: "review", label: "Review project", icon: ScanSearch, prompt: "Review my project and tell me what to improve" },
-  { id: "create", label: "Create media", icon: Wand2, prompt: "Create " },
+  { id: "build", label: "Deploy my website", icon: Hammer, prompt: "Deploy my website and show me what needs attention" },
+  { id: "fix", label: "Fix all TypeScript errors", icon: Wrench, prompt: "Find and fix all TypeScript errors in this project" },
+  { id: "review", label: "Scan project health", icon: ScanSearch, prompt: "Run a complete project health check and summarize what matters" },
+  { id: "create", label: "Create artwork", icon: Wand2, prompt: "Generate artwork for this project" },
 ];
 
 const PROJECT_SUGGESTIONS = [
-  "Continue improving Studio",
-  "Run a complete project health check",
-  "Find mobile interaction issues",
-  "Review recent changes",
-  "Make this project more premium",
+  "🚀 Deploy my website",
+  "🎵 Make a new song",
+  "🖼 Generate artwork",
+  "🧠 Scan project health",
+  "⚡ Fix all TypeScript errors",
+  "📱 Optimize mobile",
+  "🔍 Improve SEO",
+  "💰 Monetize my project",
+];
+
+const QUICK_ACTIONS = [
+  { label: "Images", icon: ImageIcon, prompt: "Create a polished image for this project" },
+  { label: "Music", icon: Music2, prompt: "Make a new song for this project" },
+  { label: "Video", icon: Video, prompt: "Plan a short video for this project" },
+  { label: "Code", icon: Code2, prompt: "Fix all TypeScript errors in this project" },
+  { label: "Website", icon: Globe, prompt: "Deploy my website and improve the experience" },
+  { label: "Docs", icon: FileText, prompt: "Improve the documentation and onboarding" },
+  { label: "Analytics", icon: BarChart3, prompt: "Scan project health and summarize the numbers" },
+  { label: "Agents", icon: Bot, prompt: "Show me the running agents and what they are doing" },
 ];
 
 /**
@@ -209,9 +232,10 @@ export default function LiTEmptyState({
   projectName,
   sourceType,
   githubInstalled,
-  onPick,
-  onConnectRepo,
-  onStartBlank,
+  displayName,
+  onPickAction,
+  onConnectRepoAction,
+  onStartBlankAction,
   capabilities,
   modelHealth,
   modelLabel,
@@ -223,29 +247,53 @@ export default function LiTEmptyState({
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | null;
   githubInstalled: boolean;
-  onPick: (prompt: string) => void;
-  onConnectRepo?: () => void;
-  onStartBlank?: () => void;
+  displayName?: string | null;
+  onPickAction?: (prompt: string) => void;
+  onConnectRepoAction?: () => void;
+  onStartBlankAction?: () => void;
   /** Live workspace capabilities. When omitted, the briefing panel is skipped. */
   capabilities?: ConnectionCapabilities;
   modelHealth?: ProviderHealth;
   modelLabel?: string;
 }) {
   const [hovered, setHovered] = useState<PrimaryAction | null>(null);
+  const onPick = onPickAction ?? (() => {});
+  const greetingName = displayName?.trim() || "there";
+  const connectedToolCount = capabilities?.availableTools?.length ?? 0;
+  const connectedProviderCount = capabilities?.connectedProviders?.length ?? 0;
+  const voiceReady = capabilities?.voiceHealth.available ?? false;
 
   return (
     <div
-      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6 animate-fadeInUp"
+      className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-4 sm:py-6 animate-fadeInUp"
       style={{ color: "var(--text-primary)" }}
       data-testid="empty-state"
     >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-80"
+        aria-hidden
+        style={{
+          backgroundImage: [
+            "radial-gradient(circle at 18% 20%, rgba(114,242,56,0.14), transparent 26%)",
+            "radial-gradient(circle at 82% 26%, rgba(169,112,255,0.11), transparent 22%)",
+            "radial-gradient(circle at 50% 60%, rgba(34,211,238,0.08), transparent 34%)",
+            "linear-gradient(rgba(114,242,56,0.05) 1px, transparent 1px)",
+            "linear-gradient(90deg, rgba(114,242,56,0.05) 1px, transparent 1px)",
+          ].join(", "),
+          backgroundSize: "100% 100%, 100% 100%, 100% 100%, 72px 72px, 72px 72px",
+          animation: "litt-grid-drift 28s linear infinite",
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(114,242,56,0.08),transparent_38%)]" aria-hidden />
+
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-5">
       {/* Active character — clean transparent art, no framed black bars. */}
-      <div className="relative mb-2 grid min-h-[104px] place-items-center">
+      <div className="relative mb-2 grid min-h-[132px] place-items-center">
         {activeAgentId === "litt" ? (
-          <LiTTPresence state="idle" variant="empty-state" size="sm" />
+          <LiTTPresence state="idle" variant="empty-state" size="xl" />
         ) : (
           <div
-            className="relative grid h-24 w-24 place-items-center overflow-hidden rounded-full border"
+            className="relative grid h-32 w-32 place-items-center overflow-hidden rounded-full border"
             style={{
               borderColor: "rgba(244,114,182,.35)",
               background: "radial-gradient(circle, rgba(244,114,182,.14), transparent 70%)",
@@ -268,32 +316,221 @@ export default function LiTEmptyState({
         </span>
       </div>
 
-      {/* Headline */}
-      <h1
-        className="text-center text-xl font-black tracking-tight sm:text-2xl"
-        style={{ color: "var(--text-primary)" }}
-      >
-        {activeAgentId === "spark" ? "What should we create today?" : "What are we building today?"}
-      </h1>
+      <div className="text-center">
+        <div
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
+          style={{
+            borderColor: "rgba(114,242,56,0.22)",
+            backgroundColor: "rgba(114,242,56,0.06)",
+            color: "var(--litt-primary)",
+          }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-[#72f238]" />
+          {hasProject ? "Workspace online" : "Workspace ready"}
+        </div>
+        <h1
+          className="mt-3 text-center text-xl font-black tracking-tight sm:text-2xl lg:text-3xl"
+          style={{ color: "var(--text-primary)" }}
+        >
+          👋 Welcome back, {greetingName}.
+        </h1>
+        <p
+          className="mx-auto mt-2 max-w-2xl text-center text-[13px] leading-relaxed sm:text-sm"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {hasProject
+            ? `Your ${projectName ?? "workspace"} is connected. LiTT can inspect files, edit code, run checks, and prepare deployment.`
+            : "LiTT is ready to start from zero, or pick up a connected workspace the moment you attach one."}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em]">
+          {[
+            `${connectedToolCount} tools ready`,
+            `${connectedProviderCount} providers connected`,
+            voiceReady ? "Voice live" : "Voice offline",
+            hasProject ? "Project linked" : "No project linked",
+          ].map((item) => (
+            <span
+              key={item}
+              className="rounded-full border px-3 py-1"
+              style={{ borderColor: "var(--studio-border-strong)", color: "var(--text-secondary)" }}
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
 
-      {/* Supporting copy */}
-      <p
-        className="mt-2 max-w-md text-center text-[13px] leading-relaxed"
-        style={{ color: "var(--text-secondary)" }}
-      >
-        {hasProject
-          ? "I can inspect your project, edit code, run checks, create media, repair issues, and prepare a preview."
-          : "Chat with me now. Add a project only when you want files, code edits, preview, terminal, or deployment."}
-      </p>
+      {/* Quick actions */}
+      <div className="w-full">
+        <div className="mb-2 px-1 text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+          Quick actions
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {QUICK_ACTIONS.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                type="button"
+                onClick={() => onPickAction?.(action.prompt)}
+                className="flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-bold transition hover:-translate-y-0.5 hover:border-[rgba(114,242,56,0.3)]"
+                style={{
+                  borderColor: "var(--studio-border-strong)",
+                  backgroundColor: "var(--studio-card)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                <Icon size={13} style={{ color: "var(--litt-primary)" }} />
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* Proactive workspace briefing — only when live capabilities are wired in */}
-      {capabilities && (
-        <WorkspaceBriefing
-          capabilities={capabilities}
-          modelHealth={modelHealth}
-          modelLabel={modelLabel}
-        />
-      )}
+      <div className="grid w-full gap-4 lg:grid-cols-[1.1fr_.9fr]">
+        <section
+          className="rounded-[24px] border p-4 sm:p-5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                Recent projects
+              </div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+                Continue where you left off
+              </h2>
+            </div>
+            <span className="rounded-full border px-2.5 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(114,242,56,0.18)", color: "var(--litt-primary)" }}>
+              OS mode
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {[
+              { label: "Continue website", prompt: "Continue building my website and improve the user experience" },
+              { label: "Continue music", prompt: "Make a new song and refine the arrangement" },
+              { label: "Continue images", prompt: "Generate artwork and polish the visual direction" },
+              { label: "Run health scan", prompt: "Scan project health and summarize what needs attention" },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => onPickAction?.(item.prompt)}
+                className="group flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5"
+                style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-card)" }}
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>
+                  <Sparkles size={14} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{item.label}</span>
+                  <span className="block text-[10px]" style={{ color: "var(--text-muted)" }}>One tap to restart momentum</span>
+                </span>
+                <ArrowRight size={12} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--litt-primary)" }} />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section
+          className="rounded-[24px] border p-4 sm:p-5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                Live workspace
+              </div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+                LiTT is awake
+              </h2>
+            </div>
+            <span className="rounded-full border px-2.5 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(34,211,238,0.18)", color: "#65f4ff" }}>
+              {hasProject ? "Connected" : "Standby"}
+            </span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {[
+              { label: "Agents ready", value: connectedProviderCount || 0 },
+              { label: "Tools online", value: connectedToolCount || 0 },
+              { label: "Voice", value: voiceReady ? "On" : "Off" },
+              { label: "Project", value: hasProject ? "Linked" : "None" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-xl border px-3 py-3" style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>{item.label}</div>
+                <div className="mt-2 text-lg font-black" style={{ color: "var(--text-primary)" }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {capabilities && (
+            <div className="mt-4">
+              <WorkspaceBriefing
+                capabilities={capabilities}
+                modelHealth={modelHealth}
+                modelLabel={modelLabel}
+              />
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="grid w-full gap-4 xl:grid-cols-[1.25fr_.85fr]">
+        <section
+          className="rounded-[24px] border p-4 sm:p-5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                Recent chats
+              </div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+                Keep the conversation moving
+              </h2>
+            </div>
+          </div>
+          <StudioActivityTimeline />
+        </section>
+
+        <section
+          className="rounded-[24px] border p-4 sm:p-5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                Recent files
+              </div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+                Start from the right place
+              </h2>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {[
+              { label: "Scan latest changes", prompt: "Review the latest changes in my project and tell me what matters" },
+              { label: "Open file tree", prompt: "Open the project file tree and help me navigate the codebase" },
+              { label: "Review build output", prompt: "Review the latest build output and fix anything broken" },
+              { label: "Check SEO", prompt: "Improve the SEO metadata and page structure" },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => onPick(item.prompt)}
+                className="group flex items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5"
+                style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-card)" }}
+              >
+                <span className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{item.label}</span>
+                <ArrowRight size={12} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: "var(--litt-primary)" }} />
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
 
       {/* Primary actions */}
       <div className="mt-6 grid w-full max-w-md grid-cols-2 gap-2">
@@ -421,12 +658,12 @@ export default function LiTEmptyState({
               <NoProjectAction
                 icon={GithubMark}
                 label="Connect repo"
-                onClick={onConnectRepo}
+                onClick={onConnectRepoAction}
               />
               <NoProjectAction
                 icon={FilePlus2}
                 label="Start blank"
-                onClick={onStartBlank}
+                onClick={onStartBlankAction}
               />
             </div>
           </div>
@@ -446,28 +683,24 @@ export default function LiTEmptyState({
               <NoProjectAction
                 icon={FilePlus2}
                 label="Start blank"
-                onClick={onStartBlank}
+                onClick={onStartBlankAction}
               />
               <NoProjectAction
                 icon={GithubMark}
                 label="Connect repo"
-                onClick={onConnectRepo}
+                onClick={onConnectRepoAction}
               />
               <NoProjectAction
                 icon={Upload}
                 label="Upload project"
-                onClick={onStartBlank}
+                onClick={onStartBlankAction}
               />
             </div>
           </div>
         )}
       </div>
 
-      {/* Live activity timeline — fills dead space with real recent chats
-          and deploys. Only when a project is loaded so the no-project state
-          stays focused on connect actions. Renders nothing if both sources
-          are empty. */}
-      {hasProject && <StudioActivityTimeline />}
+      </div>
     </div>
   );
 }

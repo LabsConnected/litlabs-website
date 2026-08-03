@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useProfile } from "@/context/ProfileContext";
+import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
@@ -110,6 +111,10 @@ function AgentVoiceSync() {
 export default function CommandStudio() {
   const { theme } = useTheme();
   const { userId, getToken } = useClerkAuth();
+  const { user: appUser } = useAppUser();
+  const { profile } = useProfile();
+  const userDisplayName = appUser?.firstName ?? appUser?.fullName ?? null;
+  const profileDisplayName = profile?.displayName ?? userDisplayName;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -470,8 +475,8 @@ export default function CommandStudio() {
                     busy={conversation.busy}
                     activeAgentId={conversation.activeAgentId}
                     fallbackNotice={conversation.fallbackNotice}
-                    onRouteTool={handleRouteTool}
-                    onRegenerate={conversation.regenerate}
+                    onRouteToolAction={handleRouteTool}
+                    onRegenerateAction={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
                     hasProject={projectReady}
                     projectName={capabilities.projectName}
@@ -480,6 +485,7 @@ export default function CommandStudio() {
                     capabilities={capabilities}
                     modelHealth={modelHealth}
                     modelLabel={modelLabel}
+                    displayName={profileDisplayName}
                     onStartBlank={handleStartBlank}
                     onConnectRepo={handleConnectRepo}
                   />
@@ -644,8 +650,8 @@ function StudioWorkSurface({
   busy,
   activeAgentId,
   fallbackNotice,
-  onRouteTool,
-  onRegenerate,
+  onRouteToolAction,
+  onRegenerateAction,
   onEmptyAction,
   hasProject,
   projectName,
@@ -654,6 +660,7 @@ function StudioWorkSurface({
   capabilities,
   modelHealth,
   modelLabel,
+  displayName,
   onStartBlank,
   onConnectRepo,
 }: {
@@ -661,8 +668,8 @@ function StudioWorkSurface({
   busy: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
   fallbackNotice: string | null;
-  onRouteTool: (tool: StudioTool, command?: string) => void;
-  onRegenerate: () => void;
+  onRouteToolAction: (tool: StudioTool, command?: string) => void;
+  onRegenerateAction: () => void;
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
   projectName: string | null;
@@ -671,6 +678,7 @@ function StudioWorkSurface({
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;
   modelLabel: string | undefined;
+  displayName?: string | null;
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
@@ -701,9 +709,10 @@ function StudioWorkSurface({
             capabilities={capabilities}
             modelHealth={modelHealth}
             modelLabel={modelLabel}
-            onPick={onEmptyAction}
-            onStartBlank={onStartBlank}
-            onConnectRepo={onConnectRepo}
+            displayName={displayName}
+            onPickAction={onEmptyAction}
+            onStartBlankAction={onStartBlank}
+            onConnectRepoAction={onConnectRepo}
           />
         </div>
       ) : (
@@ -711,8 +720,8 @@ function StudioWorkSurface({
           messages={messages}
           busy={busy}
           activeAgentId={activeAgentId}
-          onRouteTool={onRouteTool}
-          onRegenerate={onRegenerate}
+          onRouteToolAction={onRouteToolAction}
+          onRegenerateAction={onRegenerateAction}
         />
       )}
     </div>

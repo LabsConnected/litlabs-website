@@ -24,7 +24,7 @@ const SIZE_MAP: Record<LiTTPresenceVariant, Record<LiTTPresenceSize, { w: number
     sm: { w: 104, h: 104 },
     md: { w: 132, h: 132 },
     lg: { w: 152, h: 152 },
-    xl: { w: 120, h: 120 },
+    xl: { w: 176, h: 176 },
   },
   "chat-avatar": {
     sm: { w: 28, h: 28 },

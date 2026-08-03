@@ -63,7 +63,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     expect(screen.getByText("Build a landing page")).toBeTruthy();
@@ -79,7 +79,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     expect(screen.getByText("I'm ready to help.")).toBeTruthy();
@@ -91,7 +91,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={[]}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // No user message text should be present
@@ -107,7 +107,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={true}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // The busy indicator uses animate-pulse dots
@@ -162,8 +162,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
-        onRegenerate={onRegenerate}
+        onRouteToolAction={vi.fn()}
+        onRegenerateAction={onRegenerate}
       />,
     );
     expect(screen.getByRole("button", { name: /regenerate/i })).toBeTruthy();
@@ -179,8 +179,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={true}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
-        onRegenerate={vi.fn()}
+        onRouteToolAction={vi.fn()}
+        onRegenerateAction={vi.fn()}
       />,
     );
     expect(screen.queryByRole("button", { name: /regenerate/i })).toBeNull();
@@ -217,11 +217,11 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={true}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
-    // The streaming assistant bubble should be visible (LiTT label shows)
-    expect(screen.getByText("LiTT")).toBeTruthy();
+    // The streaming assistant bubble should now visibly show thinking state.
+    expect(screen.getByText(/LiTT is thinking/i)).toBeTruthy();
   });
 
   it("shows Retry button for failed assistant messages", () => {
@@ -235,8 +235,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={false}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
-        onRegenerate={onRegenerate}
+        onRouteToolAction={vi.fn()}
+        onRegenerateAction={onRegenerate}
       />,
     );
     expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
@@ -285,7 +285,7 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         messages={messages}
         busy={true}
         activeAgentId={"litt" as AgentId}
-        onRouteTool={vi.fn()}
+        onRouteToolAction={vi.fn()}
       />,
     );
     // The standalone busy indicator should NOT appear since the last
