@@ -243,19 +243,108 @@ describe("LiTT Intelligence — MCP Adapter", () => {
     await expect(adapter.connect("nonexistent")).rejects.toThrow("not registered");
   });
 
-  it("connect returns empty lists in Phase 1 stub", async () => {
+  it("connect returns empty lists for stdio transport (no fetch needed)", async () => {
     const adapter = new MCPAdapter();
     adapter.registerServer({
-      id: "test",
-      name: "Test",
+      id: "test-stdio",
+      name: "Test stdio",
       url: "http://localhost:3000",
+      transport: "stdio",
+      approved: true,
+    });
+    const result = await adapter.connect("test-stdio");
+    expect(result.tools).toHaveLength(0);
+    expect(result.resources).toHaveLength(0);
+    expect(adapter.isConnected("test-stdio")).toBe(true);
+  });
+
+  it("connect sends JSON-RPC initialize + tools/list for http transport", async () => {
+    const adapter = new MCPAdapter();
+    adapter.registerServer({
+      id: "test-http",
+      name: "Test HTTP",
+      url: "http://localhost:9999/mcp",
       transport: "http",
       approved: true,
     });
-    const result = await adapter.connect("test");
-    expect(result.tools).toHaveLength(0);
-    expect(result.resources).toHaveLength(0);
-    expect(adapter.isConnected("test")).toBe(true);
+
+    // Mock fetch to return successful initialize + tools/list responses
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      if (body.method === "initialize") {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: new Map(),
+          json: async () => ({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } }),
+          text: async () => "",
+        };
+      }
+      if (body.method === "tools/list") {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: new Map(),
+          json: async () => ({
+            jsonrpc: "2.0",
+            id: 2,
+            result: {
+              tools: [{ name: "search", description: "Search tool", inputSchema: { type: "object" } }],
+            },
+          }),
+          text: async () => "",
+        };
+      }
+      return { ok: false, status: 404, statusText: "Not Found", headers: new Map(), json: async () => ({}), text: async () => "" };
+    });
+
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      const result = await adapter.connect("test-http", { token: "test-pat-token" });
+      expect(result.tools).toHaveLength(1);
+      expect(result.tools[0].name).toBe("search");
+      expect(result.resources).toHaveLength(0);
+      expect(adapter.isConnected("test-http")).toBe(true);
+
+      // Verify fetch was called with Authorization header
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const initCall = mockFetch.mock.calls[0][1] as RequestInit;
+      const headers = initCall.headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer test-pat-token");
+      expect(headers["Content-Type"]).toBe("application/json");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("connect throws on 401 Unauthorized", async () => {
+    const adapter = new MCPAdapter();
+    adapter.registerServer({
+      id: "test-401",
+      name: "Test 401",
+      url: "http://localhost:9999/mcp",
+      transport: "http",
+      approved: true,
+    });
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      headers: new Map(),
+      json: async () => ({}),
+      text: async () => "Unauthorized",
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      await expect(adapter.connect("test-401")).rejects.toThrow(/unauthorized/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("convertTool creates LiTT tool definition from MCP schema", () => {

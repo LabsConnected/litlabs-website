@@ -63,10 +63,10 @@ export class MCPAdapter {
 
   /**
    * Connect to an MCP server and discover its tools.
-   * In Phase 1, this is a stub that returns empty lists.
-   * In production, this would use the MCP client protocol.
+   * Sends JSON-RPC 2.0 initialize request with proper Bearer authentication
+   * (e.g. SUPABASE_ACCESS_TOKEN / Personal Access Token).
    */
-  async connect(serverId: string): Promise<{
+  async connect(serverId: string, options: { token?: string } = {}): Promise<{
     tools: MCPToolSchema[];
     resources: MCPResource[];
     prompts: MCPPrompt[];
@@ -79,13 +79,69 @@ export class MCPAdapter {
       throw new Error(`MCP server "${serverId}" is not approved`);
     }
 
-    // Phase 1: stub — no actual MCP connection
-    // In production, this would:
-    // 1. Establish transport (stdio/http/sse)
-    // 2. Send initialize request
-    // 3. List tools, resources, prompts
-    // 4. Convert tool schemas to LiTT tool definitions
+    const authToken = options.token || process.env.SUPABASE_ACCESS_TOKEN;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
 
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+
+    if (config.transport === "http" || config.transport === "sse") {
+      const initPayload = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "LiTT-Studio-Client", version: "1.0.0" }
+        }
+      };
+
+      const initRes = await fetch(config.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(initPayload),
+      });
+
+      if (initRes.status === 401) {
+        throw new Error(`MCP initialize unauthorized (HTTP 401) for server "${serverId}". Ensure SUPABASE_ACCESS_TOKEN is set.`);
+      }
+
+      if (!initRes.ok) {
+        const bodyText = await initRes.text();
+        throw new Error(`MCP initialize failed with status ${initRes.status}: ${bodyText}`);
+      }
+
+      // After successful initialization, call tools/list
+      const listToolsPayload = {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {}
+      };
+
+      const listRes = await fetch(config.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(listToolsPayload),
+      });
+
+      if (!listRes.ok) {
+        const bodyText = await listRes.text();
+        throw new Error(`MCP tools/list failed with status ${listRes.status}: ${bodyText}`);
+      }
+
+      const listData = (await listRes.json()) as { result?: { tools?: MCPToolSchema[] } };
+      const tools = listData.result?.tools || [];
+
+      this.connected.add(serverId);
+      return { tools, resources: [], prompts: [] };
+    }
+
+    // stdio transport — not supported in serverless; return empty
     this.connected.add(serverId);
     return { tools: [], resources: [], prompts: [] };
   }
