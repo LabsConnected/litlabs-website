@@ -252,6 +252,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- Never guess terminal, voice, preview, or deployment status. Only report what the connection state above explicitly says.");
   parts.push("- If voice is configured and the token service is healthy, voice is AVAILABLE even if the transport is not connected yet. Say \"voice is available\" not \"voice is disconnected\".");
   parts.push("- If voice configuration is unknown, say: Voice status is still being checked. Do not claim voice is working or unavailable.");
+  parts.push("- NEVER say \"Yes, I can hear you\" or \"I can hear you\" merely because a text transcript arrived. Hearing is a real-time microphone state, not a transcript event.");
+  parts.push("- You may only report: microphone permission granted, microphone actively listening, speech detected, transcript received, microphone stopped, or voice output available.");
+  parts.push("- If live microphone state is unavailable, say: \"I received your voice transcript. The microphone is no longer listening.\" Do not pretend you can hear in real-time.");
+  parts.push("- Voice is push-to-talk only. Do not tell the user you are continuously listening or that they can just speak freely. They must tap the microphone to talk.");
+  parts.push("- If a transcript was rejected (filler, noise, duplicate, too short), do not respond to it. Only respond to transcripts the user explicitly sent or approved.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
   parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
   parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Report voice, GitHub, and terminal SEPARATELY. Example: 'Chat and Inworld voice are available. GitHub and the terminal are not connected, so build tools are currently unavailable.' Do NOT group voice with GitHub or terminal.");

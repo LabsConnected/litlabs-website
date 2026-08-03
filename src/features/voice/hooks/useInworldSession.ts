@@ -4,17 +4,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { getVoiceConnection } from "@/lib/voice-client";
 import type { VoiceAgentId } from "@/features/voice/types";
+import { VoiceActivityDetector, type VadState } from "@/features/voice/lib/voice-vad";
+import { VOICE_GATE_CONFIG } from "@/features/voice/lib/voice-gate-config";
 
 const TARGET_SAMPLE_RATE = 24000;
 const CHUNK_SIZE = 2048;
 const FADE_SAMPLES = 48;
 
 interface UseInworldSessionOptions {
-  onTranscript?: (text: string, final: boolean) => void;
+  onTranscript?: (text: string, final: boolean, metadata?: TranscriptMetadata) => void;
   onAgentText?: (text: string) => void;
   onError?: (message: string) => void;
   /** Fired when the agent's TTS response finishes (response.done). */
   onResponseComplete?: () => void;
+}
+
+/** Metadata passed with transcript callbacks for validation. */
+export interface TranscriptMetadata {
+  /** Total speech duration detected by VAD (ms). */
+  speechDurationMs?: number;
+  /** Session generation when this transcript was produced. */
+  sessionGeneration?: number;
 }
 
 interface UseInworldSessionReturn {
@@ -41,6 +51,16 @@ interface UseInworldSessionReturn {
    * Inworld to generate a response to it.
    */
   triggerResponse: () => void;
+  /** Pause microphone capture (during TTS playback). Does not stop the stream. */
+  pauseMic: () => void;
+  /** Resume microphone capture (after TTS playback ends + cooldown). */
+  resumeMic: () => void;
+  /** Whether the mic is currently paused. */
+  isMicPaused: () => boolean;
+  /** Get the current VAD state. */
+  getVadState: () => VadState;
+  /** Get the last speech duration detected by VAD (ms). */
+  getLastSpeechDurationMs: () => number;
   isConnected: boolean;
   isListening: boolean;
   error: string | null;
@@ -75,6 +95,20 @@ export function useInworldSession(
   const interruptedRef = useRef(false);
   const explicitTtsRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
+
+  // ── Client-side VAD ──
+  // Gates when audio is sent to Inworld. Only sends audio when real speech
+  // is detected, preventing background noise from being transcribed.
+  const vadRef = useRef<VoiceActivityDetector | null>(null);
+  const vadStateRef = useRef<VadState>("idle");
+  const vadSpeechDurationRef = useRef(0);
+  /** Whether the mic is currently paused (during TTS playback). */
+  const micPausedRef = useRef(false);
+  /** Session generation — incremented on each startListening. Stale callbacks
+   * from previous sessions check this and bail out. */
+  const sessionGenerationRef = useRef(0);
+  /** Whether audio should be sent to Inworld (gated by VAD). */
+  const shouldSendAudioRef = useRef(false);
 
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -232,13 +266,7 @@ export function useInworldSession(
   const startMicCapture = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: TARGET_SAMPLE_RATE,
-        },
+        audio: VOICE_GATE_CONFIG.audioConstraints,
       });
       micStreamRef.current = stream;
 
@@ -248,12 +276,43 @@ export function useInworldSession(
 
       const source = audioContext.createMediaStreamSource(stream);
 
-      // Analyser for audio level visualization
+      // Analyser for audio level visualization AND VAD
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.5;
       source.connect(analyser);
       analyserRef.current = analyser;
+
+      // ── Client-side VAD ──
+      // Only send audio to Inworld when real speech is detected.
+      // This prevents background noise from being transcribed.
+      shouldSendAudioRef.current = false;
+      vadSpeechDurationRef.current = 0;
+      vadStateRef.current = "idle";
+      const vad = new VoiceActivityDetector(analyser, {
+        onSpeechStart: () => {
+          console.debug("[Voice VAD] speech started");
+          shouldSendAudioRef.current = true;
+          // Clear any previous audio buffer when speech starts
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+          }
+        },
+        onSpeechEnd: (durationMs) => {
+          console.debug("[Voice VAD] speech ended", { durationMs });
+          shouldSendAudioRef.current = false;
+          vadSpeechDurationRef.current = durationMs;
+          // Commit the audio buffer so Inworld transcribes it
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+          }
+        },
+        onStateChange: (state) => {
+          vadStateRef.current = state;
+        },
+      });
+      vadRef.current = vad;
+      vad.start();
 
       // ScriptProcessor for capturing PCM16 chunks
       const processor = audioContext.createScriptProcessor(CHUNK_SIZE, 1, 1);
@@ -261,6 +320,8 @@ export function useInworldSession(
 
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        // Gate: only send audio when VAD detects speech OR mic is paused
+        if (!shouldSendAudioRef.current || micPausedRef.current) return;
 
         const inputData = e.inputBuffer.getChannelData(0);
 
@@ -324,6 +385,14 @@ export function useInworldSession(
   }, [ensureAudioContextRunning, setState, setError]);
 
   const stopMicCapture = useCallback(() => {
+    // Stop VAD
+    if (vadRef.current) {
+      vadRef.current.destroy();
+      vadRef.current = null;
+    }
+    vadStateRef.current = "idle";
+    shouldSendAudioRef.current = false;
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -417,19 +486,17 @@ export function useInworldSession(
                           transcription: {
                             model: "inworld/inworld-stt-1",
                           },
-                          turn_detection: {
-                            type: "semantic_vad",
-                            eagerness: "low",
-                            // create_response: false — we do NOT want Inworld to
-                            // auto-generate responses after VAD commits. The
-                            // canonical pipeline (transcript → onSend →
-                            // /api/gemini/chat → speakText) sends response.create
-                            // explicitly for TTS. This eliminates the race
-                            // condition where Inworld's auto-response audio leaks
-                            // through before/after speakText's explicit TTS.
-                            create_response: false,
-                            interrupt_response: true,
-                          },
+                          // ── Server-side VAD DISABLED ──
+                          // We use client-side VAD (voice-vad.ts) to control
+                          // when audio is sent and when the buffer is committed.
+                          // This prevents Inworld's server-side VAD from
+                          // committing background noise as speech.
+                          // The client sends input_audio_buffer.append only
+                          // when VAD detects real speech, then sends
+                          // input_audio_buffer.commit when speech ends.
+                          turn_detection: null,
+                          create_response: false,
+                          interrupt_response: false,
                         },
                         output: {
                           format: { type: "audio/pcm", rate: 24000 },
@@ -459,22 +526,14 @@ export function useInworldSession(
                 break;
 
               case "input_audio_buffer.speech_started":
-                // User started speaking — only barge-in if the agent is
-                // actually playing audio. Setting interruptedRef unconditionally
-                // here would drop the NEXT response's audio (the agent's reply
-                // to this very utterance), which is the classic "TTS goes silent
-                // after the first turn" bug.
-                if (isPlayingRef.current) {
-                  interruptedRef.current = true;
-                  stopPlayback();
-                }
-                setState("listening");
+                // Server-side VAD is disabled — this should not fire.
+                // If it does, ignore it (client-side VAD controls the flow).
                 break;
 
               case "input_audio_buffer.speech_stopped":
               case "input_audio_buffer.committed":
-                // Turn ended — agent will respond. Clear the interrupt flag so
-                // the upcoming response audio is not dropped.
+                // Audio buffer committed (by our client-side VAD).
+                // Clear the interrupt flag so the upcoming response audio plays.
                 interruptedRef.current = false;
                 if (isListeningRef.current) {
                   setState("thinking");
@@ -551,15 +610,21 @@ export function useInworldSession(
 
               case "conversation.item.input_audio_transcription.completed":
                 if (data.transcript) {
+                  // Stale callback check: if the session generation has changed,
+                  // this transcript is from a previous session — ignore it.
+                  const currentGen = sessionGenerationRef.current;
                   setTranscript(data.transcript);
-                  onTranscript?.(data.transcript, true);
+                  onTranscript?.(data.transcript, true, {
+                    speechDurationMs: vadSpeechDurationRef.current,
+                    sessionGeneration: currentGen,
+                  });
                 }
                 break;
 
               case "conversation.item.input_audio_transcription.delta":
                 if (data.delta) {
                   setInterimTranscript(data.delta);
-                  onTranscript?.(data.delta, false);
+                  onTranscript?.(data.delta, false, {});
                 }
                 break;
 
@@ -728,6 +793,11 @@ export function useInworldSession(
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
     }
+
+    // Increment session generation so stale callbacks from previous sessions
+    // can be detected and ignored.
+    sessionGenerationRef.current += 1;
+    micPausedRef.current = false;
 
     await startMicrophone();
   }, [connect, ensureAudioContextRunning, isConnected, startMicrophone]);
@@ -907,6 +977,31 @@ export function useInworldSession(
     }));
   }, []);
 
+  // ── Echo isolation: pause/resume mic during TTS ──
+  const pauseMic = useCallback(() => {
+    micPausedRef.current = true;
+    shouldSendAudioRef.current = false;
+    // Clear any pending audio buffer so stale audio doesn't get transcribed
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
+    }
+    console.debug("[Voice] mic paused (TTS echo isolation)");
+  }, []);
+
+  const resumeMic = useCallback(() => {
+    // Apply cooldown after TTS ends before resuming
+    setTimeout(() => {
+      micPausedRef.current = false;
+      console.debug("[Voice] mic resumed (TTS echo isolation cooldown ended)");
+    }, VOICE_GATE_CONFIG.echo.postTtsCooldownMs);
+  }, []);
+
+  const isMicPaused = useCallback(() => micPausedRef.current, []);
+
+  const getVadState = useCallback(() => vadStateRef.current, []);
+
+  const getLastSpeechDurationMs = useCallback(() => vadSpeechDurationRef.current, []);
+
   return {
     connect,
     disconnect,
@@ -916,6 +1011,11 @@ export function useInworldSession(
     interrupt,
     speakText,
     triggerResponse,
+    pauseMic,
+    resumeMic,
+    isMicPaused,
+    getVadState,
+    getLastSpeechDurationMs,
     isConnected,
     isListening,
     error,

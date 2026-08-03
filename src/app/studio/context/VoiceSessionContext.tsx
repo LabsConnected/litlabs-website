@@ -3,12 +3,20 @@
 /**
  * VoiceSessionContext — persistent Inworld voice session.
  *
- * ARCHITECTURE:
+ * ARCHITECTURE (v2 — ghost transcription fix):
  * - Uses useInworldSession for STT (WebSocket → voice-server proxy → Inworld)
  * - Uses Inworld TTS (inworld-tts-2 with configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
  *   when the transport is connected, falling back to browser speechSynthesis
- * - Mic track stays alive between turns (muted/unmuted, NOT stopped)
- * - State machine: ready → listening → processing → speaking → ready
+ * - PUSH-TO-TALK ONLY: tap to start recording, tap again to stop.
+ *   Hands-free/continuous mode is REMOVED to prevent ghost transcription.
+ * - Client-side VAD gates when audio is sent to Inworld (see voice-vad.ts)
+ * - Transcript validation gate rejects filler/noise/empty/duplicate transcripts
+ *   (see transcript-validation.ts)
+ * - Echo isolation: mic is PAUSED during TTS playback and resumed after cooldown
+ * - Default UX: stop recording → transcript appears as editable draft → user presses Send.
+ *   Auto-send is an opt-in toggle (autoSendEnabled, default false).
+ * - State machine: idle → requesting_permission → connecting → listening →
+ *   processing → transcript_ready → sending → assistant_speaking → idle
  * - Only explicit "End Voice" / unmount / fatal error destroys the session
  *
  * Provider hierarchy (mounted in StudioOS.tsx):
@@ -16,6 +24,8 @@
  *     <StudioShell>         ← tool switching happens here, voice persists
  *
  * @see src/features/voice/hooks/useInworldSession.ts
+ * @see src/features/voice/lib/voice-vad.ts
+ * @see src/features/voice/lib/transcript-validation.ts
  * @see voice-server/server.mjs (WebSocket proxy to Inworld)
  */
 
@@ -31,7 +41,9 @@ import {
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
-import { useInworldSession } from "@/features/voice/hooks/useInworldSession";
+import { useInworldSession, type TranscriptMetadata } from "@/features/voice/hooks/useInworldSession";
+import { validateTranscript, type RejectionReason, type TranscriptValidationResult } from "@/features/voice/lib/transcript-validation";
+import { VOICE_GATE_CONFIG } from "@/features/voice/lib/voice-gate-config";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,8 +56,12 @@ export type VoiceState =
   | "listening"
   | "user_speaking"
   | "processing"
+  | "transcript_ready"
+  | "sending"
   | "assistant_speaking"
   | "muted"
+  | "permission_denied"
+  | "unsupported"
   | "error";
 
 export type VoiceOutputState = "idle" | "connecting" | "speaking" | "error";
@@ -60,7 +76,6 @@ export type VoiceInputState =
 export type MicrophoneStartSource =
   | "composer_mic_click"
   | "floating_voice_button"
-  | "hands_free_resume"
   | "mount_effect"
   | "tts_started"
   | "tts_finished"
@@ -78,6 +93,18 @@ export interface VoiceDiagnostics {
   lastTranscript: string | null;
   lastError: string | null;
   turnNumber: number;
+  /** Current VAD state (client-side voice activity detection). */
+  vadState: string;
+  /** Last speech duration detected by VAD (ms). */
+  lastSpeechDurationMs: number;
+  /** Last transcript rejection reason (or "accepted"). */
+  lastRejectionReason: RejectionReason | "accepted" | null;
+  /** Last rejection explanation. */
+  lastRejectionExplanation: string | null;
+  /** Active MediaStream track count. */
+  activeStreamCount: number;
+  /** Current session generation (increments on each startListening). */
+  sessionGeneration: number;
 }
 
 export interface VoiceSessionCtx {
@@ -85,7 +112,10 @@ export interface VoiceSessionCtx {
   voiceOutputState: VoiceOutputState;
   voiceInputState: VoiceInputState;
   voiceTransportConnected: boolean;
+  /** Live interim transcript (updates as user speaks). */
   transcript: string;
+  /** Finalized transcript pending user review (editable draft). */
+  pendingTranscript: string | null;
   micLevel: number;
   errorMessage: string | null;
   isMuted: boolean;
@@ -95,7 +125,8 @@ export interface VoiceSessionCtx {
   timing: VoiceTimingMetrics;
   latencies: ReturnType<typeof computeLatencies>;
   ttsEnabled: boolean;
-  handsFreeEnabled: boolean;
+  /** Auto-send finalized transcript (default: false — show editable draft). */
+  autoSendEnabled: boolean;
   diagnostics: VoiceDiagnostics;
   startVoice: () => void;
   stopVoice: () => void;
@@ -106,7 +137,15 @@ export interface VoiceSessionCtx {
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void) => void;
   toggleTts: () => void;
-  toggleHandsFree: () => void;
+  toggleAutoSend: () => void;
+  /** Submit the pending transcript (explicit Send button). */
+  submitTranscript: () => void;
+  /** Cancel the current recording / clear pending transcript. */
+  cancelRecording: () => void;
+  /** Clear the pending transcript without sending. */
+  clearPendingTranscript: () => void;
+  /** Edit the pending transcript. */
+  setPendingTranscript: (text: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +170,12 @@ const defaultDiagnostics: VoiceDiagnostics = {
   lastTranscript: null,
   lastError: null,
   turnNumber: 0,
+  vadState: "idle",
+  lastSpeechDurationMs: 0,
+  lastRejectionReason: null,
+  lastRejectionExplanation: null,
+  activeStreamCount: 0,
+  sessionGeneration: 0,
 };
 
 const defaultCtx: VoiceSessionCtx = {
@@ -139,6 +184,7 @@ const defaultCtx: VoiceSessionCtx = {
   voiceInputState: "idle",
   voiceTransportConnected: false,
   transcript: "",
+  pendingTranscript: null,
   micLevel: 0,
   errorMessage: null,
   isMuted: false,
@@ -148,7 +194,7 @@ const defaultCtx: VoiceSessionCtx = {
   timing: createInitialTimingMetrics(),
   latencies: computeLatencies(createInitialTimingMetrics()),
   ttsEnabled: true,
-  handsFreeEnabled: false,
+  autoSendEnabled: false,
   diagnostics: defaultDiagnostics,
   startVoice: noop,
   stopVoice: noop,
@@ -159,7 +205,11 @@ const defaultCtx: VoiceSessionCtx = {
   selectDevice: noop,
   setOnTurn: noop,
   toggleTts: noop,
-  toggleHandsFree: noop,
+  toggleAutoSend: noop,
+  submitTranscript: noop,
+  cancelRecording: noop,
+  clearPendingTranscript: noop,
+  setPendingTranscript: noop,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -170,7 +220,7 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
 const TTS_PREF_KEY = "litt:voice:ttsEnabled";
-const HANDS_FREE_PREF_KEY = "litt:voice:handsFreeEnabled";
+const AUTO_SEND_PREF_KEY = "litt:voice:autoSendEnabled";
 
 export function VoiceSessionProvider({
   children,
@@ -199,11 +249,12 @@ export function VoiceSessionProvider({
     const stored = localStorage.getItem(TTS_PREF_KEY);
     return stored === null ? true : stored === "1";
   });
-  const [handsFreeEnabled, setHandsFreeEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(HANDS_FREE_PREF_KEY) === "1";
+  const [autoSendEnabled, setAutoSendEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return VOICE_GATE_CONFIG.ptt.autoSendDefault;
+    return localStorage.getItem(AUTO_SEND_PREF_KEY) === "1";
   });
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
+  const [pendingTranscript, setPendingTranscriptState] = useState<string | null>(null);
   const voiceStore = useVoiceStore();
   const setTiming = voiceStore.setTiming;
 
@@ -220,13 +271,19 @@ export function VoiceSessionProvider({
   const sessionGenerationRef = useRef(0);
   const micStartInProgressRef = useRef(false);
   const micActiveRef = useRef(false);
-  const handsFreeEnabledRef = useRef(handsFreeEnabled);
   const ttsEnabledRef = useRef(ttsEnabled);
+  const autoSendEnabledRef = useRef(autoSendEnabled);
   const turnNumberRef = useRef(0);
+  const pendingTranscriptRef = useRef<string | null>(null);
+  const lastValidationResultRef = useRef<TranscriptValidationResult | null>(null);
+  /** Ref to inworldSession.resumeMic — set after inworldSession is created.
+   * Used by inworldOnResponseCompleteRef which is defined before inworldSession. */
+  const resumeMicRef = useRef<() => void>(() => {});
 
   // Keep pref refs in sync
-  useEffect(() => { handsFreeEnabledRef.current = handsFreeEnabled; }, [handsFreeEnabled]);
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+  useEffect(() => { autoSendEnabledRef.current = autoSendEnabled; }, [autoSendEnabled]);
+  useEffect(() => { pendingTranscriptRef.current = pendingTranscript; }, [pendingTranscript]);
 
   // Update diagnostics helper
   const updateDiagnostics = useCallback((patch: Partial<VoiceDiagnostics>) => {
@@ -234,36 +291,84 @@ export function VoiceSessionProvider({
   }, []);
 
   // --- Inworld session (primary voice provider) ---
-  const inworldOnTranscriptRef = useRef<(text: string, final: boolean) => void>(() => {});
+  const inworldOnTranscriptRef = useRef<(text: string, final: boolean, metadata?: TranscriptMetadata) => void>(() => {});
   const inworldOnAgentTextRef = useRef<(delta: string) => void>(() => {});
   const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
   const inworldOnResponseCompleteRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    inworldOnTranscriptRef.current = (text: string, final: boolean) => {
+    inworldOnTranscriptRef.current = (text: string, final: boolean, metadata?: TranscriptMetadata) => {
       if (final) {
         const trimmed = text.trim();
-        console.debug("[Voice Pipeline] transcript received", { final, text: trimmed.slice(0, 80) });
-        if (trimmed && trimmed !== submittedTranscriptRef.current && activeRef.current) {
-          submittedTranscriptRef.current = trimmed;
-          setTranscript(trimmed);
-          turnNumberRef.current += 1;
-          updateDiagnostics({
-            turnNumber: turnNumberRef.current,
-            lastTranscript: trimmed.slice(0, 60),
+        console.debug("[Voice Pipeline] transcript received", { final, text: trimmed.slice(0, 80), metadata });
+
+        // Stale callback check: ignore transcripts from previous sessions
+        if (metadata?.sessionGeneration !== undefined && metadata.sessionGeneration !== sessionGenerationRef.current) {
+          console.debug("[Voice Pipeline] ignoring stale transcript", {
+            transcriptGen: metadata.sessionGeneration,
+            currentGen: sessionGenerationRef.current,
           });
-          setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
-          // Do NOT set activeRef.current = false here — it prevents hands-free
-          // mode from resuming after TTS finishes. Deduplication is handled by
-          // submittedTranscriptRef above. activeRef stays true so finishSpeaking
-          // can transition back to "listening" in hands-free mode.
-          // Canonical pipeline: final transcript → onTurn → onSend →
-          // /api/gemini/chat → response stored → speakText (Inworld TTS)
-          console.debug("[Voice Pipeline] assistant text request started", { transcript: trimmed.slice(0, 80) });
-          onTurnRef.current(trimmed);
+          return;
+        }
+
+        if (!trimmed || !activeRef.current) return;
+
+        // ── Transcript validation gate ──
+        // Reject filler, noise, empty, duplicate, during-TTS transcripts
+        const validation = validateTranscript(trimmed, {
+          previousTranscript: submittedTranscriptRef.current || null,
+          ttsPlaying: voiceOutputStateRef.current === "speaking",
+          speechDurationMs: metadata?.speechDurationMs,
+        });
+        lastValidationResultRef.current = validation;
+
+        updateDiagnostics({
+          lastTranscript: trimmed.slice(0, 60),
+          lastRejectionReason: validation.reason,
+          lastRejectionExplanation: validation.explanation,
+          lastSpeechDurationMs: metadata?.speechDurationMs ?? 0,
+        });
+
+        if (!validation.accepted) {
+          console.debug("[Voice Pipeline] transcript rejected", validation);
+          // Don't send — show as editable draft if it's not empty/filler
+          if (validation.reason !== "empty" && validation.reason !== "filler_only" && validation.reason !== "no_speech_detected") {
+            setPendingTranscriptState(trimmed);
+            setVoiceState("transcript_ready");
+            voiceStateRef.current = "transcript_ready";
+          }
+          return;
+        }
+
+        // Transcript accepted
+        const acceptedText = validation.transcript;
+        submittedTranscriptRef.current = acceptedText;
+        setTranscript(acceptedText);
+        turnNumberRef.current += 1;
+        updateDiagnostics({
+          turnNumber: turnNumberRef.current,
+          lastTranscript: acceptedText.slice(0, 60),
+          lastRejectionReason: "accepted",
+          lastRejectionExplanation: "Transcript accepted.",
+        });
+        setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
+
+        if (autoSendEnabledRef.current) {
+          // Auto-send: send immediately
+          console.debug("[Voice Pipeline] auto-send enabled, sending transcript", { transcript: acceptedText.slice(0, 80) });
+          setVoiceState("sending");
+          voiceStateRef.current = "sending";
+          onTurnRef.current(acceptedText);
           setTiming({ aiResponseCompletedAt: Date.now() });
+        } else {
+          // Default: show as editable draft for user to review and Send
+          console.debug("[Voice Pipeline] showing editable draft", { transcript: acceptedText.slice(0, 80) });
+          setPendingTranscriptState(acceptedText);
+          setVoiceState("transcript_ready");
+          voiceStateRef.current = "transcript_ready";
         }
       } else {
+        // Interim transcript — show visually but NEVER send
         setTranscript(text);
       }
     };
@@ -293,26 +398,30 @@ export function VoiceSessionProvider({
       // TTS is handled by Inworld's speakText which has its own response.done.
       setVoiceOutputState("idle");
       voiceOutputStateRef.current = "idle";
+      // No hands-free resume — push-to-talk only.
+      // Resume mic after cooldown (echo isolation)
+      if (VOICE_GATE_CONFIG.echo.pauseMicDuringTts) {
+        resumeMicRef.current();
+      }
       if (voiceStateRef.current === "assistant_speaking" || voiceStateRef.current === "processing") {
-        if (handsFreeEnabledRef.current && activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          setVoiceInputState("listening");
-          voiceInputStateRef.current = "listening";
-        } else {
-          setVoiceState("idle");
-          voiceStateRef.current = "idle";
-        }
+        setVoiceState("idle");
+        voiceStateRef.current = "idle";
       }
     };
   });
 
   const inworldSession = useInworldSession({
-    onTranscript: (text: string, final: boolean) => inworldOnTranscriptRef.current(text, final),
+    onTranscript: (text: string, final: boolean, metadata?: TranscriptMetadata) => inworldOnTranscriptRef.current(text, final, metadata),
     onAgentText: (delta: string) => inworldOnAgentTextRef.current(delta),
     onError: (msg: string) => inworldOnErrorRef.current(msg),
     onResponseComplete: () => inworldOnResponseCompleteRef.current(),
   });
+
+  // Keep resumeMicRef in sync so inworldOnResponseCompleteRef can call it
+  // without accessing inworldSession before it's declared.
+  useEffect(() => {
+    resumeMicRef.current = inworldSession.resumeMic;
+  }, [inworldSession.resumeMic]);
 
   // Sync Inworld connection state
   const inworldConnectedRef = useRef(false);
@@ -338,8 +447,11 @@ export function VoiceSessionProvider({
       voicePhase: voiceState,
       inputState: voiceInputState,
       outputState: voiceOutputState,
+      vadState: inworldSession.getVadState(),
+      sessionGeneration: sessionGenerationRef.current,
+      activeStreamCount: streamRef.current?.getTracks().length ?? 0,
     });
-  }, [voiceState, voiceInputState, voiceOutputState, updateDiagnostics]);
+  }, [voiceState, voiceInputState, voiceOutputState, updateDiagnostics, inworldSession]);
 
   // ---------------------------------------------------------------------------
   // cleanup — fully idempotent
@@ -413,9 +525,8 @@ export function VoiceSessionProvider({
       const isExplicitGesture =
         trustedUserGesture &&
         (source === "composer_mic_click" || source === "floating_voice_button");
-      const isHandsFreeResume =
-        source === "hands_free_resume" && handsFreeEnabledRef.current;
-      if (!isExplicitGesture && !isHandsFreeResume) {
+      // Hands-free mode removed — only explicit user gestures start the mic
+      if (!isExplicitGesture) {
         logMicStart(source, false, "rejected_source");
         return;
       }
@@ -540,8 +651,8 @@ export function VoiceSessionProvider({
       voiceStateRef.current = "assistant_speaking";
     } else {
       // Transition to "processing" — waiting for STT to complete.
-      // The transcript handler will fire onSend → speakText, then
-      // onResponseComplete transitions back to idle.
+      // The transcript handler will either auto-send (if autoSendEnabled)
+      // or show an editable draft (transcript_ready state).
       setVoiceState("processing");
       voiceStateRef.current = "processing";
     }
@@ -614,6 +725,11 @@ export function VoiceSessionProvider({
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
+      // ── Echo isolation: pause mic before TTS ──
+      if (VOICE_GATE_CONFIG.echo.pauseMicDuringTts) {
+        inworldSession.pauseMic();
+      }
+
       setVoiceOutputState("speaking");
       voiceOutputStateRef.current = "speaking";
       setVoiceState("assistant_speaking");
@@ -632,16 +748,14 @@ export function VoiceSessionProvider({
       const finishSpeaking = () => {
         setVoiceOutputState("idle");
         voiceOutputStateRef.current = "idle";
+        // Resume mic after cooldown (echo isolation)
+        if (VOICE_GATE_CONFIG.echo.pauseMicDuringTts) {
+          inworldSession.resumeMic();
+        }
         if (voiceStateRef.current === "assistant_speaking") {
-          if (handsFreeEnabledRef.current && activeRef.current) {
-            setVoiceState("listening");
-            voiceStateRef.current = "listening";
-            setVoiceInputState("listening");
-            voiceInputStateRef.current = "listening";
-          } else {
-            setVoiceState("idle");
-            voiceStateRef.current = "idle";
-          }
+          // No hands-free resume — push-to-talk only
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
         }
         updateDiagnostics({ voicePhase: voiceStateRef.current, outputState: "idle" });
       };
@@ -738,7 +852,7 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
-  // toggleTts / toggleHandsFree
+  // toggleTts / toggleAutoSend
   // ---------------------------------------------------------------------------
 
   const toggleTts = useCallback(() => {
@@ -750,37 +864,73 @@ export function VoiceSessionProvider({
     });
   }, []);
 
-  const toggleHandsFree = useCallback(() => {
-    setHandsFreeEnabled((prev) => {
+  const toggleAutoSend = useCallback(() => {
+    setAutoSendEnabled((prev) => {
       const next = !prev;
-      try { localStorage.setItem(HANDS_FREE_PREF_KEY, next ? "1" : "0"); } catch {}
-      handsFreeEnabledRef.current = next;
+      try { localStorage.setItem(AUTO_SEND_PREF_KEY, next ? "1" : "0"); } catch {}
+      autoSendEnabledRef.current = next;
       return next;
     });
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Hands-free resume — auto-resume listening after TTS finishes
+  // submitTranscript — explicit Send button for the editable draft
   // ---------------------------------------------------------------------------
 
-  useEffect(() => {
-    if (!handsFreeEnabled) return;
-    if (voiceOutputState !== "idle") return;
-    if (!voiceTransportConnected) return;
-    if (micActiveRef.current) return;
-    if (micStartInProgressRef.current) return;
+  const submitTranscript = useCallback(() => {
+    const draft = pendingTranscriptRef.current;
+    if (!draft || !draft.trim()) return;
+    const trimmed = draft.trim();
+    submittedTranscriptRef.current = trimmed;
+    setPendingTranscriptState(null);
+    setVoiceState("sending");
+    voiceStateRef.current = "sending";
+    console.debug("[Voice Pipeline] user submitted transcript", { transcript: trimmed.slice(0, 80) });
+    onTurnRef.current(trimmed);
+    setTiming({ aiResponseCompletedAt: Date.now() });
+  }, [setTiming]);
 
-    const timer = window.setTimeout(() => {
-      if (!handsFreeEnabledRef.current) return;
-      if (micActiveRef.current) return;
-      if (micStartInProgressRef.current) return;
-      void requestMicrophoneStart({
-        source: "hands_free_resume",
-        trustedUserGesture: false,
-      });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [handsFreeEnabled, voiceOutputState, voiceTransportConnected, requestMicrophoneStart]);
+  // ---------------------------------------------------------------------------
+  // cancelRecording — stop recording and clear pending transcript
+  // ---------------------------------------------------------------------------
+
+  const cancelRecording = useCallback(() => {
+    console.debug("[Voice] cancelRecording");
+    if (inworldConnectedRef.current) {
+      inworldSession.stopListening();
+    }
+    micActiveRef.current = false;
+    micStartInProgressRef.current = false;
+    activeRef.current = false;
+    setVoiceInputState("idle");
+    voiceInputStateRef.current = "idle";
+    setVoiceState("idle");
+    voiceStateRef.current = "idle";
+    setPendingTranscriptState(null);
+    setTranscript("");
+    setMicLevel(0);
+    updateDiagnostics({ micActive: false });
+  }, [inworldSession, updateDiagnostics]);
+
+  // ---------------------------------------------------------------------------
+  // clearPendingTranscript — clear the draft without sending
+  // ---------------------------------------------------------------------------
+
+  const clearPendingTranscript = useCallback(() => {
+    setPendingTranscriptState(null);
+    if (voiceStateRef.current === "transcript_ready") {
+      setVoiceState("idle");
+      voiceStateRef.current = "idle";
+    }
+  }, []);
+
+  const setPendingTranscript = useCallback((text: string) => {
+    setPendingTranscriptState(text);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Hands-free resume — REMOVED. Push-to-talk only.
+  // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
   // Cleanup on unmount
@@ -804,6 +954,31 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
+  // Stop mic on tab hidden / page hide (prevents ghost capture in background)
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && micActiveRef.current) {
+        console.debug("[Voice] tab hidden — stopping mic");
+        stopVoice();
+      }
+    };
+    const handlePageHide = () => {
+      if (micActiveRef.current) {
+        console.debug("[Voice] page hide — stopping mic");
+        stopVoice();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [stopVoice]);
+
+  // ---------------------------------------------------------------------------
   // Context value
   // ---------------------------------------------------------------------------
 
@@ -819,6 +994,7 @@ export function VoiceSessionProvider({
       voiceInputState,
       voiceTransportConnected,
       transcript,
+      pendingTranscript,
       micLevel,
       errorMessage,
       isMuted,
@@ -828,7 +1004,7 @@ export function VoiceSessionProvider({
       timing: voiceStore.timing,
       latencies,
       ttsEnabled,
-      handsFreeEnabled,
+      autoSendEnabled,
       diagnostics,
       startVoice,
       stopVoice,
@@ -839,35 +1015,20 @@ export function VoiceSessionProvider({
       selectDevice,
       setOnTurn,
       toggleTts,
-      toggleHandsFree,
+      toggleAutoSend,
+      submitTranscript,
+      cancelRecording,
+      clearPendingTranscript,
+      setPendingTranscript,
     }),
     [
-      voiceState,
-      voiceOutputState,
-      voiceInputState,
-      voiceTransportConnected,
-      transcript,
-      micLevel,
-      errorMessage,
-      isMuted,
-      selectedDeviceId,
-      availableDevices,
-      voiceMode,
-      voiceStore.timing,
-      latencies,
-      ttsEnabled,
-      handsFreeEnabled,
-      diagnostics,
-      startVoice,
-      stopVoice,
-      toggleMute,
-      interrupt,
-      speakText,
-      stopSpeaking,
-      selectDevice,
-      setOnTurn,
-      toggleTts,
-      toggleHandsFree,
+      voiceState, voiceOutputState, voiceInputState, voiceTransportConnected,
+      transcript, pendingTranscript, micLevel, errorMessage, isMuted,
+      selectedDeviceId, availableDevices, voiceMode, voiceStore.timing,
+      latencies, ttsEnabled, autoSendEnabled, diagnostics,
+      startVoice, stopVoice, toggleMute, interrupt, speakText, stopSpeaking,
+      selectDevice, setOnTurn, toggleTts, toggleAutoSend,
+      submitTranscript, cancelRecording, clearPendingTranscript, setPendingTranscript,
     ],
   );
 
