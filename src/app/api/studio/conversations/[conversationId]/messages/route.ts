@@ -131,7 +131,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
 
   // 4. Insert user message (idempotent)
-  const { message: userMessage, duplicate } = await insertMessage({
+  const { message: userMessage, duplicate, error: insertError } = await insertMessage({
     conversationId: conversation.id,
     ownerId: userId,
     projectId: conversation.projectId,
@@ -142,7 +142,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   });
 
   if (!userMessage) {
-    return NextResponse.json({ error: "Failed to insert message" }, { status: 500 });
+    // Rollback the revision increment so the conversation isn't bricked
+    // (every retry would otherwise get a 409 "Stale revision").
+    await admin
+      .from("studio_conversations")
+      .update({ revision: expectedRevision })
+      .eq("id", conversation.id)
+      .eq("owner_id", userId)
+      .eq("revision", newRevision);
+    return NextResponse.json(
+      { error: "Failed to insert message", detail: insertError || undefined },
+      { status: 500 },
+    );
   }
 
   // If duplicate request, return the existing message + any assistant response
@@ -434,7 +445,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
  * Returns all messages for a conversation, scoped by owner.
  */
 async function getHandler(req: NextRequest, routeCtx: RouteParams) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -449,5 +460,5 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
   return NextResponse.json({ messages, revision: conversation.revision });
 }
 
-export const POST = withRateLimit(postHandler, 30, 60);
-export const GET = withRateLimit(getHandler, 100, 60);
+export const POST = withRateLimit(postHandler, 60, 60);
+export const GET = withRateLimit(getHandler, 200, 60);

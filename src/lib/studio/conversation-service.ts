@@ -217,7 +217,7 @@ export async function insertMessage(
     regenerationOfMessageId?: string | null;
     clientRequestId?: string | null;
   },
-): Promise<{ message: ConversationMessage | null; duplicate: boolean }> {
+): Promise<{ message: ConversationMessage | null; duplicate: boolean; error?: string }> {
   // Check for existing message with same client_request_id (idempotency)
   if (message.clientRequestId) {
     const { data: existing } = await supabaseAdmin
@@ -251,7 +251,11 @@ export async function insertMessage(
     .select()
     .single();
 
-  if (error || !data) return { message: null, duplicate: false };
+  if (error || !data) {
+    const errMsg = error?.message || "Unknown error";
+    console.error("[conversation-service] insertMessage failed:", errMsg);
+    return { message: null, duplicate: false, error: errMsg };
+  }
   return { message: mapMessage(data as DbMessage), duplicate: false };
 }
 

@@ -649,7 +649,10 @@ export function useCanonicalConversation({
           // Non-auth HTTP failure — the user message was not persisted.
           // Roll back optimistic messages and show the error.
           rollbackOptimistic(conversationId);
-          setSendError(data.error || `Request failed (${response.status})`);
+          const errorText = data.detail
+            ? `${data.error}: ${data.detail}`
+            : data.error || `Request failed (${response.status})`;
+          setSendError(errorText);
           return { accepted: false, persisted: false, errorKind: "network" };
         }
 
