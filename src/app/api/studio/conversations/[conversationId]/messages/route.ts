@@ -19,7 +19,7 @@ import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/l
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
-import { startAgentRun, completeAgentRun, estimateCredits } from "@/lib/agent-billing";
+import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -271,20 +271,44 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
   }
 
-  // 11.5. Start an agent_run record for marketplace agents (for billing audit)
+  // 11.5. Reserve credits BEFORE the model call (marketplace agents only)
   let agentRunId: string | null = null;
+  let reservedCredits = 0;
   if (runtimeAgent?.agentInstanceId && clerkId) {
-    const runResult = await startAgentRun({
-      clerkId,
-      agentInstanceId: runtimeAgent.agentInstanceId,
-      agentId: runtimeAgent.agentId,
-      agentVersionId: runtimeAgent.agentVersionId,
-      conversationId: conversation.id,
-      messageId: assistantMessage.id,
-      idempotencyKey: clientRequestId,
-      model: runtimeAgent.model,
-    });
-    agentRunId = runResult.runId;
+    // Estimate the maximum cost: per-run fee + estimated tokens
+    const estimatedTokens = Math.ceil(prompt.length / 4) + 2048; // prompt + max output
+    const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
+    const reserveResult = await reserveCredits(
+      {
+        clerkId,
+        agentInstanceId: runtimeAgent.agentInstanceId,
+        agentId: runtimeAgent.agentId,
+        agentVersionId: runtimeAgent.agentVersionId,
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        idempotencyKey: clientRequestId,
+        model: runtimeAgent.model,
+      },
+      estimatedCost,
+    );
+
+    if (!reserveResult.ok) {
+      // Insufficient balance — abort BEFORE the model call
+      await updateMessageStatus(assistantMessage.id, userId, "failed");
+      return NextResponse.json(
+        {
+          error: reserveResult.error || "Insufficient LiTTBits balance",
+          detail: "This agent requires LiTTBits to run. Purchase credits in your wallet.",
+          userMessage,
+          assistantMessage: { ...assistantMessage, status: "failed" as const },
+          revision: conversation.revision,
+        },
+        { status: reserveResult.status || 402 },
+      );
+    }
+
+    agentRunId = reserveResult.runId;
+    reservedCredits = reserveResult.reservedCredits;
   }
 
   // 12. Call the LLM provider
@@ -310,22 +334,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     // 13. Persist the assistant response
     await updateMessageStatus(assistantMessage.id, userId, "completed", r.text);
 
-    // 13.5. Complete the agent_run and charge credits (marketplace agents only)
+    // 13.5. Settle the run — charge actual cost and refund unused reserved credits
     if (agentRunId) {
-      const credits = runtimeAgent
+      const actualCredits = runtimeAgent
         ? estimateCredits(
-            Math.ceil(prompt.length / 4), // rough token estimate
+            Math.ceil(prompt.length / 4),
             Math.ceil(r.text.length / 4),
             1, // per 1k tokens
             1, // per run
           )
         : 0;
-      void completeAgentRun(agentRunId, {
+      void settleRun(agentRunId, {
         inputTokens: Math.ceil(prompt.length / 4),
         outputTokens: Math.ceil(r.text.length / 4),
-        creditsCharged: credits,
+        actualCredits,
         status: "completed",
-      });
+      }, reservedCredits);
     }
 
     // 14. Revision was already incremented atomically by the RPC at step 2
@@ -373,15 +397,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     // Mark assistant message as failed
     await updateMessageStatus(assistantMessage.id, userId, "failed");
 
-    // Mark the agent_run as failed
+    // Refund ALL reserved credits and mark the run as failed
     if (agentRunId) {
-      void completeAgentRun(agentRunId, {
+      void settleRun(agentRunId, {
         inputTokens: 0,
         outputTokens: 0,
-        creditsCharged: 0,
+        actualCredits: 0, // no charge on failure
         status: "failed",
         error: err instanceof Error ? err.message : "LLM provider unavailable",
-      });
+      }, reservedCredits);
     }
 
     const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";

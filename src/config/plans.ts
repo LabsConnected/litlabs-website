@@ -102,27 +102,26 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   },
   founder: {
     id: "founder",
-    name: "Founding Member",
-    description: "Permanent Creator-level AI team access",
+    name: "Founding Supporter",
+    description: "6 months of Creator + founder perks",
     billingType: "one_time",
-    monthlyPriceCents: 14900,
+    monthlyPriceCents: 4900,
     standardPriceCents: null,
     stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
     monthlyCredits: 6000,
     activeProjectLimit: 5,
     features: [
-      "Permanent Creator-level agent access",
-      "Researcher, Writer & Marketer forever",
+      "6 months of Creator-level agent access",
+      "Researcher, Writer & Marketer included",
+      "5,000 bonus LiTTBits (one-time)",
       "Founder badge",
+      "15% off future credit packs",
       "Early feature access",
-      "20% off future usage packs",
-      "Higher beta limits",
       "Priority feedback channel",
-      "Price protection",
     ],
     beta: true,
     enabled: true,
-    founderLimit: 250,
+    founderLimit: 100,
   },
 };
 
@@ -131,8 +130,8 @@ export const PLAN_LIST = Object.values(PLANS);
 /**
  * Plan rank — higher = more access. Used by the agent entitlement resolver
  * to determine whether a user's active plan covers a specialist agent's
- * minimumPlan requirement. Founder is treated as Creator-level for agent
- * access (permanent Creator-tier benefit), so it ranks equal to creator_beta.
+ * minimumPlan requirement. Founding Supporter grants 6 months of
+ * Creator-level access, so it ranks equal to creator_beta.
  */
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
@@ -147,8 +146,8 @@ export function getPlanById(id: string): PlanDefinition | null {
 
 /**
  * Returns true if `userPlan` satisfies the `requiredPlan` threshold.
- * Founder counts as Creator-level (rank 1) — it does NOT unlock Pro-only
- * agents (Coder, Analyst). Pro Builder unlocks everything.
+ * Founding Supporter counts as Creator-level (rank 1) — it does NOT unlock
+ * Pro-only agents (Coder, Analyst). Pro Builder unlocks everything.
  */
 export function hasPlanAccess(userPlan: PlanId, requiredPlan: PlanId): boolean {
   return PLAN_RANK[userPlan] >= PLAN_RANK[requiredPlan];

@@ -214,6 +214,7 @@ function AgentCardInner({
           <ActionButton
             state={state} busy={busy} categoryColor={categoryColor}
             borderColor={borderColor} textMuted={textMuted} itemSlug={item.slug}
+            instanceId={instanceId}
             onBuy={handleBuy} onInstall={handleInstall}
             onUninstall={handleUninstall} onToggle={handleToggle}
           />
@@ -237,11 +238,11 @@ function StateBadge({ state }: { state: AgentState }) {
 }
 
 function ActionButton({
-  state, busy, categoryColor, borderColor, textMuted, itemSlug,
+  state, busy, categoryColor, borderColor, textMuted, itemSlug, instanceId,
   onBuy, onInstall, onUninstall, onToggle,
 }: {
   state: AgentState; busy: boolean; categoryColor: string; borderColor: string;
-  textMuted: string; itemSlug: string;
+  textMuted: string; itemSlug: string; instanceId: string | null;
   onBuy: () => void; onInstall: () => void; onUninstall: () => void; onToggle: () => void;
 }) {
   if (busy) {

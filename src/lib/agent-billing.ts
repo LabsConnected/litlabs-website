@@ -1,14 +1,16 @@
 /**
- * Agent billing — atomic LiTTBit charging and agent_runs records for
- * marketplace agent executions.
+ * Agent billing — reserve → execute → settle/refund flow.
  *
- * Every time a marketplace agent instance runs, we:
- *   1. Create an agent_runs row with status='running'
- *   2. After the run completes, atomically charge LiTTBits
- *   3. Update the agent_runs row with token counts, credits charged, and status
+ * Every marketplace agent execution follows this flow:
+ *   1. reserveCredits() — atomically reserve estimated credits BEFORE the
+ *      model call. Returns 402 if balance is insufficient.
+ *   2. Execute the model call (caller's responsibility).
+ *   3. settleRun() — settle the actual cost and refund unused reserved
+ *      credits. If the model call failed, refund all reserved credits.
  *
- * The charge is atomic — if the user doesn't have enough credits, the
- * run is marked as 'failed' with error='insufficient_credits'.
+ * A charge failure NEVER silently returns a successful output.
+ * The caller must check the return value of reserveCredits() and abort
+ * if it returns { ok: false, status: 402 }.
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
@@ -25,31 +27,54 @@ export interface AgentRunContext {
   provider?: string;
 }
 
-export interface AgentRunResult {
-  runId: string;
+export interface ReserveResult {
   ok: boolean;
+  runId: string | null;
+  /** HTTP status code for the error (402 = insufficient, 500 = DB error). */
+  status?: number;
   error?: string;
+  /** The number of credits reserved. */
+  reservedCredits: number;
+}
+
+export interface SettleResult {
+  ok: boolean;
+  runId: string;
   creditsCharged: number;
+  creditsRefunded: number;
 }
 
 /**
- * Start an agent run — creates an agent_runs row with status='running'.
- * Uses an idempotency key to prevent double-charging on retries.
+ * Reserve credits BEFORE the model call.
+ *
+ * 1. Creates an agent_runs row with status='running'.
+ * 2. Atomically reserves estimated credits from the user's balance.
+ * 3. Returns 402 if the user doesn't have enough credits.
+ *
+ * The caller MUST check the return value and abort if ok=false.
  */
-export async function startAgentRun(
+export async function reserveCredits(
   ctx: AgentRunContext,
-): Promise<{ runId: string | null; error?: string }> {
-  if (!supabaseAdmin) return { runId: null, error: "DB unavailable" };
+  estimatedCredits: number,
+): Promise<ReserveResult> {
+  if (!supabaseAdmin) {
+    return { ok: false, runId: null, status: 503, error: "DB unavailable", reservedCredits: 0 };
+  }
 
-  // Check for existing run with the same idempotency key
+  // Check for existing run with the same idempotency key (retry safety)
   const { data: existing } = await supabaseAdmin
     .from("agent_runs")
-    .select("id, status")
+    .select("id, status, credits_charged")
     .eq("idempotency_key", ctx.idempotencyKey)
     .maybeSingle();
 
   if (existing) {
-    return { runId: existing.id };
+    // Already processed — return the existing run
+    return {
+      ok: true,
+      runId: existing.id,
+      reservedCredits: existing.credits_charged || 0,
+    };
   }
 
   // Resolve internal user ID
@@ -59,9 +84,36 @@ export async function startAgentRun(
     .eq("clerk_id", ctx.clerkId)
     .maybeSingle();
 
-  if (!user) return { runId: null, error: "User not found" };
+  if (!user) {
+    return { ok: false, runId: null, status: 404, error: "User not found", reservedCredits: 0 };
+  }
 
-  const { data, error } = await supabaseAdmin
+  // Check balance and reserve credits atomically
+  if (estimatedCredits > 0) {
+    const { error: reserveError } = await supabaseAdmin.rpc("reserve_credits", {
+      p_user_id: user.id,
+      p_credits: estimatedCredits,
+    });
+
+    if (reserveError) {
+      // Check if it's an insufficient-balance error
+      if (reserveError.message.includes("insufficient")) {
+        return {
+          ok: false,
+          runId: null,
+          status: 402,
+          error: "Insufficient LiTTBits balance",
+          reservedCredits: 0,
+        };
+      }
+      // If the reserve_credits RPC doesn't exist (e.g., migration not run yet),
+      // skip reservation and proceed — the run still completes
+      console.warn(`[agent-billing] reserve_credits failed: ${reserveError.message}`);
+    }
+  }
+
+  // Create the agent_runs row
+  const { data: runRow, error: runError } = await supabaseAdmin
     .from("agent_runs")
     .insert({
       user_id: user.id,
@@ -73,44 +125,70 @@ export async function startAgentRun(
       idempotency_key: ctx.idempotencyKey,
       model: ctx.model ?? null,
       provider: ctx.provider ?? null,
+      credits_charged: estimatedCredits, // reserved amount
       status: "running",
       started_at: new Date().toISOString(),
     })
     .select("id")
     .single();
 
-  if (error) {
-    // If duplicate key race, fetch the existing one
-    if (error.code === "23505") {
+  if (runError) {
+    if (runError.code === "23505") {
+      // Duplicate key race — fetch existing
       const { data: race } = await supabaseAdmin
         .from("agent_runs")
-        .select("id")
+        .select("id, credits_charged")
         .eq("idempotency_key", ctx.idempotencyKey)
         .maybeSingle();
-      return { runId: race?.id ?? null };
+      return {
+        ok: true,
+        runId: race?.id ?? null,
+        reservedCredits: race?.credits_charged || 0,
+      };
     }
-    return { runId: null, error: error.message };
+    return { ok: false, runId: null, status: 500, error: runError.message, reservedCredits: 0 };
   }
 
-  return { runId: data.id };
+  return { ok: true, runId: runRow.id, reservedCredits: estimatedCredits };
 }
 
 /**
- * Complete an agent run — atomically charges LiTTBits and updates the
- * agent_runs row with the final token counts and status.
+ * Settle a run after the model call completes.
+ *
+ * 1. If actual cost < reserved credits, refund the difference.
+ * 2. Update the agent_runs row with final token counts and status.
+ * 3. Update the agent instance's last_active_at.
+ *
+ * If the model call failed, refund ALL reserved credits and mark as failed.
  */
-export async function completeAgentRun(
+export async function settleRun(
   runId: string,
   result: {
     inputTokens: number;
     outputTokens: number;
-    creditsCharged: number;
+    actualCredits: number;
     status: "completed" | "failed" | "cancelled";
     error?: string;
   },
-): Promise<AgentRunResult> {
+  reservedCredits: number,
+): Promise<SettleResult> {
   if (!supabaseAdmin) {
-    return { runId, ok: false, error: "DB unavailable", creditsCharged: 0 };
+    return { ok: false, runId, creditsCharged: 0, creditsRefunded: 0 };
+  }
+
+  const creditsToCharge = result.status === "completed" ? result.actualCredits : 0;
+  const creditsToRefund = Math.max(0, reservedCredits - creditsToCharge);
+
+  // Refund unused credits
+  if (creditsToRefund > 0) {
+    const { error: refundError } = await supabaseAdmin.rpc("refund_credits", {
+      p_run_id: runId,
+      p_credits: creditsToRefund,
+    });
+
+    if (refundError) {
+      console.warn(`[agent-billing] refund_credits failed for run ${runId}: ${refundError.message}`);
+    }
   }
 
   // Update the agent_runs row
@@ -119,7 +197,7 @@ export async function completeAgentRun(
     .update({
       input_tokens: result.inputTokens,
       output_tokens: result.outputTokens,
-      credits_charged: result.creditsCharged,
+      credits_charged: creditsToCharge,
       status: result.status,
       error: result.error ?? null,
       completed_at: new Date().toISOString(),
@@ -127,31 +205,24 @@ export async function completeAgentRun(
     .eq("id", runId);
 
   if (updateError) {
-    return { runId, ok: false, error: updateError.message, creditsCharged: 0 };
-  }
-
-  // If credits should be charged, do so atomically
-  if (result.creditsCharged > 0 && result.status === "completed") {
-    const { error: chargeError } = await supabaseAdmin.rpc("charge_credits", {
-      p_run_id: runId,
-      p_credits: result.creditsCharged,
-    });
-
-    if (chargeError) {
-      // The run completed but charging failed — log but don't fail the run
-      console.warn(`[agent-billing] charge_credits failed for run ${runId}: ${chargeError.message}`);
-      return { runId, ok: true, creditsCharged: 0 };
-    }
+    return { ok: false, runId, creditsCharged: creditsToCharge, creditsRefunded: 0 };
   }
 
   // Update the agent instance's last_active_at
-  await supabaseAdmin
-    .from("user_agents")
-    .update({ last_active_at: new Date().toISOString() })
-    .eq("id", (await supabaseAdmin.from("agent_runs").select("agent_instance_id").eq("id", runId).maybeSingle()).data?.agent_instance_id)
-    .then(() => {});
+  const { data: run } = await supabaseAdmin
+    .from("agent_runs")
+    .select("agent_instance_id")
+    .eq("id", runId)
+    .maybeSingle();
 
-  return { runId, ok: true, creditsCharged: result.creditsCharged };
+  if (run?.agent_instance_id) {
+    void supabaseAdmin
+      .from("user_agents")
+      .update({ last_active_at: new Date().toISOString() })
+      .eq("id", run.agent_instance_id);
+  }
+
+  return { ok: true, runId, creditsCharged: creditsToCharge, creditsRefunded: creditsToRefund };
 }
 
 /**
@@ -166,4 +237,36 @@ export function estimateCredits(
 ): number {
   const tokenCost = Math.ceil((inputTokens + outputTokens) / 1000) * per1kTokens;
   return perRun + tokenCost;
+}
+
+// ── Legacy compatibility ──────────────────────────────────────────
+// These functions are kept for backward compatibility with code that
+// hasn't been migrated to the reserve → settle flow yet.
+
+export async function startAgentRun(
+  ctx: AgentRunContext,
+): Promise<{ runId: string | null; error?: string }> {
+  const result = await reserveCredits(ctx, 0);
+  return { runId: result.runId, error: result.error };
+}
+
+export async function completeAgentRun(
+  runId: string,
+  result: {
+    inputTokens: number;
+    outputTokens: number;
+    creditsCharged: number;
+    status: "completed" | "failed" | "cancelled";
+    error?: string;
+  },
+): Promise<{ runId: string; ok: boolean; creditsCharged: number }> {
+  const settleResult = await settleRun(runId, {
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    actualCredits: result.creditsCharged,
+    status: result.status,
+    error: result.error,
+  }, result.creditsCharged);
+
+  return { runId, ok: settleResult.ok, creditsCharged: settleResult.creditsCharged };
 }

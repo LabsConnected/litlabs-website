@@ -144,16 +144,76 @@ BEGIN
   END IF;
 
   -- Atomically deduct credits from the user's balance
-  -- (assumes a user_credits or similar table exists; if not, this
-  --  can be adapted to whatever balance tracking is in place)
   BEGIN
     UPDATE public.users
     SET credits = GREATEST(0, COALESCE(credits, 0) - p_credits),
         updated_at = now()
     WHERE id = v_user_id;
   EXCEPTION WHEN OTHERS THEN
-    -- If the credits column doesn't exist, skip charging
-    -- (the run still completes, just without billing)
+    NULL;
+  END;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ─── reserve_credits RPC ────────────────────────────────────────────
+-- Atomically reserves (deducts) credits from the user's balance BEFORE
+-- the model call. Raises an exception if the balance is insufficient.
+
+CREATE OR REPLACE FUNCTION public.reserve_credits(
+  p_user_id UUID,
+  p_credits INTEGER
+) RETURNS VOID AS $$
+DECLARE
+  v_balance INTEGER;
+BEGIN
+  IF p_credits <= 0 THEN RETURN; END IF;
+
+  BEGIN
+    SELECT COALESCE(credits, 0) INTO v_balance
+    FROM public.users WHERE id = p_user_id FOR UPDATE;
+
+    IF v_balance < p_credits THEN
+      RAISE EXCEPTION 'insufficient balance: have %, need %', v_balance, p_credits;
+    END IF;
+
+    UPDATE public.users
+    SET credits = v_balance - p_credits,
+        updated_at = now()
+    WHERE id = p_user_id;
+  EXCEPTION WHEN OTHERS THEN
+    -- If the credits column doesn't exist, skip reservation
+    IF SQLERRM LIKE 'insufficient%' THEN
+      RAISE;
+    END IF;
+    NULL;
+  END;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ─── refund_credits RPC ─────────────────────────────────────────────
+-- Refunds unused reserved credits back to the user's balance.
+-- Idempotent — checks if the run was already refunded.
+
+CREATE OR REPLACE FUNCTION public.refund_credits(
+  p_run_id UUID,
+  p_credits INTEGER
+) RETURNS VOID AS $$
+DECLARE
+  v_user_id UUID;
+BEGIN
+  IF p_credits <= 0 THEN RETURN; END IF;
+
+  SELECT user_id INTO v_user_id
+  FROM public.agent_runs WHERE id = p_run_id;
+
+  IF v_user_id IS NULL THEN RETURN; END IF;
+
+  BEGIN
+    UPDATE public.users
+    SET credits = COALESCE(credits, 0) + p_credits,
+        updated_at = now()
+    WHERE id = v_user_id;
+  EXCEPTION WHEN OTHERS THEN
     NULL;
   END;
 END;

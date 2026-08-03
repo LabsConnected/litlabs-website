@@ -95,7 +95,12 @@ const faq = [
   {
     question: "What are LiTTBits?",
     answer:
-      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, media processing, and terminal runtime.",
+      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime.",
+  },
+  {
+    question: "How does video generation work?",
+    answer:
+      "Video is metered usage. Create a 5-second clip starting at $0.79 in LiTTBits. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.",
   },
   {
     question: "Do I keep my existing Beta LiTTBits?",
@@ -110,7 +115,12 @@ const faq = [
   {
     question: "Is this unlimited AI?",
     answer:
-      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions should show an estimate before they run.",
+      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
+  },
+  {
+    question: "What is the Founding Supporter offer?",
+    answer:
+      "A one-time $49 purchase that grants 6 months of Creator-level access, 5,000 bonus LiTTBits, a Founder badge, 15% off future credit packs, and early feature access. Limited to 100 supporters.",
   },
 ];
 
@@ -326,18 +336,17 @@ export default function PricingPage() {
 
           <div className={styles.founderCopy}>
             <div className={styles.founderTitleRow}>
-              <p>Founding Member</p>
-              <span>Limited</span>
+              <p>Founding Supporter</p>
+              <span>Limited · 100 spots</span>
             </div>
             <h2>
-              Permanent Creator-level access for{" "}
+              6 months of Creator + bonus perks for{" "}
               <strong>{formatPrice(founder.monthlyPriceCents)} once</strong>
             </h2>
             <p>
-              Includes {founder.monthlyCredits.toLocaleString()} founding LiTTBits, a Founder
-              badge, early feature access, 20% off future usage packs, higher beta
-              limits, priority feedback, and price protection. One-time purchase
-              that does not renew.
+              Includes 5,000 bonus LiTTBits, a Founder badge, 15% off future
+              credit packs, early feature access, and priority feedback.
+              One-time purchase — no recurring charge.
             </p>
           </div>
 
@@ -347,7 +356,7 @@ export default function PricingPage() {
             disabled={founderLoading}
             onClick={() => handleCheckout(founder)}
           >
-            Become a Founder
+            Become a Founding Supporter
             {founderLoading ? null : <ArrowIcon />}
           </button>
         </article>
