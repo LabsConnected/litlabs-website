@@ -186,7 +186,13 @@ export function useCanonicalConversation({
     voiceState,
     voiceOutputState,
     voiceHealth: capabilities.voiceHealth,
-  }), [capabilities, voiceTransportConnected, voiceInputState, voiceState, voiceOutputState]);
+    writeAccess: capabilities.writeAccess,
+    activeBranch: capabilities.activeBranch,
+    repositoryName: capabilities.repositoryName,
+    workspaceStatus: capabilities.workspaceStatus,
+    selectedModelLabel: selectedModel.label,
+    selectedModelId: selectedModel.id,
+  }), [capabilities, voiceTransportConnected, voiceInputState, voiceState, voiceOutputState, selectedModel]);
 
   // Subscribe to the messages slice reactively (selector pattern, matching
   // CanvasPanel). The no-selector + store.getMessages() approach relies on the
