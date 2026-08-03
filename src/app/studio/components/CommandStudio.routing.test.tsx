@@ -37,6 +37,13 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
 }));
 
+// Mock ModelPicker — it uses useTheme.resolvedColors which the test mock doesn't provide
+vi.mock("@/components/ModelPicker", () => ({
+  default: ({ selectedModel }: { selectedModel: string }) => (
+    <div data-testid="model-picker-mock">{selectedModel}</div>
+  ),
+}));
+
 vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
   useAppUser: () => ({ user: { id: "test-user-id", firstName: "Test", username: "test" } }),

@@ -6,8 +6,10 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
+import ModelPicker from "@/components/ModelPicker";
 import {
   useStudioModelStore,
+  MODELS,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
@@ -77,6 +79,7 @@ export default function CommandStudioHeader({
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
@@ -273,6 +276,18 @@ export default function CommandStudioHeader({
           />,
           document.body,
         )}
+
+      {/* Model picker — lets the user change the AI model. The selected
+          model reaches the backend via useCanonicalConversation.send(). */}
+      <div className="hidden sm:block shrink-0 w-[min(11rem,30vw)]" data-testid="studio-model-picker">
+        <ModelPicker
+          selectedModel={selectedModel.id}
+          onModelChange={(modelId) => {
+            const found = MODELS.find((m) => m.id === modelId);
+            if (found) selectModel(found);
+          }}
+        />
+      </div>
 
       {/* Write-permission pill — colored so the approval state is obvious.
           🟢 Writes allowed · 🟡 Approval needed · (locked shown in popover) */}

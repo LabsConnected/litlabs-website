@@ -37,17 +37,26 @@ vi.mock("../hooks/useConnectionSummary", () => ({
 
 // Mock model store
 vi.mock("../stores/useStudioModelStore", () => ({
-  useStudioModelStore: (selector: (s: { selectedModel: unknown; fallbackNotice: string | null; providerHealth: Record<string, string> }) => unknown) =>
+  useStudioModelStore: (selector: (s: { selectedModel: unknown; selectModel: unknown; fallbackNotice: string | null; providerHealth: Record<string, string> }) => unknown) =>
     selector({
       selectedModel: { id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" },
+      selectModel: vi.fn(),
       fallbackNotice: null,
       providerHealth: {},
     }),
+  MODELS: [{ id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" }],
 }));
 
 // Mock Clerk UserButton
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
+}));
+
+// Mock ModelPicker — it uses useTheme which requires ThemeProvider
+vi.mock("@/components/ModelPicker", () => ({
+  default: ({ selectedModel }: { selectedModel: string }) => (
+    <div data-testid="model-picker-mock">{selectedModel}</div>
+  ),
 }));
 
 // Mock fetch so the notifications poll doesn't trigger async act warnings

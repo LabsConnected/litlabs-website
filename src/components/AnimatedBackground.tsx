@@ -435,30 +435,41 @@ export default function AnimatedBackground() {
   return (
     <>
       {showWallpaper ? (
-        <div
-          className="fixed inset-0 pointer-events-none"
-          style={{
-            zIndex: 0,
-            backgroundColor: resolvedColors.bgColor,
-            // If the image failed to load, use the fallback gradient.
-            // Never display a broken-image icon.
-            ...(imageFailed
-              ? { background: WALLPAPER_FALLBACK_GRADIENT }
-              : customWallpaper
-                ? {
-                    backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
-                    backgroundSize: profile.wallpaperFit,
-                    backgroundPosition: "center",
-                    backgroundAttachment: "fixed",
-                  }
-                : wallpaper.fullStyle),
-            backgroundSize: profile.wallpaperFit,
-            filter: profile.wallpaperBlur > 0 ? `blur(${profile.wallpaperBlur}px)` : undefined,
-            transform: profile.wallpaperBlur > 0 ? "scale(1.03)" : undefined,
-            transition: "background 0.5s ease",
-          }}
-          onError={() => setImageFailed(true)}
-        >
+        (() => {
+          // Resolve the wallpaper-specific style. Use backgroundImage (not the
+          // background shorthand) so it never conflicts with backgroundColor.
+          const wallpaperStyle: React.CSSProperties = imageFailed
+            ? { backgroundImage: WALLPAPER_FALLBACK_GRADIENT }
+            : customWallpaper
+              ? {
+                  backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
+                  backgroundPosition: "center",
+                  backgroundAttachment: "fixed",
+                }
+              : { ...wallpaper.fullStyle };
+
+          // If fullStyle used the `background` shorthand, convert it to
+          // backgroundImage so we can safely layer backgroundColor underneath.
+          if ("background" in wallpaperStyle) {
+            const bg = (wallpaperStyle as Record<string, string>).background;
+            delete (wallpaperStyle as Record<string, string>).background;
+            if (bg) wallpaperStyle.backgroundImage = bg;
+          }
+
+          return (
+            <div
+              className="fixed inset-0 pointer-events-none"
+              style={{
+                zIndex: 0,
+                backgroundColor: resolvedColors.bgColor,
+                ...wallpaperStyle,
+                backgroundSize: profile.wallpaperFit,
+                filter: profile.wallpaperBlur > 0 ? `blur(${profile.wallpaperBlur}px)` : undefined,
+                transform: profile.wallpaperBlur > 0 ? "scale(1.03)" : undefined,
+                transition: "background-image 0.5s ease, background-color 0.5s ease",
+              }}
+              onError={() => setImageFailed(true)}
+            >
           <div
             className="absolute inset-0"
             style={{ backgroundColor: `rgba(2, 4, 10, ${profile.wallpaperOverlay})` }}
@@ -471,7 +482,9 @@ export default function AnimatedBackground() {
               aria-hidden="true"
             />
           )}
-        </div>
+            </div>
+          );
+        })()
       ) : mode === "constellation" ? (
         <canvas
           ref={canvasRef}
