@@ -153,8 +153,12 @@ function WorkspaceBriefing({
         LiTT checked your workspace
       </div>
       <ul className="space-y-1.5">
-        {checks.map((c) => (
-          <li key={c.label} className="flex items-center gap-2 text-[11px]">
+        {checks.map((c, i) => (
+          <li
+            key={c.label}
+            className="flex items-center gap-2 text-[11px] animate-fadeInUp"
+            style={{ animationDelay: `${i * 60}ms` }}
+          >
             <span
               className="grid h-4 w-4 shrink-0 place-items-center rounded-full"
               style={{
@@ -231,7 +235,7 @@ export default function LiTEmptyState({
 
   return (
     <div
-      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6"
+      className="flex min-h-full flex-col items-center justify-center px-4 py-4 sm:py-6 animate-fadeInUp"
       style={{ color: "var(--text-primary)" }}
       data-testid="empty-state"
     >

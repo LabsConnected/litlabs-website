@@ -139,7 +139,7 @@ export default function StudioActivityTimeline() {
           return (
             <div
               key={e.id}
-              className="flex items-center gap-2.5 rounded-lg border px-3 py-2"
+              className="flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-all hover:translate-x-0.5 hover:border-[rgba(114,242,56,0.25)]"
               style={{
                 borderColor: "var(--studio-border)",
                 backgroundColor: "var(--studio-card)",
