@@ -7,24 +7,30 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       // `server-only` is a Next.js build-time marker that throws if imported
       // into client bundles. In vitest we just need it to resolve to nothing
-      // so modules using it can be imported by tests.
-      "server-only": path.resolve(__dirname, "vitest.stubs/empty.ts"),
+      // so modules using it can be imported by tests. The stub lives in a
+      // committed, source-controlled path so the test suite is reproducible
+      // from a clean clone — not in an ignored local directory.
+      "server-only": path.resolve(__dirname, "tests/stubs/server-only.ts"),
     },
   },
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: [],
+    setupFiles: ["./tests/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
     exclude: [
       "node_modules",
       ".next",
+      ".worktrees",
       "OmniRoute",
       "litlabs",
       "litlabs-website",
       "work",
       "Zoo-Code",
       "meta",
+      "test-results",
+      "playwright-report",
+      "coverage",
     ],
   },
 });

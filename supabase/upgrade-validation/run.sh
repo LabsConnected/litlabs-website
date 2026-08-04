@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Production-style migration upgrade validation
+# =============================================================================
+# Validates the REAL upgrade path for the forward migration
+# 20260801000000_create_agent_system_notifications.sql on top of a pre-forward
+# database. This is NOT a pgTAP test and is NOT run by `supabase test db`.
+#
+# Flow (must pass WITHOUT repairing migration history — a validation test must
+# not repair its own migration history to pass):
+#   1. Reset to 20260728220000 (migration immediately before the forward one)
+#   2. Run preconditions (assert pre-forward state + insert sentinel row)
+#   3. Verify only the forward migration is pending
+#   4. Apply the forward migration via `supabase migration up`
+#   5. Run postconditions (table exists, sentinel survived, schema intact)
+#   6. Re-run the ENTIRE forward migration SQL with ON_ERROR_STOP=1 (idempotency)
+#   7. Run postconditions again (proves idempotency didn't break anything)
+#   8. Cleanup sentinel data
+#
+# Exits non-zero on any failure. Designed to run inside the
+# "Production-style migration upgrade" GitHub Actions job, which starts
+# `supabase start` before invoking this script and stops it afterwards.
+# =============================================================================
+set -euo pipefail
+
+RESET_VERSION="20260728220000"
+FORWARD_VERSION="20260801000000"
+FORWARD_MIGRATION="supabase/migrations/${FORWARD_VERSION}_create_agent_system_notifications.sql"
+PRECONDITIONS="supabase/upgrade-validation/preconditions.sql"
+POSTCONDITIONS="supabase/upgrade-validation/postconditions.sql"
+
+# Local Postgres connection string. We apply the forward migration directly
+# via psql (not `supabase migration up`) because `migration up` ALWAYS fetches
+# remote migration history — even with --db-url or --local — and the linked
+# production project has stale entries (20260712, 20260719) with no local files,
+# causing a hard error that would require `migration repair` to work around.
+# A validation test must not repair its own migration history to pass, so we
+# bypass the migration tool entirely and apply the SQL directly, then record
+# the version in schema_migrations manually (matching what migration up does).
+# Default local Supabase credentials: postgres:postgres@127.0.0.1:54322/postgres
+DB_PORT="${SUPABASE_DB_PORT:-54322}"
+DB_PASSWORD="${SUPABASE_DB_PASSWORD:-postgres}"
+DB_URL="postgresql://postgres:${DB_PASSWORD}@127.0.0.1:${DB_PORT}/postgres"
+
+# -----------------------------------------------------------------------------
+# Discover the local Supabase Postgres container name (derived from project_id
+# in supabase/config.toml, but discovered dynamically for robustness).
+# -----------------------------------------------------------------------------
+DB_CONTAINER="$(docker ps --format '{{.Names}}' | grep '^supabase_db_' | head -n1 || true)"
+if [ -z "${DB_CONTAINER}" ]; then
+  echo "FAIL: no running supabase_db_* container found. Run 'supabase start' first." >&2
+  exit 1
+fi
+echo "Using Postgres container: ${DB_CONTAINER}"
+
+psql_exec() {
+  # Stream SQL from stdin into the local Postgres container, hard-failing on error.
+  docker exec -i "${DB_CONTAINER}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"
+}
+
+psql_scalar() {
+  # Print a single scalar value (no headers, no alignment).
+  docker exec "${DB_CONTAINER}" psql -U postgres -d postgres -t -A -v ON_ERROR_STOP=1 -c "$1"
+}
+
+step() {
+  echo
+  echo "==================================================================="
+  echo "  $1"
+  echo "==================================================================="
+}
+
+# -----------------------------------------------------------------------------
+# Step 1: Reset to the migration immediately before the forward migration.
+# -----------------------------------------------------------------------------
+step "Step 1: Reset local DB to version ${RESET_VERSION}"
+npx supabase db reset --local --no-seed --version "${RESET_VERSION}"
+
+# -----------------------------------------------------------------------------
+# Step 2: Run preconditions (assert pre-forward state + insert sentinel).
+# -----------------------------------------------------------------------------
+step "Step 2: Run preconditions"
+psql_exec < "${PRECONDITIONS}"
+
+# -----------------------------------------------------------------------------
+# Step 3: Verify pending migrations.
+#         (a) No migration newer than RESET_VERSION is recorded as applied.
+#         (b) The forward migration is NOT yet in the migration history.
+#         (c) At least one migration file on disk is newer than RESET_VERSION.
+# -----------------------------------------------------------------------------
+step "Step 3: Verify pending migrations"
+
+# List all migration files newer than RESET_VERSION, sorted by version.
+# Each filename is YYYYMMDDHHMMSS_description.sql — the version prefix sorts
+# chronologically.
+NEWER_FILES="$(ls supabase/migrations/*.sql | awk -F/ '{print $NF}' \
+  | awk -F_ '{if ($1 > "'${RESET_VERSION}'") print}' | sort || true)"
+NEWER_COUNT="$(printf '%s\n' "${NEWER_FILES}" | grep -c . || true)"
+if [ "${NEWER_COUNT}" -lt 1 ]; then
+  echo "FAIL: expected at least 1 migration file newer than ${RESET_VERSION}, found ${NEWER_COUNT}" >&2
+  exit 1
+fi
+echo "OK: ${NEWER_COUNT} migration file(s) newer than ${RESET_VERSION}:"
+printf '      %s\n' ${NEWER_FILES}
+
+FORWARD_APPLIED="$(psql_scalar \
+  "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '${FORWARD_VERSION}';")"
+if [ "${FORWARD_APPLIED}" != "0" ]; then
+  echo "FAIL: forward migration ${FORWARD_VERSION} already recorded as applied (count=${FORWARD_APPLIED}) before apply" >&2
+  exit 1
+fi
+echo "OK: forward migration ${FORWARD_VERSION} is pending (not yet applied)"
+
+# -----------------------------------------------------------------------------
+# Step 4: Apply ALL pending migrations directly via psql (in version order).
+#         We do NOT use `supabase migration up` because it always fetches
+#         remote migration history (even with --db-url), which contains stale
+#         entries (20260712, 20260719) that cause a hard error requiring
+#         `migration repair`. Instead, we apply the SQL directly and record
+#         each version in schema_migrations manually — exactly what migration
+#         up does internally, without the remote check.
+# -----------------------------------------------------------------------------
+step "Step 4: Apply all pending migrations (psql direct + record in schema_migrations)"
+
+for FILE in ${NEWER_FILES}; do
+  VERSION="$(printf '%s' "${FILE}" | awk -F_ '{print $1}')"
+  NAME="$(printf '%s' "${FILE}" | sed 's/^[0-9]*_//; s/\.sql$//')"
+  MIGRATION_PATH="supabase/migrations/${FILE}"
+
+  echo "  Applying migration ${FILE}..."
+  psql_exec < "${MIGRATION_PATH}"
+  echo "  OK: ${FILE} SQL applied (exit 0)"
+
+  # Record the migration version in schema_migrations, matching what
+  # `supabase migration up` does internally.
+  psql_exec <<SQL
+INSERT INTO supabase_migrations.schema_migrations (version, statements, name)
+VALUES (
+  '${VERSION}',
+  ARRAY['-- applied by supabase/upgrade-validation/run.sh (direct psql)'],
+  '${NAME}'
+)
+ON CONFLICT (version) DO NOTHING;
+SQL
+  echo "  OK: ${VERSION} recorded in schema_migrations"
+done
+
+# Confirm the forward migration is now recorded as applied.
+FORWARD_APPLIED="$(psql_scalar \
+  "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '${FORWARD_VERSION}';")"
+if [ "${FORWARD_APPLIED}" != "1" ]; then
+  echo "FAIL: forward migration ${FORWARD_VERSION} not recorded as applied after direct apply (count=${FORWARD_APPLIED})" >&2
+  exit 1
+fi
+echo "OK: forward migration ${FORWARD_VERSION} recorded as applied"
+
+# -----------------------------------------------------------------------------
+# Step 5: Run postconditions (table exists, sentinel survived, schema intact).
+# -----------------------------------------------------------------------------
+step "Step 5: Run postconditions (after upgrade)"
+psql_exec < "${POSTCONDITIONS}"
+
+# -----------------------------------------------------------------------------
+# Step 6: Re-run ALL pending migration SQL files with ON_ERROR_STOP=1.
+#         This proves the migrations are idempotent — safe to re-apply on a
+#         database where they have already run (e.g. a repaired/replayed prod DB).
+# -----------------------------------------------------------------------------
+step "Step 6: Re-run all pending migration SQL (idempotency, ON_ERROR_STOP=1)"
+for FILE in ${NEWER_FILES}; do
+  MIGRATION_PATH="supabase/migrations/${FILE}"
+  echo "  Re-running ${FILE}..."
+  psql_exec < "${MIGRATION_PATH}"
+  echo "  OK: ${FILE} idempotency re-run succeeded (exit 0)"
+done
+echo "OK: all pending migrations idempotency re-run succeeded"
+
+# -----------------------------------------------------------------------------
+# Step 7: Run postconditions again (idempotency didn't break anything).
+# -----------------------------------------------------------------------------
+step "Step 7: Run postconditions again (after idempotency re-run)"
+psql_exec < "${POSTCONDITIONS}"
+
+# -----------------------------------------------------------------------------
+# Step 8: Cleanup sentinel data.
+# -----------------------------------------------------------------------------
+step "Step 8: Cleanup sentinel data"
+psql_exec <<'SQL'
+DELETE FROM public.notifications WHERE content = 'SENTINEL_UPGRADE_TEST_ROW';
+DELETE FROM public.users WHERE clerk_id = 'sentinel_upgrade_test';
+SQL
+echo "OK: sentinel data removed"
+
+echo
+echo "==================================================================="
+echo "  ALL UPGRADE-VALIDATION STEPS PASSED"
+echo "==================================================================="

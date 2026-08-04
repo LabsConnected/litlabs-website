@@ -19,10 +19,18 @@ const eslintConfig = defineConfig([
     "node_modules/**",
     ".next/**",
     ".vercel/**",
+    "supabase/.temp/**",
     "out/**",
     "build/**",
     "**/dist/**",
     "next-env.d.ts",
+    // Git worktrees — local only, 376K files
+    ".worktrees/**",
+    ".codex-deploy-stage*/**",
+    // Test artifacts
+    "coverage/**",
+    "test-results/**",
+    "playwright-report/**",
     // Local binaries and heavy folders
     "chrome/**",
     "terminal-server/**",
@@ -40,6 +48,10 @@ const eslintConfig = defineConfig([
     "litlabs/**",
     "litlabs-website/**",
     "OmniRoute/**",
+    // Docs — not linted
+    "docs/**",
+    // CommonJS scripts — require() is correct in .cjs files
+    "scripts/**/*.cjs",
   ]),
   {
     rules: {

@@ -9,6 +9,8 @@ node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
+.worktrees/
+**/.worktrees/**
 
 # Build artifacts
 .next/
@@ -18,6 +20,14 @@ terminal-server/dist/
 
 # Testing
 /coverage
+/tests/
+/test-results/
+/playwright-report/
+/supabase/tests/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
 
 # Env / secrets (NEVER upload)
 .env
@@ -38,11 +48,11 @@ next-env.d.ts
 # Heavy local artifacts — DO NOT deploy
 # (These live on disk but are never in the build output.)
 # ============================================
-docs
-scripts
-tasks
-prompts
-prds
+/docs/
+/scripts/
+/tasks/
+/prompts/
+/prds/
 outputs/
 plans/
 .tmp.driveupload/
@@ -58,8 +68,8 @@ work/
 .codex-reference/
 Zoo-Code/
 OmniRoute/
-meta/
-voice-server/
+/meta/
+/voice-server/
 
 # Chrome browser binaries and profiles
 chrome/
@@ -121,3 +131,8 @@ bun.lock
 .backup/
 .quadcodeai/
 .netlify
+
+# Non-production directories
+/.github/
+/supabase/upgrade-validation/
+/diagnostics/

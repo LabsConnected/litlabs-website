@@ -58,6 +58,8 @@ services:
     environment:
       - TERMINAL_SERVER_PORT=4001
       - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
+      - TERMINAL_AUTH_SECRET=${TERMINAL_AUTH_SECRET}
+      - TERMINAL_INTERNAL_SERVICE_KEY=${TERMINAL_INTERNAL_SERVICE_KEY}
       - TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
       - TERMINAL_USE_DOCKER=false
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -71,6 +73,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+  voice:
+    build:
+      context: ./voice-server
+      dockerfile: Dockerfile
+    ports:
+      - "4002:4002"
+    environment:
+      - VOICE_PROXY_PORT=4002
+      - INWORLD_API_KEY=${INWORLD_API_KEY}
+      - VOICE_AUTH_SECRET=${VOICE_AUTH_SECRET}
+      - MAX_CONCURRENT_SESSIONS_PER_USER=${MAX_CONCURRENT_SESSIONS_PER_USER:-3}
+      - MAX_TOTAL_SESSIONS=${MAX_TOTAL_SESSIONS:-50}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4002/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   littree-workspaces:

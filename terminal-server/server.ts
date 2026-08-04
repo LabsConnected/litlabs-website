@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
@@ -85,12 +85,72 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-app.get("/health", (_req, res) => {
+app.get("/health/live", (_req, res) => {
   res.json({
-    ok: true,
+    service: "terminal-server",
+    status: "alive",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/health/ready", (_req, res) => {
+  const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
+  const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const workspaceReady = workspaceRoot.length > 0;
+
+  const checks = {
+    authConfigured,
+    internalServiceConfigured,
+    workspaceRoot: workspaceReady,
     docker: USE_DOCKER,
-    authConfigured: (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32,
-    internalServiceConfigured: (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32,
+  };
+
+  const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+
+  res.status(allReady ? 200 : 503).json({
+    service: "terminal-server",
+    readiness: allReady ? "ready" : "not_ready",
+    timestamp: new Date().toISOString(),
+    checks,
+    reasons: allReady
+      ? []
+      : [
+          !authConfigured ? "TERMINAL_AUTH_SECRET not configured (min 32 chars)" : "",
+          !internalServiceConfigured ? "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars)" : "",
+          !workspaceReady ? "TERMINAL_WORKSPACE_ROOT not set" : "",
+        ].filter(Boolean),
+  });
+});
+
+// Backward-compatible /health — returns readiness check
+app.get("/health", (_req, res) => {
+  const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
+  const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const workspaceReady = workspaceRoot.length > 0;
+  const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+
+  res.status(allReady ? 200 : 503).json({
+    service: "terminal-server",
+    status: allReady ? "ok" : "degraded",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    readiness: allReady ? "ready" : "not_ready",
+    checks: {
+      authConfigured,
+      internalServiceConfigured,
+      workspaceRoot: workspaceReady,
+      docker: USE_DOCKER,
+    },
+    reasons: allReady
+      ? []
+      : [
+          !authConfigured ? "TERMINAL_AUTH_SECRET not configured (min 32 chars)" : "",
+          !internalServiceConfigured ? "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars)" : "",
+          !workspaceReady ? "TERMINAL_WORKSPACE_ROOT not set" : "",
+        ].filter(Boolean),
   });
 });
 
@@ -228,6 +288,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const workspaceId = req.params.workspaceId;
   const userId = String(req.body?.userId || "");
   const command = String(req.body?.command || "");
+  const stdinInput = typeof req.body?.stdin === "string" ? req.body.stdin : undefined;
 
   if (!userId || !command) {
     res.status(400).json({ error: "Missing userId or command" });
@@ -262,7 +323,7 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   const shell = isWin ? "powershell.exe" : "bash";
   const shellArgs = isWin ? ["-NoProfile", "-Command", command] : ["-c", command];
 
-  execFile(
+  const child = execFile(
     shell,
     shellArgs,
     {
@@ -283,6 +344,11 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
       });
     },
   );
+
+  // Pipe stdin to the child process if provided (e.g. for `git commit --file=-`)
+  if (stdinInput !== undefined && child.stdin) {
+    child.stdin.end(stdinInput);
+  }
 });
 
 function getUserWorkspace(userId: string) {
@@ -527,11 +593,48 @@ app.post("/ws-files/delete", (req: AuthenticatedRequest, res) => {
   }
 });
 
+app.post("/ws-files/mkdir", (req: AuthenticatedRequest, res) => {
+  const filePath = String(req.body.path || "");
+  if (!filePath || filePath === ".") {
+    return res.status(400).json({ error: "Folder path is required" });
+  }
+  try {
+    const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    if (existsSync(target)) return res.status(409).json({ error: "Path already exists" });
+    mkdirSync(target, { recursive: false });
+    res.json({ created: true, workspaceId: req.workspaceId });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create folder";
+    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/ws-files/rename", (req: AuthenticatedRequest, res) => {
+  const filePath = String(req.body.path || "");
+  const newPath = String(req.body.newPath || "");
+  if (!filePath || !newPath || filePath === "." || newPath === ".") {
+    return res.status(400).json({ error: "Both source and destination paths are required" });
+  }
+  try {
+    const source = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
+    const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, newPath);
+    if (!existsSync(source)) return res.status(404).json({ error: "Source path not found" });
+    if (existsSync(target)) return res.status(409).json({ error: "Destination path already exists" });
+    renameSync(source, target);
+    res.json({ renamed: true, workspaceId: req.workspaceId });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to rename path";
+    const status = msg === "Forbidden" ? 403 : msg === "Workspace not found" ? 404 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
 io.use((socket, next) => {
   try {
-    socket.data.userId = verifyTerminalToken(socket.handshake.auth?.token).sub;
-    // Optional: accept workspaceId from handshake for project-bound PTY
-    const workspaceId = socket.handshake.auth?.workspaceId;
+    const tokenPayload = verifyTerminalToken(socket.handshake.auth?.token);
+    socket.data.userId = tokenPayload.sub;
+    const workspaceId = tokenPayload.wid;
     if (workspaceId) {
       const ws = getWorkspace(String(workspaceId));
       if (!ws) {
@@ -675,3 +778,28 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
 });
+
+// Graceful shutdown
+function shutdown(signal: string) {
+  console.log(`[terminal-server] Received ${signal}, shutting down...`);
+  for (const [id, session] of sessions) {
+    try {
+      session.ptyProcess.kill();
+    } catch {}
+    sessions.delete(id);
+  }
+  io.close(() => {
+    server.close(() => {
+      console.log("[terminal-server] All connections closed.");
+      process.exit(0);
+    });
+  });
+  // Force exit after 10s if connections don't close
+  setTimeout(() => {
+    console.error("[terminal-server] Forcing exit after timeout.");
+    process.exit(1);
+  }, 10_000);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -19,10 +19,13 @@ const nextConfig: NextConfig = {
   },
 
   experimental: {
+    turbopackFileSystemCacheForBuild: true,
     optimizePackageImports: [
       "@supabase/supabase-js",
       "lucide-react",
       "@clerk/nextjs",
+      "react-markdown",
+      "zustand",
     ],
   },
 
@@ -123,14 +126,14 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live https://cdn.emulatorjs.org https://v8.js-dos.com https://thumbnails.libretro.com",
-              "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com ws://localhost:* wss://localhost:* https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone",
+              "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com https://vercel.live",
+              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com ws://localhost:* wss://localhost:* https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone",
               "frame-src 'self' blob: data: https: http: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
               "worker-src 'self' blob: https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
               "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
-              "form-action 'self'",
+              "form-action 'self' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
               "upgrade-insecure-requests",
             ].join("; "),
           },
@@ -167,16 +170,6 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=2592000, stale-while-revalidate=86400",
-          },
-        ],
-      },
-      // Cache Next.js static chunks for 1 year
-      {
-        source: "/_next/static/(.*)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
           },
         ],
       },
@@ -284,8 +277,24 @@ const nextConfig: NextConfig = {
   },
 
   async rewrites() {
+    const clerkFrontendApi =
+      process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL;
     return {
-      beforeFiles: [],
+      beforeFiles: [
+        // Clerk proxy: forward /__clerk/* to the Clerk Frontend API so that
+        // session cookies are set on the app domain (litlabs.net) instead of
+        // the Clerk domain (clerk.litlabs.net). Without this, API routes on
+        // litlabs.net never receive Clerk session cookies, causing 401 on
+        // every authenticated request, even after a fresh sign-in.
+        ...(clerkFrontendApi
+          ? [
+              {
+                source: "/__clerk/:path*",
+                destination: clerkFrontendApi + "/:path*",
+              },
+            ]
+          : []),
+      ],
       afterFiles: [],
       fallback: [],
     };

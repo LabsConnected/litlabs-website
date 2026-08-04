@@ -14,7 +14,7 @@ if [ ! -f "package.json" ]; then
 fi
 
 # Ensure PATH has Node/npx
-export PATH="/home/litbit/.nvm/versions/node/v22.22.3/bin:$PATH"
+export PATH="${HOME}/.nvm/versions/node/v22.22.3/bin:$PATH"
 
 # Check if logged into Vercel
 if ! npx vercel whoami > /dev/null 2>&1; then

@@ -101,7 +101,7 @@ const configScript = readFileSync(scriptPath, "utf8");
 
 console.log("\n--- Syntax validation ---");
 try {
-  // eslint-disable-next-line no-new-func
+   
   new Function(configScript);
   console.log("✓ Config script syntax is VALID");
 } catch (err) {

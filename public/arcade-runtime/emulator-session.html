@@ -32,6 +32,31 @@
       height: 100% !important;
     }
 
+    /* Keep EmulatorJS controls in a dedicated bottom dock. The stock runtime
+       positions this menu over the canvas, which hides game UI and makes the
+       controls look vertically misplaced on laptop-sized screens. */
+    #game .ejs_canvas_parent {
+      height: calc(100% - 52px) !important;
+    }
+    #game .ejs_big_screen .ejs_menu_bar {
+      min-height: 52px;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      background: rgba(3, 4, 9, 0.96);
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    #game .ejs_big_screen .ejs_menu_bar_hidden {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+
+    @media (max-width: 640px) {
+      #game .ejs_canvas_parent {
+        height: 100% !important;
+      }
+    }
+
     /* ─── Save state / popup positioning fixes ─────────────────── */
     /* EmulatorJS .ejs_popup_container defaults to position:absolute; top:0
        with a very tall .ejs_popup_body, causing the save/load dialog to
@@ -115,6 +140,15 @@
       &cdnTest=1         — use official CDN for diagnostic control test
       &color=<hex>       — EJS_color (accent color)
       &legacy=1          — force legacy cores (EJS_forceLegacyCores = true)
+      &controlScheme=<id> — EJS_controlScheme override (e.g. "segaMD").
+                            REQUIRED for Sega Genesis: the raw core
+                            "genesis_plus_gx" is ambiguous — EmulatorJS's
+                            getCore(true) reverse-maps it to "segaMS" (declared
+                            before "segaMD" in getCores()), which renders
+                            generic "BUTTON 1 / START" / "BUTTON 2" labels.
+                            Passing controlScheme=segaMD forces the correct
+                            Mega Drive layout (A/B/C/Start/D-Pad) while still
+                            loading the genesis_plus_gx core.
 
     The parent listens for postMessage events from this iframe.
     All events use { source: "arcade", type: "runtime.*" } format.
@@ -155,6 +189,11 @@
       var color = params.get("color") || "#6366f1";
       var legacy = params.get("legacy") === "1";
       var bios = params.get("bios") || "";
+      // controlScheme is the EmulatorJS system alias used for the Control
+      // Settings menu + virtual gamepad layout. It is DISTINCT from `core`
+      // (the libretro core that runs the game). See the header comment for
+      // why this is mandatory for Sega Genesis.
+      var controlScheme = params.get("controlScheme") || "";
 
       if (cdnTest) {
         dataPath = "https://cdn.emulatorjs.org/4.2.3/data/";
@@ -192,6 +231,38 @@
       window.EJS_color = color;
       window.EJS_threads = false;
       window.EJS_forceLegacyCores = legacy;
+
+      // ─── Control scheme override ───────────────────────────────
+      // EmulatorJS's getControlScheme() returns config.controlScheme if set,
+      // otherwise falls back to getCore(true) — which is AMBIGUOUS for Sega
+      // (genesis_plus_gx reverse-maps to "segaMS" not "segaMD"). Setting
+      // EJS_controlScheme explicitly forces the correct controller layout
+      // (A/B/C/Start/D-Pad for segaMD) while EJS_core still loads the right
+      // core. This is the supported config path — no vendored patch needed.
+      if (controlScheme) {
+        window.EJS_controlScheme = controlScheme;
+      }
+
+      // ─── Default controls (keyboard) ───────────────────────────
+      // EJS_defaultControls is intentionally NOT injected. EmulatorJS 4.2.3's
+      // setupKeys() crashes if the object format isn't exactly right (it
+      // accesses this.controls[i][j] for i=0..3, j=0..29 and throws TypeError
+      // if any player slot is missing or malformed). The controlScheme override
+      // alone is sufficient — EmulatorJS uses its own sensible keyboard defaults
+      // for each system, and users can remap via the Control Settings menu.
+      // The `defaultControls` URL param is still parsed for forward compat but
+      // not applied unless explicitly enabled in a future verified fix.
+      var defaultControlsJson = params.get("defaultControls") || "";
+      if (defaultControlsJson && params.get("enableDefaultControls") === "1") {
+        try {
+          window.EJS_defaultControls = JSON.parse(defaultControlsJson);
+        } catch (e) {
+          send("runtime.error", {
+            message: "Invalid defaultControls JSON: " + e.message,
+            source: "default_controls",
+          });
+        }
+      }
 
       // ─── Gamepad configuration ─────────────────────────────────
       // EmulatorJS auto-detects gamepads, but Xbox One controllers

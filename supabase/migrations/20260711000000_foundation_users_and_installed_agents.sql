@@ -76,7 +76,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_user_agents_user_id ON public.user_agents(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_agents_agent_id ON public.user_agents(agent_id);
 
--- Trigger function for updated_at
+-- Trigger function for updated_at (CREATE OR REPLACE is idempotent)
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -85,13 +85,29 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS update_users_updated_at
-  BEFORE UPDATE ON public.users
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-CREATE TRIGGER IF NOT EXISTS update_wallets_updated_at
-  BEFORE UPDATE ON public.wallets
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+-- Guard: CREATE TRIGGER IF NOT EXISTS is not supported in all PG versions.
+-- Use DROP + CREATE in a DO block for idempotency.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.triggers
+    WHERE trigger_schema = 'public' AND event_object_table = 'users'
+      AND trigger_name = 'update_users_updated_at'
+  ) THEN
+    CREATE TRIGGER update_users_updated_at
+      BEFORE UPDATE ON public.users
+      FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.triggers
+    WHERE trigger_schema = 'public' AND event_object_table = 'wallets'
+      AND trigger_name = 'update_wallets_updated_at'
+  ) THEN
+    CREATE TRIGGER update_wallets_updated_at
+      BEFORE UPDATE ON public.wallets
+      FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  END IF;
+END $$;
 
 -- RLS: deny direct client access; server routes use service_role with Clerk auth.
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;

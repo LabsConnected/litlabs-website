@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Daily deploy digest — cron-ready script
 // Reads last 24h of deployments from Supabase and sends a Discord summary.
-// Run via cron: 0 9 * * 1-5 /usr/bin/node /home/litbit/LiTTreeLabstudios/scripts/daily-deploy-digest.mjs
+// Run via cron: 0 9 * * 1-5 /usr/bin/node ${HOME}/LiTTreeLabStudios/scripts/daily-deploy-digest.mjs
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

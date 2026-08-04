@@ -22,9 +22,12 @@ CREATE TABLE IF NOT EXISTS public.agent_tasks (
 );
 
 -- Agent Logs table
+-- agent_id is UUID with a FK to agents(id) — the application inserts
+-- agents.id (UUID) values and queries agent_logs → agents(display_name).
+-- ON DELETE SET NULL preserves log history when an agent is deleted.
 CREATE TABLE IF NOT EXISTS public.agent_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id TEXT REFERENCES public.agents(id) ON DELETE SET NULL,
+  agent_id UUID REFERENCES public.agents(id) ON DELETE SET NULL,
   level TEXT NOT NULL CHECK (level IN ('info', 'warn', 'error', 'success')),
   message TEXT NOT NULL,
   metadata JSONB,
