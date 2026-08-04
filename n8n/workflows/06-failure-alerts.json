@@ -1,0 +1,165 @@
+{
+  "name": "LiTTree — Failure Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "*/5 * * * *" }] }
+      },
+      "id": "schedule-failure",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "workflow_failures",
+        "options": {}
+      },
+      "id": "supabase-failures",
+      "name": "Watch Failed Workflows",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "provider_errors",
+        "options": {}
+      },
+      "id": "supabase-provider-errors",
+      "name": "Watch Provider Errors",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 500],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge failures and provider errors, redact secrets\nconst failures = $('Watch Failed Workflows').all().map(item => item.json);\nconst providerErrors = $('Watch Provider Errors').all().map(item => item.json);\n\n// Redact any fields that might contain secrets\nconst redact = (obj) => {\n  const cleaned = { ...obj };\n  const sensitiveKeys = ['apiKey', 'api_key', 'secret', 'token', 'password', 'authorization'];\n  for (const key of Object.keys(cleaned)) {\n    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {\n      cleaned[key] = '[REDACTED]';\n    }\n  }\n  return cleaned;\n};\n\nconst allFailures = [...failures, ...providerErrors].map(redact);\nreturn [{ json: { count: allFailures.length, failures: allFailures, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "func-merge-redact",
+      "name": "Merge & Redact Secrets",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-has-failures",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-failures",
+      "name": "Has Failures?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "system_events",
+        "options": {}
+      },
+      "id": "supabase-event",
+      "name": "Create System Event",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "=LiTTree Alert — {{ $json.count }} failure(s) detected",
+        "options": {}
+      },
+      "id": "notify-owner-email",
+      "name": "Notify Owner (Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 200],
+      "credentials": {
+        "gmail": {
+          "id": "gmail-default",
+          "name": "LiTTree Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "options": {}
+      },
+      "id": "notify-owner-discord",
+      "name": "Notify Owner (Discord)",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [1250, 400],
+      "credentials": {
+        "discordWebhook": {
+          "id": "discord-default",
+          "name": "LiTTree Discord"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [{ "node": "Watch Failed Workflows", "type": "main", "index": 0 }],
+        [{ "node": "Watch Provider Errors", "type": "main", "index": 0 }]
+      ]
+    },
+    "Watch Failed Workflows": { "main": [[{ "node": "Merge & Redact Secrets", "type": "main", "index": 0 }]] },
+    "Watch Provider Errors": { "main": [[{ "node": "Merge & Redact Secrets", "type": "main", "index": 0 }]] },
+    "Merge & Redact Secrets": { "main": [[{ "node": "Has Failures?", "type": "main", "index": 0 }]] },
+    "Has Failures?": {
+      "main": [
+        [{ "node": "Create System Event", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Create System Event": {
+      "main": [
+        [{ "node": "Notify Owner (Email)", "type": "main", "index": 0 }],
+        [{ "node": "Notify Owner (Discord)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

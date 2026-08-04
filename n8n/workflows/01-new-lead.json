@@ -1,0 +1,117 @@
+{
+  "name": "LiTTree — New Lead Capture",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litt-new-lead",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-new-lead",
+      "name": "New Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "litt-new-lead"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract lead data from signed LiTTree payload\nconst body = $input.first().json.body || $input.first().json;\nconst data = body.data || {};\nreturn [{\n  json: {\n    email: data.email || '',\n    name: data.name || '',\n    source: data.source || body.eventType || 'unknown',\n    campaign: data.campaign || null,\n    userId: body.userId || null,\n    projectId: body.projectId || 'platform',\n    idempotencyKey: body.idempotencyKey || '',\n    callbackUrl: body.callbackUrl || '',\n    raw: body\n  }\n}];"
+      },
+      "id": "func-parse-lead",
+      "name": "Parse Lead",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "leads",
+        "options": {}
+      },
+      "id": "supabase-save-lead",
+      "name": "Save Lead to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "Welcome to LiTTree Lab Studios",
+        "options": {}
+      },
+      "id": "gmail-welcome",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [850, 200],
+      "credentials": {
+        "gmail": {
+          "id": "gmail-default",
+          "name": "LiTTree Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "options": {}
+      },
+      "id": "notify-owner",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [850, 400],
+      "credentials": {
+        "discordWebhook": {
+          "id": "discord-default",
+          "name": "LiTTree Discord"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "campaign_sources",
+        "options": {}
+      },
+      "id": "supabase-campaign",
+      "name": "Record Campaign Source",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New Lead Webhook": { "main": [[{ "node": "Parse Lead", "type": "main", "index": 0 }]] },
+    "Parse Lead": { "main": [[{ "node": "Save Lead to Supabase", "type": "main", "index": 0 }]] },
+    "Save Lead to Supabase": {
+      "main": [
+        [{ "node": "Send Welcome Email", "type": "main", "index": 0 }],
+        [{ "node": "Notify Owner", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Welcome Email": { "main": [[{ "node": "Record Campaign Source", "type": "main", "index": 0 }]] },
+    "Notify Owner": { "main": [[{ "node": "Record Campaign Source", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "litt-failure-alerts" }
+}

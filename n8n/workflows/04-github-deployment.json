@@ -1,0 +1,121 @@
+{
+  "name": "LiTTree — GitHub Deployment Tracking",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litt-deployment-event",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-deploy",
+      "name": "Deployment Event Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "litt-deployment-event"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse repository/deployment event from signed LiTTree payload\nconst body = $input.first().json.body || $input.first().json;\nconst data = body.data || {};\nreturn [{\n  json: {\n    repo: data.repository || data.repo || '',\n    commitSha: data.commitSha || data.sha || '',\n    deploymentStatus: data.status || data.deploymentStatus || 'unknown',\n    environment: data.environment || 'production',\n    projectId: body.projectId || 'platform',\n    idempotencyKey: body.idempotencyKey || '',\n    callbackUrl: body.callbackUrl || '',\n    raw: body\n  }\n}];"
+      },
+      "id": "func-parse-deploy",
+      "name": "Parse Deployment Event",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "deployments",
+        "options": {}
+      },
+      "id": "supabase-record-deploy",
+      "name": "Record Commit & Deployment",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-failed",
+              "leftValue": "={{ $json.deploymentStatus }}",
+              "rightValue": "failure",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-failed",
+      "name": "Is Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "=LiTTree Deployment Failed — {{ $json.repo }}",
+        "options": {}
+      },
+      "id": "notify-failure",
+      "name": "Notify LiTT of Failure",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "credentials": {
+        "discordWebhook": {
+          "id": "discord-default",
+          "name": "LiTTree Discord"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "tableId": "project_health",
+        "options": {}
+      },
+      "id": "supabase-health",
+      "name": "Update Project Health",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 400],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Deployment Event Webhook": { "main": [[{ "node": "Parse Deployment Event", "type": "main", "index": 0 }]] },
+    "Parse Deployment Event": { "main": [[{ "node": "Record Commit & Deployment", "type": "main", "index": 0 }]] },
+    "Record Commit & Deployment": { "main": [[{ "node": "Is Failed?", "type": "main", "index": 0 }]] },
+    "Is Failed?": {
+      "main": [
+        [{ "node": "Notify LiTT of Failure", "type": "main", "index": 0 }],
+        [{ "node": "Update Project Health", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify LiTT of Failure": { "main": [[{ "node": "Update Project Health", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "litt-failure-alerts" }
+}
