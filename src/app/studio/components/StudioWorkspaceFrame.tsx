@@ -62,6 +62,8 @@ export interface StudioInspectorData {
   messages: ChatMessage[];
   busy: boolean;
   workspaceRevision: number;
+  /** Incremented to trigger a run-all health check from outside the panel */
+  healthRunTrigger?: number;
   onFilesSaved?: () => void;
   onWorkspacePrepared?: () => void;
 }
@@ -120,7 +122,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "checks") {
-    return <StudioHealthPanel mode="checks" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />;
+    return <StudioHealthPanel mode="checks" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} runTrigger={data.healthRunTrigger} />;
   }
 
   if (tab === "changes") {

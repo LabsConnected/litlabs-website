@@ -112,10 +112,13 @@ function toUIMessage(
 export function useCanonicalConversation({
   onRouteToolAction,
   onRouteInspectorAction,
+  onRunHealthChecks,
   serverProjectId,
 }: {
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRouteInspectorAction?: (tab: InspectorTab) => void;
+  /** Triggered when LiTT should run all project health checks */
+  onRunHealthChecks?: () => void;
   serverProjectId?: string | null;
 } = {}) {
   const [busy, setBusy] = useState(false);
@@ -532,6 +535,8 @@ export function useCanonicalConversation({
           onRouteInspectorAction?.("preview");
         } else if (intent.intent === "project_health") {
           onRouteInspectorAction?.("checks");
+          // Trigger real check execution — not just panel navigation
+          onRunHealthChecks?.();
         } else if (intent.intent === "open_approvals") {
           onRouteInspectorAction?.("approvals");
         } else if (intent.tool) {
@@ -971,7 +976,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -1144,6 +1149,11 @@ function buildIntentResponseMessage(
   }
   if (intent.intent === "generate_image") {
     return "Opening the image generator.";
+  }
+  if (intent.intent === "project_health") {
+    return runtime.terminalConnected
+      ? "I'm running a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will appear in the Project Health panel."
+      : "I'll run a complete project health check. The workspace is being resolved — results will stream into the Project Health panel once the terminal connects.";
   }
   return intent.message || "Done.";
 }
