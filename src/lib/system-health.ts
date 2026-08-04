@@ -397,7 +397,7 @@ export async function probeGemini(): Promise<Omit<AiProviderHealth, "label" | "c
 export async function probeOpenRouter(): Promise<Omit<AiProviderHealth, "label" | "category" | "action">> {
   const key = process.env.OPENROUTER_API_KEY || "";
   const now = new Date().toISOString();
-  const probeModel = "meta-llama/llama-3.3-70b-instruct:free";
+  const probeModel = "google/gemini-2.0-flash-exp:free";
 
   if (!key) {
     return { id: "openrouter", state: "missing", detail: "API key required", model: "openrouter/free", latencyMs: null, lastChecked: now };

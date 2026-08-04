@@ -1,11 +1,13 @@
-feat: wallpaper transparency, model picker removal, mascot padding, n8n 2.10.0
+feat: dashboard overhaul — hide empty widgets, polish dark/violet theme, fix OpenRouter
 
-- Remove model picker from studio header nav
-- Add padding to robot mascot cutout to prevent clipping
-- Make studio/code/dashboard/marketplace layouts transparent for wallpaper
-- Remove green scan grid from studio empty state
-- Update n8n to v2.10.0 for Gemini node support
-- Remove pg/bcrypt dev deps (one-time DB reset scripts cleaned up)
+- Hide widgets with no data (empty states no longer clutter the dashboard)
+- Only show cards that have real content; interactive widgets always visible
+- Polish dark/violet theme: better gradients, glow effects, glassmorphism
+- Metric cards highlight when they have real data, dim when empty
+- Section cards get hover transitions and gradient backgrounds
+- Add "Add widget" shortcut and empty-state CTA in widget grid
+- Fix OpenRouter probe: use google/gemini-2.0-flash-exp:free (old model was 404)
+- Better activity feed empty state with actionable copy
 
 Generated with [Devin](https://devin.ai)
 

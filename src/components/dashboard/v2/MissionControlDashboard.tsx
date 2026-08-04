@@ -54,19 +54,21 @@ import type { DiscoverFeedItem } from "@/lib/dashboard/discover-widget-data";
 const D = {
   bg: "transparent",
   bgGradient:
-    "radial-gradient(circle at 15% 0%, rgba(124,58,237,0.12), transparent 40%), radial-gradient(circle at 85% 15%, rgba(168,85,247,0.06), transparent 30%), transparent",
-  surface: "rgba(255,255,255,0.025)",
-  surfaceHover: "rgba(255,255,255,0.04)",
-  border: "rgba(168,85,247,0.12)",
-  borderActive: "rgba(168,85,247,0.3)",
+    "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.18), transparent 60%), radial-gradient(circle at 85% 20%, rgba(168,85,247,0.08), transparent 35%), radial-gradient(circle at 10% 80%, rgba(99,102,241,0.06), transparent 40%), transparent",
+  surface: "rgba(255,255,255,0.03)",
+  surfaceHover: "rgba(255,255,255,0.06)",
+  border: "rgba(168,85,247,0.15)",
+  borderActive: "rgba(168,85,247,0.4)",
   accent: "#a970ff",
   accentGreen: "#B6FF4A",
   accentAmber: "#F97316",
   accentRed: "#ef4444",
   accentCyan: "#65f4ff",
   textPrimary: "#eef4ff",
-  textMuted: "rgba(238,244,255,0.45)",
-  textDim: "rgba(238,244,255,0.25)",
+  textMuted: "rgba(238,244,255,0.5)",
+  textDim: "rgba(238,244,255,0.3)",
+  glow: "0 0 24px rgba(168,85,247,0.15)",
+  glowGreen: "0 0 20px rgba(182,255,74,0.12)",
 };
 
 // ---------------------------------------------------------------------------
@@ -129,29 +131,41 @@ function MetricCard({
   value,
   detail,
   icon,
+  highlight = false,
 }: {
   label: string;
   value: string | number;
   detail?: string;
   icon: string;
+  highlight?: boolean;
 }) {
+  const isEmpty = value === "No project" || value === "Unavailable" || value === "None" || value === 0 && label !== "Active Missions" && label !== "Needs Attention";
   return (
     <div
-      className="rounded-2xl border p-4"
-      style={{ background: D.surface, borderColor: D.border }}
+      className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-0.5"
+      style={{
+        background: highlight ? `${D.accent}08` : D.surface,
+        borderColor: highlight ? `${D.accent}30` : D.border,
+        boxShadow: highlight ? D.glow : "none",
+      }}
     >
       <div className="flex items-center justify-between">
         <span
           className="text-[10px] font-black uppercase tracking-[.18em]"
-          style={{ color: D.textDim }}
+          style={{ color: isEmpty ? D.textDim : D.textMuted }}
         >
           {label}
         </span>
-        <Icon name={icon} size={15} style={{ color: `${D.accent}b0` }} />
+        <Icon
+          name={icon}
+          size={15}
+          style={{ color: isEmpty ? D.textDim : `${D.accent}b0` }}
+          className="transition-transform group-hover:scale-110"
+        />
       </div>
       <div
         className="mt-3 text-2xl font-black tracking-tight capitalize"
-        style={{ color: D.textPrimary }}
+        style={{ color: isEmpty ? D.textDim : D.textPrimary }}
       >
         {value}
       </div>
@@ -473,9 +487,10 @@ export function MissionControlDashboard() {
         <header
           className="mb-5 flex flex-col gap-4 rounded-3xl border p-5 lg:flex-row lg:items-center lg:justify-between"
           style={{
-            background: "rgba(0,0,0,0.35)",
-            borderColor: `${D.accent}33`,
-            backdropFilter: "blur(16px)",
+            background: "linear-gradient(135deg, rgba(0,0,0,0.4), rgba(124,58,237,0.05))",
+            borderColor: `${D.accent}30`,
+            backdropFilter: "blur(20px)",
+            boxShadow: D.glow,
           }}
         >
           <div className="min-w-0">
@@ -606,18 +621,21 @@ export function MissionControlDashboard() {
             value={activeMissions.length}
             detail="Currently running or waiting"
             icon="zap"
+            highlight={activeMissions.length > 0}
           />
           <MetricCard
             label="Needs Attention"
             value={urgentCount}
             detail="Approvals, failures, or degraded services"
             icon="alert"
+            highlight={urgentCount > 0}
           />
           <MetricCard
             label="LiTTBits"
             value={(data?.billing.balance ?? 0).toLocaleString()}
             detail={data?.billing.plan ?? "Free"}
             icon="wallet"
+            highlight={(data?.billing.balance ?? 0) > 0}
           />
           <MetricCard
             label="Workspace"
@@ -645,11 +663,11 @@ export function MissionControlDashboard() {
           <div className="space-y-5">
             {/* Active Project Runtime */}
             <section
-              className="rounded-3xl border p-5"
+              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
                 borderColor: D.border,
-                backdropFilter: "blur(16px)",
+                backdropFilter: "blur(20px)",
               }}
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -951,10 +969,14 @@ export function MissionControlDashboard() {
                 })}
                 {!data?.activity?.length ? (
                   <div
-                    className="py-8 text-center text-xs"
-                    style={{ color: D.textDim }}
+                    className="py-8 text-center"
                   >
-                    No recent activity.
+                    <div className="text-xs font-bold" style={{ color: D.textMuted }}>
+                      No recent activity
+                    </div>
+                    <p className="mt-1 text-[11px]" style={{ color: D.textDim }}>
+                      Activity from missions, builds, and deploys will appear here.
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -965,11 +987,11 @@ export function MissionControlDashboard() {
           <aside className="space-y-5">
             {/* System Status */}
             <section
-              className="rounded-3xl border p-5"
+              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
                 borderColor: D.border,
-                backdropFilter: "blur(16px)",
+                backdropFilter: "blur(20px)",
               }}
             >
               <div className="flex items-center gap-2">
@@ -1054,11 +1076,11 @@ export function MissionControlDashboard() {
 
             {/* Operating Rules */}
             <section
-              className="rounded-3xl border p-5"
+              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
                 borderColor: D.border,
-                backdropFilter: "blur(16px)",
+                backdropFilter: "blur(20px)",
               }}
             >
               <div className="flex items-center gap-2">
@@ -1110,15 +1132,25 @@ export function MissionControlDashboard() {
           </aside>
         </div>
 
-        {/* === Widget Grid === */}
+        {/* === Widget Grid — only show widgets with data === */}
         <section className="mt-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.textDim }}>
               Widgets
             </h2>
-            <span className="text-[10px]" style={{ color: D.textDim }}>
-              {placements.filter((p) => !p.hidden).length} active
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px]" style={{ color: D.textDim }}>
+                {placements.filter((p) => !p.hidden).length} active
+              </span>
+              <button
+                type="button"
+                onClick={() => setCustomizeOpen(true)}
+                className="text-[10px] font-bold transition hover:opacity-80"
+                style={{ color: D.accent }}
+              >
+                + Add widget
+              </button>
+            </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {placements.filter((p) => !p.hidden).map((p) => {
@@ -1129,6 +1161,47 @@ export function MissionControlDashboard() {
                 onToggleCollapse: () => toggleCollapsed(p.widgetId),
                 onRemove: () => removeWidget(p.widgetId),
               };
+
+              // Check if widget has data — hide empty ones unless they're interactive
+              const hasData = (() => {
+                switch (p.widgetId) {
+                  case "litt-quick-ask": return true; // always show — interactive
+                  case "mission-queue": return (data?.missions ?? []).length > 0;
+                  case "current-project": return !!data?.project;
+                  case "project-runtime": return !!data?.project;
+                  case "pending-approvals": return (data?.missions ?? []).some(m => m.state === "awaiting_approval");
+                  case "recent-activity": return (data?.activity ?? []).length > 0;
+                  case "recent-creations": return (widgetData.recentCreations ?? []).length > 0;
+                  case "my-gallery": return (widgetData.gallery?.myGallery ?? []).length > 0;
+                  case "trending-gallery": return (widgetData.gallery?.trending ?? []).length > 0;
+                  case "discover-feed": return (widgetData.discoverFeed ?? []).length > 0;
+                  case "music-player": return true; // always show — interactive
+                  case "littbits": return (data?.billing.balance ?? 0) > 0;
+                  case "notifications": return false; // hide by default
+                  case "deployments": return false; // hide by default
+                  case "saved-items": return false; // hide by default
+                  case "system-health": return true; // always show
+                  case "audit-events": return false; // hide by default
+                  // Owner metrics — only show if there's real data
+                  case "visitors-online": return ownerMode && (data?.growth?.visitorsOnline ?? 0) > 0;
+                  case "signed-in-online": return ownerMode && (data?.growth?.signedInOnline ?? 0) > 0;
+                  case "signups-today": return ownerMode && (data?.growth?.signupsToday ?? 0) > 0;
+                  case "studio-opens": return ownerMode && (data?.growth?.studioOpensToday ?? 0) > 0;
+                  case "first-prompts": return ownerMode && (data?.growth?.firstPromptsToday ?? 0) > 0;
+                  case "upgrades": return ownerMode && (data?.growth?.upgradesToday ?? 0) > 0;
+                  case "revenue": return ownerMode && (data?.billing.revenueTodayCents ?? 0) > 0;
+                  case "provider-costs": return ownerMode && (data?.billing.estimatedProviderCostTodayCents ?? 0) > 0;
+                  case "failed-tools": return false;
+                  case "failed-jobs": return false;
+                  case "terminal-sessions": return false;
+                  case "litt-live-sessions": return false;
+                  case "marketplace-installs": return false;
+                  default: return false;
+                }
+              })();
+
+              if (!hasData) return null;
+
               const renderWidget = () => {
                 switch (p.widgetId) {
                   case "litt-quick-ask": return <LiTTQuickAskWidget {...widgetProps} />;
@@ -1171,6 +1244,34 @@ export function MissionControlDashboard() {
               );
             })}
           </div>
+          {/* Show a helpful empty state if no widgets have data */}
+          {placements.filter((p) => !p.hidden).every((p) => {
+            const def = getWidgetDefinition(p.widgetId);
+            if (!def) return true;
+            // Same logic as above — if all widgets are hidden, show the CTA
+            const interactiveWidgets = ["litt-quick-ask", "music-player", "system-health"];
+            return !interactiveWidgets.includes(p.widgetId);
+          }) ? (
+            <div
+              className="rounded-2xl border p-8 text-center"
+              style={{ background: D.surface, borderColor: D.border }}
+            >
+              <div className="text-sm font-bold" style={{ color: D.textMuted }}>
+                No widget data yet
+              </div>
+              <p className="mt-2 text-xs" style={{ color: D.textDim }}>
+                Connect a project, start a mission, or create something in the Studio to see live data here.
+              </p>
+              <Link
+                href="/studio?tool=chat"
+                className="mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition hover:opacity-90"
+                style={{ background: D.accent, color: "#fff" }}
+              >
+                <Icon name="play" size={14} />
+                Open Studio
+              </Link>
+            </div>
+          ) : null}
         </section>
       </div>
 
