@@ -33,9 +33,11 @@ import {
   Link2,
   AlertCircle,
   Music,
+  Search,
 } from "lucide-react";
 import { useYouTubePlayer } from "@/context/YouTubePlayerContext";
 import { YouTubePlayerHost } from "./YouTubePlayerHost";
+import { YouTubeSearchPanel } from "./YouTubeSearchPanel";
 import { parseYouTubeUrl } from "@/lib/youtube/url-parser";
 
 function formatTime(s: number): string {
@@ -81,6 +83,7 @@ export function YouTubeDock() {
 
   const [urlInput, setUrlInput] = useState("");
   const [showQueue, setShowQueue] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
 
   const handleLoadUrl = useCallback(() => {
@@ -130,8 +133,17 @@ export function YouTubeDock() {
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onClick={() => { setShowSearch(!showSearch); if (!showSearch) setShowQueue(false); }}
+            className={`grid h-7 w-7 place-items-center rounded-lg transition hover:bg-white/10 hover:text-white ${showSearch ? "bg-purple-500/15 text-purple-300" : "text-white/50"}`}
+            aria-label="Search YouTube Music"
+            title="Search"
+          >
+            <Search size={14} />
+          </button>
+          <button
+            type="button"
             onClick={() => setShowQueue(!showQueue)}
-            className="grid h-7 w-7 place-items-center rounded-lg text-white/50 transition hover:bg-white/10 hover:text-white"
+            className={`grid h-7 w-7 place-items-center rounded-lg transition hover:bg-white/10 hover:text-white ${showQueue ? "bg-purple-500/15 text-purple-300" : "text-white/50"}`}
             aria-label="Toggle queue"
             title="Queue"
           >
@@ -341,6 +353,13 @@ export function YouTubeDock() {
       </div>
       {urlError && (
         <p className="mt-1 text-[10px] text-red-400">{urlError}</p>
+      )}
+
+      {/* Search panel */}
+      {showSearch && (
+        <div className="mt-3 rounded-xl border border-purple-500/15 bg-black/40 p-3">
+          <YouTubeSearchPanel onClose={() => setShowSearch(false)} />
+        </div>
       )}
 
       {/* Queue drawer */}
