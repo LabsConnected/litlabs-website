@@ -1,0 +1,118 @@
+{
+  "name": "LiTTree — New User Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "litt-user-created",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-new-user",
+      "name": "User Created Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "litt-user-created"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract new-user data from signed LiTTree payload\nconst body = $input.first().json.body || $input.first().json;\nconst data = body.data || {};\nreturn [{\n  json: {\n    clerkId: body.userId || data.clerkId || '',\n    email: data.email || '',\n    displayName: data.displayName || data.name || '',\n    projectId: body.projectId || 'platform',\n    idempotencyKey: body.idempotencyKey || '',\n    callbackUrl: body.callbackUrl || '',\n    raw: body\n  }\n}];"
+      },
+      "id": "func-parse-user",
+      "name": "Parse User",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "onboarding_state",
+        "options": {}
+      },
+      "id": "supabase-onboarding",
+      "name": "Create Onboarding State",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "Welcome to LiTTree — Let's get started",
+        "options": {}
+      },
+      "id": "gmail-onboarding",
+      "name": "Send Onboarding Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [850, 200],
+      "credentials": {
+        "gmail": {
+          "id": "gmail-default",
+          "name": "LiTTree Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "wallet_transactions",
+        "options": {}
+      },
+      "id": "supabase-littbits",
+      "name": "Award Starter LiTTBits",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [850, 400],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "tableId": "suggestions",
+        "options": {}
+      },
+      "id": "supabase-suggestions",
+      "name": "Create First-Action Suggestions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "User Created Webhook": { "main": [[{ "node": "Parse User", "type": "main", "index": 0 }]] },
+    "Parse User": { "main": [[{ "node": "Create Onboarding State", "type": "main", "index": 0 }]] },
+    "Create Onboarding State": {
+      "main": [
+        [{ "node": "Send Onboarding Email", "type": "main", "index": 0 }],
+        [{ "node": "Award Starter LiTTBits", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Onboarding Email": { "main": [[{ "node": "Create First-Action Suggestions", "type": "main", "index": 0 }]] },
+    "Award Starter LiTTBits": { "main": [[{ "node": "Create First-Action Suggestions", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "litt-failure-alerts" }
+}

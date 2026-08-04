@@ -1,0 +1,156 @@
+{
+  "name": "LiTTree — Daily Owner Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }] }
+      },
+      "id": "schedule-daily",
+      "name": "Daily 8AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "users",
+        "options": {}
+      },
+      "id": "supabase-signups",
+      "name": "Aggregate Signups",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 200],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "agent_logs",
+        "options": {}
+      },
+      "id": "supabase-first-prompts",
+      "name": "Aggregate First Prompts",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 400],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "billing_events",
+        "options": {}
+      },
+      "id": "supabase-upgrades-revenue",
+      "name": "Aggregate Upgrades & Revenue",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 600],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "provider_errors",
+        "options": {}
+      },
+      "id": "supabase-provider-failures",
+      "name": "Aggregate Provider Failures",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 800],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "getAll",
+        "tableId": "missions",
+        "options": {}
+      },
+      "id": "supabase-missions",
+      "name": "Missions Needing Attention",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 500],
+      "credentials": {
+        "supabase": {
+          "id": "supabase-default",
+          "name": "LiTTree Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build the daily summary from all aggregated data\nconst signups = $('Aggregate Signups').all().length;\nconst firstPrompts = $('Aggregate First Prompts').all().length;\nconst billing = $('Aggregate Upgrades & Revenue').all();\nconst upgrades = billing.length;\nconst revenue = billing.reduce((sum, item) => sum + (item.json.amount || 0), 0);\nconst providerFailures = $('Aggregate Provider Failures').all().length;\nconst missions = $('Missions Needing Attention').all().map(item => item.json);\n\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    signups,\n    firstPrompts,\n    upgrades,\n    revenue,\n    providerFailures,\n    missionsNeedingAttention: missions.length,\n    missions: missions.slice(0, 10)\n  }\n}];"
+      },
+      "id": "func-build-summary",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "=LiTTree Daily Owner Summary — {{ new Date().toLocaleDateString() }}",
+        "options": {}
+      },
+      "id": "gmail-summary",
+      "name": "Send Summary Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1050, 500],
+      "credentials": {
+        "gmail": {
+          "id": "gmail-default",
+          "name": "LiTTree Gmail"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 8AM": {
+      "main": [
+        [{ "node": "Aggregate Signups", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate First Prompts", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate Upgrades & Revenue", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate Provider Failures", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Signups": { "main": [[{ "node": "Missions Needing Attention", "type": "main", "index": 0 }]] },
+    "Aggregate First Prompts": { "main": [[{ "node": "Missions Needing Attention", "type": "main", "index": 0 }]] },
+    "Aggregate Upgrades & Revenue": { "main": [[{ "node": "Missions Needing Attention", "type": "main", "index": 0 }]] },
+    "Aggregate Provider Failures": { "main": [[{ "node": "Missions Needing Attention", "type": "main", "index": 0 }]] },
+    "Missions Needing Attention": { "main": [[{ "node": "Build Summary", "type": "main", "index": 0 }]] },
+    "Build Summary": { "main": [[{ "node": "Send Summary Email", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
