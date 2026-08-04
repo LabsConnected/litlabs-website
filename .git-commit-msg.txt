@@ -1,8 +1,15 @@
-fix: add Dashboard back button on games page + game overlay
+feat: remove broken Claude from model picker, activate all n8n workflows
 
-- Mobile: visible "← Dashboard" button at top of games page
-- Game overlay: "← Dashboard" link in header bar next to controls
-- Users can now get back to dashboard from games on mobile and desktop
+- Remove Claude Sonnet from BYOK picker and code models (no Anthropic API key)
+- R2 storage already configured (all 5 env vars verified on Vercel)
+- n8n: All 4 workflows now active:
+  - AI Workflow Orchestration (was already active)
+  - Email + Social Digest (was already active)
+  - Stripe Customer Onboarding (fixed Gmail params, replaced Slack with HTTP Request)
+  - GitHub to Supabase Sync (rebuilt with Code node + HTTP Request for Discord)
+- Replaced Slack/Discord native nodes with HTTP Request nodes using env var webhook URLs
+- Cleaned up duplicate workflows and test workflow
+- Generated new n8n API key (old one expired)
 
 Generated with [Devin](https://devin.ai)
 

@@ -129,9 +129,8 @@ export const CHAT_MODELS: StudioModel[] = [
   // Vision — Gemini vision-capable
   { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "vision", apiModel: "gemini-2.5-flash" },
 
-  // BYOK — user-supplied keys
+  // BYOK — user-supplied keys (only show models that have API keys configured)
   { id: "gpt-4o", name: "GPT-4o (BYOK)", provider: "openai", cost: "paid", speed: "fast", icon: "🔮", category: "byok", apiModel: "gpt-4o" },
-  { id: "claude-sonnet", name: "Claude Sonnet (BYOK)", provider: "anthropic", cost: "paid", speed: "medium", icon: "🎯", category: "byok", apiModel: "claude-3-5-sonnet-20241022" },
 ];
 
 export const CODE_MODELS: StudioModel[] = [
@@ -139,7 +138,6 @@ export const CODE_MODELS: StudioModel[] = [
   { id: "gemini-flash", name: "Gemini 2.5 Flash", short: "Gemini", provider: "gemini", cost: "free", speed: "fast", icon: "⚡" },
   { id: "groq-llama", name: "Groq Llama 70B", short: "Groq", provider: "groq", cost: "free", speed: "fast", icon: "🚀", apiProvider: "groq" },
   { id: "gpt-4o", name: "GPT-4o", short: "GPT-4o", provider: "openai", cost: "paid", speed: "fast", icon: "🔮" },
-  { id: "claude-sonnet", name: "Claude Sonnet", short: "Claude", provider: "anthropic", cost: "paid", speed: "medium", icon: "🎯" },
 ];
 
 export type MediaModel = {
