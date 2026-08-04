@@ -115,16 +115,16 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Creator Hub", href: "/creator", icon: BarChart3 },
     ],
   },
-  // Community/Discover hidden — social features disabled for v1
-  // {
-  //   label: "Discover",
-  //   href: "/discover",
-  //   icon: Users,
-  //   accent: GROUP_ACCENTS.Social,
-  //   items: [
-  //     { label: "Community", href: "/discover", icon: Users },
-  //   ],
-  // },
+  {
+    label: "Discover",
+    href: "/discover",
+    icon: Users,
+    accent: GROUP_ACCENTS.Social,
+    items: [
+      { label: "Feed", href: "/discover", icon: Users },
+      { label: "Gallery", href: "/gallery", icon: Image },
+    ],
+  },
   {
     label: "More",
     href: "/wallet",
@@ -148,9 +148,9 @@ type MobileNavItem = {
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
-  { label: "Projects", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Marketplace", href: "/marketplace", icon: Store },
-  { label: "Account", href: "/profile", icon: User },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Discover", href: "/discover", icon: MessagesSquare },
+  { label: "Gallery", href: "/gallery", icon: Image },
 ];
 
 export const AI_SUGGESTIONS = [

@@ -87,9 +87,9 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   communitySocial: {
     flag: "communitySocial",
-    description: "Community and social features",
-    enabled: false,
-    hideFromNav: true,
+    description: "Community and social features (Discover feed)",
+    enabled: true,
+    hideFromNav: false,
   },
   founderCheckout: {
     flag: "founderCheckout",

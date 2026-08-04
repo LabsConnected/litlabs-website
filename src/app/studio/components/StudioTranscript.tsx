@@ -182,7 +182,7 @@ export default function StudioTranscript({
           return (
             <div
               key={key}
-              className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+              className={`flex gap-3 studio-anim-in ${isUser ? "flex-row-reverse" : "flex-row"}`}
               data-testid={isUser ? "user-message" : "assistant-message"}
             >
               {isUser ? (
@@ -298,6 +298,13 @@ export default function StudioTranscript({
                       >
                         {message.content}
                       </ReactMarkdown>
+                      {isStreaming && hasContent && (
+                        <span
+                          className="studio-anim-blink ml-0.5 inline-block align-middle"
+                          style={{ width: "2px", height: "14px", background: "var(--litt-primary)" }}
+                          aria-hidden
+                        />
+                      )}
                     </div>
                   )}
                 </div>

@@ -30,7 +30,7 @@ import { RecentWorkCard } from "./RecentWorkCard";
 import { SystemHealthStrip } from "./SystemHealthStrip";
 import { ActionButton } from "./DashboardV2Primitives";
 import { Icon, getGreeting, timeAgo, STATUS_COLORS } from "./dashboard-v2-utils";
-import type { DashboardData, LlmHealth } from "./dashboard-v2-types";
+import type { DashboardData } from "./dashboard-v2-types";
 
 // ---------------------------------------------------------------------------
 // Premium design tokens — deep black-violet matching Studio
@@ -76,16 +76,14 @@ export function DashboardV2() {
   const { dockMode, showDocked } = useYouTubePlayer();
 
   const [data, setData] = useState<DashboardData | null>(null);
-  const [llmHealth, setLlmHealth] = useState<LlmHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDashboard = useCallback(async () => {
     setError(null);
     try {
-      const [dashRes, healthRes] = await Promise.allSettled([
+      const [dashRes] = await Promise.allSettled([
         fetch("/api/dashboard"),
-        fetch("/api/llm/health"),
       ]);
       if (dashRes.status === "fulfilled" && dashRes.value.ok) {
         setData(await dashRes.value.json());
@@ -95,9 +93,6 @@ export function DashboardV2() {
             ? "Your sign-in session needs to be refreshed."
             : "Some connected workspace data is temporarily unavailable.",
         );
-      }
-      if (healthRes.status === "fulfilled" && healthRes.value.ok) {
-        setLlmHealth(await healthRes.value.json());
       }
       if (dashRes.status === "rejected") {
         setError("Some connected workspace data is temporarily unavailable.");
@@ -467,11 +462,7 @@ export function DashboardV2() {
                 className="rounded-2xl border p-4"
                 style={{ background: D.surface, borderColor: D.border }}
               >
-                <SystemHealthStrip
-                  data={data}
-                  llmHealth={llmHealth}
-                  loading={loading}
-                />
+                <SystemHealthStrip loading={loading} />
               </div>
             </section>
 

@@ -111,8 +111,8 @@ export default function StudioPreviewPanel({
   };
 
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
-  const label = state === "loading" ? "Checking preview status…" : state === "preparing" ? "Preparing preview…" : state === "ready" ? "Preview ready" : state === "stale" ? "Preview may be stale" : state === "not_prepared" ? "Workspace not prepared" : state === "failed" ? "Preview failed" : "Preview unavailable";
-  const detail = state === "not_prepared" ? "Prepare the project workspace before opening a preview." : state === "offline" ? "The project preview endpoint is not currently available." : state === "stale" ? "A file changed. Refreshing the project preview status." : error ?? "The preview surface reports only real project runtime state.";
+  const label = state === "loading" ? "Checking preview status…" : state === "preparing" ? "Preparing preview…" : state === "ready" ? "Preview ready" : state === "stale" ? "Preview may be stale" : state === "not_prepared" ? "Preview not started" : state === "failed" ? "Preview failed" : "Preview unavailable";
+  const detail = state === "not_prepared" ? "The workspace needs preparation before a preview can start." : state === "offline" ? "The project preview endpoint is not currently available." : state === "stale" ? "A file changed. Refreshing the project preview status." : error ?? "The preview surface reports only real project runtime state.";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2" data-testid="studio-preview-panel">

@@ -10,9 +10,9 @@ const desktopLinks = [
   ["Dashboard", "/dashboard"],
   ["Studio", "/studio"],
   ["Gallery", "/gallery"],
+  ["Discover", "/discover"],
   ["Marketplace", "/marketplace"],
   ["Pricing", "/pricing"],
-  ["Games", "/games"],
 ] as const;
 
 export default function NavbarWrapper() {

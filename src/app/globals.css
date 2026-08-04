@@ -72,7 +72,87 @@
   --studio-composer-max-w: 960px;
   --studio-glow-purple: 0 0 16px rgba(155, 77, 255, 0.25);
   --studio-glow-green: 0 0 8px rgba(77, 255, 98, 0.4);
+  --studio-glow-purple-soft: 0 0 20px rgba(155, 77, 255, 0.15);
+  --studio-glow-green-soft: 0 0 12px rgba(77, 255, 98, 0.25);
+
+  /* Micro-animation durations */
+  --studio-anim-fast: 120ms;
+  --studio-anim-normal: 200ms;
+  --studio-anim-slow: 300ms;
 }
+
+/* ============================================
+   Studio Micro-Animations
+   ============================================ */
+@keyframes studio-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes studio-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes studio-message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-section-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-tab-glow {
+  from { opacity: 0; transform: scaleX(0.5); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes studio-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-bar-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+/* Studio animation utility classes */
+.studio-anim-in {
+  animation: studio-message-in var(--studio-anim-normal) ease;
+}
+.studio-anim-section {
+  animation: studio-section-in var(--studio-anim-fast) ease;
+}
+.studio-anim-pulse {
+  animation: studio-pulse 1.5s infinite;
+}
+.studio-anim-blink {
+  animation: studio-blink 1s step-end infinite;
+}
+.studio-anim-dropdown {
+  animation: studio-dropdown-in var(--studio-anim-fast) ease;
+}
+
+/* Playing indicator bars (for YouTube player + voice) */
+.studio-playing-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.studio-playing-bars span {
+  width: 2px;
+  background: var(--litt-primary);
+  border-radius: 1px;
+  animation: studio-bar-bounce 0.8s ease-in-out infinite;
+}
+.studio-playing-bars span:nth-child(1) { animation-delay: 0ms; height: 60%; }
+.studio-playing-bars span:nth-child(2) { animation-delay: 150ms; height: 100%; }
+.studio-playing-bars span:nth-child(3) { animation-delay: 300ms; height: 70%; }
+.studio-playing-bars span:nth-child(4) { animation-delay: 450ms; height: 90%; }
 
 @theme inline {
   --color-background: var(--bg-color);

@@ -13,18 +13,33 @@ import Lightbox from "@/components/Lightbox";
 // The API handles demo fallback when Supabase is not configured.
 // This page only renders items from the API + user uploads.
 
-const CATEGORIES = [
-  { id: "all", label: "🌌 All Works" },
-  { id: "360-worlds", label: "🌍 360° Worlds" },
-  { id: "character", label: "👤 Characters" },
-  { id: "landscape", label: "🏔️ Landscapes" },
-  { id: "abstract", label: "🎨 Abstract" },
+// ─── Gallery tabs ────────────────────────────────────────────────────────────
+const GALLERY_TABS = [
+  { id: "featured", label: "Featured" },
+  { id: "trending", label: "Trending" },
+  { id: "new", label: "New" },
+  { id: "following", label: "Following" },
+  { id: "my-work", label: "My Work" },
+  { id: "collections", label: "Collections" },
+];
+
+// ─── Media filters ───────────────────────────────────────────────────────────
+const MEDIA_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "image", label: "Images" },
+  { id: "video", label: "Video" },
+  { id: "music", label: "Music" },
+  { id: "audio", label: "Audio" },
+  { id: "app", label: "Apps" },
+  { id: "website", label: "Websites" },
+  { id: "brand-kit", label: "Brand Kits" },
+  { id: "document", label: "Documents" },
 ];
 
 const SORT_OPTIONS = [
-  { id: "newest", label: "🕐 Newest" },
-  { id: "popular", label: "🔥 Most Liked" },
-  { id: "name", label: "🔤 Name" },
+  { id: "newest", label: "Newest" },
+  { id: "popular", label: "Most Liked" },
+  { id: "name", label: "Name" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -124,6 +139,8 @@ export default function Gallery() {
     "community",
   );
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [activeTab, setActiveTab] = useState("featured");
+  const [mediaFilter, setMediaFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
@@ -295,6 +312,13 @@ export default function Gallery() {
   const filteredItems = items
     .filter(
       (i) => selectedCategory === "all" || i.category === selectedCategory,
+    )
+    .filter(
+      (i) =>
+        mediaFilter === "all" ||
+        i.mediaType === mediaFilter ||
+        (mediaFilter === "image" && !i.mediaType) ||
+        (mediaFilter === "video" && i.videoUrl),
     )
     .filter(
       (i) =>
@@ -843,27 +867,54 @@ export default function Gallery() {
             style={{ backgroundColor: T.borderColor + "40" }}
           />
 
-          {/* Category pills - mobile: horizontal scroll */}
+          {/* Gallery tabs — Featured / Trending / New / Following / My Work / Collections */}
           <div className="flex gap-1.5 sm:gap-2 flex-wrap overflow-x-auto scrollbar-hide">
-            {CATEGORIES.slice(0, 4).map((cat) => (
+            {GALLERY_TABS.map((tab) => (
               <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[11px] font-medium transition-all duration-200 whitespace-nowrap"
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === "my-work") setViewMode("my-uploads");
+                  else setViewMode("community");
+                }}
+                className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[11px] font-bold transition-all duration-200 whitespace-nowrap"
                 style={{
-                  border: `1px solid ${selectedCategory === cat.id ? T.accentColor + "60" : T.borderColor + "30"}`,
+                  border: `1px solid ${activeTab === tab.id ? T.accentColor + "60" : T.borderColor + "30"}`,
                   backgroundColor:
-                    selectedCategory === cat.id
+                    activeTab === tab.id
                       ? T.accentColor + "12"
                       : T.bgColor + "60",
                   color:
-                    selectedCategory === cat.id
+                    activeTab === tab.id
                       ? T.accentColor
                       : T.textColor + "cc",
                   cursor: "pointer",
                 }}
               >
-                {cat.label.replace(/[🌌🌍👤🏔️🎨]/g, "").trim()}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Media filter row */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b overflow-x-auto scrollbar-hide" style={{ borderColor: T.borderColor + "20" }}>
+          <span className="text-[9px] font-black uppercase tracking-wider shrink-0" style={{ color: T.textMuted }}>
+            Filter:
+          </span>
+          <div className="flex gap-1.5 flex-wrap">
+            {MEDIA_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                onClick={() => setMediaFilter(filter.id)}
+                className="px-2 py-0.5 rounded-md text-[9px] font-bold transition-all whitespace-nowrap"
+                style={{
+                  backgroundColor: mediaFilter === filter.id ? T.accentColor + "15" : "transparent",
+                  color: mediaFilter === filter.id ? T.accentColor : T.textMuted,
+                  border: `1px solid ${mediaFilter === filter.id ? T.accentColor + "30" : "transparent"}`,
+                }}
+              >
+                {filter.label}
               </button>
             ))}
           </div>
@@ -1464,7 +1515,7 @@ export default function Gallery() {
                     }}
                   />
 
-                  {/* Category badge */}
+                  {/* Media type badge */}
                   <div
                     className="absolute top-3 right-3 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
                     style={{
@@ -1473,7 +1524,7 @@ export default function Gallery() {
                       border: `1px solid ${T.accentColor}40`,
                     }}
                   >
-                    {item.category}
+                    {item.mediaType ?? "image"}
                   </div>
 
                   {/* Ownership controls - show for user's own items */}

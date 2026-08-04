@@ -245,7 +245,7 @@ export default function LiTEmptyState({
   /** Accepted for backwards compatibility; readiness is derived from hasProject. */
   projectId?: string | null;
   projectName: string | null;
-  sourceType: "github" | "blank" | "template" | null;
+  sourceType: "github" | "blank" | "template" | "upload" | null;
   githubInstalled: boolean;
   displayName?: string | null;
   onPickAction?: (prompt: string) => void;

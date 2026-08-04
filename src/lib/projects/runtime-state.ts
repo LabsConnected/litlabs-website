@@ -43,6 +43,8 @@ export interface ProjectRuntimeState {
   projectName: string | null;
   repository: string | null;
   branch: string | null;
+  /** How the project source was created */
+  sourceType: "github" | "upload" | "template" | "blank" | null;
 
   /** Workspace identity */
   workspaceId: string | null;
@@ -51,6 +53,13 @@ export interface ProjectRuntimeState {
 
   /** Terminal identity */
   terminalSessionId: string | null;
+
+  /** Preview state — client-side hook refines this */
+  previewState: "idle" | "preparing" | "ready" | "running" | "failed";
+  /** Logs state — client-side hook refines this */
+  logsState: "idle" | "streaming" | "failed";
+  /** Deployment state — from project metadata */
+  deploymentState: "none" | "preview" | "production" | "failed";
 
   /** Access flags */
   readAccess: boolean;
@@ -73,10 +82,14 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   projectName: null,
   repository: null,
   branch: null,
+  sourceType: null,
   workspaceId: null,
   workspacePath: null,
   workspaceStatus: null,
   terminalSessionId: null,
+  previewState: "idle",
+  logsState: "idle",
+  deploymentState: "none",
   readAccess: false,
   writeAccess: false,
   writeApprovalRequired: true,

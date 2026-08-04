@@ -6,6 +6,7 @@ import { useTerminalStore } from "@/stores/useTerminalStore";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useVoiceSession } from "../context/VoiceSessionContext";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
+import { useProjectRuntime } from "./useProjectRuntime";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
 export interface VoiceHealthState {
@@ -31,7 +32,7 @@ export interface ConnectionCapabilities {
   projectName: string | null;
   defaultBranch: string | null;
   activeBranch: string | null;
-  sourceType: "github" | "blank" | "template" | null;
+  sourceType: "github" | "blank" | "template" | "upload" | null;
   workspaceStatus: string | null;
   githubInstalled: boolean;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
@@ -83,6 +84,9 @@ export function useConnectionSummary() {
   const [capabilities, setCapabilities] = useState<ConnectionCapabilities>(
     DEFAULT_CAPABILITIES,
   );
+
+  // Canonical project runtime — the ONE source of truth for project identity
+  const { state: runtimeState } = useProjectRuntime();
 
   // Client-side terminal store is the source of truth for PTY status
   const terminalStatus = useTerminalStore((s) => s.status);
@@ -219,13 +223,30 @@ export function useConnectionSummary() {
         next.writeAccess = true;
       }
 
+      // ── Merge canonical runtime state ──────────────────────────────
+      // The project-runtime API is the single source of truth for project
+      // identity, workspace, and branch. Override whatever the capabilities
+      // endpoint returned with the canonical values so every Studio surface
+      // shows the same project.
+      if (runtimeState.projectId) {
+        next.projectId = runtimeState.projectId;
+        next.projectName = runtimeState.projectName;
+        next.repository = runtimeState.repository ? "connected" : next.repository;
+        next.repositoryName = runtimeState.repository ?? next.repositoryName;
+        next.activeBranch = runtimeState.branch ?? next.activeBranch;
+        next.defaultBranch = runtimeState.branch ?? next.defaultBranch;
+        next.sourceType = runtimeState.sourceType ?? next.sourceType;
+        next.workspaceStatus = runtimeState.workspaceStatus ?? next.workspaceStatus;
+        next.writeAccess = runtimeState.writeAccess || next.writeAccess;
+      }
+
       setCapabilities(next);
     } catch {
       // leave previous state
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError, voiceTransportConnected, voiceInputState, getToken, explicitProjectId]);
+  }, [terminalStatus, terminalSessionId, terminalError, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType]);
 
   useEffect(() => {
     void refresh();

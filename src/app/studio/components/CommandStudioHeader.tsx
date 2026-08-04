@@ -27,6 +27,10 @@ import {
   Plus,
   Terminal,
   Trash2,
+  Edit2,
+  Download,
+  Eraser,
+  Settings,
 } from "lucide-react";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
@@ -57,6 +61,8 @@ export default function CommandStudioHeader({
   onClearChatAction,
   onNewChatAction,
   onDeleteChatAction,
+  onRenameChatAction,
+  onExportChatAction,
   hasConversation,
   projectReady,
   capabilities,
@@ -71,6 +77,8 @@ export default function CommandStudioHeader({
   onClearChatAction?: () => void;
   onNewChatAction?: () => void;
   onDeleteChatAction?: () => void;
+  onRenameChatAction?: () => void;
+  onExportChatAction?: () => void;
   hasConversation?: boolean;
   projectReady?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
@@ -342,17 +350,6 @@ export default function CommandStudioHeader({
         <Plus size={12} aria-hidden />
         <span className="hidden sm:inline">New Chat</span>
       </button>
-      <button
-        type="button"
-        onClick={onDeleteChatAction}
-        disabled={!hasConversation || busy}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md border transition-all hover:bg-red-500/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-        style={{ borderColor: "var(--studio-border)", color: "#f87171" }}
-        aria-label="Delete chat"
-        title={hasConversation ? "Delete current chat" : "No chat to delete"}
-      >
-        <Trash2 size={12} aria-hidden />
-      </button>
 
       {/* Notifications — wired to /api/notifications/count */}
       <Link
@@ -440,8 +437,14 @@ export default function CommandStudioHeader({
             rect={overflowRect}
             onClose={() => setOverflowOpen(false)}
             onPreviewAction={onPreviewAction}
+            onNewChatAction={onNewChatAction}
             onClearChatAction={onClearChatAction}
+            onDeleteChatAction={onDeleteChatAction}
+            onRenameChatAction={onRenameChatAction}
+            onExportChatAction={onExportChatAction}
+            hasConversation={Boolean(hasConversation)}
             previewDisabled={!projectReady}
+            busy={busy}
             settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
           />,
           document.body,
@@ -688,20 +691,32 @@ function WritePermissionPill({ writesAllowed, hasProject }: { writesAllowed: boo
   );
 }
 
-/* ── Overflow menu (Preview + Deploy + Settings) ────────────────── */
+/* ── Overflow menu — Conversation actions + Preview + Settings ──── */
 function OverflowMenu({
   rect,
   onClose,
   onPreviewAction,
+  onNewChatAction,
   onClearChatAction,
+  onDeleteChatAction,
+  onRenameChatAction,
+  onExportChatAction,
+  hasConversation,
   previewDisabled,
+  busy,
   settingsHref,
 }: {
   rect: DOMRect;
   onClose: () => void;
   onPreviewAction?: () => void;
+  onNewChatAction?: () => void;
   onClearChatAction?: () => void;
+  onDeleteChatAction?: () => void;
+  onRenameChatAction?: () => void;
+  onExportChatAction?: () => void;
+  hasConversation: boolean;
   previewDisabled: boolean;
+  busy: boolean;
   settingsHref: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -720,13 +735,14 @@ function OverflowMenu({
 
   const top = rect.bottom + 6;
   const right = window.innerWidth - rect.right;
+  const disabled = !hasConversation || busy;
 
   return (
     <div
       ref={ref}
       role="dialog"
-      aria-label="More actions"
-      className="fixed z-[200] w-48 overflow-hidden rounded-xl border shadow-2xl"
+      aria-label="Conversation menu"
+      className="fixed z-[200] w-52 overflow-hidden rounded-xl border shadow-2xl"
       style={{
         top,
         right,
@@ -734,6 +750,74 @@ function OverflowMenu({
         borderColor: "var(--studio-border-strong)",
       }}
     >
+      {/* Section: Conversation */}
+      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+        Conversation
+      </div>
+      <button
+        type="button"
+        onClick={() => { onClose(); onNewChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Plus size={13} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+        New Chat
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => { onClose(); onRenameChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Edit2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Rename
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => { onClose(); onExportChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Export
+      </button>
+      <div className="h-px mx-3" style={{ backgroundColor: "var(--studio-border)" }} />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!window.confirm("Clear all messages from this conversation? The conversation will remain, but its visible message history will be removed.")) return;
+          onClose();
+          onClearChatAction?.();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Eraser size={13} className="pointer-events-none" style={{ color: "#e3b341" }} />
+        Clear Messages
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!window.confirm("Delete this conversation? This removes it from your chat list. Project files, Missions, and audit history will remain.")) return;
+          onClose();
+          onDeleteChatAction?.();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "#f87171" }}
+      >
+        <Trash2 size={13} className="pointer-events-none" />
+        Delete Conversation
+      </button>
+
+      {/* Section: Workspace */}
+      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+        Workspace
+      </div>
       <button
         type="button"
         disabled={previewDisabled}
@@ -744,25 +828,6 @@ function OverflowMenu({
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Preview
       </button>
-      <button
-        type="button"
-        onClick={() => { onClose(); onClearChatAction?.(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
-        style={{ color: "var(--text-primary)" }}
-      >
-        <Trash2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
-        Clear chat
-      </button>
-      <button
-        type="button"
-        disabled
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors disabled:cursor-not-allowed"
-        style={{ color: "var(--text-muted)" }}
-        title="Deploy unavailable — not wired in this phase"
-      >
-        <Rocket size={13} className="pointer-events-none" />
-        Deploy
-      </button>
       <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
       <Link
         href={settingsHref}
@@ -770,7 +835,7 @@ function OverflowMenu({
         className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
         style={{ color: "var(--text-primary)" }}
       >
-        <span className="text-[14px] leading-none" style={{ color: "var(--text-secondary)" }}>⋯</span>
+        <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Settings
       </Link>
     </div>

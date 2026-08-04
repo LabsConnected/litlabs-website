@@ -488,6 +488,11 @@ function CommandStudioContent() {
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
+          onRenameChatAction={() => {
+            const title = window.prompt("Rename conversation:", conversation.conversations.find((c) => c.id === conversation.selectedConversationId)?.title ?? "");
+            if (title) void conversation.renameConversation(title);
+          }}
+          onExportChatAction={() => conversation.exportConversation()}
           hasConversation={Boolean(conversation.selectedConversationId)}
           projectReady={projectReady}
           capabilities={capabilities}
@@ -840,7 +845,7 @@ function StudioWorkSurface({
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
   projectName: string | null;
-  sourceType: "github" | "blank" | "template" | null;
+  sourceType: "github" | "blank" | "template" | "upload" | null;
   githubInstalled: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;

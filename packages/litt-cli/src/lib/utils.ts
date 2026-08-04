@@ -143,8 +143,7 @@ export function hasEnvVar(name: string): boolean {
 export function readStdin(): string {
   // Synchronous read from stdin if piped
   try {
-    const fs = require("node:fs");
-    const data = fs.readFileSync(0, "utf-8");
+    const data = readFileSync(0, "utf-8");
     return data.trim();
   } catch {
     return "";
