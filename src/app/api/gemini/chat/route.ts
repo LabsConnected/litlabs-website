@@ -184,8 +184,6 @@ async function handler(req: NextRequest) {
     const body = await req.json();
     const {
       agentSlug = DEFAULT_AGENT_SLUG,
-      message,
-      history = [],
       provider,
       category,
       model: requestedModel,
@@ -196,6 +194,26 @@ async function handler(req: NextRequest) {
       pageContext,
       systemPrompt: _clientSystemPrompt, // never trusted — always ignored
     } = body;
+
+    let message = body.message;
+    let history = body.history || [];
+
+    // Support client variations in request format
+    if (!message) {
+      if (body.messages && Array.isArray(body.messages) && body.messages.length > 0) {
+        const lastMsg = body.messages[body.messages.length - 1];
+        if (lastMsg && typeof lastMsg.content === "string") {
+          message = lastMsg.content;
+          history = body.messages.slice(0, -1);
+        }
+      } else if (body.history && Array.isArray(body.history) && body.history.length > 0) {
+        const lastMsg = body.history[body.history.length - 1];
+        if (lastMsg && typeof lastMsg.content === "string") {
+          message = lastMsg.content;
+          history = body.history.slice(0, -1);
+        }
+      }
+    }
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });

@@ -189,7 +189,7 @@ export default function StudioTranscript({
                 <UserMessageAvatar size={30} />
               ) : (
                 <div
-                  className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
+                  className="grid shrink-0 place-items-center overflow-hidden rounded-xl border"
                   style={{
                     width: 32,
                     height: 32,

@@ -118,7 +118,7 @@ export default function LiTTPresence({
     // Chat avatar — small circle beside assistant messages
     return (
       <div
-        className={`relative shrink-0 rounded-full ${animationClass}`}
+        className={`relative shrink-0 rounded-xl ${animationClass}`}
         style={{
           width: dims.w,
           height: dims.h,

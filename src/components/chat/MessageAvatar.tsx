@@ -28,7 +28,7 @@ export function UserMessageAvatar({ size = 30 }: { size?: number }) {
 
   return (
     <div
-      className="grid shrink-0 place-items-center overflow-hidden rounded-full border font-black uppercase"
+      className="grid shrink-0 place-items-center overflow-hidden rounded-xl border font-black uppercase"
       style={{
         width: size,
         height: size,
@@ -62,7 +62,7 @@ export function LiTTMessageAvatar({ size = 32 }: { size?: number }) {
 
   return (
     <div
-      className="grid shrink-0 place-items-center overflow-hidden rounded-full border border-cyan-300/25 font-black text-cyan-100"
+      className="grid shrink-0 place-items-center overflow-hidden rounded-xl border border-cyan-300/25 font-black text-cyan-100"
       style={{
         width: size,
         height: size,
