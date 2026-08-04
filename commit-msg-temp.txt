@@ -1,7 +1,36 @@
-chore: remove unused ModelPicker, MODELS, selectModel from CommandStudioHeader
+fix: show top nav on mobile — add hamburger menu to NavbarWrapper
 
-Pre-existing unused imports/vars (not caused by branding change).
-Reduces lint warnings from 51 to 48.
+The NavbarWrapper was `hidden md:flex` — completely hidden on mobile
+(< 768px). On mobile, users only got the bottom nav bar with 4 links.
+There was no way to access Settings, Pricing, Marketplace, Profile, or
+any page not in the bottom nav. The top nav with the logo was invisible.
+
+Fix: Rewrote NavbarWrapper to show on ALL screen sizes:
+- Mobile (< md): hamburger button + BrandLogo icon + settings link
+  Tapping hamburger opens a slide-in drawer with all nav links
+  (Dashboard, Studio, Gallery, Games, Discover, Marketplace, Pricing,
+  Settings, Profile)
+- Desktop (md+): full nav links visible in the header bar (unchanged)
+  Hamburger is hidden, drawer is hidden
+
+The drawer includes:
+- Backdrop overlay (click to close)
+- BrandLogo with text in drawer header
+- Close button
+- All nav links with active state highlighting
+- Settings and Profile links (not in desktop top bar)
+- Route-change auto-close
+- Body scroll lock when open
+
+Page audit:
+- /studio/* — intentionally skips global nav (has CommandStudioHeader)
+- / (landing) — has its own LandingHeader
+- /login, /sign-in, /sign-up — auth pages, no nav needed
+- /privacy, /terms, /cookies, /docs — public pages, no nav (by design)
+- /games/cloud — self-contained chrome, still gets NavbarWrapper
+- All other pages — get NavbarWrapper (now visible on mobile too)
+
+Quality gate: typecheck PASS, lint 0 errors/48 warnings, 1236 tests, 192 pages
 
 Generated with [Devin](https://devin.ai)
 

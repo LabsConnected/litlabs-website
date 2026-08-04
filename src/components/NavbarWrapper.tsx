@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Bell, Search, Settings } from "lucide-react";
+import { Bell, Search, Settings, Menu, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { usePathname } from "next/navigation";
 
@@ -23,6 +23,7 @@ export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 8);
@@ -30,84 +31,194 @@ export default function NavbarWrapper() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll when mobile drawer is open
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    return () => { document.documentElement.style.overflow = prev; };
+  }, [mobileOpen]);
+
   const visibleLinks = desktopLinks.filter(([, href]) => {
     if (href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
     if (href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
     return true;
   });
 
+  const headerStyle = {
+    backgroundColor: `${T.bgColor}${scrolled ? "f2" : "e6"}`,
+    borderColor: `${T.borderColor}20`,
+    backdropFilter: "blur(14px)" as const,
+  };
+
   return (
-    <header
-      className="sticky top-0 z-30 hidden h-14 items-center justify-between border-b px-6 transition-colors md:flex"
-      style={{
-        backgroundColor: `${T.bgColor}${scrolled ? "f2" : "e6"}`,
-        borderColor: `${T.borderColor}20`,
-        backdropFilter: "blur(14px)",
-      }}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <BrandLogo
-          href="/dashboard"
-          size={30}
-          showText={false}
-          className="lg:hidden"
-        />
-        <BrandLogo
-          href="/dashboard"
-          size={30}
-          showText
-          className="hidden lg:inline-flex"
-        />
-        <nav className="ml-2 flex items-center gap-0.5 lg:ml-4 lg:gap-1">
-          {visibleLinks.map(([label, href]) => {
-            const active = pathname === href || pathname?.startsWith(`${href}/`);
-            return (
+    <>
+      <header
+        className="sticky top-0 z-30 flex h-14 items-center justify-between border-b px-4 transition-colors md:px-6"
+        style={headerStyle}
+      >
+        {/* Left: logo + desktop nav */}
+        <div className="flex min-w-0 items-center gap-3">
+          {/* Mobile hamburger */}
+          <button
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-white/5 md:hidden"
+            style={{ color: T.textMuted }}
+            aria-label="Open menu"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+
+          {/* Logo — icon only on mobile/tablet, icon+text on desktop */}
+          <BrandLogo
+            href="/dashboard"
+            size={30}
+            showText={false}
+            className="lg:hidden"
+          />
+          <BrandLogo
+            href="/dashboard"
+            size={30}
+            showText
+            className="hidden lg:inline-flex"
+          />
+
+          {/* Desktop nav links */}
+          <nav className="ml-2 hidden items-center gap-0.5 lg:ml-4 lg:gap-1 md:flex">
+            {visibleLinks.map(([label, href]) => {
+              const active = pathname === href || pathname?.startsWith(`${href}/`);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 lg:px-3 lg:text-xs ${
+                    label === "Marketplace" ? "hidden xl:block" : ""
+                  }`}
+                  style={{
+                    color: active ? T.accentColor : T.textMuted,
+                    backgroundColor: active ? `${T.accentColor}12` : "transparent",
+                  }}
+                >
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Right: actions */}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/settings"
+            className="rounded-lg p-2 transition-colors hover:bg-white/5"
+            style={{
+              color: pathname?.startsWith("/settings") ? T.accentColor : T.textMuted,
+              backgroundColor: pathname?.startsWith("/settings") ? `${T.accentColor}12` : "transparent",
+            }}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings size={18} />
+          </Link>
+          <button
+            className="hidden p-2 rounded-lg hover:bg-white/5 transition-colors md:block"
+            style={{ color: T.textMuted }}
+            aria-label="Search"
+          >
+            <Search size={18} />
+          </button>
+          <button
+            className="hidden p-2 rounded-lg hover:bg-white/5 transition-colors md:block"
+            style={{ color: T.textMuted }}
+            aria-label="Notifications"
+          >
+            <Bell size={18} />
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+
+          {/* Drawer */}
+          <div
+            className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r"
+            style={{
+              backgroundColor: T.bgColor,
+              borderColor: `${T.borderColor}40`,
+            }}
+          >
+            {/* Drawer header */}
+            <div
+              className="flex h-14 shrink-0 items-center justify-between border-b px-4"
+              style={{ borderColor: `${T.borderColor}30` }}
+            >
+              <BrandLogo href="/dashboard" size={28} showText />
+              <button
+                className="grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-white/5"
+                style={{ color: T.textMuted }}
+                aria-label="Close menu"
+                onClick={() => setMobileOpen(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Drawer nav links */}
+            <nav className="flex-1 overflow-y-auto p-3">
+              {visibleLinks.map(([label, href]) => {
+                const active = pathname === href || pathname?.startsWith(`${href}/`);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="mb-1 flex items-center rounded-xl px-4 py-3 text-sm font-bold transition-colors hover:bg-white/5"
+                    style={{
+                      color: active ? T.accentColor : T.textColor,
+                      backgroundColor: active ? `${T.accentColor}12` : "transparent",
+                    }}
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+
+              {/* Extra links that are in the bottom nav but not the top nav */}
               <Link
-                key={href}
-                href={href}
-                className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 lg:px-3 lg:text-xs ${
-                  label === "Marketplace" ? "hidden xl:block" : ""
-                }`}
+                href="/settings"
+                className="mb-1 flex items-center rounded-xl px-4 py-3 text-sm font-bold transition-colors hover:bg-white/5"
                 style={{
-                  color: active ? T.accentColor : T.textMuted,
-                  backgroundColor: active ? `${T.accentColor}12` : "transparent",
+                  color: pathname?.startsWith("/settings") ? T.accentColor : T.textColor,
+                  backgroundColor: pathname?.startsWith("/settings") ? `${T.accentColor}12` : "transparent",
                 }}
               >
-                {label}
+                Settings
               </Link>
-            );
-          })}
-        </nav>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Link
-          href="/settings"
-          className="rounded-lg p-2 transition-colors hover:bg-white/5"
-          style={{
-            color: pathname?.startsWith("/settings") ? T.accentColor : T.textMuted,
-            backgroundColor: pathname?.startsWith("/settings") ? `${T.accentColor}12` : "transparent",
-          }}
-          aria-label="Settings"
-          title="Settings"
-        >
-          <Settings size={18} />
-        </Link>
-        <button
-          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-          style={{ color: T.textMuted }}
-          aria-label="Search"
-        >
-          <Search size={18} />
-        </button>
-        <button
-          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-          style={{ color: T.textMuted }}
-          aria-label="Notifications"
-        >
-          <Bell size={18} />
-        </button>
-      </div>
-    </header>
+              <Link
+                href="/profile"
+                className="mb-1 flex items-center rounded-xl px-4 py-3 text-sm font-bold transition-colors hover:bg-white/5"
+                style={{
+                  color: pathname?.startsWith("/profile") ? T.accentColor : T.textColor,
+                  backgroundColor: pathname?.startsWith("/profile") ? `${T.accentColor}12` : "transparent",
+                }}
+              >
+                Profile
+              </Link>
+            </nav>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
