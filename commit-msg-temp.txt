@@ -1,33 +1,7 @@
-feat: replace header branding with crystal-tree logo
+chore: remove unused ModelPicker, MODELS, selectModel from CommandStudioHeader
 
-Replace the old purple sparkle/Sprout/Zap icons and /logo.png in
-navigation headers with the new crystal-tree icon mark.
-
-Changes:
-- Created /public/branding/littree-crystal-mark.png (256x256, transparent,
-  generated from logo-littree.svg via sharp)
-- Created src/components/branding/BrandLogo.tsx — reusable component
-  using next/image with soft purple glow, 30x30 default size,
-  icon-only on mobile, icon + "LiTTree LabStudios" text on desktop
-- Updated 5 header locations to use BrandLogo:
-  - Navbar.tsx (main app nav) — was /logo.png in colored square
-  - CommandStudioHeader.tsx (studio) — was Sprout icon in gradient box
-  - LandingHeader.tsx (landing page) — was Sparkles icon in gradient box
-  - NavbarWrapper.tsx (dashboard wrapper) — was Sparkles icon in border box
-  - Sidebar.tsx (collapsible sidebar) — was Zap icon in border box
-- Renamed "LiTTree-LabStudios" → "LiTTree LabStudios" in all visible
-  UI text (Footer, AgentsPageClient, PageShell, ProfileOverview,
-  DeveloperControlCenter, LiTTTerminalPage, AgentsTerminalTool,
-  LandingFooter, projects page)
-- Removed unused imports: Sprout, Zap, Sparkles (from headers),
-  Image (from Navbar), Link (where no longer used)
-- Did NOT remove /logo.png — still used by SEO image generation script
-- Did NOT change Stripe product names, system prompts, or API route
-  strings (those are internal/contractual)
-- Did NOT change navigation routes, auth, header actions, or responsive
-  behavior
-
-Quality gate: typecheck PASS, lint 0 errors, 1236 tests passed, 192 pages
+Pre-existing unused imports/vars (not caused by branding change).
+Reduces lint warnings from 51 to 48.
 
 Generated with [Devin](https://devin.ai)
 
