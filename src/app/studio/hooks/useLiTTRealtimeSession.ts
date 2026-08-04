@@ -86,10 +86,13 @@ export function useLiTTRealtimeSession(): UseLiTTRealtimeSession {
   const [error, setError] = useState<LiveSessionError | null>(null);
   const [framesSent, setFramesSent] = useState(0);
 
-  // Create controller on mount
-  if (!controllerRef.current) {
-    controllerRef.current = new LiTTRealtimeSessionController();
-  }
+  // Create controller on mount (lazy init in useEffect to avoid
+  // accessing refs during render — eslint-react-hooks rule).
+  useEffect(() => {
+    if (!controllerRef.current) {
+      controllerRef.current = new LiTTRealtimeSessionController();
+    }
+  }, []);
 
   // Subscribe to controller events
   useEffect(() => {
