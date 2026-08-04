@@ -124,9 +124,11 @@ describe("hasPlanAccess", () => {
 });
 
 describe("Agent registry", () => {
-  it("has exactly 7 agents", async () => {
-    const { AGENT_DEFINITIONS } = await import("@/lib/agent-registry");
+  it("has 2 core personalities and 5 internal specialists (7 total)", async () => {
+    const { AGENT_DEFINITIONS, CORE_PERSONALITIES } = await import("@/lib/agent-registry");
     expect(AGENT_DEFINITIONS).toHaveLength(7);
+    expect(CORE_PERSONALITIES).toHaveLength(2);
+    expect(CORE_PERSONALITIES.map((a) => a.id).sort()).toEqual(["litt", "spark"]);
   });
 
   it("LiTT and Spark are free/starter", async () => {
@@ -218,25 +220,26 @@ describe("Pricing features name agents (scenario 18)", () => {
     expect(PLANS.starter.features.some((f) => f.includes("LiTT"))).toBe(true);
   });
 
-  it("creator features name Researcher, Writer, Marketer", async () => {
+  it("creator features mention research, writing, and marketing skills", async () => {
     const { PLANS } = await import("@/config/plans");
-    const features = PLANS.creator_beta.features.join(" ");
-    expect(features).toContain("Researcher");
-    expect(features).toContain("Writer");
-    expect(features).toContain("Marketer");
+    const features = PLANS.creator_beta.features.join(" ").toLowerCase();
+    expect(features).toContain("research");
+    expect(features).toContain("writing");
+    expect(features).toContain("marketing");
   });
 
-  it("pro features name Coder and Analyst", async () => {
+  it("pro features mention coding and analytics skills", async () => {
     const { PLANS } = await import("@/config/plans");
-    const features = PLANS.pro_builder_beta.features.join(" ");
-    expect(features).toContain("Coder");
-    expect(features).toContain("Analyst");
+    const features = PLANS.pro_builder_beta.features.join(" ").toLowerCase();
+    expect(features).toContain("coding");
+    expect(features).toContain("analytics");
   });
 
-  it("founder features mention permanent agent access", async () => {
+  it("founder features mention permanent access", async () => {
     const { PLANS } = await import("@/config/plans");
     const features = PLANS.founder.features.join(" ");
-    expect(features).toContain("agent");
+    expect(features).toContain("Permanent");
+    expect(features).toContain("access");
   });
 });
 

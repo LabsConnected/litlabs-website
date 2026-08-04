@@ -634,11 +634,24 @@ ${TRUTH_RULES}`,
 };
 
 /* ------------------------------------------------------------------ */
-/*  The registry — ordered for Studio display                          */
+/*  The registry — three explicit categories                           */
 /* ------------------------------------------------------------------ */
-export const AGENT_DEFINITIONS: AgentDefinition[] = [
-  LITT,
-  SPARK,
+
+/**
+ * A. CORE PERSONALITIES — LiTT and Spark only.
+ * These are the two official user-facing personalities. They appear in the
+ * Studio selector and are the only agents advertised as "built-in".
+ * See docs/PRODUCT_TRUTH.md for the canonical agent model.
+ */
+export const CORE_PERSONALITIES: AgentDefinition[] = [LITT, SPARK];
+
+/**
+ * B. INTERNAL SPECIALISTS — delegated workers, not competing primary agents.
+ * These are invoked by LiTT as skills/modes. They do not appear in the Studio
+ * selector as independent selectable agents. They may appear in the
+ * marketplace as optional products but must not replace the LiTT control plane.
+ */
+export const INTERNAL_SPECIALISTS: AgentDefinition[] = [
   RESEARCHER,
   WRITER,
   MARKETER,
@@ -646,28 +659,54 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
   ANALYST,
 ];
 
+/**
+ * C. MARKETPLACE AGENTS — optional user-purchased specialist products.
+ * These are private user instances with specialized prompts, tools, and
+ * entitlements. They must not contaminate LiTT or Spark memory and must use
+ * explicit instance IDs and namespaces.
+ */
+export const MARKETPLACE_SPECIALISTS: AgentDefinition[] = [
+  RESEARCHER,
+  WRITER,
+  MARKETER,
+  CODER,
+  ANALYST,
+];
+
+/**
+ * The full registry — all definitions (core + internal + marketplace).
+ * Used for entitlement resolution and lookup by slug. The Studio selector
+ * and pricing page must use CORE_PERSONALITIES, not this full list.
+ */
+export const AGENT_DEFINITIONS: AgentDefinition[] = [
+  ...CORE_PERSONALITIES,
+  ...INTERNAL_SPECIALISTS,
+];
+
 export const AGENT_REGISTRY: Record<string, AgentDefinition> =
   Object.fromEntries(AGENT_DEFINITIONS.map((a) => [a.id, a]));
 
-/** Starter agents — included free with every account. */
-export const FREE_AGENTS = AGENT_DEFINITIONS.filter(
+/** Core personalities — LiTT and Spark (the two official visible agents). */
+export const FREE_AGENTS = CORE_PERSONALITIES.filter(
   (a) => a.billingModel === "free",
 );
 
-/** Subscription-bundled specialist agents (not sold individually by default). */
-export const SPECIALIST_AGENTS = AGENT_DEFINITIONS.filter(
+/** Subscription-bundled specialist agents (delegated workers, not primaries). */
+export const SPECIALIST_AGENTS = INTERNAL_SPECIALISTS.filter(
   (a) => a.billingModel === "subscription",
 );
 
-/** Alias for the marketplace — the premium/specialist agents listed there. */
-export const PREMIUM_AGENTS = SPECIALIST_AGENTS;
+/** Alias for the marketplace — the specialist agents listed there. */
+export const PREMIUM_AGENTS = MARKETPLACE_SPECIALISTS;
 
 export function getAgentDefinition(slug: string): AgentDefinition | null {
   return AGENT_REGISTRY[slug] ?? null;
 }
 
 export function getStudioAgents(): AgentDefinition[] {
-  return AGENT_DEFINITIONS.filter((a) => a.studioVisible && a.enabled);
+  // Only core personalities (LiTT and Spark) appear in the Studio selector.
+  // Internal specialists are delegated by LiTT, not independently selectable.
+  return CORE_PERSONALITIES.filter((a) => a.studioVisible && a.enabled);
 }
 
 export function getMarketplaceAgents(): AgentDefinition[] {

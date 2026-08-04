@@ -99,7 +99,7 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   marketplaceAgentInstall: {
     flag: "marketplaceAgentInstall",
-    description: "Individual agent install from marketplace (separate from plan-tier agents)",
+    description: "Individual skill install from marketplace (delegated workers, not separate primary agents)",
     enabled: false,
     hideFromNav: true,
   },

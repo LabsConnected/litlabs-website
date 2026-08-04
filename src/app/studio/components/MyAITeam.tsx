@@ -138,12 +138,12 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
-        <h2 className="text-sm font-black">My AI Team</h2>
+        <h2 className="text-sm font-black">My Specialists</h2>
         <Link
           href="/marketplace"
           className="rounded-lg bg-white/5 px-2.5 py-1 text-[10px] font-bold text-white/60 transition hover:bg-white/10 hover:text-white/80"
         >
-          + Hire Agent
+          + Browse Marketplace
         </Link>
       </div>
 

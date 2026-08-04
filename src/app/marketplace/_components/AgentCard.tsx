@@ -256,7 +256,7 @@ function ActionButton({
   switch (state) {
     case "buy": return <button onClick={onBuy} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Buy Now</button>;
     case "processing": return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: borderColor + "10", color: textMuted }}><Clock size={12} /> Processing payment...</div>;
-    case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Install</button>;
+    case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Add</button>;
     case "open": return (
       <div className="flex gap-2">
         <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>

@@ -127,7 +127,7 @@ export function AgentDetailClient({ slug, name, color, minimumPlan }: Props) {
             className="w-full rounded-xl py-3 text-sm font-black text-black transition hover:scale-[1.02]"
             style={{ background: color }}
           >
-            Install {name}
+            Add {name}
           </button>
         ) : (
           <div className="w-full rounded-xl border border-white/10 py-3 text-center text-sm font-bold text-white/50">

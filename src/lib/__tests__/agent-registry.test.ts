@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   AGENT_DEFINITIONS,
   AGENT_REGISTRY,
+  CORE_PERSONALITIES,
+  INTERNAL_SPECIALISTS,
   getAgentDefinition,
   getStudioAgents,
   getMarketplaceAgents,
@@ -10,8 +12,17 @@ import {
 } from "@/lib/agent-registry";
 
 describe("marketplace agent-registry", () => {
+  describe("CORE_PERSONALITIES", () => {
+    it("includes exactly 2 core personalities (LiTT and Spark)", () => {
+      expect(CORE_PERSONALITIES).toHaveLength(2);
+      const slugs = CORE_PERSONALITIES.map((a) => a.id);
+      expect(slugs).toContain("litt");
+      expect(slugs).toContain("spark");
+    });
+  });
+
   describe("AGENT_DEFINITIONS", () => {
-    it("includes the 7 agents (LiTT, Spark, Researcher, Writer, Marketer, Coder, Analyst)", () => {
+    it("includes 7 total (2 core + 5 internal specialists)", () => {
       const slugs = AGENT_DEFINITIONS.map((a) => a.id);
       expect(slugs).toContain("litt");
       expect(slugs).toContain("spark");
