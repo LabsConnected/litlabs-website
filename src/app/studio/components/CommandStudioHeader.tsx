@@ -211,27 +211,8 @@ export default function CommandStudioHeader({
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
       />
 
-      {/* Connected repo — visible chip when a repository is linked */}
-      {repoConnected && capabilities.repositoryName && (
-        <span
-          className="hidden md:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
-          style={{
-            borderColor: "rgba(114,242,56,0.25)",
-            color: "var(--litt-primary)",
-            backgroundColor: "rgba(114,242,56,0.06)",
-          }}
-          title={`Repository: ${capabilities.repositoryName}`}
-        >
-          <span
-            className="h-1.5 w-1.5 rounded-full"
-            aria-hidden
-            style={{ backgroundColor: "var(--litt-primary)" }}
-          />
-          {capabilities.repositoryName}
-        </span>
-      )}
-
-      {/* Branch — only when a repo is connected */}
+      {/* Branch — only when a repo is connected; repo name is already
+          shown inside the project picker to avoid duplicate indicators */}
       {branch && repoConnected && (
         <span
           className="hidden lg:inline shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold"

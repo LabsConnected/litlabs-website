@@ -48,7 +48,6 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 ];
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
-  { id: "activity", label: "Activity", icon: Activity },
   { id: "terminal", label: "Terminal", icon: Terminal },
 ];
 
@@ -435,7 +434,7 @@ export function StudioDrawer({
           aria-expanded={open}
         >
           {open ? <PanelBottomClose size={13} className="pointer-events-none" /> : <PanelBottomOpen size={13} className="pointer-events-none" />}
-          <span>{open ? "Close" : "Activity / Terminal"}</span>
+          <span>{open ? "Close" : "Terminal"}</span>
         </button>
       </div>
 

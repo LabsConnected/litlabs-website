@@ -740,7 +740,7 @@ export default function ImageTool() {
 
   const handleGenerate = useCallback(async () => {
     if (!promptValid) {
-      setError("Enter a prompt to forge.");
+      setError("Enter a prompt to generate.");
       return;
     }
     const totalCost = providerCost * batchSize;
@@ -811,7 +811,7 @@ export default function ImageTool() {
           body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Forge failed");
+        if (!res.ok) throw new Error(data.error || "Generation failed");
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -843,7 +843,7 @@ export default function ImageTool() {
         );
         refreshWallet().catch(() => {});
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Forge failed";
+        const msg = err instanceof Error ? err.message : "Generation failed";
         addLog("error", `[${i + 1}/${batchSize}] ${msg}`);
         setHistory((prev) =>
           prev.map((g) =>
@@ -1151,7 +1151,7 @@ export default function ImageTool() {
               color: showLogs ? T.accentColor : T.textMuted,
               backgroundColor: showLogs ? T.accentColor + "10" : "transparent",
             }}
-            title="Toggle forge log"
+            title="Toggle generation log"
           >
             <Terminal size={9} />
           </button>
@@ -1325,7 +1325,7 @@ export default function ImageTool() {
                 {isWorking ? (
                   <><Loader2 size={15} className="animate-spin" /> Forging...</>
                 ) : (
-                  <><Wand2 size={15} /> Forge{batchSize > 1 ? ` ${batchSize}×` : ""}</>
+                  <><Wand2 size={15} /> Generate{batchSize > 1 ? ` ${batchSize}×` : ""}</>
                 )}
               </button>
               {error && (
@@ -1523,7 +1523,7 @@ export default function ImageTool() {
                     setPrompt(e.target.value);
                     setError(null);
                   }}
-                  placeholder="Describe what you want to forge..."
+                  placeholder="Describe what you want to generate..."
                   rows={4}
                   disabled={isWorking}
                   className="w-full min-h-28 px-3 py-3 text-sm md:text-[12px] rounded-xl md:rounded-lg outline-none resize-none disabled:opacity-50 transition-all focus:ring-1"
@@ -2603,7 +2603,7 @@ export default function ImageTool() {
             </div>
           )}
 
-          {/* ── Forge button — always visible ── */}
+          {/* ── Generate button — always visible ── */}
           <div className="shrink-0 px-4 md:px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-3 md:pt-1 space-y-2 border-t md:border-t-0" style={{ borderColor: T.borderColor + "24", backgroundColor: T.boxBg }}>
             <button
               onClick={handleGenerate}
@@ -2624,7 +2624,7 @@ export default function ImageTool() {
                 </>
               ) : (
                 <>
-                  <Wand2 size={15} /> Forge{" "}
+                  <Wand2 size={15} /> Generate{" "}
                   {batchSize > 1 ? `${batchSize}×` : ""}
                 </>
               )}
@@ -2921,7 +2921,7 @@ export default function ImageTool() {
                       className="text-sm font-bold mb-1"
                       style={{ color: "#f85149" }}
                     >
-                      Forge Failed
+                      Generation Failed
                     </p>
                     <p
                       className="text-[11px] opacity-60 mb-4"
@@ -3201,7 +3201,7 @@ export default function ImageTool() {
             </div>
           </div>
 
-          {/* ── Forge Log (bottom) ── */}
+          {/* ── Generation Log (bottom) ── */}
           {showLogs && (
             <div
               className="shrink-0 border-t"
@@ -3220,7 +3220,7 @@ export default function ImageTool() {
                   className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"
                   style={{ color: T.accentColor }}
                 >
-                  <Terminal size={9} /> Forge Log
+                  <Terminal size={9} /> Generation Log
                 </div>
                 <button
                   onClick={() => setLogs([])}

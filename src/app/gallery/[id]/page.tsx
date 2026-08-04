@@ -43,6 +43,8 @@ export default function GalleryArtifactPage({
   const [copied, setCopied] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [comments, setComments] = useState<GalleryArtifact["comments"]>([]);
+  const [sharingToDiscover, setSharingToDiscover] = useState(false);
+  const [sharedToDiscover, setSharedToDiscover] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -120,6 +122,25 @@ export default function GalleryArtifactPage({
       });
     } catch {
       // Non-fatal — optimistic update
+    }
+  };
+
+  const handleShareToDiscover = async () => {
+    setSharingToDiscover(true);
+    try {
+      const res = await fetch(`/api/gallery/${id}/share`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: `Check out my creation: ${item?.title ?? ""}` }),
+      });
+      if (res.ok) {
+        setSharedToDiscover(true);
+      }
+    } catch {
+      // Non-fatal
+    } finally {
+      setSharingToDiscover(false);
     }
   };
 
@@ -246,6 +267,20 @@ export default function GalleryArtifactPage({
                 Use in Studio
               </Link>
             </div>
+
+            {/* Share to Discover — owner only */}
+            {item.isOwner && (
+              <button
+                type="button"
+                onClick={handleShareToDiscover}
+                disabled={sharingToDiscover}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:opacity-80 disabled:opacity-40"
+                style={{ borderColor: T.border + "30", color: T.textMuted }}
+              >
+                <Share2 size={14} />
+                {sharedToDiscover ? "Shared to Discover" : "Share to Discover"}
+              </button>
+            )}
 
             {/* Prompt + tool info */}
             {(item.prompt || item.toolUsed || item.providerUsed) && (

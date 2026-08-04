@@ -17,8 +17,8 @@ import {
   X,
   Gamepad2,
   ExternalLink,
-  Home,
   Zap,
+  Home,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import type {
@@ -104,31 +104,6 @@ export default function CommandStudioNav({
           style={{ backgroundColor: "var(--studio-border-strong)" }}
           aria-hidden
         />
-
-        {/* Home — navigate back to dashboard */}
-        <Link
-          href="/dashboard"
-          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
-          style={{ color: "var(--text-muted)" }}
-          title="Dashboard"
-          aria-label="Go to dashboard"
-        >
-          <Home
-            size={17}
-            strokeWidth={1.7}
-            className="pointer-events-none transition-all duration-200 group-hover:scale-110"
-          />
-          <span
-            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
-            style={{
-              backgroundColor: "var(--studio-elevated)",
-              borderColor: "var(--studio-border-strong)",
-              color: "var(--text-primary)",
-            }}
-          >
-            Dashboard
-          </span>
-        </Link>
 
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
