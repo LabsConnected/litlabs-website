@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-export type SaveStatus = "idle" | "saving" | "saved";
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export function SettingsCard({
   title,
@@ -132,7 +132,8 @@ export function SaveBar({
   return (
     <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-white/10 bg-black/80 px-4 py-2.5 shadow-2xl backdrop-blur-xl">
       {status === "saving" && <span className="text-xs text-white/60">Saving…</span>}
-      {status === "saved" && <span className="text-xs text-green-400">Saved</span>}
+      {status === "saved" && <span className="text-xs text-green-400">Saved to account</span>}
+      {status === "error" && <span className="text-xs text-red-400">Save failed — try again</span>}
       {status === "idle" && (
         <>
           <button onClick={onDiscard} className="rounded-lg px-3 py-1.5 text-xs font-bold text-white/50 hover:bg-white/8 hover:text-white">

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import {
   getAdminSupabase,
@@ -7,10 +7,10 @@ import {
 } from "@/lib/supabase-admin";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
 ) {
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -68,7 +68,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
 ) {
-  const { userId: clerkId } = await auth();
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

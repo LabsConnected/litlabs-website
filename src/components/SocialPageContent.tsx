@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
+import { useTheme } from "@/context/ThemeContext";
 import {
   Zap,
   Sparkles,
@@ -20,18 +21,6 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
-
-const C = {
-  bgColor: "#0a0a12",
-  textColor: "#e0e0ff",
-  textMuted: "#8888aa",
-  linkColor: "#ff00a0",
-  headerColor: "#00f0ff",
-  borderColor: "#2a2a45",
-  accentColor: "#ff00a0",
-  boxBg: "#151520",
-  success: "#00ff41",
-};
 
 type ApiPost = {
   id: string;
@@ -63,6 +52,18 @@ function timeAgo(iso: string) {
 export default function SocialPageContent() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { profile } = useProfile();
+  const { resolvedColors } = useTheme();
+  const C = {
+    bgColor: resolvedColors.bgColor,
+    textColor: resolvedColors.textColor,
+    textMuted: resolvedColors.textMuted,
+    linkColor: resolvedColors.accentColor,
+    headerColor: resolvedColors.headerColor,
+    borderColor: resolvedColors.borderColor,
+    accentColor: resolvedColors.accentColor,
+    boxBg: resolvedColors.boxBg,
+    success: "#22c55e",
+  };
   const [activeTab, setActiveTab] = useState<"for-you" | "following">(
     "for-you",
   );

@@ -234,7 +234,8 @@ export default function DashboardWidgets({
         </div>
       </GlassCard>
 
-      {/* Daily Reward */}
+      {/* Daily Reward — hidden by default; enable via server-side feature flag */}
+      {false && (
       <GlassCard variant="flat" padding="sm" radius="lg" className={claimed ? "opacity-70" : ""}>
         <div className="flex items-center gap-3">
           <div
@@ -276,6 +277,7 @@ export default function DashboardWidgets({
           </div>
         </div>
       </GlassCard>
+      )}
 
       {/* Top Creators */}
       <GlassCard

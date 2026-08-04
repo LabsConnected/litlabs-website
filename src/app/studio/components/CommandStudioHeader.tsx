@@ -5,20 +5,34 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
-import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import StudioProjectPicker from "./StudioProjectPicker";
+import ModelPicker from "@/components/ModelPicker";
 import {
   useStudioModelStore,
+  MODELS,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
   ChevronDown,
   Eye,
   Rocket,
-  Sparkles,
-  Home,
+  Sprout,
   CircleAlert,
   CircleCheck,
   CircleDot,
+  Bell,
+  Bot,
+  PanelRightOpen,
+  PanelRightClose,
+  Activity,
+  MoreHorizontal,
+  Plus,
+  Terminal,
+  Trash2,
+  Edit2,
+  Download,
+  Eraser,
+  Settings,
 } from "lucide-react";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
@@ -41,34 +55,84 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
  */
 export default function CommandStudioHeader({
   branch,
-  onPreview,
-  onOpenActivity,
+  onPreviewAction,
+  onOpenActivityAction,
+  activityRailOpen = false,
+  onOpenTerminalAction,
+  onOpenInspectorAction,
+  onProjectSelectAction,
+  onClearChatAction,
+  onNewChatAction,
+  onDeleteChatAction,
+  onRenameChatAction,
+  onExportChatAction,
+  hasConversation,
   projectReady,
   capabilities,
+  busy = false,
 }: {
   branch?: string;
-  onPreview?: () => void;
-  onOpenActivity?: () => void;
+  onPreviewAction?: () => void;
+  onOpenActivityAction?: () => void;
+  /** Whether the right Activity rail is currently open. */
+  activityRailOpen?: boolean;
+  onOpenTerminalAction?: () => void;
+  onOpenInspectorAction?: () => void;
+  onProjectSelectAction?: (projectId: string) => void;
+  onClearChatAction?: () => void;
+  onNewChatAction?: () => void;
+  onDeleteChatAction?: () => void;
+  onRenameChatAction?: () => void;
+  onExportChatAction?: () => void;
+  hasConversation?: boolean;
   projectReady?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  /** True while an agent/conversation turn is in flight. */
+  busy?: boolean;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
   const [statusOpen, setStatusOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
+  const [overflowRect, setOverflowRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
       setStatusRect(statusTriggerRef.current.getBoundingClientRect());
     }
+    if (overflowTriggerRef.current) {
+      setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
+    }
+  }, []);
+
+  // Poll unread notification count (truthful; falls back to null on error).
+  useEffect(() => {
+    let cancelled = false;
+    const fetchNotifs = async () => {
+      try {
+        const res = await fetch("/api/notifications/count", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
+      } catch {
+        if (!cancelled) setNotifCount(null);
+      }
+    };
+    void fetchNotifs();
+    const id = window.setInterval(fetchNotifs, 45_000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
   useEffect(() => {
-    if (!statusOpen) return;
+    if (!statusOpen && !overflowOpen) return;
     updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
@@ -76,69 +140,87 @@ export default function CommandStudioHeader({
       window.removeEventListener("scroll", updateRect, true);
       window.removeEventListener("resize", updateRect);
     };
-  }, [statusOpen, updateRect]);
+  }, [statusOpen, overflowOpen, updateRect]);
 
-  const providerCount = capabilities.connectedProviders.length;
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = providerHealth[selectedModel.provider] ?? "available";
+  const hasAi = modelHealth === "available" || modelHealth === "degraded";
+  const providerCount = hasAi ? 1 : 0;
 
   // Truthful aggregate status — calculated from actual capabilities,
   // never from provider count alone. "Workspace ready" requires a
   // project (repo OR terminal) AND an AI provider.
   const hasProject = repoConnected || ptyAvailable;
-  const hasAi = providerCount > 0;
   const statusColor = hasProject && hasAi
     ? "var(--litt-primary)"
     : hasProject
       ? "#e3b341"
-      : "var(--text-muted)";
+      : hasAi
+        ? "var(--litt-primary)"
+        : "var(--text-muted)";
   const statusLabel = hasProject && hasAi
     ? "Workspace available"
     : hasProject
       ? "AI setup required"
       : hasAi
-        ? "Project setup required"
-        : "Workspace setup required";
+        ? "Chat ready"
+        : "Chat unavailable";
 
   return (
     <header
-      className="flex shrink-0 items-center gap-2 border-b px-2 sm:px-3"
+      className="flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b px-2 sm:px-3"
       style={{
         height: "var(--studio-header-h)",
-        backgroundColor: "var(--studio-bg)",
+        backgroundColor: "var(--studio-surface)",
         borderColor: "var(--studio-border)",
+        backdropFilter: "blur(12px)",
       }}
+      data-testid="studio-header"
     >
       {/* LiTT Studio logo — clickable to go to dashboard */}
       <Link
         href="/dashboard"
         className="flex shrink-0 items-center gap-1.5 rounded-md transition-all hover:opacity-80"
         aria-label="Go to dashboard"
-        title="Go to dashboard"
+        title="LiTT Studio — AI Operating System"
       >
         <div
           className="grid h-6 w-6 place-items-center rounded-md"
           style={{
             background: "linear-gradient(135deg, var(--litt-primary), var(--spark-primary))",
+            boxShadow: "var(--studio-glow-purple)",
           }}
           aria-hidden
         >
-          <Sparkles size={11} className="text-black" />
+          <Sprout size={11} className="text-black" />
         </div>
         <span
-          className="hidden sm:inline text-[11px] font-black uppercase tracking-[0.15em]"
+          className="hidden lg:inline text-[13px] font-black tracking-[0.08em]"
           style={{ color: "var(--text-primary)" }}
         >
           LiTT Studio
         </span>
+        <span
+          className="hidden lg:inline text-[11px] font-bold tracking-[0.1em]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          AI OS
+        </span>
       </Link>
 
-      {/* Branch */}
-      {branch && (
+      <StudioProjectPicker
+        projectId={capabilities.projectId}
+        projectName={capabilities.projectName}
+        onSelect={(projectId) => onProjectSelectAction?.(projectId)}
+      />
+
+      {/* Branch — only when a repo is connected; repo name is already
+          shown inside the project picker to avoid duplicate indicators */}
+      {branch && repoConnected && (
         <span
-          className="hidden md:inline shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          className="hidden lg:inline shrink-0 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-bold"
           style={{
             borderColor: "var(--studio-border)",
             color: "var(--text-secondary)",
@@ -155,14 +237,14 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
           backgroundColor: "var(--studio-surface)",
         }}
         aria-label="Workspace status"
-        aria-expanded={statusOpen}
+        aria-expanded={Boolean(statusOpen)}
         title={capabilities.connectionSummary}
       >
         <span
@@ -178,6 +260,7 @@ export default function CommandStudioHeader({
           <WorkspaceStatusPopover
             rect={statusRect}
             onClose={() => setStatusOpen(false)}
+            onOpenTerminalAction={onOpenTerminalAction}
             providerCount={providerCount}
             repoConnected={repoConnected}
             repoName={capabilities.repositoryName}
@@ -187,78 +270,190 @@ export default function CommandStudioHeader({
             modelHealth={modelHealth}
             fallbackNotice={fallbackNotice}
             walletBalance={walletLoading ? null : balance}
-            connectionSummary={capabilities.connectionSummary}
+            connectionSummary={
+              hasAi
+                ? `${selectedModel.label} is ready. Add a project for files, preview, terminal, and deployment.`
+                : "Configure an AI provider to start chatting."
+            }
           />,
           document.body,
         )}
 
+      {/* Model picker — lets the user change the AI model. The selected
+          model reaches the backend via useCanonicalConversation.send(). */}
+      <div className="hidden sm:block shrink-0 w-[min(11rem,30vw)]" data-testid="studio-model-picker">
+        <ModelPicker
+          selectedModel={selectedModel.id}
+          onModelChange={(modelId) => {
+            const found = MODELS.find((m) => m.id === modelId);
+            if (found) selectModel(found);
+          }}
+        />
+      </div>
+
+      {/* Write-permission pill — colored so the approval state is obvious.
+          🟢 Writes allowed · 🟡 Approval needed · (locked shown in popover) */}
+      <WritePermissionPill writesAllowed={writesAllowed} hasProject={hasProject} />
+
+      {/* Agent-active indicator — truthful: only while a turn is in flight */}
+      {busy && (
+        <span
+          className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          style={{
+            borderColor: "rgba(167,139,250,0.3)",
+            color: "#a78bfa",
+            backgroundColor: "rgba(167,139,250,0.08)",
+          }}
+          title="An agent is working"
+          data-testid="agent-active-pill"
+        >
+          <Bot size={10} className="pointer-events-none" />
+          <span className="pointer-events-none">Agent working</span>
+          <span
+            className="h-1.5 w-1.5 rounded-full animate-pulse"
+            aria-hidden
+            style={{ backgroundColor: "#a78bfa" }}
+          />
+        </span>
+      )}
+
       <div className="flex-1" />
 
-      {/* Preview — switches Studio to the Preview surface */}
+      {/* Conversation controls — always visible instead of being hidden in slash commands. */}
+      <button
+        type="button"
+        onClick={onNewChatAction}
+        disabled={busy}
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{
+          borderColor: "rgba(114,242,56,0.28)",
+          color: "var(--litt-primary)",
+          backgroundColor: "rgba(114,242,56,0.06)",
+        }}
+        aria-label="New chat"
+        title="Start a new chat"
+      >
+        <Plus size={12} aria-hidden />
+        <span className="hidden sm:inline">New Chat</span>
+      </button>
+
+      {/* Notifications — wired to /api/notifications/count */}
+      <Link
+        href="/notifications"
+        className="relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        style={{ color: "var(--text-secondary)" }}
+        aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
+        title="Notifications"
+      >
+        <Bell size={13} />
+        {notifCount ? (
+          <span
+            className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
+            style={{ backgroundColor: "#ff00a0", color: "#fff" }}
+          >
+            {notifCount > 99 ? "99+" : notifCount}
+          </span>
+        ) : null}
+      </Link>
+
+      {/* Deploy button — primary gradient action, disabled when no project */}
       <button
         type="button"
         disabled={!projectReady}
-        onClick={onPreview}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        onClick={onPreviewAction}
+        className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
         style={{
-          borderColor: "var(--studio-border)",
-          color: "var(--text-secondary)",
-          backgroundColor: "var(--studio-surface)",
+          background: projectReady
+            ? "linear-gradient(135deg, var(--spark-primary), var(--violet-accent))"
+            : "var(--studio-surface)",
+          color: projectReady ? "#fff" : "var(--text-muted)",
+          border: "1px solid rgba(155,77,255,0.4)",
+          boxShadow: projectReady ? "var(--studio-glow-purple)" : "none",
         }}
-        title={projectReady ? "Preview" : "Connect a project to preview"}
-        aria-label="Preview"
-      >
-        <Eye size={11} className="pointer-events-none" />
-        <span className="hidden sm:inline pointer-events-none">Preview</span>
-      </button>
-
-      {/* Activity — opens the Activity drawer */}
-      <button
-        type="button"
-        onClick={onOpenActivity}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5"
-        style={{
-          borderColor: "var(--studio-border)",
-          color: "var(--text-secondary)",
-          backgroundColor: "var(--studio-surface)",
-        }}
-        title="Activity"
-        aria-label="Activity"
-      >
-        <span className="hidden sm:inline pointer-events-none">Activity</span>
-      </button>
-
-      {/* Deploy — truthful. No deploy handler is wired in Phase 1, so
-          the button is disabled with a truthful explanation rather than
-          claiming success or opening the Activity drawer. */}
-      <button
-        type="button"
-        disabled
-        className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black transition-all disabled:cursor-not-allowed"
-        style={{
-          backgroundColor: "var(--studio-card)",
-          color: "var(--text-muted)",
-        }}
-        title="Deploy unavailable — not wired in this phase"
-        aria-label="Deploy unavailable"
+        title={projectReady ? "Preview / Deploy project" : "No project to deploy"}
+        aria-label="Deploy"
       >
         <Rocket size={11} className="pointer-events-none" />
-        <span className="hidden sm:inline pointer-events-none">Deploy</span>
+        <span className="pointer-events-none">Deploy</span>
       </button>
 
-      {/* Overflow menu — settings + account */}
-      <Link
-        href={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+      <button
+        type="button"
+        onClick={onOpenInspectorAction}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md border transition-all hover:bg-white/5 active:scale-95"
+        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
+        title="Workspace inspector"
+        aria-label="Open workspace inspector"
+      >
+        <PanelRightOpen size={13} className="pointer-events-none" />
+      </button>
+
+      {/* Activity — toggles the right Activity rail (not a second drawer) */}
+      <button
+        type="button"
+        onClick={onOpenActivityAction}
+        aria-pressed={activityRailOpen}
+        aria-label={activityRailOpen ? "Hide Activity" : "Show Activity"}
+        title={activityRailOpen ? "Hide Activity" : "Show Activity"}
+        data-testid="activity-toggle"
+        data-active={activityRailOpen}
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        style={{
+          borderColor: activityRailOpen
+            ? "rgba(155,77,255,.45)"
+            : "var(--studio-border)",
+          backgroundColor: activityRailOpen
+            ? "rgba(155,77,255,.12)"
+            : "var(--studio-surface)",
+          color: activityRailOpen
+            ? "var(--spark-primary)"
+            : "var(--text-secondary)",
+        }}
+      >
+        {activityRailOpen ? (
+          <PanelRightClose size={13} className="pointer-events-none" />
+        ) : (
+          <Activity size={13} className="pointer-events-none" />
+        )}
+        <span className="hidden xl:inline pointer-events-none">
+          {activityRailOpen ? "Hide Activity" : "Show Activity"}
+        </span>
+      </button>
+
+      {/* Overflow menu — Preview + Deploy + Settings collapsed here */}
+      <button
+        ref={overflowTriggerRef}
+        type="button"
+        onClick={() => setOverflowOpen((v) => !v)}
         className="grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
-        aria-label="Settings"
-        title="Settings"
+        aria-label="More actions"
+        aria-expanded={Boolean(overflowOpen)}
+        title="More"
       >
-        <span className="text-[14px] leading-none">⋯</span>
-      </Link>
+        <MoreHorizontal size={14} />
+      </button>
+      {overflowOpen && overflowRect &&
+        createPortal(
+          <OverflowMenu
+            rect={overflowRect}
+            onClose={() => setOverflowOpen(false)}
+            onPreviewAction={onPreviewAction}
+            onNewChatAction={onNewChatAction}
+            onClearChatAction={onClearChatAction}
+            onDeleteChatAction={onDeleteChatAction}
+            onRenameChatAction={onRenameChatAction}
+            onExportChatAction={onExportChatAction}
+            hasConversation={Boolean(hasConversation)}
+            previewDisabled={!projectReady}
+            busy={busy}
+            settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+          />,
+          document.body,
+        )}
 
       {/* User avatar */}
-      <div className="shrink-0">
+      <div className="shrink-0" data-testid="user-avatar">
         <UserButton
           afterSignOutUrl="/"
           appearance={{
@@ -320,6 +515,7 @@ function StatusRow({
 function WorkspaceStatusPopover({
   rect,
   onClose,
+  onOpenTerminalAction,
   providerCount,
   repoConnected,
   repoName,
@@ -333,6 +529,7 @@ function WorkspaceStatusPopover({
 }: {
   rect: DOMRect;
   onClose: () => void;
+  onOpenTerminalAction?: () => void;
   providerCount: number;
   repoConnected: boolean;
   repoName: string | null;
@@ -422,8 +619,28 @@ function WorkspaceStatusPopover({
           value={ptyLabel}
           ok={ptyState === "available"}
           warn={ptyState === "connecting" || ptyState === "error"}
-          detail={ptyState === "available" ? "Ready for command execution" : "Open the Activity drawer to connect"}
+          detail={ptyState === "available" ? "Ready for command execution" : "Open the terminal drawer to connect"}
         />
+        {ptyState !== "available" && onOpenTerminalAction && (
+          <div className="px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenTerminalAction();
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] font-bold transition hover:bg-white/5"
+              style={{
+                borderColor: "rgba(114,242,56,0.28)",
+                color: "var(--litt-primary)",
+                backgroundColor: "rgba(114,242,56,0.06)",
+              }}
+            >
+              <Terminal size={12} aria-hidden />
+              Open Terminal & Connect
+            </button>
+          </div>
+        )}
         <StatusRow
           label="Write Permission"
           value={writesAllowed ? "Writes allowed" : "Writes require approval"}
@@ -443,6 +660,186 @@ function WorkspaceStatusPopover({
           detail="Current deployment environment"
         />
       </div>
+    </div>
+  );
+}
+
+/* ── Write-permission pill ──────────────────────────────────────── */
+function WritePermissionPill({ writesAllowed, hasProject }: { writesAllowed: boolean; hasProject: boolean }) {
+  // No project yet → no writes possible → muted "Read-only" pill.
+  // Project + writes allowed → green.
+  // Project + approval required → amber.
+  const tone = !hasProject ? "muted" : writesAllowed ? "ok" : "warn";
+  const label = !hasProject ? "Read-only" : writesAllowed ? "Writes allowed" : "Approval needed";
+  const cfg = {
+    ok: { color: "var(--litt-primary)", bg: "rgba(114,242,56,0.08)", border: "rgba(114,242,56,0.3)" },
+    warn: { color: "#e3b341", bg: "rgba(227,179,65,0.08)", border: "rgba(227,179,65,0.3)" },
+    muted: { color: "var(--text-muted)", bg: "var(--studio-surface)", border: "var(--studio-border)" },
+  }[tone];
+  return (
+    <span
+      className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+      style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}
+      title={label}
+      data-testid="write-permission-pill"
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        aria-hidden
+        style={{ backgroundColor: cfg.color }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/* ── Overflow menu — Conversation actions + Preview + Settings ──── */
+function OverflowMenu({
+  rect,
+  onClose,
+  onPreviewAction,
+  onNewChatAction,
+  onClearChatAction,
+  onDeleteChatAction,
+  onRenameChatAction,
+  onExportChatAction,
+  hasConversation,
+  previewDisabled,
+  busy,
+  settingsHref,
+}: {
+  rect: DOMRect;
+  onClose: () => void;
+  onPreviewAction?: () => void;
+  onNewChatAction?: () => void;
+  onClearChatAction?: () => void;
+  onDeleteChatAction?: () => void;
+  onRenameChatAction?: () => void;
+  onExportChatAction?: () => void;
+  hasConversation: boolean;
+  previewDisabled: boolean;
+  busy: boolean;
+  settingsHref: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const top = rect.bottom + 6;
+  const right = window.innerWidth - rect.right;
+  const disabled = !hasConversation || busy;
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Conversation menu"
+      className="fixed z-[200] w-52 overflow-hidden rounded-xl border shadow-2xl"
+      style={{
+        top,
+        right,
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border-strong)",
+      }}
+    >
+      {/* Section: Conversation */}
+      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+        Conversation
+      </div>
+      <button
+        type="button"
+        onClick={() => { onClose(); onNewChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Plus size={13} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+        New Chat
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => { onClose(); onRenameChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Edit2 size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Rename
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => { onClose(); onExportChatAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Export
+      </button>
+      <div className="h-px mx-3" style={{ backgroundColor: "var(--studio-border)" }} />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!window.confirm("Clear all messages from this conversation? The conversation will remain, but its visible message history will be removed.")) return;
+          onClose();
+          onClearChatAction?.();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Eraser size={13} className="pointer-events-none" style={{ color: "#e3b341" }} />
+        Clear Messages
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!window.confirm("Delete this conversation? This removes it from your chat list. Project files, Missions, and audit history will remain.")) return;
+          onClose();
+          onDeleteChatAction?.();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-30"
+        style={{ color: "#f87171" }}
+      >
+        <Trash2 size={13} className="pointer-events-none" />
+        Delete Conversation
+      </button>
+
+      {/* Section: Workspace */}
+      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+      <div className="px-3 pt-2 pb-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>
+        Workspace
+      </div>
+      <button
+        type="button"
+        disabled={previewDisabled}
+        onClick={() => { onClose(); onPreviewAction?.(); }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Preview
+      </button>
+      <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+      <Link
+        href={settingsHref}
+        onClick={onClose}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <Settings size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+        Settings
+      </Link>
     </div>
   );
 }

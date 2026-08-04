@@ -347,6 +347,7 @@ export function ConversationProvider({
       interruptVoice,
       speakAssistantMessage,
       partialTranscript,
+      clearPartialTranscript,
       messages,
       sendMessage,
       startAssistantResponse,

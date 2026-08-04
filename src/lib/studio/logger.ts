@@ -5,6 +5,7 @@ export interface LogContext {
   projectId?: string;
   userId?: string;
   agentSlug?: string;
+  agentInstanceId?: string | null;
   provider?: string;
   latencyMs?: number;
   status?: string;
@@ -13,6 +14,9 @@ export interface LogContext {
   memoryProvider?: string;
   fallbackUsed?: boolean;
   errorClass?: string;
+  intent?: string;
+  confidence?: number;
+  tool?: string;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

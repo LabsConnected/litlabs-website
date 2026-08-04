@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 // Mock wallet
 vi.mock("@/context/WalletContext", () => ({
@@ -15,6 +15,7 @@ const mockCapabilities = {
   projectId: null,
   projectName: null,
   defaultBranch: null,
+  activeBranch: null,
   sourceType: null,
   workspaceStatus: null,
   githubInstalled: false,
@@ -36,18 +37,30 @@ vi.mock("../hooks/useConnectionSummary", () => ({
 
 // Mock model store
 vi.mock("../stores/useStudioModelStore", () => ({
-  useStudioModelStore: (selector: (s: { selectedModel: unknown; fallbackNotice: string | null; providerHealth: Record<string, string> }) => unknown) =>
+  useStudioModelStore: (selector: (s: { selectedModel: unknown; selectModel: unknown; fallbackNotice: string | null; providerHealth: Record<string, string> }) => unknown) =>
     selector({
       selectedModel: { id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" },
+      selectModel: vi.fn(),
       fallbackNotice: null,
       providerHealth: {},
     }),
+  MODELS: [{ id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" }],
 }));
 
 // Mock Clerk UserButton
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
 }));
+
+// Mock ModelPicker — it uses useTheme which requires ThemeProvider
+vi.mock("@/components/ModelPicker", () => ({
+  default: ({ selectedModel }: { selectedModel: string }) => (
+    <div data-testid="model-picker-mock">{selectedModel}</div>
+  ),
+}));
+
+// Mock fetch so the notifications poll doesn't trigger async act warnings
+vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
 
 import CommandStudioHeader from "./CommandStudioHeader";
 
@@ -59,44 +72,47 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
   it("does not say 'Workspace ready' when only AI is connected (no project)", () => {
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
     );
-    // Should say "Project setup required" not "Workspace ready"
+    // Chat is available without a project; project-only controls stay disabled.
     expect(screen.queryByText("Workspace ready")).toBeNull();
-    expect(screen.getByText("Project setup required")).toBeTruthy();
+    expect(screen.getByText("Chat ready")).toBeTruthy();
   });
 
-  it("Deploy button is disabled (no handler wired in Phase 1)", () => {
+  it("Deploy button is disabled when no project is ready", () => {
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
     );
+    // Deploy is now a visible button in the header (not in overflow menu)
     const deployBtn = screen.getByRole("button", { name: /deploy/i });
     expect(deployBtn).toBeTruthy();
     expect(deployBtn.hasAttribute("disabled")).toBe(true);
   });
 
-  it("Preview button calls onPreview (not onOpenActivity)", () => {
+  it("Preview button calls onPreview (lives in overflow menu)", () => {
     const onPreview = vi.fn();
     const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
-        onPreview={onPreview}
-        onOpenActivity={onOpenActivity}
+        onPreviewAction={onPreview}
+        onOpenActivityAction={onOpenActivity}
         projectReady={true}
         capabilities={mockCapabilities}
       />,
     );
+    // Preview now lives behind the overflow menu — open it first.
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const previewBtn = screen.getByRole("button", { name: /preview/i });
-    previewBtn.click();
+    fireEvent.click(previewBtn);
     expect(onPreview).toHaveBeenCalledTimes(1);
     expect(onOpenActivity).not.toHaveBeenCalled();
   });
@@ -105,8 +121,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={onOpenActivity}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={onOpenActivity}
         projectReady={false}
         capabilities={mockCapabilities}
       />,
@@ -116,11 +132,27 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     expect(onOpenActivity).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the terminal drawer from workspace status when PTY is disconnected", () => {
+    const onOpenTerminal = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        onOpenTerminalAction={onOpenTerminal}
+        projectReady={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /workspace status/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open terminal & connect/i }));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+  });
+
   it("does not render a project selector slot", () => {
     const { container } = render(
       <CommandStudioHeader
-        onPreview={vi.fn()}
-        onOpenActivity={vi.fn()}
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
         projectReady={false}
         capabilities={mockCapabilities}
       />,

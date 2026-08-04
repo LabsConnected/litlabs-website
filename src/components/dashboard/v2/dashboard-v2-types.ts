@@ -105,3 +105,72 @@ export type HealthCheck = {
   status: string;
   detail: string;
 };
+
+/* ── System Health (3-section model) ─────────────────────────────── */
+
+export type HealthState =
+  | "connected"
+  | "authorized"
+  | "linked"
+  | "live"
+  | "configured"
+  | "checking"
+  | "healthy"
+  | "degraded"
+  | "unauthorized"
+  | "rate_limited"
+  | "unavailable"
+  | "reconnect_required"
+  | "not_connected"
+  | "missing"
+  | "operational"
+  | "disconnected";
+
+export type HealthAction = { label: string; href: string };
+
+export type WorkspaceConnection = {
+  id: string;
+  label: string;
+  category: "Workspace";
+  state: HealthState;
+  detail: string;
+  subState?: string;
+  lastChecked: string;
+  action?: HealthAction;
+};
+
+export type AiProviderHealth = {
+  id: string;
+  label: string;
+  category: "AI";
+  state: HealthState;
+  detail: string;
+  model: string;
+  latencyMs: number | null;
+  lastChecked: string;
+  action?: HealthAction;
+};
+
+export type PlatformService = {
+  id: string;
+  label: string;
+  category: "Platform";
+  state: HealthState;
+  detail: string;
+  lastChecked: string;
+};
+
+export type SystemHealthSummary = {
+  headline: string;
+  optionalPending: number;
+  platformDegraded: boolean;
+};
+
+export type SystemHealthResponse = {
+  workspace: WorkspaceConnection[];
+  ai: AiProviderHealth[];
+  platform: PlatformService[];
+  summary: SystemHealthSummary;
+  isOwner: boolean;
+  generatedAt: string;
+};

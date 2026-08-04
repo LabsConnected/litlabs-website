@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { ArrowRight, Bot, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import { MissionSequence } from "@/components/landing/MissionSequence";
@@ -19,10 +20,11 @@ function Header() {
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
         <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
-          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_25px_rgba(168,255,47,.18)]">
-            <Bot size={18} />
+          <span className="relative h-9 w-9 overflow-hidden rounded-xl border border-[#a8ff2f]/30 shadow-[0_0_25px_rgba(168,255,47,.18)]">
+            <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="36px" className="object-cover" priority />
           </span>
-          <span>LiTTree LabStudios</span>
+          <span className="hidden sm:inline">LiTTree LabStudios</span>
+          <span className="sm:hidden">LiTTree</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
           <a href="#product" className="transition hover:text-[#a8ff2f]">Product</a>
@@ -67,7 +69,7 @@ function LandingPage() {
           <div className="relative z-10">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 px-4 py-2 text-[11px] font-black uppercase tracking-[.18em] text-[#a8ff2f]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
-              AI project workspace
+              AI creative operating system
             </div>
             <h1 className="max-w-2xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl">
               Bring the idea.
@@ -76,9 +78,9 @@ function LandingPage() {
               </span>
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/60">
-              LiTTree is an AI project workspace where LiTT helps you turn ideas
-              into working apps, websites, and creative media—with project memory,
-              real files, human approvals, and deployment from inside Studio.
+              LiTTree LabStudios is an AI creative operating system and social
+              creator platform where LiTT helps people build apps, create media,
+              preserve project context, collaborate and ship real work from Studio.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
@@ -95,7 +97,7 @@ function LandingPage() {
                 <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> See how it works
               </a>
             </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/40">
+            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/55">
               <span>Free to join</span>
               <span>No credit card</span>
               <span>Your work stays yours</span>
@@ -103,7 +105,7 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/30">Interactive product demonstration</div>
+            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/50">Interactive product demonstration</div>
             <MissionSequence />
           </div>
         </div>
@@ -231,7 +233,7 @@ function LandingPage() {
 
       {/* ═══ FOOTER ═══ */}
       <footer className="bg-[#050706] px-5 py-8 lg:px-10">
-        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
+        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/50 sm:flex-row">
           <div className="flex items-center gap-2 font-black text-white">
             <Sparkles size={14} className="text-[#a8ff2f]" /> LiTTree LabStudios
           </div>
@@ -239,8 +241,6 @@ function LandingPage() {
             <Link href="/studio">Studio</Link>
             <Link href="/marketplace">Marketplace</Link>
             <Link href="/gallery">Gallery</Link>
-            <Link href="/games">Games</Link>
-            <Link href="/discover">Community</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>

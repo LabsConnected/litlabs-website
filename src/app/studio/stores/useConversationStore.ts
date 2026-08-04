@@ -1,18 +1,27 @@
 "use client";
 
 import { create } from "zustand";
-import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
+import type { AgentSlug, AgentMode, Conversation, ConversationMessage } from "@/lib/studio/types";
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   agentSlug: AgentSlug | null;
+  /** Agent mode that produced this message. Preserved across mode switches. */
+  agentMode: AgentMode | null;
   status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   createdAt: string;
   parentMessageId: string | null;
   regenerationOfMessageId: string | null;
+  /** Provider reasoning/thinking trace (client-side only, not persisted). */
+  reasoning?: string;
 }
+
+// Zustand selectors are backed by useSyncExternalStore. Returning a fresh []
+// for an empty conversation makes every snapshot look different to React 19
+// and can trigger "Maximum update depth exceeded" before data finishes loading.
+export const EMPTY_CONVERSATION_MESSAGES: ChatMessage[] = [];
 
 interface ConversationStore {
   // State
@@ -20,6 +29,8 @@ interface ConversationStore {
   selectedConversationId: string | null;
   messagesByConversationId: Record<string, ChatMessage[]>;
   activeAgentSlug: AgentSlug;
+  /** Active agent mode — the operational profile within LiTT. */
+  activeAgentMode: AgentMode;
   revision: number;
   loading: boolean;
   streaming: boolean;
@@ -33,11 +44,14 @@ interface ConversationStore {
   addMessage: (conversationId: string, message: ChatMessage) => void;
   updateMessage: (conversationId: string, messageId: string, patch: Partial<ChatMessage>) => void;
   setActiveAgent: (slug: AgentSlug) => void;
+  /** Set the active agent mode — only affects future messages. */
+  setActiveAgentMode: (mode: AgentMode) => void;
   setRevision: (revision: number) => void;
   setLoading: (loading: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
+  resetForProject: () => void;
 
   // Computed helpers
   getMessages: () => ChatMessage[];
@@ -49,6 +63,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   selectedConversationId: null,
   messagesByConversationId: {},
   activeAgentSlug: "litt",
+  activeAgentMode: "standard",
   revision: 1,
   loading: false,
   streaming: false,
@@ -59,10 +74,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   selectConversation: (id) => {
     const state = get();
+    if (id === state.selectedConversationId) return;
     const conversation = state.conversations.find((c) => c.id === id);
     set({
       selectedConversationId: id,
       activeAgentSlug: conversation?.activeAgentSlug ?? state.activeAgentSlug,
+      activeAgentMode: conversation?.activeAgentMode ?? state.activeAgentMode,
       revision: conversation?.revision ?? 1,
     });
   },
@@ -96,12 +113,31 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       },
     })),
 
-  setActiveAgent: (slug) => set({ activeAgentSlug: slug }),
+  setActiveAgent: (slug) => set({
+    activeAgentSlug: slug,
+    // Sync mode with slug — "spark" → spark mode, everything else → standard
+    activeAgentMode: slug === "spark" ? "spark" : "standard",
+  }),
+  setActiveAgentMode: (mode) => set({
+    activeAgentMode: mode,
+    // Sync slug with mode — spark mode → "spark", everything else → "litt"
+    activeAgentSlug: mode === "spark" ? "spark" : "litt",
+  }),
   setRevision: (revision) => set({ revision }),
   setLoading: (loading) => set({ loading }),
   setStreaming: (streaming) => set({ streaming }),
   setSending: (sending) => set({ sending }),
   setError: (error) => set({ error }),
+  resetForProject: () => set({
+    conversations: [],
+    selectedConversationId: null,
+    messagesByConversationId: {},
+    revision: 1,
+    loading: false,
+    streaming: false,
+    sending: false,
+    error: null,
+  }),
 
   getMessages: () => {
     const state = get();
@@ -123,6 +159,7 @@ export function toChatMessage(msg: ConversationMessage): ChatMessage {
     role: msg.role === "user" || msg.role === "assistant" ? msg.role : "assistant",
     content: msg.content,
     agentSlug: msg.agentSlug,
+    agentMode: msg.agentMode ?? null,
     status: msg.status,
     createdAt: msg.createdAt,
     parentMessageId: msg.parentMessageId,
@@ -139,8 +176,12 @@ export function parseConversationFromUrl(searchParams: URLSearchParams): {
 } {
   const conversationId = searchParams.get("conversation");
   const agentRaw = searchParams.get("agent");
+  const VALID_AGENT_SLUGS: AgentSlug[] = [
+    "litt", "spark", "researcher", "writer", "marketer",
+    "coder", "analyst", "nova", "forge", "echo",
+  ];
   const agentSlug: AgentSlug | null =
-    agentRaw === "litt" || agentRaw === "spark" ? agentRaw : null;
+    agentRaw && VALID_AGENT_SLUGS.includes(agentRaw as AgentSlug) ? (agentRaw as AgentSlug) : null;
   return { conversationId, agentSlug };
 }
 

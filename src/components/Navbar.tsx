@@ -15,9 +15,9 @@ import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSessionAuth } from "@/hooks/useSessionAuth";
+import { isFeatureEnabled } from "@/config/feature-flags";
 import dynamic from "next/dynamic";
 import {
   Home,
@@ -26,13 +26,11 @@ import {
   Settings,
   Sun,
   Moon,
-  ChevronDown,
   X,
   Menu,
   Bell,
   Coins,
   User,
-  Code2,
   Wand2,
   Bot,
   BrainCircuit,
@@ -42,6 +40,14 @@ import {
 
 const NavAuth = dynamic(
   () => import("@/components/ClerkAuth").then((m) => ({ default: m.NavAuth })),
+  { ssr: false },
+);
+const UpgradeButton = dynamic(
+  () => import("@/components/ClerkAuth").then((m) => ({ default: m.UpgradeButton })),
+  { ssr: false },
+);
+const UsageBadge = dynamic(
+  () => import("@/components/ClerkAuth").then((m) => ({ default: m.UsageBadge })),
   { ssr: false },
 );
 
@@ -55,48 +61,33 @@ const leftNavLinks = [
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
   { href: "/games", label: "Games", icon: Gamepad2 },
-  { href: "/discover", label: "Community", icon: MessageCircle },
+  { href: "/discover", label: "Discover", icon: MessageCircle },
   { href: "/pricing", label: "Pricing", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
-];
+].filter((link) => {
+  // Feature flag filtering for v1 release
+  if (link.href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
+  if (link.href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
+  return true;
+});
 
 const agentsLink = { href: "/agents", label: "Agents", icon: BrainCircuit };
 const AgentsIcon = agentsLink.icon;
 
 /* ------------------------------------------------------------------ */
-/*  Utility items for mobile / user dropdown                           */
+/*  Utility items for mobile drawer                                    */
 /* ------------------------------------------------------------------ */
-const userLinks = [
-  { href: "/profile", label: "Profile", icon: User },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/code", label: "Code Scanner", icon: Code2 },
-  { href: "/showcase", label: "Showcase", icon: Sparkles },
-];
-
 const mobileDrawerGroups = [
   { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
-  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/agents", label: "LiTT Agent", icon: BrainCircuit }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
-  { label: "Discover", links: [{ href: "/discover", label: "Community", icon: MessageCircle }] },
+  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
+  { label: "Discover", links: [{ href: "/discover", label: "Discover Feed", icon: MessageCircle }, { href: "/marketplace", label: "Marketplace", icon: ShoppingBag }] },
   { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
   { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },
-];
-
-function WalletBadge({ accentColor }: { accentColor: string }) {
-  const { balance, isLoading } = useWallet();
-  return (
-    <span
-      className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold"
-      style={{
-        backgroundColor: accentColor + "15",
-        color: accentColor,
-        border: `1px solid ${accentColor}30`,
-      }}
-      title="Your LiTTBits balance"
-    >
-      <Coins size={10} /> {isLoading ? "—" : balance.toLocaleString()}
-    </span>
-  );
-}
+].filter((group) => {
+  if (group.label === "Discover" && !isFeatureEnabled("communitySocial")) return false;
+  if (group.label === "Games" && !isFeatureEnabled("retroGameRuntime")) return false;
+  return true;
+});
 
 export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { theme, resolvedColors, setMode } = useTheme();
@@ -104,11 +95,9 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
-  const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const userRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
   const { isLoaded: sessionLoaded, isSignedIn: sessionSignedIn } =
@@ -161,8 +150,6 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   /* Close dropdowns on outside click + close mobile drawer on desktop resize */
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (userRef.current && !userRef.current.contains(e.target as Node))
-        setUserOpen(false);
       if (notifRef.current && !notifRef.current.contains(e.target as Node))
         setNotifOpen(false);
       if (mobileOpen && !hamburgerRef.current?.contains(e.target as Node))
@@ -185,7 +172,6 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       setMobileOpen(false);
-      setUserOpen(false);
       setNotifOpen(false);
     });
     return () => cancelAnimationFrame(id);
@@ -279,6 +265,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   }}
                   title={link.label}
                   aria-label={link.label}
+                  data-testid={link.href === "/" ? "nav-home" : `nav-${link.href.slice(1)}`}
                 >
                   <Icon size={12} strokeWidth={active ? 2.5 : 2} />
                   <span className="hidden xl:inline">{link.label}</span>
@@ -287,17 +274,17 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             })}
           </div>
 
-          {/* Right side */}
-          <div className="flex items-center gap-2">
-            {/* LitCoins wallet — only when signed in */}
+          {/* Right side — clean horizontal group */}
+          <div className="flex items-center gap-2.5">
+            {/* LiTTBits / Usage badge — only when signed in */}
             {authLoaded && isSignedIn && (
-              <WalletBadge accentColor={resolvedColors.accentColor} />
+              <UsageBadge accentColor={resolvedColors.accentColor} />
             )}
 
-            {/* Agents — dedicated quick-access icon on the far right */}
+            {/* Agents — dedicated quick-access icon */}
             <Link
               href={agentsLink.href}
-              className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
+              className="hidden sm:flex w-9 h-9 shrink-0 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
               style={{
                 border: `1px solid ${
                   isActive(agentsLink.href)
@@ -322,7 +309,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             </Link>
 
             {/* Notification bell */}
-            <div className="relative" ref={notifRef}>
+            <div className="relative shrink-0" ref={notifRef}>
               <button
                 onClick={() => {
                   setNotifOpen((v) => !v);
@@ -437,7 +424,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   ? "Switch to light mode"
                   : "Switch to dark mode"
               }
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
               style={{
                 border: `1px solid ${resolvedColors.accentColor}30`,
                 color: resolvedColors.accentColor,
@@ -448,74 +435,10 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               {theme.mode === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            {/* User dropdown (profile/settings links) — desktop, signed-in only */}
-            {authLoaded && isSignedIn && (
-              <div className="hidden md:block relative" ref={userRef}>
-                <button
-                  onClick={() => setUserOpen((v) => !v)}
-                  aria-label="Navigation menu"
-                  aria-expanded={userOpen}
-                  className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg transition-all hover:opacity-80"
-                  style={{
-                    border: `1px solid ${resolvedColors.borderColor}30`,
-                    backgroundColor: resolvedColors.boxBg + "60",
-                  }}
-                  title="Menu"
-                >
-                  {profile?.avatarUrl ? (
-                    <Image
-                      src={profile.avatarUrl}
-                      alt="Profile"
-                      width={24}
-                      height={24}
-                      unoptimized
-                      className="w-6 h-6 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black"
-                      style={{
-                        backgroundColor: resolvedColors.accentColor + "30",
-                        color: resolvedColors.accentColor,
-                      }}
-                    >
-                      {profile?.displayName?.[0]?.toUpperCase() || "U"}
-                    </div>
-                  )}
-                  <ChevronDown
-                    size={12}
-                    style={{ color: resolvedColors.textMuted }}
-                  />
-                </button>
-                {userOpen && (
-                  <div
-                    className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-40 z-50"
-                    style={{
-                      backgroundColor: resolvedColors.boxBg + "f0",
-                      borderColor: resolvedColors.borderColor + "40",
-                      backdropFilter: "blur(12px)",
-                    }}
-                  >
-                    {userLinks.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
-                          style={{ color: resolvedColors.textColor }}
-                        >
-                          <Icon size={13} />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Upgrade button — dedicated control, never overlaps profile */}
+            {authLoaded && isSignedIn && <UpgradeButton />}
 
-            {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
+            {/* Profile menu — ONE clean control */}
             <NavAuth linkColor={resolvedColors.accentColor} />
 
             {/* Mobile hamburger */}
@@ -528,7 +451,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               }}
               aria-label={mobileOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileOpen}
-              className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg"
+              className="lg:hidden w-9 h-9 shrink-0 flex items-center justify-center rounded-lg"
               style={{ color: resolvedColors.linkColor }}
             >
               {mobileOpen ? <X size={20} /> : <Menu size={20} />}
@@ -578,7 +501,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             >
               <div className="flex items-center gap-2">
                 {authLoaded && isSignedIn ? (
-                  <WalletBadge accentColor={resolvedColors.accentColor} />
+                  <UsageBadge accentColor={resolvedColors.accentColor} />
                 ) : (
                   <>
                     <Coins

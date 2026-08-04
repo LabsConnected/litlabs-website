@@ -2,7 +2,7 @@
 // Admin-only: return all invite codes (without their hashes) for the admin dashboard.
 // DELETE /api/invites/list — revoke by id (body: { id })
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 
@@ -12,8 +12,8 @@ function isAdmin(userId: string) {
   return ADMIN_IDS.length === 0 || ADMIN_IDS.includes(userId);
 }
 
-async function getHandler() {
-  const { userId } = await auth();
+async function getHandler(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId || !isAdmin(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
@@ -36,7 +36,7 @@ async function getHandler() {
 }
 
 async function deleteHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId || !isAdmin(userId)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }

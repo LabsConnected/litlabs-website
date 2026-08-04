@@ -1,16 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
 import dynamic from "next/dynamic";
+import { Image as ImageIcon, Clapperboard, AudioLines, Music } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useProfile } from "@/context/ProfileContext";
+import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
-import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
-import { useStudioAgentStore } from "../stores/useStudioAgentStore";
+import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
+import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
@@ -18,7 +23,9 @@ import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
-import { StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import StudioActivityRail from "./StudioActivityRail";
+import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
@@ -38,6 +45,7 @@ const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.C
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
+const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
@@ -45,11 +53,11 @@ const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false }
 const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
 const MissionForge = dynamic(() => import("../tools/MissionForge"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), { ssr: false });
-const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), { ssr: false });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const PluginsTool = dynamic(() => import("../tools/PluginsTool"), { ssr: false });
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
+const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
@@ -69,6 +77,7 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
+  music: MusicTool,
   build: BuilderTool,
   code: CanvasTool,
   agents: AgentTool,
@@ -79,14 +88,17 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   workflows: MissionForge,
   space: SpaceTool,
   clibridge: CLIBridgeTool,
-  color: ColorByNumberTool,
 };
 
 function AgentVoiceSync() {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setVoiceAgent = useVoiceStore((s) => s.setActiveAgent);
   useEffect(() => {
-    setVoiceAgent(activeAgentId);
+    // Legacy agent names (nova/forge/echo) map to LiTT for voice purposes.
+    const voiceAgent = ["litt", "spark", "researcher", "writer", "marketer", "coder", "analyst"].includes(activeAgentId)
+      ? (activeAgentId as import("@/features/voice/types").VoiceAgentId)
+      : "litt";
+    setVoiceAgent(voiceAgent);
   }, [activeAgentId, setVoiceAgent]);
   return null;
 }
@@ -101,13 +113,31 @@ function AgentVoiceSync() {
  * ChatTool, no duplicate composer, no custom-event bridge.
  */
 export default function CommandStudio() {
+  return (
+    <VoiceSessionProvider>
+      <CommandStudioContent />
+    </VoiceSessionProvider>
+  );
+}
+
+function CommandStudioContent() {
   const { theme } = useTheme();
-  const { userId } = useClerkAuth();
+  const { userId, getToken } = useClerkAuth();
+  const { user: appUser } = useAppUser();
+  const { profile } = useProfile();
+  const userDisplayName = appUser?.firstName ?? appUser?.fullName ?? null;
+  const profileDisplayName = profile?.displayName ?? userDisplayName;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { capabilities, refresh: refreshCapabilities } = useConnectionSummary();
   const projectReady = Boolean(capabilities.projectId);
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const providerHealth = useStudioModelStore((s) => s.providerHealth);
+  // Look up health by provider first, then fall back to apiProvider
+  // (e.g. "Auto" models route to "gemini" under the hood).
+  const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
+  const modelLabel = selectedModel.label;
 
   // Resolve initial destination from legacy ?tool= query.
   const initial = useMemo(() => {
@@ -129,20 +159,99 @@ export default function CommandStudio() {
     initial.legacyTool === "build" ? "builder" : "conversation",
   );
 
-  const [inspectorOpen, setInspectorOpen] = useState<boolean>(!!initial.openInspector);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
 
+  // ── Unified side panel manager ────────────────────────────────────
+  // Only ONE side panel may be open at a time. Opening one closes the
+  // others. The canvas immediately reclaims width when a panel closes.
+  // New users start with no side panel. The last choice persists.
+  type StudioSidePanel = "none" | "activity" | "inspector" | "settings";
+  const SIDE_PANEL_STORAGE_KEY = "littree:studio:side-panel";
+  const [sidePanel, setSidePanel] = useState<StudioSidePanel>(() => {
+    if (typeof window === "undefined") return "none";
+    try {
+      const stored = localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
+      if (stored === "activity" || stored === "inspector" || stored === "settings") return stored;
+      return "none";
+    } catch {
+      return "none";
+    }
+  });
+
+  // Backwards-compat: if old activity-rail-open key was "true", migrate
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const oldKey = localStorage.getItem("littree:studio:activity-rail-open");
+      if (oldKey === "true" && sidePanel === "none") {
+        setSidePanel("activity");
+        localStorage.removeItem("littree:studio:activity-rail-open");
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidePanel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDE_PANEL_STORAGE_KEY, sidePanel);
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [sidePanel]);
+
+  // Derived booleans for downstream components
+  const activityRailOpen = sidePanel === "activity";
+  const inspectorOpen = sidePanel === "inspector";
+
+  // Toggle helpers — opening one closes the others
+  const handleToggleActivity = useCallback(() => {
+    setSidePanel((current) => (current === "activity" ? "none" : "activity"));
+  }, []);
+  const handleToggleInspector = useCallback(() => {
+    setSidePanel((current) => (current === "inspector" ? "none" : "inspector"));
+  }, []);
+
+  // Keyboard shortcut: Ctrl+Shift+A toggles the Activity panel.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "a"
+      ) {
+        event.preventDefault();
+        handleToggleActivity();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleToggleActivity]);
+
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
+  const [livePanelOpen, setLivePanelOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
-
-  const isInitialMount = useRef(true);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
+  }, []);
+
+  const handleSelectMoreMode = useCallback((mode: MoreMode) => {
+    if (mode === "terminal") {
+      setDestination("studio");
+      setStudioMode("work");
+      setDrawerOpen(true);
+      setDrawerTab("terminal");
+      return;
+    }
+    setDestination("more");
+    setMoreMode(mode);
   }, []);
 
   // handleRouteTool must be declared before useStudioConversation so the
@@ -166,21 +275,38 @@ export default function CommandStudio() {
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
-      setDrawerOpen(true);
-      setDrawerTab(mapped.openDrawer);
+      const terminalNeedsExplicitConnect =
+        mapped.openDrawer === "terminal" && capabilities.terminalStatus !== "connected" && !command;
+      if (!terminalNeedsExplicitConnect) {
+        setDrawerOpen(true);
+        setDrawerTab(mapped.openDrawer);
+      }
     }
     if (mapped.openInspector) {
-      setInspectorOpen(true);
+      setSidePanel("inspector");
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
-  }, []);
+  }, [capabilities.terminalStatus]);
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
-    onRouteTool: handleRouteTool,
+    onRouteToolAction: handleRouteTool,
+    onRouteInspectorAction: (tab) => {
+      setInspectorTab(tab);
+      setSidePanel("inspector");
+    },
+    onRunHealthChecks: () => {
+      // Open the checks panel and trigger run-all
+      setInspectorTab("checks");
+      setSidePanel("inspector");
+      setHealthRunTrigger((n) => n + 1);
+    },
     serverProjectId: capabilities.projectId,
   });
+
+  // ── LiTT Live realtime session ──
+  const liveSession = useLiTTRealtimeSession();
 
   // Sync destination -> URL ?tool= (preserves legacy bookmarks).
   // Use a destination-specific mode so Video writes ?tool=video, not ?tool=image.
@@ -233,24 +359,22 @@ export default function CommandStudio() {
     return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
-    // If no project, save the message and prompt project creation
-    if (!capabilities.projectId) {
-      setPendingMessage(value);
-      setComposerValue("");
-      return;
-    }
-    // Direct call to the real controller — no custom-event bridge.
+    // The canonical controller provisions a starter project and conversation
+    // when needed. Do not block first-time users at the composer boundary.
     try {
-      return await conversation.send(value, attachments);
+      const result = await conversation.send(value, attachments);
+      if (result?.accepted && !capabilities.projectId) {
+        await refreshCapabilities();
+      }
+      return result;
     } catch {
       // Restore the typed message so the user doesn't lose input
       setComposerValue(value);
     }
-  }, [conversation, capabilities.projectId]);
+  }, [conversation, capabilities.projectId, refreshCapabilities]);
 
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
@@ -259,9 +383,14 @@ export default function CommandStudio() {
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);
     try {
+      const token = await getToken?.();
       const res = await fetch("/api/studio-projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           sourceType: "blank",
           name: "Untitled Project",
@@ -294,19 +423,12 @@ export default function CommandStudio() {
       setDestination("studio");
       setStudioMode("work");
       setWorkSurface("conversation");
-      // Retry pending message if any
-      if (pendingMessage) {
-        const msg = pendingMessage;
-        setPendingMessage(null);
-        setComposerValue("");
-        await conversation.send(msg);
-      }
     } catch (err) {
       console.error("[handleStartBlank] Error:", err);
     } finally {
       setCreatingProject(false);
     }
-  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation, userId]);
+  }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -314,22 +436,54 @@ export default function CommandStudio() {
     }
   }, []);
 
+  const handleSelectProject = useCallback((projectId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", projectId);
+    params.delete("conversation");
+    params.delete("agentInstance");
+    setWorkspaceRevision(0);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams]);
+
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
     setDestination("studio");
     setStudioMode("preview");
   }, []);
-  const handleOpenActivity = useCallback(() => {
+  const handleOpenTerminal = useCallback(() => {
+    setDestination("studio");
+    setStudioMode("work");
+    setWorkSurface("conversation");
     setDrawerOpen(true);
-    setDrawerTab("activity");
+    setDrawerTab("terminal");
   }, []);
 
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
     repo: capabilities.repositoryName ?? undefined,
-    branch: typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined,
+    branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
-  }), [capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+
+  // ── LiTT Live session context (must be after contextLine) ──
+  const liveContext = useMemo<LiTTLiveSessionContext>(() => ({
+    userId: userId ?? "unknown",
+    userName: profile?.displayName ?? appUser?.username ?? undefined,
+    projectId: capabilities.projectId || undefined,
+    projectName: capabilities.projectName || undefined,
+    repository: capabilities.repositoryName || undefined,
+    branch: capabilities.activeBranch || contextLine.branch,
+    currentTool: destination === "studio" ? studioMode : destination === "create" ? createMode : destination,
+    approvedTools: capabilities.writeAccess ? ["terminal", "files"] : [],
+  }), [userId, profile, appUser, capabilities, contextLine, destination, studioMode, createMode]);
+
+  // Sync Live transcripts into canonical conversation
+  const handleLiveTranscript = useCallback((role: "user" | "assistant", text: string) => {
+    if (!text.trim()) return;
+    if (role === "user") {
+      void conversation.send(text).catch(() => {});
+    }
+  }, [conversation]);
 
   // Resolve the legacy tool to render for the active destination/mode.
   // Studio/Work renders the conversation (transcript + composer) unless
@@ -344,8 +498,8 @@ export default function CommandStudio() {
     }
     if (destination === "create") {
       if (createMode === "video") return "video";
-      if (createMode === "audio" || createMode === "music") return "audio";
-      if (createMode === "brand") return "color";
+      if (createMode === "audio") return "audio";
+      if (createMode === "music") return "music";
       return "image";
     }
     if (destination === "assets") return "assets";
@@ -358,27 +512,26 @@ export default function CommandStudio() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
-  // Studio internal tabs (Work | Preview | Code | Files)
-  const studioTabs: { id: StudioMode; label: string }[] = [
-    { id: "work", label: "Work" },
-    { id: "preview", label: "Preview" },
-    { id: "code", label: "Code" },
-    { id: "files", label: "Files" },
+  // Primary workspace tabs — always visible: Chat | Create | Preview | Code
+  // Chat = studio/work, Create = create destination, Preview = studio/preview, Code = studio/code
+  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
+    { id: "chat", label: "Chat", destination: "studio", mode: "work" },
+    { id: "create", label: "Create", destination: "create", mode: "image" },
+    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
+    { id: "code", label: "Code", destination: "studio", mode: "code" },
   ];
 
-  // Create internal tabs (Image | Video | Audio | Music | Brand)
-  const createTabs: { id: CreateMode; label: string }[] = [
-    { id: "image", label: "Image" },
-    { id: "video", label: "Video" },
-    { id: "audio", label: "Audio" },
-    { id: "music", label: "Music" },
-    { id: "brand", label: "Brand" },
+  // Create secondary tabs — visible only when Create is active
+  const createTabs: { id: CreateMode; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
+    { id: "image", label: "Image", icon: ImageIcon },
+    { id: "video", label: "Video", icon: Clapperboard },
+    { id: "audio", label: "Audio", icon: AudioLines },
+    { id: "music", label: "Music", icon: Music },
   ];
 
   return (
-    <VoiceSessionProvider>
+    <>
       <AgentVoiceSync />
-      <VoiceDiagnosticsDrawer />
 
       <div
         className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
@@ -386,56 +539,113 @@ export default function CommandStudio() {
         style={{
           backgroundColor: "var(--studio-bg)",
           color: "var(--text-primary)",
+          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(155,77,255,0.08), transparent)",
         }}
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
           branch={contextLine.branch}
-          onPreview={handlePreview}
-          onOpenActivity={handleOpenActivity}
+          onPreviewAction={handlePreview}
+          onOpenActivityAction={handleToggleActivity}
+          activityRailOpen={activityRailOpen}
+          onOpenTerminalAction={handleOpenTerminal}
+          onOpenInspectorAction={handleToggleInspector}
+          onProjectSelectAction={handleSelectProject}
+          onClearChatAction={conversation.clear}
+          onNewChatAction={() => { void conversation.createConversation(); }}
+          onDeleteChatAction={() => { void conversation.deleteConversation(); }}
+          onRenameChatAction={() => {
+            const title = window.prompt("Rename conversation:", conversation.conversations.find((c) => c.id === conversation.selectedConversationId)?.title ?? "");
+            if (title) void conversation.renameConversation(title);
+          }}
+          onExportChatAction={() => conversation.exportConversation()}
+          hasConversation={Boolean(conversation.selectedConversationId)}
           projectReady={projectReady}
           capabilities={capabilities}
+          busy={conversation.busy}
         />
 
         {/* Body: nav rail + workspace + inspector */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <CommandStudioNav active={destination} onSelect={handleSelectDestination} />
+          <CommandStudioNav active={destination} onSelect={handleSelectDestination} onSelectMoreMode={handleSelectMoreMode} />
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Internal tab strip for Studio + Create destinations */}
-            {(destination === "studio" || destination === "create") && (
+            {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
+            <div
+              className="flex shrink-0 items-center gap-0.5 border-b px-2"
+              style={{
+                height: 36,
+                backgroundColor: "var(--studio-surface)",
+                borderColor: "var(--studio-border)",
+              }}
+            >
+              {primaryTabs.map((t) => {
+                const isActive =
+                  t.destination === "studio"
+                    ? destination === "studio" && studioMode === t.mode
+                    : destination === t.destination;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      if (t.destination === "studio") {
+                        setDestination("studio");
+                        setStudioMode(t.mode as StudioMode);
+                        if (t.mode === "work") setWorkSurface("conversation");
+                      } else {
+                        setDestination(t.destination);
+                      }
+                    }}
+                    className="relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all"
+                    style={{
+                      color: isActive ? "var(--text-primary)" : "var(--text-muted)",
+                      backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
+                    }}
+                    aria-label={t.label}
+                  >
+                    {t.label}
+                    {isActive && (
+                      <span
+                        className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                        style={{
+                          background: "linear-gradient(90deg, var(--spark-primary), var(--violet-accent))",
+                          boxShadow: "0 0 6px var(--spark-primary)",
+                        }}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
+            {destination === "create" && (
               <div
                 className="flex shrink-0 items-center gap-0.5 border-b px-2"
                 style={{
-                  height: 36,
+                  height: 32,
                   backgroundColor: "var(--studio-surface)",
                   borderColor: "var(--studio-border)",
                 }}
               >
-                {(destination === "studio" ? studioTabs : createTabs).map((t) => {
-                  const isActive = destination === "studio" ? studioMode === t.id : createMode === t.id;
+                {createTabs.map((t) => {
+                  const isActive = createMode === t.id;
+                  const TabIcon = t.icon;
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => {
-                        if (destination === "studio") {
-                          setStudioMode(t.id as StudioMode);
-                          // Clicking the visible Work tab always returns
-                          // to the conversation surface. Build must be
-                          // explicitly routed again to show the Builder.
-                          if (t.id === "work") setWorkSurface("conversation");
-                        } else {
-                          setCreateMode(t.id as CreateMode);
-                        }
-                      }}
-                      className="rounded-md px-3 py-1.5 text-[11px] font-bold transition"
+                      onClick={() => setCreateMode(t.id)}
+                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all"
                       style={{
-                        color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                        backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent",
+                        color: isActive ? "var(--spark-primary)" : "var(--text-muted)",
+                        backgroundColor: isActive ? "rgba(168,85,247,0.1)" : "transparent",
                       }}
                       aria-label={t.label}
                     >
+                      <TabIcon size={13} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
                       {t.label}
                     </button>
                   );
@@ -452,14 +662,17 @@ export default function CommandStudio() {
                     busy={conversation.busy}
                     activeAgentId={conversation.activeAgentId}
                     fallbackNotice={conversation.fallbackNotice}
-                    onRouteTool={handleRouteTool}
-                    onRegenerate={conversation.regenerate}
+                    onRouteToolAction={handleRouteTool}
+                    onRegenerateAction={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
                     hasProject={projectReady}
-                    projectId={capabilities.projectId}
                     projectName={capabilities.projectName}
                     sourceType={capabilities.sourceType}
                     githubInstalled={capabilities.githubInstalled}
+                    capabilities={capabilities}
+                    modelHealth={modelHealth}
+                    modelLabel={modelLabel}
+                    displayName={profileDisplayName}
                     onStartBlank={handleStartBlank}
                     onConnectRepo={handleConnectRepo}
                   />
@@ -472,18 +685,34 @@ export default function CommandStudio() {
                     <WorkspaceComponent />
                   </div>
                 ) : (
-                  <div className="flex h-full items-center justify-center text-[12px]" style={{ color: "var(--text-muted)" }}>
-                    Nothing here yet
-                  </div>
+                  <StudioUnavailableSurface
+                    destination={destination}
+                    capabilities={capabilities}
+                    modelLabel={modelLabel}
+                  />
                 )}
               </div>
 
               {/* Right inspector — collapsed by default */}
               <StudioInspector
                 open={inspectorOpen}
-                onToggle={() => setInspectorOpen((v) => !v)}
+                onToggle={handleToggleInspector}
                 activeTab={inspectorTab}
                 onTabChange={setInspectorTab}
+                data={{
+                  capabilities,
+                  modelLabel,
+                  modelHealth,
+                  activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
+                  destination,
+                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "more" ? moreMode : "overview",
+                  messages: conversation.messages,
+                  busy: conversation.busy,
+                  workspaceRevision,
+                  healthRunTrigger,
+                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                  onWorkspacePrepared: () => { void refreshCapabilities(); },
+                }}
               />
             </div>
 
@@ -494,44 +723,70 @@ export default function CommandStudio() {
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
             >
-              {drawerTab === "terminal" ? <StudioTerminalDrawer projectId={capabilities.projectId} /> : null}
+              {drawerTab === "terminal" ? (
+                <StudioTerminalDrawer projectId={capabilities.projectId} repositoryName={capabilities.repositoryName} branch={capabilities.activeBranch ?? capabilities.defaultBranch} />
+              ) : drawerTab === "media" ? (
+                <MediaUtilityDock />
+              ) : (
+                <StudioActivityPanel
+                  messages={conversation.messages}
+                  busy={conversation.busy}
+                  modelLabel={modelLabel}
+                  projectName={capabilities.projectName}
+                  terminalStatus={capabilities.terminalStatus}
+                />
+              )}
             </StudioDrawer>
 
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
-            {/* Send error banner — visible when conversation creation fails */}
-            {isStudioWorkConversation && conversation.sendError && (
+            {/* Reauthentication banner — visible when session expires during Studio use.
+                Disables the composer and offers a real recovery action. */}
+            {isStudioWorkConversation && (conversation.requiresReauth || conversation.sendError) && (
               <div
-                className="flex shrink-0 items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+                className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
                 style={{
                   borderColor: "rgba(239,68,68,0.3)",
                   backgroundColor: "rgba(239,68,68,0.08)",
                   color: "#fca5a5",
                 }}
               >
-                <span className="flex-1 font-medium">{conversation.sendError}</span>
-                <button
-                  type="button"
-                  onClick={() => conversation.clearSendError()}
-                  className="rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                  aria-label="Dismiss error"
-                >
-                  ✕
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { window.location.href = "/api/github/install"; }}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                >
-                  Choose Project
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { void handleStartBlank(); conversation.clearSendError(); }}
-                  disabled={creatingProject}
-                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10 disabled:opacity-50"
-                >
-                  {creatingProject ? "Creating…" : "Start Blank"}
-                </button>
+                <span className="min-w-0 flex-1 font-medium">
+                  {conversation.requiresReauth
+                    ? "Your session expired. Sign in again to continue."
+                    : conversation.sendError}
+                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {!conversation.requiresReauth && conversation.sendError && (
+                    <button
+                      type="button"
+                      onClick={() => conversation.clearSendError()}
+                      className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                      aria-label="Dismiss error"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {conversation.requiresReauth ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        conversation.clearRequiresReauth();
+                        window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                      }}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Sign in again
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                    >
+                      Refresh session
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -540,13 +795,35 @@ export default function CommandStudio() {
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
+                onCancel={conversation.cancel}
+                onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
+                disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                cameraActive={cameraDock.open}
+                onToggleLive={() => setLivePanelOpen((v) => !v)}
+                liveActive={livePanelOpen && liveSession.isLive}
                 contextLine={contextLine}
               />
             )}
           </main>
+
+          {/* Right Activity Rail — optional, toggled by header Activity button.
+              When hidden, the main canvas reclaims the full width (no spacer). */}
+          {activityRailOpen && (
+            <StudioActivityRail
+              messages={conversation.messages}
+              busy={conversation.busy}
+              activeAgentId={conversation.activeAgentId}
+              projectName={capabilities.projectName}
+              modelLabel={modelLabel}
+              terminalStatus={capabilities.terminalStatus}
+              repositoryName={capabilities.repositoryName}
+              branch={capabilities.activeBranch ?? contextLine.branch}
+              onOpenTerminal={handleOpenTerminal}
+              onSelectAgent={conversation.switchAgent}
+              onClose={() => setSidePanel("none")}
+            />
+          )}
         </div>
 
         {/* Mobile bottom nav — 5 destinations */}
@@ -594,7 +871,49 @@ export default function CommandStudio() {
         onCameraPosChange={(pos) => setCameraDock((v) => ({ ...v, pos }))}
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
-    </VoiceSessionProvider>
+
+      {/* LiTT Live — centered overlay for realtime voice + vision session.
+          Replaces the old side panel with a proper fullscreen overlay. */}
+      {livePanelOpen && (
+        <LiveVoiceOverlay
+          session={liveSession}
+          context={liveContext}
+          onTranscript={handleLiveTranscript}
+          onEnd={() => setLivePanelOpen(false)}
+        />
+      )}
+
+    </>
+  );
+}
+
+function StudioUnavailableSurface({
+  destination,
+  capabilities,
+  modelLabel,
+}: {
+  destination: StudioDestination;
+  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  modelLabel: string;
+}) {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-4 py-8" aria-live="polite">
+      <div className="w-full max-w-lg space-y-4 rounded-2xl border p-5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--litt-primary)" }}>{destination}</div>
+          <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>Workspace status</h2>
+          <p className="mt-1 text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>
+            This surface is not available yet, but your live workspace context is still connected below.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Project</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{capabilities.projectName ?? "Not selected"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Model</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{modelLabel}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Repository</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.repository === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.repositoryName ?? "Not connected"}</div></div>
+          <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Terminal</span><div className="mt-1 truncate font-bold" style={{ color: capabilities.terminalStatus === "connected" ? "var(--litt-primary)" : "var(--text-primary)" }}>{capabilities.terminalStatus}</div></div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -604,14 +923,17 @@ function StudioWorkSurface({
   busy,
   activeAgentId,
   fallbackNotice,
-  onRouteTool,
-  onRegenerate,
+  onRouteToolAction,
+  onRegenerateAction,
   onEmptyAction,
   hasProject,
-  projectId,
   projectName,
   sourceType,
   githubInstalled,
+  capabilities,
+  modelHealth,
+  modelLabel,
+  displayName,
   onStartBlank,
   onConnectRepo,
 }: {
@@ -619,14 +941,17 @@ function StudioWorkSurface({
   busy: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
   fallbackNotice: string | null;
-  onRouteTool: (tool: StudioTool, command?: string) => void;
-  onRegenerate: () => void;
+  onRouteToolAction: (tool: StudioTool, command?: string) => void;
+  onRegenerateAction: () => void;
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
-  projectId: string | null;
   projectName: string | null;
-  sourceType: "github" | "blank" | "template" | null;
+  sourceType: "github" | "blank" | "template" | "upload" | null;
   githubInstalled: boolean;
+  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
+  modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;
+  modelLabel: string | undefined;
+  displayName?: string | null;
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
@@ -649,14 +974,18 @@ function StudioWorkSurface({
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
+            activeAgentId={activeAgentId}
             hasProject={hasProject}
-            projectId={projectId}
             projectName={projectName}
             sourceType={sourceType}
             githubInstalled={githubInstalled}
-            onPick={onEmptyAction}
-            onStartBlank={onStartBlank}
-            onConnectRepo={onConnectRepo}
+            capabilities={capabilities}
+            modelHealth={modelHealth}
+            modelLabel={modelLabel}
+            displayName={displayName}
+            onPickAction={onEmptyAction}
+            onStartBlankAction={onStartBlank}
+            onConnectRepoAction={onConnectRepo}
           />
         </div>
       ) : (
@@ -664,8 +993,8 @@ function StudioWorkSurface({
           messages={messages}
           busy={busy}
           activeAgentId={activeAgentId}
-          onRouteTool={onRouteTool}
-          onRegenerate={onRegenerate}
+          onRouteToolAction={onRouteToolAction}
+          onRegenerateAction={onRegenerateAction}
         />
       )}
     </div>

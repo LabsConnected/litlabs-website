@@ -25,6 +25,7 @@ import {
   getAgentAuthorization,
 } from "@/lib/agent-entitlements";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isFeatureEnabled } from "@/config/feature-flags";
 
 export const runtime = "nodejs";
 
@@ -41,10 +42,17 @@ function forbidden(message: string) {
 }
 
 async function postHandler(
-  _req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  // v1 release freeze: individual agent installs are disabled
+  if (!isFeatureEnabled("marketplaceAgentInstall")) {
+    return NextResponse.json(
+      { error: "Individual agent installation is coming soon. Agent access is included with Creator and Pro plans." },
+      { status: 503 },
+    );
+  }
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {
@@ -116,10 +124,10 @@ async function postHandler(
 }
 
 async function deleteHandler(
-  _req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {
@@ -137,9 +145,9 @@ async function deleteHandler(
 
 async function patchHandler(
   req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {

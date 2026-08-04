@@ -9,7 +9,11 @@ export type StudioIntent =
   | "connect_github"
   | "start_blank_project"
   | "open_files"
+  | "file_question"
   | "open_preview"
+  | "visual_output"
+  | "project_health"
+  | "open_approvals"
   | "deploy"
   | "open_settings"
   | "unknown";
@@ -42,6 +46,13 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "file_question",
+    patterns: [
+      /^(what|which|list|show|inspect|read|open|view)\b.*\b(files?|file tree|repository|repo)\b/i,
+      /\b(read|open|edit|modify)\b.*\b(file|component|source)\b/i,
+    ],
+  },
+  {
     intent: "open_files",
     tool: "code",
     patterns: [
@@ -51,11 +62,32 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "visual_output",
+    patterns: [
+      /\b(show|open|view|render|inspect)\b.*\b(visual|rendered|ui)\b/i,
+      /\bwhat does it look like\b/i,
+    ],
+  },
+  {
     intent: "open_preview",
     tool: "build",
     patterns: [
       /^(open|show|view|launch)\b.*\bpreview\b/i,
       /\bshow\b.*\bpreview\b/i,
+    ],
+  },
+  {
+    intent: "project_health",
+    patterns: [
+      /\b(project|workspace|codebase)\b.*\b(health|checks?|lint|typecheck|tests?|audit)\b/i,
+      /\b(run|show|open|check)\b.*\b(project health|quality checks?)\b/i,
+    ],
+  },
+  {
+    intent: "open_approvals",
+    patterns: [
+      /\b(show|open|view|check|review)\b.*\bapprovals?\b/i,
+      /\bwhat needs approval\b/i,
     ],
   },
   {
@@ -154,10 +186,25 @@ function buildIntentResult(
           { label: "Retry Terminal", action: "retry_terminal" },
         ],
       };
+    case "file_question":
+      return { intent, message: "Opening Files." };
     case "open_files":
       return { intent, tool, message: "Opening Files." };
+    case "visual_output":
+      return { intent, message: "Opening Preview." };
     case "open_preview":
       return { intent, tool, message: "Opening Preview." };
+    case "project_health":
+      return {
+        intent,
+        message: "I'll run a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will stream into the Project Health panel.",
+        actions: [
+          { label: "Run all checks", action: "run_all_checks" },
+          { label: "View results", action: "view_health" },
+        ],
+      };
+    case "open_approvals":
+      return { intent, message: "Opening Approvals." };
     case "connect_github":
       return {
         intent,

@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { orchestrator } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
 import { getStudioContext, buildCapabilityContextForChat } from "@/lib/capabilities/studio-context";
+import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
+import {
+  detectIntent,
+  buildRuntimeContextBlock,
+  buildToolManifest,
+  generateProjectStatusAnswer,
+  type RuntimeContextSnapshot,
+} from "@/lib/litt-intelligence/runtime-context-injector";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -143,6 +151,12 @@ ${capabilityContext}
 
 IMPORTANT: Before answering questions about project state, coding readiness, or what's connected, review the STUDIO CONNECTION STATE above. Never claim something is ready, connected, or running if the state says otherwise. Always give the user one clear next action. Do not use internal field names like "repository capability", "repositoryIndexed", or "terminalExecution" in conversation — translate them into plain English.
 
+ANTI-BOILERPLATE RULES:
+- Do NOT generate template code, placeholder text, "Your App Name", "Lorem Ipsum", or generic pricing.
+- Do NOT create new components when existing ones can be reused. Inspect the codebase first.
+- If information is unknown, ask the user or leave a TODO — never fabricate content.
+- Think like you are editing a production SaaS, not scaffolding a tutorial.
+
 Personality: sharp, confident, concise, occasionally sardonic. You address ${name} by their name (${name}). You do not over-explain.
 
 Job: understand ${name}'s intent, plan the work, delegate to specialist agents when useful, and present results clearly. Always explain what you did in plain terms before showing artifacts or code.
@@ -153,7 +167,7 @@ If a request requires approval or is ambiguous, ask one clear question. Prefer a
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -162,6 +176,41 @@ export async function POST(req: NextRequest) {
     const { agentId, message } = await req.json();
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
+
+    // ── Deterministic intent routing ────────────────────────────
+    // Detect intent BEFORE calling any tool or LLM. This ensures
+    // project-status questions get exact runtime values, weather
+    // questions call the weather tool, etc.
+    const intent = detectIntent(message);
+
+    // ── Real-time tool routing ──────────────────────────────────
+    // Before calling the LLM, check whether the message matches a
+    // real-time tool intent (weather, etc.). If a tool fires, return
+    // the live result directly — the LLM never guesses real-time data.
+    const toolResult = await detectAndExecuteTool(userId, message);
+    if (toolResult.executed) {
+      // Persist the exchange for memory continuity
+      void persistMemory(userId, `User said: ${message}`, {
+        agentId: "director",
+        scope: "conversation",
+        source: "agent-chat",
+        reason: "user chat (tool-routed)",
+      });
+      void persistMemory(userId, `I replied: ${toolResult.text}`, {
+        agentId: "director",
+        scope: "conversation",
+        source: "agent-chat",
+        reason: "tool-executed reply",
+      });
+
+      return NextResponse.json({
+        agent: { id: "director", name: "LiTT Director", role: "Director" },
+        response: toolResult.text,
+        userName: "",
+        tool: toolResult.metadata,
+        intent: intent.category,
+      });
     }
 
     // Resolve legacy or drawer IDs to the canonical director agent
@@ -176,14 +225,66 @@ export async function POST(req: NextRequest) {
 
     // Fetch real capability state for the studio context
     let capabilityContext = "";
+    let studioCtx: Awaited<ReturnType<typeof getStudioContext>> | null = null;
     try {
-      const ctx = await getStudioContext(userId);
-      capabilityContext = buildCapabilityContextForChat(ctx);
+      studioCtx = await getStudioContext(userId);
+      capabilityContext = buildCapabilityContextForChat(studioCtx);
     } catch {
       // non-fatal — continue without capability context
     }
 
-    const directorPrompt = buildDirectorPrompt(userName, capabilityContext);
+    // Build runtime context snapshot for intent routing and context injection
+    const runtimeSnapshot: RuntimeContextSnapshot = {
+      projectId: null,
+      projectName: null,
+      repositoryConnected: studioCtx?.repositoryConnected ?? false,
+      repositoryName: studioCtx?.repositoryName ?? null,
+      activeBranch: null,
+      workspaceStatus: null,
+      workspaceReady: false,
+      terminalConnected: studioCtx?.terminalConnected ?? false,
+      terminalStatus: studioCtx?.terminalConnected ? "connected" : "disconnected",
+      terminalSessionId: studioCtx?.terminalSessionId ?? null,
+      deploymentStatus: null,
+      deploymentUrl: null,
+      writeAccess: false,
+      approvalRequired: true,
+      selectedModelLabel: null,
+      selectedModelId: null,
+      activeAgentMode: "standard",
+      activeAgentSlug: "litt",
+      recentHealthResults: [],
+    };
+
+    // Deterministic project-status answer — bypass LLM for accuracy
+    if (intent.category === "project_status" && intent.confidence > 0) {
+      const statusAnswer = generateProjectStatusAnswer(runtimeSnapshot);
+      void persistMemory(userId, `User said: ${message}`, {
+        agentId: "director",
+        scope: "conversation",
+        source: "agent-chat",
+        reason: "user chat (intent-routed: project_status)",
+      });
+      void persistMemory(userId, `I replied: ${statusAnswer}`, {
+        agentId: "director",
+        scope: "conversation",
+        source: "agent-chat",
+        reason: "intent-routed reply",
+      });
+      return NextResponse.json({
+        agent: { id: "director", name: "LiTT Director", role: "Director" },
+        response: statusAnswer,
+        userName,
+        intentRouted: true,
+        intent: intent.category,
+      });
+    }
+
+    // Build runtime context block and tool manifest for the system prompt
+    const runtimeContextBlock = buildRuntimeContextBlock(runtimeSnapshot);
+    const toolManifest = buildToolManifest(runtimeSnapshot);
+
+    const directorPrompt = buildDirectorPrompt(userName, `${capabilityContext}\n\n${runtimeContextBlock}\n\n${toolManifest.manifestBlock}`);
 
     const agent = orchestrator.getAgent(resolvedId);
     const recalled = await recallMemories(userId, message, 5);

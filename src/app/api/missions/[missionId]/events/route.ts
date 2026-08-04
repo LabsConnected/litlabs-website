@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getMission } from "@/lib/missions/mission-repository";
 import { listSteps, listValidationResults } from "@/lib/missions/mission-repository";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";
@@ -11,10 +11,10 @@ import { supabaseAdmin } from "@/lib/supabase";
  * This is a polling endpoint (SSE could be added later).
  */
 export async function GET(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ missionId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { missionId } = await params;

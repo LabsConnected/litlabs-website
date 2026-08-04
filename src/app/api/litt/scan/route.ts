@@ -1,8 +1,8 @@
 import { execFileSync } from "child_process";
 import { promises as fs } from "fs";
 import path from "path";
-import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,8 +114,8 @@ function apiRoute(filePath: string): string {
     .replace(/\[([^\]]+)\]/g, ":$1");
 }
 
-export async function GET() {
-  const { userId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

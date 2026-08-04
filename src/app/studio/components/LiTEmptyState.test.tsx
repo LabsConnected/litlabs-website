@@ -8,6 +8,12 @@ vi.mock("@/app/studio/components/LiTTPresence", () => ({
   __esModule: true,
 }));
 
+// Mock StudioActivityTimeline to avoid async fetch in the empty-state tests
+vi.mock("@/app/studio/components/StudioActivityTimeline", () => ({
+  default: () => null,
+  __esModule: true,
+}));
+
 describe("LiTEmptyState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -21,9 +27,9 @@ describe("LiTEmptyState", () => {
         projectName="owner/repo"
         sourceType="github"
         githubInstalled={true}
-        onPick={vi.fn()}
-        onStartBlank={vi.fn()}
-        onConnectRepo={vi.fn()}
+        onPickAction={vi.fn()}
+        onStartBlankAction={vi.fn()}
+        onConnectRepoAction={vi.fn()}
       />,
     );
 
@@ -39,14 +45,14 @@ describe("LiTEmptyState", () => {
         projectName="My Blank"
         sourceType="blank"
         githubInstalled={false}
-        onPick={vi.fn()}
-        onStartBlank={vi.fn()}
-        onConnectRepo={vi.fn()}
+        onPickAction={vi.fn()}
+        onStartBlankAction={vi.fn()}
+        onConnectRepoAction={vi.fn()}
       />,
     );
 
     expect(screen.getByText(/Blank project ready/)).toBeDefined();
-    expect(screen.getByText(/My Blank/)).toBeDefined();
+    expect(screen.getAllByText(/My Blank/).length).toBeGreaterThan(0);
   });
 
   it("shows GitHub connect prompt when githubInstalled but no project", () => {
@@ -57,9 +63,9 @@ describe("LiTEmptyState", () => {
         projectName={null}
         sourceType={null}
         githubInstalled={true}
-        onPick={vi.fn()}
-        onStartBlank={vi.fn()}
-        onConnectRepo={vi.fn()}
+        onPickAction={vi.fn()}
+        onStartBlankAction={vi.fn()}
+        onConnectRepoAction={vi.fn()}
       />,
     );
 
@@ -76,13 +82,13 @@ describe("LiTEmptyState", () => {
         projectName={null}
         sourceType={null}
         githubInstalled={false}
-        onPick={vi.fn()}
-        onStartBlank={vi.fn()}
-        onConnectRepo={vi.fn()}
+        onPickAction={vi.fn()}
+        onStartBlankAction={vi.fn()}
+        onConnectRepoAction={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("No project connected")).toBeDefined();
+    expect(screen.getByText(/workspace optional|Chat ready/)).toBeDefined();
     expect(screen.getByText("Start blank")).toBeDefined();
     expect(screen.getByText("Connect repo")).toBeDefined();
     expect(screen.getByText("Upload project")).toBeDefined();
@@ -96,7 +102,7 @@ describe("LiTEmptyState", () => {
         projectName={null}
         sourceType={null}
         githubInstalled={false}
-        onPick={vi.fn()}
+        onPickAction={vi.fn()}
       />,
     );
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import Link from "next/link";
 import { Check, ArrowRight, Sparkles, Loader2, Ban, Clock } from "lucide-react";
+import { useAuthedFetch } from "@/lib/fetch-auth";
 
 type AgentState =
   | "buy"
@@ -69,6 +70,8 @@ function AgentCardInner({
 }: AgentCardProps) {
   const [state, setState] = useState<AgentState>("loading");
   const [busy, setBusy] = useState(false);
+  const [instanceId, setInstanceId] = useState<string | null>(null);
+  const authedFetch = useAuthedFetch();
 
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
   const agentId = item.agent_id ?? null;
@@ -79,17 +82,18 @@ function AgentCardInner({
       return;
     }
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/state`);
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/state`);
       if (res.ok) {
         const data = await res.json();
         setState(data.state as AgentState);
+        setInstanceId(data.agentInstanceId ?? null);
       } else {
         setState(item.price_cents === 0 ? "install" : "buy");
       }
     } catch {
       setState(item.price_cents === 0 ? "install" : "buy");
     }
-  }, [agentId, isSignedIn, item.price_cents]);
+  }, [agentId, isSignedIn, item.price_cents, authedFetch]);
 
   useEffect(() => {
     loadState();
@@ -100,30 +104,30 @@ function AgentCardInner({
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, { method: "POST" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok) { setState("open"); onToast(`${item.name} installed`, "success"); }
       else { onToast(data.error || "Install failed", "error"); }
     } catch { onToast("Network error during install", "error"); }
     finally { setBusy(false); }
-  }, [agentId, isSignedIn, item.name, onSignInRequired, onToast]);
+  }, [agentId, isSignedIn, item.name, onSignInRequired, onToast, authedFetch]);
 
   const handleUninstall = useCallback(async () => {
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, { method: "DELETE" });
       if (res.ok) { setState("install"); onToast(`${item.name} removed`, "info"); }
       else { const data = await res.json().catch(() => ({})); onToast(data.error || "Uninstall failed", "error"); }
     } catch { onToast("Network error", "error"); }
     finally { setBusy(false); }
-  }, [agentId, item.name, onToast]);
+  }, [agentId, item.name, onToast, authedFetch]);
 
   const handleToggle = useCallback(async () => {
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/install`, {
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/install`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: state === "open" ? "disable" : "enable" }),
@@ -135,19 +139,19 @@ function AgentCardInner({
       } else { onToast(data.error || "Failed to update", "error"); }
     } catch { onToast("Network error", "error"); }
     finally { setBusy(false); }
-  }, [agentId, state, item.name, onToast]);
+  }, [agentId, state, item.name, onToast, authedFetch]);
 
   const handleBuy = useCallback(async () => {
     if (!isSignedIn) { onSignInRequired(); return; }
     if (!agentId) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/marketplace/agents/${agentId}/checkout`, { method: "POST" });
+      const res = await authedFetch(`/api/marketplace/agents/${agentId}/checkout`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.url) { window.location.href = data.url; }
       else { onToast(data.error || "Checkout failed", "error"); setBusy(false); }
     } catch { onToast("Network error", "error"); setBusy(false); }
-  }, [agentId, isSignedIn, onSignInRequired, onToast]);
+  }, [agentId, isSignedIn, onSignInRequired, onToast, authedFetch]);
 
   return (
     <article
@@ -210,6 +214,7 @@ function AgentCardInner({
           <ActionButton
             state={state} busy={busy} categoryColor={categoryColor}
             borderColor={borderColor} textMuted={textMuted} itemSlug={item.slug}
+            instanceId={instanceId}
             onBuy={handleBuy} onInstall={handleInstall}
             onUninstall={handleUninstall} onToggle={handleToggle}
           />
@@ -233,11 +238,11 @@ function StateBadge({ state }: { state: AgentState }) {
 }
 
 function ActionButton({
-  state, busy, categoryColor, borderColor, textMuted, itemSlug,
+  state, busy, categoryColor, borderColor, textMuted, itemSlug, instanceId,
   onBuy, onInstall, onUninstall, onToggle,
 }: {
   state: AgentState; busy: boolean; categoryColor: string; borderColor: string;
-  textMuted: string; itemSlug: string;
+  textMuted: string; itemSlug: string; instanceId: string | null;
   onBuy: () => void; onInstall: () => void; onUninstall: () => void; onToggle: () => void;
 }) {
   if (busy) {
@@ -251,10 +256,10 @@ function ActionButton({
   switch (state) {
     case "buy": return <button onClick={onBuy} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Buy Now</button>;
     case "processing": return <div className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold" style={{ background: borderColor + "10", color: textMuted }}><Clock size={12} /> Processing payment...</div>;
-    case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Install</button>;
+    case "install": return <button onClick={onInstall} className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]" style={{ background: categoryColor }}>Add</button>;
     case "open": return (
       <div className="flex gap-2">
-        <Link href={`/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
+        <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
           <ArrowRight size={12} /> Open in Studio
         </Link>
         <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>

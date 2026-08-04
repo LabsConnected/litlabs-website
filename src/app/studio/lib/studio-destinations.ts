@@ -24,7 +24,7 @@ export type StudioDestination =
 export type StudioMode = "work" | "preview" | "code" | "files";
 
 /** Internal tabs inside the Create destination. */
-export type CreateMode = "image" | "video" | "audio" | "music" | "brand";
+export type CreateMode = "image" | "video" | "audio" | "music";
 
 /** Internal tabs inside the More destination. */
 export type MoreMode =
@@ -33,15 +33,14 @@ export type MoreMode =
   | "screen"
   | "space"
   | "clibridge"
-  | "color"
   | "terminal"
   | "workflows";
 
 /** Internal tabs inside the right inspector. */
-export type InspectorTab = "plan" | "changes" | "checks" | "approvals";
+export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
 
 /** Internal tabs inside the bottom drawer. */
-export type DrawerTab = "activity" | "terminal";
+export type DrawerTab = "activity" | "terminal" | "media";
 
 export interface DestinationState {
   destination: StudioDestination;
@@ -83,9 +82,6 @@ export function mapLegacyToolToDestination(
     // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
       return { destination: "studio", legacyTool: "terminal", mode: "work", command, openDrawer: "terminal" };
-    // Studio / Work with the right inspector open on Plan
-    case "workflows":
-      return { destination: "studio", legacyTool: "workflows", mode: "work", command, openInspector: "plan" };
 
     // Create — media workspace
     case "image":
@@ -94,8 +90,12 @@ export function mapLegacyToolToDestination(
       return { destination: "create", legacyTool: "video", mode: "video" };
     case "audio":
       return { destination: "create", legacyTool: "audio", mode: "audio" };
+    case "music":
+      return { destination: "create", legacyTool: "music", mode: "music" };
+    // Legacy "color" tool (Color by Number) has been removed —
+    // redirect to Create / Image so old bookmarks don't 404.
     case "color":
-      return { destination: "create", legacyTool: "color", mode: "brand" };
+      return { destination: "create", legacyTool: "image", mode: "image" };
 
     // Assets
     case "assets":
@@ -111,6 +111,7 @@ export function mapLegacyToolToDestination(
     case "screen":
     case "space":
     case "clibridge":
+    case "workflows":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
 
     // Unknown / default → Studio
@@ -136,8 +137,8 @@ export function destinationToLegacyTool(
       return "chat";
     case "create":
       if (mode === "video") return "video";
-      if (mode === "audio" || mode === "music") return "audio";
-      if (mode === "brand") return "color";
+      if (mode === "audio") return "audio";
+      if (mode === "music") return "music";
       return "image";
     case "assets":
       return "assets";
@@ -148,7 +149,6 @@ export function destinationToLegacyTool(
       if (mode === "screen") return "screen";
       if (mode === "space") return "space";
       if (mode === "clibridge") return "clibridge";
-      if (mode === "color") return "color";
       if (mode === "terminal") return "terminal";
       if (mode === "workflows") return "workflows";
       return "plugins";

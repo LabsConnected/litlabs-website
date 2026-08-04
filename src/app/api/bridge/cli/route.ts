@@ -3,7 +3,8 @@
 // Only admin user can access this
 
 import { spawn, ChildProcess } from "child_process";
-import { auth } from "@clerk/nextjs/server";
+import { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 
 // Admin user ID - only this user can use CLI bridge
 const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
@@ -29,8 +30,8 @@ interface BridgeMessage {
   rows?: number;
 }
 
-export async function GET(req: Request) {
-  const { userId } = await auth();
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return new Response("Unauthorized", { status: 401 });
@@ -206,8 +207,8 @@ export async function GET(req: Request) {
 }
 
 // POST endpoint to send input to running CLI session
-export async function POST(req: Request) {
-  const { userId } = await auth();
+export async function POST(req: NextRequest) {
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -247,8 +248,8 @@ export async function POST(req: Request) {
 }
 
 // DELETE endpoint to kill session
-export async function DELETE(req: Request) {
-  const { userId } = await auth();
+export async function DELETE(req: NextRequest) {
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -271,8 +272,8 @@ export async function DELETE(req: Request) {
 }
 
 // GET sessions list
-export async function PATCH() {
-  const { userId } = await auth();
+export async function PATCH(req: NextRequest) {
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

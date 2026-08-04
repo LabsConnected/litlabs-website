@@ -63,6 +63,17 @@ export default function SettingsPage() {
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/studio";
 
+  // Read ?section= from the URL on mount so deep links like
+  // /settings?section=connections&returnTo=/dashboard land on the right tab.
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {
+      setActiveSection(section);
+      setMobileSection(section);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const sections = visibleSections();
 
   const filteredSections = useMemo(() => {
@@ -78,14 +89,24 @@ export default function SettingsPage() {
     [activeSection],
   );
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     setSaveStatus("saving");
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/settings/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ controlMode }),
+      });
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
       setSaveStatus("saved");
       setUnsaved(false);
       setTimeout(() => setSaveStatus("idle"), 2000);
-    }, 800);
-  }, [setUnsaved]);
+    } catch {
+      setSaveStatus("error");
+      setUnsaved(false);
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [controlMode, setUnsaved]);
 
   const handleDiscard = useCallback(() => {
     setUnsaved(false);
@@ -2097,7 +2118,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
             </div>
             {betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
-                Beta LiTTBits are consumed after paid credits. They expire 90 days after paid beta launch.
+                Beta LiTTBits are consumed after paid credits. Expiration is defined per grant.
               </p>
             )}
           </>

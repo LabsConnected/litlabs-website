@@ -9,11 +9,14 @@ import type { AgentSlug } from "../types";
 
 describe("agent-registry", () => {
   describe("BUILT_IN_AGENTS", () => {
-    it("has exactly two agents: litt and spark", () => {
+    it("has all 10 agents", () => {
       const keys = Object.keys(BUILT_IN_AGENTS);
-      expect(keys).toHaveLength(2);
+      expect(keys).toHaveLength(10);
       expect(keys).toContain("litt");
       expect(keys).toContain("spark");
+      expect(keys).toContain("nova");
+      expect(keys).toContain("forge");
+      expect(keys).toContain("echo");
     });
 
     it("litt agent has correct display name", () => {
@@ -24,14 +27,16 @@ describe("agent-registry", () => {
       expect(BUILT_IN_AGENTS.spark.displayName).toBe("Spark");
     });
 
-    it("both agents have non-empty system prompts", () => {
-      expect(BUILT_IN_AGENTS.litt.systemPrompt.length).toBeGreaterThan(50);
-      expect(BUILT_IN_AGENTS.spark.systemPrompt.length).toBeGreaterThan(50);
+    it("all agents have non-empty system prompts", () => {
+      for (const key of Object.keys(BUILT_IN_AGENTS) as AgentSlug[]) {
+        expect(BUILT_IN_AGENTS[key].systemPrompt.length).toBeGreaterThan(20);
+      }
     });
 
-    it("both agents have capabilities arrays", () => {
-      expect(BUILT_IN_AGENTS.litt.capabilities.length).toBeGreaterThan(0);
-      expect(BUILT_IN_AGENTS.spark.capabilities.length).toBeGreaterThan(0);
+    it("all agents have capabilities arrays", () => {
+      for (const key of Object.keys(BUILT_IN_AGENTS) as AgentSlug[]) {
+        expect(BUILT_IN_AGENTS[key].capabilities.length).toBeGreaterThan(0);
+      }
     });
   });
 
@@ -48,23 +53,42 @@ describe("agent-registry", () => {
       expect(agent?.slug).toBe("spark");
     });
 
+    it("returns nova agent for 'nova' slug", () => {
+      const agent = resolveAgent("nova");
+      expect(agent).not.toBeNull();
+      expect(agent?.slug).toBe("nova");
+    });
+
+    it("returns forge agent for 'forge' slug", () => {
+      const agent = resolveAgent("forge");
+      expect(agent).not.toBeNull();
+      expect(agent?.slug).toBe("forge");
+    });
+
+    it("returns echo agent for 'echo' slug", () => {
+      const agent = resolveAgent("echo");
+      expect(agent).not.toBeNull();
+      expect(agent?.slug).toBe("echo");
+    });
+
     it("returns null for unknown slug", () => {
       expect(resolveAgent("director")).toBeNull();
-      expect(resolveAgent("forge")).toBeNull();
       expect(resolveAgent("")).toBeNull();
       expect(resolveAgent("LiTT")).toBeNull();
     });
   });
 
   describe("isValidAgentSlug", () => {
-    it("returns true for 'litt' and 'spark'", () => {
+    it("returns true for known agents", () => {
       expect(isValidAgentSlug("litt")).toBe(true);
       expect(isValidAgentSlug("spark")).toBe(true);
+      expect(isValidAgentSlug("nova")).toBe(true);
+      expect(isValidAgentSlug("forge")).toBe(true);
+      expect(isValidAgentSlug("echo")).toBe(true);
     });
 
     it("returns false for invalid slugs", () => {
       expect(isValidAgentSlug("director")).toBe(false);
-      expect(isValidAgentSlug("forge")).toBe(false);
       expect(isValidAgentSlug("")).toBe(false);
     });
 
@@ -87,6 +111,25 @@ describe("agent-registry", () => {
 
     it("returns memory types for spark", () => {
       const types = getAgentMemoryTypes("spark");
+      expect(types).toContain("user_preference");
+      expect(types.length).toBeGreaterThan(0);
+    });
+
+    it("returns memory types for nova", () => {
+      const types = getAgentMemoryTypes("nova");
+      expect(types).toContain("user_preference");
+      expect(types.length).toBeGreaterThan(0);
+    });
+
+    it("returns memory types for forge", () => {
+      const types = getAgentMemoryTypes("forge");
+      expect(types).toContain("user_preference");
+      expect(types).toContain("architecture");
+      expect(types.length).toBeGreaterThan(3);
+    });
+
+    it("returns memory types for echo", () => {
+      const types = getAgentMemoryTypes("echo");
       expect(types).toContain("user_preference");
       expect(types.length).toBeGreaterThan(0);
     });

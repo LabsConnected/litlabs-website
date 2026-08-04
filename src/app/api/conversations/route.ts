@@ -1,11 +1,11 @@
 // API Route: Conversations
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 
-async function getUserId() {
-  const { userId: clerkId } = await auth();
+async function getUserId(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
   if (!clerkId) return null;
   const { data: user } = await supabaseAdmin
     .from("users")
@@ -18,7 +18,7 @@ async function getUserId() {
 // GET: List user's conversations
 async function getHandler(req: NextRequest) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getUserId(req);
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -65,7 +65,7 @@ async function getHandler(req: NextRequest) {
 // POST: Create new conversation
 async function postHandler(req: NextRequest) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getUserId(req);
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,7 +1,7 @@
 // POST /api/invites/create
 // Admin-only: generate a new invite code and store its hash in Supabase.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { generateInviteCode, hashToken } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -9,7 +9,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

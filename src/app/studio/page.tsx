@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { Suspense } from "react";
 import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -18,6 +16,7 @@ function StudioHub() {
       <div
         className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
+        data-testid="studio-loading"
       >
         <div className="pointer-events-none absolute inset-0">
           <div
@@ -71,6 +70,7 @@ function StudioHub() {
       <div
         className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
+        data-testid="studio-unauthenticated"
       >
         <div className="pointer-events-none absolute inset-0">
           <div

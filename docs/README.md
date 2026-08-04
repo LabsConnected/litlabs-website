@@ -1,11 +1,17 @@
 # LiTTree Lab Studios — Docs Index
 
-## Live Documents
+## Canonical Documents
 
 | Document | Purpose |
 | --- | --- |
-| `ULTRA_BLUEPRINT_v7.md` | Canonical platform blueprint and architecture decisions |
-| `LITTREE_MASTER_PLATFORM_HANDBOOK_v2.0.md` | Platform handbook — agents, missions, data model |
+| `PRODUCT_TRUTH.md` | **Canonical commercial and public-copy truth** — brand, product definition, plans, LiTTBits policy, agent model, approved terminology, banned obsolete claims |
+| `litt/ultra-handbook-v12.md` | **Canonical architecture and operating-model truth** — system architecture, agent orchestration, data model, runtime design |
+| `AUDIT_PRODUCT_TRUTH_REPORT.md` | Phase Zero audit report (128 contradictions found across 5 categories) |
+
+## Live Reference Documents
+
+| Document | Purpose |
+| --- | --- |
 | `deep-scan-2026-07-25.md` | Latest deep-scan audit (supersedes 7/21 and earlier) |
 | `deep-dive-2026-07-14.md` | Architecture deep-dive (still relevant for subsystem maps) |
 | `agents-terminal-design.md` | Agent and terminal design spec |
@@ -16,15 +22,21 @@
 | `microphone-fix-2026-07-14.md` | Microphone fix notes |
 | `dev-debugging.md` | Development debugging guide |
 
-## Legacy / Superseded
+## Archived / Superseded
 
-Older scan reports and audits have been moved to `docs/legacy/`. They contain
-historical context but their findings may be outdated or incorrect. Do not
-rely on them without re-verifying.
+The following documents are **archived** and should not be treated as canonical.
+They contain historical context but their findings, terminology, or pricing may
+be outdated or contradicted by `PRODUCT_TRUTH.md`.
 
-- `legacy/deep-scan-2026-07-21.md` — **SUPERSEDED** by 2026-07-25 scan (contained false "Resolved" claims)
-- `legacy/deep-scan-report.md` — **SUPERSEDED** (2026-07-02, contradicts current TS strict config)
+- `ULTRA_BLUEPRINT_v7.md` — **ARCHIVED** (superseded by Ultra Handbook v12 and PRODUCT_TRUTH.md)
+- `LITTREE_MASTER_PLATFORM_HANDBOOK_v2.0.md` — **ARCHIVED** (superseded by Ultra Handbook v12 and PRODUCT_TRUTH.md)
+- `SUPABASE_LITBITS_BILLING_CHECKLIST.md` — **SUPERSEDED** by PRODUCT_TRUTH.md credit policy section
+- `legacy/deep-scan-2026-07-21.md` — **SUPERSEDED** by 2026-07-25 scan
+- `legacy/deep-scan-report.md` — **SUPERSEDED** (2026-07-02)
 - `legacy/unused-scan-2026-07-20.md` — Historical unused-file scan
-- `legacy/page-audit-report.md` — Stale page audit (47+ days old, malformed paths)
+- `legacy/page-audit-report.md` — Stale page audit
 - `legacy/LITLABS_WORKSPACE_DEEP_DIVE_2026-07-14.md` — Written for archived checkout
 - `legacy/scan-needs.md` — Fragmented audio-fix notes
+
+> **Do not rely on archived documents without re-verifying against
+> `PRODUCT_TRUTH.md` and the Ultra Handbook.**

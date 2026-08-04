@@ -204,7 +204,7 @@ export async function upsertUserPreferences(
   return data as UserPreferenceRow;
 }
 
-/** Get user wallet — auto-creates with 500 coins if missing. Returns synthetic wallet on ANY failure. */
+/** Get user wallet — auto-creates with 500 LiTTBits if missing. Returns synthetic wallet on ANY failure. */
 export async function getUserWallet(clerkId: string): Promise<Wallet> {
   const db = getDb();
   if (db) {
@@ -217,7 +217,7 @@ export async function getUserWallet(clerkId: string): Promise<Wallet> {
           .eq("user_id", user.id)
           .single();
         if (data) return data as Wallet;
-        // Wallet missing — create with default 500 coins
+        // Wallet missing — create with default 500 LiTTBits
         const { data: created } = await db
           .from("wallets")
           .insert({ user_id: user.id, balance: 500 })

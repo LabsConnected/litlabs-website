@@ -37,6 +37,13 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
 }));
 
+// Mock ModelPicker — it uses useTheme.resolvedColors which the test mock doesn't provide
+vi.mock("@/components/ModelPicker", () => ({
+  default: ({ selectedModel }: { selectedModel: string }) => (
+    <div data-testid="model-picker-mock">{selectedModel}</div>
+  ),
+}));
+
 vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
   useAppUser: () => ({ user: { id: "test-user-id", firstName: "Test", username: "test" } }),
@@ -46,6 +53,7 @@ vi.mock("../context/VoiceSessionContext", () => ({
   useVoiceSession: () => ({
     voiceState: "idle",
     voiceInputState: "idle",
+    voiceOutputState: "idle",
     isMuted: false,
     startVoice: vi.fn(),
     stopVoice: vi.fn(),
@@ -53,6 +61,17 @@ vi.mock("../context/VoiceSessionContext", () => ({
     toggleMute: vi.fn(),
     setOnTurn: vi.fn(),
     speakText: vi.fn(),
+    stopSpeaking: vi.fn(),
+    ttsEnabled: false,
+    toggleTts: vi.fn(),
+    autoSendEnabled: false,
+    toggleAutoSend: vi.fn(),
+    cancelRecording: vi.fn(),
+    micLevel: 0,
+    transcript: "",
+    recordingSeconds: 0,
+    errorMessage: null,
+    setOnTranscriptComplete: vi.fn(),
     voiceTransportConnected: false,
   }),
   VoiceSessionProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -158,9 +177,6 @@ vi.mock("../lib/supabase", () => ({
   getSupabaseAdmin: () => ({}),
 }));
 
-vi.mock("./VoiceDiagnosticsDrawer", () => ({
-  VoiceDiagnosticsDrawer: () => null,
-}));
 
 vi.mock("./canvas/CanvasPanel", () => ({
   CanvasPanel: () => <div data-testid="canvas-panel" />,
@@ -176,7 +192,6 @@ vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="galler
 vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
-vi.mock("../tools/ColorByNumberTool", () => ({ default: () => <div data-testid="color-tool" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
 vi.mock("../tools/PluginsTool", () => ({ default: () => <div data-testid="plugins-tool" /> }));
 vi.mock("../tools/CameraTool", () => ({ default: () => <div data-testid="camera-tool" /> }));
@@ -223,8 +238,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
     });
     await waitFor(() => expect(screen.getByTestId("builder-tool")).toBeTruthy());
-    // Click the Work tab — should go back to conversation
-    const workTab = screen.getByRole("button", { name: /^Work$/i });
+    // Click the Chat tab (formerly Work) — should go back to conversation
+    const workTab = screen.getByRole("button", { name: /^Chat$/i });
     fireEvent.click(workTab);
     await waitFor(() => {
       expect(screen.queryByTestId("builder-tool")).toBeNull();

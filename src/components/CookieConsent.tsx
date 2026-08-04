@@ -5,11 +5,14 @@ import { useTheme } from "@/context/ThemeContext";
 
 export default function CookieConsent() {
   const { resolvedColors: T } = useTheme();
-  const [visible, setVisible] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return !localStorage.getItem("cookie-consent");
-  });
+  // Keep the server and first client render identical. Reading localStorage in
+  // the state initializer caused React hydration error #418 for new visitors.
+  const [visible, setVisible] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
+
+  useEffect(() => {
+    setVisible(!localStorage.getItem("cookie-consent"));
+  }, []);
 
   useEffect(() => {
     if (visible) {

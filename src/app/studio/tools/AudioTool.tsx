@@ -17,6 +17,7 @@ import {
   Mic,
   Volume2,
 } from "lucide-react";
+import { readApiResponse } from "../lib/create-api";
 
 const VOICES = [
   { id: "Kore", label: "Kore", desc: "Warm & clear" },
@@ -123,19 +124,19 @@ export default function AudioTool() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Audio generation failed");
-      if (!data.audioBase64) throw new Error("No audio returned");
+      const data = await readApiResponse(res, "Audio");
+      const audioBase64 = data.audioBase64 as string | undefined;
+      if (!audioBase64) throw new Error("No audio returned");
 
       setCurrent((prev) =>
         prev?.id === id
-          ? { ...prev, status: "succeeded", audioUrl: data.audioBase64 }
+          ? { ...prev, status: "succeeded", audioUrl: audioBase64 }
           : prev,
       );
       setHistory((prev) =>
         prev.map((g) =>
           g.id === id
-            ? { ...g, status: "succeeded", audioUrl: data.audioBase64 }
+            ? { ...g, status: "succeeded", audioUrl: audioBase64 }
             : g,
         ),
       );

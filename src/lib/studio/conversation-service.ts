@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { resolveProject } from "./project-resolver";
-import type { Conversation, ConversationMessage, AgentSlug, MessageStatus } from "./types";
+import type { Conversation, ConversationMessage, AgentSlug, AgentMode, MessageStatus } from "./types";
 
 interface DbConversation {
   id: string;
@@ -8,6 +8,8 @@ interface DbConversation {
   project_id: string;
   title: string | null;
   active_agent_slug: AgentSlug;
+  active_agent_mode: AgentMode | null;
+  agent_instance_id: string | null;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -21,6 +23,8 @@ interface DbMessage {
   project_id: string;
   role: string;
   agent_slug: AgentSlug | null;
+  agent_mode: AgentMode | null;
+  agent_instance_id: string | null;
   content: string;
   status: string;
   parent_message_id: string | null;
@@ -37,6 +41,8 @@ function mapConversation(row: DbConversation): Conversation {
     projectId: row.project_id,
     title: row.title,
     activeAgentSlug: row.active_agent_slug,
+    activeAgentMode: row.active_agent_mode ?? "standard",
+    agentInstanceId: row.agent_instance_id ?? null,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -52,6 +58,8 @@ function mapMessage(row: DbMessage): ConversationMessage {
     projectId: row.project_id,
     role: row.role as ConversationMessage["role"],
     agentSlug: row.agent_slug,
+    agentMode: (row.agent_mode as AgentMode | null) ?? null,
+    agentInstanceId: row.agent_instance_id ?? null,
     content: row.content,
     status: row.status as MessageStatus,
     parentMessageId: row.parent_message_id,
@@ -206,13 +214,15 @@ export async function insertMessage(
     projectId: string;
     role: ConversationMessage["role"];
     agentSlug?: AgentSlug | null;
+    agentMode?: AgentMode | null;
+    agentInstanceId?: string | null;
     content: string;
     status?: MessageStatus;
     parentMessageId?: string | null;
     regenerationOfMessageId?: string | null;
     clientRequestId?: string | null;
   },
-): Promise<{ message: ConversationMessage | null; duplicate: boolean }> {
+): Promise<{ message: ConversationMessage | null; duplicate: boolean; error?: string }> {
   // Check for existing message with same client_request_id (idempotency)
   if (message.clientRequestId) {
     const { data: existing } = await supabaseAdmin
@@ -228,24 +238,45 @@ export async function insertMessage(
     }
   }
 
+  const insertPayload: Record<string, unknown> = {
+    conversation_id: message.conversationId,
+    owner_id: message.ownerId,
+    project_id: message.projectId,
+    role: message.role,
+    content: message.content,
+    status: message.status ?? "pending",
+  };
+
+  if (message.agentSlug != null) {
+    insertPayload.agent_slug = message.agentSlug;
+  }
+  if (message.agentMode != null) {
+    insertPayload.agent_mode = message.agentMode;
+  }
+  if (message.agentInstanceId != null) {
+    insertPayload.agent_instance_id = message.agentInstanceId;
+  }
+  if (message.parentMessageId != null) {
+    insertPayload.parent_message_id = message.parentMessageId;
+  }
+  if (message.regenerationOfMessageId != null) {
+    insertPayload.regeneration_of_message_id = message.regenerationOfMessageId;
+  }
+  if (message.clientRequestId != null) {
+    insertPayload.client_request_id = message.clientRequestId;
+  }
+
   const { data, error } = await supabaseAdmin
     .from("studio_conversation_messages")
-    .insert({
-      conversation_id: message.conversationId,
-      owner_id: message.ownerId,
-      project_id: message.projectId,
-      role: message.role,
-      agent_slug: message.agentSlug ?? null,
-      content: message.content,
-      status: message.status ?? "pending",
-      parent_message_id: message.parentMessageId ?? null,
-      regeneration_of_message_id: message.regenerationOfMessageId ?? null,
-      client_request_id: message.clientRequestId ?? null,
-    })
+    .insert(insertPayload)
     .select()
     .single();
 
-  if (error || !data) return { message: null, duplicate: false };
+  if (error || !data) {
+    const errMsg = error?.message || "Unknown error";
+    console.error("[conversation-service] insertMessage failed:", errMsg);
+    return { message: null, duplicate: false, error: errMsg };
+  }
   return { message: mapMessage(data as DbMessage), duplicate: false };
 }
 

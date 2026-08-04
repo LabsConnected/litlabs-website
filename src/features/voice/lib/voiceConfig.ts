@@ -17,6 +17,41 @@ export const AGENT_VOICE_CONFIG = {
     pitch: 1.03,
     volume: 1,
   },
+  researcher: {
+    agentId: "researcher" as const,
+    style: "measured-clear",
+    rate: 0.95,
+    pitch: 0.92,
+    volume: 1,
+  },
+  writer: {
+    agentId: "writer" as const,
+    style: "clear-expressive",
+    rate: 0.98,
+    pitch: 0.95,
+    volume: 1,
+  },
+  marketer: {
+    agentId: "marketer" as const,
+    style: "confident-warm",
+    rate: 1.0,
+    pitch: 0.98,
+    volume: 1,
+  },
+  coder: {
+    agentId: "coder" as const,
+    style: "technical-rigor",
+    rate: 0.92,
+    pitch: 0.9,
+    volume: 1,
+  },
+  analyst: {
+    agentId: "analyst" as const,
+    style: "evidence-first",
+    rate: 0.94,
+    pitch: 0.91,
+    volume: 1,
+  },
 } as const;
 
 const DEEP_VOICE_PATTERNS = [

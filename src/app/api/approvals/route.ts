@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";
 
 /**
@@ -7,7 +7,7 @@ import { listPendingApprovals } from "@/lib/missions/mission-repository";
  * List pending approvals for a project.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const projectId = request.nextUrl.searchParams.get("projectId");

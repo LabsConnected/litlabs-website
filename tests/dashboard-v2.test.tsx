@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // Mock theme context
@@ -52,6 +52,55 @@ vi.mock("@/hooks/useClerkAuth", () => ({
 // Mock MusicPlayer
 vi.mock("@/components/dashboard/MusicPlayer", () => ({
   default: () => <div data-testid="music-player">Music Player</div>,
+}));
+
+// Mock YouTube player context — DashboardV2 uses useYouTubePlayer
+vi.mock("@/context/YouTubePlayerContext", () => ({
+  useYouTubePlayer: () => ({
+    dockMode: "hidden",
+    showDocked: false,
+    setDockMode: () => {},
+    setShowDocked: () => {},
+  }),
+  YouTubePlayerProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// Mock YouTube dock
+vi.mock("@/components/youtube/YouTubeDock", () => ({
+  YouTubeDock: () => null,
+}));
+
+// Mock Media Hub — Dashboard uses MediaNowPlayingCard
+vi.mock("@/components/media/MediaHubProvider", () => ({
+  MediaHubProvider: ({ children }: { children: React.ReactNode }) => children,
+  useMediaHub: () => ({
+    activeProvider: "youtube",
+    playback: { status: "idle", item: null, positionMs: 0, durationMs: 0, volume: 70, muted: false, error: null },
+    queue: [],
+    currentIndex: -1,
+    dockMode: "hidden",
+    mountYouTube: async () => {},
+    unmountYouTube: () => {},
+    mountSpotify: async () => {},
+    unmountSpotify: () => {},
+    loadUrl: () => false,
+    addToQueue: () => false,
+    removeFromQueue: () => {},
+    clearQueue: () => {},
+    jumpTo: () => {},
+    play: () => {},
+    pause: () => {},
+    toggle: () => {},
+    next: () => {},
+    previous: () => {},
+    seek: () => {},
+    setVolume: () => {},
+    switchProvider: () => {},
+    setDockMode: () => {},
+    showCollapsed: () => {},
+    showExpanded: () => {},
+    hide: () => {},
+  }),
 }));
 
 // Mock next/dynamic — simple pass-through to avoid hooks-in-lowercase lint error
@@ -277,15 +326,56 @@ describe("DashboardQuickCreate", () => {
 });
 
 describe("SystemHealthStrip", () => {
-  it("renders collapsed by default", () => {
-    render(<SystemHealthStrip data={null} llmHealth={null} loading={false} />);
+  // SystemHealthStrip now fetches its own data from /api/system-health.
+  // Mock fetch to return a minimal valid response.
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          workspace: [
+            { id: "github", label: "GitHub Repository", category: "Workspace", state: "not_connected", detail: "Not connected", lastChecked: new Date().toISOString(), action: { label: "Connect GitHub", href: "/studio/github" } },
+            { id: "vercel", label: "Vercel Project", category: "Workspace", state: "not_connected", detail: "Not linked", lastChecked: new Date().toISOString() },
+            { id: "supabase_project", label: "Supabase Project Integration", category: "Workspace", state: "not_connected", detail: "Optional · Not linked", lastChecked: new Date().toISOString() },
+          ],
+          ai: [
+            { id: "gemini", label: "Gemini", category: "AI", state: "missing", detail: "API key required", model: "gemini-2.5-flash", latencyMs: null, lastChecked: new Date().toISOString() },
+            { id: "openrouter", label: "OpenRouter", category: "AI", state: "missing", detail: "API key required", model: "openrouter/free", latencyMs: null, lastChecked: new Date().toISOString() },
+          ],
+          platform: [
+            { id: "auth", label: "Authentication", category: "Platform", state: "operational", detail: "Operational", lastChecked: new Date().toISOString() },
+          ],
+          summary: { headline: "Platform operational · 3 optional integrations need setup", optionalPending: 3, platformDegraded: false },
+          isOwner: false,
+          generatedAt: new Date().toISOString(),
+        }),
+    }) as unknown as typeof fetch;
+  });
+
+  it("renders collapsed by default", async () => {
+    const { container } = render(<SystemHealthStrip loading={false} />);
+    // Wait for fetch to resolve and component to render the summary
+    await screen.findByText(/System Status/i, undefined, { timeout: 3000 });
     const button = screen.getByRole("button", { name: /toggle system health/i });
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("shows not-configured for missing providers", () => {
-    render(<SystemHealthStrip data={null} llmHealth={null} loading={false} />);
-    // The summary should show 0 services connected since nothing is configured
-    expect(screen.getByText(/0\/5 services connected/)).toBeTruthy();
+  it("shows truthful summary instead of fake X/Y score", async () => {
+    render(<SystemHealthStrip loading={false} />);
+    await screen.findByText(/Platform operational/i, undefined, { timeout: 3000 });
+    // Must NOT show the old "X/Y services connected" score
+    expect(screen.queryByText(/\d+\/\d+ services connected/)).toBeNull();
+  });
+
+  it("links to canonical settings URL, not /settings/connections", async () => {
+    const { container } = render(<SystemHealthStrip loading={false} />);
+    await screen.findByText(/Platform operational/i, undefined, { timeout: 3000 });
+    // Expand the panel to reveal the Manage Connections link
+    fireEvent.click(screen.getByRole("button", { name: /toggle system health/i }));
+    const links = container.querySelectorAll("a");
+    const hrefs = Array.from(links).map((l) => l.getAttribute("href"));
+    // Must use /settings?section=connections, not the nonexistent /settings/connections
+    expect(hrefs.some((h) => h?.includes("/settings?section=connections"))).toBe(true);
+    expect(hrefs.every((h) => h !== "/settings/connections")).toBe(true);
   });
 });

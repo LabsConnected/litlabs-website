@@ -18,6 +18,7 @@ import {
   Palette,
   Plug,
 } from "lucide-react";
+import { AgentCard } from "./_components/AgentCard";
 
 // --- Types ---
 
@@ -134,9 +135,12 @@ function MarketplaceInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">(() =>
-    searchParams.get("tab") === "beta" ? "beta" : "marketplace",
-  );
+  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
+
+  // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
+  useEffect(() => {
+    if (searchParams.get("tab") === "beta") setActiveTab("beta");
+  }, [searchParams]);
 
   const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });
@@ -477,19 +481,34 @@ function MarketplaceInner() {
               <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Featured</p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {featuredItems.map((item) => (
-                  <MarketplaceCard
-                    key={item.id}
-                    item={item}
-                    installation={installations.get(item.id)}
-                    onInstall={() => installItem(item)}
-                    onUninstall={() => uninstallItem(item)}
-                    onToggleEnabled={() => toggleEnabled(item)}
-                    accentColor={T.accentColor}
-                    borderColor={T.borderColor}
-                    boxBg={T.boxBg}
-                    textMuted={T.textMuted}
-                    headerColor={T.headerColor}
-                  />
+                  item.item_type === "agent" ? (
+                    <AgentCard
+                      key={item.id}
+                      item={item}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                      isSignedIn={isSignedIn}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <MarketplaceCard
+                      key={item.id}
+                      item={item}
+                      installation={installations.get(item.id)}
+                      onInstall={() => installItem(item)}
+                      onUninstall={() => uninstallItem(item)}
+                      onToggleEnabled={() => toggleEnabled(item)}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                    />
+                  )
                 ))}
               </div>
             </div>
@@ -519,19 +538,34 @@ function MarketplaceInner() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {(searchQuery ? filteredItems : nonFeaturedItems).map((item) => (
-                  <MarketplaceCard
-                    key={item.id}
-                    item={item}
-                    installation={installations.get(item.id)}
-                    onInstall={() => installItem(item)}
-                    onUninstall={() => uninstallItem(item)}
-                    onToggleEnabled={() => toggleEnabled(item)}
-                    accentColor={T.accentColor}
-                    borderColor={T.borderColor}
-                    boxBg={T.boxBg}
-                    textMuted={T.textMuted}
-                    headerColor={T.headerColor}
-                  />
+                  item.item_type === "agent" ? (
+                    <AgentCard
+                      key={item.id}
+                      item={item}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                      isSignedIn={isSignedIn}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <MarketplaceCard
+                      key={item.id}
+                      item={item}
+                      installation={installations.get(item.id)}
+                      onInstall={() => installItem(item)}
+                      onUninstall={() => uninstallItem(item)}
+                      onToggleEnabled={() => toggleEnabled(item)}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      boxBg={T.boxBg}
+                      textMuted={T.textMuted}
+                      headerColor={T.headerColor}
+                    />
+                  )
                 ))}
               </div>
             )}
@@ -565,7 +599,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">Free</div>
               <div className="text-[10px] text-white/40">Free forever</div>
               <div className="mt-3 space-y-1">
-                {["1 active project", "500 monthly LiTTBits", "LiTT and Spark", "Basic tools"].map((f) => (
+                {["1 active project", "500 starter LiTTBits", "LiTT and Spark", "Basic tools"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-emerald-400" /> {f}
                   </div>
@@ -617,16 +651,16 @@ function MarketplaceInner() {
                 <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[8px] font-black uppercase text-black">Limited</span>
               </div>
               <div className="mt-1 text-2xl font-black text-white">$149</div>
-              <div className="text-[10px] text-white/40">One-time · permanent benefits</div>
+              <div className="text-[10px] text-white/40">One-time · permanent Creator-level access</div>
               <div className="mt-3 space-y-1">
-                {["Permanent Creator account", "Founder badge", "20% off credit packs", "Price protection"].map((f) => (
+                {["Permanent Creator-level access", "Founder badge"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-amber-400" /> {f}
                   </div>
                 ))}
               </div>
               <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-amber-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
-                Become a Founder
+                Currently Unavailable
               </Link>
             </div>
           </div>
@@ -795,7 +829,15 @@ const MarketplaceCard = memo(function MarketplaceCard({
 
         {/* Action */}
         <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
-          {isComingSoon ? (
+          {item.item_type === "agent" ? (
+            <Link
+              href={`/marketplace/agents/${item.slug}`}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
+              style={{ background: categoryColor }}
+            >
+              <ArrowRight size={12} /> View Agent
+            </Link>
+          ) : isComingSoon ? (
             <span
               className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
               style={{ background: borderColor + "10", color: textMuted }}

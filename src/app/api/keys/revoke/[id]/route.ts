@@ -2,7 +2,7 @@
 // Auth required. Revokes an API key by setting revoked_at.
 // Users can only revoke their own keys.
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
@@ -10,10 +10,10 @@ import {
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function handler(
-  _req: NextRequest,
+  req: NextRequest,
   ctx?: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

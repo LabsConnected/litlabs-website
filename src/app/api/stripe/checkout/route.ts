@@ -38,7 +38,7 @@ function getAppUrl(): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { clerkId } = await auth();
+    const { clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -99,7 +99,11 @@ export async function POST(req: NextRequest) {
       product.allowPromotionCodes ? "true" : "false",
     );
     params.append("billing_address_collection", "auto");
-    params.append("automatic_tax[enabled]", "false");
+    // Automatic tax is disabled by default. Enable only after Stripe Tax
+    // is fully configured (registrations, product tax codes, tax behavior).
+    // See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
+    const autoTaxEnabled = process.env.STRIPE_AUTOMATIC_TAX_ENABLED === "true";
+    params.append("automatic_tax[enabled]", autoTaxEnabled ? "true" : "false");
 
     // Line items — server-controlled, never client-supplied.
     if (product.stripePriceId) {
@@ -128,7 +132,7 @@ export async function POST(req: NextRequest) {
     params.append("metadata[checkout_version]", CHECKOUT_VERSION);
     params.append("metadata[product_type]", product.type);
     params.append("metadata[clerk_id]", clerkId);
-    if (product.type === "coin_pack" && product.credits) {
+    if (product.type === "credit_pack" && product.credits) {
       params.append("metadata[coin_amount]", String(product.credits));
     }
     if (product.type === "plan" && product.planId) {
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
     // Also propagate metadata to the PaymentIntent for refund classification.
     params.append("payment_intent_data[metadata][product_type]", product.type);
     params.append("payment_intent_data[metadata][clerk_id]", clerkId);
-    if (product.type === "coin_pack" && product.credits) {
+    if (product.type === "credit_pack" && product.credits) {
       params.append(
         "payment_intent_data[metadata][coin_amount]",
         String(product.credits),

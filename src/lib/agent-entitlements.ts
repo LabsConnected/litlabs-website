@@ -1,32 +1,299 @@
-import "server-only";
+// Agent Entitlement Resolver — server-side authorization for agent runs.
+//
+// This is the single authority that decides whether a user may run a given
+// agent. It is called by every agent execution endpoint (/api/chat,
+// /api/chat/unified, and any future agent run route) BEFORE the model is
+// invoked. UI hiding is not authorization — this function is.
+//
+// Access is granted when ANY of the following is true:
+//   1. The agent's minimumPlan is covered by the user's active subscription
+//      (status active or trialing). Founder counts as Creator-level.
+//   2. The user has an active agent_entitlements row for that agent
+//      (individually purchased — survives plan downgrade until revoked).
+//
+// Access is denied when:
+//   - The user is not authenticated (caller must check first).
+//   - The subscription is past_due, unpaid, canceled, or incomplete_expired.
+//   - The entitlement is revoked or the agent is disabled.
+//
+// Billing (LiTTBits) is handled separately by chargeAgentRun() — charges
+// happen atomically and idempotently only after a successful run, and
+// never on validation failure.
 
-import { supabaseAdmin } from "@/lib/supabase";
-import type { PlanId } from "@/config/plans";
+import "server-only";
+import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
+import { getAgentDefinition } from "@/lib/agent-registry";
+import { hasPlanAccess, type PlanId } from "@/config/plans";
+
+/** Subscription statuses that grant plan-based agent access. */
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+
+/** Subscription statuses that deny plan-based agent access. */
+const DENIED_SUBSCRIPTION_STATUSES = new Set([
+  "past_due",
+  "unpaid",
+  "canceled",
+  "incomplete_expired",
+  "incomplete",
+]);
+
+export interface EntitlementInput {
+  /** Clerk user ID (from auth().clerkId). */
+  clerkId: string;
+  /** Agent slug (from the registry / URL / request body). */
+  agentSlug: string;
+}
+
+export interface EntitlementResult {
+  allowed: boolean;
+  /** The internal Supabase user UUID (resolved from clerkId). */
+  internalUserId: string | null;
+  /** The user's current effective plan. */
+  plan: PlanId;
+  /** Subscription status, if any. */
+  subscriptionStatus: string | null;
+  /** Why access was denied — only present when allowed is false. */
+  reason?: "agent_not_found" | "agent_disabled" | "plan_required" | "no_subscription" | "entitlement_revoked";
+  /** The plan the user would need to unlock this agent. */
+  requiredPlan?: PlanId;
+  /** True if the user has a separate purchased entitlement for this agent. */
+  hasPurchasedEntitlement: boolean;
+}
 
 /**
- * Agent entitlement and authorization helpers.
+ * Resolve whether a user may run a given agent.
  *
- * These functions are the single source of truth for whether a user may
- * install, enable, or use a premium agent. The Marketplace UI must call the
- * state endpoint to render the correct button, but the installation endpoint
- * re-checks authorization server-side — never trusting UI state.
- *
- * Authorization rules (exactly one must be true for installation):
- *   1. Agent is free (agent_versions.price_cents = 0 for the selected version)
- *   2. Agent is included in the caller's active plan
- *   3. Caller has an active agent entitlement for a compatible version
- *
- * Key principles:
- *   - Price and free status are derived from the immutable agent_versions row,
- *     NOT the mutable agents row.
- *   - The published version is selected deterministically: latest published_at.
- *   - Entitlements enforce version policy: minimum_version, maximum_version,
- *     and includes_future_updates. Semantic version comparison, not string.
- *   - Private agents (is_public = false) and unlisted marketplace items return
- *     404 — they must not reveal product existence.
- *   - user_agents.agent_id stores the agent UUID (not the slug).
- *   - Pending orders must not be expired (expires_at > now()).
+ * Never trusts client-supplied plan, entitlement, price, cost, or agent
+ * configuration — all are loaded server-side from the database and the
+ * canonical registry.
  */
+export async function resolveAgentEntitlement(
+  input: EntitlementInput,
+): Promise<EntitlementResult> {
+  const { clerkId, agentSlug } = input;
+
+  // 1. Resolve the agent from the canonical registry.
+  const agent = getAgentDefinition(agentSlug);
+  if (!agent) {
+    return denied("agent_not_found", { hasPurchasedEntitlement: false });
+  }
+  if (!agent.enabled) {
+    return denied("agent_disabled", { hasPurchasedEntitlement: false, requiredPlan: agent.minimumPlan });
+  }
+
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    // No DB configured — deny in production, but allow free agents in dev
+    // so local development works without Supabase.
+    if (agent.billingModel === "free" && process.env.NODE_ENV !== "production") {
+      return {
+        allowed: true,
+        internalUserId: null,
+        plan: "starter",
+        subscriptionStatus: null,
+        hasPurchasedEntitlement: false,
+      };
+    }
+    return denied("no_subscription", { hasPurchasedEntitlement: false, requiredPlan: agent.minimumPlan });
+  }
+
+  // 2. Resolve the internal user from clerk_id.
+  const { data: user, error: userError } = await admin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .maybeSingle();
+
+  if (userError || !user) {
+    return denied("no_subscription", { hasPurchasedEntitlement: false, requiredPlan: agent.minimumPlan });
+  }
+  const internalUserId = user.id as string;
+
+  // 3. Load the user's active subscription.
+  const { data: sub } = await admin
+    .from("subscriptions")
+    .select("plan, status")
+    .eq("user_id", internalUserId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let plan: PlanId = "starter";
+  let subscriptionStatus: string | null = sub?.status ?? null;
+
+  if (sub && ACTIVE_SUBSCRIPTION_STATUSES.has(sub.status)) {
+    plan = (sub.plan as PlanId) ?? "starter";
+    if (!isValidPlan(plan)) plan = "starter";
+  } else if (sub && DENIED_SUBSCRIPTION_STATUSES.has(sub.status)) {
+    // Subscription exists but is in a denied state — do not fall back to
+    // starter; the user had a plan and lost it. They keep purchased
+    // entitlements (checked below) but not plan-based access.
+    plan = "starter";
+    subscriptionStatus = sub.status;
+  }
+
+  // 4. Check plan-based access first.
+  if (hasPlanAccess(plan, agent.minimumPlan)) {
+    return {
+      allowed: true,
+      internalUserId,
+      plan,
+      subscriptionStatus,
+      hasPurchasedEntitlement: false,
+    };
+  }
+
+  // 5. Check for an individually purchased agent entitlement.
+  // agent_entitlements.agent_id is a UUID FK to agents(id), so resolve
+  // the slug → id first, then look up the entitlement.
+  let hasPurchasedEntitlement = false;
+  const { data: agentRow } = await admin
+    .from("agents")
+    .select("id")
+    .eq("slug", agentSlug)
+    .maybeSingle();
+  if (agentRow) {
+    const { data: entitlement } = await admin
+      .from("agent_entitlements")
+      .select("status")
+      .eq("user_id", internalUserId)
+      .eq("agent_id", agentRow.id)
+      .maybeSingle();
+    if (entitlement && entitlement.status === "active") {
+      hasPurchasedEntitlement = true;
+    }
+  }
+
+  if (hasPurchasedEntitlement) {
+    return {
+      allowed: true,
+      internalUserId,
+      plan,
+      subscriptionStatus,
+      hasPurchasedEntitlement: true,
+    };
+  }
+
+  // 6. Denied — plan does not cover the agent and no active entitlement.
+  return denied("plan_required", {
+    internalUserId,
+    plan,
+    subscriptionStatus,
+    hasPurchasedEntitlement: false,
+    requiredPlan: agent.minimumPlan,
+  });
+}
+
+function isValidPlan(p: string): p is PlanId {
+  return ["starter", "creator_beta", "pro_builder_beta", "founder"].includes(p);
+}
+
+function denied(
+  reason: NonNullable<EntitlementResult["reason"]>,
+  overrides: Partial<EntitlementResult> = {},
+): EntitlementResult {
+  return {
+    allowed: false,
+    internalUserId: null,
+    plan: "starter",
+    subscriptionStatus: null,
+    hasPurchasedEntitlement: false,
+    reason,
+    ...overrides,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Billing — atomic, idempotent LiTTBit charge for agent runs         */
+/* ------------------------------------------------------------------ */
+
+export interface ChargeResult {
+  charged: boolean;
+  /** True if this idempotency key was already used — no double charge. */
+  replayed: boolean;
+  /** Remaining total balance after the charge. */
+  balance: number;
+  /** Error message if the charge failed (e.g. insufficient balance). */
+  error?: string;
+}
+
+/**
+ * Charge LiTTBits for an agent run. Atomic and idempotent via the
+ * debit_credits RPC — a duplicate call with the same idempotency key
+ * does not double-charge.
+ *
+ * Returns charged=false with an error if the balance is insufficient.
+ * The caller must NOT run the model if the charge fails.
+ */
+export async function chargeAgentRun(params: {
+  clerkId: string;
+  agentSlug: string;
+  /** Unique per-run key — prevents double-charging on retry/replay. */
+  idempotencyKey: string;
+}): Promise<ChargeResult> {
+  const agent = getAgentDefinition(params.agentSlug);
+  if (!agent) {
+    return { charged: false, replayed: false, balance: 0, error: "Unknown agent" };
+  }
+  // Free agents (LiTT, Spark) cost nothing.
+  if (agent.cost.perRun === 0 && agent.cost.per1kTokens === 0) {
+    return { charged: false, replayed: false, balance: 0 };
+  }
+
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    // No DB in dev — don't block free-tier testing.
+    if (process.env.NODE_ENV !== "production") {
+      return { charged: false, replayed: false, balance: 0 };
+    }
+    return { charged: false, replayed: false, balance: 0, error: "Billing service unavailable" };
+  }
+
+  const { data: user } = await admin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", params.clerkId)
+    .maybeSingle();
+  if (!user) {
+    return { charged: false, replayed: false, balance: 0, error: "User not found" };
+  }
+
+  const amount = agent.cost.perRun;
+  const { data, error } = await admin.rpc("debit_credits", {
+    p_user_id: user.id,
+    p_amount: amount,
+    p_category: "usage",
+    p_description: `Agent run: ${agent.name}`,
+    p_idempotency_key: params.idempotencyKey,
+  });
+
+  if (error) {
+    return { charged: false, replayed: false, balance: 0, error: error.message };
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  const balance = Number(row?.remaining ?? row?.total_after ?? 0);
+  const replayed = row?.success === false && balance > 0;
+
+  // success === false with zero balance means insufficient funds.
+  if (row?.success === false && balance < amount) {
+    return { charged: false, replayed: false, balance, error: "Insufficient LiTTBits" };
+  }
+
+  return { charged: true, replayed, balance };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Marketplace authorization — install/enable/use for purchased agents */
+/* ------------------------------------------------------------------ */
+//
+// These functions are the single source of truth for whether a user may
+// install, enable, or use a premium agent via the marketplace. The
+// Marketplace UI calls the state endpoint to render the correct button,
+// but the installation endpoint re-checks authorization server-side.
+//
+// This is distinct from resolveAgentEntitlement above, which authorizes
+// runtime agent runs against the user's plan or purchased entitlement.
 
 export interface AgentAuthorization {
   canInstall: boolean;
@@ -44,6 +311,8 @@ export interface AgentAuthorization {
   versionStatus: string | null;
   agentStatus: string | null;
   selectedVersionId: string | null;
+  /** The private user_agents.id for this user's installed instance, if installed. */
+  agentInstanceId: string | null;
   denyReason?: string;
 }
 
@@ -86,7 +355,7 @@ export async function resolveInternalUserId(clerkId: string): Promise<string | n
   return data.id;
 }
 
-// ── Core authorization ───────────────────────────────────────────────────
+// ── Core marketplace authorization ───────────────────────────────────────
 
 export async function getAgentAuthorization(
   clerkId: string,
@@ -99,6 +368,7 @@ export async function getAgentAuthorization(
       isFree: false, isIncludedInPlan: false, isInstalled: false, isDisabled: false,
       hasPendingOrder: false, isRefunded: false, isPrivate: false, isListed: false,
       versionStatus: null, agentStatus: null, selectedVersionId: null,
+      agentInstanceId: null,
       denyReason: "user_not_found",
     };
   }
@@ -115,6 +385,7 @@ export async function getAgentAuthorization(
       isFree: false, isIncludedInPlan: false, isInstalled: false, isDisabled: false,
       hasPendingOrder: false, isRefunded: false, isPrivate: false, isListed: false,
       versionStatus: null, agentStatus: null, selectedVersionId: null,
+      agentInstanceId: null,
       denyReason: "agent_not_found",
     };
   }
@@ -189,6 +460,7 @@ export async function getAgentAuthorization(
 
   const isInstalled = !!installation;
   const isDisabled = isInstalled && !installation!.is_active;
+  const agentInstanceId = isInstalled ? installation!.id : null;
 
   let hasPendingOrder = false;
   if (!isInstalled) {
@@ -257,7 +529,7 @@ export async function getAgentAuthorization(
     isFree, isIncludedInPlan, isInstalled, isDisabled,
     hasPendingOrder, isRefunded, isPrivate, isListed,
     versionStatus, agentStatus: agentIsPublic ? (listingAvailable ? "available" : "unlisted") : "private",
-    selectedVersionId, denyReason,
+    selectedVersionId, agentInstanceId, denyReason,
   };
 }
 
@@ -326,9 +598,35 @@ export async function installAgent(
   const internalUserId = await resolveInternalUserId(clerkId);
   if (!internalUserId) return { success: false, error: "user_not_found" };
 
+  // Load the agent template and its latest published version to populate
+  // the private instance with the correct version and display name.
+  const { data: agentTemplate } = await supabaseAdmin
+    .from("agents")
+    .select("id, display_name, slug")
+    .eq("id", agentId)
+    .maybeSingle();
+
+  const { data: latestVersion } = await supabaseAdmin
+    .from("agent_versions")
+    .select("id")
+    .eq("agent_id", agentId)
+    .eq("version_status", "published")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const { data: installation, error } = await supabaseAdmin
     .from("user_agents")
-    .insert({ user_id: internalUserId, agent_id: agentId, is_active: true })
+    .insert({
+      user_id: internalUserId,
+      agent_id: agentId,
+      agent_version_id: latestVersion?.id ?? null,
+      name: agentTemplate?.display_name || "Agent",
+      is_active: true,
+      status: "active",
+      approval_mode: "supervised",
+      enabled_tools: [],
+    })
     .select("id")
     .single();
 

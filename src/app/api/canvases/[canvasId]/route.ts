@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getCanvas, renameCanvas, deleteCanvas, archiveCanvas, listBlocks } from "@/lib/canvas/repository";
 
 /**
@@ -7,10 +7,10 @@ import { getCanvas, renameCanvas, deleteCanvas, archiveCanvas, listBlocks } from
  * Get a single canvas with all its blocks.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ canvasId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -42,7 +42,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ canvasId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -83,10 +83,10 @@ export async function PATCH(
  * Permanently delete a canvas and all its blocks + revisions.
  */
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ canvasId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

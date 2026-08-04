@@ -5,11 +5,12 @@ import { createConversation, listConversations } from "@/lib/studio/conversation
 import { isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug } from "@/lib/studio/types";
+import { createBlankProject, getProject, listProjects } from "@/lib/projects/project-repository";
 
 export const runtime = "nodejs";
 
 async function getHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -21,7 +22,7 @@ async function getHandler(req: NextRequest) {
 }
 
 async function postHandler(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -31,9 +32,28 @@ async function postHandler(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const projectId = body.projectId;
-  if (typeof projectId !== "string" || !projectId.trim()) {
-    return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+  // Chat must not be gated by project setup. Conversations currently retain a
+  // project foreign key for memory/file scoping, so resolve that detail here:
+  // use the requested owned project, otherwise reuse the user's latest project,
+  // and finally create a lightweight private chat workspace. The client never
+  // has to create or choose a project just to speak to LiTT or Spark.
+  const requestedProjectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+  let projectId = requestedProjectId;
+  if (projectId && !(await getProject(projectId, userId))) {
+    projectId = "";
+  }
+  if (!projectId) {
+    const existing = await listProjects(userId);
+    projectId = existing.projects[0]?.id ?? existing.legacyOnly[0]?.id ?? "";
+  }
+  if (!projectId) {
+    const chatProject = await createBlankProject({
+      userId,
+      name: "LiTT Chat",
+      templateId: "blank-static",
+      accessMode: "private",
+    });
+    projectId = chatProject.id;
   }
 
   const title = typeof body.title === "string" ? body.title.trim().slice(0, 120) || null : null;
@@ -55,8 +75,8 @@ async function postHandler(req: NextRequest) {
     revisionAfter: conversation.revision,
   });
 
-  return NextResponse.json({ conversation }, { status: 201 });
+  return NextResponse.json({ conversation, projectId }, { status: 201 });
 }
 
-export const GET = withRateLimit(getHandler, 100, 60);
-export const POST = withRateLimit(postHandler, 30, 60);
+export const GET = withRateLimit(getHandler, 200, 60);
+export const POST = withRateLimit(postHandler, 60, 60);

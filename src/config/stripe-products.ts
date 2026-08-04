@@ -14,12 +14,12 @@ import type { PlanId } from "@/config/plans";
  * route yet — existing subscription/plan purchases use the separate
  * `/api/billing/checkout` route with pre-created Stripe Price IDs. Agent
  * purchases use the separate `/api/marketplace/agents/[id]/checkout` route.
- * Until real coin-pack or marketplace products are approved, every checkout
+ * Until real credit-pack or marketplace products are approved, every checkout
  * request is rejected. This securely closes the orphan endpoint without
  * removing the architecture needed for future products.
  */
 
-export type ProductType = "coin_pack" | "plan" | "one_time";
+export type ProductType = "credit_pack" | "plan" | "one_time";
 export type CheckoutMode = "payment" | "subscription";
 
 export interface ProductDefinition {
@@ -48,7 +48,7 @@ export interface ProductDefinition {
   name: string;
   /** Optional description sent to Stripe as `product_data.description`. */
   description?: string;
-  /** LiTTBits granted on purchase. Only valid for `coin_pack` products. */
+  /** LiTTBits granted on purchase. Only valid for `credit_pack` products. */
   credits?: number;
   /** Plan identifier. Only valid for products representing a plan. */
   planId?: PlanId;
@@ -87,7 +87,7 @@ export function getProductById(id: string): ProductDefinition | undefined {
  *  - `checkoutMode: "subscription"` requires `stripePriceId` (ad-hoc amounts
  *    cannot safely create Stripe subscriptions without recurring interval
  *    data).
- *  - `credits` only for `coin_pack` products.
+ *  - `credits` only for `credit_pack` products.
  *  - `planId` only for `plan` products.
  *  - `amountCents`, when present, must be a positive integer >= 50 (Stripe
  *    minimum).
@@ -142,19 +142,19 @@ export function validateCatalog(catalog: Record<string, ProductDefinition>): voi
         );
       }
     }
-    // credits: positive integer, only for coin_pack, and required for coin_pack.
+    // credits: positive integer, only for credit_pack, and required for credit_pack.
     if (p.credits !== undefined) {
       if (!Number.isInteger(p.credits) || p.credits <= 0) {
         throw new Error(
           `Product "${id}" credits must be a positive integer`,
         );
       }
-      if (p.type !== "coin_pack") {
-        throw new Error(`Product "${id}" credits is only valid for coin_pack`);
+      if (p.type !== "credit_pack") {
+        throw new Error(`Product "${id}" credits is only valid for credit_pack`);
       }
     }
-    if (p.type === "coin_pack" && p.credits === undefined) {
-      throw new Error(`Product "${id}" is a coin_pack and requires credits`);
+    if (p.type === "credit_pack" && p.credits === undefined) {
+      throw new Error(`Product "${id}" is a credit_pack and requires credits`);
     }
     // planId: only for plan products, and required for plan products.
     if (p.planId !== undefined && p.type !== "plan") {

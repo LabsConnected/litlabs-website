@@ -4,10 +4,10 @@ import { useCallback } from "react";
 import { VoiceOrb } from "@/features/voice/components/VoiceOrb";
 import { VoiceStatus } from "@/features/voice/components/VoiceStatus";
 import { AgentVoiceSelector } from "@/features/voice/components/AgentVoiceSelector";
-import { useInworldSession } from "@/features/voice/hooks/useInworldSession";
+import { useInworldSession, type TranscriptMetadata } from "@/features/voice/hooks/useInworldSession";
 
 interface VoiceControllerProps {
-  onTranscript?: (text: string, final: boolean) => void;
+  onTranscript?: (text: string, final: boolean, metadata?: TranscriptMetadata) => void;
   onAgentText?: (text: string) => void;
   showSelector?: boolean;
   showStatus?: boolean;

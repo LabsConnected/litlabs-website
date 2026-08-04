@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
-import type { StudioCapabilities, ResolvedStudioContext, AgentSlug } from "./types";
+import type { StudioCapabilities, ResolvedStudioContext, AgentSlug, AgentMode } from "./types";
 
 interface ProjectRecord {
   id: string;
@@ -34,6 +34,10 @@ export interface ResolvedProject {
   repositoryOwner: string | null;
   repositoryName: string | null;
   repositoryDefaultBranch: string | null;
+  activeBranch: string | null;
+  framework: string | null;
+  scanStatus: string | null;
+  scanSummary: Record<string, unknown> | null;
   capabilities: StudioCapabilities;
 }
 
@@ -66,6 +70,10 @@ export async function resolveProject(
       repositoryOwner: studioProject.github_owner,
       repositoryName: studioProject.github_repo,
       repositoryDefaultBranch: studioProject.github_default_branch,
+      activeBranch: studioProject.github_branch,
+      framework: studioProject.framework,
+      scanStatus: studioProject.scan_status,
+      scanSummary: studioProject.scan_summary,
       capabilities: {
         repositoryConnected: repoConnected,
         repositoryName: studioProject.github_full_name,
@@ -96,6 +104,10 @@ export async function resolveProject(
       repositoryOwner: legacyProject.owner,
       repositoryName: legacyProject.repository,
       repositoryDefaultBranch: legacyProject.default_branch,
+      activeBranch: legacyProject.working_branch,
+      framework: null,
+      scanStatus: legacyProject.status,
+      scanSummary: null,
       capabilities: {
         repositoryConnected: repoConnected,
         repositoryName: legacyProject.repository_full_name,
@@ -120,6 +132,7 @@ export async function buildStudioContext(
   conversationId: string,
   projectId: string,
   agentSlug: AgentSlug,
+  agentMode: AgentMode = "standard",
 ): Promise<ResolvedStudioContext | null> {
   const project = await resolveProject(clerkUserId, projectId);
   if (!project) return null;
@@ -134,7 +147,13 @@ export async function buildStudioContext(
     repositoryOwner: project.repositoryOwner,
     repositoryName: project.repositoryName,
     repositoryDefaultBranch: project.repositoryDefaultBranch,
+    activeBranch: project.activeBranch,
+    framework: project.framework,
+    scanStatus: project.scanStatus,
+    scanSummary: project.scanSummary,
     activeAgentSlug: agentSlug,
+    activeAgentMode: agentMode,
+    agentInstanceId: null,
     capabilities: project.capabilities,
   };
 }
@@ -154,6 +173,18 @@ export function buildProjectContextBlock(ctx: ResolvedStudioContext): string {
   }
   if (ctx.repositoryDefaultBranch) {
     lines.push(`  Default Branch: ${ctx.repositoryDefaultBranch}`);
+  }
+  if (ctx.activeBranch) {
+    lines.push(`  Active Branch: ${ctx.activeBranch}`);
+  }
+  if (ctx.framework) {
+    lines.push(`  Framework: ${ctx.framework}`);
+  }
+  if (ctx.scanStatus) {
+    lines.push(`  Scan Status: ${ctx.scanStatus}`);
+  }
+  if (ctx.scanSummary) {
+    lines.push(`  Scan Summary: ${JSON.stringify(ctx.scanSummary).slice(0, 2000)}`);
   }
   if (ctx.projectDescription) {
     lines.push(`  Description: ${ctx.projectDescription}`);

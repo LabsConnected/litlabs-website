@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isFeatureEnabled } from "@/config/feature-flags";
 
 export const runtime = "nodejs";
 
@@ -71,14 +72,18 @@ function stripeFailure() {
 
 async function handler(
   req: NextRequest,
-  ctx?: { params: Promise<{ id: string }> },
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const { clerkId } = await auth();
+  // v1 release freeze: individual agent purchases are disabled
+  if (!isFeatureEnabled("individualAgentPurchases")) {
+    return NextResponse.json(
+      { error: "Individual agent purchases are coming soon. Agent access is included with Creator and Pro plans." },
+      { status: 503 },
+    );
+  }
+  const { clerkId } = await auth(req);
   if (!clerkId) return unauthorized();
 
-  if (!ctx?.params) {
-    return NextResponse.json({ error: "Missing route params" }, { status: 400 });
-  }
   const { id: agentId } = await ctx.params;
 
   // 2. Resolve internal user server-side.
@@ -192,7 +197,11 @@ async function handler(
   params.append("mode", "payment");
   params.append("line_items[0][price]", version.stripe_price_id);
   params.append("line_items[0][quantity]", "1");
-  params.append("success_url", `${appUrl}/marketplace?purchased=${agent.slug}`);
+  // After successful payment, the webhook creates the entitlement and
+  // auto-provisions the user_agents instance. The success URL sends the
+  // buyer to Studio with the agent slug — the Studio client will look up
+  // the instance ID from the user's installed agents.
+  params.append("success_url", `${appUrl}/studio?agent=${agent.slug}&purchase=success`);
   params.append("cancel_url", `${appUrl}/marketplace?canceled=true`);
 
   params.append("metadata[checkout_version]", MARKETPLACE_CHECKOUT_VERSION);
@@ -209,7 +218,11 @@ async function handler(
   params.append("payment_intent_data[metadata][clerk_id]", clerkId);
 
   params.append("billing_address_collection", "auto");
-  params.append("automatic_tax[enabled]", "false");
+  // Automatic tax is disabled by default. Enable only after Stripe Tax
+  // is fully configured (registrations, product tax codes, tax behavior).
+  // See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
+  const autoTaxEnabled = process.env.STRIPE_AUTOMATIC_TAX_ENABLED === "true";
+  params.append("automatic_tax[enabled]", autoTaxEnabled ? "true" : "false");
 
   // 10. Create the Stripe Checkout session.
   let stripeResponse: Response;

@@ -1,0 +1,26 @@
+{
+  "name": "@litlabs/litt-cli",
+  "version": "0.1.0",
+  "description": "LiTT CLI — AI operating system for your terminal",
+  "type": "module",
+  "bin": {
+    "litt": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

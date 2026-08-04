@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
 import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
@@ -15,9 +15,9 @@ const EMPTY_WALLET = {
  * GET /api/wallet
  * Returns the user's LiTTBits wallet balance.
  */
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -50,13 +50,17 @@ async function getHandler() {
 }
 
 /**
- * POST /api/wallet/claim
- * Claims the daily bonus of 50 LiTTBits.
- * Body: { type: "daily" }
+ * POST /api/wallet
+ * Handles LiTTBit spending and (optionally) daily bonus claims.
+ * Body: { type: "spend", amount, reason } or { type: "daily" }
+ *
+ * The daily +50 LiTTBit bonus is NOT approved for public production.
+ * It is disabled by default and gated behind ENABLE_DAILY_LITTBITS=true.
+ * See docs/PRODUCT_TRUTH.md for the approved policy.
  */
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -72,7 +76,7 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    /* Spend coins */
+    /* Spend LiTTBits */
     if (body.type === "spend") {
       const amount = typeof body.amount === "number" ? body.amount : 0;
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
@@ -110,6 +114,16 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json(
         { error: "Invalid type. Use 'daily' or 'spend'" },
         { status: 400 },
+      );
+    }
+
+    // Daily bonus is NOT approved for public production.
+    // Gate behind ENABLE_DAILY_LITTBITS=true (off by default).
+    // See docs/PRODUCT_TRUTH.md for the approved policy.
+    if (process.env.ENABLE_DAILY_LITTBITS !== "true") {
+      return NextResponse.json(
+        { error: "Daily bonus is currently unavailable.", disabled: true },
+        { status: 503 },
       );
     }
 
@@ -153,7 +167,7 @@ async function postHandler(req: NextRequest) {
  */
 async function putHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

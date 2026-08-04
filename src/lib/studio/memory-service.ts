@@ -55,6 +55,15 @@ async function getSupermemory() {
 
 /**
  * Recall memories scoped by owner_id, project_id, and optionally agent_slug.
+ *
+ * MEMORY ISOLATION RULES:
+ * - user_preference and project_fact memories are shared across conversations
+ *   within the same project (scoped by owner_id + project_id).
+ * - conversation_summary and agent_note memories are scoped by conversation_id
+ *   — they never leak from one conversation to another.
+ * - agent_mode further scopes the retrieval — Spark mode memories don't
+ *   leak into Standard mode and vice versa.
+ *
  * Never returns memories from a different project.
  * Falls back to Supabase text search when Supermemory is unavailable.
  */
@@ -64,14 +73,55 @@ export async function recallMemories(
   projectId: string,
   options: {
     agentSlug?: AgentSlug;
+    agentInstanceId?: string;
+    memoryNamespace?: string;
     conversationId?: string;
+    agentMode?: string;
     limit?: number;
   } = {},
 ): Promise<MemoryRecord[]> {
   const limit = options.limit ?? 5;
-  const agentFilter = options.agentSlug
-    ? supabaseAdmin.from("memories").select("*").eq("owner_id", ownerId).eq("project_id", projectId).eq("agent_slug", options.agentSlug)
-    : supabaseAdmin.from("memories").select("*").eq("owner_id", ownerId).eq("project_id", projectId);
+
+  // SHARED memories: user_preference and project_fact — scoped by owner + project only
+  // These are the only memories that cross conversation boundaries.
+  const sharedTypes = ["user_preference", "project_fact", "project_decision", "architecture", "workflow", "constraint"];
+
+  let sharedFilter = supabaseAdmin
+    .from("memories")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("project_id", projectId)
+    .in("memory_type", sharedTypes);
+
+  // CONVERSATION-SCOPED memories: conversation_summary and agent_note
+  // These are scoped by conversation_id — they never leak across conversations.
+  let conversationFilter = supabaseAdmin
+    .from("memories")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("project_id", projectId);
+
+  if (options.conversationId) {
+    conversationFilter = conversationFilter.eq("conversation_id", options.conversationId);
+  } else {
+    // If no conversation ID, only return shared memories
+    conversationFilter = conversationFilter.eq("conversation_id", "00000000-0000-0000-0000-000000000000");
+  }
+
+  if (options.agentSlug) {
+    sharedFilter = sharedFilter.eq("agent_slug", options.agentSlug);
+    conversationFilter = conversationFilter.eq("agent_slug", options.agentSlug);
+  }
+  if (options.agentMode) {
+    // Further scope by agent_mode to prevent Spark creative context from
+    // leaking into Standard mode and vice versa.
+    sharedFilter = sharedFilter.eq("agent_mode", options.agentMode);
+    conversationFilter = conversationFilter.eq("agent_mode", options.agentMode);
+  }
+  if (options.memoryNamespace) {
+    sharedFilter = sharedFilter.eq("memory_namespace", options.memoryNamespace);
+    conversationFilter = conversationFilter.eq("memory_namespace", options.memoryNamespace);
+  }
 
   // Try Supermemory first for semantic search
   if (hasSupermemory()) {
@@ -108,36 +158,58 @@ export async function recallMemories(
     }
   }
 
-  // Fallback: Supabase text search, always scoped by project_id (not conversation_id)
+  // Fallback: Supabase text search
+  // Search shared memories first, then conversation-scoped memories
   try {
-    const textQuery = agentFilter
+    // Search shared memories (user_preference, project_fact, etc.)
+    const sharedTextQuery = sharedFilter
       .ilike("content", `%${query}%`)
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .limit(Math.ceil(limit / 2));
 
-    const { data, error } = await textQuery;
-    if (error) {
-      console.error("[memory:recall] Supabase text search error:", error.message);
-      return [];
-    }
-    if (data && data.length > 0) {
-      return data as unknown[] as MemoryRecord[];
+    const { data: sharedData, error: sharedError } = await sharedTextQuery;
+    if (sharedError) {
+      console.error("[memory:recall] Supabase shared text search error:", sharedError.message);
     }
 
-    // Final fallback: recent memories for this project
-    let recentQuery = supabaseAdmin
-      .from("memories")
-      .select("*")
-      .eq("owner_id", ownerId)
-      .eq("project_id", projectId)
+    // Search conversation-scoped memories (conversation_summary, agent_note)
+    const convTextQuery = conversationFilter
+      .ilike("content", `%${query}%`)
+      .order("created_at", { ascending: false })
+      .limit(Math.ceil(limit / 2));
+
+    const { data: convData, error: convError } = await convTextQuery;
+    if (convError) {
+      console.error("[memory:recall] Supabase conversation text search error:", convError.message);
+    }
+
+    // Merge and deduplicate by id
+    const allResults = [...(sharedData ?? []), ...(convData ?? [])];
+    const seenIds = new Set<string>();
+    const deduped = allResults.filter((r) => {
+      const id = (r as { id: string }).id;
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+
+    if (deduped.length > 0) {
+      return deduped.slice(0, limit) as unknown[] as MemoryRecord[];
+    }
+
+    // Final fallback: recent shared memories for this project
+    const { data: recentShared } = await sharedFilter
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    if (options.agentSlug) {
-      recentQuery = recentQuery.eq("agent_slug", options.agentSlug);
+    if (recentShared && recentShared.length > 0) {
+      return recentShared as unknown[] as MemoryRecord[];
     }
 
-    const { data: recent } = await recentQuery;
+    // Final fallback: recent conversation-scoped memories
+    const { data: recent } = await conversationFilter
+      .order("created_at", { ascending: false })
+      .limit(limit);
     return (recent || []) as unknown[] as MemoryRecord[];
   } catch (err) {
     console.error("[memory:recall] Fallback search failed:", err instanceof Error ? err.message : String(err));
@@ -156,6 +228,8 @@ export async function persistMemory(
   projectId: string,
   options: {
     agentSlug?: AgentSlug;
+    agentInstanceId?: string;
+    memoryNamespace?: string;
     conversationId?: string;
     memoryType?: MemoryType;
     metadata?: Record<string, unknown>;
@@ -173,26 +247,34 @@ export async function persistMemory(
   }
 
   const agentSlug = options.agentSlug ?? null;
+  const agentInstanceId = options.agentInstanceId ?? null;
+  const memoryNamespace = options.memoryNamespace ?? null;
   const memoryType = options.memoryType ?? "agent_note";
   const dedupeKey = normalizeDedupeKey(content);
   const metadata = options.metadata ?? {};
 
   try {
+    // Build payload conditionally — agent_instance_id and memory_namespace
+    // columns may not exist yet if the migration hasn't been applied.
+    const basePayload: Record<string, unknown> = {
+      owner_id: ownerId,
+      project_id: projectId,
+      conversation_id: options.conversationId ?? null,
+      agent_slug: agentSlug,
+      memory_type: memoryType,
+      dedupe_key: dedupeKey,
+      content,
+      metadata,
+      sync_status: "pending",
+    };
+    if (agentInstanceId != null) basePayload.agent_instance_id = agentInstanceId;
+    if (memoryNamespace != null) basePayload.memory_namespace = memoryNamespace;
+
     // Try upsert by dedupe key
     const { data, error } = await supabaseAdmin
       .from("memories")
       .upsert(
-        {
-          owner_id: ownerId,
-          project_id: projectId,
-          conversation_id: options.conversationId ?? null,
-          agent_slug: agentSlug,
-          memory_type: memoryType,
-          dedupe_key: dedupeKey,
-          content,
-          metadata,
-          sync_status: "pending",
-        },
+        basePayload,
         {
           onConflict: "owner_id,project_id,agent_slug,memory_type,dedupe_key",
         },
@@ -204,17 +286,7 @@ export async function persistMemory(
       // If upsert failed (e.g., dedupe index doesn't exist yet), try plain insert
       const { data: insertData, error: insertError } = await supabaseAdmin
         .from("memories")
-        .insert({
-          owner_id: ownerId,
-          project_id: projectId,
-          conversation_id: options.conversationId ?? null,
-          agent_slug: agentSlug,
-          memory_type: memoryType,
-          dedupe_key: dedupeKey,
-          content,
-          metadata,
-          sync_status: "pending",
-        })
+        .insert(basePayload)
         .select()
         .single();
 

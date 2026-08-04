@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY;
 const MINIMAX_API_URL = "https://api.minimax.io/v1/music_generation";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

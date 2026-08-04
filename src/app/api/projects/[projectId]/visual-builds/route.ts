@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { listVisualBuilds } from "@/lib/visual-builds/repository";
 import { VisualBuildRequestSchema } from "@/lib/visual-builds/types";
@@ -11,9 +11,9 @@ export const maxDuration = 300;
 
 async function getHandler(
   _request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string }> },
+  ctx: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -25,9 +25,9 @@ async function getHandler(
 
 async function postHandler(
   request: NextRequest,
-  ctx?: { params: Promise<{ projectId: string }> },
+  ctx: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

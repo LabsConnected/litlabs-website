@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { runAI } from "@/lib/ai/providers";
 import {
   buildJarvisPrompt,
@@ -8,9 +8,10 @@ import {
   JarvisAction,
   parseJarvisActions,
 } from "@/lib/litt-context";
+import { detectAndExecuteTool, detectToolIntent } from "@/lib/litt-intelligence/tool-executor";
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -22,6 +23,20 @@ export async function POST(req: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
+
+    // ── Real-time tool routing ──────────────────────────────────
+    // Check for tool intent (weather, etc.) before calling the LLM.
+    // If a tool fires, return the live result directly.
+    if (detectToolIntent(message)) {
+      const toolResult = await detectAndExecuteTool(userId, message);
+      if (toolResult.executed) {
+        return NextResponse.json({
+          answer: toolResult.text,
+          actions: [] as JarvisAction[],
+          tool: toolResult.metadata,
+        });
+      }
     }
 
     const context = collectJarvisContext(contextRaw || { route: "/litt" });
@@ -55,7 +70,6 @@ export async function POST(req: NextRequest) {
 
     const parsed = parseJarvisActions(answer);
 
-    // Add context-aware fallback actions if the AI didn't return any
     const actions: JarvisAction[] = parsed.length > 0 ? parsed : [];
 
     const lower = message.toLowerCase();

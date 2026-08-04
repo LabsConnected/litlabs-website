@@ -261,7 +261,7 @@ export function CenterStage({
           {/* Mobile: Compact quick actions */}
           <div className="md:hidden grid grid-cols-4 gap-2">
             {[
-              { label: "AI", icon: Zap, href: "/agents", color: "#ff9ff3" },
+              { label: "AI", icon: Zap, href: "/studio?tool=agents", color: "#ff9ff3" },
               { label: "Post", icon: Send, href: "/discover", color: "#00f0ff" },
               {
                 label: "Img",
@@ -414,7 +414,7 @@ export function CenterStage({
         <div className="space-y-6">
           <HeroCard
             title="Marketplace"
-            subtitle="Agents, templates & coin packs."
+            subtitle="Agents, templates & credit packs."
             color="#ff9ff3"
           />
           <MarketplacePreview />

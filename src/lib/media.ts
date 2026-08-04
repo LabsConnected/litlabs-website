@@ -12,16 +12,21 @@ export type MediaProviderId =
   | "together"
   | "openai"
   | "recraft"
+  | "alibaba"
+  | "cloudflare"
   | "luma"
   | "veo"
   | "runway";
+
+/** Provider selection — includes auto modes + manual provider IDs. */
+export type ProviderSelection = "auto-free" | "auto-quality" | MediaProviderId;
 
 export interface MediaProvider {
   id: MediaProviderId;
   label: string;
   description: string;
   supportedFormats: MediaFormat[];
-  /** Coin cost per render. */
+  /** LiTTBits cost per render. */
   cost: (format: MediaFormat, style?: string) => number;
   /** Whether the provider requires any external API key to function. */
   requiresKey: boolean;
@@ -33,9 +38,29 @@ export interface MediaProvider {
 
 export const MEDIA_PROVIDERS: MediaProvider[] = [
   {
+    id: "cloudflare",
+    label: "Cloudflare Workers AI",
+    description: "Free everyday drafts via FLUX schnell on Cloudflare Workers AI.",
+    supportedFormats: ["image"],
+    cost: () => 0,
+    requiresKey: true,
+    free: true,
+    tier: "free",
+  },
+  {
+    id: "alibaba",
+    label: "Alibaba Qwen Image",
+    description: "Qwen/Wan image generation through Model Studio.",
+    supportedFormats: ["image"],
+    cost: () => 1,
+    requiresKey: true,
+    free: false,
+    tier: "cheap",
+  },
+  {
     id: "gemini",
-    label: "Gemini (Imagen)",
-    description: "Google Gemini Imagen 3 image generation via your existing GEMINI_API_KEY.",
+    label: "Gemini (Flash Image)",
+    description: "Google Gemini 3.1 Flash Image generation via GEMINI_API_KEY.",
     supportedFormats: ["image"],
     cost: () => 1,
     requiresKey: true,
@@ -142,13 +167,23 @@ export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
   const candidates = MEDIA_PROVIDERS.filter(p =>
     p.supportedFormats.includes(format)
   );
-  // For images, prefer Gemini if API key is configured (more reliable than Pollinations)
   if (format === "image") {
+    // Prefer Cloudflare Workers AI (free) if configured
+    if (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_AI_API_TOKEN) {
+      const cf = candidates.find(p => p.id === "cloudflare");
+      if (cf) return cf.id;
+    }
+    // Then Gemini if configured (reliable, low cost)
     if (process.env.GEMINI_API_KEY) {
       const gemini = candidates.find(p => p.id === "gemini");
       if (gemini) return gemini.id;
     }
-    // Fall back to FAL if configured
+    // Then Alibaba if configured (free quota)
+    if (process.env.ALIBABA_DASHSCOPE_API_KEY && process.env.ALIBABA_MODELSTUDIO_WORKSPACE_ID) {
+      const alibaba = candidates.find(p => p.id === "alibaba");
+      if (alibaba) return alibaba.id;
+    }
+    // Then FAL if configured
     if (process.env.FAL_KEY) {
       const fal = candidates.find(p => p.id === "fal");
       if (fal) return fal.id;

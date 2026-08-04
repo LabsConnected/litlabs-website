@@ -34,8 +34,8 @@ const HISTORY_LIMIT = 12;
  * Regenerates an assistant response. Does NOT duplicate the user message.
  * Stores the new assistant message with regenerationOfMessageId linking.
  */
-async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
-  const { userId } = await auth();
+async function postHandler(req: NextRequest, routeCtx: RouteParams) {
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -45,6 +45,12 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
+  const runtimeContext = body.runtimeContext && typeof body.runtimeContext === "object"
+    ? body.runtimeContext as Record<string, unknown>
+    : {};
+  const runtimeVoiceHealth = runtimeContext.voiceHealth && typeof runtimeContext.voiceHealth === "object"
+    ? runtimeContext.voiceHealth as RawCapabilities["voiceHealth"]
+    : undefined;
   const assistantMessageId = body.assistantMessageId;
   const expectedRevision = body.expectedRevision;
   if (typeof assistantMessageId !== "string" || !assistantMessageId.trim()) {
@@ -162,10 +168,20 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
   const rawCaps: RawCapabilities = {
     repository: ctx.capabilities.repositoryConnected ? "connected" : "none",
     repositoryIndexed: ctx.capabilities.repositoryConnected,
-    terminalExecution: ctx.capabilities.terminalConnected ? "available" : "unavailable",
+    terminalExecution: typeof runtimeContext.terminalExecution === "string"
+      ? runtimeContext.terminalExecution
+      : (ctx.capabilities.terminalConnected ? "available" : "unavailable"),
+    terminalStatus: typeof runtimeContext.terminalStatus === "string" ? runtimeContext.terminalStatus : undefined,
+    terminalSessionId: typeof runtimeContext.terminalSessionId === "string" ? runtimeContext.terminalSessionId : null,
     connectedProviders: ctx.capabilities.availableTools,
     availableTools: ctx.capabilities.availableTools,
     connectionSummary: ctx.capabilities.connectionSummary,
+    voiceTransportConnected: runtimeContext.voiceTransportConnected === true,
+    voiceMicrophoneOn: runtimeContext.voiceMicrophoneOn === true,
+    voiceInputState: typeof runtimeContext.voiceInputState === "string" ? runtimeContext.voiceInputState : undefined,
+    voiceState: typeof runtimeContext.voiceState === "string" ? runtimeContext.voiceState : undefined,
+    voiceOutputState: typeof runtimeContext.voiceOutputState === "string" ? runtimeContext.voiceOutputState : undefined,
+    voiceHealth: runtimeVoiceHealth,
   };
   const translated = translateCapabilities(rawCaps);
 

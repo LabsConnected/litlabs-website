@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getProject, updateProjectWorkspace } from "@/lib/projects/project-repository";
 import { prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 
@@ -16,7 +16,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
-  const { userId } = await auth();
+  const { userId } = await auth(_request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

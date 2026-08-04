@@ -6,12 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Bot,
   ChevronRight,
-  Coins,
+  Sparkles,
   Crown,
   Film,
   FolderOpen,
   Hammer,
   Image as ImageIcon,
+  MessageCircle,
   MessageSquare,
   Music2,
   PanelLeftClose,
@@ -43,6 +44,7 @@ const QUICK_TOOLS = [
   { label: "Terminal", href: "/studio?tool=terminal", icon: TerminalSquare, color: "#34d399" },
   { label: "Agents", href: "/agents", icon: Bot, color: "#c084fc" },
   { label: "Assets", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
+  { label: "Discover", href: "/discover", icon: MessageCircle, color: "#f472b6" },
 ] as const;
 
 function SidebarContent({
@@ -207,7 +209,7 @@ function CreditsCard({ balance, plan, T }: { balance: number; plan: string; T: R
       <div className="text-[8px] font-black uppercase tracking-[.18em]" style={{ color: T.textMuted }}>Credits & plan</div>
       <div className="mt-2 flex items-end justify-between">
         <div><b className="text-lg text-white">{balance.toLocaleString()} <span className="text-[10px]" style={{ color: T.accentColor }}>LBC</span></b><div className="text-[8px] capitalize" style={{ color: T.textMuted }}>{plan} plan</div></div>
-        <Coins size={24} style={{ color: `${T.accentColor}bb` }} />
+        <Sparkles size={24} style={{ color: `${T.accentColor}bb` }} />
       </div>
       <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/5"><div className="h-full w-[72%] rounded-full" style={{ background: `linear-gradient(90deg, ${T.accentColor}, ${T.linkColor})` }} /></div>
       <Link href="/wallet" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-[9px] font-black" style={{ borderColor: `${T.accentColor}35`, backgroundColor: `${T.accentColor}14`, color: T.headerColor }}><Crown size={11} /> Manage credits</Link>

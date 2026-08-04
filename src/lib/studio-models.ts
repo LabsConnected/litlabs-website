@@ -9,11 +9,106 @@ export type StudioModel = {
   apiModel?: string;
   apiProvider?: string;
   short?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
+  /** True if this is a stable LiTT alias that routes to an underlying provider. */
+  isLittAlias?: boolean;
+  /** Description shown in the model picker tooltip. */
+  description?: string;
 };
 
+/**
+ * LiTT model aliases — stable, branded names that route to underlying providers.
+ * UI code references these aliases, never raw provider model IDs.
+ * The server resolves each alias to the best available provider at call time.
+ *
+ * When LiteLLM is installed, these aliases map directly to LiteLLM model groups.
+ * Until then, they route through the existing provider chain with fallback.
+ */
+export const LITT_MODEL_ALIASES: StudioModel[] = [
+  {
+    id: "litt-fast",
+    name: "LiTT Fast",
+    provider: "LiTT",
+    cost: "free",
+    speed: "fast",
+    icon: "⚡",
+    category: "litt-alias",
+    isLittAlias: true,
+    recommended: true,
+    description: "Quick answers and simple tasks. Routes to the fastest available model.",
+    apiProvider: "groq",
+    apiModel: "llama-3.3-70b-versatile",
+  },
+  {
+    id: "litt-balanced",
+    name: "LiTT Balanced",
+    provider: "LiTT",
+    cost: "hybrid",
+    speed: "medium",
+    icon: "⚖️",
+    category: "litt-alias",
+    isLittAlias: true,
+    recommended: true,
+    description: "General-purpose chat with good quality and speed.",
+    apiProvider: "gemini",
+    apiModel: "gemini-2.5-flash",
+  },
+  {
+    id: "litt-reasoning",
+    name: "LiTT Reasoning",
+    provider: "LiTT",
+    cost: "paid",
+    speed: "slow",
+    icon: "🧠",
+    category: "litt-alias",
+    isLittAlias: true,
+    description: "Complex planning, analysis, and multi-step reasoning.",
+    apiProvider: "openrouter-deepseek",
+    apiModel: "deepseek/deepseek-chat:free",
+  },
+  {
+    id: "litt-code",
+    name: "LiTT Code",
+    provider: "LiTT",
+    cost: "free",
+    speed: "fast",
+    icon: "⌨️",
+    category: "litt-alias",
+    isLittAlias: true,
+    description: "Code generation, debugging, and technical work.",
+    apiProvider: "openrouter-qwen",
+    apiModel: "qwen/qwen-2.5-coder-32b-instruct:free",
+  },
+  {
+    id: "litt-research",
+    name: "LiTT Research",
+    provider: "LiTT",
+    cost: "hybrid",
+    speed: "medium",
+    icon: "🔍",
+    category: "litt-alias",
+    isLittAlias: true,
+    description: "Web research, summarization, and information gathering.",
+    apiProvider: "gemini",
+    apiModel: "gemini-2.5-flash",
+  },
+];
+
+/**
+ * Media model aliases — stable LiTT names for image, video, audio, music.
+ */
+export const LITT_MEDIA_ALIASES = [
+  { id: "litt-image", label: "LiTT Image", provider: "LiTT", description: "Image generation", aliasFor: "image" },
+  { id: "litt-video", label: "LiTT Video", provider: "LiTT", description: "Video generation", aliasFor: "video" },
+  { id: "litt-audio", label: "LiTT Audio", provider: "LiTT", description: "Audio generation", aliasFor: "audio" },
+  { id: "litt-music", label: "LiTT Music", provider: "LiTT", description: "Music generation", aliasFor: "music" },
+] as const;
+
 export const CHAT_MODELS: StudioModel[] = [
-  // Auto Best — routes through the full chain
+  // ── LiTT Aliases — stable branded names (shown first) ────────────
+  ...LITT_MODEL_ALIASES,
+
+  // ── Auto Best — routes through the full chain ────────────────────
   { id: "auto", name: "Auto Best", provider: "Auto", cost: "hybrid", speed: "fast", icon: "🧠", recommended: true, category: "auto", apiProvider: "gemini", apiModel: "gemini-2.5-flash" },
 
   // Free AI — Gemini primary, OpenRouter free fallback
@@ -78,4 +173,30 @@ export const SPACE_MODEL = {
 
 export function getChatModel(id: string) {
   return CHAT_MODELS.find((model) => model.id === id) ?? CHAT_MODELS[0];
+}
+
+/**
+ * Returns true if the model ID is a LiTT alias (stable branded name).
+ */
+export function isLittAlias(id: string): boolean {
+  return LITT_MODEL_ALIASES.some((m) => m.id === id);
+}
+
+/**
+ * Resolve a LiTT alias to its underlying provider + model.
+ * Returns the alias's apiProvider and apiModel, or null if not an alias.
+ */
+export function resolveLittAlias(
+  id: string,
+): { apiProvider: string; apiModel: string } | null {
+  const alias = LITT_MODEL_ALIASES.find((m) => m.id === id);
+  if (!alias?.apiProvider || !alias?.apiModel) return null;
+  return { apiProvider: alias.apiProvider, apiModel: alias.apiModel };
+}
+
+/**
+ * List all LiTT aliases for the model picker UI.
+ */
+export function getLittAliases(): StudioModel[] {
+  return LITT_MODEL_ALIASES;
 }

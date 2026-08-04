@@ -7,20 +7,44 @@
    ============================================================ */
 
 :root {
-  /* Font families — pure system font stacks, no external font fetches.
-     Previously used next/font/google (build-time timeout on slow networks)
-     and Google Fonts CDN <link> (CSP violations). System fonts eliminate
-     both issues with zero network dependency. These CSS vars match the old
-     next/font variable names so all existing var(--font-*) refs work. */
-  --font-inter: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-jetbrains: "JetBrains Mono", "Fira Code", "Cascadia Code", "Courier New", monospace;
-  --font-space-grotesk: "Space Grotesk", "Inter", system-ui, sans-serif;
-  --font-sora: "Sora", "Inter", system-ui, sans-serif;
-  --font-pixelify-sans: "Pixelify Sans", "Press Start 2P", monospace;
-  --font-orbitron: "Orbitron", "Chakra Petch", system-ui, sans-serif;
-  --font-press-start-2p: "Press Start 2P", "Pixelify Sans", monospace;
-  --font-chakra-petch: "Chakra Petch", "Inter", system-ui, sans-serif;
-  --font-rajdhani: "Rajdhani", "Inter", system-ui, sans-serif;
+  /* Font families — dependable system stacks that ship with Windows 11,
+     macOS, and Linux. No external font fetches (eliminates CSP issues and
+     unpredictable fallbacks when fonts like Inter/JetBrains Mono are not
+     installed locally).
+
+     --font-ui:  Interface text — Studio shell, header, nav, chat, buttons
+     --font-code: Monospace — terminal, code editor, commands, file paths
+     --font-retro: Arcade/pixel — ONLY for Retro Vault and Emulator surfaces
+     */
+  --font-ui:
+    "Segoe UI Variable",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  --font-code:
+    "Cascadia Code",
+    "Cascadia Mono",
+    Consolas,
+    "Courier New",
+    monospace;
+  --font-retro:
+    "Press Start 2P",
+    "Pixelify Sans",
+    monospace;
+
+  /* Legacy aliases — map to the new dependable stacks so existing
+     var(--font-inter) etc. references still work without code changes. */
+  --font-inter: var(--font-ui);
+  --font-jetbrains: var(--font-code);
+  --font-space-grotesk: var(--font-ui);
+  --font-sora: var(--font-ui);
+  --font-pixelify-sans: var(--font-retro);
+  --font-orbitron: var(--font-ui);
+  --font-press-start-2p: var(--font-retro);
+  --font-chakra-petch: var(--font-ui);
+  --font-rajdhani: var(--font-ui);
 
   /* Cinematic Studio — deep space, electric cyan, violet and ember */
   --bg-color: #03050b;
@@ -49,33 +73,118 @@
      Three visible surface depths, LiTT green primary, Spark purple
      for creative mode only, neon reserved for execution/success.
      ============================================================ */
-  --studio-bg: #07080d;
-  --studio-surface: #0d1018;
-  --studio-elevated: #131722;
-  --studio-card: #181d2a;
-  --studio-border: rgba(255, 255, 255, 0.06);
-  --studio-border-strong: rgba(255, 255, 255, 0.1);
-  --litt-primary: #72f238;
-  --litt-primary-strong: #42ff18;
-  --spark-primary: #a970ff;
-  --text-primary: #f4f5f8;
-  --text-secondary: #a5a8b5;
-  --text-muted: #6f7485;
-  --studio-header-h: 46px;
-  --studio-nav-w: 64px;
+  --studio-bg: #08060f;
+  --studio-surface: #0d0916;
+  --studio-elevated: rgba(29, 20, 44, 0.8);
+  --studio-card: rgba(20, 15, 31, 0.72);
+  --studio-border: rgba(155, 77, 255, 0.12);
+  --studio-border-strong: rgba(155, 77, 255, 0.22);
+  --litt-primary: #4dff62;
+  --litt-primary-strong: #2eff4a;
+  --spark-primary: #9b4dff;
+  --spark-primary-strong: #7c3aed;
+  --purple-accent: #9b4dff;
+  --violet-accent: #7c3aed;
+  --warning: #ffcc33;
+  --error: #ff5263;
+  --text-primary: #f5f1fa;
+  --text-secondary: #a29aaf;
+  --text-muted: #70687e;
+  --studio-header-h: 48px;
+  --studio-nav-w: 56px;
+  --studio-rail-w: 300px;
   --studio-composer-max-w: 960px;
+  --studio-glow-purple: 0 0 16px rgba(155, 77, 255, 0.25);
+  --studio-glow-green: 0 0 8px rgba(77, 255, 98, 0.4);
+  --studio-glow-purple-soft: 0 0 20px rgba(155, 77, 255, 0.15);
+  --studio-glow-green-soft: 0 0 12px rgba(77, 255, 98, 0.25);
+
+  /* Micro-animation durations */
+  --studio-anim-fast: 120ms;
+  --studio-anim-normal: 200ms;
+  --studio-anim-slow: 300ms;
 }
+
+/* ============================================
+   Studio Micro-Animations
+   ============================================ */
+@keyframes studio-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes studio-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes studio-message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-section-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-tab-glow {
+  from { opacity: 0; transform: scaleX(0.5); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes studio-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes studio-bar-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+/* Studio animation utility classes */
+.studio-anim-in {
+  animation: studio-message-in var(--studio-anim-normal) ease;
+}
+.studio-anim-section {
+  animation: studio-section-in var(--studio-anim-fast) ease;
+}
+.studio-anim-pulse {
+  animation: studio-pulse 1.5s infinite;
+}
+.studio-anim-blink {
+  animation: studio-blink 1s step-end infinite;
+}
+.studio-anim-dropdown {
+  animation: studio-dropdown-in var(--studio-anim-fast) ease;
+}
+
+/* Playing indicator bars (for YouTube player + voice) */
+.studio-playing-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.studio-playing-bars span {
+  width: 2px;
+  background: var(--litt-primary);
+  border-radius: 1px;
+  animation: studio-bar-bounce 0.8s ease-in-out infinite;
+}
+.studio-playing-bars span:nth-child(1) { animation-delay: 0ms; height: 60%; }
+.studio-playing-bars span:nth-child(2) { animation-delay: 150ms; height: 100%; }
+.studio-playing-bars span:nth-child(3) { animation-delay: 300ms; height: 70%; }
+.studio-playing-bars span:nth-child(4) { animation-delay: 450ms; height: 90%; }
 
 @theme inline {
   --color-background: var(--bg-color);
   --color-foreground: var(--text-color);
-  --font-sans: var(--font-inter), "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono:
-    var(--font-jetbrains), "JetBrains Mono", "Fira Code", "Courier New",
-    monospace;
-  --font-display: var(--font-jetbrains), "JetBrains Mono", "Inter", sans-serif;
-  --font-retro:
-    var(--font-jetbrains), "JetBrains Mono", "Courier New", monospace;
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+  --font-display: var(--font-ui);
+  --font-retro: var(--font-retro);
 
   /* IDE Native semantic tokens */
   --color-ide-bg: #0d0d0d;
@@ -99,6 +208,17 @@
 html,
 body {
   overflow-x: hidden;
+}
+
+/* Rendering quality — prevent synthetic bold/italic and optimize legibility */
+html {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Ensure main content never overflows sidebar/topbar */
@@ -129,7 +249,7 @@ body {
     radial-gradient(circle at 8% 45%, rgba(0, 214, 255, 0.08), transparent 34rem),
     var(--bg-color);
   color: var(--text-color);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.55;
   margin: 0;
@@ -162,9 +282,9 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   line-height: 1.2;
   margin: 0;
 }
@@ -175,11 +295,11 @@ h6 {
 }
 
 .font-display {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
 }
 
 .font-mono {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
 }
 
 .gradient-text {
@@ -188,6 +308,29 @@ h6 {
   background-clip: text;
   -webkit-background-clip: text;
   font-weight: 800;
+}
+
+/* ============================================================
+   STUDIO TYPOGRAPHY ENFORCEMENT
+   Minimum sizes: body 14px, buttons/tabs 13px, nav 12px, metadata 11px.
+   No important functional text may be smaller than 11px.
+   Terminal/code text uses --font-code at 12–13px.
+   ============================================================ */
+[data-studio-surface] button,
+[data-studio-surface] .studio-tab,
+[data-studio-surface] .studio-nav-label {
+  font-size: 13px;
+}
+
+[data-studio-surface] .studio-metadata,
+[data-studio-surface] .studio-timestamp {
+  font-size: 11px;
+}
+
+[data-studio-surface] .studio-terminal,
+[data-studio-surface] .studio-code {
+  font-family: var(--font-code);
+  font-size: 13px;
 }
 
 /* ============================================================
@@ -444,13 +587,15 @@ a:hover {
 }
 
 /* ============================================================
-   CRT MONITOR OVERLAY (toggleable)
+   CRT MONITOR OVERLAY — scoped to retro surfaces only.
+   Apply .crt-overlay inside a .retro-crt-surface container,
+   never as a global fixed overlay on the body.
    ============================================================ */
 .crt-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 9998;
+  z-index: 2;
   background: repeating-linear-gradient(
     0deg,
     rgba(0, 0, 0, 0.15),
@@ -2285,6 +2430,140 @@ main {
   transform: translateY(1px) scale(0.995);
 }
 
+@keyframes litt-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes litt-breathe {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1);
+  }
+  50% {
+    transform: translate3d(var(--litt-x, 0px), calc(var(--litt-y, 0px) - 4px), 0) scale(1.025);
+  }
+}
+
+@keyframes litt-working {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1) rotate(var(--litt-rot, 0deg));
+  }
+  50% {
+    transform: translate3d(calc(var(--litt-x, 0px) * 1.08), calc(var(--litt-y, 0px) - 6px), 0) scale(1.04) rotate(calc(var(--litt-rot, 0deg) + 0.8deg));
+  }
+}
+
+@keyframes litt-listening {
+  0%,
+  100% {
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1) rotate(var(--litt-rot, 0deg));
+  }
+  50% {
+    transform: translate3d(calc(var(--litt-x, 0px) * 0.7), calc(var(--litt-y, 0px) - 2px), 0) scale(1.015) rotate(calc(var(--litt-rot, 0deg) - 0.4deg));
+  }
+}
+
+@keyframes litt-blink {
+  0%,
+  86%,
+  100% {
+    opacity: 0;
+    transform: scaleY(0.15);
+  }
+  88% {
+    opacity: 0.85;
+    transform: scaleY(1);
+  }
+  90% {
+    opacity: 0;
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes litt-grid-drift {
+  from {
+    background-position: 0 0, 0 0, 0 0;
+  }
+  to {
+    background-position: 96px 96px, -64px -64px, 0 0;
+  }
+}
+
+@keyframes litt-pulse-ring {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translate3d(var(--litt-x, 0px), var(--litt-y, 0px), 0) scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: translate3d(var(--litt-x, 0px), calc(var(--litt-y, 0px) - 2px), 0) scale(1.08);
+  }
+}
+
+.animate-fadeInUp {
+  animation: litt-fade-in-up 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.litt-presence-shell {
+  position: relative;
+  isolation: isolate;
+  will-change: transform;
+}
+
+.litt-presence-shell[data-state="idle"] .litt-presence-figure {
+  animation: litt-breathe 5.6s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="listening"] .litt-presence-figure {
+  animation: litt-listening 2s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="thinking"] .litt-presence-figure,
+.litt-presence-shell[data-state="working"] .litt-presence-figure,
+.litt-presence-shell[data-state="success"] .litt-presence-figure {
+  animation: litt-working 2.8s ease-in-out infinite;
+}
+
+.litt-presence-shell[data-state="error"] .litt-presence-figure {
+  animation: litt-working 1.6s ease-in-out infinite;
+}
+
+.litt-presence-shell .litt-presence-figure {
+  transform-origin: center bottom;
+}
+
+.litt-presence-shell .litt-eye-blink {
+  animation: litt-blink 6.4s infinite;
+  transform-origin: center;
+}
+
+.litt-presence-shell .litt-ambient-grid {
+  animation: litt-grid-drift 22s linear infinite;
+}
+
+.litt-presence-shell .litt-pulse-ring {
+  animation: litt-pulse-ring 4.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeInUp,
+  .litt-presence-shell .litt-presence-figure,
+  .litt-presence-shell .litt-eye-blink,
+  .litt-presence-shell .litt-ambient-grid,
+  .litt-presence-shell .litt-pulse-ring {
+    animation: none !important;
+  }
+}
+
 @media (max-width: 640px) {
   .studio-tool-surface {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
@@ -2409,12 +2688,15 @@ main {
 }
 
 /* ============================================================
-   SCANLINES EFFECT
+   SCANLINES EFFECT — scoped to retro/arcade surfaces only.
+   Never applied to the global body, Dashboard, Studio, or settings.
+   Use .retro-crt-surface on Retro Vault, Emulator, or terminal
+   components that explicitly opt into the CRT aesthetic.
    ============================================================ */
 
-[data-scanlines="true"] body::before {
+.retro-crt-surface::after {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   background: repeating-linear-gradient(
     0deg,
@@ -2424,18 +2706,19 @@ main {
     transparent 3px
   );
   pointer-events: none;
-  z-index: 9997;
+  z-index: 1;
   mix-blend-mode: multiply;
   opacity: 0.4;
 }
 
 /* ============================================================
-   PIXEL GRAIN EFFECT
+   PIXEL GRAIN EFFECT — scoped to retro surfaces only.
+   Never applied globally via body::before.
    ============================================================ */
 
-[data-pixel-grain="true"] body::before {
+.retro-crt-surface[data-pixel-grain="true"]::before {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   background-image:
     repeating-conic-gradient(
@@ -2445,7 +2728,7 @@ main {
     );
   background-size: 3px 3px;
   pointer-events: none;
-  z-index: 9996;
+  z-index: 0;
   opacity: 0.5;
 }
 

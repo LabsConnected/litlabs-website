@@ -1,12 +1,13 @@
 {
   "name": "litlabs-website",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "next dev --turbo",
     "dev:webpack": "next dev --webpack",
     "build": "next build",
+    "build:webpack": "next build --webpack",
     "prebuild": "node -e \"if(require('fs').existsSync('scripts/verify-emulatorjs-assets.mjs')){process.exitCode=require('child_process').spawnSync('node',['scripts/verify-emulatorjs-assets.mjs'],{stdio:'inherit'}).status}else{console.log('Skipping emulatorjs verify (scripts/ not deployed)')}\"",
     "sync:emulatorjs": "node scripts/sync-emulatorjs-assets.mjs",
     "verify:emulatorjs": "node scripts/verify-emulatorjs-assets.mjs",
@@ -14,7 +15,17 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:public": "playwright test --project=public-chromium",
+    "test:e2e:auth": "playwright test --project=authenticated-chromium",
+    "test:e2e:golden": "playwright test golden-journey.spec.ts --headed",
+    "test:e2e:production": "playwright test --grep=\"@production|@smoke\"",
+    "test:e2e:update-snapshots": "playwright test --update-snapshots",
+    "test:e2e:report": "playwright show-report",
     "type-check": "tsc --noEmit",
+    "type-check:tests": "tsc --noEmit --project tsconfig.test.json",
     "clean": "powershell -Command \"Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue\"",
     "clean:dist": "powershell -Command \"Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue\"",
     "rebuild": "pnpm clean && pnpm build",
@@ -25,7 +36,8 @@
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
     "daemon:dev": "tsx src/daemon.ts",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\" \"pnpm daemon:dev\"",
-    "diagnose:connections": "tsx scripts/diagnose-connections.ts"
+    "diagnose:connections": "tsx scripts/diagnose-connections.ts",
+    "audit:product-truth": "tsx scripts/audit-product-truth.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",
@@ -66,6 +78,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@clerk/testing": "^2.2.15",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",

@@ -16,6 +16,8 @@ export type WallpaperCategory =
 export type WallpaperEffect =
   | 'none' | 'constellation' | 'nebula' | 'waves' | 'minimal' | 'holo';
 
+export type WallpaperCollection = 'litt-original' | 'user' | 'ambient';
+
 export interface Wallpaper {
   id: WallpaperId;
   name: string;
@@ -23,6 +25,8 @@ export interface Wallpaper {
   category: WallpaperCategory;
   /** Additional categories for multi-category filtering. */
   categories?: WallpaperCategory[];
+  /** Collection grouping: premium artwork, user uploads, or ambient gradients. */
+  collection: WallpaperCollection;
   preview: string; // CSS for preview
   fullStyle: React.CSSProperties; // Full page styles
   requiresCustom?: boolean;
@@ -36,6 +40,14 @@ export interface Wallpaper {
   tags?: string[];
   /** Default effect to apply when this wallpaper is selected. */
   defaultEffect?: WallpaperEffect;
+  /** Gradient fallback shown if the image asset fails to load. */
+  gradientFallback: string;
+  /** Default fit mode for this wallpaper. */
+  defaultFit?: 'cover' | 'contain' | 'fill';
+  /** Default overlay darkness for this wallpaper (0-1). */
+  defaultOverlay?: number;
+  /** Default blur in px for this wallpaper. */
+  defaultBlur?: number;
 }
 
 /**
@@ -82,6 +94,7 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Violet auroras over a city of tomorrow',
     category: 'tech',
     categories: ['all', 'tech', 'space'],
+    collection: 'litt-original',
     preview: 'linear-gradient(180deg, transparent 35%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(115deg, rgba(2, 3, 14, .48), rgba(2, 3, 14, .16) 58%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp")',
@@ -94,6 +107,10 @@ export const WALLPAPERS: Wallpaper[] = [
     premium: true,
     tags: ['city', 'future', 'violet', 'cyberpunk', 'cinematic'],
     defaultEffect: 'constellation',
+    gradientFallback: 'linear-gradient(135deg, #1a0a2e 0%, #2d1b4e 50%, #0a0a1a 100%)',
+    defaultFit: 'cover',
+    defaultOverlay: 0.48,
+    defaultBlur: 0,
   },
   {
     id: 'liquid-signal',
@@ -101,6 +118,7 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Iridescent glass sculpted in deep space',
     category: 'abstract',
     categories: ['all', 'abstract', 'space'],
+    collection: 'litt-original',
     preview: 'linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, .35)), url("/wallpapers/liquid-signal.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(110deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .12) 62%, rgba(0, 0, 0, .32)), url("/wallpapers/liquid-signal.webp")',
@@ -112,6 +130,10 @@ export const WALLPAPERS: Wallpaper[] = [
     accent: '#ec4899',
     tags: ['glass', 'liquid', 'pink', 'cyan', 'premium'],
     defaultEffect: 'nebula',
+    gradientFallback: 'linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a0a1a 100%)',
+    defaultFit: 'cover',
+    defaultOverlay: 0.46,
+    defaultBlur: 0,
   },
   {
     id: 'biolume-canopy',
@@ -119,6 +141,7 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'A quiet world glowing beyond midnight',
     category: 'nature',
     categories: ['all', 'nature', 'tech'],
+    collection: 'litt-original',
     preview: 'linear-gradient(180deg, transparent 35%, rgba(1, 8, 20, .38)), url("/wallpapers/biolume-canopy.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(110deg, rgba(1, 7, 18, .48), rgba(1, 7, 18, .12) 58%, rgba(1, 7, 18, .4)), url("/wallpapers/biolume-canopy.webp")',
@@ -131,6 +154,10 @@ export const WALLPAPERS: Wallpaper[] = [
     premium: true,
     tags: ['forest', 'emerald', 'organic', 'circuit', 'mystical'],
     defaultEffect: 'minimal',
+    gradientFallback: 'linear-gradient(135deg, #0a1f0a 0%, #1a2f1a 50%, #0d1a0d 100%)',
+    defaultFit: 'cover',
+    defaultOverlay: 0.48,
+    defaultBlur: 0,
   },
   {
     id: 'default',
@@ -138,7 +165,9 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Clean dark base with subtle depth',
     category: 'minimal',
     preview: 'linear-gradient(180deg, #0a0a0f 0%, #111118 100%)',
-    fullStyle: { background: 'linear-gradient(180deg, #0a0a0f 0%, #111118 100%)' }
+    fullStyle: { background: 'linear-gradient(180deg, #0a0a0f 0%, #111118 100%)' },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(180deg, #0a0a0f 0%, #111118 100%)",
   },
   {
     id: 'gradient',
@@ -146,7 +175,9 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Flowing blue-purple gradient',
     category: 'abstract',
     preview: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)',
-    fullStyle: { background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)' }
+    fullStyle: { background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)' },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)",
   },
   {
     id: 'mesh',
@@ -154,7 +185,9 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Animated floating gradient orbs',
     category: 'tech',
     preview: 'radial-gradient(circle at 30% 70%, #818cf820, transparent), radial-gradient(circle at 70% 30%, #a78bfa20, transparent), #0a0a0f',
-    fullStyle: { backgroundColor: '#0a0a0f' } // Handled by AnimatedBackground component
+    fullStyle: { backgroundColor: '#0a0a0f' }, // Handled by AnimatedBackground component
+    collection: 'ambient',
+    gradientFallback: "radial-gradient(circle at 30% 70%, #818cf820, transparent), radial-gradient(circle at 70% 30%, #a78bfa20, transparent), #0a0a0f",
   },
   {
     id: 'dark',
@@ -162,7 +195,9 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Pure black for focus',
     category: 'minimal',
     preview: '#050505',
-    fullStyle: { backgroundColor: '#050505' }
+    fullStyle: { backgroundColor: '#050505' },
+    collection: 'ambient',
+    gradientFallback: "#050505",
   },
   {
     id: 'nebula',
@@ -177,7 +212,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 50% 50%, #3b82f420 0%, transparent 60%),
         linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 50%, #0f0f1a 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "radial-gradient(ellipse at 20% 30%, #9333ea30, transparent), radial-gradient(ellipse at 80% 70%, #ec489930, transparent), radial-gradient(ellipse at 50% 50%, #3b82f620, transparent), #0a0a0f",
   },
   {
     id: 'cyberpunk',
@@ -193,7 +230,9 @@ export const WALLPAPERS: Wallpaper[] = [
         linear-gradient(180deg, #1a0a1a 0%, #0d1a2e 50%, #0a0f1a 100%)
       `,
       backgroundSize: '100% 100%, 100% 100%, 100% 100%'
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "repeating-linear-gradient(0deg, transparent, transparent 40px, #ff00ff10 40px, #ff00ff10 41px), repeating-linear-gradient(90deg, transparent, transparent 40px, #00ffff10 40px, #00ffff10 41px), linear-gradient(180deg, #1a0a1a 0%, #0a1a2e 100%)",
   },
   {
     id: 'aurora',
@@ -208,7 +247,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 50% 50%, #10b98120 0%, transparent 60%),
         linear-gradient(180deg, #0a1f1a 0%, #0a2f3f 50%, #0a0f2f 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(180deg, #0a1f1a 0%, #0a2f3f 50%, #0a0f2f 100%)",
   },
   {
     id: 'matrix',
@@ -227,7 +268,9 @@ export const WALLPAPERS: Wallpaper[] = [
       `,
       backgroundSize: '100% 200%',
       animation: 'matrix-shift 8s ease-in-out infinite'
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(180deg, #001a00 0%, #000a00 100%)",
   },
   {
     id: 'sunset',
@@ -242,7 +285,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 80% 20%, #f472b640 0%, transparent 50%),
         linear-gradient(135deg, #2d1a12 0%, #4a2510 30%, #7c2d12 60%, #c2410c 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(135deg, #7c2d12 0%, #c2410c 50%, #fb923c 100%)",
   },
   {
     id: 'ocean',
@@ -256,7 +301,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 30% 100%, #3b82f620 0%, transparent 50%),
         linear-gradient(180deg, #0c1a3a 0%, #1e3a5f 40%, #0f172a 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(180deg, #0c1a3a 0%, #1e3a5f 50%, #0c1a3a 100%)",
   },
   {
     id: 'forest',
@@ -270,7 +317,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 20% 20%, #16a34a20 0%, transparent 50%),
         linear-gradient(180deg, #0a1f0a 0%, #1a2f1a 50%, #0d1a0d 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(180deg, #0a1f0a 0%, #1a2f1a 50%, #0a1f0a 100%)",
   },
   {
     id: 'cosmic',
@@ -290,7 +339,9 @@ export const WALLPAPERS: Wallpaper[] = [
         linear-gradient(180deg, #050510 0%, #0a0a1a 50%, #050510 100%)
       `,
       backgroundSize: '200px 200px, 200px 200px, 200px 200px, 200px 200px, 200px 200px, 200px 200px, 100% 100%'
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "radial-gradient(circle, white 1px, transparent 1px), #0a0a15",
   },
   {
     id: 'minimal',
@@ -298,7 +349,9 @@ export const WALLPAPERS: Wallpaper[] = [
     description: 'Ultra clean subtle gray',
     category: 'minimal',
     preview: '#fafafa',
-    fullStyle: { background: 'linear-gradient(180deg, #fafafa 0%, #f5f5f5 100%)' }
+    fullStyle: { background: 'linear-gradient(180deg, #fafafa 0%, #f5f5f5 100%)' },
+    collection: 'ambient',
+    gradientFallback: "#fafafa",
   },
   {
     id: 'glass',
@@ -312,7 +365,9 @@ export const WALLPAPERS: Wallpaper[] = [
         linear-gradient(225deg, rgba(167,139,250,0.15) 0%, rgba(129,140,248,0.15) 50%, rgba(251,191,36,0.1) 100%),
         #0a0a12
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(135deg, #ffffff10 0%, #ffffff05 100%), linear-gradient(225deg, #a78bfa20 0%, #818cf820 100%)",
   },
   {
     id: 'lava',
@@ -327,7 +382,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 50% 50%, #7f1d1d20 0%, transparent 60%),
         linear-gradient(180deg, #1a0a0a 0%, #2d1212 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "radial-gradient(ellipse at 50% 100%, #dc262630, transparent), linear-gradient(180deg, #1a0a0a 0%, #2d1212 100%)",
   },
   {
     id: 'crystal',
@@ -342,7 +399,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 50% 50%, #0891b220 0%, transparent 60%),
         linear-gradient(135deg, #0c1f2d 0%, #0a2f3f 50%, #0c1f2d 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "linear-gradient(135deg, #0c1f2d 0%, #0a2f3f 50%, #0c1f2d 100%)",
   },
   {
     id: 'tokyo',
@@ -357,7 +416,9 @@ export const WALLPAPERS: Wallpaper[] = [
         repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(236,72,153,0.06) 60px, rgba(236,72,153,0.06) 61px),
         linear-gradient(180deg, #1a0a2e 0%, #120522 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "repeating-linear-gradient(90deg, #1a0a2e, #1a0a2e 20px, #2d1b4e 20px, #2d1b4e 21px), #1a0a2e",
   },
   {
     id: 'solar',
@@ -372,7 +433,9 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 60% 40%, #f59e0b30 0%, transparent 50%),
         linear-gradient(135deg, #2a1a0a 0%, #3d1f0a 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "radial-gradient(circle at 50% 50%, #fbbf2420, transparent), linear-gradient(135deg, #2a1a0a 0%, #3d1f0a 100%)",
   },
   {
     id: 'honeycomb',
@@ -388,16 +451,20 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 80% 20%, #d9770612 0%, transparent 50%),
         linear-gradient(180deg, #0d0a05 0%, #1a1510 100%)
       `
-    }
+    },
+    collection: 'ambient',
+    gradientFallback: "repeating-conic-gradient(from 30deg at 50% 50%, #f59e0b10 0deg 60deg, transparent 60deg 120deg), #0d0a05",
   },
   {
     id: 'custom',
     name: 'Custom',
     description: 'Upload your own image',
     category: 'minimal',
+    collection: 'user',
     preview: 'repeating-linear-gradient(45deg, #333, #333 10px, #444 10px, #444 20px)',
     fullStyle: {},
-    requiresCustom: true
+    requiresCustom: true,
+    gradientFallback: 'linear-gradient(180deg, #0a0a0f 0%, #111118 100%)',
   }
 ];
 
@@ -412,3 +479,27 @@ export const getWallpapersByCategory = (category: WallpaperCategory) => {
     (w.category === category || (w.categories?.includes(category) ?? false))
   );
 };
+
+/**
+ * Returns wallpapers grouped by collection for the hierarchical wallpaper UI.
+ * - LiTT Originals: premium artwork with real image assets
+ * - Ambient: CSS gradients and patterns (collapsed by default)
+ * - User: custom uploads (managed separately)
+ */
+export function getWallpapersByCollection(collection: WallpaperCollection): Wallpaper[] {
+  return WALLPAPERS.filter(w => w.collection === collection && w.id !== 'custom');
+}
+
+/**
+ * Returns the LiTT Originals collection — premium wallpapers with real assets.
+ */
+export function getLittOriginals(): Wallpaper[] {
+  return getWallpapersByCollection('litt-original');
+}
+
+/**
+ * Returns the ambient/minimal collection — CSS gradients and patterns.
+ */
+export function getAmbientWallpapers(): Wallpaper[] {
+  return getWallpapersByCollection('ambient');
+}

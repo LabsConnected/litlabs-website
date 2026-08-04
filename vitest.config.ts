@@ -21,12 +21,16 @@ export default defineConfig({
     exclude: [
       "node_modules",
       ".next",
+      ".worktrees",
       "OmniRoute",
       "litlabs",
       "litlabs-website",
       "work",
       "Zoo-Code",
       "meta",
+      "test-results",
+      "playwright-report",
+      "coverage",
     ],
   },
 });

@@ -33,9 +33,9 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 500,
     activeProjectLimit: 1,
     features: [
+      "LiTT & Spark",
       "1 active project",
-      "500 monthly LiTTBits",
-      "LiTT and Spark",
+      "500 starter LiTTBits (one-time)",
       "Free AI routing",
       "Basic code generation",
       "Basic image generation",
@@ -49,7 +49,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   creator_beta: {
     id: "creator_beta",
     name: "Creator Beta",
-    description: "Individual builders and creators",
+    description: "Research, write, and market with LiTT and Spark",
     billingType: "subscription",
     monthlyPriceCents: 700,
     standardPriceCents: 1500,
@@ -57,16 +57,16 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 6000,
     activeProjectLimit: 5,
     features: [
+      "LiTT & Spark",
+      "Research, writing & marketing skills",
       "5 active projects",
-      "6,000 monthly LiTTBits",
+      "6,000 LiTTBits per billing cycle",
       "Private projects",
       "GitHub connection",
       "Project downloads",
       "Images and audio",
       "Voice mode",
-      "Longer memory",
       "Basic deployment",
-      "Premium themes and wallpapers",
     ],
     beta: true,
     enabled: true,
@@ -74,7 +74,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   pro_builder_beta: {
     id: "pro_builder_beta",
     name: "Pro Builder Beta",
-    description: "Heavy code, media, terminal, deployment",
+    description: "Build, debug, and analyze with LiTT and Spark",
     billingType: "subscription",
     monthlyPriceCents: 1900,
     standardPriceCents: 3900,
@@ -82,17 +82,18 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 20000,
     activeProjectLimit: 25,
     features: [
+      "LiTT & Spark",
+      "Coding & analytics skills",
+      "Everything in Creator Beta",
       "25 active projects",
-      "20,000 monthly LiTTBits",
+      "20,000 LiTTBits per billing cycle",
       "Terminal runtime",
       "Advanced coding models",
       "Diff and approval",
       "Vercel deployment",
       "Supabase integration",
       "Larger uploads",
-      "Longer autonomous Missions",
       "Priority generation",
-      "Usage controls",
     ],
     beta: true,
     enabled: true,
@@ -100,32 +101,49 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   founder: {
     id: "founder",
     name: "Founding Member",
-    description: "Early supporters with permanent benefits",
+    description: "Permanent Creator-level access — $149 one-time",
     billingType: "one_time",
     monthlyPriceCents: 14900,
     standardPriceCents: null,
     stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
-    monthlyCredits: 6000,
+    monthlyCredits: 0,
     activeProjectLimit: 5,
     features: [
-      "Permanent Creator-level account",
+      "Permanent Creator-level access",
       "Founder badge",
-      "Early feature access",
-      "20% off future usage packs",
-      "Higher beta limits",
-      "Priority feedback channel",
-      "Price protection",
     ],
     beta: true,
-    enabled: true,
-    founderLimit: 250,
+    enabled: false,
+    founderLimit: 100,
   },
 };
 
 export const PLAN_LIST = Object.values(PLANS);
 
+/**
+ * Plan rank — higher = more access. Used by the agent entitlement resolver
+ * to determine whether a user's active plan covers a specialist agent's
+ * minimumPlan requirement. Founding Member grants permanent Creator-level
+ * access, so it ranks equal to creator_beta.
+ */
+export const PLAN_RANK: Record<PlanId, number> = {
+  starter: 0,
+  creator_beta: 1,
+  founder: 1,
+  pro_builder_beta: 2,
+};
+
 export function getPlanById(id: string): PlanDefinition | null {
   return PLANS[id as PlanId] ?? null;
+}
+
+/**
+ * Returns true if `userPlan` satisfies the `requiredPlan` threshold.
+ * Founding Member counts as Creator-level (rank 1) — it does NOT unlock
+ * Pro-only agents (Coder, Analyst). Pro Builder unlocks everything.
+ */
+export function hasPlanAccess(userPlan: PlanId, requiredPlan: PlanId): boolean {
+  return PLAN_RANK[userPlan] >= PLAN_RANK[requiredPlan];
 }
 
 export function getStripePriceId(plan: PlanDefinition): string | null {

@@ -12,7 +12,7 @@ export type SelectedModel = {
   icon: string;
   apiModel?: string;
   apiProvider?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 };
 
 export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
@@ -33,7 +33,7 @@ export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
 
 export const RECOMMENDED_IDS = CHAT_MODELS.filter((m) => m.recommended).map((m) => m.id);
 
-const DEFAULT_MODEL = MODELS[0];
+const DEFAULT_MODEL = MODELS.find((m) => m.id === "litt-balanced") ?? MODELS[0];
 
 function getInitialModel(): SelectedModel {
   if (typeof window === "undefined") return DEFAULT_MODEL;
@@ -79,12 +79,17 @@ export const useStudioModelStore = create<StudioModelStore>((set) => ({
   providerHealth: {},
   fallbackNotice: null,
 
-  selectModel: (model) =>
-    set({
-      selectedModel: "apiModel" in model && "label" in model
-        ? model as SelectedModel
-        : toSelectedModel(model as StudioModel),
-    }),
+  selectModel: (model) => {
+    const selectedModel = "apiModel" in model && "label" in model
+      ? model as SelectedModel
+      : toSelectedModel(model as StudioModel);
+    try {
+      localStorage.setItem("litt-selected-model-v2", selectedModel.id);
+    } catch {
+      // Storage may be unavailable in private or restricted browser contexts.
+    }
+    set({ selectedModel });
+  },
 
   setFallbackNotice: (fallbackNotice) => set({ fallbackNotice }),
   setProviderHealth: (provider, health) =>

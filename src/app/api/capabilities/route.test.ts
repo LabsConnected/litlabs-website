@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
-// Mock auth
+// Mock auth — accepts a request arg but ignores it
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn(() => Promise.resolve({ userId: "user-123" })),
 }));
@@ -47,11 +48,12 @@ describe("/api/capabilities route", () => {
       repositoryOwner: "litlabs",
       repositoryName: "litlabs-website",
       defaultBranch: "main",
+      activeBranch: "main",
       workspaceStatus: "ready",
     });
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new NextRequest("http://localhost:3000/api/capabilities"));
     const data = await response.json();
 
     const repoCap = data.capabilities.find(
@@ -75,11 +77,12 @@ describe("/api/capabilities route", () => {
       repositoryOwner: "litlabs",
       repositoryName: "litlabs-website",
       defaultBranch: "main",
+      activeBranch: "main",
       workspaceStatus: "ready",
     });
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new NextRequest("http://localhost:3000/api/capabilities"));
     const data = await response.json();
 
     const projectCap = data.capabilities.find(
@@ -100,11 +103,12 @@ describe("/api/capabilities route", () => {
       repositoryOwner: null,
       repositoryName: null,
       defaultBranch: null,
+      activeBranch: null,
       workspaceStatus: "not_prepared",
     });
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new NextRequest("http://localhost:3000/api/capabilities"));
     const data = await response.json();
 
     const repoCap = data.capabilities.find(
@@ -122,7 +126,7 @@ describe("/api/capabilities route", () => {
     vi.mocked(resolveCurrentProject).mockResolvedValue(null);
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new NextRequest("http://localhost:3000/api/capabilities"));
     const data = await response.json();
 
     const ids = data.capabilities.map((c: { id: string }) => c.id);

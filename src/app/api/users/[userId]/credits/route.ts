@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getUserWallet } from "@/lib/user-db";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
@@ -30,7 +30,7 @@ export async function POST(
   }
 
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     const canMutate = await canMutateBalances(req);
     if (!canMutate) {
       return NextResponse.json(
@@ -138,7 +138,7 @@ export async function GET(
   }
 
   try {
-    const { userId: clerkId } = await auth();
+    const { userId: clerkId } = await auth(req);
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

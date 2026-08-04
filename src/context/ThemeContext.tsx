@@ -675,30 +675,7 @@ function mixMuted(hex: string): string {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return defaultTheme;
-    const stored = localStorage.getItem("litlabs-theme");
-    if (stored) {
-      try {
-        const saved = JSON.parse(stored) as Theme;
-        // Move the former factory-default look to the cinematic studio system
-        // without changing themes that a member intentionally customized.
-        if (
-          saved.mode === "dark" &&
-          saved.skin === "volcanic" &&
-          saved.accent === "sunset-orange" &&
-          saved.backgroundMode === "constellation" &&
-          !saved.customColors
-        ) {
-          return defaultTheme;
-        }
-        return saved;
-      } catch {
-        /* ignore */
-      }
-    }
-    return defaultTheme;
-  });
+  const [theme, setTheme] = useState<Theme>(defaultTheme);
   const getResolvedColors = (t: Theme) => {
     // Get base skin based on mode
     const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
@@ -750,6 +727,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const id = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(id);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      const stored = localStorage.getItem("litlabs-theme");
+      if (!stored) return;
+      const saved = JSON.parse(stored) as Theme;
+      // Move the former factory-default look to the cinematic studio system
+      // without changing themes that a member intentionally customized.
+      if (
+        saved.mode === "dark" &&
+        saved.skin === "volcanic" &&
+        saved.accent === "sunset-orange" &&
+        saved.backgroundMode === "constellation" &&
+        !saved.customColors
+      ) {
+        setTheme(defaultTheme);
+        return;
+      }
+      setTheme(saved);
+    } catch {
+      /* ignore */
+    }
+  }, [mounted]);
 
   // Save to localStorage on change
   useEffect(() => {
@@ -872,9 +873,9 @@ export { darkSkins, lightSkins, accentOverrides };
 /* ------------------------------------------------------------------ */
 export function useCrtToggle() {
   const [crtEnabled, setCrtEnabled] = useState(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     const val = localStorage.getItem("crt_global_scanlines");
-    return val === null ? true : val === "true";
+    return val === null ? false : val === "true";
   });
   const [hydrated, setHydrated] = useState(false);
 
@@ -892,5 +893,5 @@ export function useCrtToggle() {
     [crtEnabled],
   );
 
-  return { crtEnabled: hydrated ? crtEnabled : true, toggleCrt };
+  return { crtEnabled: hydrated ? crtEnabled : false, toggleCrt };
 }

@@ -23,7 +23,7 @@ describe("useStudioModelStore", () => {
     const { useStudioModelStore } = await import("./useStudioModelStore");
     const state = useStudioModelStore.getState();
     expect(state.selectedModel).toBeDefined();
-    expect(state.selectedModel.id).toBe("auto");
+    expect(state.selectedModel.id).toBe("litt-balanced");
   });
 
   it("restores selected model from localStorage", async () => {
@@ -38,7 +38,7 @@ describe("useStudioModelStore", () => {
     localStorageMock.setItem("litt-selected-model-v2", "nonexistent-model");
     const { useStudioModelStore } = await import("./useStudioModelStore");
     const state = useStudioModelStore.getState();
-    expect(state.selectedModel.id).toBe("auto");
+    expect(state.selectedModel.id).toBe("litt-balanced");
   });
 
   it("selectModel updates the store", async () => {
@@ -64,5 +64,6 @@ describe("useStudioModelStore", () => {
     expect(categories.has("creative")).toBe(true);
     expect(categories.has("vision")).toBe(true);
     expect(categories.has("byok")).toBe(true);
+    expect(categories.has("litt-alias")).toBe(true);
   });
 });

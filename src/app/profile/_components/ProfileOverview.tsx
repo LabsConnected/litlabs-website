@@ -531,9 +531,8 @@ export function ProfileOverview({
                   maxWidth: "480px",
                 }}
               >
-                A full-stack AI operating system for creators. Build agents,
-                generate content, manage projects, and deploy — all in one
-                platform.
+                An AI creative operating system and social creator platform for
+                turning ideas into real, editable, publishable work.
               </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>

@@ -41,7 +41,7 @@ const STATUS_LABELS: Record<CameraStatus, string> = {
   idle: "Camera off",
   requesting_permission: "Requesting permission…",
   starting: "Starting camera…",
-  live: "Camera live",
+  live: "Camera preview active",
   paused: "Camera paused",
   capturing: "Capturing…",
   analyzing: "Analyzing…",
@@ -56,7 +56,7 @@ export default function CameraSession({
   onSnapshot,
   onCaptureReady,
   onClose,
-  modelName = "Gemini 2.5 Flash Vision",
+  modelName = "Local preview only",
   compact = false,
   visionOnSend = false,
 }: CameraSessionProps) {
@@ -247,7 +247,7 @@ export default function CameraSession({
           <Camera size={14} /> Start camera
         </button>
         <p className="text-[9px] text-slate-500">
-          Camera access requires explicit permission and runs locally in your browser.
+          Local preview only — not connected to LiTT. Use the LiTT Live button for real-time voice + vision.
         </p>
       </div>
     );

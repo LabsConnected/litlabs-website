@@ -10,7 +10,7 @@ import {
   Palette,
   Bot,
   Rocket,
-  Sparkles,
+  Sprout,
   Terminal,
   Hammer,
   Network,
@@ -30,9 +30,7 @@ import {
   Mic,
   Cpu,
   Shield,
-  Coins,
-  Gamepad2,
-  ExternalLink,
+  Sparkles,
   Layout,
   Repeat,
 } from "lucide-react";
@@ -44,6 +42,7 @@ export type StudioTool =
   | "image"
   | "video"
   | "audio"
+  | "music"
   | "build"
   | "code"
   | "agents"
@@ -55,7 +54,6 @@ export type StudioTool =
   | "workflows"
   | "space"
   | "clibridge"
-  | "color"
   | "loops";
 
 type ToolItem = {
@@ -74,7 +72,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
-  { id: "agents", label: "LiTT & Spark", icon: Bot, shortcut: "5" },
+  { id: "agents", label: "AI Team", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
   { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },
@@ -84,7 +82,6 @@ const PRIMARY_TOOLS: ToolItem[] = [
 /* ── Secondary tools (in More Tools drawer) ──────────────────────── */
 const MORE_TOOLS: ToolItem[] = [
   { id: "screen", label: "Screen", icon: MonitorUp, shortcut: "S" },
-  { id: "color", label: "Color", icon: Palette, shortcut: "4" },
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
   { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
@@ -189,7 +186,7 @@ export default function StudioSidebar({
             aria-label="Studio home"
             title="Studio home"
           >
-            <Sparkles size={18} className="pointer-events-none" />
+            <Sprout size={18} className="pointer-events-none" />
           </button>
         </div>
 
@@ -308,20 +305,6 @@ export default function StudioSidebar({
               className="my-1 h-px"
               style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
             />
-
-            {/* Games — external link to /games */}
-            <Link
-              href="/games"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setMoreOpen(false)}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all hover:bg-white/5"
-              style={{ color: "rgba(255,255,255,0.6)" }}
-            >
-              <Gamepad2 size={18} strokeWidth={1.7} className="pointer-events-none" />
-              <span className="text-xs font-bold">Games</span>
-              <ExternalLink size={11} className="ml-auto opacity-40 pointer-events-none" />
-            </Link>
           </div>
         </div>
       )}
@@ -350,7 +333,7 @@ const SYSTEM_ENTRIES: SheetEntry[] = [
   { label: "Voice & Camera", icon: Mic, href: "/settings/agents/voice" },
   { label: "AI & Models", icon: Cpu, href: "/settings" },
   { label: "Privacy & Security", icon: Shield, href: "/settings" },
-  { label: "Billing & LiTTBits", icon: Coins, href: "/settings" },
+  { label: "Billing & LiTTBits", icon: Sparkles, href: "/settings" },
 ];
 
 /* ── Mobile bottom tab bar ───────────────────────────────────────── */

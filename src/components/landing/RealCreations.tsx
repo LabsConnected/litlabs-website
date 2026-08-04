@@ -96,7 +96,7 @@ export function RealCreations() {
               </div>
 
               {/* Demo label */}
-              <div className="mt-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
+              <div className="mt-4 text-[10px] font-bold uppercase tracking-wider text-white/50">
                 Product demonstration
               </div>
 

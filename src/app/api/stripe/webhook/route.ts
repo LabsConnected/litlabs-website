@@ -29,9 +29,9 @@ async function markEventProcessed(
   });
 }
 
-async function creditCoinPack(
+async function creditCreditPack(
   clerkId: string,
-  coinAmount: number,
+  creditAmount: number,
   sessionId: string,
 ) {
   if (!isAdminSupabaseConfigured()) {
@@ -51,19 +51,19 @@ async function creditCoinPack(
     // the non-atomic read-then-write on wallets was a race condition.
     const { error } = await sb.rpc("grant_credits", {
       p_user_id: user.id,
-      p_amount: coinAmount,
+      p_amount: creditAmount,
       p_category: "purchase",
       p_balance_bucket: "purchased",
-      p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-      p_idempotency_key: `coinpack_${sessionId}`,
+      p_description: `Purchased ${creditAmount} LiTTBits via Stripe`,
+      p_idempotency_key: `creditpack_${sessionId}`,
       p_reference_type: "stripe_checkout",
       p_reference_id: sessionId,
     });
     if (error) {
-      console.error(`[stripe] credit_ledger grant failed for coinpack ${sessionId}: ${error.message}`);
+      console.error(`[stripe] credit_ledger grant failed for creditpack ${sessionId}: ${error.message}`);
     }
   } catch (err) {
-    console.error(`[stripe] creditCoinPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    console.error(`[stripe] creditCreditPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -171,16 +171,69 @@ export async function POST(req: NextRequest) {
           if (rpcError) {
             throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
           }
+
+          // ── Auto-provision the private agent instance ──
+          // After creating the entitlement, create or activate the
+          // user_agents row so the buyer can immediately open the agent
+          // in Studio. This is idempotent — if the instance already
+          // exists (e.g., from a previous install), it's reactivated.
+          const { data: agentUser } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", clerkId)
+            .maybeSingle();
+
+          if (agentUser) {
+            // Check if an instance already exists for this user + agent.
+            const { data: existingInstance } = await sb
+              .from("user_agents")
+              .select("id")
+              .eq("user_id", agentUser.id)
+              .eq("agent_id", agentId)
+              .maybeSingle();
+
+            if (existingInstance) {
+              // Reactivate the existing instance and update the version.
+              await sb
+                .from("user_agents")
+                .update({
+                  is_active: true,
+                  status: "active",
+                  agent_version_id: agentVersionId,
+                  last_active_at: new Date().toISOString(),
+                })
+                .eq("id", existingInstance.id);
+            } else {
+              // Create a new private agent instance.
+              const { data: agentTemplate } = await sb
+                .from("agents")
+                .select("display_name")
+                .eq("id", agentId)
+                .maybeSingle();
+
+              await sb.from("user_agents").insert({
+                user_id: agentUser.id,
+                agent_id: agentId,
+                agent_version_id: agentVersionId,
+                name: agentTemplate?.display_name || "Agent",
+                is_active: true,
+                status: "active",
+                approval_mode: "supervised",
+                enabled_tools: [],
+              });
+            }
+          }
+
           break;
         }
 
-        // ── Coin pack / plan fulfillment (existing logic) ──
+        // ── Credit pack / plan fulfillment (existing logic) ──
         const coinAmount = parseInt(meta.coin_amount || "0", 10);
         const planId = meta.plan_id as PlanId | undefined;
         if (coinAmount > 0 && clerkId) {
-          await creditCoinPack(clerkId, coinAmount, session.id);
+          await creditCreditPack(clerkId, coinAmount, session.id);
         }
-        // If this was a one-time founder purchase, grant credits
+        // If this was a one-time Founding Member purchase, grant permanent entitlement
         if (planId && clerkId && sb) {
           const plan = PLANS[planId];
           if (plan && plan.billingType === "one_time") {
@@ -190,8 +243,9 @@ export async function POST(req: NextRequest) {
               .eq("clerk_id", clerkId)
               .single();
             if (user) {
-              await grantSubscriptionCredits(sb, user.id, planId, `founder_${session.id}`);
-              // Record as a permanent subscription
+              // Founding Member: permanent Creator-level access, no monthly credits.
+              // Do NOT call grantSubscriptionCredits — Founder has monthlyCredits: 0.
+              // Record as a permanent entitlement (not a time-limited subscription).
               await sb.from("subscriptions").upsert({
                 user_id: user.id,
                 stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
@@ -395,7 +449,7 @@ export async function POST(req: NextRequest) {
           if (agentOrder) {
             // Found a matching marketplace order — process as agent refund.
             // The RPC is idempotent (claims the Stripe event atomically).
-            // It does NOT debit LBC — agent purchases are not coin packs.
+            // It does NOT debit LBC — agent purchases are not credit packs.
             const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
               p_stripe_event_id: event.id,
               p_stripe_event_type: event.type,
@@ -423,9 +477,55 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // ── Coin pack / plan refund: debit LBC ──
-        // Only debit LBC for coin_pack or plan refunds — never for agents.
-        if (refundClerkId) {
+        // ── Plan / Founder refund: revoke entitlement ──
+        // For plan refunds (including Founder), revoke the subscription
+        // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
+        // has 0 LiTTBits. For subscription plans, the credits were already
+        // consumed; revoking access is the correct action.
+        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
+        if (refundPlanId && refundClerkId) {
+          const plan = PLANS[refundPlanId];
+          if (plan) {
+            const { data: refundUser } = await sb
+              .from("users")
+              .select("id")
+              .eq("clerk_id", refundClerkId)
+              .single();
+            if (refundUser) {
+              // Revoke the subscription/entitlement
+              await sb
+                .from("subscriptions")
+                .update({
+                  status: "refunded",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", refundUser.id)
+                .eq("plan", refundPlanId);
+
+              // For one_time plans (Founder), do NOT debit LiTTBits —
+              // Founder has 0 LiTTBits. For subscription plans, debit
+              // the refunded amount from purchased balance.
+              if (plan.billingType === "subscription") {
+                try {
+                  await sb.rpc("debit_credits", {
+                    p_user_id: refundUser.id,
+                    p_amount: charge.amount_refunded / 100,
+                    p_category: "refund",
+                    p_description: `Refund for charge ${charge.id}`,
+                    p_idempotency_key: `refund_${charge.id}`,
+                  });
+                } catch {
+                  // Ledger not available — skip
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        // ── Credit pack refund: debit LBC ──
+        // Only debit LBC for credit_pack refunds — never for agents or plans.
+        if (refundProductType === "credit_pack" && refundClerkId) {
           const { data: refundUser } = await sb
             .from("users")
             .select("id")

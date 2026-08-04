@@ -11,6 +11,7 @@ const speakText = vi.fn();
 vi.mock("@/app/studio/context/VoiceSessionContext", () => ({
   useVoiceSession: () => ({
     voiceState: "idle",
+    voiceOutputState: "idle",
     isMuted: false,
     startVoice,
     stopVoice,
@@ -18,6 +19,17 @@ vi.mock("@/app/studio/context/VoiceSessionContext", () => ({
     toggleMute,
     setOnTurn: vi.fn(),
     speakText,
+    stopSpeaking: vi.fn(),
+    ttsEnabled: false,
+    toggleTts: vi.fn(),
+    autoSendEnabled: false,
+    toggleAutoSend: vi.fn(),
+    cancelRecording: vi.fn(),
+    micLevel: 0,
+    transcript: "",
+    recordingSeconds: 0,
+    errorMessage: null,
+    setOnTranscriptComplete: vi.fn(),
   }),
   VoiceSessionProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -57,21 +69,22 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(onSend).toHaveBeenCalledWith("Hello LiTT", undefined);
   });
 
-  it("busy state prevents duplicate submit", async () => {
+  it("busy state exposes cancellation instead of submitting again", async () => {
     const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "response" });
+    const onCancel = vi.fn();
     render(
       <CommandComposer
         value="Hello"
         onChange={vi.fn()}
         onSend={onSend}
+        onCancel={onCancel}
         busy={true}
       />,
     );
-    const sendBtn = screen.getByRole("button", { name: /send message/i });
-    fireEvent.click(sendBtn);
-    // Wait a tick to ensure no async call happens
+    fireEvent.click(screen.getByRole("button", { name: /cancel response/i }));
     await new Promise((r) => setTimeout(r, 50));
     expect(onSend).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it("clears text after successful submission", async () => {
@@ -178,7 +191,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(textareas).toHaveLength(1);
   });
 
-  it("does not render a mode dropdown (only Auto label)", () => {
+  it("shows the active model picker without an execution-mode dropdown", () => {
     const onSend = vi.fn();
     render(
       <CommandComposer
@@ -188,26 +201,50 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
         busy={false}
       />,
     );
-    // The mode selector should be a static span, not a button
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    // "Auto" text should be visible
-    expect(screen.getByText("Auto")).toBeTruthy();
+    // Model picker is a button with aria-label "Select AI model"
+    expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
   });
 
-  it("camera button toggles camera", () => {
-    const onToggleCamera = vi.fn();
+  it("keeps LiTT and Spark visible and switches through the canonical callback", () => {
+    const onAgentChange = vi.fn();
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        onAgentChange={onAgentChange}
+        busy={false}
+      />,
+    );
+
+    // Open the agent popover
+    const agentBtn = screen.getByRole("button", { name: /select agent/i });
+    fireEvent.click(agentBtn);
+
+    // Agent popover renders buttons with agent names
+    // Use a regex that matches the agent button text but not the
+    // "Start LiTT Live" button (which has "LiTT Live" in its aria-label)
+    const littBtn = screen.getByRole("button", { name: /LiTT.*Engineer/i });
+    const sparkBtn = screen.getByRole("button", { name: /Spark.*Companion/i });
+    expect(littBtn).toBeTruthy();
+    expect(sparkBtn).toBeTruthy();
+    fireEvent.click(sparkBtn);
+    expect(onAgentChange).toHaveBeenCalledWith("spark");
+  });
+
+  it("camera button opens camera preview popover", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
         busy={false}
-        onToggleCamera={onToggleCamera}
-        cameraActive={false}
       />,
     );
-    const camBtn = screen.getByRole("button", { name: /camera/i });
+    const camBtn = screen.getByRole("button", { name: /open camera preview/i });
     fireEvent.click(camBtn);
-    expect(onToggleCamera).toHaveBeenCalledTimes(1);
+    // Camera preview popover should appear
+    expect(screen.getByTestId("camera-preview")).toBeTruthy();
   });
 });

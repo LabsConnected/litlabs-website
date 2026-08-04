@@ -68,6 +68,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (data.error?.includes("already claimed")) setClaimed(true);
+        if (data.disabled) setClaimed(true); // Daily bonus disabled
         return false;
       }
       setBalance(typeof data.balance === "number" ? data.balance : balance);

@@ -7,10 +7,10 @@ import { useTheme } from "@/context/ThemeContext";
 import { ShoppingBag, Zap, ArrowRight, ShieldCheck } from "lucide-react";
 
 const TIER_PACKAGES = [
-  { id: "free", coins: 100, price: "$0", priceId: "", label: "Free", tier: "free", popular: false, color: "#6b7280" },
-  { id: "starter", coins: 500, price: "$5", priceId: "price_1TogVaJ53kgx4fp5pclmzUZv", label: "Starter", tier: "starter", popular: true, color: "#00f0ff" },
-  { id: "pro", coins: 1500, price: "$19.99", priceId: "price_1TogZdJ53kgx4fp56g6bewkx", label: "Pro", tier: "pro", popular: false, color: "#8b5cf6" },
-  { id: "elite", coins: 5000, price: "$50", priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8", label: "Elite", tier: "elite", popular: false, color: "#fbbf24" },
+  { id: "free", littbits: 100, price: "$0", label: "Free", tier: "free", popular: false, color: "#6b7280" },
+  { id: "starter", littbits: 500, price: "$5", label: "Starter", tier: "starter", popular: true, color: "#00f0ff" },
+  { id: "pro", littbits: 1500, price: "$19.99", label: "Pro", tier: "pro", popular: false, color: "#8b5cf6" },
+  { id: "elite", littbits: 5000, price: "$50", label: "Elite", tier: "elite", popular: false, color: "#fbbf24" },
 ];
 
 const CATEGORIES = [
@@ -158,10 +158,10 @@ export default function MarketplacePreview() {
                 {tier.label}
               </div>
               <div className="text-lg font-black" style={{ color: tier.color }}>
-                {tier.coins.toLocaleString()}
+                {tier.littbits.toLocaleString()}
               </div>
               <div className="text-[10px] font-bold" style={{ color: T.textMuted }}>
-                LiTTs
+                LiTTBits
               </div>
               <div className="text-xs font-black mt-1" style={{ color: T.textColor }}>
                 {tier.price}

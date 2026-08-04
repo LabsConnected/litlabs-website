@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -10,7 +10,7 @@ import GitHubProjectConnection from "../components/GitHubProjectConnection";
 export default function GitHubSetupPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
   const { tokens } = useTheme();
   const [status, setStatus] = useState<"loading" | "ready" | "connected" | "unconfigured" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +18,14 @@ export default function GitHubSetupPage() {
 
   const installedId = searchParams.get("installed");
   const errorParam = searchParams.get("error");
+
+  // Build auth headers with a Clerk Bearer token — same pattern as
+  // GitHubProjectConnection and the Studio chat. Cookies alone may not
+  // reach the API route, causing 401 "Unauthorized".
+  const authHeaders = useCallback(async (): Promise<HeadersInit> => {
+    const token = await getToken?.();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [getToken]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -30,8 +38,12 @@ export default function GitHubSetupPage() {
       setError(errorParam.replace(/_/g, " "));
     }
 
-    fetch("/api/github/installations")
-      .then(async (res) => {
+    (async () => {
+      try {
+        const res = await fetch("/api/github/installations", {
+          credentials: "include",
+          headers: await authHeaders(),
+        });
         if (res.status === 503) {
           setStatus("unconfigured");
           return;
@@ -50,12 +62,12 @@ export default function GitHubSetupPage() {
         } else {
           setStatus("ready");
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         setStatus("error");
         setError(err instanceof Error ? err.message : "Unknown error");
-      });
-  }, [isLoaded, isSignedIn, router, errorParam]);
+      }
+    })();
+  }, [isLoaded, isSignedIn, router, errorParam, authHeaders]);
 
   const startInstall = () => {
     window.location.href = "/api/github/install";

@@ -7,7 +7,6 @@ import {
   Image as ImageIcon,
   Film,
   Music,
-  Palette,
   Bot,
   Send,
   Sparkles,
@@ -82,7 +81,6 @@ export default function StudioCommandDock({
     { id: "image", label: "Image", icon: ImageIcon, tool: "image" },
     { id: "video", label: "Video", icon: Film, tool: "video" },
     { id: "audio", label: "Audio", icon: Music, tool: "audio" },
-    { id: "color", label: "Color", icon: Palette, tool: "color" },
     { id: "agents", label: "Agent", icon: Bot, tool: "agents" },
     { id: "terminal", label: "Term", icon: TerminalSquare, tool: "terminal" },
   ];

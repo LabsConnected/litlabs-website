@@ -2,7 +2,7 @@
 // Streams real-time stats and events to admin dashboard
 
 import { NextRequest } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import type { TelemetryData } from "@/components/TelemetryPanel";
 import type { AdminEvent } from "@/components/EventStream";
@@ -85,7 +85,7 @@ async function fetchRealEvents(): Promise<AdminEvent[]> {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
+  const { userId } = await auth(req);
 
   if (!userId || userId !== ADMIN_USER_ID) {
     return new Response("Unauthorized", { status: 401 });

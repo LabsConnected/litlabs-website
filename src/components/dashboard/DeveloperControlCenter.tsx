@@ -744,7 +744,7 @@ export function DeveloperControlCenter() {
             </div>
           </div>
           <Link
-            href="/agents"
+            href="/studio?tool=agents"
             className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
             style={{ background: `linear-gradient(135deg, #22d3ee08 0%, ${T.boxBg} 80%)`, border: "1px solid #22d3ee25" }}
           >

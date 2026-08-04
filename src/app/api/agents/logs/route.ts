@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
 function makeDemoLogs(): never[] {
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   // Command logs require admin auth
   if (type === "commands") {
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!isAdmin(userId)) {
       return NextResponse.json({ error: "Admin only" }, { status: 403 });
     }

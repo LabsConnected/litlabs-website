@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   LayoutGrid,
-  Wand2,
+  Shapes,
   FolderOpen,
   Bot,
   MoreHorizontal,
@@ -12,14 +12,13 @@ import {
   Camera,
   MonitorUp,
   Rocket,
-  Palette,
   Terminal,
   Network,
   X,
-  Gamepad2,
-  ExternalLink,
+  Sprout,
   Home,
 } from "lucide-react";
+import { useWallet } from "@/context/WalletContext";
 import type {
   StudioDestination,
   MoreMode,
@@ -33,7 +32,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "studio", label: "Studio", icon: LayoutGrid },
-  { id: "create", label: "Create", icon: Wand2 },
+  { id: "create", label: "Create", icon: Shapes },
   { id: "assets", label: "Assets", icon: FolderOpen },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "more", label: "More", icon: MoreHorizontal },
@@ -45,27 +44,28 @@ const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle }[] = [
   { id: "screen", label: "Screen", icon: MonitorUp },
   { id: "space", label: "Space", icon: Rocket },
   { id: "clibridge", label: "CLI Bridge", icon: Terminal },
-  { id: "color", label: "Color", icon: Palette },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "workflows", label: "Mission Forge", icon: Network },
 ];
 
 /**
- * CommandStudioNav — five destinations only.
+ * CommandStudioNav — premium icon rail (56px wide).
  *
- * Replaces the 17-tool StudioSidebar rail. Labels with icons on desktop,
- * clear tooltips in compact mode. The "More" destination opens a drawer
- * of secondary tools (plugins, camera, screen, space, clibridge, color,
- * terminal, workflows) plus an external Games link.
+ * Compact vertical icon rail with LiTT green active indicator, purple hover
+ * glow, and a plan/usage footer pill. The "More" destination opens a drawer
+ * of secondary tools.
  */
 export default function CommandStudioNav({
   active,
   onSelect,
+  onSelectMoreMode,
 }: {
   active: StudioDestination;
   onSelect: (dest: StudioDestination) => void;
+  onSelectMoreMode?: (mode: MoreMode) => void;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const { balance } = useWallet();
 
   return (
     <>
@@ -78,35 +78,28 @@ export default function CommandStudioNav({
           borderRight: "1px solid var(--studio-border)",
         }}
       >
-        {/* Home — navigate back to dashboard */}
+        {/* LiTT logo mark */}
         <Link
           href="/dashboard"
-          className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
-          style={{ color: "var(--text-muted)" }}
-          title="Dashboard"
+          className="group relative mb-1 flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:scale-105"
+          style={{
+            background: "linear-gradient(135deg, var(--litt-primary), var(--spark-primary))",
+            boxShadow: "var(--studio-glow-purple)",
+          }}
+          title="LiTT Studio — AI Operating System"
           aria-label="Go to dashboard"
         >
-          <Home
-            size={18}
-            strokeWidth={1.7}
-            className="pointer-events-none transition-transform duration-200 group-hover:scale-110"
+          <Sprout
+            size={16}
+            strokeWidth={2.5}
+            className="text-black pointer-events-none"
           />
-          <span
-            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
-            style={{
-              backgroundColor: "var(--studio-elevated)",
-              borderColor: "var(--studio-border)",
-              color: "var(--text-primary)",
-            }}
-          >
-            Home
-          </span>
         </Link>
 
-        {/* Divider between home and studio destinations */}
+        {/* Divider between logo and nav items */}
         <div
-          className="my-1 h-px w-8"
-          style={{ backgroundColor: "var(--studio-border)" }}
+          className="mb-1 h-px w-7"
+          style={{ backgroundColor: "var(--studio-border-strong)" }}
           aria-hidden
         />
 
@@ -124,10 +117,11 @@ export default function CommandStudioNav({
                 }
                 onSelect(item.id);
               }}
-              className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+              className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
               style={{
                 color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                backgroundColor: isActive ? "rgba(114,242,56,0.12)" : "transparent",
+                backgroundColor: isActive ? "rgba(77,255,98,0.1)" : "transparent",
+                boxShadow: isActive ? "var(--studio-glow-green)" : "none",
               }}
               title={item.label}
               aria-label={item.label}
@@ -135,24 +129,24 @@ export default function CommandStudioNav({
             >
               {isActive && (
                 <span
-                  className="absolute -left-1 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full"
+                  className="absolute -left-1 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full"
                   style={{
                     backgroundColor: "var(--litt-primary)",
-                    boxShadow: "0 0 8px var(--litt-primary)",
+                    boxShadow: "0 0 6px var(--litt-primary)",
                   }}
                   aria-hidden
                 />
               )}
               <Icon
-                size={18}
+                size={17}
                 strokeWidth={isActive ? 2.2 : 1.7}
-                className="pointer-events-none transition-transform duration-200 group-hover:scale-110"
+                className="pointer-events-none transition-all duration-200 group-hover:scale-110"
               />
               <span
-                className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
+                className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[12px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
                 style={{
                   backgroundColor: "var(--studio-elevated)",
-                  borderColor: "var(--studio-border)",
+                  borderColor: "var(--studio-border-strong)",
                   color: "var(--text-primary)",
                 }}
               >
@@ -161,6 +155,43 @@ export default function CommandStudioNav({
             </button>
           );
         })}
+
+        {/* Spacer pushes footer to bottom */}
+        <div className="flex-1" />
+
+        {/* Plan / LiTTBits usage footer */}
+        <Link
+          href="/wallet"
+          className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+          style={{ color: "var(--text-muted)" }}
+          title={`LiTTBits: ${balance.toLocaleString()}`}
+          aria-label="View wallet"
+        >
+          <div className="flex flex-col items-center pointer-events-none">
+            <Sprout
+              size={14}
+              strokeWidth={2}
+              style={{ color: "var(--litt-primary)" }}
+              className="pointer-events-none"
+            />
+            <span
+              className="text-[10px] font-black leading-none mt-0.5"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance}
+            </span>
+          </div>
+          <span
+            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[12px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
+            style={{
+              backgroundColor: "var(--studio-elevated)",
+              borderColor: "var(--studio-border-strong)",
+              color: "var(--text-primary)",
+            }}
+          >
+            {balance.toLocaleString()} LiTTBits
+          </span>
+        </Link>
       </nav>
 
       {/* More drawer — slides out from nav */}
@@ -173,14 +204,15 @@ export default function CommandStudioNav({
             height: "calc(100dvh - var(--studio-header-h))",
             backgroundColor: "var(--studio-elevated)",
             borderRight: "1px solid var(--studio-border-strong)",
-            boxShadow: "8px 0 32px rgba(0,0,0,0.4)",
+            boxShadow: "8px 0 32px rgba(0,0,0,0.5)",
+            backdropFilter: "blur(12px)",
           }}
         >
           <div
-            className="flex h-11 items-center justify-between px-3"
+            className="flex h-10 items-center justify-between px-3"
             style={{ borderBottom: "1px solid var(--studio-border)" }}
           >
-            <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[11px] font-black tracking-[0.1em]" style={{ color: "var(--text-secondary)" }}>
               More tools
             </span>
             <button
@@ -201,7 +233,7 @@ export default function CommandStudioNav({
                   key={m.id}
                   type="button"
                   onClick={() => {
-                    onSelect("more");
+                    onSelectMoreMode?.(m.id);
                     setMoreOpen(false);
                   }}
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"
@@ -212,19 +244,6 @@ export default function CommandStudioNav({
                 </button>
               );
             })}
-            <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
-            <Link
-              href="/games"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setMoreOpen(false)}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-white/5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <Gamepad2 size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
-              <span className="text-xs font-bold">Games</span>
-              <ExternalLink size={11} className="ml-auto opacity-40 pointer-events-none" />
-            </Link>
           </div>
         </div>
       )}
@@ -259,7 +278,7 @@ export function MobileCommandNav({
         aria-label="Go to dashboard"
       >
         <Home size={18} strokeWidth={1.7} className="pointer-events-none" />
-        <span className="text-[9px] font-bold">Home</span>
+        <span className="text-[11px] font-bold">Home</span>
       </Link>
 
       {NAV_ITEMS.map((item) => {
@@ -278,7 +297,7 @@ export function MobileCommandNav({
             aria-current={isActive ? "page" : undefined}
           >
             <Icon size={18} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
-            <span className="text-[9px] font-bold">{item.label}</span>
+            <span className="text-[11px] font-bold">{item.label}</span>
           </button>
         );
       })}

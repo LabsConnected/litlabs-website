@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
@@ -6,8 +6,8 @@ import type { CapabilitySummary, CapabilityStatus } from "@/lib/capabilities/typ
 
 export const runtime = "nodejs";
 
-async function handler() {
-  const { userId } = await auth().catch(() => ({ userId: null }));
+async function handler(req: NextRequest) {
+  const { userId } = await auth(req).catch(() => ({ userId: null }));
 
   const capabilities: CapabilitySummary = {
     capabilities: [
@@ -46,8 +46,9 @@ async function handler() {
       // Non-fatal — leave githubInstalled as false
     }
 
-    // Resolve project using the shared helper
-    const project = await resolveCurrentProject({ userId });
+    // Resolve the URL-selected project first, then use the shared fallback order.
+    const explicitProjectId = req.nextUrl.searchParams.get("projectId");
+    const project = await resolveCurrentProject({ userId, explicitProjectId });
 
     if (project) {
       // A blank Studio project is still a valid project even without GitHub
@@ -61,6 +62,7 @@ async function handler() {
         projectId: project.projectId,
         projectName: project.projectName,
         defaultBranch: project.defaultBranch ?? undefined,
+        activeBranch: project.activeBranch ?? undefined,
         lastVerifiedAt: new Date().toISOString(),
       });
 

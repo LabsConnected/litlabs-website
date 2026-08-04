@@ -95,23 +95,11 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Agents",
-    href: "/agents",
-    icon: Bot,
-    accent: GROUP_ACCENTS.Agents,
-    items: [
-      { label: "All Agents", href: "/agents", icon: Bot },
-      { label: "Memory", href: "/memories", icon: Database },
-      { label: "Automations", href: "/studio?tool=pipeline", icon: Zap },
-    ],
-  },
-  {
     label: "Gallery",
     href: "/gallery",
     icon: Image,
     accent: GROUP_ACCENTS.Gallery,
     items: [
-      { label: "Community", href: "/gallery", icon: Image },
       { label: "Showcase", href: "/showcase", icon: Star },
     ],
   },
@@ -122,7 +110,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Marketplace,
     items: [
       { label: "Browse Agents", href: "/marketplace", icon: Store },
-      { label: "LiTTBits", href: "/marketplace?tab=coins", icon: Wallet },
+      { label: "LiTTBits", href: "/marketplace?tab=littbits", icon: Wallet },
       { label: "Purchases", href: "/wallet?tab=history", icon: Receipt },
       { label: "Creator Hub", href: "/creator", icon: BarChart3 },
     ],
@@ -133,16 +121,16 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Users,
     accent: GROUP_ACCENTS.Social,
     items: [
-      { label: "Community", href: "/discover", icon: Users },
+      { label: "Feed", href: "/discover", icon: Users },
+      { label: "Gallery", href: "/gallery", icon: Image },
     ],
   },
   {
     label: "More",
-    href: "/games",
+    href: "/wallet",
     icon: Menu,
     accent: GROUP_ACCENTS.More,
     items: [
-      { label: "Games", href: "/games", icon: Gamepad2 },
       { label: "Wallet", href: "/wallet", icon: Wallet },
       { label: "Docs", href: "/docs", icon: FileText },
       { label: "Settings", href: "/settings", icon: Settings },
@@ -160,9 +148,9 @@ type MobileNavItem = {
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
-  { label: "Projects", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Agents", href: "/agents", icon: Bot },
-  { label: "Account", href: "/profile", icon: User },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Discover", href: "/discover", icon: MessagesSquare },
+  { label: "Gallery", href: "/gallery", icon: Image },
 ];
 
 export const AI_SUGGESTIONS = [
@@ -170,9 +158,7 @@ export const AI_SUGGESTIONS = [
   "Open my agents",
   "Continue yesterday's song",
   "Show my revenue",
-  "Play Hextris",
   "Open Studio",
-  "Show trending games",
   "Create a new post",
 ];
 
@@ -180,7 +166,7 @@ export const QUICK_CREATE_ITEMS = [
   { label: "Create Image", href: "/studio?tool=image", icon: Image },
   { label: "Create Music", href: "/dashboard?app=music", icon: Music },
   { label: "Create Video", href: "/studio?tool=video", icon: Video },
-  { label: "Create Agent", href: "/agents", icon: Bot },
+  { label: "Create Agent", href: "/studio?tool=agents", icon: Bot },
   { label: "Create Workflow", href: "/studio?tool=pipeline", icon: Layers },
   { label: "Create Post", href: "/discover", icon: MessagesSquare },
 ];

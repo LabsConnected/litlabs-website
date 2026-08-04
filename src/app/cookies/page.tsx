@@ -3,7 +3,7 @@ import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
-  description: "Cookie Policy for LiTTree LabStudios AI creative studio.",
+  description: "Cookie Policy for LiTTree LabStudios AI creative operating system and social creator platform.",
   path: "/cookies",
   index: true,
 });
@@ -45,16 +45,12 @@ export default function CookiesPage() {
               </div>
 
               <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
-                <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>📊 Analytics Cookies</h3>
+                <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>📊 Analytics</h3>
                 <p className="opacity-80">
-                  These cookies help us understand how visitors interact with the Platform by collecting and reporting information anonymously. We use Vercel Analytics, which does not use cookies but collects basic usage metrics.
-                </p>
-              </div>
-
-              <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
-                <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>💰 Marketing & Commerce Cookies</h3>
-                <p className="opacity-80">
-                  These cookies track your activity on the Platform to deliver relevant marketplace recommendations and measure the effectiveness of promotional campaigns. Currently minimal usage.
+                  We may use Vercel Analytics to collect basic, anonymous usage
+                  metrics (page views, performance). Vercel Analytics does not
+                  use cross-site tracking cookies. No advertising or marketing
+                  cookies are used.
                 </p>
               </div>
             </div>
@@ -63,7 +59,10 @@ export default function CookiesPage() {
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider mb-2" style={{ color: "var(--header-color)" }}>Local Storage</h2>
             <p>
-              In addition to cookies, we use browser localStorage to persist user preferences (themes, profiles, LiTTBits balances, visitor counts). This data never leaves your device and is not transmitted to our servers unless explicitly synced.
+              In addition to cookies, we use browser localStorage to persist
+              user preferences (themes, UI state, cached session metadata).
+              LiTTBits balances are fetched from our server-side Supabase
+              credit ledger — they are not stored in localStorage.
             </p>
           </section>
 

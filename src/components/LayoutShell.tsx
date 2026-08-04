@@ -9,6 +9,7 @@ import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
+import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 
 const PUBLIC_PATHS = [
   "/",
@@ -51,6 +52,7 @@ export default function LayoutShell({
         <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
           {children}
         </div>
+        {/* Media Hub lives inside the Studio drawer — no floating player */}
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
@@ -87,6 +89,7 @@ export default function LayoutShell({
           {!ownChrome && <MobileBottomNav />}
           <FooterWrapper />
           <GlobalCompanion />
+          <YouTubePlayerShell />
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>

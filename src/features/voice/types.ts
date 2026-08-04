@@ -1,4 +1,11 @@
-export type VoiceAgentId = "litt" | "spark";
+export type VoiceAgentId =
+  | "litt"
+  | "spark"
+  | "researcher"
+  | "writer"
+  | "marketer"
+  | "coder"
+  | "analyst";
 
 export type VoiceSessionState =
   | "idle"

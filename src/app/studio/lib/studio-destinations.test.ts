@@ -48,11 +48,10 @@ describe("studio-destinations", () => {
       expect(result.openDrawer).toBe("terminal");
     });
 
-    it("maps workflows to Studio/Work with inspector open on Plan", () => {
+    it("maps workflows to More / Mission Forge", () => {
       const result = mapLegacyToolToDestination("workflows");
-      expect(result.destination).toBe("studio");
-      expect(result.mode).toBe("work");
-      expect(result.openInspector).toBe("plan");
+      expect(result.destination).toBe("more");
+      expect(result.mode).toBe("workflows");
     });
 
     it("maps image/video/audio to Create with correct modes", () => {
@@ -65,9 +64,9 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("audio").mode).toBe("audio");
     });
 
-    it("maps color to Create/Brand", () => {
+    it("maps legacy color to Create/Image (color tool removed)", () => {
       expect(mapLegacyToolToDestination("color").destination).toBe("create");
-      expect(mapLegacyToolToDestination("color").mode).toBe("brand");
+      expect(mapLegacyToolToDestination("color").mode).toBe("image");
     });
 
     it("maps assets to Assets", () => {
@@ -91,7 +90,7 @@ describe("studio-destinations", () => {
     it("maps pipeline (legacy) to workflows", () => {
       // The StudioOS component normalizes "pipeline" -> "workflows" before
       // calling this function, but the adapter should still handle it.
-      expect(mapLegacyToolToDestination("workflows").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("more");
     });
 
     it("falls back to Studio/Work for unknown tools", () => {
@@ -113,8 +112,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("create", "image")).toBe("image");
       expect(destinationToLegacyTool("create", "video")).toBe("video");
       expect(destinationToLegacyTool("create", "audio")).toBe("audio");
-      expect(destinationToLegacyTool("create", "music")).toBe("audio");
-      expect(destinationToLegacyTool("create", "brand")).toBe("color");
+      expect(destinationToLegacyTool("create", "music")).toBe("music");
     });
 
     it("round-trips Assets and Agents", () => {
@@ -128,7 +126,6 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("more", "screen")).toBe("screen");
       expect(destinationToLegacyTool("more", "space")).toBe("space");
       expect(destinationToLegacyTool("more", "clibridge")).toBe("clibridge");
-      expect(destinationToLegacyTool("more", "color")).toBe("color");
       expect(destinationToLegacyTool("more", "terminal")).toBe("terminal");
       expect(destinationToLegacyTool("more", "workflows")).toBe("workflows");
     });

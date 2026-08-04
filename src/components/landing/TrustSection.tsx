@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Play, Shield } from "lucide-react";
+import { ArrowRight, Check, Play, Shield } from "lucide-react";
 
 const PRODUCT_FACTS = [
   "Approval required for sensitive actions",
@@ -19,9 +19,9 @@ export function TrustSection() {
           <p className="mt-4 text-sm leading-7 text-white/50">We do not use fake metrics, invented testimonials, or stock company logos. These are real product capabilities you can test today.</p>
         </div>
         <div className="mt-10 grid gap-2.5 sm:grid-cols-2">
-          {PRODUCT_FACTS.map((fact) => (<div key={fact} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-4 py-3"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-[#a8ff2f]/10 text-[10px] font-black text-[#a8ff2f]">&check;</span><span className="text-xs font-bold text-white/70">{fact}</span></div>))}
+          {PRODUCT_FACTS.map((fact) => (<div key={fact} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-4 py-3"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-[#a8ff2f]/10 text-[#a8ff2f]"><Check size={13} strokeWidth={3} /></span><span className="text-xs font-bold leading-5 text-white/70">{fact}</span></div>))}
         </div>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-bold text-white/40">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-bold text-white/55">
           <Link href="/privacy" className="transition hover:text-white/70">Privacy Policy</Link>
           <Link href="/terms" className="transition hover:text-white/70">Terms of Service</Link>
           <Link href="/pricing" className="transition hover:text-white/70">Pricing</Link>
@@ -33,7 +33,7 @@ export function TrustSection() {
             <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-4 text-sm font-black text-[#03050a] shadow-[0_0_40px_rgba(168,255,47,.18)] transition hover:-translate-y-0.5 hover:bg-[#b8ff5f] hover:shadow-[0_0_50px_rgba(168,255,47,.3)]">Start building free <ArrowRight size={15} /></Link>
             <a href="#product" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-bold text-white transition hover:border-white/30 hover:bg-white/10"><Play size={14} fill="currentColor" /> See how it works</a>
           </div>
-          <div className="mt-4 text-xs font-semibold text-white/35">No credit card required</div>
+          <div className="mt-4 text-xs font-semibold text-white/50">No credit card required</div>
         </div>
       </div>
     </section>
