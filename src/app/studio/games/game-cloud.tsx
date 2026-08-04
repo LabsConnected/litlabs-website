@@ -8,29 +8,41 @@ const GAMES: GameMeta[] = [
   {
     id: "solitaire",
     title: "Solitaire",
+    brandTitle: "LiTT Solitaire",
     description: "Classic Klondike solitaire. Stack cards by suit and rank.",
+    tagline: "Klondike — stack by suit, Ace to King",
     category: "cards",
     players: "1P",
     color: "#4DFF62",
     icon: "♠",
+    status: "original",
+    controlsHint: "Click card, click destination to move",
   },
   {
     id: "wordsearch",
     title: "Word Search",
+    brandTitle: "Word Hunt",
     description: "Find hidden words in a grid of letters.",
+    tagline: "Drag to select hidden tech words",
     category: "word",
     players: "1P",
     color: "#FFCC33",
     icon: "🔍",
+    status: "original",
+    controlsHint: "Click and drag across letters",
   },
   {
     id: "sudoku",
     title: "Sudoku",
+    brandTitle: "Number Grid",
     description: "Fill the 9×9 grid so each row, column, and box contains 1–9.",
+    tagline: "9×9 logic puzzle. No math required.",
     category: "puzzle",
     players: "1P",
     color: "#9B4DFF",
     icon: "⊞",
+    status: "original",
+    controlsHint: "Click cell · Press 1–9 · Notes toggle",
   },
 ];
 
@@ -92,27 +104,35 @@ export function GameCloud() {
       </div>
 
       <div className="gc-grid">
-        {filtered.map((game) => (
-          <a
-            key={game.id}
-            href={`/studio/games/${game.id}`}
-            className="gc-card"
-            style={{ "--game-color": game.color } as React.CSSProperties}
-          >
-            <div className="gc-card-glow" />
-            <div className="gc-card-top">
-              <span className="gc-card-icon">{game.icon}</span>
-              <span className="gc-card-play">▶</span>
-            </div>
-            <h3 className="gc-card-title">{game.title}</h3>
-            <p className="gc-card-desc">{game.description}</p>
-            <div className="gc-card-meta">
-              <span className="gc-card-tag">{game.category}</span>
-              <span className="gc-card-dot" />
-              <span className="gc-card-players">{game.players}</span>
-            </div>
-          </a>
-        ))}
+        {filtered.map((game) => {
+          const displayTitle = game.brandTitle ?? game.title;
+          const statusLabel = game.status === "original" ? "LiTT Original"
+            : game.status === "inspired" ? "Inspired"
+            : game.status === "licensed" ? "Licensed"
+            : "Open Source";
+          return (
+            <a
+              key={game.id}
+              href={`/studio/games/${game.id}`}
+              className="gc-card"
+              style={{ "--game-color": game.color } as React.CSSProperties}
+            >
+              <div className="gc-card-glow" />
+              <div className="gc-card-top">
+                <span className="gc-card-icon">{game.icon}</span>
+                <span className="gc-card-badge" style={{ background: game.color }}>{statusLabel}</span>
+                <span className="gc-card-play">▶</span>
+              </div>
+              <h3 className="gc-card-title">{displayTitle}</h3>
+              <p className="gc-card-desc">{game.tagline ?? game.description}</p>
+              <div className="gc-card-meta">
+                <span className="gc-card-tag">{game.category}</span>
+                <span className="gc-card-dot" />
+                <span className="gc-card-players">{game.players}</span>
+              </div>
+            </a>
+          );
+        })}
         {filtered.length === 0 && (
           <div className="gc-empty">
             <div className="gc-empty-icon">🌑</div>

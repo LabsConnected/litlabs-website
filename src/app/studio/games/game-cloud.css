@@ -150,6 +150,17 @@
   transition: all 200ms ease;
 }
 .gc-card:hover .gc-card-play { opacity: 1; transform: scale(1); }
+.gc-card-badge {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: #08060F;
+  margin-left: auto;
+  margin-right: 8px;
+}
 .gc-card-title {
   font-size: 16px;
   font-weight: 600;

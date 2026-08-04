@@ -160,13 +160,17 @@ export default function GamesPage() {
   return (
     <PageShell>
       <main className="min-h-screen bg-[#070812] text-white">
-        {/* === GAME CLOUD HERO === */}
+        {/* === LiTT ARCADE HERO === */}
         <section className="relative overflow-hidden border-b border-white/10">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(249,115,22,.12),transparent_40%),radial-gradient(circle_at_80%_10%,rgba(168,85,247,.1),transparent_35%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(155,77,255,.15),transparent_40%),radial-gradient(circle_at_80%_10%,rgba(34,211,238,.1),transparent_35%)]" />
           <div className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
-            <p className="text-xs font-black uppercase tracking-[.3em] text-orange-400">Game Cloud</p>
+            <div className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-littree.svg" alt="LiTTree" className="h-6 w-6" />
+              <p className="text-xs font-black uppercase tracking-[.3em] text-[#9B4DFF]">LiTT Arcade</p>
+            </div>
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
-            <p className="mt-3 max-w-xl text-base text-white/65">Bring games you legally own. Build your own with LiTT.</p>
+            <p className="mt-3 max-w-xl text-base text-white/65">Classic browser games. No install. Instant play. Bring games you legally own.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
                 <Gamepad2 size={16} /> Open Retro Arcade
@@ -271,8 +275,9 @@ export default function GamesPage() {
         <section id="quick-play" className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
           <div className="mb-5 flex items-end justify-between gap-3">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Quick Play</p>
+              <p className="text-[10px] font-black uppercase tracking-[.25em] text-[#9B4DFF]">LiTT Arcade</p>
               <h2 className="mt-1 text-xl font-black sm:text-2xl">Browser games — no install</h2>
+              <p className="mt-1 text-xs text-white/50">Curated classics &amp; originals. Branded, honest, instant-play.</p>
             </div>
             <div className="relative w-full max-w-48">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50" size={14} />
@@ -287,53 +292,103 @@ export default function GamesPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {filteredGames.map((game) => (
-              <article
-                key={game.id}
-                className="group cursor-pointer overflow-hidden rounded-2xl border border-white/10 bg-white/3 transition hover:-translate-y-1 hover:border-white/20"
-                onClick={() => launchGame(game)}
-              >
-                <div className="relative aspect-4/3 overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={game.coverUrl}
-                    alt={`${game.title} cover art`}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    loading="lazy"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23111"/><text x="50" y="50" text-anchor="middle" fill="%23555" font-size="40">🎮</text></svg>';
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 transition group-hover:opacity-100" />
-                  <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between opacity-0 transition group-hover:opacity-100">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-lg">
-                      <Play size={15} fill="currentColor" />
+            {filteredGames.map((game) => {
+              const displayTitle = game.brandTitle ?? game.title;
+              const statusLabel = game.status === "original" ? "LiTT Original"
+                : game.status === "inspired" ? "Inspired"
+                : game.status === "licensed" ? "Licensed"
+                : "Open Source";
+              const statusColor = game.status === "original" ? "from-emerald-500 to-cyan-400"
+                : game.status === "inspired" ? "from-orange-500 to-amber-400"
+                : game.status === "licensed" ? "from-blue-500 to-indigo-400"
+                : "from-sky-500 to-blue-400";
+              return (
+                <article
+                  key={game.id}
+                  className="group relative cursor-pointer overflow-hidden rounded-2xl border border-[#9B4DFF]/15 bg-[#140F1F]/72 transition hover:-translate-y-1 hover:border-[#9B4DFF]/35 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(155,77,255,0.15)]"
+                  onClick={() => launchGame(game)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") launchGame(game); }}
+                  aria-label={`Play ${displayTitle}`}
+                >
+                  {/* Cover art */}
+                  <div className="relative aspect-4/3 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={game.coverUrl}
+                      alt={`${displayTitle} cover art`}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23111"/><text x="50" y="50" text-anchor="middle" fill="%23555" font-size="40">🎮</text></svg>';
+                      }}
+                    />
+                    {/* Gradient overlay on hover */}
+                    <div className="absolute inset-0 bg-linear-to-t from-black/70 to-transparent opacity-0 transition group-hover:opacity-100" />
+
+                    {/* LiTT logo badge — top left */}
+                    <div className="absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/logo-littree.svg" alt="" className="h-3 w-3" />
+                      <span className="text-[7px] font-black uppercase tracking-wider text-white/90">LiTT</span>
+                    </div>
+
+                    {/* Status badge — top right */}
+                    <span className={`absolute right-2 top-2 rounded-md bg-linear-to-r ${statusColor} px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wider text-black shadow-sm`}>
+                      {statusLabel}
                     </span>
+
+                    {/* Play button — appears on hover */}
+                    <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between opacity-0 transition group-hover:opacity-100">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-lg transition group-hover:scale-110">
+                        <Play size={15} fill="currentColor" />
+                      </span>
+                      <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/80 backdrop-blur-sm">
+                        {game.launchMode === "embedded" ? "Play here" : "New tab"}
+                      </span>
+                    </div>
                   </div>
-                  <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/80 backdrop-blur-sm">
-                    {game.launchMode === "embedded" ? "Play here" : "New tab"}
-                  </span>
-                </div>
-                <div className="p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="truncate text-sm font-black">{game.title}</h3>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggleFav(game.id); }}
-                      className="shrink-0 text-white/50 transition hover:text-white"
-                      aria-label={favorites.includes(game.id) ? `Unfavorite ${game.title}` : `Favorite ${game.title}`}
-                    >
-                      <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} className={favorites.includes(game.id) ? "text-orange-500" : ""} />
-                    </button>
+
+                  {/* Circuit divider */}
+                  <div className="flex items-center gap-1.5 px-3 pt-2">
+                    <span className="h-1 w-1 rounded-full bg-[#9B4DFF]/40" />
+                    <span className="h-px flex-1 bg-linear-to-r from-[#9B4DFF]/30 via-[#9B4DFF]/15 to-transparent" />
+                    <span className="h-1 w-1 rounded-full bg-[#9B4DFF]/40" />
                   </div>
-                  <p className="mt-1 line-clamp-1 text-xs text-white/60">{game.description}</p>
-                  <div className="mt-2 flex items-center gap-2 text-[10px] text-white/55">
-                    <span className="capitalize">{game.category}</span>
-                    <span>·</span>
-                    <span>{game.players}P</span>
+
+                  {/* Info */}
+                  <div className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="truncate text-sm font-black text-white">{displayTitle}</h3>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleToggleFav(game.id); }}
+                        className="shrink-0 text-white/50 transition hover:text-white"
+                        aria-label={favorites.includes(game.id) ? `Unfavorite ${displayTitle}` : `Favorite ${displayTitle}`}
+                      >
+                        <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} className={favorites.includes(game.id) ? "text-orange-500" : ""} />
+                      </button>
+                    </div>
+                    <p className="mt-1 line-clamp-1 text-xs text-white/60">{game.tagline ?? game.description}</p>
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] font-medium text-white/55">
+                      <span className="capitalize">{game.category}</span>
+                      <span className="text-white/30">·</span>
+                      <span>{game.players}P</span>
+                      <span className="text-white/30">·</span>
+                      <span>{game.year}</span>
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))}
+
+                  {/* Branded footer strip */}
+                  <div className="flex items-center gap-1.5 border-t border-[#9B4DFF]/10 bg-[#9B4DFF]/5 px-3 py-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/logo-littree.svg" alt="" className="h-2.5 w-2.5 opacity-60" />
+                    <span className="text-[7px] font-bold uppercase tracking-wider text-white/40">LiTTree Game Cloud</span>
+                  </div>
+                </article>
+              );
+            })}
           </div>
 
           {filteredGames.length === 0 && (
