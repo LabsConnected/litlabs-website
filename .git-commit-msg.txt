@@ -1,9 +1,8 @@
-feat: add URL input to dashboard music player + polish card styling
+fix: add Dashboard back button on games page + game overlay
 
-- Music player card now has a URL input field directly on the dashboard
-- Paste YouTube or Spotify links without going to Studio
-- Card styling matches the new dashboard glassmorphism theme
-- Provider badge shows "—" when nothing is connected instead of wrong label
+- Mobile: visible "← Dashboard" button at top of games page
+- Game overlay: "← Dashboard" link in header bar next to controls
+- Users can now get back to dashboard from games on mobile and desktop
 
 Generated with [Devin](https://devin.ai)
 

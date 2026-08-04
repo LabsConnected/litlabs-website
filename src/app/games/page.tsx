@@ -164,6 +164,13 @@ export default function GamesPage() {
         <section className="relative overflow-hidden border-b border-white/10">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(155,77,255,.15),transparent_40%),radial-gradient(circle_at_80%_10%,rgba(34,211,238,.1),transparent_35%)]" />
           <div className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
+            {/* Back to Dashboard — visible on mobile where top nav is hidden */}
+            <Link
+              href="/dashboard"
+              className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white/70 transition hover:bg-white/10 hover:text-white md:hidden"
+            >
+              <span>←</span> Dashboard
+            </Link>
             <div className="flex items-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo-littree.svg" alt="LiTTree" className="h-6 w-6" />
@@ -413,7 +420,7 @@ export default function GamesPage() {
               {!isFullscreen && (
                 <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <button onClick={closeGame} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game">
+                    <button onClick={closeGame} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game" title="Close">
                       <X size={16} />
                     </button>
                     <div>
@@ -422,6 +429,9 @@ export default function GamesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Link href="/dashboard" className="rounded-lg border border-white/10 px-3 py-2 text-[11px] font-bold text-white/60 transition hover:bg-white/10 hover:text-white" title="Back to Dashboard">
+                      ← Dashboard
+                    </Link>
                     <button
                       onClick={reloadIframe}
                       className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"
