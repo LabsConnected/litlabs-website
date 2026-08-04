@@ -48,9 +48,13 @@ describe("marketplace agent-registry", () => {
     it("all premium agents are marketplace-visible", () => {
       for (const agent of PREMIUM_AGENTS) {
         expect(agent.marketplaceVisible).toBe(true);
-        expect(agent.studioVisible).toBe(true);
         expect(agent.enabled).toBe(true);
       }
+    });
+
+    it("Coder and Researcher are NOT studio-visible (consolidated into LiTT)", () => {
+      expect(AGENT_REGISTRY["coder"].studioVisible).toBe(false);
+      expect(AGENT_REGISTRY["researcher"].studioVisible).toBe(false);
     });
 
     it("Researcher minimum plan is creator_beta", () => {
@@ -79,14 +83,26 @@ describe("marketplace agent-registry", () => {
   });
 
   describe("getStudioAgents", () => {
-    it("includes all 7 agents", () => {
+    it("includes only LiTT and Spark (2 agents)", () => {
       const studioAgents = getStudioAgents();
-      expect(studioAgents).toHaveLength(7);
+      expect(studioAgents).toHaveLength(2);
       const slugs = studioAgents.map((a) => a.id);
       expect(slugs).toContain("litt");
       expect(slugs).toContain("spark");
-      expect(slugs).toContain("researcher");
-      expect(slugs).toContain("coder");
+      expect(slugs).not.toContain("researcher");
+      expect(slugs).not.toContain("coder");
+    });
+
+    it("LiTT role includes Engineer and Researcher", () => {
+      const litt = getStudioAgents().find((a) => a.id === "litt");
+      expect(litt?.role).toMatch(/Engineer/i);
+      expect(litt?.role).toMatch(/Researcher/i);
+    });
+
+    it("Spark role includes Creative Companion and Designer", () => {
+      const spark = getStudioAgents().find((a) => a.id === "spark");
+      expect(spark?.role).toMatch(/Creative Companion/i);
+      expect(spark?.role).toMatch(/Designer/i);
     });
   });
 

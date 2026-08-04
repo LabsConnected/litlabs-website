@@ -163,9 +163,12 @@ describe("Agent registry", () => {
     }
   });
 
-  it("studio agents are all 7", async () => {
+  it("studio agents are only LiTT and Spark (2 agents)", async () => {
     const { getStudioAgents } = await import("@/lib/agent-registry");
-    expect(getStudioAgents()).toHaveLength(7);
+    expect(getStudioAgents()).toHaveLength(2);
+    const ids = getStudioAgents().map((a) => a.id);
+    expect(ids).toContain("litt");
+    expect(ids).toContain("spark");
   });
 
   it("marketplace agents are the 5 specialists", async () => {
@@ -409,17 +412,15 @@ describe("chargeAgentRun (billing)", () => {
 });
 
 describe("Studio agent store (scenario 19, 20)", () => {
-  it("exposes all 7 agents in the studio selector", async () => {
+  it("exposes only LiTT and Spark in the studio selector (2 agents)", async () => {
     const { STUDIO_AGENTS } = await import("@/app/studio/stores/useStudioAgentStore");
-    expect(STUDIO_AGENTS).toHaveLength(7);
+    expect(STUDIO_AGENTS).toHaveLength(2);
     const ids = STUDIO_AGENTS.map((a) => a.id);
     expect(ids).toContain("litt");
     expect(ids).toContain("spark");
-    expect(ids).toContain("researcher");
-    expect(ids).toContain("writer");
-    expect(ids).toContain("marketer");
-    expect(ids).toContain("coder");
-    expect(ids).toContain("analyst");
+    // Coder and Researcher are consolidated into LiTT — not studio-visible
+    expect(ids).not.toContain("researcher");
+    expect(ids).not.toContain("coder");
   });
 
   it("each studio agent has minimumPlan for gating", async () => {

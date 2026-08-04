@@ -96,9 +96,10 @@ export default function StudioActivityRail({
     return result.reverse();
   }, [messages]);
 
-  // Active agents crew — derived from AGENT_META, highlight the active one
+  // Active agents crew — only LiTT and Spark are official Studio agents.
+  // Coder and Researcher capabilities are consolidated into LiTT.
   const crewAgents = useMemo(() => {
-    const ids: AgentId[] = ["litt", "spark", "coder", "researcher"];
+    const ids: AgentId[] = ["litt", "spark"];
     return ids.map((id) => ({
       id,
       meta: AGENT_META[id],

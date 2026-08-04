@@ -213,7 +213,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     // Agent popover renders buttons with agent names
     // Use a regex that matches the agent button text but not the
     // "Start LiTT Live" button (which has "LiTT Live" in its aria-label)
-    const littBtn = screen.getByRole("button", { name: /LiTT.*Copilot/i });
+    const littBtn = screen.getByRole("button", { name: /LiTT.*Engineer/i });
     const sparkBtn = screen.getByRole("button", { name: /Spark.*Companion/i });
     expect(littBtn).toBeTruthy();
     expect(sparkBtn).toBeTruthy();

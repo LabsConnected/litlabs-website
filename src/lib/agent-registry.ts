@@ -108,8 +108,8 @@ const LITT: AgentDefinition = {
   slug: "litt",
   name: "LiTT",
   description:
-    "Your lead AI copilot — builds, reviews, deploys, and orchestrates your whole project.",
-  role: "AI Copilot, Engineer & Creator",
+    "AI Operating System — engineer, researcher, and builder. Owns code, terminal, git, files, testing, missions, deployment, and project memory.",
+  role: "AI OS · Engineer · Researcher · Builder",
   tag: "LITT",
   color: "#67e8f9",
   personality:
@@ -125,18 +125,22 @@ const LITT: AgentDefinition = {
   enabled: true,
   marketplaceVisible: false,
   studioVisible: true,
-  version: "1.0.0",
+  version: "2.0.0",
   domains: [
     "code", "architecture", "debugging", "devops", "api", "database",
     "typescript", "react", "nextjs", "supabase", "vercel",
     "strategy", "orchestration", "planning", "qa",
+    "research", "synthesis", "verification", "comparison", "sources",
+    "testing", "review", "implementation", "terminal", "git", "files",
+    "deployment", "missions", "project-memory",
   ],
   starterActions: [
     { label: "Build a feature", prompt: "Help me build a new feature" },
     { label: "Debug an error", prompt: "I'm hitting an error — help me debug it" },
+    { label: "Research a topic", prompt: "Research this topic for me with sources: " },
     { label: "Review my code", prompt: "Review my recent code for issues" },
   ],
-  systemPrompt: `You are LiTT — the lead AI copilot inside LiTTree Lab Studios. You combine senior engineering, product strategy, creative direction, operations, and agent orchestration. Spark is your playful creative companion. The specialist agents (Researcher, Writer, Marketer, Coder, Analyst) handle their domains — you coordinate and handle general engineering and strategy.
+  systemPrompt: `You are LiTT — the AI Operating System inside LiTTree Lab Studios. You are the single engineering, research, and execution brain. You own coding, research, terminal, git, files, testing, missions, deployment, and project memory. Spark is your creative companion — it handles design direction, images, music, video, branding, and ideation. There are no other separate agents — you do all engineering and research yourself.
 
 PERSONALITY:
 - Start with the useful answer. No empty preamble or repeated context.
@@ -160,11 +164,13 @@ CAPABILITIES:
 - Build, review, refactor, debug, test, and deploy production software
 - Design APIs, schemas, RLS policies, agent systems, and real-time workflows
 - Plan products, prioritize roadmaps, and diagnose project risks
-- Coordinate specialist agents and route work to the right specialist
+- Research topics with source-backed findings, verify claims, compare options
+- Execute terminal commands, manage git, read/write files, run tests
+- Create and manage Missions, control deployment, maintain project memory
 
 ${TRUTH_RULES}
 
-Adapt to verified project context. For engineering requests, provide production-ready implementation. For creative or strategy requests, stay concise unless depth is requested. When a request clearly belongs to a specialist (deep research, long-form writing, marketing campaigns, heavy coding, data analysis), recommend the matching specialist agent.`,
+Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only engineering and research agent — do not recommend switching to another agent for coding or research tasks. For creative direction, design, images, music, or branding, suggest Spark.`,
 };
 
 /* ------------------------------------------------------------------ */
@@ -176,7 +182,7 @@ const SPARK: AgentDefinition = {
   name: "Spark",
   description:
     "Your playful creative companion — ideation, design direction, and creative exploration.",
-  role: "Creative Companion & Explorer",
+  role: "Creative Companion · Designer · Explorer",
   tag: "SPARK",
   color: "#a970ff",
   personality: "Playful, curious, energetic, imaginative, and encouraging",
@@ -231,7 +237,7 @@ const RESEARCHER: AgentDefinition = {
   cost: { perRun: 2, per1kTokens: 1 },
   enabled: true,
   marketplaceVisible: true,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: ["research", "synthesis", "verification", "comparison", "sources"],
   starterActions: [
@@ -281,7 +287,7 @@ const WRITER: AgentDefinition = {
   cost: { perRun: 2, per1kTokens: 1 },
   enabled: true,
   marketplaceVisible: true,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: ["content", "copywriting", "landing-pages", "email", "editing", "seo-copy"],
   starterActions: [
@@ -331,7 +337,7 @@ const MARKETER: AgentDefinition = {
   cost: { perRun: 2, per1kTokens: 1 },
   enabled: true,
   marketplaceVisible: true,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: ["marketing", "positioning", "campaigns", "seo", "social", "growth", "conversion"],
   starterActions: [
@@ -381,7 +387,7 @@ const CODER: AgentDefinition = {
   cost: { perRun: 3, per1kTokens: 2 },
   enabled: true,
   marketplaceVisible: true,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: ["code", "debugging", "review", "testing", "architecture", "implementation"],
   starterActions: [
@@ -431,7 +437,7 @@ const ANALYST: AgentDefinition = {
   cost: { perRun: 3, per1kTokens: 2 },
   enabled: true,
   marketplaceVisible: true,
-  studioVisible: true,
+  studioVisible: false,
   version: "1.0.0",
   domains: ["analytics", "data", "kpi", "reports", "trends", "anomalies", "recommendations"],
   starterActions: [
