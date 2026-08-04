@@ -59,33 +59,33 @@ export default function NavbarWrapper() {
   return (
     <>
       <header
-        className="sticky top-0 z-30 flex h-14 items-center justify-between border-b px-4 transition-colors md:px-6"
+        className="sticky top-0 z-30 flex h-16 items-center justify-between border-b px-4 transition-colors md:px-6"
         style={headerStyle}
       >
-        {/* Left: logo + desktop nav */}
+        {/* Left: hamburger + logo + desktop nav */}
         <div className="flex min-w-0 items-center gap-3">
           {/* Mobile hamburger */}
           <button
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-white/5 md:hidden"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg transition-colors hover:bg-white/5 md:hidden"
             style={{ color: T.textMuted }}
             aria-label="Open menu"
             onClick={() => setMobileOpen(true)}
           >
-            <Menu size={20} />
+            <Menu size={22} />
           </button>
 
-          {/* Logo — icon only on mobile, icon+text on desktop (md+) */}
+          {/* Logo — icon only on mobile/tablet, icon+text on lg+ */}
           <BrandLogo
             href="/dashboard"
-            size={30}
+            size={38}
             showText={false}
-            className="md:hidden"
+            className="lg:hidden"
           />
           <BrandLogo
             href="/dashboard"
-            size={30}
+            size={38}
             showText
-            className="hidden md:inline-flex"
+            className="hidden lg:inline-flex"
           />
 
           {/* Desktop nav links — visible on md+ */}
@@ -96,7 +96,7 @@ export default function NavbarWrapper() {
                 <Link
                   key={href}
                   href={href}
-                  className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 md:px-2.5 lg:px-3 lg:text-xs ${
+                  className={`rounded-lg px-2.5 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 lg:px-3 lg:text-xs ${
                     label === "Marketplace" ? "hidden lg:block" : ""
                   }`}
                   style={{
@@ -111,11 +111,11 @@ export default function NavbarWrapper() {
           </nav>
         </div>
 
-        {/* Right: actions */}
+        {/* Right: only settings on mobile, search+bell+settings on desktop */}
         <div className="flex items-center gap-2">
           <Link
             href="/settings"
-            className="rounded-lg p-2 transition-colors hover:bg-white/5"
+            className="grid h-10 w-10 place-items-center rounded-lg transition-colors hover:bg-white/5"
             style={{
               color: pathname?.startsWith("/settings") ? T.accentColor : T.textMuted,
               backgroundColor: pathname?.startsWith("/settings") ? `${T.accentColor}12` : "transparent",
@@ -123,21 +123,21 @@ export default function NavbarWrapper() {
             aria-label="Settings"
             title="Settings"
           >
-            <Settings size={18} />
+            <Settings size={20} />
           </Link>
           <button
-            className="hidden p-2 rounded-lg hover:bg-white/5 transition-colors md:block"
+            className="hidden h-10 w-10 place-items-center rounded-lg hover:bg-white/5 transition-colors md:grid"
             style={{ color: T.textMuted }}
             aria-label="Search"
           >
-            <Search size={18} />
+            <Search size={20} />
           </button>
           <button
-            className="hidden p-2 rounded-lg hover:bg-white/5 transition-colors md:block"
+            className="hidden h-10 w-10 place-items-center rounded-lg hover:bg-white/5 transition-colors md:grid"
             style={{ color: T.textMuted }}
             aria-label="Notifications"
           >
-            <Bell size={18} />
+            <Bell size={20} />
           </button>
         </div>
       </header>
@@ -164,7 +164,7 @@ export default function NavbarWrapper() {
               className="flex h-14 shrink-0 items-center justify-between border-b px-4"
               style={{ borderColor: `${T.borderColor}30` }}
             >
-              <BrandLogo href="/dashboard" size={28} showText />
+              <BrandLogo href="/dashboard" size={38} showText />
               <button
                 className="grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-white/5"
                 style={{ color: T.textMuted }}

@@ -218,14 +218,14 @@ export default function AnimatedBackground() {
     const sparkles: Sparkle[] = [];
     function initSparkles() {
       sparkles.length = 0;
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 40; i++) {
         sparkles.push({
           x: Math.random() * w,
           y: Math.random() * h,
-          size: 0.5 + Math.random() * 2,
+          size: 0.5 + Math.random() * 2.5,
           alpha: 0,
-          targetAlpha: Math.random() * 0.6,
-          fadeSpeed: 0.005 + Math.random() * 0.015,
+          targetAlpha: Math.random() * 0.7,
+          fadeSpeed: 0.003 + Math.random() * 0.012,
           hue: Math.random() * 360,
         });
       }
@@ -363,16 +363,20 @@ export default function AnimatedBackground() {
         ctx!.fill();
       }
 
-      // ── Sparkles ──
+      // ── Sparkles (with subtle parallax) ──
       ctx!.globalCompositeOperation = "screen";
+      const scrollY = window.scrollY || 0;
       for (const s of sparkles) {
         s.alpha += (s.targetAlpha - s.alpha) * s.fadeSpeed;
         if (Math.abs(s.alpha - s.targetAlpha) < 0.01) {
-          s.targetAlpha = s.targetAlpha > 0.1 ? 0 : Math.random() * 0.6;
+          s.targetAlpha = s.targetAlpha > 0.1 ? 0 : Math.random() * 0.7;
         }
         const rgb = hslToRgb((baseHsl.h + s.hue) % 360, 60, 70);
+        // Parallax: sparkles drift slightly with scroll
+        const parallaxY = (s.y - scrollY * 0.15) % h;
+        const py = parallaxY < 0 ? parallaxY + h : parallaxY;
         ctx!.beginPath();
-        ctx!.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx!.arc(s.x, py, s.size, 0, Math.PI * 2);
         ctx!.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${s.alpha})`;
         ctx!.fill();
       }
