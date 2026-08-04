@@ -142,8 +142,12 @@ export default function SettingsPage() {
         >
           <SettingsNav
             sections={filteredSections}
+            allSections={SETTINGS_SECTIONS}
+            controlMode={controlMode}
+            isOwner={isOwner}
             activeSection={activeSection}
             onSectionClick={handleSectionClick}
+            onModeChange={setControlMode}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             T={T}
@@ -184,11 +188,12 @@ export default function SettingsPage() {
               {isMobileSectionActive ? activeSectionMeta?.label : "Settings"}
             </span>
           </div>
-          {!isMobileSectionActive && (
-            <span className="text-[10px] font-bold" style={{ color: MODE_META[controlMode].color }}>
-              {MODE_META[controlMode].label}
-            </span>
-          )}
+          <ModeSelector
+            controlMode={controlMode}
+            onModeChange={setControlMode}
+            isOwner={isOwner}
+            T={T}
+          />
         </div>
 
         {/* Mobile: section list or active section */}
@@ -208,7 +213,11 @@ export default function SettingsPage() {
           <main className="min-w-0 flex-1 px-4 py-4 pb-24 lg:hidden">
             <MobileSectionList
               sections={filteredSections}
+              allSections={SETTINGS_SECTIONS}
+              controlMode={controlMode}
+              isOwner={isOwner}
               onSectionClick={handleSectionClick}
+              onModeChange={setControlMode}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               T={T}
@@ -252,21 +261,33 @@ export default function SettingsPage() {
 
 function SettingsNav({
   sections,
+  allSections,
+  controlMode,
+  isOwner,
   activeSection,
   onSectionClick,
+  onModeChange,
   searchQuery,
   onSearchChange,
   T,
   returnTo,
 }: {
   sections: SettingsSection[];
+  allSections: SettingsSection[];
+  controlMode: ControlMode;
+  isOwner: boolean;
   activeSection: string;
   onSectionClick: (id: string) => void;
+  onModeChange: (m: ControlMode) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
   returnTo: string;
 }) {
+  const modeIdx = MODE_ORDER.indexOf(controlMode);
+  const hasSearch = searchQuery.trim().length > 0;
+  const displaySections = hasSearch ? sections : allSections;
+
   return (
     <div className="flex h-full flex-col">
       {/* Back link */}
@@ -299,11 +320,53 @@ function SettingsNav({
         </div>
       </div>
 
-      {/* Section list */}
+      {/* Section list — shows ALL sections, locked ones greyed out */}
       <nav className="flex-1 overflow-y-auto px-2 py-2">
-        {sections.map((section) => {
+        {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
           const isActive = activeSection === section.id;
+          const sIdx = MODE_ORDER.indexOf(section.minMode);
+          const isLocked = sIdx > modeIdx || (section.ownerOnly && !isOwner);
+          const lockedMode = MODE_META[section.minMode];
+
+          if (isLocked && !hasSearch) {
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => onModeChange(section.minMode)}
+                className="flex min-h-13 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white/3"
+                style={{ opacity: 0.5 }}
+                aria-label={`${section.label} — switch to ${lockedMode.label} mode to unlock`}
+              >
+                <span
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
+                  style={{
+                    backgroundColor: `${lockedMode.color}10`,
+                    color: `${lockedMode.color}80`,
+                  }}
+                >
+                  <Icon size={14} className="pointer-events-none" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-bold text-white/50">{section.label}</span>
+                    <Lock size={10} className="text-white/30" />
+                  </div>
+                  <div className="truncate text-[10px] text-white/25">
+                    {section.description}
+                  </div>
+                </div>
+                <span
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider"
+                  style={{ color: lockedMode.color, backgroundColor: `${lockedMode.color}15` }}
+                >
+                  {lockedMode.label}
+                </span>
+              </button>
+            );
+          }
+
           return (
             <button
               key={section.id}
@@ -425,17 +488,32 @@ function ModeSelector({
 
 function MobileSectionList({
   sections,
+  allSections,
+  controlMode,
+  isOwner,
   onSectionClick,
+  onModeChange,
   searchQuery,
   onSearchChange,
   T: _T,
 }: {
   sections: SettingsSection[];
+  allSections: SettingsSection[];
+  controlMode: ControlMode;
+  isOwner: boolean;
   onSectionClick: (id: string) => void;
+  onModeChange: (m: ControlMode) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
+  const modeIdx = MODE_ORDER.indexOf(controlMode);
+  const hasSearch = searchQuery.trim().length > 0;
+
+  // When searching, show filtered results. Otherwise show ALL sections
+  // with locked ones greyed out so users can see what exists.
+  const displaySections = hasSearch ? sections : allSections;
+
   return (
     <div className="space-y-3">
       <div className="relative">
@@ -453,9 +531,79 @@ function MobileSectionList({
           aria-label="Search settings"
         />
       </div>
+
+      {/* Mode banner — shows current mode and lets user switch */}
+      {!hasSearch && (
+        <div
+          className="flex items-center justify-between rounded-xl border px-3 py-2.5"
+          style={{
+            borderColor: `${MODE_META[controlMode].color}30`,
+            backgroundColor: `${MODE_META[controlMode].color}08`,
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: MODE_META[controlMode].color }} />
+            <span className="text-xs font-bold" style={{ color: MODE_META[controlMode].color }}>
+              {MODE_META[controlMode].label}
+            </span>
+            <span className="text-[10px] text-white/40">{MODE_META[controlMode].description}</span>
+          </div>
+          <ModeSelector
+            controlMode={controlMode}
+            onModeChange={onModeChange}
+            isOwner={isOwner}
+            T={_T}
+          />
+        </div>
+      )}
+
       <div className="space-y-1">
-        {sections.map((section) => {
+        {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
+          const sIdx = MODE_ORDER.indexOf(section.minMode);
+          const isLocked = sIdx > modeIdx || (section.ownerOnly && !isOwner);
+          const lockedMode = MODE_META[section.minMode];
+
+          if (isLocked && !hasSearch) {
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => onModeChange(section.minMode)}
+                className="flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all hover:bg-white/3"
+                style={{
+                  borderColor: "rgba(255,255,255,0.04)",
+                  backgroundColor: "rgba(255,255,255,0.01)",
+                  opacity: 0.55,
+                }}
+                aria-label={`${section.label} — switch to ${lockedMode.label} mode to unlock`}
+              >
+                <span
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
+                  style={{
+                    backgroundColor: `${lockedMode.color}10`,
+                    color: `${lockedMode.color}80`,
+                  }}
+                >
+                  <Icon size={16} className="pointer-events-none" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-white/60">{section.label}</span>
+                    <Lock size={10} className="text-white/30" />
+                  </div>
+                  <div className="truncate text-[10px] text-white/30">{section.description}</div>
+                </div>
+                <span
+                  className="shrink-0 rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider"
+                  style={{ color: lockedMode.color, backgroundColor: `${lockedMode.color}15` }}
+                >
+                  {lockedMode.label}
+                </span>
+              </button>
+            );
+          }
+
           return (
             <button
               key={section.id}
