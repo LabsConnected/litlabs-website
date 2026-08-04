@@ -36,7 +36,8 @@
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
     "daemon:dev": "tsx src/daemon.ts",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\" \"pnpm daemon:dev\"",
-    "diagnose:connections": "tsx scripts/diagnose-connections.ts"
+    "diagnose:connections": "tsx scripts/diagnose-connections.ts",
+    "audit:product-truth": "tsx scripts/audit-product-truth.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",

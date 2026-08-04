@@ -93,7 +93,7 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   },
   founderCheckout: {
     flag: "founderCheckout",
-    description: "Founding Supporter checkout — disabled until pricing conflict resolved",
+    description: "Founding Member checkout — disabled until approved $149 Stripe Price ID is configured",
     enabled: false,
     hideFromNav: false, // Visible as "Coming soon" on pricing page
   },

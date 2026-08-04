@@ -599,7 +599,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">Free</div>
               <div className="text-[10px] text-white/40">Free forever</div>
               <div className="mt-3 space-y-1">
-                {["1 active project", "500 monthly LiTTBits", "LiTT and Spark", "Basic tools"].map((f) => (
+                {["1 active project", "500 starter LiTTBits", "LiTT and Spark", "Basic tools"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-emerald-400" /> {f}
                   </div>
