@@ -251,7 +251,7 @@ export default function CommandStudioNav({
   );
 }
 
-/* ── Mobile bottom tab bar — 5 destinations ────────────────────── */
+/* ── Mobile bottom tab bar — 6 destinations, premium ─────────── */
 export function MobileCommandNav({
   active,
   onSelect,
@@ -264,21 +264,23 @@ export function MobileCommandNav({
       aria-label="Studio navigation"
       className="flex md:hidden shrink-0 items-stretch border-t"
       style={{
-        height: "calc(52px + env(safe-area-inset-bottom))",
+        height: "calc(62px + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        backgroundColor: "var(--studio-surface)",
+        backgroundColor: "rgba(8, 6, 15, 0.85)",
         borderTop: "1px solid var(--studio-border)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
       }}
     >
       {/* Home — navigate back to dashboard */}
       <Link
         href="/dashboard"
-        className="flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors"
+        className="flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
         style={{ color: "var(--text-muted)" }}
         aria-label="Go to dashboard"
       >
-        <Home size={18} strokeWidth={1.7} className="pointer-events-none" />
-        <span className="text-[11px] font-bold">Home</span>
+        <Home size={20} strokeWidth={1.8} className="pointer-events-none" />
+        <span className="text-[10px] font-bold">Home</span>
       </Link>
 
       {NAV_ITEMS.map((item) => {
@@ -289,15 +291,30 @@ export function MobileCommandNav({
             key={item.id}
             type="button"
             onClick={() => onSelect(item.id)}
-            className="flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors"
+            className="relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors"
             style={{
               color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
             }}
             aria-label={item.label}
             aria-current={isActive ? "page" : undefined}
           >
-            <Icon size={18} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
-            <span className="text-[11px] font-bold">{item.label}</span>
+            {isActive && (
+              <span
+                className="absolute top-0 h-0.5 w-8 rounded-b-full"
+                style={{
+                  backgroundColor: "var(--litt-primary)",
+                  boxShadow: "0 0 8px var(--litt-primary)",
+                }}
+                aria-hidden
+              />
+            )}
+            <Icon
+              size={20}
+              strokeWidth={isActive ? 2.3 : 1.8}
+              className="pointer-events-none transition-transform"
+              style={isActive ? { transform: "scale(1.1)" } : undefined}
+            />
+            <span className="text-[10px] font-bold">{item.label}</span>
           </button>
         );
       })}

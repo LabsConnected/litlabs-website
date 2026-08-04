@@ -476,12 +476,12 @@ export default function CommandComposer({
           }}
         />
 
-        {/* Agent selector */}
+        {/* Agent selector — icon only on mobile, full on desktop */}
         <button
           ref={agentTriggerRef}
           type="button"
           onClick={() => setAgentOpen((v) => !v)}
-          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 transition hover:bg-white/5"
+          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-white/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: agentAccent,
@@ -575,12 +575,11 @@ export default function CommandComposer({
           data-testid="studio-command-input"
         />
 
-        {/* TTS settings — separate from mic input. Opens a popover with
-            on/off, stop speaking, and interrupt-while-talking toggle. */}
+        {/* TTS settings — hidden on mobile to save space */}
         <button
           type="button"
           onClick={() => setTtsPopoverOpen((v) => !v)}
-          className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{
             color: ttsEnabled ? "#65f4ff" : "var(--text-muted)",
             boxShadow: voiceOutputState === "speaking" ? "0 0 0 2px rgba(101,244,255,0.3)" : undefined,
@@ -606,11 +605,11 @@ export default function CommandComposer({
           />
         )}
 
-        {/* Camera — opens compact preview popover, capture → attach */}
+        {/* Camera — hidden on mobile to save space */}
         <button
           type="button"
           onClick={() => setCameraPreviewOpen((v) => !v)}
-          className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{
             color: cameraPreviewOpen ? "#22d3ee" : "var(--text-muted)",
             boxShadow: cameraPreviewOpen ? "0 0 0 2px rgba(34,211,238,0.3)" : undefined,
@@ -621,11 +620,11 @@ export default function CommandComposer({
           <Camera size={18} className="pointer-events-none shrink-0" />
         </button>
 
-        {/* Share / Live — opens Share menu (screen, window, tab, Live Voice) */}
+        {/* Share / Live — hidden on mobile to save space */}
         <button
           type="button"
           onClick={() => setShareMenuOpen((v) => !v)}
-          className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
           style={{
             color: shareMenuOpen || liveActive ? "#a855f7" : "var(--text-muted)",
             boxShadow: shareMenuOpen ? "0 0 0 2px rgba(168,85,247,0.3)" : undefined,

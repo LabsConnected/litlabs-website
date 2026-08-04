@@ -750,11 +750,19 @@ export function useCanonicalConversation({
           const data = await response.json().catch(() => null) as {
             duplicate?: boolean;
             error?: string;
+            detail?: string;
             userMessage?: ConversationMessage;
             assistantMessage?: ConversationMessage;
             revision?: number;
             usedFallbackModel?: string;
           } | null;
+          if (!data) {
+            // JSON parse failed — server returned non-JSON for a 200 response
+            rollbackOptimistic(conversationId);
+            const errorText = "Server returned an invalid response (not JSON). Check network tab.";
+            setSendError(errorText);
+            return { accepted: false, persisted: false, errorKind: "network" };
+          }
           if (data?.userMessage && data.assistantMessage) {
             const s2 = getStore();
             const userMsg = data.userMessage;
@@ -813,7 +821,9 @@ export function useCanonicalConversation({
             setTimeout(() => void loadMessages(conversationId!), 2000);
             return { accepted: true, persisted: true };
           }
-          const errorText = data?.error || "Server returned an invalid response.";
+          const errorText = data?.error
+            ? (data.detail ? `${data.error}: ${data.detail}` : data.error)
+            : `Server returned an unexpected response format (status ${response.status}, keys: ${Object.keys(data).join(",") || "none"}). Check network tab.`;
           getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
             content: errorText,

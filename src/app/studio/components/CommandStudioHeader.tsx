@@ -170,7 +170,7 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b px-2 sm:px-3"
+      className="flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap border-b px-3 sm:px-4"
       style={{
         height: "var(--studio-header-h)",
         backgroundColor: "var(--studio-surface)",
@@ -340,12 +340,12 @@ export default function CommandStudioHeader({
       {/* Notifications — wired to /api/notifications/count */}
       <Link
         href="/dashboard"
-        className="relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        className="relative grid h-8 w-8 sm:h-7 sm:w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-secondary)" }}
         aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
         title="Notifications"
       >
-        <Bell size={13} />
+        <Bell size={14} />
         {notifCount ? (
           <span
             className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
