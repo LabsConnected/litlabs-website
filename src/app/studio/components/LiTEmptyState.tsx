@@ -271,22 +271,7 @@ export default function LiTEmptyState({
       aria-live="polite"
       aria-label="Workspace briefing"
     >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-80"
-        aria-hidden
-        style={{
-          backgroundImage: [
-            "radial-gradient(circle at 18% 20%, rgba(114,242,56,0.14), transparent 26%)",
-            "radial-gradient(circle at 82% 26%, rgba(169,112,255,0.11), transparent 22%)",
-            "radial-gradient(circle at 50% 60%, rgba(34,211,238,0.08), transparent 34%)",
-            "linear-gradient(rgba(114,242,56,0.05) 1px, transparent 1px)",
-            "linear-gradient(90deg, rgba(114,242,56,0.05) 1px, transparent 1px)",
-          ].join(", "),
-          backgroundSize: "100% 100%, 100% 100%, 100% 100%, 72px 72px, 72px 72px",
-          animation: "litt-grid-drift 28s linear infinite",
-        }}
-      />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(114,242,56,0.08),transparent_38%)]" aria-hidden />
+
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-5">
       {/* Active character — clean transparent art, no framed black bars. */}

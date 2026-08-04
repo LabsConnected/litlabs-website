@@ -52,9 +52,9 @@ import type { DiscoverFeedItem } from "@/lib/dashboard/discover-widget-data";
 // ---------------------------------------------------------------------------
 
 const D = {
-  bg: "#060410",
+  bg: "transparent",
   bgGradient:
-    "radial-gradient(circle at 15% 0%, rgba(124,58,237,0.12), transparent 40%), radial-gradient(circle at 85% 15%, rgba(168,85,247,0.06), transparent 30%), #060410",
+    "radial-gradient(circle at 15% 0%, rgba(124,58,237,0.12), transparent 40%), radial-gradient(circle at 85% 15%, rgba(168,85,247,0.06), transparent 30%), transparent",
   surface: "rgba(255,255,255,0.025)",
   surfaceHover: "rgba(255,255,255,0.04)",
   border: "rgba(168,85,247,0.12)",

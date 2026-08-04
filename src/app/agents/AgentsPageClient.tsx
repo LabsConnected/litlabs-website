@@ -372,7 +372,7 @@ export default function AgentsPageClient() {
   };
 
   return (
-    <main className="relative h-full overflow-y-auto bg-[#03050a] pb-24 text-white">
+    <main className="relative h-full overflow-y-auto bg-transparent pb-24 text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(168,255,47,.08),transparent_24%),radial-gradient(circle_at_88%_20%,rgba(169,112,255,.12),transparent_28%),radial-gradient(circle_at_50%_90%,rgba(34,211,238,.08),transparent_30%)]" />
       <div className="relative mx-auto max-w-[1680px] space-y-3 px-2.5 py-3 sm:px-4 lg:px-5">
         <header className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#070a12] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,.3)]">

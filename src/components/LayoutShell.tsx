@@ -48,6 +48,7 @@ export default function LayoutShell({
   if (isStudio) {
     return (
       <>
+        <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
           {children}

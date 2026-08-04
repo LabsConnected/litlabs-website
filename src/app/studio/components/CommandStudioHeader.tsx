@@ -279,17 +279,7 @@ export default function CommandStudioHeader({
           document.body,
         )}
 
-      {/* Model picker — lets the user change the AI model. The selected
-          model reaches the backend via useCanonicalConversation.send(). */}
-      <div className="hidden sm:block shrink-0 w-[min(11rem,30vw)]" data-testid="studio-model-picker">
-        <ModelPicker
-          selectedModel={selectedModel.id}
-          onModelChange={(modelId) => {
-            const found = MODELS.find((m) => m.id === modelId);
-            if (found) selectModel(found);
-          }}
-        />
-      </div>
+
 
       {/* Write-permission pill — colored so the approval state is obvious.
           🟢 Writes allowed · 🟡 Approval needed · (locked shown in popover) */}

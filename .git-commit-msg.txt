@@ -1,0 +1,12 @@
+feat: wallpaper transparency, model picker removal, mascot padding, n8n 2.10.0
+
+- Remove model picker from studio header nav
+- Add padding to robot mascot cutout to prevent clipping
+- Make studio/code/dashboard/marketplace layouts transparent for wallpaper
+- Remove green scan grid from studio empty state
+- Update n8n to v2.10.0 for Gemini node support
+- Remove pg/bcrypt dev deps (one-time DB reset scripts cleaned up)
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

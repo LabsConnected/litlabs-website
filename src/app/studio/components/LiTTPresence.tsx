@@ -231,7 +231,7 @@ export default function LiTTPresence({
           alt="LiTT mascot"
           width={dims.w}
           height={dims.h}
-          className="object-contain"
+          className="object-contain p-2.5"
           style={{ filter: `drop-shadow(0 0 20px ${colors.glow})` }}
         />
         <span

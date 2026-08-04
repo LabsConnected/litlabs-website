@@ -537,7 +537,7 @@ function CommandStudioContent() {
         className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
         data-layout={theme.layoutStyle}
         style={{
-          backgroundColor: "var(--studio-bg)",
+          backgroundColor: "transparent",
           color: "var(--text-primary)",
           backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(155,77,255,0.08), transparent)",
         }}

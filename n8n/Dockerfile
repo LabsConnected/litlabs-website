@@ -6,7 +6,7 @@
 #
 # This is BEHIND the scenes — never customer-facing.
 
-FROM n8nio/n8n:latest
+FROM n8nio/n8n:2.10.0
 
 # n8n runs on port 5678
 EXPOSE 5678

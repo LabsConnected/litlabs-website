@@ -58,7 +58,7 @@ export default async function AgentDetailPage({
           : "Free";
 
   return (
-    <div className="min-h-screen bg-[#0a0a0b] text-white">
+    <div className="min-h-screen bg-transparent text-white">
       {/* Hero */}
       <div className="relative overflow-hidden border-b border-white/5">
         <div
