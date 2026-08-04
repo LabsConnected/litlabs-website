@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { ArrowRight, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
+import { NavAuth } from "@/components/ClerkAuth";
 import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { RealCreations } from "@/components/landing/RealCreations";
@@ -16,6 +17,7 @@ import { TrustSection } from "@/components/landing/TrustSection";
 /* ── Navigation ────────────────────────────────────────────────── */
 
 function Header() {
+  const { isLoaded, isSignedIn } = useClerkAuth();
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
@@ -30,23 +32,30 @@ function Header() {
           <a href="#product" className="transition hover:text-[#a8ff2f]">Product</a>
           <a href="#creations" className="transition hover:text-[#a8ff2f]">Creations</a>
           <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
+          <Link href="/games" className="transition hover:text-[#a8ff2f]">Games</Link>
           <Link href="/discover" className="transition hover:text-[#a8ff2f]">Community</Link>
           <Link href="/marketplace" className="transition hover:text-[#a8ff2f]">Marketplace</Link>
           <Link href="/pricing" className="transition hover:text-[#a8ff2f]">Pricing</Link>
         </nav>
         <div className="flex items-center gap-2">
-          <Link
-            href="/sign-in"
-            className="hidden px-3 py-2 text-sm font-bold text-white/60 transition hover:text-white sm:block"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
-          >
-            Start free <ArrowRight size={14} />
-          </Link>
+          {isLoaded && isSignedIn ? (
+            <NavAuth linkColor="#a8ff2f" />
+          ) : (
+            <>
+              <Link
+                href="/sign-in"
+                className="hidden px-3 py-2 text-sm font-bold text-white/60 transition hover:text-white sm:block"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/sign-up"
+                className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
+              >
+                Start free <ArrowRight size={14} />
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -239,6 +248,7 @@ function LandingPage() {
           </div>
           <div className="flex flex-wrap gap-5">
             <Link href="/studio">Studio</Link>
+            <Link href="/games">Games</Link>
             <Link href="/marketplace">Marketplace</Link>
             <Link href="/gallery">Gallery</Link>
             <Link href="/pricing">Pricing</Link>
