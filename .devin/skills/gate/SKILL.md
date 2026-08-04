@@ -1,4 +1,5 @@
 ---
+name: gate
 description: Run a full quality gate — lint, typecheck, tests, and production build
 ---
 

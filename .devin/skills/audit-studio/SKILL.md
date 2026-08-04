@@ -1,4 +1,5 @@
 ---
+name: audit-studio
 description: Audit all Studio controls for accessibility — type=button, pointer-events-none, aria-labels, touch targets
 ---
 

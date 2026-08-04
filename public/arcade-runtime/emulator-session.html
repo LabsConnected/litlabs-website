@@ -56,6 +56,39 @@
         height: 100% !important;
       }
     }
+
+    /* ─── Save state / popup positioning fixes ─────────────────── */
+    /* EmulatorJS .ejs_popup_container defaults to position:absolute; top:0
+       with a very tall .ejs_popup_body, causing the save/load dialog to
+       appear at the very top of the iframe instead of centered. */
+    .ejs_popup_container {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      align-items: center !important;
+      z-index: 99999 !important;
+    }
+    .ejs_popup_container_box {
+      position: relative !important;
+      max-width: 90% !important;
+      max-height: 80% !important;
+      width: auto !important;
+      border-radius: 12px;
+    }
+    .ejs_popup_body {
+      height: auto !important;
+      max-height: 50vh !important;
+      overflow: auto !important;
+      padding: 10px !important;
+    }
+    .ejs_popup_container h4 {
+      padding-top: 10px !important;
+    }
   </style>
 </head>
 <body>
@@ -66,6 +99,34 @@
     document.addEventListener("click", function () {
       try { window.focus(); } catch (e) {}
     });
+
+    // ─── Keyboard input fix ──────────────────────────────────────
+    // Prevent the browser from intercepting game-related keys (arrow keys,
+    // space, etc.) for scrolling. Without this, arrow keys scroll the
+    // parent page instead of reaching the emulator core.
+    var GAME_KEYS = [
+      "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      " ", "Spacebar",
+      "Enter", "Shift", "Tab",
+      "z", "x", "a", "s", "q", "w", "c",
+      "Z", "X", "A", "S", "Q", "W", "C",
+    ];
+    document.addEventListener("keydown", function (e) {
+      // Always focus the iframe window on any keydown
+      try { window.focus(); } catch (err) {}
+      // Prevent default for game keys to stop page scroll
+      if (GAME_KEYS.indexOf(e.key) !== -1) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true); // capture phase — catch before EmulatorJS
+
+    // Also prevent default for game keys on keyup (some browsers scroll on keyup)
+    document.addEventListener("keyup", function (e) {
+      if (GAME_KEYS.indexOf(e.key) !== -1) {
+        e.preventDefault();
+      }
+    }, true);
   </script>
 
   <!--
@@ -211,40 +272,165 @@
       window.EJS_gamepad = true;
       window.EJS_gamepadConnected = true;
 
+      // ─── Control scheme — explicit mapping for Sega systems ──────
+      // EmulatorJS determines the control scheme (button layout + labels)
+      // by reverse-looking-up the core name to a system alias. If the
+      // core name (e.g. "genesis_plus_gx") appears in multiple alias
+      // groups (segaMS, segaMD, segaGG, segaCD), the FIRST match wins —
+      // which is "segaMS" (Master System, 2 buttons) instead of "segaMD"
+      // (Genesis, 6 buttons). This breaks Xbox/PlayStation controller
+      // input on Sega games. Setting EJS_controlScheme explicitly
+      // bypasses the reverse lookup and forces the correct layout.
+      var CONTROL_SCHEME_MAP = {
+        "segaMD": "segaMD",
+        "segaCD": "segaCD",
+        "sega32x": "sega32x",
+        "segaMS": "segaMS",
+        "segaGG": "segaGG",
+        "segaSaturn": "segaSaturn",
+        "genesis_plus_gx": "segaMD",
+        "picodrive": "segaMD",
+        "smsplus": "segaMS"
+      };
+      if (CONTROL_SCHEME_MAP[core]) {
+        window.EJS_controlScheme = CONTROL_SCHEME_MAP[core];
+      }
+
+      // ─── Xbox One controller button map ──────────────────────
+      // Standard Xbox button indices (Gamepad API):
+      //   A=0, B=1, X=2, Y=3, LB=4, RB=5, LT=6, RT=7,
+      //   SELECT=8, START=9, L3=10, R3=11, DPAD_UP=12,
+      //   DPAD_DOWN=13, DPAD_LEFT=14, DPAD_RIGHT=15
+      // Map these to EmulatorJS button labels for each console.
+      // The mapping is applied per-core in EJS_ready.
+      var XBOX_BUTTON_MAP = {
+        // Xbox → NES
+        nes: {
+          "BUTTON_1": 0,   // A button
+          "BUTTON_2": 2,   // B button → X
+          "SELECT": 8,
+          "START": 9,
+          "DPAD_UP": 12,
+          "DPAD_DOWN": 13,
+          "DPAD_LEFT": 14,
+          "DPAD_RIGHT": 15,
+        },
+        // Xbox → SNES
+        snes: {
+          "BUTTON_1": 0,   // A → A
+          "BUTTON_2": 1,   // B → B
+          "BUTTON_3": 2,   // X → X
+          "BUTTON_4": 3,   // Y → Y
+          "LEFT_TOP_SHOULDER": 4,    // L → LB
+          "RIGHT_TOP_SHOULDER": 5,   // R → RB
+          "SELECT": 8,
+          "START": 9,
+          "DPAD_UP": 12,
+          "DPAD_DOWN": 13,
+          "DPAD_LEFT": 14,
+          "DPAD_RIGHT": 15,
+        },
+      };
+
       // Manually poll for already-connected gamepads on load.
       // The `gamepadconnected` event only fires on button press, so
       // if the controller was connected before the iframe loaded,
       // EmulatorJS may not detect it until a button is pressed.
       // This poll forces detection on startup.
       function pollGamepads() {
+        var gamepadStates = [];
         try {
           var pads = navigator.getGamepads ? navigator.getGamepads() : [];
           for (var i = 0; i < pads.length; i++) {
             if (pads[i]) {
-              send("runtime.progress", {
-                text: "gamepad detected: " + pads[i].id.substring(0, 60) +
-                  " (index=" + pads[i].index + ", buttons=" + pads[i].buttons.length +
-                  ", axes=" + pads[i].axes.length + ")"
+              gamepadStates.push({
+                index: pads[i].index,
+                id: pads[i].id.substring(0, 60),
+                buttons: pads[i].buttons.length,
+                axes: pads[i].axes.length,
               });
             }
           }
         } catch (e) {
           send("runtime.progress", { text: "gamepad poll error: " + e.message });
         }
+        if (gamepadStates.length > 0) {
+          send("runtime.gamepad_connected", {
+            count: gamepadStates.length,
+            pads: gamepadStates,
+          });
+        } else {
+          send("runtime.gamepad_disconnected");
+        }
+        return gamepadStates;
       }
+
+      // ─── Continuous gamepad monitoring ────────────────────────
+      // Poll every 2s to detect hotplug/unplug events. The Gamepad API
+      // on some browsers stops reporting controllers after a while if
+      // the iframe loses focus — this keeps it honest.
+      var gamepadMonitorInterval = null;
+      var lastGamepadCount = 0;
+
+      function startGamepadMonitor() {
+        if (gamepadMonitorInterval) return;
+        // Initial poll
+        var pads = pollGamepads();
+        lastGamepadCount = pads.length;
+        // Monitor every 2s
+        gamepadMonitorInterval = setInterval(function () {
+          var current = pollGamepads();
+          // If count changed, also emit connect/disconnect events
+          if (current.length !== lastGamepadCount) {
+            lastGamepadCount = current.length;
+            if (current.length > 0) {
+              send("runtime.progress", {
+                text: "gamepad hotplug: " + current.length + " controller(s) detected"
+              });
+            } else {
+              send("runtime.progress", {
+                text: "gamepad unplugged: all controllers disconnected"
+              });
+            }
+          }
+        }, 2000);
+      }
+
+      // ─── Force re-scan on user interaction ────────────────────
+      // Browsers may gate navigator.getGamepads() behind user activation.
+      // Every click/tap inside the iframe triggers a fresh poll.
+      document.addEventListener("click", function () {
+        try { window.focus(); } catch (e) {}
+        // Re-scan gamepads on click
+        pollGamepads();
+        // If EmulatorJS exists, also refresh its internal gamepad state
+        if (window.EJS_emulator && typeof window.EJS_emulator.gamepadHandler !== "undefined") {
+          try { window.EJS_emulator.gamepadHandler.loop(); } catch (e) {}
+        }
+      });
+
+      // Also re-scan on touch (mobile controllers, tablet)
+      document.addEventListener("touchstart", function () {
+        setTimeout(pollGamepads, 100);
+      });
 
       // Poll for gamepads after the loader is ready (EJS_ready).
       // Also listen for gamepadconnected/disconnected events.
       window.addEventListener("gamepadconnected", function (e) {
+        lastGamepadCount = 1;
+        startGamepadMonitor();
         send("runtime.progress", {
           text: "gamepadconnected: " + (e.gamepad ? e.gamepad.id.substring(0, 60) : "unknown") +
             " (index=" + (e.gamepad ? e.gamepad.index : -1) + ")"
         });
+        pollGamepads();
       });
       window.addEventListener("gamepaddisconnected", function (e) {
+        lastGamepadCount = 0;
         send("runtime.progress", {
           text: "gamepaddisconnected: " + (e.gamepad ? e.gamepad.id.substring(0, 60) : "unknown")
         });
+        pollGamepads();
       });
 
       // BIOS URL — passed from parent for Satellaview/BS-X titles
@@ -276,8 +462,34 @@
         send("runtime.loader_ready");
         // Poll for already-connected gamepads now that EmulatorJS is ready.
         // This catches controllers that were connected before the iframe loaded.
-        setTimeout(pollGamepads, 500);
-        setTimeout(pollGamepads, 2000);
+        startGamepadMonitor();
+
+        // Apply Xbox button mapping for the current core if available
+        var coreKey = (window.EJS_core || core || "").toLowerCase();
+        var mapping = null;
+        if (coreKey.indexOf("nes") !== -1 || coreKey.indexOf("fceumm") !== -1 || coreKey.indexOf("nestopia") !== -1) {
+          mapping = XBOX_BUTTON_MAP.nes;
+        } else if (coreKey.indexOf("snes") !== -1 || coreKey.indexOf("snes9x") !== -1) {
+          mapping = XBOX_BUTTON_MAP.snes;
+        } else if (coreKey.indexOf("gb") !== -1 || coreKey.indexOf("gambatte") !== -1 || coreKey.indexOf("mgba") !== -1) {
+          // Game Boy / GBA use same layout as NES (A+B, Start+Select, D-Pad)
+          mapping = XBOX_BUTTON_MAP.nes;
+        } else if (coreKey.indexOf("genesis") !== -1 || coreKey.indexOf("md") !== -1) {
+          // Genesis / Mega Drive uses SNES layout (A+B+C + Start + D-Pad)
+          mapping = XBOX_BUTTON_MAP.snes;
+        }
+        // Map is used only if EmulatorJS exposes its gamepad config
+        if (mapping && window.EJS_emulator && window.EJS_emulator.config) {
+          try {
+            window.EJS_emulator.config.gamepadMapping = mapping;
+          } catch (e) {}
+        }
+
+        setTimeout(function () {
+          pollGamepads();
+          // On Xbox controllers, the `gamepadconnected` event may not fire until
+          // a button is pressed. Do one extra poll after the UI is interactive.
+        }, 1500);
       };
 
       // EJS_onGameStart = game actually started (canvas rendering).
@@ -290,6 +502,8 @@
           // Without focus, some browsers route gamepad input to the
           // parent page instead of the iframe.
           try { window.focus(); } catch (e) {}
+          // Ensure continuous gamepad monitoring is active
+          startGamepadMonitor();
           // Poll again for gamepads now that the game is running.
           setTimeout(pollGamepads, 500);
         }

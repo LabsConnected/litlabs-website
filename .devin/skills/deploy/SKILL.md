@@ -1,4 +1,5 @@
 ---
+name: deploy
 description: Deploy the web app to Vercel — build, check config, and deploy
 ---
 
