@@ -676,6 +676,7 @@ function CommandStudioContent() {
             repositoryName={capabilities.repositoryName}
             branch={capabilities.activeBranch ?? contextLine.branch}
             onOpenTerminal={handleOpenTerminal}
+            onSelectAgent={conversation.switchAgent}
           />
         </div>
 

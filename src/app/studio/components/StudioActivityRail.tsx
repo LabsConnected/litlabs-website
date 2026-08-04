@@ -39,6 +39,7 @@ interface StudioActivityRailProps {
   repositoryName: string | null;
   branch?: string | null;
   onOpenTerminal?: () => void;
+  onSelectAgent?: (id: AgentId) => void;
 }
 
 /**
@@ -58,6 +59,7 @@ export default function StudioActivityRail({
   repositoryName,
   branch,
   onOpenTerminal,
+  onSelectAgent,
 }: StudioActivityRailProps) {
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [agentsOpen, setAgentsOpen] = useState(true);
@@ -173,13 +175,17 @@ export default function StudioActivityRail({
         >
           <div className="flex flex-col gap-1">
             {crewAgents.map(({ id, meta, active }) => (
-              <div
+              <button
                 key={id}
-                className="flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all"
+                type="button"
+                onClick={() => onSelectAgent?.(id)}
+                className="flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-all hover:bg-white/5 active:scale-[0.98]"
                 style={{
                   borderColor: active ? `${meta.color}40` : "var(--studio-border)",
                   backgroundColor: active ? `${meta.color}08` : "transparent",
                 }}
+                title={`Switch to ${meta.displayName}`}
+                aria-label={`Switch agent to ${meta.displayName}`}
               >
                 <div
                   className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[10px] font-black"
@@ -202,7 +208,7 @@ export default function StudioActivityRail({
                     aria-hidden
                   />
                 )}
-              </div>
+              </button>
             ))}
           </div>
         </Section>

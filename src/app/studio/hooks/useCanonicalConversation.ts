@@ -291,9 +291,15 @@ export function useCanonicalConversation({
       });
       if (!res.ok) {
         const errorBody = await res.json().catch(() => null);
-        setSendError(res.status === 401
-          ? "Your Studio session expired. Refresh the page and sign in again."
-          : errorBody?.error || `Failed to create conversation (${res.status}).`);
+        if (res.status === 429) {
+          const retryAfter = res.headers.get("Retry-After");
+          const secs = retryAfter ? parseInt(retryAfter, 10) : 60;
+          setSendError(`You're sending messages too fast. Try again in ${secs} second${secs > 1 ? "s" : ""}.`);
+        } else {
+          setSendError(res.status === 401
+            ? "Your Studio session expired. Refresh the page and sign in again."
+            : errorBody?.error || `Failed to create conversation (${res.status}).`);
+        }
         return null;
       }
       const data = await res.json();
@@ -701,6 +707,18 @@ export function useCanonicalConversation({
             setRequiresReauth(true);
             setSendError("Your Studio session expired. Refresh the page and sign in again.");
             return { accepted: false, persisted: false, errorKind: "auth" };
+          }
+          if (response.status === 429) {
+            // Rate limited — show a friendly message with the retry window.
+            // The user message was not persisted; roll back optimistic msgs.
+            rollbackOptimistic(conversationId);
+            const retryAfter = response.headers.get("Retry-After");
+            const secs = retryAfter ? parseInt(retryAfter, 10) : 60;
+            const friendly = secs > 60
+              ? `You're sending messages too fast. Try again in ${Math.ceil(secs / 60)} minute${Math.ceil(secs / 60) > 1 ? "s" : ""}.`
+              : `You're sending messages too fast. Try again in ${secs} second${secs > 1 ? "s" : ""}.`;
+            setSendError(friendly);
+            return { accepted: false, persisted: false, errorKind: "network" };
           }
           // Non-auth HTTP failure — the user message was not persisted.
           // Roll back optimistic messages and show the error.
