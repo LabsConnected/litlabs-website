@@ -387,7 +387,7 @@ export default function AgentsPageClient() {
                     {executionMode === "connected" ? "Connected runtime" : "Local draft mode"}
                   </span>
                 </div>
-                <p className="mt-0.5 text-[10px] text-white/40">LiTTree-LabStudios™ · Build the crew, connect the work, run the mission.</p>
+                <p className="mt-0.5 text-[10px] text-white/40">LiTTree LabStudios™ · Build the crew, connect the work, run the mission.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -622,8 +622,8 @@ export default function AgentsPageClient() {
         </details>
 
         <footer className="flex flex-col gap-2 border-t border-white/8 px-1 py-4 text-[9px] text-white/30 sm:flex-row sm:items-center sm:justify-between">
-          <span>© {new Date().getFullYear()} LiTTree-LabStudios™. All rights reserved.</span>
-          <span>LiTTree-LabStudios™, LiTT™, Spark™, and the LiTTree mark are trademarks of LiTTree-LabStudios.</span>
+          <span>© {new Date().getFullYear()} LiTTree LabStudios™. All rights reserved.</span>
+          <span>LiTTree LabStudios™, LiTT™, Spark™, and the LiTTree mark are trademarks of LiTTree LabStudios.</span>
         </footer>
       </div>
     </main>

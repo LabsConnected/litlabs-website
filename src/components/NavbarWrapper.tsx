@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Bell, Search, Settings, Sparkles } from "lucide-react";
+import { Bell, Search, Settings } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { usePathname } from "next/navigation";
 
 import { isFeatureEnabled } from "@/config/feature-flags";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const desktopLinks = [
   ["Dashboard", "/dashboard"],
@@ -45,26 +46,18 @@ export default function NavbarWrapper() {
       }}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <Link
+        <BrandLogo
           href="/dashboard"
-          className="flex shrink-0 items-center gap-2 font-black"
-          style={{ color: T.headerColor }}
-          aria-label="LiTTree-LabStudios home"
-        >
-          <span
-            className="grid h-8 w-8 place-items-center rounded-xl border"
-            style={{
-              color: T.accentColor,
-              borderColor: `${T.accentColor}45`,
-              backgroundColor: `${T.accentColor}12`,
-              boxShadow: `0 0 20px ${T.accentColor}18`,
-            }}
-          >
-            <Sparkles size={16} />
-          </span>
-          <span className="hidden text-sm tracking-[-.025em] lg:inline">LiTTree-LabStudios</span>
-          <span className="text-sm tracking-[-.025em] lg:hidden">LiTTree</span>
-        </Link>
+          size={30}
+          showText={false}
+          className="lg:hidden"
+        />
+        <BrandLogo
+          href="/dashboard"
+          size={30}
+          showText
+          className="hidden lg:inline-flex"
+        />
         <nav className="ml-2 flex items-center gap-0.5 lg:ml-4 lg:gap-1">
           {visibleLinks.map(([label, href]) => {
             const active = pathname === href || pathname?.startsWith(`${href}/`);

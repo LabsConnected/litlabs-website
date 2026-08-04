@@ -264,7 +264,7 @@ function LiTTTerminalPageInner() {
               <h1 className="truncate text-base font-bold sm:text-lg">
                 {project
                   ? `${project.owner}/${project.repository}`
-                  : "LiTTree-LabStudios"}
+                  : "LiTTree LabStudios"}
               </h1>
             </div>
           </div>
@@ -406,7 +406,7 @@ function LiTTTerminalPageInner() {
                       </div>
                       <p>
                         Build a real GitHub-backed workspace for
-                        LiTTree-LabStudios.
+                        LiTTree LabStudios.
                       </p>
                     </div>
                     <div className="rounded-xl border border-neutral-800/60 p-3">

@@ -10,7 +10,6 @@ interface Notification {
 }
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
@@ -18,6 +17,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSessionAuth } from "@/hooks/useSessionAuth";
 import { isFeatureEnabled } from "@/config/feature-flags";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 import dynamic from "next/dynamic";
 import {
   Home,
@@ -193,48 +193,19 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
     >
       <div className="w-full px-4">
         <div className="flex items-center justify-between h-14">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-            <div
-              className="relative w-8 h-8 rounded-lg overflow-hidden transition-transform duration-300 group-hover:scale-105"
-              style={{ border: `1px solid ${resolvedColors.accentColor}40` }}
-            >
-              <Image
-                src="/logo.png"
-                alt="LiTTree LabStudios"
-                fill
-                className="object-contain p-0.5"
-                unoptimized
-              />
-            </div>
-            <div
-              className="hidden sm:flex flex-col leading-none px-2 py-1 rounded-lg"
-              style={{
-                backgroundColor: resolvedColors.bgColor + "60",
-                backdropFilter: "blur(4px)",
-              }}
-            >
-              <span
-                className="font-black text-[13px] tracking-tight"
-                style={{
-                  color: resolvedColors.textColor,
-                  textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
-                }}
-              >
-                LiTTree LabStudios
-              </span>
-              <span
-                className="text-[9px] font-bold tracking-widest uppercase"
-                style={{
-                  color: resolvedColors.textMuted,
-                  opacity: 0.9,
-                  textShadow: `0 0 8px ${resolvedColors.bgColor}`,
-                }}
-              >
-                AI Platform
-              </span>
-            </div>
-          </Link>
+          {/* Logo — icon-only on mobile, icon + text on desktop */}
+          <BrandLogo
+            href="/"
+            size={30}
+            showText={false}
+            className="sm:hidden"
+          />
+          <BrandLogo
+            href="/"
+            size={30}
+            showText
+            className="hidden sm:inline-flex"
+          />
 
           {/* Desktop Nav */}
           <div
