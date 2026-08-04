@@ -12,6 +12,8 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
+import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
@@ -52,6 +54,7 @@ const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const PluginsTool = dynamic(() => import("../tools/PluginsTool"), { ssr: false });
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
+const LiTTLivePanel = dynamic(() => import("./LiTTLivePanel"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
@@ -160,6 +163,8 @@ function CommandStudioContent() {
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
+  const [livePanelOpen, setLivePanelOpen] = useState(false);
+  const [livePanelCollapsed, setLivePanelCollapsed] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
@@ -224,6 +229,9 @@ function CommandStudioContent() {
     },
     serverProjectId: capabilities.projectId,
   });
+
+  // ── LiTT Live realtime session ──
+  const liveSession = useLiTTRealtimeSession();
 
   // Sync destination -> URL ?tool= (preserves legacy bookmarks).
   // Use a destination-specific mode so Video writes ?tool=video, not ?tool=image.
@@ -385,6 +393,26 @@ function CommandStudioContent() {
     branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
   }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+
+  // ── LiTT Live session context (must be after contextLine) ──
+  const liveContext = useMemo<LiTTLiveSessionContext>(() => ({
+    userId: userId ?? "unknown",
+    userName: profile?.displayName ?? appUser?.username ?? undefined,
+    projectId: capabilities.projectId || undefined,
+    projectName: capabilities.projectName || undefined,
+    repository: capabilities.repositoryName || undefined,
+    branch: capabilities.activeBranch || contextLine.branch,
+    currentTool: destination === "studio" ? studioMode : destination === "create" ? createMode : destination,
+    approvedTools: capabilities.writeAccess ? ["terminal", "files"] : [],
+  }), [userId, profile, appUser, capabilities, contextLine, destination, studioMode, createMode]);
+
+  // Sync Live transcripts into canonical conversation
+  const handleLiveTranscript = useCallback((role: "user" | "assistant", text: string) => {
+    if (!text.trim()) return;
+    if (role === "user") {
+      void conversation.send(text).catch(() => {});
+    }
+  }, [conversation]);
 
   // Resolve the legacy tool to render for the active destination/mode.
   // Studio/Work renders the conversation (transcript + composer) unless
@@ -660,6 +688,8 @@ function CommandStudioContent() {
                 disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
+                onToggleLive={() => setLivePanelOpen((v) => !v)}
+                liveActive={livePanelOpen && liveSession.isLive}
                 contextLine={contextLine}
               />
             )}
@@ -725,6 +755,19 @@ function CommandStudioContent() {
         onCameraPosChange={(pos) => setCameraDock((v) => ({ ...v, pos }))}
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
+
+      {/* LiTT Live panel — unified realtime voice + vision session */}
+      {livePanelOpen && (
+        <div className="fixed bottom-20 right-4 z-50 w-80 max-w-[calc(100vw-2rem)]">
+          <LiTTLivePanel
+            session={liveSession}
+            context={liveContext}
+            onTranscript={handleLiveTranscript}
+            collapsed={livePanelCollapsed}
+            onToggleCollapse={() => setLivePanelCollapsed((v) => !v)}
+          />
+        </div>
+      )}
 
     </>
   );
