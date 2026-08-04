@@ -6,10 +6,8 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
-import ModelPicker from "@/components/ModelPicker";
 import {
   useStudioModelStore,
-  MODELS,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
 import {
@@ -92,7 +90,6 @@ export default function CommandStudioHeader({
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
-  const selectModel = useStudioModelStore((s) => s.selectModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
