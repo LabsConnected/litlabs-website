@@ -69,7 +69,7 @@ function LandingPage() {
           <div className="relative z-10">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 px-4 py-2 text-[11px] font-black uppercase tracking-[.18em] text-[#a8ff2f]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
-              AI project workspace
+              AI creative operating system
             </div>
             <h1 className="max-w-2xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl">
               Bring the idea.
@@ -78,9 +78,9 @@ function LandingPage() {
               </span>
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/60">
-              LiTTree is an AI project workspace where LiTT helps you turn ideas
-              into working apps, websites, and creative media—with project memory,
-              real files, human approvals, and deployment from inside Studio.
+              LiTTree LabStudios is an AI creative operating system and social
+              creator platform where LiTT helps people build apps, create media,
+              preserve project context, collaborate and ship real work from Studio.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link

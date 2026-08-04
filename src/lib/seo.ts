@@ -6,10 +6,10 @@ export { SITE_URL };
 export const SITE_NAME = "LiTTree LabStudios";
 
 export const DEFAULT_TITLE =
-  "LiTTree LabStudios | AI Creative Studio for Apps, Art & Projects";
+  "LiTTree LabStudios | AI Creative Operating System & Social Creator Platform";
 
 export const DEFAULT_DESCRIPTION =
-  "Build apps, create art, launch projects, and work with LiTT and Spark in one AI creative studio. Free to join with no credit card required.";
+  "LiTTree LabStudios is an AI creative operating system and social creator platform for turning ideas into real, editable, publishable work. Free to join with no credit card required.";
 
 export const DEFAULT_OG_IMAGE = "/og/littree-labstudios.jpg";
 

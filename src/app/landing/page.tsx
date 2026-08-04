@@ -15,7 +15,7 @@ import { LandingBackground } from "./_components/LandingBackground";
 export const metadata: Metadata = buildMetadata({
   title: "Bring the idea. LiTT helps you build the rest.",
   description:
-    "Build apps, create art, make media, and launch real projects with an AI crew that remembers your goals, style, and decisions. Free to join.",
+    "Build apps, create media, preserve project context, collaborate and ship real work from Studio. Free to join.",
   path: "/landing",
   index: true,
 });

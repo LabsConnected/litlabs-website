@@ -3,7 +3,7 @@ import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
   title: "Privacy Policy",
-  description: "Privacy Policy for LiTTree LabStudios AI creative studio.",
+  description: "Privacy Policy for LiTTree LabStudios AI creative operating system and social creator platform.",
   path: "/privacy",
   index: true,
 });

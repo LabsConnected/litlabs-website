@@ -3,7 +3,7 @@ import { buildMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
-  description: "Cookie Policy for LiTTree LabStudios AI creative studio.",
+  description: "Cookie Policy for LiTTree LabStudios AI creative operating system and social creator platform.",
   path: "/cookies",
   index: true,
 });
