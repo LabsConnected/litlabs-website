@@ -82,8 +82,8 @@ const usageRules = [
     copy: "See all your credits in one place — no hidden balances or surprise charges.",
   },
   {
-    title: "Monthly credits refresh",
-    copy: "Plan credits refresh each billing period. Bought credits never expire.",
+    title: "Credits per billing cycle",
+    copy: "Paid plans grant LiTTBits after each successful billing cycle. Starter credits do not expire.",
   },
   {
     title: "Fair usage tracking",
@@ -105,7 +105,7 @@ const faq = [
   {
     question: "Do I keep my existing Beta LiTTBits?",
     answer:
-      "Yes. Existing balances are migrated once into the promotional bucket. Monthly plan credits are used first, followed by promotional and purchased credits.",
+      "Yes. Existing balances remain visible. Monthly plan credits are used first, followed by promotional and purchased credits.",
   },
   {
     question: "Can I cancel anytime?",
@@ -118,9 +118,9 @@ const faq = [
       "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions show an estimate before they run.",
   },
   {
-    question: "What is the Founding Supporter offer?",
+    question: "What is the Founding Member offer?",
     answer:
-      "A one-time $49 purchase that grants 6 months of Creator-level access, 5,000 bonus LiTTBits, a Founder badge, 15% off future credit packs, and early feature access. Limited to 100 supporters.",
+      "A one-time $149 purchase that grants permanent Creator-level access and a Founder badge. No recurring subscription charge. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
   },
 ];
 
@@ -290,18 +290,18 @@ export default function PricingPage() {
         </div>
 
         <h1>
-          Your AI business team.
-          <span> Research, write, code, market, and analyze.</span>
+          Your AI creative studio.
+          <span> Build apps, media, and projects with LiTT and Spark.</span>
         </h1>
 
         <p className={styles.heroCopy}>
-          One workspace, seven AI agents. Start free with LiTT and Spark, then
-          unlock Researcher, Writer, and Marketer with Creator Beta — or add
-          Coder and Analyst with Pro Builder Beta.
+          One workspace with LiTT and Spark. Start free, then unlock research,
+          writing, and marketing skills with Creator Beta — or add coding and
+          analytics skills with Pro Builder Beta.
         </p>
 
         <div className={styles.heroMeta}>
-          <span>7 specialist AI agents</span>
+          <span>LiTT &amp; Spark</span>
           <span>Clear LiTTBit allowances</span>
           <span>Projects stay yours</span>
         </div>
@@ -334,16 +334,16 @@ export default function PricingPage() {
 
           <div className={styles.founderCopy}>
             <div className={styles.founderTitleRow}>
-              <p>Founding Supporter</p>
-              <span>Coming Soon</span>
+              <p>Founding Member</p>
+              <span>Currently Unavailable</span>
             </div>
             <h2>
-              Founding Supporter pricing and duration are being finalized.
+              $149 one-time for permanent Creator-level access.
             </h2>
             <p>
-              We&apos;re confirming the final price and access duration before
-              opening checkout. Join the waitlist to be notified when it&apos;s
-              ready — no payment required until then.
+              Founding Member grants permanent Creator-level feature access and a
+              Founder badge — no recurring subscription, no six-month limitation.
+              Checkout is currently unavailable pending an approved Stripe price.
             </p>
           </div>
 
@@ -352,7 +352,7 @@ export default function PricingPage() {
             className={styles.founderButton}
             disabled
           >
-            Coming Soon
+            Currently Unavailable
           </button>
         </article>
 

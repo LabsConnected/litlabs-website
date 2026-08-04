@@ -29,9 +29,9 @@ async function markEventProcessed(
   });
 }
 
-async function creditCoinPack(
+async function creditCreditPack(
   clerkId: string,
-  coinAmount: number,
+  creditAmount: number,
   sessionId: string,
 ) {
   if (!isAdminSupabaseConfigured()) {
@@ -51,19 +51,19 @@ async function creditCoinPack(
     // the non-atomic read-then-write on wallets was a race condition.
     const { error } = await sb.rpc("grant_credits", {
       p_user_id: user.id,
-      p_amount: coinAmount,
+      p_amount: creditAmount,
       p_category: "purchase",
       p_balance_bucket: "purchased",
-      p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-      p_idempotency_key: `coinpack_${sessionId}`,
+      p_description: `Purchased ${creditAmount} LiTTBits via Stripe`,
+      p_idempotency_key: `creditpack_${sessionId}`,
       p_reference_type: "stripe_checkout",
       p_reference_id: sessionId,
     });
     if (error) {
-      console.error(`[stripe] credit_ledger grant failed for coinpack ${sessionId}: ${error.message}`);
+      console.error(`[stripe] credit_ledger grant failed for creditpack ${sessionId}: ${error.message}`);
     }
   } catch (err) {
-    console.error(`[stripe] creditCoinPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    console.error(`[stripe] creditCreditPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -227,13 +227,13 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // ── Coin pack / plan fulfillment (existing logic) ──
+        // ── Credit pack / plan fulfillment (existing logic) ──
         const coinAmount = parseInt(meta.coin_amount || "0", 10);
         const planId = meta.plan_id as PlanId | undefined;
         if (coinAmount > 0 && clerkId) {
-          await creditCoinPack(clerkId, coinAmount, session.id);
+          await creditCreditPack(clerkId, coinAmount, session.id);
         }
-        // If this was a one-time founder purchase, grant credits
+        // If this was a one-time Founding Member purchase, grant permanent entitlement
         if (planId && clerkId && sb) {
           const plan = PLANS[planId];
           if (plan && plan.billingType === "one_time") {
@@ -243,10 +243,9 @@ export async function POST(req: NextRequest) {
               .eq("clerk_id", clerkId)
               .single();
             if (user) {
-              await grantSubscriptionCredits(sb, user.id, planId, `founder_${session.id}`);
-              // Record as a time-limited subscription (6 months of Creator access)
-              // Founder is currently DISABLED for v1 — this code path is retained
-              // for when the pricing/duration conflict is resolved.
+              // Founding Member: permanent Creator-level access, no monthly credits.
+              // Do NOT call grantSubscriptionCredits — Founder has monthlyCredits: 0.
+              // Record as a permanent entitlement (not a time-limited subscription).
               await sb.from("subscriptions").upsert({
                 user_id: user.id,
                 stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
@@ -450,7 +449,7 @@ export async function POST(req: NextRequest) {
           if (agentOrder) {
             // Found a matching marketplace order — process as agent refund.
             // The RPC is idempotent (claims the Stripe event atomically).
-            // It does NOT debit LBC — agent purchases are not coin packs.
+            // It does NOT debit LBC — agent purchases are not credit packs.
             const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
               p_stripe_event_id: event.id,
               p_stripe_event_type: event.type,
@@ -478,8 +477,8 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // ── Coin pack / plan refund: debit LBC ──
-        // Only debit LBC for coin_pack or plan refunds — never for agents.
+        // ── Credit pack / plan refund: debit LBC ──
+        // Only debit LBC for credit_pack or plan refunds — never for agents.
         if (refundClerkId) {
           const { data: refundUser } = await sb
             .from("users")

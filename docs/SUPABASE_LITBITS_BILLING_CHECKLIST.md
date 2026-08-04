@@ -72,10 +72,10 @@ Create exactly these server-side price mappings:
 
 | Plan | Stripe mode | Beta price | LiTTBits |
 |---|---|---:|---:|
-| Starter | no checkout | Free | 500 per calendar month |
+| Starter | no checkout | Free | 500 once at account creation |
 | Creator Beta | recurring monthly | $7 | 6,000 per paid period |
 | Pro Builder Beta | recurring monthly | $19 | 20,000 per paid period |
-| Founding Member | one-time payment | $149 | 6,000 included once |
+| Founding Member | one-time payment | $149 | No recurring allowance |
 
 The Founding Member product grants permanent Creator-level entitlements, but
 does not create an impossible monthly Stripe renewal promise.
@@ -111,8 +111,9 @@ Spend order:
 
 Rules:
 
-- Monthly grants expire at the end of their billing period.
-- Promotional expiration must be shown before it is enabled.
+- Monthly grants are valid for the current billing period and reset on the next successful grant. They do not roll over.
+- Starter grants do not expire.
+- Promotional expiration must be defined explicitly per grant and shown before it is enabled.
 - Purchased credits do not expire.
 - A failed debit must not create any ledger rows.
 - Replaying the same idempotency key must never charge twice.
@@ -206,7 +207,7 @@ Before enabling paid checkout:
 - Replaying a webhook produces no extra credits.
 - Spending across monthly, promotional, and purchased buckets is atomic.
 - Insufficient balance creates no debit rows.
-- Founder checkout grants 6,000 once and permanent founder entitlements.
+- Founder checkout grants permanent founder entitlements (no LiTTBit allowance).
 - Cancellation retains access until `current_period_end`.
 - Failed payment changes status without granting credits.
 - The UI total equals `get_user_balances(...).total`.

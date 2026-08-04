@@ -33,9 +33,9 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 500,
     activeProjectLimit: 1,
     features: [
-      "LiTT & Spark AI agents",
+      "LiTT & Spark",
       "1 active project",
-      "500 monthly LiTTBits",
+      "500 starter LiTTBits (one-time)",
       "Free AI routing",
       "Basic code generation",
       "Basic image generation",
@@ -49,7 +49,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   creator_beta: {
     id: "creator_beta",
     name: "Creator Beta",
-    description: "Research, write, and market with your AI team",
+    description: "Research, write, and market with LiTT and Spark",
     billingType: "subscription",
     monthlyPriceCents: 700,
     standardPriceCents: 1500,
@@ -57,12 +57,10 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 6000,
     activeProjectLimit: 5,
     features: [
-      "Researcher — source-backed research & comparisons",
-      "Writer — ready-to-publish content & copy",
-      "Marketer — campaigns, SEO & growth",
-      "LiTT & Spark included",
+      "LiTT & Spark",
+      "Research, writing & marketing skills",
       "5 active projects",
-      "6,000 monthly LiTTBits",
+      "6,000 LiTTBits per billing cycle",
       "Private projects",
       "GitHub connection",
       "Project downloads",
@@ -76,7 +74,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   pro_builder_beta: {
     id: "pro_builder_beta",
     name: "Pro Builder Beta",
-    description: "Build, debug, and analyze with your full AI team",
+    description: "Build, debug, and analyze with LiTT and Spark",
     billingType: "subscription",
     monthlyPriceCents: 1900,
     standardPriceCents: 3900,
@@ -84,11 +82,11 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyCredits: 20000,
     activeProjectLimit: 25,
     features: [
-      "Coder — repository-aware implementation & debugging",
-      "Analyst — data interpretation & recommendations",
+      "LiTT & Spark",
+      "Coding & analytics skills",
       "Everything in Creator Beta",
       "25 active projects",
-      "20,000 monthly LiTTBits",
+      "20,000 LiTTBits per billing cycle",
       "Terminal runtime",
       "Advanced coding models",
       "Diff and approval",
@@ -102,22 +100,17 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   },
   founder: {
     id: "founder",
-    name: "Founding Supporter",
-    description: "Coming soon — pricing and duration being finalized",
+    name: "Founding Member",
+    description: "Permanent Creator-level access — $149 one-time",
     billingType: "one_time",
-    monthlyPriceCents: 4900,
+    monthlyPriceCents: 14900,
     standardPriceCents: null,
     stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
-    monthlyCredits: 6000,
+    monthlyCredits: 0,
     activeProjectLimit: 5,
     features: [
-      "6 months of Creator-level agent access",
-      "Researcher, Writer & Marketer included",
-      "5,000 bonus LiTTBits (one-time)",
+      "Permanent Creator-level access",
       "Founder badge",
-      "15% off future credit packs",
-      "Early feature access",
-      "Priority feedback channel",
     ],
     beta: true,
     enabled: false,
@@ -130,8 +123,8 @@ export const PLAN_LIST = Object.values(PLANS);
 /**
  * Plan rank — higher = more access. Used by the agent entitlement resolver
  * to determine whether a user's active plan covers a specialist agent's
- * minimumPlan requirement. Founding Supporter grants 6 months of
- * Creator-level access, so it ranks equal to creator_beta.
+ * minimumPlan requirement. Founding Member grants permanent Creator-level
+ * access, so it ranks equal to creator_beta.
  */
 export const PLAN_RANK: Record<PlanId, number> = {
   starter: 0,
@@ -146,7 +139,7 @@ export function getPlanById(id: string): PlanDefinition | null {
 
 /**
  * Returns true if `userPlan` satisfies the `requiredPlan` threshold.
- * Founding Supporter counts as Creator-level (rank 1) — it does NOT unlock
+ * Founding Member counts as Creator-level (rank 1) — it does NOT unlock
  * Pro-only agents (Coder, Analyst). Pro Builder unlocks everything.
  */
 export function hasPlanAccess(userPlan: PlanId, requiredPlan: PlanId): boolean {

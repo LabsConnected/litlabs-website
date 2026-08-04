@@ -522,7 +522,7 @@ export async function resolveBilling(
       starter: "Starter",
       creator_beta: "Creator Beta",
       pro_builder_beta: "Pro Builder Beta",
-      founder: "Founder",
+      founder: "Founding Member",
     };
     planName = planMap[sub.plan] || sub.plan;
   }

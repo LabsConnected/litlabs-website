@@ -54,9 +54,12 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
     });
 
-    it("Founder is disabled for v1 launch", () => {
+    it("Founder is disabled pending approved Stripe price", () => {
       expect(PLANS.founder.enabled).toBe(false);
       expect(PLANS.founder.billingType).toBe("one_time");
+      expect(PLANS.founder.monthlyPriceCents).toBe(14900);
+      expect(PLANS.founder.name).toBe("Founding Member");
+      expect(PLANS.founder.monthlyCredits).toBe(0);
     });
   });
 
@@ -89,7 +92,7 @@ describe("Pricing contract — single source of truth", () => {
     it("formatPrice renders dollar amounts", () => {
       expect(formatPrice(700)).toBe("$7");
       expect(formatPrice(1900)).toBe("$19");
-      expect(formatPrice(4900)).toBe("$49");
+      expect(formatPrice(14900)).toBe("$149");
     });
 
     it("formatPriceMonthly renders per-month", () => {

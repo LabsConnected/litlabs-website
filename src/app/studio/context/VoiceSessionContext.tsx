@@ -146,6 +146,10 @@ export interface VoiceSessionCtx {
   clearPendingTranscript: () => void;
   /** Edit the pending transcript. */
   setPendingTranscript: (text: string) => void;
+  /** Set the callback that receives finalized transcripts directly into the composer. */
+  setOnTranscriptComplete: (handler: ((text: string) => void) | null) => void;
+  /** Recording elapsed time in seconds (updates every second while recording). */
+  recordingSeconds: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +214,8 @@ const defaultCtx: VoiceSessionCtx = {
   cancelRecording: noop,
   clearPendingTranscript: noop,
   setPendingTranscript: noop,
+  setOnTranscriptComplete: noop as unknown as (handler: ((text: string) => void) | null) => void,
+  recordingSeconds: 0,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -255,6 +261,7 @@ export function VoiceSessionProvider({
   });
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(defaultDiagnostics);
   const [pendingTranscript, setPendingTranscriptState] = useState<string | null>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const voiceStore = useVoiceStore();
   const setTiming = voiceStore.setTiming;
 
@@ -279,6 +286,10 @@ export function VoiceSessionProvider({
   /** Ref to inworldSession.resumeMic — set after inworldSession is created.
    * Used by inworldOnResponseCompleteRef which is defined before inworldSession. */
   const resumeMicRef = useRef<() => void>(() => {});
+  /** Callback that writes finalized transcripts directly into the composer. */
+  const onTranscriptCompleteRef = useRef<((text: string) => void) | null>(null);
+  /** Recording timer interval. */
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep pref refs in sync
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
@@ -343,11 +354,17 @@ export function VoiceSessionProvider({
 
         if (!validation.accepted) {
           console.debug("[Voice Pipeline] transcript rejected", validation);
-          // Don't send — show as editable draft if it's not empty/filler
+          // Don't send — write into composer if it's not empty/filler
           if (validation.reason !== "empty" && validation.reason !== "filler_only" && validation.reason !== "no_speech_detected") {
-            setPendingTranscriptState(trimmed);
-            setVoiceState("transcript_ready");
-            voiceStateRef.current = "transcript_ready";
+            if (onTranscriptCompleteRef.current) {
+              onTranscriptCompleteRef.current(trimmed);
+              setVoiceState("idle");
+              voiceStateRef.current = "idle";
+            } else {
+              setPendingTranscriptState(trimmed);
+              setVoiceState("transcript_ready");
+              voiceStateRef.current = "transcript_ready";
+            }
           }
           return;
         }
@@ -372,9 +389,15 @@ export function VoiceSessionProvider({
           voiceStateRef.current = "sending";
           onTurnRef.current(acceptedText);
           setTiming({ aiResponseCompletedAt: Date.now() });
+        } else if (onTranscriptCompleteRef.current) {
+          // Unified composer: write transcript directly into the composer textarea
+          console.debug("[Voice Pipeline] writing transcript into composer", { transcript: acceptedText.slice(0, 80) });
+          onTranscriptCompleteRef.current(acceptedText);
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
         } else {
-          // Default: show as editable draft for user to review and Send
-          console.debug("[Voice Pipeline] showing editable draft", { transcript: acceptedText.slice(0, 80) });
+          // Fallback: show as editable draft (legacy pending transcript panel)
+          console.debug("[Voice Pipeline] showing editable draft (legacy)", { transcript: acceptedText.slice(0, 80) });
           setPendingTranscriptState(acceptedText);
           setVoiceState("transcript_ready");
           voiceStateRef.current = "transcript_ready";
@@ -869,6 +892,34 @@ export function VoiceSessionProvider({
     onTurnRef.current = handler;
   }, []);
 
+  const setOnTranscriptComplete = useCallback((handler: ((text: string) => void) | null) => {
+    onTranscriptCompleteRef.current = handler;
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Recording timer — tracks elapsed seconds while listening/processing
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (voiceState === "listening" || voiceState === "user_speaking") {
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    };
+  }, [voiceState]);
+
   // ---------------------------------------------------------------------------
   // toggleTts / toggleAutoSend
   // ---------------------------------------------------------------------------
@@ -1038,6 +1089,8 @@ export function VoiceSessionProvider({
       cancelRecording,
       clearPendingTranscript,
       setPendingTranscript,
+      setOnTranscriptComplete,
+      recordingSeconds,
     }),
     [
       voiceState, voiceOutputState, voiceInputState, voiceTransportConnected,
@@ -1047,6 +1100,7 @@ export function VoiceSessionProvider({
       startVoice, stopVoice, toggleMute, interrupt, speakText, stopSpeaking,
       selectDevice, setOnTurn, toggleTts, toggleAutoSend,
       submitTranscript, cancelRecording, clearPendingTranscript, setPendingTranscript,
+      setOnTranscriptComplete, recordingSeconds,
     ],
   );
 

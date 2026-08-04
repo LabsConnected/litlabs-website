@@ -11,6 +11,7 @@ const speakText = vi.fn();
 vi.mock("@/app/studio/context/VoiceSessionContext", () => ({
   useVoiceSession: () => ({
     voiceState: "idle",
+    voiceOutputState: "idle",
     isMuted: false,
     startVoice,
     stopVoice,
@@ -18,6 +19,17 @@ vi.mock("@/app/studio/context/VoiceSessionContext", () => ({
     toggleMute,
     setOnTurn: vi.fn(),
     speakText,
+    stopSpeaking: vi.fn(),
+    ttsEnabled: false,
+    toggleTts: vi.fn(),
+    autoSendEnabled: false,
+    toggleAutoSend: vi.fn(),
+    cancelRecording: vi.fn(),
+    micLevel: 0,
+    transcript: "",
+    recordingSeconds: 0,
+    errorMessage: null,
+    setOnTranscriptComplete: vi.fn(),
   }),
   VoiceSessionProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -221,20 +233,18 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(onAgentChange).toHaveBeenCalledWith("spark");
   });
 
-  it("camera button toggles camera", () => {
-    const onToggleCamera = vi.fn();
+  it("camera button opens camera preview popover", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
         busy={false}
-        onToggleCamera={onToggleCamera}
-        cameraActive={false}
       />,
     );
-    const camBtn = screen.getByRole("button", { name: /camera/i });
+    const camBtn = screen.getByRole("button", { name: /open camera preview/i });
     fireEvent.click(camBtn);
-    expect(onToggleCamera).toHaveBeenCalledTimes(1);
+    // Camera preview popover should appear
+    expect(screen.getByTestId("camera-preview")).toBeTruthy();
   });
 });

@@ -57,7 +57,7 @@ const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const PluginsTool = dynamic(() => import("../tools/PluginsTool"), { ssr: false });
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
-const LiTTLivePanel = dynamic(() => import("./LiTTLivePanel"), { ssr: false });
+const LiveVoiceOverlay = dynamic(() => import("./LiveVoiceOverlay"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
@@ -233,7 +233,6 @@ function CommandStudioContent() {
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
   const [livePanelOpen, setLivePanelOpen] = useState(false);
-  const [livePanelCollapsed, setLivePanelCollapsed] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
@@ -801,7 +800,6 @@ function CommandStudioContent() {
                 busy={conversation.busy || creatingProject}
                 disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                cameraActive={cameraDock.open}
                 onToggleLive={() => setLivePanelOpen((v) => !v)}
                 liveActive={livePanelOpen && liveSession.isLive}
                 contextLine={contextLine}
@@ -874,17 +872,15 @@ function CommandStudioContent() {
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
 
-      {/* LiTT Live panel — unified realtime voice + vision session */}
+      {/* LiTT Live — centered overlay for realtime voice + vision session.
+          Replaces the old side panel with a proper fullscreen overlay. */}
       {livePanelOpen && (
-        <div className="fixed bottom-20 right-4 z-50 w-80 max-w-[calc(100vw-2rem)]">
-          <LiTTLivePanel
-            session={liveSession}
-            context={liveContext}
-            onTranscript={handleLiveTranscript}
-            collapsed={livePanelCollapsed}
-            onToggleCollapse={() => setLivePanelCollapsed((v) => !v)}
-          />
-        </div>
+        <LiveVoiceOverlay
+          session={liveSession}
+          context={liveContext}
+          onTranscript={handleLiveTranscript}
+          onEnd={() => setLivePanelOpen(false)}
+        />
       )}
 
     </>

@@ -32,6 +32,8 @@ import { useStudioAttachments } from "../hooks/useStudioAttachments";
 import AttachmentMenu from "./AttachmentMenu";
 import AttachmentPreviewStrip from "./AttachmentPreviewStrip";
 import MediaRecorderPanel from "./MediaRecorderPanel";
+import CameraPreview from "./CameraPreview";
+import ShareMenu from "./ShareMenu";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -65,7 +67,6 @@ interface CommandComposerProps {
   disabled?: boolean;
   onAgentChange?: (agentId: import("../stores/useStudioAgentStore").AgentId) => void;
   onToggleCamera?: () => void;
-  cameraActive?: boolean;
   onToggleLive?: () => void;
   liveActive?: boolean;
   contextLine?: ComposerContextLine;
@@ -80,7 +81,6 @@ export default function CommandComposer({
   disabled = false,
   onAgentChange,
   onToggleCamera,
-  cameraActive = false,
   onToggleLive,
   liveActive = false,
   contextLine,
@@ -97,6 +97,9 @@ export default function CommandComposer({
   const [recorderMode, setRecorderMode] = useState<"audio" | "video" | "screen" | null>(null);
   const [attachAnchorRect, setAttachAnchorRect] = useState<DOMRect | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [cameraPreviewOpen, setCameraPreviewOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [ttsPopoverOpen, setTtsPopoverOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
@@ -134,14 +137,16 @@ export default function CommandComposer({
     speakText,
     ttsEnabled,
     toggleTts,
-    pendingTranscript,
     autoSendEnabled,
     toggleAutoSend,
-    submitTranscript,
     cancelRecording,
-    clearPendingTranscript,
-    setPendingTranscript,
     micLevel,
+    transcript: interimTranscript,
+    setOnTranscriptComplete,
+    recordingSeconds,
+    errorMessage,
+    stopSpeaking,
+    voiceOutputState,
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
@@ -152,6 +157,15 @@ export default function CommandComposer({
       }).catch(() => {});
     });
   }, [onSend, setOnTurn, speakText]);
+
+  // Unified dictation: finalized transcripts write directly into the composer.
+  // No separate transcript review panel — the composer IS the review surface.
+  useEffect(() => {
+    setOnTranscriptComplete((text) => {
+      onChange(text);
+    });
+    return () => setOnTranscriptComplete(null);
+  }, [onChange, setOnTranscriptComplete]);
 
   // Auto-resize textarea.
   useEffect(() => {
@@ -528,7 +542,9 @@ export default function CommandComposer({
             document.body,
           )}
 
-        {/* Text input — min 14px font */}
+        {/* Text input — min 14px font.
+            While recording, the interim transcript appears as live placeholder
+            text so the user sees their words appearing in the composer itself. */}
         <textarea
           id="command-composer-message"
           name="command-composer-message"
@@ -541,7 +557,11 @@ export default function CommandComposer({
               void submit(e);
             }
           }}
-          placeholder={agentMeta.placeholder}
+          placeholder={
+            (voiceState === "listening" || voiceState === "user_speaking") && interimTranscript
+              ? interimTranscript
+              : agentMeta.placeholder
+          }
           className="min-w-0 flex-1 resize-none bg-transparent py-2.5 outline-none"
           style={{
             color: "var(--text-primary)",
@@ -555,14 +575,18 @@ export default function CommandComposer({
           data-testid="studio-command-input"
         />
 
-        {/* Speak toggle — auto-read replies on/off */}
+        {/* TTS settings — separate from mic input. Opens a popover with
+            on/off, stop speaking, and interrupt-while-talking toggle. */}
         <button
           type="button"
-          onClick={toggleTts}
+          onClick={() => setTtsPopoverOpen((v) => !v)}
           className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
-          style={{ color: ttsEnabled ? "#65f4ff" : "var(--text-muted)" }}
-          aria-label={ttsEnabled ? "Turn reply speech off" : "Turn reply speech on"}
-          title={ttsEnabled ? "Reply speech on" : "Reply speech off"}
+          style={{
+            color: ttsEnabled ? "#65f4ff" : "var(--text-muted)",
+            boxShadow: voiceOutputState === "speaking" ? "0 0 0 2px rgba(101,244,255,0.3)" : undefined,
+          }}
+          aria-label={ttsEnabled ? "Reply speech settings" : "Reply speech is off"}
+          title="Reply speech settings"
         >
           {ttsEnabled ? (
             <Volume2 size={17} className="pointer-events-none shrink-0" />
@@ -570,27 +594,44 @@ export default function CommandComposer({
             <VolumeX size={17} className="pointer-events-none shrink-0" />
           )}
         </button>
+        {ttsPopoverOpen && (
+          <TtsPopover
+            ttsEnabled={ttsEnabled}
+            toggleTts={toggleTts}
+            stopSpeaking={stopSpeaking}
+            isSpeaking={voiceOutputState === "speaking"}
+            autoSendEnabled={autoSendEnabled}
+            toggleAutoSend={toggleAutoSend}
+            onClose={() => setTtsPopoverOpen(false)}
+          />
+        )}
 
-        {/* Camera — directly beside microphone */}
+        {/* Camera — opens compact preview popover, capture → attach */}
         <button
           type="button"
-          onClick={() => onToggleCamera?.()}
+          onClick={() => setCameraPreviewOpen((v) => !v)}
           className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
-          style={{ color: cameraActive ? "#22d3ee" : "var(--text-muted)" }}
-          aria-label={cameraActive ? "Close camera" : "Open camera"}
-          title="Camera"
+          style={{
+            color: cameraPreviewOpen ? "#22d3ee" : "var(--text-muted)",
+            boxShadow: cameraPreviewOpen ? "0 0 0 2px rgba(34,211,238,0.3)" : undefined,
+          }}
+          aria-label={cameraPreviewOpen ? "Close camera preview" : "Open camera preview"}
+          title="Camera — capture photo"
         >
           <Camera size={18} className="pointer-events-none shrink-0" />
         </button>
 
-        {/* LiTT Live — unified realtime voice + vision session */}
+        {/* Share / Live — opens Share menu (screen, window, tab, Live Voice) */}
         <button
           type="button"
-          onClick={() => onToggleLive?.()}
+          onClick={() => setShareMenuOpen((v) => !v)}
           className="pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
-          style={{ color: liveActive ? "#a855f7" : "var(--text-muted)" }}
-          aria-label={liveActive ? "Close LiTT Live" : "Start LiTT Live"}
-          title="LiTT Live — voice + vision"
+          style={{
+            color: shareMenuOpen || liveActive ? "#a855f7" : "var(--text-muted)",
+            boxShadow: shareMenuOpen ? "0 0 0 2px rgba(168,85,247,0.3)" : undefined,
+          }}
+          aria-label={shareMenuOpen ? "Close share menu" : "Open share menu"}
+          title="Share — screen, window, tab, or Live Voice"
         >
           {liveActive ? (
             <span className="relative flex h-4 w-4 items-center justify-center">
@@ -599,9 +640,9 @@ export default function CommandComposer({
             </span>
           ) : (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none shrink-0">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M5 12a7 7 0 0 1 14 0" />
-              <path d="M2 12a10 10 0 0 1 20 0" />
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+              <polyline points="16 6 12 2 8 6" />
+              <line x1="12" y1="2" x2="12" y2="15" />
             </svg>
           )}
         </button>
@@ -661,103 +702,84 @@ export default function CommandComposer({
         </button>
       </div>
 
-      {/* Voice status */}
-      {STATUS_LABELS[voiceState] && (
-        <div className="px-1 text-[10px] font-bold" style={{ color: "var(--text-muted)" }}>
-          {STATUS_LABELS[voiceState]}
-          {isMuted && voiceState !== "muted" ? " · muted" : ""}
-          {voiceState === "listening" && micLevel > 0.01 && (
-            <span className="ml-2 inline-flex items-center gap-1">
-              <span className="inline-block h-1 w-1 rounded-full bg-cyan-400" />
-              {Math.round(micLevel * 100)}%
+      {/* Inline recording indicator — replaces the old transcript review panel.
+          Shows waveform, timer, and Cancel/Stop while recording.
+          No separate textarea, no duplicate Send button. */}
+      {(voiceState === "listening" ||
+        voiceState === "user_speaking" ||
+        voiceState === "requesting_permission" ||
+        voiceState === "connecting" ||
+        voiceState === "processing") && (
+        <div
+          className="flex items-center gap-2.5 px-1 text-[11px] font-bold"
+          style={{ color: "var(--text-muted)" }}
+          data-testid="recording-indicator"
+        >
+          {/* Waveform / level meter — 5 bars that scale with micLevel */}
+          {(voiceState === "listening" || voiceState === "user_speaking") && (
+            <span className="flex items-end gap-0.5" aria-hidden>
+              {[0, 1, 2, 3, 4].map((i) => {
+                const baseHeight = 3;
+                const levelHeight = Math.max(baseHeight, Math.round(micLevel * 14));
+                const height = i === 2 ? levelHeight : Math.max(baseHeight, Math.round(levelHeight * (0.5 + Math.abs(Math.sin(Date.now() / 200 + i)) * 0.5)));
+                return (
+                  <span
+                    key={i}
+                    className="inline-block w-1 rounded-full bg-cyan-400 transition-all"
+                    style={{ height: `${height}px` }}
+                  />
+                );
+              })}
             </span>
+          )}
+
+          {/* Timer — mm:ss format */}
+          {(voiceState === "listening" || voiceState === "user_speaking") && (
+            <span className="tabular-nums" style={{ color: "#22d3ee" }}>
+              {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:
+              {String(recordingSeconds % 60).padStart(2, "0")}
+            </span>
+          )}
+
+          {/* Status text */}
+          <span>
+            {STATUS_LABELS[voiceState]}
+            {isMuted ? " · muted" : ""}
+          </span>
+
+          {/* Cancel button — discards recording */}
+          {(voiceState === "listening" || voiceState === "user_speaking" || voiceState === "processing") && (
+            <button
+              type="button"
+              onClick={cancelRecording}
+              className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Cancel recording"
+            >
+              Cancel
+            </button>
+          )}
+
+          {/* Stop button — finalizes transcript into composer */}
+          {(voiceState === "listening" || voiceState === "user_speaking") && (
+            <button
+              type="button"
+              onClick={stopVoice}
+              className="rounded px-2.5 py-0.5 text-[10px] font-bold text-black"
+              style={{ backgroundColor: "#22d3ee" }}
+              aria-label="Stop recording"
+            >
+              Stop
+            </button>
           )}
         </div>
       )}
 
-      {/* Pending transcript review (push-to-talk editable draft) */}
-      {pendingTranscript !== null && voiceState === "transcript_ready" && (
-        <div
-          className="mt-1 rounded-lg border px-3 py-2"
-          style={{
-            borderColor: "rgba(114,242,56,0.25)",
-            backgroundColor: "rgba(114,242,56,0.05)",
-          }}
-        >
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              Voice transcript — review and send
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={cancelRecording}
-                className="rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
-                style={{ color: "var(--text-muted)" }}
-                aria-label="Cancel and clear transcript"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={clearPendingTranscript}
-                className="rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
-                style={{ color: "var(--text-muted)" }}
-                aria-label="Clear transcript"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={submitTranscript}
-                className="rounded px-2.5 py-0.5 text-[10px] font-bold text-black"
-                style={{ backgroundColor: "var(--litt-primary)" }}
-                aria-label="Send transcript"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-          <textarea
-            value={pendingTranscript}
-            onChange={(e) => setPendingTranscript(e.target.value)}
-            className="w-full resize-none rounded-md bg-black/20 px-2 py-1.5 text-[12px] outline-none"
-            style={{ color: "var(--text-primary)", minHeight: "44px" }}
-            title="Edit voice transcript draft"
-            aria-label="Edit voice transcript draft"
-            rows={2}
-            autoFocus
-          />
-        </div>
-      )}
-
-      {/* Auto-send toggle (small, next to voice status) */}
-      {voiceState === "idle" && (
-        <div className="flex items-center gap-2 px-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
-          <button
-            type="button"
-            onClick={toggleAutoSend}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/5"
-            aria-label="Toggle auto-send voice transcripts"
-          >
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ backgroundColor: autoSendEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
-            />
-            Auto-send {autoSendEnabled ? "on" : "off"}
-          </button>
-          <button
-            type="button"
-            onClick={toggleTts}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/5"
-            aria-label="Toggle text-to-speech"
-          >
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ backgroundColor: ttsEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
-            />
-            TTS {ttsEnabled ? "on" : "off"}
-          </button>
+      {/* Error / permission denied status */}
+      {(voiceState === "permission_denied" || voiceState === "unsupported" || voiceState === "error") && (
+        <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
+          {STATUS_LABELS[voiceState]}
+          {errorMessage && <span className="ml-1">— {errorMessage}</span>}
         </div>
       )}
 
@@ -774,6 +796,119 @@ export default function CommandComposer({
           }}
         />
       )}
+
+      {/* Camera preview popover — compact live preview with capture → attach */}
+      {cameraPreviewOpen && (
+        <CameraPreview
+          onClose={() => setCameraPreviewOpen(false)}
+          onCapture={(file) => {
+            addCameraPhoto(file);
+            setCameraPreviewOpen(false);
+          }}
+        />
+      )}
+
+      {/* Share menu popover — screen/window/tab sharing + Live Voice */}
+      {shareMenuOpen && (
+        <ShareMenu
+          onClose={() => setShareMenuOpen(false)}
+          onToggleLive={() => onToggleLive?.()}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── TTS settings popover — separate from mic controls ─────────── */
+function TtsPopover({
+  ttsEnabled,
+  toggleTts,
+  stopSpeaking,
+  isSpeaking,
+  autoSendEnabled,
+  toggleAutoSend,
+  onClose,
+}: {
+  ttsEnabled: boolean;
+  toggleTts: () => void;
+  stopSpeaking: () => void;
+  isSpeaking: boolean;
+  autoSendEnabled: boolean;
+  toggleAutoSend: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Reply speech settings"
+      className="fixed bottom-20 z-[10016] w-56 rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
+      style={{
+        right: "5rem",
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border-strong)",
+      }}
+      data-testid="tts-popover"
+    >
+      <div className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] border-b" style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)" }}>
+        Reply Speech
+      </div>
+      <div className="p-2 space-y-1">
+        {/* TTS on/off */}
+        <button
+          type="button"
+          onClick={toggleTts}
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          style={{ color: "var(--text-primary)" }}
+        >
+          <span>Read replies aloud</span>
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: ttsEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+          />
+        </button>
+
+        {/* Stop speaking (only while speaking) */}
+        {isSpeaking && (
+          <button
+            type="button"
+            onClick={stopSpeaking}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+            style={{ color: "#e3b341" }}
+          >
+            <Square size={12} className="pointer-events-none" />
+            Stop speaking
+          </button>
+        )}
+
+        <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+
+        {/* Auto-send toggle */}
+        <button
+          type="button"
+          onClick={toggleAutoSend}
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          style={{ color: "var(--text-primary)" }}
+        >
+          <span>Auto-send voice</span>
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: autoSendEnabled ? "#72f238" : "rgba(255,255,255,0.2)" }}
+          />
+        </button>
+      </div>
     </div>
   );
 }

@@ -39,6 +39,28 @@ export default function MediaRecorderPanel({ mode, onClose, onComplete }: MediaR
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
 
+  // Cleanup — declared before startRecording/stopRecording since they reference it
+  const cleanup = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    chunksRef.current = [];
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    setState((prev) => ({ ...prev, recording: false }));
+  }, []);
+
   // Start recording when mode is set
   const startRecording = useCallback(async () => {
     if (!mode) return;
@@ -110,29 +132,7 @@ export default function MediaRecorderPanel({ mode, onClose, onComplete }: MediaR
       const message = err instanceof Error ? err.message : "Failed to access media device";
       setState((prev) => ({ ...prev, error: message, recording: false }));
     }
-  }, [mode, onComplete]);
-
-  // Cleanup
-  const cleanup = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    mediaRecorderRef.current = null;
-    chunksRef.current = [];
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-    }
-    setState((prev) => ({ ...prev, recording: false }));
-  }, []);
+  }, [mode, onComplete, cleanup, stopRecording]);
 
   const handleCancel = useCallback(() => {
     const recorder = mediaRecorderRef.current;

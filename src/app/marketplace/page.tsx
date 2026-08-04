@@ -651,16 +651,16 @@ function MarketplaceInner() {
                 <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[8px] font-black uppercase text-black">Limited</span>
               </div>
               <div className="mt-1 text-2xl font-black text-white">$149</div>
-              <div className="text-[10px] text-white/40">One-time · permanent benefits</div>
+              <div className="text-[10px] text-white/40">One-time · permanent Creator-level access</div>
               <div className="mt-3 space-y-1">
-                {["Permanent Creator account", "Founder badge", "20% off credit packs", "Price protection"].map((f) => (
+                {["Permanent Creator-level access", "Founder badge"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-amber-400" /> {f}
                   </div>
                 ))}
               </div>
               <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-amber-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
-                Become a Founder
+                Currently Unavailable
               </Link>
             </div>
           </div>
