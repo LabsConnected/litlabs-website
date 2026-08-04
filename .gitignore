@@ -11,6 +11,16 @@
 .devin/config.local.json
 .devin/*.local.json
 
+# Devin temp files
+.devin-commit-msg.txt
+.devin-pr-body.md
+
+# Screenshot artifacts
+studio-after.png
+studio-before.png
+studio-current.png
+studio-mobile.png
+
 # Dependencies
 /node_modules
 **/node_modules

@@ -30,7 +30,7 @@ function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; co
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.14em] transition hover:opacity-80"
         style={{ color: `${color}cc` }}
-        aria-expanded={open}
+        aria-expanded={Boolean(open)}
       >
         <span
           className="inline-block h-0 w-0 border-y-[3px] border-l-[5px] border-y-transparent transition-transform"
