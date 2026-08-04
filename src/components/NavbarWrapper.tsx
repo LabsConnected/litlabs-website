@@ -74,30 +74,30 @@ export default function NavbarWrapper() {
             <Menu size={20} />
           </button>
 
-          {/* Logo — icon only on mobile/tablet, icon+text on desktop */}
+          {/* Logo — icon only on mobile, icon+text on desktop (md+) */}
           <BrandLogo
             href="/dashboard"
             size={30}
             showText={false}
-            className="lg:hidden"
+            className="md:hidden"
           />
           <BrandLogo
             href="/dashboard"
             size={30}
             showText
-            className="hidden lg:inline-flex"
+            className="hidden md:inline-flex"
           />
 
-          {/* Desktop nav links */}
-          <nav className="ml-2 hidden items-center gap-0.5 lg:ml-4 lg:gap-1 md:flex">
+          {/* Desktop nav links — visible on md+ */}
+          <nav className="ml-2 hidden items-center gap-0.5 md:ml-4 md:gap-1 md:flex">
             {visibleLinks.map(([label, href]) => {
               const active = pathname === href || pathname?.startsWith(`${href}/`);
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 lg:px-3 lg:text-xs ${
-                    label === "Marketplace" ? "hidden xl:block" : ""
+                  className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 md:px-2.5 lg:px-3 lg:text-xs ${
+                    label === "Marketplace" ? "hidden lg:block" : ""
                   }`}
                   style={{
                     color: active ? T.accentColor : T.textMuted,

@@ -181,13 +181,13 @@ export default function CommandStudioHeader({
         href="/dashboard"
         size={30}
         showText={false}
-        className="lg:hidden"
+        className="md:hidden"
       />
       <BrandLogo
         href="/dashboard"
         size={30}
         showText
-        className="hidden lg:inline-flex"
+        className="hidden md:inline-flex"
       />
 
       <StudioProjectPicker

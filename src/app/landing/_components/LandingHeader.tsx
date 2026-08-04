@@ -21,18 +21,18 @@ export function LandingHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-[#06060e]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 md:px-8">
-        {/* Logo */}
+        {/* Logo — icon only on mobile, icon+text on md+ */}
         <BrandLogo
           href="/"
           size={30}
           showText={false}
-          className="sm:hidden"
+          className="md:hidden"
         />
         <BrandLogo
           href="/"
           size={30}
           showText
-          className="hidden sm:inline-flex"
+          className="hidden md:inline-flex"
         />
 
         {/* Desktop nav */}
