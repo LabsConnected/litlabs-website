@@ -1091,7 +1091,7 @@ export default function ImageTool() {
         // Pull fresh balance from the shared WalletContext instead of
         // mutating local state (the context already reflects the server).
         refreshWallet().catch(() => {});
-        setError("Daily bonus claimed! +50 🪙");
+        setError("Daily bonus claimed! +50 LiTTBits");
         setTimeout(() => setError(null), 3000);
       } else {
         setError(data.error || "Failed to claim");

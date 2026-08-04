@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     }
 
     // getOrCreateUser uses admin client server-side (bypasses RLS)
-    // and inserts wallet with 500 coins on first create
+    // and inserts wallet with 500 LiTTBits on first create
     const { user, isNew } = await getOrCreateUser(clerkId, email, name);
 
     if (!user) {

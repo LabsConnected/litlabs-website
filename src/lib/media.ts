@@ -26,7 +26,7 @@ export interface MediaProvider {
   label: string;
   description: string;
   supportedFormats: MediaFormat[];
-  /** Coin cost per render. */
+  /** LiTTBits cost per render. */
   cost: (format: MediaFormat, style?: string) => number;
   /** Whether the provider requires any external API key to function. */
   requiresKey: boolean;

@@ -50,9 +50,13 @@ async function getHandler(req: NextRequest) {
 }
 
 /**
- * POST /api/wallet/claim
- * Claims the daily bonus of 50 LiTTBits.
- * Body: { type: "daily" }
+ * POST /api/wallet
+ * Handles LiTTBit spending and (optionally) daily bonus claims.
+ * Body: { type: "spend", amount, reason } or { type: "daily" }
+ *
+ * The daily +50 LiTTBit bonus is NOT approved for public production.
+ * It is disabled by default and gated behind ENABLE_DAILY_LITTBITS=true.
+ * See docs/PRODUCT_TRUTH.md for the approved policy.
  */
 async function postHandler(req: NextRequest) {
   try {
@@ -72,7 +76,7 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    /* Spend coins */
+    /* Spend LiTTBits */
     if (body.type === "spend") {
       const amount = typeof body.amount === "number" ? body.amount : 0;
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
@@ -110,6 +114,16 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json(
         { error: "Invalid type. Use 'daily' or 'spend'" },
         { status: 400 },
+      );
+    }
+
+    // Daily bonus is NOT approved for public production.
+    // Gate behind ENABLE_DAILY_LITTBITS=true (off by default).
+    // See docs/PRODUCT_TRUTH.md for the approved policy.
+    if (process.env.ENABLE_DAILY_LITTBITS !== "true") {
+      return NextResponse.json(
+        { error: "Daily bonus is currently unavailable.", disabled: true },
+        { status: 503 },
       );
     }
 

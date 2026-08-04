@@ -37,7 +37,7 @@ interface AudioPlayerState {
   volume: number;
 }
 
-const COIN_COST: Record<Tab, number> = { tts: 2, music: 20 };
+const LITTBITS_COST: Record<Tab, number> = { tts: 2, music: 20 };
 
 const VOICES = [
   { value: "Kore", label: "Kore", desc: "Firm · Female" },
@@ -404,7 +404,7 @@ export default function AudioTool() {
                 style={{ backgroundColor: `${a}20`, color: a }}
               >
                 <Coins size={8} className="inline mr-0.5" />
-                {COIN_COST[t]}
+                {LITTBITS_COST[t]}
               </span>
             </button>
           );
@@ -590,11 +590,11 @@ export default function AudioTool() {
             <span style={{ color: T.accentColor }} className="font-bold">
               {balance.toLocaleString()}
             </span>{" "}
-            coins
+            LiTTBits
           </span>
-          {balance < COIN_COST[tab] && (
+          {balance < LITTBITS_COST[tab] && (
             <span className="text-yellow-400 font-bold">
-              Insufficient coins
+              Insufficient LiTTBits
             </span>
           )}
         </div>
@@ -615,7 +615,7 @@ export default function AudioTool() {
         ) : (
           <button
             onClick={handleGenerate}
-            disabled={balance < COIN_COST[tab]}
+            disabled={balance < LITTBITS_COST[tab]}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               backgroundColor: accent,
@@ -625,7 +625,7 @@ export default function AudioTool() {
           >
             {tab === "tts" ? <Mic size={15} /> : <Music size={15} />}
             Generate · <Coins size={12} />
-            {COIN_COST[tab]} coins
+            {LITTBITS_COST[tab]} LiTTBits
           </button>
         )}
       </div>

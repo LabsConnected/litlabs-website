@@ -57,7 +57,7 @@ function WalletContent() {
     setClaimMsg(
       ok
         ? "Daily bonus claimed! +50 LiTTBits"
-        : "Already claimed today or sign in required.",
+        : "Daily bonus is currently unavailable.",
     );
   }, [claim]);
 
@@ -69,7 +69,7 @@ function WalletContent() {
   return (
     <PageShell
       title="Wallet"
-      subtitle="LiTTBits balance, daily rewards, and purchases"
+      subtitle="LiTTBits balance and usage"
       icon={<Wallet size={28} />}
     >
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -103,19 +103,6 @@ function WalletContent() {
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <button
-                onClick={handleClaim}
-                disabled={isClaiming || claimed || !isSignedIn}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:opacity-90 disabled:opacity-40"
-                style={{ backgroundColor: T.accentColor, color: T.bgColor }}
-              >
-                {isClaiming ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Gift size={16} />
-                )}
-                {claimed ? "Claimed today" : "Claim daily +50"}
-              </button>
               <Link
                 href="/pricing"
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
@@ -124,7 +111,7 @@ function WalletContent() {
                   color: T.textColor,
                 }}
               >
-                <Coins size={16} /> Get credits
+                <Sparkles size={16} /> View plans
               </Link>
             </div>
           </div>
@@ -155,9 +142,9 @@ function WalletContent() {
             },
             {
               href: "/wallet?tab=litbits",
-              label: "LiTTs info",
-              icon: Coins,
-              desc: "How coins work",
+              label: "LiTTBits info",
+              icon: Sparkles,
+              desc: "How LiTTBits work",
             },
           ].map((item) => (
             <Link
@@ -196,12 +183,14 @@ function WalletContent() {
               How LiTTBits work
             </h2>
             <ul className="space-y-2 text-sm opacity-75">
-              <li>• New accounts start with starter credits.</li>
-              <li>• Claim +50 LiTTBits every day for free.</li>
+              <li>• New accounts start with 500 starter LiTTBits (one-time).</li>
+              <li>
+                • Paid plans grant LiTTBits after each successful billing cycle.
+              </li>
               <li>
                 • Spend on Studio generation, agents, and marketplace items.
               </li>
-              <li>• Buy more via Marketplace subscriptions or coin packs.</li>
+              <li>• Starter and purchased LiTTBits do not expire.</li>
             </ul>
           </div>
         )}

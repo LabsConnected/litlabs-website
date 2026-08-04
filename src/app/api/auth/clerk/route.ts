@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     if (clerkId && isAdminSupabaseConfigured()) {
       try {
         await getOrCreateUser(clerkId, email, name);
-        // getOrCreateUser already creates the wallet row with 500 starting coins for new users
+        // getOrCreateUser already creates the wallet row with 500 LiTTBits for new users
       } catch {
         // Non-fatal — Clerk will retry if we return a 5xx, so return 200 and log
       }

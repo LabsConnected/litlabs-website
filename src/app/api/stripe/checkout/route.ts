@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
     params.append("metadata[checkout_version]", CHECKOUT_VERSION);
     params.append("metadata[product_type]", product.type);
     params.append("metadata[clerk_id]", clerkId);
-    if (product.type === "coin_pack" && product.credits) {
+    if (product.type === "credit_pack" && product.credits) {
       params.append("metadata[coin_amount]", String(product.credits));
     }
     if (product.type === "plan" && product.planId) {
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
     // Also propagate metadata to the PaymentIntent for refund classification.
     params.append("payment_intent_data[metadata][product_type]", product.type);
     params.append("payment_intent_data[metadata][clerk_id]", clerkId);
-    if (product.type === "coin_pack" && product.credits) {
+    if (product.type === "credit_pack" && product.credits) {
       params.append(
         "payment_intent_data[metadata][coin_amount]",
         String(product.credits),

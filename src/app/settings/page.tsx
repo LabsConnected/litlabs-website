@@ -2118,7 +2118,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
             </div>
             {betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
-                Beta LiTTBits are consumed after paid credits. They expire 90 days after paid beta launch.
+                Beta LiTTBits are consumed after paid credits. Expiration is defined per grant.
               </p>
             )}
           </>

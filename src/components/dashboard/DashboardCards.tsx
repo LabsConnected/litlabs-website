@@ -414,7 +414,7 @@ export function CenterStage({
         <div className="space-y-6">
           <HeroCard
             title="Marketplace"
-            subtitle="Agents, templates & coin packs."
+            subtitle="Agents, templates & credit packs."
             color="#ff9ff3"
           />
           <MarketplacePreview />
