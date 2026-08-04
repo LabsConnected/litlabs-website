@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { LandingHeaderAuth } from "./LandingHeaderAuth";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const NAV_LINKS = [
   { label: "Studio", href: "/studio" },
@@ -21,17 +22,18 @@ export function LandingHeader() {
     <header className="sticky top-0 z-30 border-b border-white/5 bg-[#06060e]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 md:px-8">
         {/* Logo */}
-        <Link
+        <BrandLogo
           href="/"
-          className="flex items-center gap-2.5 text-sm font-black tracking-tight text-white"
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
-            <Sparkles size={15} className="text-black" />
-          </div>
-          <span>
-            LiTT <span className="text-neutral-500">/</span> Labs
-          </span>
-        </Link>
+          size={30}
+          showText={false}
+          className="sm:hidden"
+        />
+        <BrandLogo
+          href="/"
+          size={30}
+          showText
+          className="hidden sm:inline-flex"
+        />
 
         {/* Desktop nav */}
         <nav className="hidden items-center gap-7 text-sm text-neutral-400 md:flex">

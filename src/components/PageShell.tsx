@@ -72,7 +72,7 @@ export default function PageShell({
                 className="mb-1.5 text-[9px] font-black uppercase tracking-[.24em]"
                 style={{ color: T.accentColor }}
               >
-                LiTTree-LabStudios
+                LiTTree LabStudios
               </div>
               {title && (
                 <h1

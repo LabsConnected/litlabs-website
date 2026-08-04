@@ -75,7 +75,7 @@ export default function ProjectsPage() {
                 <GitBranch size={12} /> Canonical project
               </div>
               <h2 className="text-2xl font-black sm:text-3xl" style={{ color: T.headerColor }}>
-                LiTTree-LabStudios
+                LiTTree LabStudios
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-relaxed" style={{ color: T.textMuted }}>
                 Build LiTTree from inside LiTTree with project context kept visible. Work should happen on a task branch, then move through diff, checks, preview, and review before deployment.

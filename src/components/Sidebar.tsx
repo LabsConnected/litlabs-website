@@ -20,13 +20,13 @@ import {
   ShieldCheck,
   TerminalSquare,
   X,
-  Zap,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
 import { COLLAPSED_KEY, NAV_GROUPS, type NavGroup } from "@/lib/navigation";
 import { LiTTPresenceCard } from "@/components/LiTTPresenceCard";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 interface SidebarProps {
   open?: boolean;
@@ -107,20 +107,22 @@ function SidebarContent({
         className="flex h-14 shrink-0 items-center border-b px-3"
         style={{ borderColor: `${T.borderColor}22` }}
       >
-        <Link href="/dashboard" onClick={onClose} aria-label="LiTTree-LabStudios dashboard" className="flex min-w-0 flex-1 items-center gap-2.5">
-          <span
-            className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border"
-            style={{ backgroundColor: `${T.accentColor}14`, borderColor: `${T.accentColor}35`, color: T.accentColor, boxShadow: `inset 0 0 18px ${T.accentColor}20` }}
-          >
-            <Zap size={17} />
-          </span>
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <BrandLogo
+            href="/dashboard"
+            size={28}
+            showText={false}
+            className={collapsed ? "inline-flex" : "inline-flex"}
+          />
           {!collapsed && (
-            <span className="min-w-0">
-              <b className="block truncate bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-[11px] font-black tracking-[.035em] text-transparent">LiTTree-LabStudios</b>
-              <span className="block text-[7px] font-bold uppercase tracking-[.2em]" style={{ color: T.textMuted }}>Creative AI platform</span>
-            </span>
+            <BrandLogo
+              href="/dashboard"
+              size={28}
+              showText
+              className="hidden sm:inline-flex"
+            />
           )}
-        </Link>
+        </div>
         {onToggleCollapse && !onClose && (
           <button onClick={onToggleCollapse} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}

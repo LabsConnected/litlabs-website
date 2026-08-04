@@ -16,7 +16,6 @@ import {
   ChevronDown,
   Eye,
   Rocket,
-  Sprout,
   CircleAlert,
   CircleCheck,
   CircleDot,
@@ -34,6 +33,7 @@ import {
   Eraser,
   Settings,
 } from "lucide-react";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#72f238", label: "Available" },
@@ -180,35 +180,18 @@ export default function CommandStudioHeader({
       data-testid="studio-header"
     >
       {/* LiTT Studio logo — clickable to go to dashboard */}
-      <Link
+      <BrandLogo
         href="/dashboard"
-        className="flex shrink-0 items-center gap-1.5 rounded-md transition-all hover:opacity-80"
-        aria-label="Go to dashboard"
-        title="LiTT Studio — AI Operating System"
-      >
-        <div
-          className="grid h-6 w-6 place-items-center rounded-md"
-          style={{
-            background: "linear-gradient(135deg, var(--litt-primary), var(--spark-primary))",
-            boxShadow: "var(--studio-glow-purple)",
-          }}
-          aria-hidden
-        >
-          <Sprout size={11} className="text-black" />
-        </div>
-        <span
-          className="hidden lg:inline text-[13px] font-black tracking-[0.08em]"
-          style={{ color: "var(--text-primary)" }}
-        >
-          LiTT Studio
-        </span>
-        <span
-          className="hidden lg:inline text-[11px] font-bold tracking-[0.1em]"
-          style={{ color: "var(--text-muted)" }}
-        >
-          AI OS
-        </span>
-      </Link>
+        size={30}
+        showText={false}
+        className="lg:hidden"
+      />
+      <BrandLogo
+        href="/dashboard"
+        size={30}
+        showText
+        className="hidden lg:inline-flex"
+      />
 
       <StudioProjectPicker
         projectId={capabilities.projectId}

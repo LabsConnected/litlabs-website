@@ -699,7 +699,7 @@ export function DeveloperControlCenter() {
         >
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.18em] opacity-40 mb-1">
-              LiTTree-LabStudios™ · Developer Control Center
+              LiTTree LabStudios™ · Developer Control Center
             </div>
             <h1 className="text-2xl font-black lg:text-3xl" style={{ color: T.headerColor }}>
               Welcome back, {displayName}
