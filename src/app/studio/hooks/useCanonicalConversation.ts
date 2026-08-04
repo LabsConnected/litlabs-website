@@ -94,6 +94,7 @@ function toUIMessage(
     content: msg.content,
     status: msg.status,
     agentSlug: msg.agentSlug,
+    agentMode: msg.agentMode ?? null,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
     reasoning: msg.reasoning,
   };
@@ -146,6 +147,7 @@ export function useCanonicalConversation({
   }, [getToken]);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const activeAgentMode = useStudioAgentStore((s) => s.activeAgentMode);
   const activeAgentInstanceId = useStudioAgentStore((s) => s.activeAgentInstanceId);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
 
@@ -422,6 +424,7 @@ export function useCanonicalConversation({
             role: "assistant",
             content,
             agentSlug: activeAgentId as AgentSlug,
+            agentMode: activeAgentMode,
             status: "completed",
             createdAt: new Date().toISOString(),
             parentMessageId: null,
@@ -513,6 +516,7 @@ export function useCanonicalConversation({
             role: "user",
             content: text,
             agentSlug: null,
+            agentMode: null,
             status: "completed",
             createdAt: new Date().toISOString(),
             parentMessageId: null,
@@ -523,6 +527,7 @@ export function useCanonicalConversation({
             role: "assistant",
             content: intentMessage,
             agentSlug: activeAgentId as AgentSlug,
+            agentMode: activeAgentMode,
             status: "completed",
             createdAt: new Date().toISOString(),
             parentMessageId: null,
@@ -564,6 +569,7 @@ export function useCanonicalConversation({
         role: "user",
         content: text,
         agentSlug: null,
+        agentMode: null,
         status: "completed",
         createdAt: optimisticTimestamp,
         parentMessageId: null,
@@ -574,6 +580,7 @@ export function useCanonicalConversation({
         role: "assistant",
         content: "",
         agentSlug: activeAgentId as AgentSlug,
+        agentMode: activeAgentMode,
         status: "streaming",
         createdAt: optimisticTimestamp,
         parentMessageId: optimisticUserId,
@@ -662,6 +669,7 @@ export function useCanonicalConversation({
             clientRequestId,
             expectedRevision: revision,
             requestedAgentSlug: activeAgentId,
+            agentMode: activeAgentMode,
             agentInstanceId: activeAgentInstanceId || undefined,
             provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
             category: isAutoBest ? "auto" : selectedModel.category,
@@ -915,6 +923,11 @@ export function useCanonicalConversation({
             reasoning: reasoningText || undefined,
             status: "completed",
             createdAt: assistantMsg.createdAt,
+            // CRITICAL: Update agent identity from the server response.
+            // This ensures the message identity always matches the backend run,
+            // not the composer state at the time the optimistic message was created.
+            agentSlug: assistantMsg.agentSlug ?? activeAgentId as AgentSlug,
+            agentMode: assistantMsg.agentMode ?? activeAgentMode,
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
@@ -976,7 +989,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
   );
 
   // Regenerate — calls canonical regenerate API

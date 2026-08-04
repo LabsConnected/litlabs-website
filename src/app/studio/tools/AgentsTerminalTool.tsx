@@ -475,10 +475,10 @@ export default function AgentsTerminalTool() {
     <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden select-none relative">
       <SystemTopologyPanel compact />
       <div className="flex flex-1 min-h-0 flex-col lg:flex-row overflow-hidden relative">
-        {/* CRT overlay */}
+        {/* CRT overlay — scoped to terminal area only, not global */}
         {crtEnabled && (
           <div
-            className="fixed inset-0 pointer-events-none z-30 opacity-[0.04]"
+            className="absolute inset-0 pointer-events-none z-30 opacity-[0.04]"
             style={crtStyle}
           />
         )}

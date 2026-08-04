@@ -236,6 +236,44 @@ export interface IntegrationRecommendation {
 export type ToolSource = "internal" | "mcp" | "openapi" | "connector";
 export type ToolRisk = "none" | "low" | "medium" | "high" | "critical";
 
+/**
+ * Tool permission levels — controls who can use a tool and whether
+ * approval is required. Higher levels require explicit approval.
+ *
+ *   read             — search files, inspect repository (no approval)
+ *   draft            — draft code, message, image (usually no approval)
+ *   workspace-write  — edit project files (sometimes approval)
+ *   external-write   — send email, create issue (always approval)
+ *   production       — deploy, push, delete data (always approval)
+ *   financial        — purchase or change billing (always approval)
+ *   destructive      — irreversible destructive operations (always approval)
+ */
+export type ToolPermissionLevel =
+  | "read"
+  | "draft"
+  | "workspace-write"
+  | "external-write"
+  | "production"
+  | "financial"
+  | "destructive";
+
+/**
+ * Permission levels that always require explicit approval.
+ */
+export const APPROVAL_REQUIRED_LEVELS: ReadonlySet<ToolPermissionLevel> = new Set([
+  "external-write",
+  "production",
+  "financial",
+  "destructive",
+]);
+
+/**
+ * Returns true if a tool permission level requires explicit approval.
+ */
+export function requiresApproval(level: ToolPermissionLevel): boolean {
+  return APPROVAL_REQUIRED_LEVELS.has(level);
+}
+
 export interface ApprovalPolicy {
   required: boolean;
   autoApproveReadOnly: boolean;
@@ -254,6 +292,8 @@ export interface LiTTToolDefinition {
   requiredCapabilities: string[];
   requiredPermissions: string[];
   risk: ToolRisk;
+  /** Permission level controls approval requirements. */
+  permissionLevel: ToolPermissionLevel;
   approvalPolicy: ApprovalPolicy;
   timeoutMs: number;
   idempotent: boolean;

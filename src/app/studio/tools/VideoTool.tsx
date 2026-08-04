@@ -20,6 +20,7 @@ import {
   Eye,
   ArrowRight,
 } from "lucide-react";
+import { readApiResponse } from "../lib/create-api";
 
 const PROMPT_PRESETS = [
   "A cyberpunk street market at night, neon signs flickering, people walking in rain, cinematic slow motion",
@@ -119,11 +120,7 @@ export default function VideoTool() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: url }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await readApiResponse(res, "Video ideas");
       setIdeas(Array.isArray(data.ideas) ? data.ideas : []);
     } catch (err) {
       setIdeaError(err instanceof Error ? err.message : "Could not analyze photo");
@@ -141,17 +138,14 @@ export default function VideoTool() {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch("/api/upload", { method: "POST", body: form });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Upload failed: HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      if (!data.url || data.fallback) {
+      const data = await readApiResponse(res, "Upload");
+      const uploadUrl = data.url as string | undefined;
+      if (!uploadUrl || data.fallback) {
         throw new Error("Upload succeeded but no public URL returned. Supabase Storage may not be configured.");
       }
-      setUploadedImageUrl(data.url);
+      setUploadedImageUrl(uploadUrl);
       // Auto-trigger LiTT's idea analysis the moment the photo is live
-      fetchIdeas(data.url);
+      fetchIdeas(uploadUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed");
       setUploadedImagePreview(null);
@@ -229,11 +223,7 @@ export default function VideoTool() {
               },
         ),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await readApiResponse(res, "Video");
 
       // ── Polling: different endpoints for Alibaba vs Veo ────────────
       const taskId = data.taskId as string | undefined;

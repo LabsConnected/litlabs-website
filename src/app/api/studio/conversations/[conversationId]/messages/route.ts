@@ -13,13 +13,23 @@ import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
 import { recallMemories, persistMemory, formatMemoryContext } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
-import type { AgentSlug } from "@/lib/studio/types";
+import type { AgentSlug, AgentMode } from "@/lib/studio/types";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { getProfile, type AgentProfile } from "@/lib/litt-intelligence/agent-profiles";
+import { isValidAgentMode, slugToMode, DEFAULT_AGENT_MODE } from "@/lib/litt-intelligence/agent-identity";
+import {
+  detectIntent,
+  buildRuntimeContextBlock,
+  buildToolManifest,
+  generateProjectStatusAnswer,
+  type RuntimeContextSnapshot,
+} from "@/lib/litt-intelligence/runtime-context-injector";
+import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -129,6 +139,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const clientRequestId = body.clientRequestId;
   const expectedRevision = body.expectedRevision;
   const requestedAgentSlug = body.requestedAgentSlug;
+  const requestedAgentMode = body.agentMode;
   const agentInstanceId = body.agentInstanceId;
 
   if (typeof message !== "string" || !message.trim()) {
@@ -139,6 +150,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
   if (typeof expectedRevision !== "number" || expectedRevision < 1) {
     return NextResponse.json({ error: "expectedRevision is required" }, { status: 400 });
+  }
+
+  // Validate agent mode — reject invalid values instead of silently defaulting
+  let agentMode: AgentMode = DEFAULT_AGENT_MODE;
+  if (requestedAgentMode !== undefined && requestedAgentMode !== null) {
+    if (!isValidAgentMode(requestedAgentMode)) {
+      return NextResponse.json({
+        error: `Invalid agentMode: expected one of standard, builder, research, spark`,
+      }, { status: 400 });
+    }
+    agentMode = requestedAgentMode;
   }
 
   // 1. Load conversation (ownership-scoped)
@@ -168,9 +190,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
   }
 
-  // 3. Resolve agent — either builtin slug or marketplace instance
-  let agentSlug: AgentSlug = conversation.activeAgentSlug;
+  // 3. Resolve agent — LiTT is the DEFAULT primary agent.
+  // Spark only responds when explicitly selected by the user (via agentMode="spark"
+  // or requestedAgentSlug="spark"). The conversation's previous activeAgentSlug
+  // is NOT carried forward automatically — this prevents stale Spark context
+  // from answering unrelated LiTT messages.
+  let agentSlug: AgentSlug = "litt"; // default — always LiTT unless explicitly Spark
   let runtimeAgent: RuntimeAgent | null = null;
+
+  // Only switch to Spark if the user EXPLICITLY selected it in THIS request
+  if (agentMode === "spark" || requestedAgentSlug === "spark") {
+    agentSlug = "spark";
+    agentMode = "spark";
+  } else if (requestedAgentSlug && isValidAgentSlug(String(requestedAgentSlug)) && String(requestedAgentSlug) !== "spark") {
+    agentSlug = requestedAgentSlug as AgentSlug;
+  }
 
   if (agentInstanceId && clerkId) {
     // Marketplace agent instance — resolve via the runtime resolver
@@ -184,19 +218,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         );
       }
       runtimeAgent = result.agent;
-      // Use the agent template slug for memory/capability routing
-      agentSlug = (result.agent.agentId ? "litt" : "litt") as AgentSlug; // fallback for type compat
+      // Marketplace agents always run as "litt" slug in standard mode
+      agentSlug = "litt";
+      agentMode = "standard";
     }
   } else {
-    // Builtin agent
+    // Builtin agent — use the requested slug if valid
     if (requestedAgentSlug && isValidAgentSlug(String(requestedAgentSlug))) {
       agentSlug = requestedAgentSlug as AgentSlug;
+      // Derive mode from slug if mode wasn't explicitly provided
+      if (requestedAgentMode === undefined || requestedAgentMode === null) {
+        agentMode = slugToMode(agentSlug);
+      }
     }
     const agent = resolveAgent(agentSlug);
     if (!agent) {
       return NextResponse.json({ error: "Unsupported agent" }, { status: 400 });
     }
   }
+
+  // 3.5. Load the agent profile for this mode — immutable server-side
+  // profile with the correct system prompt, tool permissions, and memory scope.
+  const profile: AgentProfile = getProfile(agentMode);
 
   // 4. Insert user message (idempotent)
   const { message: userMessage, duplicate, error: insertError } = await insertMessage({
@@ -247,9 +290,135 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   }
 
   // 5. Resolve project server-side
-  const ctx = await buildStudioContext(userId, conversation.id, conversation.projectId, agentSlug);
+  const ctx = await buildStudioContext(userId, conversation.id, conversation.projectId, agentSlug, agentMode);
   if (!ctx) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // 5.5. Build runtime context snapshot and run deterministic intent routing.
+  // This grounds LiTT in actual platform state and routes to tools before the LLM.
+  const runtimeSnapshot: RuntimeContextSnapshot = {
+    projectId: ctx.projectId,
+    projectName: ctx.projectName,
+    repositoryConnected: ctx.capabilities.repositoryConnected,
+    repositoryName: runtimeContext.repositoryName ?? ctx.repositoryName ?? null,
+    activeBranch: runtimeContext.activeBranch ?? ctx.activeBranch ?? null,
+    workspaceStatus: runtimeContext.workspaceStatus ?? null,
+    workspaceReady: (runtimeContext.workspaceStatus ?? "ready") === "ready",
+    terminalConnected: runtimeContext.terminalStatus === "connected",
+    terminalStatus: runtimeContext.terminalStatus ?? null,
+    terminalSessionId: runtimeContext.terminalSessionId ?? null,
+    deploymentStatus: null,
+    deploymentUrl: null,
+    writeAccess: runtimeContext.writeAccess ?? false,
+    approvalRequired: !(runtimeContext.writeAccess ?? false),
+    selectedModelLabel: runtimeContext.selectedModelLabel ?? null,
+    selectedModelId: runtimeContext.selectedModelId ?? null,
+    activeAgentMode: agentMode,
+    activeAgentSlug: agentSlug,
+    recentHealthResults: [],
+    voiceConfigured: runtimeContext.voiceHealth?.configured,
+    voiceTransportConnected: runtimeContext.voiceTransportConnected,
+  };
+
+  const intent = detectIntent(message);
+
+  // 5.6. Deterministic project-status answer — bypass LLM for accuracy.
+  // When the user asks "where do things stand", return the exact runtime values.
+  if (intent.category === "project_status" && intent.confidence > 0) {
+    const statusAnswer = generateProjectStatusAnswer(runtimeSnapshot);
+
+    // Insert the assistant message with the deterministic answer
+    const statusResult = await insertMessage({
+      conversationId: conversation.id,
+      ownerId: userId,
+      projectId: conversation.projectId,
+      role: "assistant",
+      agentSlug,
+      agentMode,
+      agentInstanceId: runtimeAgent?.agentInstanceId || null,
+      content: statusAnswer,
+      status: "completed",
+      parentMessageId: userMessage.id,
+    });
+    const statusMsg = statusResult.message;
+
+    void persistMemory(
+      `User: ${message}\nLiTT: ${statusAnswer}`,
+      userId,
+      conversation.projectId,
+      {
+        agentSlug,
+        agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+        memoryNamespace: runtimeAgent?.memoryNamespace,
+        conversationId: conversation.id,
+        memoryType: "conversation_summary",
+      },
+    );
+
+    studioLog("message:intent-routed", {
+      conversationId: conversation.id,
+      projectId: conversation.projectId,
+      userId,
+      intent: intent.category,
+      confidence: intent.confidence,
+    });
+
+    return NextResponse.json({
+      userMessage,
+      assistantMessage: statusMsg ?? { ...userMessage, role: "assistant", content: statusAnswer, status: "completed" },
+      revision: newRevision,
+      intentRouted: true,
+      intent: intent.category,
+    });
+  }
+
+  // 5.7. Weather tool — call the live weather tool before the LLM.
+  if (intent.category === "weather" && intent.confidence > 0) {
+    const toolResult = await detectAndExecuteTool(userId, message);
+    if (toolResult.executed) {
+      const weatherResult = await insertMessage({
+        conversationId: conversation.id,
+        ownerId: userId,
+        projectId: conversation.projectId,
+        role: "assistant",
+        agentSlug,
+        agentMode,
+        agentInstanceId: runtimeAgent?.agentInstanceId || null,
+        content: toolResult.text,
+        status: "completed",
+        parentMessageId: userMessage.id,
+      });
+      const weatherMsg = weatherResult.message;
+
+      void persistMemory(
+        `User: ${message}\nLiTT: ${toolResult.text}`,
+        userId,
+        conversation.projectId,
+        {
+          agentSlug,
+          agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+          memoryNamespace: runtimeAgent?.memoryNamespace,
+          conversationId: conversation.id,
+          memoryType: "conversation_summary",
+        },
+      );
+
+      studioLog("message:tool-routed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        tool: toolResult.toolId,
+      });
+
+      return NextResponse.json({
+        userMessage,
+        assistantMessage: weatherMsg ?? { ...userMessage, role: "assistant", content: toolResult.text, status: "completed" },
+        revision: newRevision,
+        toolRouted: true,
+        tool: toolResult.metadata,
+      });
+    }
   }
 
   // 6. Load prior completed messages from DB (excluding the just-inserted user message)
@@ -265,11 +434,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       content: m.content,
     }));
 
-  // 8. Recall project-scoped memories
+  // 8. Recall memories — scoped by conversation_id + agent_mode to prevent
+  // cross-conversation contamination (e.g. EDM artwork from a different chat).
+  // Shared memories (user_preference, project_fact) still cross conversations.
   const memories = await recallMemories(message, userId, conversation.projectId, {
     agentSlug,
     agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
     memoryNamespace: runtimeAgent?.memoryNamespace,
+    conversationId: conversation.id,
+    agentMode,
     limit: 5,
   });
   const memoryContext = formatMemoryContext(memories);
@@ -316,17 +489,27 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   };
   const translated = translateCapabilities(rawCaps);
 
+  // Build the runtime context block and tool capability manifest.
+  // These ensure LiTT is grounded in actual platform state and only
+  // advertises tools that are actually available and healthy.
+  const runtimeContextBlock = buildRuntimeContextBlock(runtimeSnapshot);
+  const toolManifest = buildToolManifest(runtimeSnapshot);
+
   const conversationContext = conversation.title
     ? `CURRENT CONVERSATION: "${conversation.title}"`
     : "CURRENT CONVERSATION: (untitled)";
 
   const systemPrompt = [
-    // Use the runtime agent's version prompt for marketplace agents, or the
-    // kernel system prompt for builtin agents.
-    runtimeAgent?.systemPrompt || kernelSystemPrompt,
+    // Use the runtime agent's version prompt for marketplace agents,
+    // or the mode-specific profile prompt for builtin agents.
+    // The profile prompt is mode-specific (standard, builder, research, spark)
+    // and is loaded from the immutable server-side profile registry.
+    runtimeAgent?.systemPrompt || profile.systemPrompt || kernelSystemPrompt,
     projectBlock,
     conversationContext,
     translated.contextBlock,
+    runtimeContextBlock,
+    toolManifest.manifestBlock,
     memoryContext,
   ].filter(Boolean).join("\n");
 
@@ -358,6 +541,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     projectId: conversation.projectId,
     role: "assistant",
     agentSlug,
+    agentMode,
     agentInstanceId: runtimeAgent?.agentInstanceId || null,
     content: "",
     status: "streaming",
@@ -488,6 +672,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             content: assistantText,
             reasoning: reasoningText || undefined,
             status: "completed",
+            // CRITICAL: Include agent identity in the done event so the
+            // client can update the message identity from the server response,
+            // not from the composer state at the time of the optimistic message.
+            agentSlug,
+            agentMode,
           },
           revision: newRevision,
           provider: r.provider,

@@ -193,6 +193,7 @@ export class OpenAPIAdapter {
           timeoutMs: 15000,
           idempotent: isRead,
           readOnly: isRead,
+          permissionLevel: isRead ? "read" : "external-write",
           enabled: !operation.deprecated,
         });
       }

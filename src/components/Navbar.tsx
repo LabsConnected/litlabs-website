@@ -60,8 +60,7 @@ const leftNavLinks = [
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
-  // Games hidden — retro game runtime disabled for v1
-  // { href: "/games", label: "Games", icon: Gamepad2 },
+  { href: "/games", label: "Games", icon: Gamepad2 },
   { href: "/discover", label: "Discover", icon: MessageCircle },
   { href: "/pricing", label: "Pricing", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -82,10 +81,11 @@ const mobileDrawerGroups = [
   { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
   { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
   { label: "Discover", links: [{ href: "/discover", label: "Discover Feed", icon: MessageCircle }, { href: "/marketplace", label: "Marketplace", icon: ShoppingBag }] },
-  // { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
+  { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
   { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },
 ].filter((group) => {
   if (group.label === "Discover" && !isFeatureEnabled("communitySocial")) return false;
+  if (group.label === "Games" && !isFeatureEnabled("retroGameRuntime")) return false;
   return true;
 });
 

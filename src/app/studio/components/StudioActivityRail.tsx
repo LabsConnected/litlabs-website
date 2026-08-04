@@ -21,6 +21,7 @@ import {
   EyeOff,
   Check,
   Trash2,
+  PanelRightClose,
 } from "lucide-react";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
 import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
@@ -72,6 +73,8 @@ interface StudioActivityRailProps {
   branch?: string | null;
   onOpenTerminal?: () => void;
   onSelectAgent?: (id: AgentId) => void;
+  /** Called when the user clicks the rail's close button. */
+  onClose?: () => void;
 }
 
 /**
@@ -92,6 +95,7 @@ export default function StudioActivityRail({
   branch,
   onOpenTerminal,
   onSelectAgent,
+  onClose,
 }: StudioActivityRailProps) {
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [agentsOpen, setAgentsOpen] = useState(true);
@@ -139,8 +143,11 @@ export default function StudioActivityRail({
         });
       } else if (msg.role === "assistant") {
         const slug = msg.agentSlug as AgentId | null;
-        const source: EventSource = slug === "spark" ? "spark" : "litt";
+        const mode = msg.agentMode;
+        const source: EventSource = slug === "spark" || mode === "spark" ? "spark" : "litt";
+        // Display label: "LiTT · Spark Mode responded" or "LiTT responded"
         const agentName = slug ? AGENT_META[slug]?.displayName ?? "LiTT" : "LiTT";
+        const modeSuffix = mode && mode !== "standard" ? ` · ${mode === "spark" ? "Spark Mode" : mode.charAt(0).toUpperCase() + mode.slice(1)} Mode` : "";
         const isFailed = msg.status === "failed";
         const isPending = msg.status === "pending" || msg.status === "streaming";
         result.push({
@@ -148,7 +155,7 @@ export default function StudioActivityRail({
           type: isFailed ? "error" : "agent",
           source,
           category: isFailed ? "error" : "agent",
-          label: `${agentName} responded`,
+          label: `${agentName}${modeSuffix} responded`,
           detail: isFailed ? "Response failed" : isPending ? "Generating…" : msg.content.slice(0, 60) + (msg.content.length > 60 ? "…" : ""),
           timestamp: msg.createdAt ?? Date.now(),
           status: isFailed ? "error" : isPending ? "pending" : "success",
@@ -233,16 +240,27 @@ export default function StudioActivityRail({
   const statusLabel = busy ? "Working" : terminalStatus === "connected" ? "Active" : "Idle";
 
   return (
-    <aside
-      className="hidden lg:flex h-full shrink-0 flex-col border-l overflow-hidden"
-      style={{
-        width: "var(--studio-rail-w)",
-        backgroundColor: "var(--studio-surface)",
-        borderLeft: "1px solid var(--studio-border)",
-        backdropFilter: "blur(12px)",
-      }}
-      data-testid="studio-activity-rail"
-    >
+    <>
+      {/* Mobile overlay backdrop — click to close */}
+      <div
+        className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm lg:hidden"
+        onClick={onClose}
+        aria-hidden
+      />
+      <aside
+        className="
+          fixed right-0 top-0 z-[91] flex h-full flex-col overflow-hidden
+          lg:static lg:z-auto lg:h-full lg:shrink-0 lg:border-l
+        "
+        style={{
+          width: "var(--studio-rail-w)",
+          maxWidth: "85vw",
+          backgroundColor: "var(--studio-surface)",
+          borderLeft: "1px solid var(--studio-border)",
+          backdropFilter: "blur(12px)",
+        }}
+        data-testid="studio-activity-rail"
+      >
       {/* Header */}
       <div
         className="flex shrink-0 items-center justify-between border-b px-3 py-2"
@@ -254,21 +272,36 @@ export default function StudioActivityRail({
             Activity
           </span>
         </div>
-        <span
-          className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-bold"
-          style={{
-            color: statusColor,
-            borderColor: `${statusColor}40`,
-            backgroundColor: `${statusColor}10`,
-          }}
-        >
+        <div className="flex items-center gap-2">
           <span
-            className={`h-1.5 w-1.5 rounded-full ${busy ? "animate-pulse" : ""}`}
-            style={{ backgroundColor: statusColor, boxShadow: `0 0 4px ${statusColor}` }}
-            aria-hidden
-          />
-          {statusLabel}
-        </span>
+            className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-bold"
+            style={{
+              color: statusColor,
+              borderColor: `${statusColor}40`,
+              backgroundColor: `${statusColor}10`,
+            }}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${busy ? "animate-pulse" : ""}`}
+              style={{ backgroundColor: statusColor, boxShadow: `0 0 4px ${statusColor}` }}
+              aria-hidden
+            />
+            {statusLabel}
+          </span>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/10"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Hide Activity panel"
+              title="Hide Activity"
+              data-testid="activity-rail-close"
+            >
+              <PanelRightClose size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Scrollable content */}
@@ -562,6 +595,7 @@ export default function StudioActivityRail({
         </Section>
       </div>
     </aside>
+    </>
   );
 }
 

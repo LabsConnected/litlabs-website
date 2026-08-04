@@ -1,13 +1,15 @@
 "use client";
 
 import { create } from "zustand";
-import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
+import type { AgentSlug, AgentMode, Conversation, ConversationMessage } from "@/lib/studio/types";
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   agentSlug: AgentSlug | null;
+  /** Agent mode that produced this message. Preserved across mode switches. */
+  agentMode: AgentMode | null;
   status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   createdAt: string;
   parentMessageId: string | null;
@@ -27,6 +29,8 @@ interface ConversationStore {
   selectedConversationId: string | null;
   messagesByConversationId: Record<string, ChatMessage[]>;
   activeAgentSlug: AgentSlug;
+  /** Active agent mode — the operational profile within LiTT. */
+  activeAgentMode: AgentMode;
   revision: number;
   loading: boolean;
   streaming: boolean;
@@ -40,6 +44,8 @@ interface ConversationStore {
   addMessage: (conversationId: string, message: ChatMessage) => void;
   updateMessage: (conversationId: string, messageId: string, patch: Partial<ChatMessage>) => void;
   setActiveAgent: (slug: AgentSlug) => void;
+  /** Set the active agent mode — only affects future messages. */
+  setActiveAgentMode: (mode: AgentMode) => void;
   setRevision: (revision: number) => void;
   setLoading: (loading: boolean) => void;
   setStreaming: (streaming: boolean) => void;
@@ -57,6 +63,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   selectedConversationId: null,
   messagesByConversationId: {},
   activeAgentSlug: "litt",
+  activeAgentMode: "standard",
   revision: 1,
   loading: false,
   streaming: false,
@@ -72,6 +79,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     set({
       selectedConversationId: id,
       activeAgentSlug: conversation?.activeAgentSlug ?? state.activeAgentSlug,
+      activeAgentMode: conversation?.activeAgentMode ?? state.activeAgentMode,
       revision: conversation?.revision ?? 1,
     });
   },
@@ -105,7 +113,16 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       },
     })),
 
-  setActiveAgent: (slug) => set({ activeAgentSlug: slug }),
+  setActiveAgent: (slug) => set({
+    activeAgentSlug: slug,
+    // Sync mode with slug — "spark" → spark mode, everything else → standard
+    activeAgentMode: slug === "spark" ? "spark" : "standard",
+  }),
+  setActiveAgentMode: (mode) => set({
+    activeAgentMode: mode,
+    // Sync slug with mode — spark mode → "spark", everything else → "litt"
+    activeAgentSlug: mode === "spark" ? "spark" : "litt",
+  }),
   setRevision: (revision) => set({ revision }),
   setLoading: (loading) => set({ loading }),
   setStreaming: (streaming) => set({ streaming }),
@@ -142,6 +159,7 @@ export function toChatMessage(msg: ConversationMessage): ChatMessage {
     role: msg.role === "user" || msg.role === "assistant" ? msg.role : "assistant",
     content: msg.content,
     agentSlug: msg.agentSlug,
+    agentMode: msg.agentMode ?? null,
     status: msg.status,
     createdAt: msg.createdAt,
     parentMessageId: msg.parentMessageId,

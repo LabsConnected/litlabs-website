@@ -52,7 +52,7 @@ export default function LayoutShell({
         <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
           {children}
         </div>
-        <YouTubePlayerShell />
+        {/* Media Hub lives inside the Studio drawer — no floating player */}
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>

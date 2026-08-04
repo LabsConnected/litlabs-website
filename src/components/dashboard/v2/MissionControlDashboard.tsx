@@ -12,13 +12,12 @@
  * Fetches from /api/dashboard/mission-control (aggregated server-side).
  * Owner data (growth, revenue) only renders when ownerMode === true.
  *
- * Preserves the persistent YouTube dock via useYouTubePlayer.
+ * Preserves the global Media Hub via MediaHubProvider.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useYouTubePlayer } from "@/context/YouTubePlayerContext";
-import { YouTubeDock } from "@/components/youtube/YouTubeDock";
+import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { Icon } from "./dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
 import { useDashboardLayout } from "@/lib/dashboard/layout-store";
@@ -352,7 +351,6 @@ function HealthGrid({
 // ---------------------------------------------------------------------------
 
 export function MissionControlDashboard() {
-  const { dockMode, showDocked } = useYouTubePlayer();
   const [data, setData] = useState<MissionControlResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -704,8 +702,8 @@ export function MissionControlDashboard() {
                 </div>
               </div>
 
-              {/* 4 primary actions */}
-              <div className="mt-5 grid gap-3 md:grid-cols-4">
+              {/* 5 primary actions */}
+              <div className="mt-5 grid gap-3 md:grid-cols-5">
                 <Link
                   href="/studio?tool=chat"
                   className="rounded-2xl border p-4 transition hover:opacity-90"
@@ -780,6 +778,25 @@ export function MissionControlDashboard() {
                   </div>
                   <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
                     Preview, production, logs, and rollback.
+                  </div>
+                </Link>
+                <Link
+                  href="/games"
+                  className="rounded-2xl border p-4 transition hover:opacity-90"
+                  style={{
+                    borderColor: `${D.accent}33`,
+                    background: `${D.accent}10`,
+                  }}
+                >
+                  <Icon name="gamepad" size={18} style={{ color: D.accent }} />
+                  <div
+                    className="mt-3 text-sm font-black"
+                    style={{ color: D.textPrimary }}
+                  >
+                    Games
+                  </div>
+                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                    Game Cloud, Retro Arcade and browser games.
                   </div>
                 </Link>
               </div>
@@ -1085,68 +1102,10 @@ export function MissionControlDashboard() {
               </div>
             </section>
 
-            {/* Media Player — persistent YouTube dock */}
-            <section
-              className="rounded-3xl border p-5"
-              style={{
-                background: "rgba(0,0,0,0.3)",
-                borderColor: D.border,
-                backdropFilter: "blur(16px)",
-              }}
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <h2
-                  className="text-xs font-black uppercase tracking-[0.2em]"
-                  style={{ color: D.textDim }}
-                >
-                  Media Player
-                </h2>
-                {dockMode === "hidden" && (
-                  <button
-                    type="button"
-                    onClick={() => showDocked()}
-                    className="text-xs font-bold transition hover:opacity-80"
-                    style={{ color: D.accent }}
-                  >
-                    Show Player →
-                  </button>
-                )}
-              </div>
-              {dockMode !== "hidden" && <YouTubeDock />}
-              {dockMode === "hidden" && (
-                <div
-                  className="rounded-2xl border p-6 text-center"
-                  style={{ background: D.surface, borderColor: D.border }}
-                >
-                  <div
-                    className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full"
-                    style={{
-                      background: `${D.accent}10`,
-                      border: `1px solid ${D.accent}20`,
-                    }}
-                  >
-                    <Icon name="music" size={18} style={{ color: D.accent }} />
-                  </div>
-                  <p
-                    className="text-sm font-bold"
-                    style={{ color: D.textPrimary }}
-                  >
-                    LiTT Media Player
-                  </p>
-                  <p className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Powered by YouTube — paste a URL to start playing.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => showDocked()}
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition hover:scale-[1.02]"
-                    style={{ background: D.accent, color: D.bg }}
-                  >
-                    <Icon name="play" size={12} />
-                    Open Player
-                  </button>
-                </div>
-              )}
+            {/* Media Player — compact Now Playing card using the global Media Hub.
+                No iframe is mounted here; the card reads from MediaHubProvider. */}
+            <section>
+              <MediaNowPlayingCard />
             </section>
           </aside>
         </div>

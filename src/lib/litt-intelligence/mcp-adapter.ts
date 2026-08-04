@@ -199,6 +199,7 @@ export class MCPAdapter {
       timeoutMs: 30000,
       idempotent: false,
       readOnly: options.readOnly ?? false,
+      permissionLevel: options.readOnly ? "read" : "external-write",
       enabled: !isQuarantined,
     };
   }

@@ -7,20 +7,44 @@
    ============================================================ */
 
 :root {
-  /* Font families — pure system font stacks, no external font fetches.
-     Previously used next/font/google (build-time timeout on slow networks)
-     and Google Fonts CDN <link> (CSP violations). System fonts eliminate
-     both issues with zero network dependency. These CSS vars match the old
-     next/font variable names so all existing var(--font-*) refs work. */
-  --font-inter: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-jetbrains: "JetBrains Mono", "Fira Code", "Cascadia Code", "Courier New", monospace;
-  --font-space-grotesk: "Space Grotesk", "Inter", system-ui, sans-serif;
-  --font-sora: "Sora", "Inter", system-ui, sans-serif;
-  --font-pixelify-sans: "Pixelify Sans", "Press Start 2P", monospace;
-  --font-orbitron: "Orbitron", "Chakra Petch", system-ui, sans-serif;
-  --font-press-start-2p: "Press Start 2P", "Pixelify Sans", monospace;
-  --font-chakra-petch: "Chakra Petch", "Inter", system-ui, sans-serif;
-  --font-rajdhani: "Rajdhani", "Inter", system-ui, sans-serif;
+  /* Font families — dependable system stacks that ship with Windows 11,
+     macOS, and Linux. No external font fetches (eliminates CSP issues and
+     unpredictable fallbacks when fonts like Inter/JetBrains Mono are not
+     installed locally).
+
+     --font-ui:  Interface text — Studio shell, header, nav, chat, buttons
+     --font-code: Monospace — terminal, code editor, commands, file paths
+     --font-retro: Arcade/pixel — ONLY for Retro Vault and Emulator surfaces
+     */
+  --font-ui:
+    "Segoe UI Variable",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  --font-code:
+    "Cascadia Code",
+    "Cascadia Mono",
+    Consolas,
+    "Courier New",
+    monospace;
+  --font-retro:
+    "Press Start 2P",
+    "Pixelify Sans",
+    monospace;
+
+  /* Legacy aliases — map to the new dependable stacks so existing
+     var(--font-inter) etc. references still work without code changes. */
+  --font-inter: var(--font-ui);
+  --font-jetbrains: var(--font-code);
+  --font-space-grotesk: var(--font-ui);
+  --font-sora: var(--font-ui);
+  --font-pixelify-sans: var(--font-retro);
+  --font-orbitron: var(--font-ui);
+  --font-press-start-2p: var(--font-retro);
+  --font-chakra-petch: var(--font-ui);
+  --font-rajdhani: var(--font-ui);
 
   /* Cinematic Studio — deep space, electric cyan, violet and ember */
   --bg-color: #03050b;
@@ -157,13 +181,10 @@
 @theme inline {
   --color-background: var(--bg-color);
   --color-foreground: var(--text-color);
-  --font-sans: var(--font-inter), "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono:
-    var(--font-jetbrains), "JetBrains Mono", "Fira Code", "Courier New",
-    monospace;
-  --font-display: var(--font-jetbrains), "JetBrains Mono", "Inter", sans-serif;
-  --font-retro:
-    var(--font-jetbrains), "JetBrains Mono", "Courier New", monospace;
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+  --font-display: var(--font-ui);
+  --font-retro: var(--font-retro);
 
   /* IDE Native semantic tokens */
   --color-ide-bg: #0d0d0d;
@@ -187,6 +208,17 @@
 html,
 body {
   overflow-x: hidden;
+}
+
+/* Rendering quality — prevent synthetic bold/italic and optimize legibility */
+html {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Ensure main content never overflows sidebar/topbar */
@@ -217,7 +249,7 @@ body {
     radial-gradient(circle at 8% 45%, rgba(0, 214, 255, 0.08), transparent 34rem),
     var(--bg-color);
   color: var(--text-color);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.55;
   margin: 0;
@@ -250,9 +282,9 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   line-height: 1.2;
   margin: 0;
 }
@@ -263,11 +295,11 @@ h6 {
 }
 
 .font-display {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
 }
 
 .font-mono {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
 }
 
 .gradient-text {
@@ -276,6 +308,29 @@ h6 {
   background-clip: text;
   -webkit-background-clip: text;
   font-weight: 800;
+}
+
+/* ============================================================
+   STUDIO TYPOGRAPHY ENFORCEMENT
+   Minimum sizes: body 14px, buttons/tabs 13px, nav 12px, metadata 11px.
+   No important functional text may be smaller than 11px.
+   Terminal/code text uses --font-code at 12–13px.
+   ============================================================ */
+[data-studio-surface] button,
+[data-studio-surface] .studio-tab,
+[data-studio-surface] .studio-nav-label {
+  font-size: 13px;
+}
+
+[data-studio-surface] .studio-metadata,
+[data-studio-surface] .studio-timestamp {
+  font-size: 11px;
+}
+
+[data-studio-surface] .studio-terminal,
+[data-studio-surface] .studio-code {
+  font-family: var(--font-code);
+  font-size: 13px;
 }
 
 /* ============================================================
@@ -532,13 +587,15 @@ a:hover {
 }
 
 /* ============================================================
-   CRT MONITOR OVERLAY (toggleable)
+   CRT MONITOR OVERLAY — scoped to retro surfaces only.
+   Apply .crt-overlay inside a .retro-crt-surface container,
+   never as a global fixed overlay on the body.
    ============================================================ */
 .crt-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 9998;
+  z-index: 2;
   background: repeating-linear-gradient(
     0deg,
     rgba(0, 0, 0, 0.15),
@@ -2631,12 +2688,15 @@ main {
 }
 
 /* ============================================================
-   SCANLINES EFFECT
+   SCANLINES EFFECT — scoped to retro/arcade surfaces only.
+   Never applied to the global body, Dashboard, Studio, or settings.
+   Use .retro-crt-surface on Retro Vault, Emulator, or terminal
+   components that explicitly opt into the CRT aesthetic.
    ============================================================ */
 
-[data-scanlines="true"] body::before {
+.retro-crt-surface::after {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   background: repeating-linear-gradient(
     0deg,
@@ -2646,18 +2706,19 @@ main {
     transparent 3px
   );
   pointer-events: none;
-  z-index: 9997;
+  z-index: 1;
   mix-blend-mode: multiply;
   opacity: 0.4;
 }
 
 /* ============================================================
-   PIXEL GRAIN EFFECT
+   PIXEL GRAIN EFFECT — scoped to retro surfaces only.
+   Never applied globally via body::before.
    ============================================================ */
 
-[data-pixel-grain="true"] body::before {
+.retro-crt-surface[data-pixel-grain="true"]::before {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   background-image:
     repeating-conic-gradient(
@@ -2667,7 +2728,7 @@ main {
     );
   background-size: 3px 3px;
   pointer-events: none;
-  z-index: 9996;
+  z-index: 0;
   opacity: 0.5;
 }
 

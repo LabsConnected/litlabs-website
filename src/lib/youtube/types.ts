@@ -96,6 +96,7 @@ declare global {
             onReady?: (event: { target: YTPlayerInstance }) => void;
             onStateChange?: (event: { target: YTPlayerInstance; data: number }) => void;
             onError?: (event: { target: YTPlayerInstance; data: number }) => void;
+            onAutoplayBlocked?: (event: { target: YTPlayerInstance }) => void;
           };
         },
       ) => YTPlayerInstance;

@@ -199,3 +199,4 @@ playwright-report/
 tests/playwright/.clerk/
 
 .vercel
+.env*

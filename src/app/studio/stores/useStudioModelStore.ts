@@ -12,7 +12,7 @@ export type SelectedModel = {
   icon: string;
   apiModel?: string;
   apiProvider?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 };
 
 export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
@@ -33,7 +33,7 @@ export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
 
 export const RECOMMENDED_IDS = CHAT_MODELS.filter((m) => m.recommended).map((m) => m.id);
 
-const DEFAULT_MODEL = MODELS[0];
+const DEFAULT_MODEL = MODELS.find((m) => m.id === "litt-balanced") ?? MODELS[0];
 
 function getInitialModel(): SelectedModel {
   if (typeof window === "undefined") return DEFAULT_MODEL;

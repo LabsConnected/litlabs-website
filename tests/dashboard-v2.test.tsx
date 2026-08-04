@@ -70,6 +70,39 @@ vi.mock("@/components/youtube/YouTubeDock", () => ({
   YouTubeDock: () => null,
 }));
 
+// Mock Media Hub — Dashboard uses MediaNowPlayingCard
+vi.mock("@/components/media/MediaHubProvider", () => ({
+  MediaHubProvider: ({ children }: { children: React.ReactNode }) => children,
+  useMediaHub: () => ({
+    activeProvider: "youtube",
+    playback: { status: "idle", item: null, positionMs: 0, durationMs: 0, volume: 70, muted: false, error: null },
+    queue: [],
+    currentIndex: -1,
+    dockMode: "hidden",
+    mountYouTube: async () => {},
+    unmountYouTube: () => {},
+    mountSpotify: async () => {},
+    unmountSpotify: () => {},
+    loadUrl: () => false,
+    addToQueue: () => false,
+    removeFromQueue: () => {},
+    clearQueue: () => {},
+    jumpTo: () => {},
+    play: () => {},
+    pause: () => {},
+    toggle: () => {},
+    next: () => {},
+    previous: () => {},
+    seek: () => {},
+    setVolume: () => {},
+    switchProvider: () => {},
+    setDockMode: () => {},
+    showCollapsed: () => {},
+    showExpanded: () => {},
+    hide: () => {},
+  }),
+}));
+
 // Mock next/dynamic — simple pass-through to avoid hooks-in-lowercase lint error
 vi.mock("next/dynamic", () => ({
   default: (loader: () => Promise<{ default: React.ComponentType }>) => {

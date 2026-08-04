@@ -30,19 +30,23 @@ import {
   ChevronDown,
   ChevronUp,
   ImageIcon,
+  MoreVertical,
 } from "lucide-react";
-import { MediaProviderId } from "@/lib/media";
+import { MediaProviderId, ProviderSelection } from "@/lib/media";
 import { GENERATION_PRESETS } from "@/lib/visual-packs/generation-presets";
 import { DEFAULT_MASCOT_DESCRIPTION } from "@/lib/visual-packs/types";
+import GenerationHistoryCard from "../components/GenerationHistoryCard";
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
+
+import { readApiResponse } from "../lib/create-api";
 
 type Workspace = {
   id: string;
   name: string;
   prompt: string;
   negativePrompt: string;
-  providerId: MediaProviderId;
+  providerId: ProviderSelection;
   aspectRatio: string;
   imageSize: string;
   seed: number;
@@ -70,7 +74,7 @@ type Generation = {
   id: string;
   prompt: string;
   negativePrompt: string;
-  provider: MediaProviderId;
+  provider: ProviderSelection;
   fileUrl?: string;
   thumbUrl?: string;
   status: GenerationStatus;
@@ -260,6 +264,38 @@ const ASPECT_OPTIONS = [
 
 const PROVIDER_OPTIONS = [
   {
+    id: "auto-free" as const,
+    label: "Auto Best (Free)",
+    tag: "AUTO",
+    desc: "Cloudflare → Alibaba → Pollinations",
+    cost: 0,
+    ready: true,
+  },
+  {
+    id: "auto-quality" as const,
+    label: "Auto Best (Quality)",
+    tag: "AUTO",
+    desc: "Gemini → FAL → Recraft",
+    cost: 1,
+    ready: true,
+  },
+  {
+    id: "cloudflare" as const,
+    label: "Cloudflare",
+    tag: "FREE",
+    desc: "FLUX schnell · Workers AI",
+    cost: 0,
+    ready: false, // will be set dynamically from /api/media/providers/status
+  },
+  {
+    id: "alibaba" as const,
+    label: "Alibaba Qwen",
+    tag: "Qwen",
+    desc: "Qwen Image 2.0 · Model Studio",
+    cost: 1,
+    ready: false,
+  },
+  {
     id: "pollinations" as const,
     label: "Pollinations",
     tag: "FREE",
@@ -270,7 +306,7 @@ const PROVIDER_OPTIONS = [
   {
     id: "gemini" as const,
     label: "Gemini",
-    tag: "Nano Banana",
+    tag: "Flash Image",
     desc: "GEMINI_API_KEY",
     cost: 1,
     ready: false,
@@ -322,7 +358,7 @@ export default function ImageTool() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* ── Provider / format state ── */
-  const [providerId, setProviderId] = useState<MediaProviderId>("gemini");
+  const [providerId, setProviderId] = useState<ProviderSelection>("auto-free");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:3" | "3:4" | "16:9" | "9:16"
   >("1:1");
@@ -361,6 +397,45 @@ export default function ImageTool() {
     PROVIDER_OPTIONS.find((p) => p.id === providerId) || PROVIDER_OPTIONS[0];
   const providerCost = currentProvider.cost;
 
+  /* ── Dynamic provider status (fetched from server) ── */
+  const [providerStatus, setProviderStatus] = useState<
+    Record<string, { configured: boolean; model?: string }>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchStatus() {
+      try {
+        const res = await fetch("/api/media/providers/status", {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const map: Record<string, { configured: boolean; model?: string }> = {};
+        for (const p of data.providers ?? []) {
+          map[p.id] = { configured: p.configured, model: p.model };
+        }
+        setProviderStatus(map);
+      } catch {
+        // non-fatal — providers stay at their default ready state
+      }
+    }
+    fetchStatus();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Helper: check if a provider is ready (dynamic status overrides hardcoded)
+  const isProviderReady = useCallback(
+    (id: string): boolean => {
+      if (id === "auto-free" || id === "auto-quality") return true;
+      if (id in providerStatus) return providerStatus[id].configured;
+      return PROVIDER_OPTIONS.find((p) => p.id === id)?.ready ?? false;
+    },
+    [providerStatus],
+  );
+
   /* ── Generation state ── */
   const [status, setStatus] = useState<GenerationStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -386,6 +461,7 @@ export default function ImageTool() {
     "prompt",
   );
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
 
   /* ── Resizable panel widths ── */
@@ -519,11 +595,18 @@ export default function ImageTool() {
   /* ─── Effects ─────────────────────────────────────────────────────────── */
 
   useEffect(() => {
-    if (history.length > 0)
+    try {
+      if (history.length === 0) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify(history.slice(0, MAX_HISTORY)),
       );
+    } catch {
+      // Storage unavailable — history remains in memory.
+    }
   }, [history]);
 
   useEffect(() => {
@@ -738,6 +821,46 @@ export default function ImageTool() {
     addLog("info", "History cleared");
   }, [addLog]);
 
+  /**
+   * Remove a single generation from history by id.
+   * Never touches other generations. If the deleted generation was the
+   * currently selected one, the canvas selection is cleared.
+   */
+  const deleteGeneration = useCallback(
+    (generationId: string) => {
+      setHistory((previous) =>
+        previous.filter((generation) => generation.id !== generationId),
+      );
+      setCurrentResult((current) =>
+        current?.id === generationId ? null : current,
+      );
+      addLog("info", "Generation removed from history");
+    },
+    [addLog],
+  );
+
+  /**
+   * Remove only failed generations from history, leaving successful ones intact.
+   */
+  const removeFailedGenerations = useCallback(() => {
+    setHistory((previous) => previous.filter((g) => g.status !== "failed"));
+    addLog("info", "Failed generations removed");
+  }, [addLog]);
+
+  /**
+   * Clear all history — but only after explicit confirmation.
+   */
+  const confirmClearAllHistory = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.confirm(
+        `Delete all ${history.length} generations from local history?`,
+      )
+    ) {
+      handleClearHistory();
+    }
+  }, [history.length, handleClearHistory]);
+
   const handleGenerate = useCallback(async () => {
     if (!promptValid) {
       setError("Enter a prompt to generate.");
@@ -789,7 +912,6 @@ export default function ImageTool() {
           prompt: finalPrompt,
           negativePrompt: negativePrompt.trim(),
           seed: effectiveSeed,
-          providerId,
           format: "image",
           width: currentAspect.width,
           height: currentAspect.height,
@@ -800,6 +922,14 @@ export default function ImageTool() {
           inferenceSteps,
           sampler,
         };
+
+        // Handle auto modes vs manual provider selection
+        if (providerId === "auto-free" || providerId === "auto-quality") {
+          body.generationMode = providerId;
+        } else {
+          body.providerId = providerId;
+        }
+
         if (referenceImage) {
           body.referenceUrl = referenceImage;
           body.strength = strength;
@@ -807,11 +937,18 @@ export default function ImageTool() {
 
         const res = await fetch("/api/media/generate", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "include",
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Generation failed");
+        const data = await readApiResponse(res, "Image");
+        const downloadUrl = data.downloadUrl as string;
+        const thumbUrl = data.thumbUrl as string | undefined;
+        const isFree = data.free === true;
+        const dataCost = typeof data.cost === "number" ? data.cost : 0;
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -819,8 +956,8 @@ export default function ImageTool() {
               ? {
                   ...g,
                   status: "succeeded",
-                  fileUrl: data.downloadUrl,
-                  thumbUrl: data.thumbUrl,
+                  fileUrl: downloadUrl,
+                  thumbUrl,
                 }
               : g,
           ),
@@ -831,15 +968,15 @@ export default function ImageTool() {
               ? {
                   ...prev,
                   status: "succeeded",
-                  fileUrl: data.downloadUrl,
-                  thumbUrl: data.thumbUrl,
+                  fileUrl: downloadUrl,
+                  thumbUrl,
                 }
               : prev,
           );
 
         addLog(
           "success",
-          `[${i + 1}/${batchSize}] ✓ Done · ${data.free ? "FREE" : data.cost + " 🪙"}`,
+          `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}`,
         );
         refreshWallet().catch(() => {});
       } catch (err) {
@@ -894,7 +1031,11 @@ export default function ImageTool() {
       try {
         const res = await fetch("/api/gallery", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "include",
           body: JSON.stringify({
             url: gen.fileUrl,
             caption: gen.prompt.slice(0, 200),
@@ -903,8 +1044,7 @@ export default function ImageTool() {
             category: galleryCategory,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Save failed");
+        await readApiResponse(res, "Image");
         setStatus("succeeded");
         setError(
           gallerySharePublic
@@ -1441,21 +1581,19 @@ export default function ImageTool() {
                 </span>
                 <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                   {history.slice(0, 10).map((g) => (
-                    <button
+                    <GenerationHistoryCard
                       key={g.id}
-                      onClick={() => setCurrentResult(g)}
-                      className="relative w-20 h-20 shrink-0 rounded-lg border overflow-hidden group transition-all hover:scale-[1.03]"
-                      style={{ borderColor: currentResult?.id === g.id ? T.accentColor : T.borderColor + "40" }}
-                    >
-                      {g.fileUrl ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} data-testid="generated-image" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
-                          <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />
-                        </div>
-                      )}
-                    </button>
+                      generation={g}
+                      isSelected={currentResult?.id === g.id}
+                      onSelect={(gen) => setCurrentResult(gen as Generation)}
+                      onDelete={deleteGeneration}
+                      accentColor={T.accentColor}
+                      borderColor={T.borderColor}
+                      bgColor={T.bgColor}
+                      textMuted={T.textMuted}
+                      className="w-20 h-20 shrink-0"
+                      testId="canvas-recent-card"
+                    />
                   ))}
                 </div>
               </div>
@@ -2132,16 +2270,19 @@ export default function ImageTool() {
                   </span>
                 </div>
                 <div className="px-3 pb-3 space-y-1">
-                  {PROVIDER_OPTIONS.map((p) => (
+                  {PROVIDER_OPTIONS.map((p) => {
+                    const ready = isProviderReady(p.id);
+                    return (
                     <button
                       key={p.id}
                       onClick={() => setProviderId(p.id)}
-                      disabled={isWorking}
+                      disabled={isWorking || (!ready && p.id !== "auto-free" && p.id !== "auto-quality")}
                       className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md border text-left transition-all hover:scale-[1.005] disabled:opacity-40"
                       style={pill(providerId === p.id)}
                     >
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.ready ? "bg-green-400" : "bg-amber-400"}`}
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${ready ? "bg-green-400" : "bg-amber-400"}`}
+                        title={ready ? "Configured" : "Not configured — set API key in Vercel env vars"}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
@@ -2160,7 +2301,8 @@ export default function ImageTool() {
                         </div>
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2964,23 +3106,18 @@ export default function ImageTool() {
                         </div>
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
                           {history.slice(0, 8).map((g) => (
-                            <button
+                            <GenerationHistoryCard
                               key={g.id}
-                              onClick={() => setCurrentResult(g)}
-                              className="relative aspect-square rounded-lg border overflow-hidden group transition-all hover:scale-[1.03] hover:z-10"
-                              style={{
-                                borderColor: currentResult?.id === g.id ? T.accentColor : T.borderColor + "40",
-                              }}
-                            >
-                              {g.fileUrl ? (
-                                /* eslint-disable-next-line @next/next/no-img-element */
-                                <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} data-testid="generated-image" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
-                                  <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />
-                                </div>
-                              )}
-                            </button>
+                              generation={g}
+                              isSelected={currentResult?.id === g.id}
+                              onSelect={(gen) => setCurrentResult(gen as Generation)}
+                              onDelete={deleteGeneration}
+                              accentColor={T.accentColor}
+                              borderColor={T.borderColor}
+                              bgColor={T.bgColor}
+                              textMuted={T.textMuted}
+                              testId="canvas-left-recent-card"
+                            />
                           ))}
                         </div>
                       </div>
@@ -3110,16 +3247,72 @@ export default function ImageTool() {
                     <X size={14} />
                   </button>
                   {history.length > 0 && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleClearHistory();
-                      }}
-                      className="opacity-40 hover:opacity-100 transition-opacity"
-                      title="Clear history"
-                    >
-                      <Trash2 size={9} />
-                    </span>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHistoryMenuOpen((v) => !v);
+                        }}
+                        className="p-1 rounded transition-all hover:bg-white/10"
+                        style={{ color: T.textMuted }}
+                        aria-label="History options"
+                        aria-haspopup="menu"
+                        aria-expanded={historyMenuOpen}
+                        data-testid="history-menu-trigger"
+                      >
+                        <MoreVertical size={12} />
+                      </button>
+                      {historyMenuOpen && (
+                        <>
+                          {/* Click-away backdrop */}
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryMenuOpen(false);
+                            }}
+                          />
+                          <div
+                            className="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border shadow-xl overflow-hidden"
+                            style={{
+                              backgroundColor: T.boxBg,
+                              borderColor: T.borderColor + "60",
+                            }}
+                            role="menu"
+                            data-testid="history-menu"
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHistoryMenuOpen(false);
+                                removeFailedGenerations();
+                              }}
+                              className="w-full text-left px-3 py-2 text-[10px] font-bold transition-colors hover:bg-white/5"
+                              style={{ color: T.textMuted }}
+                              role="menuitem"
+                              data-testid="remove-failed-generations"
+                            >
+                              Remove failed generations
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHistoryMenuOpen(false);
+                                confirmClearAllHistory();
+                              }}
+                              className="w-full text-left px-3 py-2 text-[10px] font-bold text-red-400 transition-colors hover:bg-red-500/10"
+                              role="menuitem"
+                              data-testid="clear-all-history"
+                            >
+                              Clear all history
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                   {historyOpen ? (
                     <ChevronUp size={10} />
@@ -3140,60 +3333,18 @@ export default function ImageTool() {
                     </div>
                   ) : (
                     history.map((g) => (
-                      <button
+                      <GenerationHistoryCard
                         key={g.id}
-                        onClick={() => setCurrentResult(g)}
-                        className="relative aspect-square rounded border overflow-hidden group transition-all hover:scale-[1.03] hover:z-10"
-                        style={{
-                          borderColor:
-                            currentResult?.id === g.id
-                              ? T.accentColor
-                              : T.borderColor + "40",
-                          boxShadow:
-                            currentResult?.id === g.id
-                              ? `0 0 8px ${T.accentColor}40`
-                              : "none",
-                        }}
-                      >
-                        {g.fileUrl ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={g.fileUrl}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                (
-                                  e.currentTarget as HTMLImageElement
-                                ).style.display = "none";
-                              }}
-                            />
-                          </>
-                        ) : g.status === "failed" ? (
-                          <div className="w-full h-full flex items-center justify-center bg-red-500/10 text-red-400 text-lg">
-                            ✕
-                          </div>
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Loader2
-                              size={12}
-                              className="animate-spin opacity-40"
-                            />
-                          </div>
-                        )}
-                        {/* Hover overlay */}
-                        <div
-                          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-end"
-                          style={{
-                            background:
-                              "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)",
-                          }}
-                        >
-                          <span className="text-[7px] text-white px-1 pb-1 truncate w-full">
-                            {g.provider}
-                          </span>
-                        </div>
-                      </button>
+                        generation={g}
+                        isSelected={currentResult?.id === g.id}
+                        onSelect={(gen) => setCurrentResult(gen as Generation)}
+                        onDelete={deleteGeneration}
+                        accentColor={T.accentColor}
+                        borderColor={T.borderColor}
+                        bgColor={T.bgColor}
+                        textMuted={T.textMuted}
+                        testId="history-grid-card"
+                      />
                     ))
                   )}
                 </div>

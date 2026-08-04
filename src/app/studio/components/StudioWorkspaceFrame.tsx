@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Activity,
   Terminal,
+  Music,
 } from "lucide-react";
 import type { InspectorTab, DrawerTab } from "../lib/studio-destinations";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
@@ -49,6 +50,7 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
   { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "media", label: "Media", icon: Music },
 ];
 
 export interface StudioInspectorData {
@@ -434,7 +436,7 @@ export function StudioDrawer({
           aria-expanded={open}
         >
           {open ? <PanelBottomClose size={13} className="pointer-events-none" /> : <PanelBottomOpen size={13} className="pointer-events-none" />}
-          <span>{open ? "Close" : "Terminal"}</span>
+          <span>{open ? "Close" : "Terminal / Media"}</span>
         </button>
       </div>
 
@@ -495,7 +497,7 @@ export function StudioDrawer({
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {children ?? (
               <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {activeTab === "terminal" ? "Terminal not connected" : "No activity yet"}
+                {activeTab === "terminal" ? "Terminal not connected" : activeTab === "media" ? "Media not loaded" : "No activity yet"}
               </div>
             )}
           </div>

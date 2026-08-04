@@ -76,8 +76,8 @@ export const FEATURE_FLAGS: Record<FeatureFlag, FeatureFlagDefinition> = {
   retroGameRuntime: {
     flag: "retroGameRuntime",
     description: "Retro game runtime and emulator",
-    enabled: false,
-    hideFromNav: true,
+    enabled: true,
+    hideFromNav: false,
   },
   experimentalMediaProviders: {
     flag: "experimentalMediaProviders",

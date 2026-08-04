@@ -29,6 +29,7 @@ import {
   Library,
   Disc3,
 } from "lucide-react";
+import { readApiResponse } from "../lib/create-api";
 
 const MUSIC_LBC_COST = {
   concept: 8,
@@ -139,8 +140,8 @@ export default function MusicTool() {
 
     try {
       const res = await fetch(`/api/music/tracks/${track.id}/stream`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to get stream URL");
-      const { url } = await res.json();
+      const streamData = await readApiResponse(res, "Music stream");
+      const url = streamData.url as string;
 
       const audio = new Audio(url);
       audio.crossOrigin = "anonymous";
@@ -156,8 +157,8 @@ export default function MusicTool() {
   const handleDownload = useCallback(async (track: VaultTrack) => {
     try {
       const res = await fetch(`/api/music/tracks/${track.id}/stream`, { credentials: "include" });
-      if (!res.ok) return;
-      const { url } = await res.json();
+      const streamData = await readApiResponse(res, "Music stream");
+      const url = streamData.url as string;
       const a = document.createElement("a");
       a.href = url;
       a.download = `${track.title.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.mp3`;

@@ -20,6 +20,7 @@ const IMAGE_MIME_TYPES = new Set([
   "image/webp",
   "image/gif",
   "image/svg+xml",
+  "image/avif",
 ]);
 
 const VIDEO_MIME_TYPES = new Set([
@@ -103,7 +104,7 @@ const EXTENSION_MIME: Record<string, string> = {
   zip: "application/zip", gz: "application/gzip", tar: "application/x-tar", "7z": "application/x-7z-compressed",
   mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/m4a", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac",
   mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", mkv: "video/x-matroska",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml", avif: "image/avif",
 };
 
 function detectImageMime(buffer: Buffer): string | null {
@@ -111,6 +112,11 @@ function detectImageMime(buffer: Buffer): string | null {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
   if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
   if (buffer.length >= 6 && ["GIF87a", "GIF89a"].includes(buffer.toString("ascii", 0, 6))) return "image/gif";
+  // AVIF: starts with \x00\x00\x00 ftyp
+  if (buffer.length >= 12 && buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x00 && buffer.toString("ascii", 4, 8) === "ftyp") {
+    const brand = buffer.toString("ascii", 8, 12);
+    if (["avif", "avis", "mif1"].includes(brand)) return "image/avif";
+  }
   return null;
 }
 
@@ -171,8 +177,34 @@ export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const file = form.get("file") as File | null;
+    const purpose = form.get("purpose");
     if (!file)
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
+
+    // ── Wallpaper-specific validation ────────────────────────────────
+    // Wallpapers have stricter rules: only images, max 10 MB, AVIF allowed.
+    const WALLPAPER_MIME_TYPES = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/avif",
+    ]);
+    const WALLPAPER_MAX_BYTES = 10 * 1024 * 1024;
+
+    if (purpose === "wallpaper") {
+      if (!WALLPAPER_MIME_TYPES.has(file.type)) {
+        return NextResponse.json(
+          { error: "Wallpapers must be JPG, PNG, WebP, or AVIF images." },
+          { status: 415 },
+        );
+      }
+      if (file.size > WALLPAPER_MAX_BYTES) {
+        return NextResponse.json(
+          { error: "Wallpaper too large. Maximum size is 10 MB." },
+          { status: 413 },
+        );
+      }
+    }
 
     // ── Apply validation to ALL uploads ──────────────────────────────
     const declaredMime = file.type || "application/octet-stream";

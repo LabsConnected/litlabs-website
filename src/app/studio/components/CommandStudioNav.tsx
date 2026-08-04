@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   LayoutGrid,
-  Wand2,
+  Shapes,
   FolderOpen,
   Bot,
   MoreHorizontal,
@@ -15,9 +15,7 @@ import {
   Terminal,
   Network,
   X,
-  Gamepad2,
-  ExternalLink,
-  Zap,
+  Sprout,
   Home,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
@@ -34,7 +32,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "studio", label: "Studio", icon: LayoutGrid },
-  { id: "create", label: "Create", icon: Wand2 },
+  { id: "create", label: "Create", icon: Shapes },
   { id: "assets", label: "Assets", icon: FolderOpen },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "more", label: "More", icon: MoreHorizontal },
@@ -91,7 +89,7 @@ export default function CommandStudioNav({
           title="LiTT Studio — AI Operating System"
           aria-label="Go to dashboard"
         >
-          <Zap
+          <Sprout
             size={16}
             strokeWidth={2.5}
             className="text-black pointer-events-none"
@@ -145,7 +143,7 @@ export default function CommandStudioNav({
                 className="pointer-events-none transition-all duration-200 group-hover:scale-110"
               />
               <span
-                className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
+                className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[12px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
                 style={{
                   backgroundColor: "var(--studio-elevated)",
                   borderColor: "var(--studio-border-strong)",
@@ -170,21 +168,21 @@ export default function CommandStudioNav({
           aria-label="View wallet"
         >
           <div className="flex flex-col items-center pointer-events-none">
-            <Zap
+            <Sprout
               size={14}
               strokeWidth={2}
               style={{ color: "var(--litt-primary)" }}
               className="pointer-events-none"
             />
             <span
-              className="text-[7px] font-black leading-none mt-0.5"
+              className="text-[10px] font-black leading-none mt-0.5"
               style={{ color: "var(--text-secondary)" }}
             >
               {balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance}
             </span>
           </div>
           <span
-            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
+            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[12px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
             style={{
               backgroundColor: "var(--studio-elevated)",
               borderColor: "var(--studio-border-strong)",
@@ -214,7 +212,7 @@ export default function CommandStudioNav({
             className="flex h-10 items-center justify-between px-3"
             style={{ borderBottom: "1px solid var(--studio-border)" }}
           >
-            <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-secondary)" }}>
+            <span className="text-[11px] font-black tracking-[0.1em]" style={{ color: "var(--text-secondary)" }}>
               More tools
             </span>
             <button
@@ -246,19 +244,6 @@ export default function CommandStudioNav({
                 </button>
               );
             })}
-            <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
-            <Link
-              href="/games"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setMoreOpen(false)}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-white/5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <Gamepad2 size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
-              <span className="text-xs font-bold">Games</span>
-              <ExternalLink size={11} className="ml-auto opacity-40 pointer-events-none" />
-            </Link>
           </div>
         </div>
       )}
@@ -293,7 +278,7 @@ export function MobileCommandNav({
         aria-label="Go to dashboard"
       >
         <Home size={18} strokeWidth={1.7} className="pointer-events-none" />
-        <span className="text-[9px] font-bold">Home</span>
+        <span className="text-[11px] font-bold">Home</span>
       </Link>
 
       {NAV_ITEMS.map((item) => {
@@ -312,7 +297,7 @@ export function MobileCommandNav({
             aria-current={isActive ? "page" : undefined}
           >
             <Icon size={18} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
-            <span className="text-[9px] font-bold">{item.label}</span>
+            <span className="text-[11px] font-bold">{item.label}</span>
           </button>
         );
       })}

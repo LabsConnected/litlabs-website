@@ -5,6 +5,7 @@ import {
   type AgentDefinition,
 } from "@/lib/agent-registry";
 import type { PlanId } from "@/config/plans";
+import type { AgentMode } from "@/lib/studio/types";
 
 export type AgentId =
   | "litt"
@@ -24,6 +25,8 @@ export interface ChatMessage {
   content: string;
   status?: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   agentSlug?: string | null;
+  /** Agent mode that produced this message. Preserved across mode switches. */
+  agentMode?: AgentMode | null;
   createdAt?: number;
   images?: string[];
   /** Canvas actions proposed by LiTT alongside this response. */
@@ -77,23 +80,41 @@ export const STUDIO_AGENTS: AgentMeta[] = AGENT_DEFINITIONS.filter(
 
 interface StudioAgentStore {
   activeAgentId: AgentId;
+  /** Active agent mode — the operational profile within LiTT. */
+  activeAgentMode: AgentMode;
   /** Private agent instance ID (user_agents.id) when a marketplace agent is selected. */
   activeAgentInstanceId: string | null;
   setActiveAgent: (id: AgentId) => void;
+  /** Set the active agent mode — only affects future messages. */
+  setActiveAgentMode: (mode: AgentMode) => void;
   /** Select a marketplace agent instance by its private user_agents.id. */
   setActiveAgentInstance: (instanceId: string | null, fallbackSlug?: AgentId) => void;
 }
 
 export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
   activeAgentId: "litt",
+  activeAgentMode: "standard",
   activeAgentInstanceId: null,
 
-  setActiveAgent: (activeAgentId) => set({ activeAgentId, activeAgentInstanceId: null }),
+  setActiveAgent: (activeAgentId) => set({
+    activeAgentId,
+    activeAgentInstanceId: null,
+    // Sync mode with slug — "spark" → spark mode, everything else → standard
+    activeAgentMode: activeAgentId === "spark" ? "spark" : "standard",
+  }),
+
+  setActiveAgentMode: (mode) => set({
+    activeAgentMode: mode,
+    // Sync slug with mode — spark mode → "spark", everything else → "litt"
+    activeAgentId: mode === "spark" ? "spark" as AgentId : "litt" as AgentId,
+  }),
 
   setActiveAgentInstance: (instanceId, fallbackSlug) =>
     set({
       activeAgentInstanceId: instanceId,
       // Keep the slug in sync for UI display, but the server will use the instance ID
       activeAgentId: fallbackSlug ?? "litt",
+      // Marketplace agents always run in standard mode
+      activeAgentMode: "standard",
     }),
 }));

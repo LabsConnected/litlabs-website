@@ -40,7 +40,7 @@ export type MoreMode =
 export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
 
 /** Internal tabs inside the bottom drawer. */
-export type DrawerTab = "activity" | "terminal";
+export type DrawerTab = "activity" | "terminal" | "media";
 
 export interface DestinationState {
   destination: StudioDestination;

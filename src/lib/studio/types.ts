@@ -10,6 +10,12 @@ export type AgentSlug =
   | "forge"
   | "echo";
 
+/**
+ * Agent mode — LiTT is the single operating agent; modes are its
+ * operational profiles (standard, builder, research, spark).
+ */
+export type AgentMode = "standard" | "builder" | "research" | "spark";
+
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
 export type MessageStatus = "pending" | "streaming" | "completed" | "failed" | "cancelled";
@@ -30,6 +36,8 @@ export interface Conversation {
   projectId: string;
   title: string | null;
   activeAgentSlug: AgentSlug;
+  /** Agent mode — the operational profile within LiTT. */
+  activeAgentMode: AgentMode;
   /** Private agent instance ID (user_agents.id) for marketplace agents. */
   agentInstanceId: string | null;
   revision: number;
@@ -45,6 +53,8 @@ export interface ConversationMessage {
   projectId: string;
   role: MessageRole;
   agentSlug: AgentSlug | null;
+  /** Agent mode that produced this message. Preserved across mode switches. */
+  agentMode: AgentMode | null;
   /** Private agent instance ID that produced this message (if marketplace agent). */
   agentInstanceId: string | null;
   content: string;
@@ -71,6 +81,7 @@ export interface ResolvedStudioContext {
   scanStatus?: string | null;
   scanSummary?: Record<string, unknown> | null;
   activeAgentSlug: AgentSlug;
+  activeAgentMode: AgentMode;
   agentInstanceId: string | null;
   capabilities: StudioCapabilities;
 }
@@ -97,6 +108,8 @@ export interface StudioChatRequest {
   clientRequestId: string;
   expectedRevision: number;
   requestedAgentSlug?: AgentSlug;
+  /** Agent mode — the operational profile within LiTT. */
+  agentMode?: AgentMode;
   /** Private agent instance ID for marketplace agents. */
   agentInstanceId?: string;
 }

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { resolveProject } from "./project-resolver";
-import type { Conversation, ConversationMessage, AgentSlug, MessageStatus } from "./types";
+import type { Conversation, ConversationMessage, AgentSlug, AgentMode, MessageStatus } from "./types";
 
 interface DbConversation {
   id: string;
@@ -8,6 +8,7 @@ interface DbConversation {
   project_id: string;
   title: string | null;
   active_agent_slug: AgentSlug;
+  active_agent_mode: AgentMode | null;
   agent_instance_id: string | null;
   revision: number;
   created_at: string;
@@ -22,6 +23,7 @@ interface DbMessage {
   project_id: string;
   role: string;
   agent_slug: AgentSlug | null;
+  agent_mode: AgentMode | null;
   agent_instance_id: string | null;
   content: string;
   status: string;
@@ -39,6 +41,7 @@ function mapConversation(row: DbConversation): Conversation {
     projectId: row.project_id,
     title: row.title,
     activeAgentSlug: row.active_agent_slug,
+    activeAgentMode: row.active_agent_mode ?? "standard",
     agentInstanceId: row.agent_instance_id ?? null,
     revision: row.revision,
     createdAt: row.created_at,
@@ -55,6 +58,7 @@ function mapMessage(row: DbMessage): ConversationMessage {
     projectId: row.project_id,
     role: row.role as ConversationMessage["role"],
     agentSlug: row.agent_slug,
+    agentMode: (row.agent_mode as AgentMode | null) ?? null,
     agentInstanceId: row.agent_instance_id ?? null,
     content: row.content,
     status: row.status as MessageStatus,
@@ -210,6 +214,7 @@ export async function insertMessage(
     projectId: string;
     role: ConversationMessage["role"];
     agentSlug?: AgentSlug | null;
+    agentMode?: AgentMode | null;
     agentInstanceId?: string | null;
     content: string;
     status?: MessageStatus;
@@ -244,6 +249,9 @@ export async function insertMessage(
 
   if (message.agentSlug != null) {
     insertPayload.agent_slug = message.agentSlug;
+  }
+  if (message.agentMode != null) {
+    insertPayload.agent_mode = message.agentMode;
   }
   if (message.agentInstanceId != null) {
     insertPayload.agent_instance_id = message.agentInstanceId;

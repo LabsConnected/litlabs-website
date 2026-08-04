@@ -14,6 +14,9 @@ export interface LogContext {
   memoryProvider?: string;
   fallbackUsed?: boolean;
   errorClass?: string;
+  intent?: string;
+  confidence?: number;
+  tool?: string;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

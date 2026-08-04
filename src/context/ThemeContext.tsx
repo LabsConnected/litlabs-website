@@ -873,9 +873,9 @@ export { darkSkins, lightSkins, accentOverrides };
 /* ------------------------------------------------------------------ */
 export function useCrtToggle() {
   const [crtEnabled, setCrtEnabled] = useState(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     const val = localStorage.getItem("crt_global_scanlines");
-    return val === null ? true : val === "true";
+    return val === null ? false : val === "true";
   });
   const [hydrated, setHydrated] = useState(false);
 
@@ -893,5 +893,5 @@ export function useCrtToggle() {
     [crtEnabled],
   );
 
-  return { crtEnabled: hydrated ? crtEnabled : true, toggleCrt };
+  return { crtEnabled: hydrated ? crtEnabled : false, toggleCrt };
 }

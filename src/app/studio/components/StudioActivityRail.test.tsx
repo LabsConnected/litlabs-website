@@ -19,10 +19,10 @@ function makeMessages(): ChatMessage[] {
   const t = 1_700_000_000_000;
   return [
     { id: "u1", role: "user", content: "Build the landing page please", createdAt: t },
-    { id: "a1", role: "assistant", agentSlug: "litt", content: "On it — scaffolding the landing page now.", status: "completed", createdAt: t + 1000 },
+    { id: "a1", role: "assistant", agentSlug: "litt", agentMode: "standard", content: "On it — scaffolding the landing page now.", status: "completed", createdAt: t + 1000 },
     { id: "u2", role: "user", content: "Now add a pricing section", createdAt: t + 2000 },
-    { id: "a2", role: "assistant", agentSlug: "spark", content: "Pricing section drafted.", status: "completed", createdAt: t + 3000 },
-    { id: "a3", role: "assistant", agentSlug: "litt", content: "oops", status: "failed", createdAt: t + 4000 },
+    { id: "a2", role: "assistant", agentSlug: "spark", agentMode: "spark", content: "Pricing section drafted.", status: "completed", createdAt: t + 3000 },
+    { id: "a3", role: "assistant", agentSlug: "litt", agentMode: "standard", content: "oops", status: "failed", createdAt: t + 4000 },
   ];
 }
 
@@ -40,7 +40,11 @@ describe("StudioActivityRail — Mission Timeline log controls", () => {
     // The rail shows the last 8 messages; user + assistant labels appear.
     expect(screen.getAllByText("User message sent").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/LiTT responded/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Spark responded/)).toBeDefined();
+    // Spark mode messages show "LiTT · Spark Mode responded"
+    // Use getAllByText with a function matcher since the text may be split across elements
+    expect(screen.getAllByText((_, node) =>
+      Boolean(node?.textContent?.includes("Spark Mode") && node?.textContent?.includes("responded"))
+    ).length).toBeGreaterThan(0);
   });
 
   it("Clear hides visible entries and confirms system history is preserved", () => {
@@ -87,7 +91,9 @@ describe("StudioActivityRail — Mission Timeline log controls", () => {
 
     expect(screen.getAllByText("User message sent").length).toBeGreaterThan(0);
     expect(screen.queryByText(/LiTT responded/)).toBeNull();
-    expect(screen.queryByText(/Spark responded/)).toBeNull();
+    expect(screen.queryAllByText((_, node) =>
+      Boolean(node?.textContent?.includes("Spark Mode") && node?.textContent?.includes("responded"))
+    ).length).toBe(0);
   });
 
   it("Search filters entries by label/detail", () => {

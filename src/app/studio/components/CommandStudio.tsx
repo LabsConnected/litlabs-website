@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
 import dynamic from "next/dynamic";
+import { Image as ImageIcon, Clapperboard, AudioLines, Music } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -23,6 +25,7 @@ import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import StudioActivityRail from "./StudioActivityRail";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
@@ -156,10 +159,76 @@ function CommandStudioContent() {
     initial.legacyTool === "build" ? "builder" : "conversation",
   );
 
-  const [inspectorOpen, setInspectorOpen] = useState<boolean>(!!initial.openInspector);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
+
+  // ── Unified side panel manager ────────────────────────────────────
+  // Only ONE side panel may be open at a time. Opening one closes the
+  // others. The canvas immediately reclaims width when a panel closes.
+  // New users start with no side panel. The last choice persists.
+  type StudioSidePanel = "none" | "activity" | "inspector" | "settings";
+  const SIDE_PANEL_STORAGE_KEY = "littree:studio:side-panel";
+  const [sidePanel, setSidePanel] = useState<StudioSidePanel>(() => {
+    if (typeof window === "undefined") return "none";
+    try {
+      const stored = localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
+      if (stored === "activity" || stored === "inspector" || stored === "settings") return stored;
+      return "none";
+    } catch {
+      return "none";
+    }
+  });
+
+  // Backwards-compat: if old activity-rail-open key was "true", migrate
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const oldKey = localStorage.getItem("littree:studio:activity-rail-open");
+      if (oldKey === "true" && sidePanel === "none") {
+        setSidePanel("activity");
+        localStorage.removeItem("littree:studio:activity-rail-open");
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidePanel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDE_PANEL_STORAGE_KEY, sidePanel);
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [sidePanel]);
+
+  // Derived booleans for downstream components
+  const activityRailOpen = sidePanel === "activity";
+  const inspectorOpen = sidePanel === "inspector";
+
+  // Toggle helpers — opening one closes the others
+  const handleToggleActivity = useCallback(() => {
+    setSidePanel((current) => (current === "activity" ? "none" : "activity"));
+  }, []);
+  const handleToggleInspector = useCallback(() => {
+    setSidePanel((current) => (current === "inspector" ? "none" : "inspector"));
+  }, []);
+
+  // Keyboard shortcut: Ctrl+Shift+A toggles the Activity panel.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "a"
+      ) {
+        event.preventDefault();
+        handleToggleActivity();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleToggleActivity]);
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
@@ -215,7 +284,7 @@ function CommandStudioContent() {
       }
     }
     if (mapped.openInspector) {
-      setInspectorOpen(true);
+      setSidePanel("inspector");
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
@@ -226,12 +295,12 @@ function CommandStudioContent() {
     onRouteToolAction: handleRouteTool,
     onRouteInspectorAction: (tab) => {
       setInspectorTab(tab);
-      setInspectorOpen(true);
+      setSidePanel("inspector");
     },
     onRunHealthChecks: () => {
       // Open the checks panel and trigger run-all
       setInspectorTab("checks");
-      setInspectorOpen(true);
+      setSidePanel("inspector");
       setHealthRunTrigger((n) => n + 1);
     },
     serverProjectId: capabilities.projectId,
@@ -382,10 +451,6 @@ function CommandStudioContent() {
     setDestination("studio");
     setStudioMode("preview");
   }, []);
-  const handleOpenActivity = useCallback(() => {
-    setDrawerOpen(true);
-    setDrawerTab("activity");
-  }, []);
   const handleOpenTerminal = useCallback(() => {
     setDestination("studio");
     setStudioMode("work");
@@ -458,11 +523,11 @@ function CommandStudioContent() {
   ];
 
   // Create secondary tabs — visible only when Create is active
-  const createTabs: { id: CreateMode; label: string }[] = [
-    { id: "image", label: "Image" },
-    { id: "video", label: "Video" },
-    { id: "audio", label: "Audio" },
-    { id: "music", label: "Music" },
+  const createTabs: { id: CreateMode; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
+    { id: "image", label: "Image", icon: ImageIcon },
+    { id: "video", label: "Video", icon: Clapperboard },
+    { id: "audio", label: "Audio", icon: AudioLines },
+    { id: "music", label: "Music", icon: Music },
   ];
 
   return (
@@ -482,9 +547,10 @@ function CommandStudioContent() {
         <CommandStudioHeader
           branch={contextLine.branch}
           onPreviewAction={handlePreview}
-          onOpenActivityAction={handleOpenActivity}
+          onOpenActivityAction={handleToggleActivity}
+          activityRailOpen={activityRailOpen}
           onOpenTerminalAction={handleOpenTerminal}
-          onOpenInspectorAction={() => setInspectorOpen(true)}
+          onOpenInspectorAction={handleToggleInspector}
           onProjectSelectAction={handleSelectProject}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
@@ -532,7 +598,7 @@ function CommandStudioContent() {
                         setDestination(t.destination);
                       }
                     }}
-                    className="relative rounded-md px-3 py-1.5 text-[11px] font-bold transition-all"
+                    className="relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all"
                     style={{
                       color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                       backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
@@ -567,18 +633,20 @@ function CommandStudioContent() {
               >
                 {createTabs.map((t) => {
                   const isActive = createMode === t.id;
+                  const TabIcon = t.icon;
                   return (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() => setCreateMode(t.id)}
-                      className="rounded-md px-2.5 py-1 text-[10px] font-bold transition-all"
+                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all"
                       style={{
                         color: isActive ? "var(--spark-primary)" : "var(--text-muted)",
                         backgroundColor: isActive ? "rgba(168,85,247,0.1)" : "transparent",
                       }}
                       aria-label={t.label}
                     >
+                      <TabIcon size={13} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
                       {t.label}
                     </button>
                   );
@@ -629,7 +697,7 @@ function CommandStudioContent() {
               {/* Right inspector — collapsed by default */}
               <StudioInspector
                 open={inspectorOpen}
-                onToggle={() => setInspectorOpen((v) => !v)}
+                onToggle={handleToggleInspector}
                 activeTab={inspectorTab}
                 onTabChange={setInspectorTab}
                 data={{
@@ -658,6 +726,8 @@ function CommandStudioContent() {
             >
               {drawerTab === "terminal" ? (
                 <StudioTerminalDrawer projectId={capabilities.projectId} repositoryName={capabilities.repositoryName} branch={capabilities.activeBranch ?? capabilities.defaultBranch} />
+              ) : drawerTab === "media" ? (
+                <MediaUtilityDock />
               ) : (
                 <StudioActivityPanel
                   messages={conversation.messages}
@@ -739,19 +809,23 @@ function CommandStudioContent() {
             )}
           </main>
 
-          {/* Right Activity Rail — premium three-column layout */}
-          <StudioActivityRail
-            messages={conversation.messages}
-            busy={conversation.busy}
-            activeAgentId={conversation.activeAgentId}
-            projectName={capabilities.projectName}
-            modelLabel={modelLabel}
-            terminalStatus={capabilities.terminalStatus}
-            repositoryName={capabilities.repositoryName}
-            branch={capabilities.activeBranch ?? contextLine.branch}
-            onOpenTerminal={handleOpenTerminal}
-            onSelectAgent={conversation.switchAgent}
-          />
+          {/* Right Activity Rail — optional, toggled by header Activity button.
+              When hidden, the main canvas reclaims the full width (no spacer). */}
+          {activityRailOpen && (
+            <StudioActivityRail
+              messages={conversation.messages}
+              busy={conversation.busy}
+              activeAgentId={conversation.activeAgentId}
+              projectName={capabilities.projectName}
+              modelLabel={modelLabel}
+              terminalStatus={capabilities.terminalStatus}
+              repositoryName={capabilities.repositoryName}
+              branch={capabilities.activeBranch ?? contextLine.branch}
+              onOpenTerminal={handleOpenTerminal}
+              onSelectAgent={conversation.switchAgent}
+              onClose={() => setSidePanel("none")}
+            />
+          )}
         </div>
 
         {/* Mobile bottom nav — 5 destinations */}

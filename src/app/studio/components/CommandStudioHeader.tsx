@@ -16,13 +16,15 @@ import {
   ChevronDown,
   Eye,
   Rocket,
-  Sparkles,
+  Sprout,
   CircleAlert,
   CircleCheck,
   CircleDot,
   Bell,
   Bot,
   PanelRightOpen,
+  PanelRightClose,
+  Activity,
   MoreHorizontal,
   Plus,
   Terminal,
@@ -55,6 +57,7 @@ export default function CommandStudioHeader({
   branch,
   onPreviewAction,
   onOpenActivityAction,
+  activityRailOpen = false,
   onOpenTerminalAction,
   onOpenInspectorAction,
   onProjectSelectAction,
@@ -71,6 +74,8 @@ export default function CommandStudioHeader({
   branch?: string;
   onPreviewAction?: () => void;
   onOpenActivityAction?: () => void;
+  /** Whether the right Activity rail is currently open. */
+  activityRailOpen?: boolean;
   onOpenTerminalAction?: () => void;
   onOpenInspectorAction?: () => void;
   onProjectSelectAction?: (projectId: string) => void;
@@ -165,7 +170,7 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="flex shrink-0 items-center gap-2 border-b px-2 sm:px-3"
+      className="flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b px-2 sm:px-3"
       style={{
         height: "var(--studio-header-h)",
         backgroundColor: "var(--studio-surface)",
@@ -189,16 +194,16 @@ export default function CommandStudioHeader({
           }}
           aria-hidden
         >
-          <Sparkles size={11} className="text-black" />
+          <Sprout size={11} className="text-black" />
         </div>
         <span
-          className="hidden lg:inline text-[11px] font-black uppercase tracking-[0.15em]"
+          className="hidden lg:inline text-[13px] font-black tracking-[0.08em]"
           style={{ color: "var(--text-primary)" }}
         >
           LiTT Studio
         </span>
         <span
-          className="hidden lg:inline text-[8px] font-bold uppercase tracking-[0.2em]"
+          className="hidden lg:inline text-[11px] font-bold tracking-[0.1em]"
           style={{ color: "var(--text-muted)" }}
         >
           AI OS
@@ -215,7 +220,7 @@ export default function CommandStudioHeader({
           shown inside the project picker to avoid duplicate indicators */}
       {branch && repoConnected && (
         <span
-          className="hidden lg:inline shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+          className="hidden lg:inline shrink-0 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-bold"
           style={{
             borderColor: "var(--studio-border)",
             color: "var(--text-secondary)",
@@ -232,7 +237,7 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
@@ -383,20 +388,36 @@ export default function CommandStudioHeader({
         <PanelRightOpen size={13} className="pointer-events-none" />
       </button>
 
-      {/* Activity — opens the Activity drawer (kept visible; useful) */}
+      {/* Activity — toggles the right Activity rail (not a second drawer) */}
       <button
         type="button"
         onClick={onOpenActivityAction}
+        aria-pressed={activityRailOpen}
+        aria-label={activityRailOpen ? "Hide Activity" : "Show Activity"}
+        title={activityRailOpen ? "Hide Activity" : "Show Activity"}
+        data-testid="activity-toggle"
+        data-active={activityRailOpen}
         className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
-          borderColor: "var(--studio-border)",
-          color: "var(--text-secondary)",
-          backgroundColor: "var(--studio-surface)",
+          borderColor: activityRailOpen
+            ? "rgba(155,77,255,.45)"
+            : "var(--studio-border)",
+          backgroundColor: activityRailOpen
+            ? "rgba(155,77,255,.12)"
+            : "var(--studio-surface)",
+          color: activityRailOpen
+            ? "var(--spark-primary)"
+            : "var(--text-secondary)",
         }}
-        title="Activity"
-        aria-label="Activity"
       >
-        <span className="hidden sm:inline pointer-events-none">Activity</span>
+        {activityRailOpen ? (
+          <PanelRightClose size={13} className="pointer-events-none" />
+        ) : (
+          <Activity size={13} className="pointer-events-none" />
+        )}
+        <span className="hidden xl:inline pointer-events-none">
+          {activityRailOpen ? "Hide Activity" : "Show Activity"}
+        </span>
       </button>
 
       {/* Overflow menu — Preview + Deploy + Settings collapsed here */}

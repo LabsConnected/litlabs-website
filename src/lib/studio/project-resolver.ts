@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
-import type { StudioCapabilities, ResolvedStudioContext, AgentSlug } from "./types";
+import type { StudioCapabilities, ResolvedStudioContext, AgentSlug, AgentMode } from "./types";
 
 interface ProjectRecord {
   id: string;
@@ -132,6 +132,7 @@ export async function buildStudioContext(
   conversationId: string,
   projectId: string,
   agentSlug: AgentSlug,
+  agentMode: AgentMode = "standard",
 ): Promise<ResolvedStudioContext | null> {
   const project = await resolveProject(clerkUserId, projectId);
   if (!project) return null;
@@ -151,6 +152,7 @@ export async function buildStudioContext(
     scanStatus: project.scanStatus,
     scanSummary: project.scanSummary,
     activeAgentSlug: agentSlug,
+    activeAgentMode: agentMode,
     agentInstanceId: null,
     capabilities: project.capabilities,
   };

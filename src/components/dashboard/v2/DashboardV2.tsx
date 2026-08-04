@@ -21,8 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
-import { useYouTubePlayer } from "@/context/YouTubePlayerContext";
-import { YouTubeDock } from "@/components/youtube/YouTubeDock";
+import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { ContinueProjectCard } from "./ContinueProjectCard";
 import { CurrentMissionCard } from "./CurrentMissionCard";
 import { UnifiedInboxCard } from "./UnifiedInboxCard";
@@ -73,7 +72,7 @@ const QUICK_ACTIONS = [
 export function DashboardV2() {
   const { user } = useAppUser();
   const { profile } = useProfile();
-  const { dockMode, showDocked } = useYouTubePlayer();
+
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -476,52 +475,9 @@ export function DashboardV2() {
               <CurrentMissionCard data={data} loading={loading} />
             </section>
 
-            {/* === SECTION 7: LITT MEDIA PLAYER (YouTube Dock) === */}
+            {/* === SECTION 7: LITT MEDIA (Now Playing card) === */}
             <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: D.textDim }}>
-                  Media Player
-                </h2>
-                {dockMode === "hidden" && (
-                  <button
-                    type="button"
-                    onClick={() => showDocked()}
-                    className="text-xs font-bold transition hover:opacity-80"
-                    style={{ color: D.accent }}
-                  >
-                    Show Player →
-                  </button>
-                )}
-              </div>
-              {dockMode !== "hidden" && <YouTubeDock />}
-              {dockMode === "hidden" && (
-                <div
-                  className="rounded-2xl border p-6 text-center"
-                  style={{ background: D.surface, borderColor: D.border }}
-                >
-                  <div
-                    className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full"
-                    style={{ background: `${D.accent}10`, border: `1px solid ${D.accent}20` }}
-                  >
-                    <Icon name="music" size={18} style={{ color: D.accent }} />
-                  </div>
-                  <p className="text-sm font-bold" style={{ color: D.textPrimary }}>
-                    LiTT Media Player
-                  </p>
-                  <p className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Powered by YouTube — paste a URL to start playing.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => showDocked()}
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition hover:scale-[1.02]"
-                    style={{ background: D.accent, color: D.bg }}
-                  >
-                    <Icon name="play" size={12} />
-                    Open Player
-                  </button>
-                </div>
-              )}
+              <MediaNowPlayingCard />
             </section>
           </div>
         </div>
