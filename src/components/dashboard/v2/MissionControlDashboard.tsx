@@ -827,7 +827,7 @@ export function MissionControlDashboard() {
                   </h2>
                 </div>
                 <Link
-                  href="/missions"
+                  href="/projects"
                   className="text-xs font-bold transition hover:opacity-80"
                   style={{ color: D.accent }}
                 >
@@ -897,7 +897,7 @@ export function MissionControlDashboard() {
                   </h2>
                 </div>
                 <Link
-                  href="/activity"
+                  href="/dashboard"
                   className="text-xs font-bold transition hover:opacity-80"
                   style={{ color: D.accent }}
                 >

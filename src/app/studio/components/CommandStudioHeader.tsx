@@ -339,7 +339,7 @@ export default function CommandStudioHeader({
 
       {/* Notifications — wired to /api/notifications/count */}
       <Link
-        href="/notifications"
+        href="/dashboard"
         className="relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-secondary)" }}
         aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
