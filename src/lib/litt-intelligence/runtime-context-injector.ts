@@ -316,12 +316,12 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
     {
       id: "workspace.write",
       name: "Workspace Write",
-      description: "Writes files to the project workspace",
-      available: ctx.workspaceReady && ctx.writeAccess,
+      description: "Writes files to the project workspace (requires approval)",
+      available: ctx.workspaceReady && ctx.terminalConnected,
       unavailableReason: !ctx.workspaceReady
         ? `Workspace is ${ctx.workspaceStatus || "not ready"}`
-        : !ctx.writeAccess
-          ? "Write operations require approval"
+        : !ctx.terminalConnected
+          ? "Terminal is disconnected — file writes require a connected terminal"
           : undefined,
     },
     {
@@ -426,8 +426,8 @@ export function buildRuntimeContextBlock(ctx: RuntimeContextSnapshot): string {
     `  URL: ${ctx.deploymentUrl || "none"}`,
     "",
     "Approval:",
-    `  Write access: ${ctx.writeAccess ? "permitted" : "not permitted"}`,
-    `  Approval required: ${ctx.approvalRequired ? "yes" : "no"}`,
+    `  Write surface available: ${ctx.writeAccess ? "yes" : "no"}`,
+    `  Approval required: yes (policy — writes always require explicit user approval)`,
     "",
     "Model:",
     `  Selected: ${ctx.selectedModelLabel || "auto"}`,
@@ -481,19 +481,15 @@ export function generateProjectStatusAnswer(ctx: RuntimeContextSnapshot): string
     parts.push(`The workspace is ${ctx.workspaceStatus || "not ready"}.`);
   }
 
-  // Terminal
+  // Terminal — separate from workspace and approval
   if (ctx.terminalConnected) {
     parts.push("The terminal is connected and ready for commands.");
   } else {
-    parts.push("The terminal is currently disconnected.");
+    parts.push("The terminal is currently disconnected. Commands, builds, and terminal-based changes are unavailable.");
   }
 
-  // Approval
-  if (ctx.approvalRequired || !ctx.writeAccess) {
-    parts.push("Write actions require approval.");
-  } else {
-    parts.push("Write access is permitted.");
-  }
+  // Approval — reported as a policy, NOT derived from terminal or workspace failure
+  parts.push("Write operations require your approval.");
 
   // Deployment
   if (ctx.deploymentStatus) {
@@ -535,10 +531,10 @@ export function explainUnavailableTool(toolId: string, ctx: RuntimeContextSnapsh
       if (!ctx.workspaceReady) {
         return `The workspace is ${ctx.workspaceStatus || "not ready"}. Wait for workspace provisioning to complete.`;
       }
-      if (!ctx.writeAccess) {
-        return "Write operations require approval. Request approval for the specific file change.";
+      if (!ctx.terminalConnected) {
+        return "The terminal is disconnected. File writes require a connected terminal. Connect the terminal first.";
       }
-      return "Workspace write is available.";
+      return "Workspace write is available, but requires user approval before executing.";
 
     case "deployment.status":
       return "No deployment information is available. Deploy from the Deployments page.";

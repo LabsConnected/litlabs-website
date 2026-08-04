@@ -82,7 +82,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
 
       // Merge server workspace state with client terminal state
       setState((prev) => {
-        const workspaceReady = serverState.phase === "ready";
+        const workspaceReady = serverState.workspaceProvisioned && serverState.workspaceStatus === "ready";
         const terminalConnected =
           terminalStatus === "connected" && Boolean(terminalSessionId);
 
@@ -93,6 +93,13 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
           phase = "ready";
         }
 
+        // Separated concepts:
+        // - executionAvailable = workspace + terminal (can run commands)
+        // - writeSurfaceAvailable = workspace provisioned (files can be written via API)
+        //   OR terminal connected (files can be written via PTY)
+        // - writeApprovalRequired = always true (safety policy, not connection state)
+        const writeSurfaceAvailable = workspaceReady || terminalConnected;
+
         return {
           ...serverState,
           phase,
@@ -100,7 +107,9 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
           terminalSessionId: terminalSessionId ?? serverState.terminalSessionId,
           executionAvailable: workspaceReady && terminalConnected,
           readAccess: workspaceReady, // reads work even if terminal is down (via API)
-          writeAccess: workspaceReady && terminalConnected,
+          writeSurfaceAvailable,
+          writeAccess: writeSurfaceAvailable, // legacy alias
+          writeApprovalRequired: true, // policy — not derived from connection
           lastCheckedAt: new Date().toISOString(),
         };
       });
@@ -146,13 +155,17 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
         phase = "ready";
       }
 
+      const writeSurfaceAvailable = workspaceReady || terminalConnected;
+
       return {
         ...prev,
         phase,
         terminalConnected,
         terminalSessionId: terminalSessionId ?? prev.terminalSessionId,
         executionAvailable: workspaceReady && terminalConnected,
-        writeAccess: workspaceReady && terminalConnected,
+        writeSurfaceAvailable,
+        writeAccess: writeSurfaceAvailable, // legacy alias
+        writeApprovalRequired: true, // policy — not derived from connection
       };
     });
   }, [terminalStatus, terminalSessionId]);

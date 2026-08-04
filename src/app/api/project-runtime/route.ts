@@ -107,6 +107,7 @@ export async function GET(request: NextRequest) {
     executionAvailable: phase === "ready", // hook will refine with terminal state
     workspaceProvisioned: Boolean(workspaceId),
     terminalConnected: false, // client-side hook sets this
+    terminalServerReachable: false, // client-side hook sets this
     projectId: project.id,
     projectName: project.name,
     repository,
@@ -119,9 +120,17 @@ export async function GET(request: NextRequest) {
     previewState: "idle",
     logsState: "idle",
     deploymentState: project.previewUrl ? "preview" : "none",
+    // Separated: reads work when workspace is ready (via API, no terminal needed)
     readAccess: phase === "ready",
-    writeAccess: phase === "ready",
+    // writeSurfaceAvailable = workspace provisioned (files writable via API)
+    // The hook will also set this true if terminal connects (PTY writes)
+    writeSurfaceAvailable: phase === "ready",
+    writeAccess: phase === "ready", // legacy alias
+    // Policy: writes always require approval. NOT derived from connection state.
     writeApprovalRequired: true,
+    // Voice — client-side hook refines these
+    voiceConfigured: false,
+    voiceSessionConnected: false,
     lastCheckedAt: new Date().toISOString(),
     error,
   };
@@ -137,6 +146,7 @@ function makeState(phase: RuntimePhase, error?: ProjectRuntimeError): Omit<Proje
     executionAvailable: false,
     workspaceProvisioned: false,
     terminalConnected: false,
+    terminalServerReachable: false,
     projectId: null,
     projectName: null,
     repository: null,
@@ -150,8 +160,11 @@ function makeState(phase: RuntimePhase, error?: ProjectRuntimeError): Omit<Proje
     logsState: "idle",
     deploymentState: "none",
     readAccess: false,
+    writeSurfaceAvailable: false,
     writeAccess: false,
     writeApprovalRequired: true,
+    voiceConfigured: false,
+    voiceSessionConnected: false,
     error,
   };
 }
