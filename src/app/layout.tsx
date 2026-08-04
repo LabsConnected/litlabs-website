@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { VisualProvider } from "@/context/VisualContext";
+import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import LayoutShell from "@/components/LayoutShell";
 import {
   DEFAULT_DESCRIPTION,
@@ -108,7 +109,9 @@ export default function RootLayout({
       <ProfileProvider>
         <WalletProvider>
           <VisualProvider>
-            <LayoutShell>{children}</LayoutShell>
+            <YouTubePlayerProvider>
+              <LayoutShell>{children}</LayoutShell>
+            </YouTubePlayerProvider>
           </VisualProvider>
         </WalletProvider>
       </ProfileProvider>
