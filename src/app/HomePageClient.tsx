@@ -7,7 +7,6 @@ import { useEffect } from "react";
 import { ArrowRight, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
-import { NavAuth } from "@/components/ClerkAuth";
 import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { RealCreations } from "@/components/landing/RealCreations";
@@ -39,7 +38,12 @@ function Header() {
         </nav>
         <div className="flex items-center gap-2">
           {isLoaded && isSignedIn ? (
-            <NavAuth linkColor="#a8ff2f" />
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
+            >
+              Dashboard <ArrowRight size={14} />
+            </Link>
           ) : (
             <>
               <Link
