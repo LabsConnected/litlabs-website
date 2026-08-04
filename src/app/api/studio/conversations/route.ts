@@ -78,5 +78,5 @@ async function postHandler(req: NextRequest) {
   return NextResponse.json({ conversation, projectId }, { status: 201 });
 }
 
-export const GET = withRateLimit(getHandler, 100, 60);
-export const POST = withRateLimit(postHandler, 30, 60);
+export const GET = withRateLimit(getHandler, 200, 60);
+export const POST = withRateLimit(postHandler, 60, 60);

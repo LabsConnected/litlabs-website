@@ -553,5 +553,5 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
   return NextResponse.json({ messages, revision: conversation.revision });
 }
 
-export const POST = withRateLimit(postHandler, 60, 60);
-export const GET = withRateLimit(getHandler, 200, 60);
+export const POST = withRateLimit(postHandler, 120, 60);
+export const GET = withRateLimit(getHandler, 300, 60);
