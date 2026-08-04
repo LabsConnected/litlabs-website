@@ -858,8 +858,7 @@ export default function CanvasTool() {
                     onClick={() => {
                       const win = window.open("", "_blank");
                       if (win) {
-                        win.document.write(getPreviewHtml());
-                        win.document.close();
+                        win.document.body.innerHTML = getPreviewHtml();
                       }
                     }}
                     title="Open in new tab"

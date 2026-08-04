@@ -77,7 +77,7 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  productionBrowserSourceMaps: false,
+  productionBrowserSourceMaps: true,
   compress: true,
   poweredByHeader: false,
 
