@@ -69,6 +69,10 @@ describe("conversation-service", () => {
         repositoryOwner: null,
         repositoryName: null,
         repositoryDefaultBranch: null,
+        activeBranch: null,
+        framework: null,
+        scanStatus: "idle",
+        scanSummary: null,
         capabilities: {
           repositoryConnected: false,
           repositoryName: null,
