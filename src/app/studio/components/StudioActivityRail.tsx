@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   ChevronDown,
@@ -117,7 +117,7 @@ export default function StudioActivityRail({
   const [autoCollapseOlder, setAutoCollapseOlder] = useState(false);
   const [pinFailures, setPinFailures] = useState(true);
   const [clearedNotice, setClearedNotice] = useState(false);
-  const sessionStartRef = useRef<number>(Date.now());
+  const [sessionStart] = useState<number>(() => Date.now());
 
   // Derive activity events from conversation messages.
   // The full `messages` array is the persistent system log and is never
@@ -170,7 +170,7 @@ export default function StudioActivityRail({
       if (tlFilter === "errors" && ev.status !== "error" && ev.category !== "error") return false;
       if (tlFilter === "voice" && ev.category !== "voice") return false;
       if (tlFilter === "missions" && ev.category !== "mission") return false;
-      if (tlScope === "session" && ev.timestamp < sessionStartRef.current) return false;
+      if (tlScope === "session" && ev.timestamp < sessionStart) return false;
       if (hideSystemNoise && ev.source === "system") return false;
       if (onlyUnread && readIds.has(ev.id)) return false;
       if (hideCompleted24h && ev.status === "success" && now - ev.timestamp > DAY_MS) return false;
@@ -187,7 +187,7 @@ export default function StudioActivityRail({
       list = [...pinned, ...rest];
     }
     return list;
-  }, [events, clearedAt, archivedIds, tlFilter, tlScope, hideSystemNoise, onlyUnread, readIds, hideCompleted24h, pinFailures, tlSearch]);
+  }, [events, clearedAt, archivedIds, tlFilter, tlScope, sessionStart, hideSystemNoise, onlyUnread, readIds, hideCompleted24h, pinFailures, tlSearch]);
 
   const clearView = () => {
     setClearedAt(Date.now());
@@ -570,11 +570,13 @@ function Section({
   title,
   open,
   onToggle,
+  extra,
   children,
 }: {
   title: string;
   open: boolean;
   onToggle: () => void;
+  extra?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -594,11 +596,14 @@ function Section({
         <span className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: "var(--text-secondary)" }}>
           {title}
         </span>
-        {open ? (
-          <ChevronDown size={12} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
-        ) : (
-          <ChevronRight size={12} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
-        )}
+        <span className="flex items-center gap-1.5">
+          {extra}
+          {open ? (
+            <ChevronDown size={12} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
+          ) : (
+            <ChevronRight size={12} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
+          )}
+        </span>
       </button>
       {open && (
         <div
@@ -613,7 +618,17 @@ function Section({
 }
 
 /* ── Timeline Entry ─────────────────────────────────────────────── */
-function TimelineEntry({ event }: { event: ActivityEvent }) {
+function TimelineEntry({
+  event,
+  collapsed,
+  unread,
+  onRead,
+}: {
+  event: ActivityEvent;
+  collapsed?: boolean;
+  unread?: boolean;
+  onRead?: () => void;
+}) {
   const cfg = {
     success: { color: "var(--litt-primary)", icon: CheckCircle2 },
     pending: { color: "var(--spark-primary)", icon: Clock },
@@ -628,13 +643,25 @@ function TimelineEntry({ event }: { event: ActivityEvent }) {
   }, [event.timestamp]);
 
   return (
-    <div className="flex items-start gap-2">
-      <Icon
-        size={12}
-        strokeWidth={2}
-        style={{ color: cfg.color, marginTop: 1 }}
-        className={`pointer-events-none shrink-0 ${event.status === "pending" ? "animate-pulse" : ""}`}
-      />
+    <div
+      className="flex items-start gap-2 rounded-md px-1 py-0.5 transition hover:bg-white/5"
+      onMouseEnter={onRead}
+    >
+      <span className="relative mt-1 shrink-0">
+        <Icon
+          size={12}
+          strokeWidth={2}
+          style={{ color: cfg.color }}
+          className={`pointer-events-none ${event.status === "pending" ? "animate-pulse" : ""}`}
+        />
+        {unread && (
+          <span
+            className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: "var(--spark-primary)", boxShadow: "0 0 4px var(--spark-primary)" }}
+            aria-label="unread"
+          />
+        )}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
           <span className="text-[10px] font-bold truncate" style={{ color: "var(--text-primary)" }}>
@@ -644,13 +671,113 @@ function TimelineEntry({ event }: { event: ActivityEvent }) {
             {timeStr}
           </span>
         </div>
-        {event.detail && (
+        {event.detail && !collapsed && (
           <div className="text-[9px] leading-tight truncate" style={{ color: "var(--text-muted)" }}>
             {event.detail}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/* ── Toolbar button ─────────────────────────────────────────────── */
+function ToolBtn({
+  icon: Icon,
+  label,
+  title,
+  active,
+  onClick,
+}: {
+  icon: typeof Filter;
+  label?: string;
+  title: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      className="flex items-center gap-1 rounded-md border px-1.5 py-1 text-[9px] font-bold transition hover:bg-white/8"
+      style={{
+        borderColor: active ? "rgba(114,242,56,0.35)" : "var(--studio-border)",
+        backgroundColor: active ? "rgba(114,242,56,0.08)" : "transparent",
+        color: active ? "var(--litt-primary)" : "var(--text-secondary)",
+      }}
+    >
+      <Icon size={11} className="pointer-events-none" />
+      {label && <span>{label}</span>}
+    </button>
+  );
+}
+
+/* ── Filter chip ────────────────────────────────────────────────── */
+function Chip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="rounded-full border px-2 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+      style={{
+        borderColor: active ? "rgba(114,242,56,0.4)" : "var(--studio-border)",
+        backgroundColor: active ? "rgba(114,242,56,0.1)" : "transparent",
+        color: active ? "var(--litt-primary)" : "var(--text-muted)",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ── Toggle row ─────────────────────────────────────────────────── */
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-2 text-[9px]" style={{ color: "var(--text-secondary)" }}>
+      <span>{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className="relative h-3.5 w-6 shrink-0 rounded-full transition"
+        style={{ backgroundColor: checked ? "var(--litt-primary)" : "var(--studio-border)" }}
+      >
+        <span
+          className="absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all"
+          style={{ left: checked ? "calc(100% - 12px)" : "2px" }}
+        />
+      </button>
+    </label>
+  );
+}
+
+/* ── Small X (inline SVG — avoids lucide version gaps) ──────────── */
+function XSmall() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
   );
 }
 

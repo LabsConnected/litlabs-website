@@ -13,7 +13,7 @@ import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { clearTerminalTokenCache, getTerminalToken } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
-import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check } from "lucide-react";
+import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import { copyToClipboard } from "@/lib/studio/message-copy";
 
@@ -375,6 +375,37 @@ export const TerminalPanel = forwardRef<
     }
   };
 
+  const downloadLog = () => {
+    const blob = new Blob([outputBufferRef.current], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.download = `litt-terminal-${stamp}.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const openFullLog = () => {
+    const content = outputBufferRef.current || "(terminal output is empty)";
+    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+    if (!w) return;
+    w.document.title = "LiTT Terminal — Full Log";
+    w.document.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>LiTT Terminal — Full Log</title>` +
+        `<style>body{margin:0;background:#0a0b10;color:#e6e6e6;font:12px/1.5 "JetBrains Mono",Consolas,monospace;}` +
+        `pre{white-space:pre-wrap;word-break:break-word;padding:16px;margin:0;}` +
+        `.bar{position:sticky;top:0;background:#11131c;border-bottom:1px solid #222;padding:8px 16px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;font-size:10px;color:#72f238;display:flex;justify-content:space-between;align-items:center;}` +
+        `button{background:#1d2030;color:#e6e6e6;border:1px solid #333;border-radius:6px;padding:4px 10px;font-size:10px;cursor:pointer;}</style></head>` +
+        `<body><div class="bar"><span>LiTT Terminal — Full Log (read-only snapshot)</span>` +
+        `<button onclick="document.execCommand('selectAll')">Select all</button></div>` +
+        `<pre>${content.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] as string))}</pre></body></html>`,
+    );
+    w.document.close();
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
@@ -436,6 +467,22 @@ export const TerminalPanel = forwardRef<
             {copiedAll ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
           </button>
           <button
+            onClick={downloadLog}
+            title="Download log"
+            className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            aria-label="Download terminal log"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+          <button
+            onClick={openFullLog}
+            title="Open full log"
+            className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            aria-label="Open full terminal log in a new window"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </button>
+          <button
             onClick={resetTerminal}
             title="Reset"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
@@ -447,6 +494,7 @@ export const TerminalPanel = forwardRef<
             onClick={clearTerminal}
             title="Clear"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            aria-label="Clear terminal"
           >
             <Trash2 className="h-4 w-4" />
           </button>
