@@ -157,7 +157,7 @@ function LandingPage() {
             {[
               {
                 title: "Build working products",
-                copy: "Sites, apps, dashboards, and tools—generated with real code, organized in your workspace, and deployed with one click.",
+                copy: "Sites, apps, dashboards, and tools—generated with real code, organized in your workspace, and deployed with one click. File management and checkpoints are in beta.",
                 accent: "#65f4ff",
                 steps: ["Describe the outcome", "LiTT creates a plan", "Files are generated", "Preview and approve", "Deploy when ready"],
               },
@@ -169,9 +169,9 @@ function LandingPage() {
               },
               {
                 title: "Preserve context and finish the work",
-                copy: "Project memory, version history, and human approvals keep the work moving forward—so projects get finished, not abandoned.",
+                copy: "Project memory, version history, and human approvals keep the work moving forward—so projects get finished, not abandoned. Checkpoints are in beta.",
                 accent: "#a8ff2f",
-                steps: ["Start a project", "Decisions are saved", "Checkpoints created", "Approve sensitive actions", "Roll back if needed"],
+                steps: ["Start a project", "Decisions are saved", "Checkpoints (beta)", "Approve sensitive actions", "Roll back if needed"],
               },
             ].map((cap) => (
               <div

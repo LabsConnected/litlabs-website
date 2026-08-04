@@ -5,7 +5,7 @@ const PRODUCT_FACTS = [
   "Approval required for sensitive actions",
   "You retain ownership of your files, code, and assets",
   "Project memory across sessions",
-  "Project file and checkpoint foundations are being finalized",
+  "Project files and checkpoints are in beta",
   "No credit card required to start",
 ];
 

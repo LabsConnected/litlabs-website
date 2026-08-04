@@ -1,0 +1,26 @@
+fix: remove /studio/games route + correct homepage capability claims
+
+## Remove /studio/games
+- Delete src/app/studio/games/ directory (page, solitaire, sudoku, wordsearch, game-shell, game-cloud)
+- Remove "Native Arcade" link from /games page that pointed to /studio/games
+- Games are exclusively under /games, not inside Studio
+- Build pages: 196 -> 192
+
+## Fix homepage capability claims conflict
+- TrustSection: "Project file and checkpoint foundations are being finalized"
+  -> "Project files and checkpoints are in beta"
+- HomePageClient: Add "File management and checkpoints are in beta" to Build card
+- HomePageClient: Add "Checkpoints are in beta" to Preserve card
+- HomePageClient: Change "Checkpoints created" step to "Checkpoints (beta)"
+- Removes the contradiction between claiming files/deploy/checkpoints work
+  and saying they're being finalized
+
+## Quality gate on merged main
+- Typecheck: PASS
+- Lint: 0 errors, 51 warnings
+- Tests: 1236 passed
+- Build: 192 pages, compiled successfully
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

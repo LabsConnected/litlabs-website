@@ -185,9 +185,6 @@ export default function GamesPage() {
               <Link href="/games/dos" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> DOS Classics
               </Link>
-              <Link href="/studio/games" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
-                <Play size={16} fill="currentColor" /> Native Arcade
-              </Link>
               <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> Quick Play
               </Link>
