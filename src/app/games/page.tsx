@@ -26,6 +26,7 @@ import {
 } from "@/lib/games";
 import { listRetroGames, type RetroGameRecord } from "@/lib/retro-arcade";
 import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
+import { RetroArcadeEmbedded } from "@/components/games/RetroArcadeEmbedded";
 
 export default function GamesPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -207,9 +208,12 @@ export default function GamesPage() {
           </section>
         )}
 
-        {/* === LiTT RETRO ARCADE HERO === */}
+        {/* === LiTT RETRO ARCADE — EMBEDDED STANDARD === */}
         <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
           <RetroArcadeHero variant="banner" />
+          <div className="mt-6">
+            <RetroArcadeEmbedded />
+          </div>
         </section>
 
         {/* === PLAY-IN-LITT PROMISE === */}
