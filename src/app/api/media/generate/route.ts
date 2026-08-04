@@ -10,6 +10,7 @@ import {
   getProvider,
 } from "@/lib/media";
 import { uploadBinaryAsset } from "@/lib/r2";
+import { supabaseAdmin } from "@/lib/supabase";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -112,50 +113,74 @@ function resolveGeminiAspect(
 }
 
 /**
- * Upload a generated image to R2 for durable storage.
+ * Upload a generated image to durable storage.
+ * Tries R2 first, then Supabase Storage as a fallback.
  * Handles both base64 data URLs and remote URLs.
- * Returns the R2 public URL, or the original URL if R2 is not configured.
+ * Returns a durable public URL, or the original URL if all storage fails.
  */
-async function persistToR2(
+async function persistImage(
   userId: string,
   downloadUrl: string,
   providerId: MediaProviderId,
   prompt: string,
 ): Promise<string> {
-  // If R2 is not configured, return the original URL
-  if (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID) {
-    return downloadUrl;
-  }
+  // Parse the image into a buffer first
+  let buffer: Buffer;
+  let contentType: string;
 
-  try {
-    let buffer: Buffer;
-    let contentType: string;
-
-    if (downloadUrl.startsWith("data:image/")) {
-      // Parse base64 data URL
-      const match = downloadUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-      if (!match) return downloadUrl;
-      contentType = match[1];
-      buffer = Buffer.from(match[2], "base64");
-    } else {
-      // Fetch remote URL
+  if (downloadUrl.startsWith("data:image/")) {
+    const match = downloadUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (!match) return downloadUrl;
+    contentType = match[1];
+    buffer = Buffer.from(match[2], "base64");
+  } else {
+    try {
       const res = await fetch(downloadUrl, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) return downloadUrl;
       contentType = res.headers.get("content-type") || "image/png";
       if (!contentType.startsWith("image/")) contentType = "image/png";
       const arrayBuf = await res.arrayBuffer();
       buffer = Buffer.from(arrayBuf);
+    } catch {
+      return downloadUrl;
     }
-
-    const ext = contentType.split("/")[1]?.split("+")[0] || "png";
-    const safePrompt = prompt.slice(0, 40).replace(/[^a-zA-Z0-9]/g, "-");
-    const filename = `${providerId}-${safePrompt}.${ext}`;
-    const result = await uploadBinaryAsset(userId, filename, buffer, contentType, "image");
-    return result.publicUrl;
-  } catch {
-    // R2 upload failure is non-fatal — return the original URL
-    return downloadUrl;
   }
+
+  const ext = contentType.split("/")[1]?.split("+")[0] || "png";
+  const safePrompt = prompt.slice(0, 40).replace(/[^a-zA-Z0-9]/g, "-");
+  const filename = `${providerId}-${safePrompt}.${ext}`;
+
+  // Try R2 first
+  if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID) {
+    try {
+      const result = await uploadBinaryAsset(userId, filename, buffer, contentType, "image");
+      return result.publicUrl;
+    } catch {
+      // Fall through to Supabase Storage
+    }
+  }
+
+  // Fallback: Supabase Storage (bucket: studio-images)
+  if (supabaseAdmin) {
+    try {
+      const filePath = `${userId}/${Date.now()}_${filename}`;
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from("studio-images")
+        .upload(filePath, buffer, { contentType, upsert: false });
+
+      if (!uploadError) {
+        const { data: urlData } = supabaseAdmin.storage
+          .from("studio-images")
+          .getPublicUrl(filePath);
+        if (urlData?.publicUrl) return urlData.publicUrl;
+      }
+    } catch {
+      // Fall through to original URL
+    }
+  }
+
+  // Last resort: return the original URL (data URL or remote URL)
+  return downloadUrl;
 }
 
 // ── Provider implementations ─────────────────────────────────────
@@ -707,8 +732,10 @@ const AUTO_FREE_ORDER: MediaProviderId[] = ["cloudflare", "alibaba", "pollinatio
 /**
  * Auto-quality provider order: Gemini Lite → Gemini → FAL → Recraft
  * Recraft is preferred for vector/logo prompts.
+ * Pollinations is always appended as a last-resort fallback so users
+ * never get a hard 502 when all quality providers are down or unconfigured.
  */
-const AUTO_QUALITY_ORDER: MediaProviderId[] = ["gemini", "fal", "recraft"];
+const AUTO_QUALITY_ORDER: MediaProviderId[] = ["gemini", "fal", "recraft", "pollinations"];
 
 function isProviderConfigured(providerId: MediaProviderId): boolean {
   switch (providerId) {
@@ -1016,7 +1043,12 @@ async function handler(req: NextRequest) {
   }
 
   if (!result || lastError) {
-    const errorMsg = lastError?.message || "Generation failed";
+    const rawMsg = lastError?.message || "Generation failed";
+    // Detect quota exhaustion and give a actionable message
+    const isQuota = rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota");
+    const errorMsg = isQuota
+      ? `${usedProviderId} quota exceeded. Try "Auto Best (Free)" mode which uses Pollinations — no API key needed.`
+      : rawMsg;
     const duration = Date.now() - startTime;
     // Log the failure (no secrets — only provider, requestId, status, duration)
     console.info(`[media/generate] FAIL provider=${usedProviderId} requestId=${requestId} status=502 duration=${duration}ms`);
@@ -1025,9 +1057,9 @@ async function handler(req: NextRequest) {
         success: false,
         requestId,
         providerId: usedProviderId,
-        code: "PROVIDER_ERROR",
+        code: isQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
         error: errorMsg,
-        retryable: true,
+        retryable: !isQuota,
       } satisfies GenerationErrorResponse,
       {
         status: 502,
@@ -1039,10 +1071,13 @@ async function handler(req: NextRequest) {
     );
   }
 
-  // ── Persist to R2 (for providers that return temporary URLs) ───
+  // ── Persist to R2 (for providers that return temporary or data URLs) ───
+  // Gemini returns a data:image/png;base64,... URL which can be several MB.
+  // Storing it in R2 converts it to a durable, cacheable public URL that
+  // won't break localStorage or hit browser data URL size limits.
   let durableUrl = result.downloadUrl;
-  if (usedProviderId === "alibaba" || usedProviderId === "fal" || usedProviderId === "openai" || usedProviderId === "recraft") {
-    durableUrl = await persistToR2(userId, result.downloadUrl, usedProviderId, prompt);
+  if (usedProviderId === "gemini" || usedProviderId === "alibaba" || usedProviderId === "fal" || usedProviderId === "openai" || usedProviderId === "recraft") {
+    durableUrl = await persistImage(userId, result.downloadUrl, usedProviderId, prompt);
   }
 
   // ── Deduct cost (only after successful generation) ─────────────
