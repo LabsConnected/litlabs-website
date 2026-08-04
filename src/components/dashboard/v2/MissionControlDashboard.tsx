@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { Icon } from "./dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
@@ -132,28 +133,39 @@ function MetricCard({
   detail,
   icon,
   highlight = false,
+  statusColor,
 }: {
   label: string;
   value: string | number;
   detail?: string;
   icon: string;
   highlight?: boolean;
+  statusColor?: string;
 }) {
   const isEmpty = value === "No project" || value === "Unavailable" || value === "None" || value === 0 && label !== "Active Missions" && label !== "Needs Attention";
+  const dotColor = statusColor ?? (isEmpty ? D.textDim : highlight ? D.accentGreen : D.accent);
   return (
     <div
-      className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-0.5"
+      className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.02]"
       style={{
         background: highlight ? `${D.accent}08` : D.surface,
         borderColor: highlight ? `${D.accent}30` : D.border,
         boxShadow: highlight ? D.glow : "none",
+        backdropFilter: "blur(12px)",
       }}
     >
       <div className="flex items-center justify-between">
         <span
-          className="text-[10px] font-black uppercase tracking-[.18em]"
+          className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[.18em]"
           style={{ color: isEmpty ? D.textDim : D.textMuted }}
         >
+          <span
+            className="h-2 w-2 rounded-full transition-all group-hover:scale-125"
+            style={{
+              backgroundColor: dotColor,
+              boxShadow: `0 0 6px ${dotColor}80`,
+            }}
+          />
           {label}
         </span>
         <Icon
@@ -180,15 +192,26 @@ function MetricCard({
 
 function RuntimeBadge({ label, state }: { label: string; state: string }) {
   const good = ["ready", "connected", "running", "production", "live"].includes(state);
-  const bad = ["failed", "missing", "disconnected"].includes(state);
-  const color = good ? D.accentGreen : bad ? D.accentRed : D.accentAmber;
+  const sleeping = ["disconnected", "not_connected", "missing"].includes(state);
+  const bad = ["failed"].includes(state);
+  const color = good ? D.accentGreen : bad ? D.accentRed : sleeping ? D.accentAmber : D.accentAmber;
+
+  // Friendlier labels for sleeping/disconnected states
+  const friendlyLabel = sleeping ? `${label} sleeping` : `${label}: ${stateLabel(state)}`;
+
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold capitalize"
       style={{ borderColor: `${color}40`, background: `${color}15`, color }}
     >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      {label}: {stateLabel(state)}
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{
+          background: color,
+          animation: sleeping ? "pulse 2s ease-in-out infinite" : undefined,
+        }}
+      />
+      {friendlyLabel}
     </span>
   );
 }
@@ -369,6 +392,8 @@ export function MissionControlDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useUser();
+  const displayName = user?.firstName || user?.username || "there";
 
   // Widget system
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -526,11 +551,10 @@ export function MissionControlDashboard() {
               className="mt-3 text-2xl font-black tracking-[-.04em] sm:text-3xl"
               style={{ color: D.textPrimary }}
             >
-              Run the platform. Finish the mission.
+              Welcome back, {displayName}.
             </h1>
             <p className="mt-1 max-w-3xl text-sm" style={{ color: D.textMuted }}>
-              One operational view for project runtime, LiTT missions, system
-              health, activity, growth, and deployment.
+              LiTT has your workspace online and is ready for your next mission.
             </p>
           </div>
 
@@ -622,6 +646,7 @@ export function MissionControlDashboard() {
             detail="Currently running or waiting"
             icon="zap"
             highlight={activeMissions.length > 0}
+            statusColor={activeMissions.length > 0 ? D.accentGreen : D.textDim}
           />
           <MetricCard
             label="Needs Attention"
@@ -629,6 +654,7 @@ export function MissionControlDashboard() {
             detail="Approvals, failures, or degraded services"
             icon="alert"
             highlight={urgentCount > 0}
+            statusColor={urgentCount > 0 ? D.accentRed : D.accentGreen}
           />
           <MetricCard
             label="LiTTBits"
@@ -636,24 +662,28 @@ export function MissionControlDashboard() {
             detail={data?.billing.plan ?? "Free"}
             icon="wallet"
             highlight={(data?.billing.balance ?? 0) > 0}
+            statusColor={(data?.billing.balance ?? 0) > 0 ? D.accent : D.textDim}
           />
           <MetricCard
             label="Workspace"
             value={data?.project?.workspaceState ?? "No project"}
             detail={data?.project?.repository ?? "Connect a project"}
             icon="layers"
+            statusColor={data?.project?.workspaceState === "ready" ? D.accentGreen : data?.project ? D.accentAmber : D.textDim}
           />
           <MetricCard
             label="Terminal"
             value={data?.project?.terminalState ?? "Unavailable"}
             detail="Project execution runtime"
             icon="terminal"
+            statusColor={data?.project?.terminalState === "connected" ? D.accentGreen : data?.project?.terminalState === "disconnected" ? D.accentAmber : D.textDim}
           />
           <MetricCard
             label="Deployment"
             value={data?.project?.deploymentState ?? "None"}
             detail="Latest project environment"
             icon="rocket"
+            statusColor={data?.project?.deploymentState === "production" ? D.accentGreen : data?.project?.deploymentState ? D.accentAmber : D.textDim}
           />
         </section>
 
@@ -936,11 +966,14 @@ export function MissionControlDashboard() {
                   return (
                     <div
                       key={event.id}
-                      className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                      className="group flex items-start gap-3 py-3 transition-all first:pt-0 last:pb-0 hover:bg-white/[0.02] hover:px-2 hover:rounded-lg"
                     >
                       <span
-                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: color }}
+                        className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full transition-all group-hover:scale-125"
+                        style={{
+                          background: color,
+                          boxShadow: `0 0 8px ${color}60`,
+                        }}
                       />
                       <div className="min-w-0 flex-1">
                         <div

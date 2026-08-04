@@ -163,7 +163,7 @@ function SidebarContent({
         </div>
 
         <SectionLabel collapsed={collapsed}>Main navigation</SectionLabel>
-        <nav className="space-y-1">
+        <nav className="space-y-2">
           {NAV_GROUPS.map((group) => {
             const active = activeGroup(group);
             return (
@@ -172,7 +172,7 @@ function SidebarContent({
                 href={group.href}
                 onClick={onClose}
                 title={group.label}
-                className={`group relative flex h-10 items-center rounded-xl border transition-all ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
+                className={`group relative flex h-12 items-center rounded-xl border transition-all ${collapsed ? "mx-auto w-12 justify-center" : "gap-3 px-3.5"}`}
                 style={{
                   background: active ? `linear-gradient(90deg, ${group.accent}28, ${group.accent}08, transparent)` : "transparent",
                   borderColor: active ? `${group.accent}38` : "transparent",
@@ -180,10 +180,10 @@ function SidebarContent({
                   boxShadow: active ? `inset 2px 0 0 ${group.accent}` : "none",
                 }}
               >
-                <group.icon size={16} style={{ color: group.accent }} />
+                <group.icon size={18} style={{ color: group.accent }} />
                 {!collapsed && (
                   <>
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold">{group.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-bold">{group.label}</span>
                     {group.label === "Marketplace" && <span className="rounded-full border px-1.5 py-0.5 text-[7px] font-black" style={{ borderColor: `${group.accent}35`, color: group.accent }}>NEW</span>}
                     <ChevronRight size={12} className="opacity-25 transition-transform group-hover:translate-x-0.5 group-hover:opacity-70" />
                   </>
@@ -202,7 +202,7 @@ function SidebarContent({
 }
 
 function SectionLabel({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
-  return <div className={`mb-1.5 mt-4 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1"}`} style={{ color: "rgba(255,255,255,.32)" }}>{collapsed ? "•••" : children}</div>;
+  return <div className={`mb-2.5 mt-6 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1.5"}`} style={{ color: "rgba(255,255,255,.32)" }}>{collapsed ? "•••" : children}</div>;
 }
 
 function CreditsCard({ balance, plan, T }: { balance: number; plan: string; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
