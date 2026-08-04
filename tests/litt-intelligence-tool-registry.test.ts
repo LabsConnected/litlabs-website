@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { toolRegistry, registerInternalTools } from "@/lib/litt-intelligence/tool-registry";
 import { MCPAdapter } from "@/lib/litt-intelligence/mcp-adapter";
 import { OpenAPIAdapter } from "@/lib/litt-intelligence/openapi-adapter";
@@ -144,6 +144,7 @@ describe("LiTT Intelligence — Tool Registry", () => {
         requiredCapabilities: ["test_cap"],
         requiredPermissions: ["test:run"],
         risk: "low",
+        permissionLevel: "read",
         approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
         timeoutMs: 5000,
         idempotent: true,

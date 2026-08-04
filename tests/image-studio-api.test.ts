@@ -263,7 +263,7 @@ describe("Image Studio API — Gemini handler", () => {
 
     // Verify aspect ratio and image size were passed
     expect(capturedConfig).not.toBeNull();
-    const responseFormat = (capturedConfig as Record<string, unknown>).responseFormat as Array<Record<string, unknown>>;
+    const responseFormat = capturedConfig!.responseFormat as Array<Record<string, unknown>>;
     expect(responseFormat).toBeDefined();
     expect(responseFormat[0].image).toMatchObject({
       aspectRatio: "16:9",
