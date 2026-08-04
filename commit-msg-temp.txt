@@ -1,31 +1,31 @@
-fix: resolve IDE type errors in test files
+fix: make all settings sections visible with mode unlocking
 
-The IDE showed "Cannot find module '@/lib/...'" and "Parameter 't'
-implicitly has an 'any' type" errors in litt-grounding.test.ts and
-other test files. Root cause: tsconfig.json excluded test files, so
-the IDE's TypeScript server couldn't resolve the @/* path alias for
-files in tests/ and **/*.test.ts.
+The settings page had 4 control modes (Standard → Advanced → Pro →
+Owner) that gated which sections were visible. Users in Standard mode
+could only see 7 sections — the other 7 (Voice & Camera, Performance,
+Advanced, AI & Models, LiTT & Spark, Connections, Automation, System)
+were completely invisible with no indication they existed.
 
-Changes:
-1. tsconfig.json: removed "tests", "**/*.test.ts", "**/*.test.tsx",
-   "**/*.spec.ts", "**/*.spec.tsx" from exclude; added test file
-   patterns to include. Now the IDE resolves @/* in all test files.
-   Next.js build is unaffected — it only type-checks files reachable
-   from app entry points, not test files.
+Problems:
+1. Mobile: ModeSelector was not rendered at all — just a static text
+   label showing "Standard" with no way to change it
+2. Desktop: ModeSelector was a tiny button in the corner, easy to miss
+3. Both: Section lists only showed unlocked sections, so users had no
+   idea that Advanced/Pro/Owner sections existed
 
-2. Fixed real type errors that surfaced once test files were included:
-   - useConversationStore.test.ts: added missing `agentMode` field to
-     3 ConversationMessage fixtures and 2 ChatMessage fixtures
-   - project-resolver.test.ts: added missing `activeAgentMode` field
-     to makeCtx() factory
-   - image-studio-api.test.ts: fixed null-to-Record cast by using
-     non-null assertion after expect().not.toBeNull()
-   - litt-intelligence-tool-registry.test.ts: added missing `vi`
-     import from vitest, added missing `permissionLevel` field to
-     test tool definition
+Fix:
+- Mobile header: replaced static "Standard" text with the interactive
+  ModeSelector dropdown (same as desktop)
+- Mobile section list: now shows ALL 15 sections. Locked sections are
+  greyed out with a lock icon and a badge showing which mode unlocks
+  them (e.g. "PRO"). Tapping a locked section switches to that mode.
+- Desktop sidebar: same treatment — all sections visible, locked ones
+  greyed out with lock icon and mode badge, click to switch mode
+- Added a mode banner at the top of the mobile section list showing
+  the current mode with a quick switch button
+- When searching, only matching sections are shown (locked or not)
 
-Quality gate: tsc PASS, tsc --project tsconfig.test.json PASS,
-lint 0 errors/48 warnings, 1236 tests passed, 192 pages built
+Quality gate: typecheck PASS, lint 0 errors/48 warnings, 1236 tests, 192 pages
 
 Generated with [Devin](https://devin.ai)
 
