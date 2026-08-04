@@ -35,8 +35,10 @@ export interface ProjectRuntimeState {
   executionAvailable: boolean;
   /** True when workspace is provisioned and status is "ready" */
   workspaceProvisioned: boolean;
-  /** True when terminal WebSocket is connected */
+  /** True when terminal WebSocket is connected (client-side transport) */
   terminalConnected: boolean;
+  /** True when terminal server is reachable (server-side health check) */
+  terminalServerReachable: boolean;
 
   /** Project identity */
   projectId: string | null;
@@ -61,10 +63,24 @@ export interface ProjectRuntimeState {
   /** Deployment state — from project metadata */
   deploymentState: "none" | "preview" | "production" | "failed";
 
-  /** Access flags */
+  // ─── Separated access/permission fields ──────────────────────────
+  // These are INDEPENDENT concepts. Do not derive one from another.
+  // See the operational-connection model in AGENTS.md / design docs.
+
+  /** Reads work via API even if terminal is down */
   readAccess: boolean;
-  writeAccess: boolean;
+  /** A write surface exists (workspace provisioned OR terminal connected) */
+  writeSurfaceAvailable: boolean;
+  /** Policy: writes always require explicit user approval. NOT derived from connection state. */
   writeApprovalRequired: boolean;
+  /** Legacy alias — true when a write surface exists. Use writeSurfaceAvailable. */
+  writeAccess: boolean;
+
+  // ─── Voice (separate from execution) ─────────────────────────────
+  /** Inworld env vars are set (server-side check) */
+  voiceConfigured: boolean;
+  /** Live voice WebSocket session is active (client-side transport) */
+  voiceSessionConnected: boolean;
 
   /** Timestamp of last resolution */
   lastCheckedAt: string;
@@ -78,6 +94,7 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   executionAvailable: false,
   workspaceProvisioned: false,
   terminalConnected: false,
+  terminalServerReachable: false,
   projectId: null,
   projectName: null,
   repository: null,
@@ -91,8 +108,11 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   logsState: "idle",
   deploymentState: "none",
   readAccess: false,
+  writeSurfaceAvailable: false,
   writeAccess: false,
-  writeApprovalRequired: true,
+  writeApprovalRequired: true, // policy — always true
+  voiceConfigured: false,
+  voiceSessionConnected: false,
   lastCheckedAt: new Date(0).toISOString(),
 };
 

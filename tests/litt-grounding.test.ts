@@ -24,7 +24,7 @@ const CONNECTED_CTX: RuntimeContextSnapshot = {
   deploymentStatus: null,
   deploymentUrl: null,
   writeAccess: false,
-  approvalRequired: true,
+  approvalRequired: true, // policy — always true, not derived from connection
   selectedModelLabel: "Auto Best",
   selectedModelId: "auto",
   activeAgentMode: "standard",
@@ -38,7 +38,7 @@ const FULLY_CONNECTED_CTX: RuntimeContextSnapshot = {
   terminalStatus: "connected",
   terminalSessionId: "session-abc",
   writeAccess: true,
-  approvalRequired: false,
+  approvalRequired: true, // policy — always true even when fully connected
   deploymentStatus: "ready",
   deploymentUrl: "https://example.vercel.app",
 };
@@ -167,14 +167,15 @@ describe("Project Status Answer Generation", () => {
     expect(answer).toContain("main");
     expect(answer).toContain("workspace is available");
     expect(answer).toContain("terminal is currently disconnected");
-    expect(answer).toContain("Write actions require approval");
+    expect(answer).toContain("Write operations require your approval");
   });
 
   it("generates accurate status for fully connected project", () => {
     const answer = generateProjectStatusAnswer(FULLY_CONNECTED_CTX);
     expect(answer).toContain("LabsConnected/litlabs-website");
     expect(answer).toContain("terminal is connected");
-    expect(answer).toContain("Write access is permitted");
+    // Approval is always required — it's a policy, not a connection state
+    expect(answer).toContain("Write operations require your approval");
   });
 
   it("generates accurate status for disconnected project", () => {
@@ -212,6 +213,7 @@ describe("Runtime Context Block", () => {
   it("includes approval mode", () => {
     const block = buildRuntimeContextBlock(CONNECTED_CTX);
     expect(block).toContain("Approval required: yes");
+    expect(block).toContain("policy");
   });
 
   it("includes model label", () => {
@@ -256,11 +258,12 @@ describe("Tool Capability Manifest", () => {
     expect(repoTool?.unavailableReason).toBe("No repository connected");
   });
 
-  it("marks workspace.write as unavailable when write access requires approval", () => {
+  it("marks workspace.write as unavailable when terminal is disconnected", () => {
     const manifest = buildToolManifest(CONNECTED_CTX);
     const writeTool = manifest.tools.find((t) => t.id === "workspace.write");
     expect(writeTool?.available).toBe(false);
-    expect(writeTool?.unavailableReason).toContain("approval");
+    // workspace.write requires terminal connection, not just workspace readiness
+    expect(writeTool?.unavailableReason).toContain("Terminal is disconnected");
   });
 
   it("includes manifest block with available and unavailable tools", () => {
@@ -314,11 +317,12 @@ describe("Unavailable Tool Error Messages", () => {
     expect(msg).toContain("workspace provisioning");
   });
 
-  it("explains write approval required precisely", () => {
-    const ctx = { ...CONNECTED_CTX, workspaceReady: true, writeAccess: false };
+  it("explains write terminal disconnection precisely", () => {
+    // workspace.write now checks terminal connection, not approval
+    const ctx = { ...CONNECTED_CTX, workspaceReady: true, writeAccess: false, terminalConnected: false };
     const msg = explainUnavailableTool("workspace.write", ctx);
-    expect(msg).toContain("approval");
-    expect(msg).toContain("Request approval");
+    expect(msg).toContain("terminal is disconnected");
+    expect(msg).toContain("Connect the terminal");
   });
 
   it("never gives generic 'I don't have access' responses", () => {
@@ -366,10 +370,11 @@ describe("Agent Selection Rules", () => {
 
 describe("Expected Answer Format", () => {
   it("matches the expected answer for the current project-status question", () => {
-    // The user's expected answer:
+    // Updated expected answer with separated concepts:
     // "Your repository LabsConnected/litlabs-website is connected on main.
     //  The workspace is available and chat is working. The terminal is
-    //  currently disconnected, write actions require approval, and no
+    //  currently disconnected. Commands, builds, and terminal-based changes
+    //  are unavailable. Write operations require your approval. No
     //  deployment status is currently shown."
     const answer = generateProjectStatusAnswer(CONNECTED_CTX);
 
@@ -379,7 +384,7 @@ describe("Expected Answer Format", () => {
     expect(answer).toContain("workspace is available");
     expect(answer).toContain("chat is working");
     expect(answer).toContain("terminal is currently disconnected");
-    expect(answer).toContain("Write actions require approval");
+    expect(answer).toContain("Write operations require your approval");
     expect(answer).toContain("No deployment status");
   });
 });

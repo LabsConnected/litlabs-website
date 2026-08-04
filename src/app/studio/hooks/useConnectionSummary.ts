@@ -219,6 +219,8 @@ export function useConnectionSummary() {
       // Allow writes when the terminal is connected (local dev) even if
       // the server-side workspace hasn't been provisioned. The terminal
       // PTY can execute file writes, so it's a valid write surface.
+      // NOTE: writeAccess here means "a write surface exists", NOT "writes
+      // don't need approval". Approval is a separate policy, always required.
       if (next.terminalExecution === "available" && !next.writeAccess) {
         next.writeAccess = true;
       }
@@ -237,6 +239,8 @@ export function useConnectionSummary() {
         next.defaultBranch = runtimeState.branch ?? next.defaultBranch;
         next.sourceType = runtimeState.sourceType ?? next.sourceType;
         next.workspaceStatus = runtimeState.workspaceStatus ?? next.workspaceStatus;
+        // writeAccess = a write surface exists (workspace OR terminal).
+        // This does NOT mean approval is waived — approval is separate.
         next.writeAccess = runtimeState.writeAccess || next.writeAccess;
       }
 

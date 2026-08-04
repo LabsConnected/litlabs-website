@@ -310,8 +310,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     terminalSessionId: runtimeContext.terminalSessionId ?? null,
     deploymentStatus: null,
     deploymentUrl: null,
+    // Separated concepts: writeAccess = a write surface exists.
+    // approvalRequired = safety policy, always true. NOT !writeAccess.
     writeAccess: runtimeContext.writeAccess ?? false,
-    approvalRequired: !(runtimeContext.writeAccess ?? false),
+    approvalRequired: true, // policy — writes always require approval
     selectedModelLabel: runtimeContext.selectedModelLabel ?? null,
     selectedModelId: runtimeContext.selectedModelId ?? null,
     activeAgentMode: agentMode,

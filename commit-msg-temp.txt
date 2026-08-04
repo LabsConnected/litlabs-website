@@ -1,25 +1,36 @@
-fix: remove /studio/games route + correct homepage capability claims
+fix: separate workspace, terminal, writeAccess, and approvalRequired concepts
 
-## Remove /studio/games
-- Delete src/app/studio/games/ directory (page, solitaire, sudoku, wordsearch, game-shell, game-cloud)
-- Remove "Native Arcade" link from /games page that pointed to /studio/games
-- Games are exclusively under /games, not inside Studio
-- Build pages: 196 -> 192
+The runtime status logic was conflating four independent concepts:
+- workspace readiness (provisioned + mounted)
+- terminal connection (WebSocket transport)
+- write surface availability (can files be written)
+- approval requirement (safety policy)
 
-## Fix homepage capability claims conflict
-- TrustSection: "Project file and checkpoint foundations are being finalized"
-  -> "Project files and checkpoints are in beta"
-- HomePageClient: Add "File management and checkpoints are in beta" to Build card
-- HomePageClient: Add "Checkpoints are in beta" to Preserve card
-- HomePageClient: Change "Checkpoints created" step to "Checkpoints (beta)"
-- Removes the contradiction between claiming files/deploy/checkpoints work
-  and saying they're being finalized
+Previously: writeAccess = workspaceReady && terminalConnected, and
+approvalRequired = !writeAccess. This meant a disconnected terminal
+was reported as "approval required" — wrong on both counts.
 
-## Quality gate on merged main
-- Typecheck: PASS
-- Lint: 0 errors, 51 warnings
-- Tests: 1236 passed
-- Build: 192 pages, compiled successfully
+Now each field is independent:
+- executionAvailable = workspaceReady && terminalConnected (can run commands)
+- writeSurfaceAvailable = workspaceReady || terminalConnected (a write surface exists)
+- writeApprovalRequired = always true (policy — writes always need approval)
+- terminalConnected = client WebSocket state (reported separately)
+- voiceConfigured / voiceSessionConnected = separate from execution
+
+Changes:
+- runtime-state.ts: add terminalServerReachable, writeSurfaceAvailable,
+  voiceConfigured, voiceSessionConnected fields
+- useProjectRuntime.ts: stop deriving writeAccess from terminal connection
+- messages/route.ts: approvalRequired = true (policy), not !writeAccess
+- project-runtime/route.ts: correct server-side state derivation
+- runtime-context-injector.ts: update generateProjectStatusAnswer to
+  report terminal disconnection and approval as separate facts;
+  workspace.write tool now checks terminal connection, not approval
+- useConnectionSummary.ts: document that writeAccess means "a write
+  surface exists", not "approval is waived"
+- litt-grounding.test.ts: update 5 tests to match separated logic
+
+Quality gate: typecheck PASS, lint 0 errors, 1236 tests passed, 192 pages
 
 Generated with [Devin](https://devin.ai)
 
