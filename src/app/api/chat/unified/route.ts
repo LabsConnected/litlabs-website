@@ -5,8 +5,6 @@ import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
-import { getAgentDefinition } from "@/lib/agent-registry";
-import type { PlanId } from "@/config/plans";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

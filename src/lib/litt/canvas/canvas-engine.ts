@@ -11,7 +11,7 @@
  * @see src/lib/litt/types.ts for CanvasBlock
  */
 
-import type { CanvasBlock, ChatMessage, InputMode, BlockStatus, CanvasBlockType } from "../types";
+import type { CanvasBlock, ChatMessage, BlockStatus, CanvasBlockType } from "../types";
 import { getEventBus } from "../event-bus";
 import { generateId } from "../conversation-engine";
 

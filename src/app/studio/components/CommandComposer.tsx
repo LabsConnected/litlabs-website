@@ -111,7 +111,6 @@ export default function CommandComposer({
   // Universal attachment system
   const {
     attachments,
-    canAdd,
     addFiles,
     addLink,
     addRecording,
@@ -121,7 +120,6 @@ export default function CommandComposer({
     reorderAttachment,
     clearAll,
     getReadyUrls,
-    isProcessing,
   } = useStudioAttachments();
   const selectModel = useStudioModelStore((s) => s.selectModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
@@ -363,6 +361,7 @@ export default function CommandComposer({
         <div className="flex flex-wrap gap-1.5 px-1">
           {snapshots.map((src, i) => (
             <div key={i} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- data URL from camera snapshot */}
               <img
                 src={src}
                 alt={`Camera snapshot ${i + 1}`}

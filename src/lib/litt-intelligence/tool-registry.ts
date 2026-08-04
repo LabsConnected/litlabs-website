@@ -9,7 +9,7 @@
  * They can never bypass the permission and approval system.
  */
 
-import type { LiTTToolDefinition, ToolSource, ToolRisk, ApprovalPolicy } from "./types";
+import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
 
 // ─── Registry ───────────────────────────────────────────────────
 

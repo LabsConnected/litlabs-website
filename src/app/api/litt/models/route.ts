@@ -4,10 +4,6 @@ import {
   CHAT_MODELS,
   LITT_MODEL_ALIASES,
   LITT_MEDIA_ALIASES,
-  getChatModel,
-  resolveLittAlias,
-  isLittAlias,
-  type StudioModel,
 } from "@/lib/studio-models";
 
 /**

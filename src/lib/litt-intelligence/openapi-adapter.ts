@@ -113,8 +113,8 @@ export class OpenAPIAdapter {
 
     // Check for deprecated operations
     if (s.paths) {
-      for (const [path, methods] of Object.entries(s.paths)) {
-        for (const [method, op] of Object.entries(methods)) {
+      for (const [_path, methods] of Object.entries(s.paths)) {
+        for (const [_method, op] of Object.entries(methods)) {
           if (op?.deprecated) {
             // Warning, not error
           }

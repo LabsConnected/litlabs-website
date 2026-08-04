@@ -168,7 +168,7 @@ export async function capturePreviewWithChrome(input: BrowserCaptureInput): Prom
   }
 
   const port = await getFreePort();
-  const userDataDir = mkdtempSync(path.join(os.tmpdir(), "littree-chrome-"));
+  const userDataDir = mkdtempSync(path.join(/*turbopackIgnore: true*/ os.tmpdir(), "littree-chrome-"));
   const proc = spawn(browser, [
     "--headless=new",
     "--disable-gpu",

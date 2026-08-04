@@ -272,6 +272,26 @@ export async function insertMessage(
     .select()
     .single();
 
+  // Schema drift fallback: if the live DB is missing agent_mode (migration
+  // 20260805000000_litt_agent_identity.sql not yet applied), retry without it.
+  // This keeps chat working while the migration is pending.
+  if (error && error.code === "42703" && insertPayload.agent_mode !== undefined) {
+    const fallbackPayload = { ...insertPayload };
+    delete fallbackPayload.agent_mode;
+    const { data: fbData, error: fbError } = await supabaseAdmin
+      .from("studio_conversation_messages")
+      .insert(fallbackPayload)
+      .select()
+      .single();
+
+    if (fbError || !fbData) {
+      const errMsg = fbError?.message || error.message;
+      console.error("[conversation-service] insertMessage fallback failed:", errMsg);
+      return { message: null, duplicate: false, error: errMsg };
+    }
+    return { message: mapMessage(fbData as DbMessage), duplicate: false };
+  }
+
   if (error || !data) {
     const errMsg = error?.message || "Unknown error";
     console.error("[conversation-service] insertMessage failed:", errMsg);

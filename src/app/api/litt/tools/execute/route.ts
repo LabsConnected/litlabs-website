@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { toolRegistry } from "@/lib/litt-intelligence/tool-registry";
-import { requiresApproval, type ToolPermissionLevel } from "@/lib/litt-intelligence/types";
+import { requiresApproval } from "@/lib/litt-intelligence/types";
 
 /**
  * POST /api/litt/tools/execute

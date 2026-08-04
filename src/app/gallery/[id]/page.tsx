@@ -4,7 +4,7 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
-import { ArrowLeft, Heart, Share2, Download, Sparkles, MessageCircle, Copy, Check } from "lucide-react";
+import { ArrowLeft, Heart, Share2, Download, Sparkles, MessageCircle, Check } from "lucide-react";
 
 interface GalleryArtifact {
   id: string;

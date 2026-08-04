@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
   Image as ImageIcon,
@@ -8,7 +8,6 @@ import {
   Music,
   Camera,
   Mic,
-  Monitor,
   Link as LinkIcon,
   FolderOpen,
 } from "lucide-react";
@@ -101,6 +100,12 @@ export default function AttachmentMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
 
+  const handleClose = useCallback(() => {
+    setShowLinkInput(false);
+    setLinkInput("");
+    onClose();
+  }, [onClose]);
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
@@ -117,7 +122,7 @@ export default function AttachmentMenu({
       clearTimeout(timer);
       document.removeEventListener("mousedown", handler);
     };
-  }, [open]);
+  }, [open, handleClose]);
 
   // Focus link input when shown
   useEffect(() => {
@@ -129,12 +134,6 @@ export default function AttachmentMenu({
   if (!open) return null;
 
   const canAdd = attachmentCount < MAX_ATTACHMENTS;
-
-  function handleClose() {
-    setShowLinkInput(false);
-    setLinkInput("");
-    onClose();
-  }
 
   function handleAction(id: string) {
     if (!canAdd) return;

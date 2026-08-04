@@ -1,6 +1,12 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import type { AgentSlug, MemoryType } from "./types";
 
+// Schema drift cache: agent_mode column may not exist yet if migration
+// 20260805000000_litt_agent_identity.sql hasn't been applied. Once we detect
+// the column is missing, we skip mode-scoped filtering for the rest of the
+// process lifetime. Reset to false after applying the migration + redeploy.
+let agentModeColumnExists = true;
+
 interface MemoryRecord {
   id: string;
   owner_id: string;
@@ -112,9 +118,11 @@ export async function recallMemories(
     sharedFilter = sharedFilter.eq("agent_slug", options.agentSlug);
     conversationFilter = conversationFilter.eq("agent_slug", options.agentSlug);
   }
-  if (options.agentMode) {
+  if (options.agentMode && agentModeColumnExists) {
     // Further scope by agent_mode to prevent Spark creative context from
     // leaking into Standard mode and vice versa.
+    // If the column doesn't exist (schema drift), the query will fail with
+    // 42703 and the error handler below will set agentModeColumnExists = false.
     sharedFilter = sharedFilter.eq("agent_mode", options.agentMode);
     conversationFilter = conversationFilter.eq("agent_mode", options.agentMode);
   }
@@ -169,6 +177,7 @@ export async function recallMemories(
 
     const { data: sharedData, error: sharedError } = await sharedTextQuery;
     if (sharedError) {
+      if (sharedError.code === "42703") agentModeColumnExists = false;
       console.error("[memory:recall] Supabase shared text search error:", sharedError.message);
     }
 
@@ -180,6 +189,7 @@ export async function recallMemories(
 
     const { data: convData, error: convError } = await convTextQuery;
     if (convError) {
+      if (convError.code === "42703") agentModeColumnExists = false;
       console.error("[memory:recall] Supabase conversation text search error:", convError.message);
     }
 

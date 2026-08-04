@@ -466,7 +466,7 @@ ${TRUTH_RULES}`,
 /* ------------------------------------------------------------------ */
 /*  Nova — AI Business Partner (Creator Beta, marketplace)            */
 /* ------------------------------------------------------------------ */
-const NOVA: AgentDefinition = {
+const _NOVA: AgentDefinition = {
   id: "nova",
   slug: "nova",
   name: "Nova",
@@ -522,7 +522,7 @@ ${TRUTH_RULES}`,
 /* ------------------------------------------------------------------ */
 /*  Forge — AI Technical Partner (Pro Builder, marketplace)            */
 /* ------------------------------------------------------------------ */
-const FORGE: AgentDefinition = {
+const _FORGE: AgentDefinition = {
   id: "forge",
   slug: "forge",
   name: "Forge",
@@ -579,7 +579,7 @@ ${TRUTH_RULES}`,
 /* ------------------------------------------------------------------ */
 /*  Echo — AI Creative Partner (Creator Beta, marketplace)             */
 /* ------------------------------------------------------------------ */
-const ECHO: AgentDefinition = {
+const _ECHO: AgentDefinition = {
   id: "echo",
   slug: "echo",
   name: "Echo",

@@ -97,7 +97,7 @@ async function generateWithImages(
   return { text, provider: "gemini", model: modelName, latencyMs: Date.now() - t0 };
 }
 
-function buildPrompt(
+function _buildPrompt(
   agent: Agent,
   message: string,
   history: HistoryEntry[],
@@ -188,7 +188,7 @@ async function handler(req: NextRequest) {
       category,
       model: requestedModel,
       stream = false,
-      userName,
+      userName: _userName,
       images = [],
       capabilities = {},
       pageContext,

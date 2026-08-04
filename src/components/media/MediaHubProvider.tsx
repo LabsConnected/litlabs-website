@@ -186,6 +186,21 @@ export function MediaHubProvider({ children }: { children: ReactNode }) {
   // Persist on state change
   useEffect(() => { persist(); }, [persist]);
 
+  // ── Helper: get adapter by provider id ────────────────────────
+
+  const getAdapter = useCallback(
+    (provider: MediaProviderId): MediaAdapter | null => {
+      if (provider === "youtube") return youtubeRef.current;
+      if (provider === "spotify") return spotifyRef.current;
+      if (provider === "soundcloud") return soundcloudRef.current;
+      if (provider === "apple-music") return appleMusicRef.current;
+      if (provider === "direct") return directAudioRef.current;
+      if (provider === "litt") return littAssetRef.current;
+      return null;
+    },
+    [],
+  );
+
   // ── Subscribe to active adapter ───────────────────────────────
 
   useEffect(() => {
@@ -195,19 +210,7 @@ export function MediaHubProvider({ children }: { children: ReactNode }) {
       setPlayback(state);
     });
     return unsub;
-  }, [activeProvider]);
-
-  // ── Helper: get adapter by provider id ────────────────────────
-
-  function getAdapter(provider: MediaProviderId): MediaAdapter | null {
-    if (provider === "youtube") return youtubeRef.current;
-    if (provider === "spotify") return spotifyRef.current;
-    if (provider === "soundcloud") return soundcloudRef.current;
-    if (provider === "apple-music") return appleMusicRef.current;
-    if (provider === "direct") return directAudioRef.current;
-    if (provider === "litt") return littAssetRef.current;
-    return null;
-  }
+  }, [activeProvider, getAdapter]);
 
   // ── Adapter mounting ──────────────────────────────────────────
 

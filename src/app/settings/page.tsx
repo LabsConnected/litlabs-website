@@ -350,7 +350,7 @@ function ModeSelector({
   controlMode,
   onModeChange,
   isOwner,
-  T,
+  T: _T,
 }: {
   controlMode: ControlMode;
   onModeChange: (m: ControlMode) => void;
@@ -428,7 +428,7 @@ function MobileSectionList({
   onSectionClick,
   searchQuery,
   onSearchChange,
-  T,
+  T: _T,
 }: {
   sections: SettingsSection[];
   onSectionClick: (id: string) => void;
@@ -1823,7 +1823,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
 /* ── Connections ───────────────────────────────────────────────────── */
 
-function ConnectionsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function ConnectionsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { status, loading, error } = useIntegrationStatus();
 
   if (loading) {
@@ -1914,7 +1914,7 @@ function ConnectionsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
 /* ── Automation ────────────────────────────────────────────────────── */
 
-function AutomationSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function AutomationSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   return (
     <div className="space-y-4">
       <SettingsCard title="Workflow automation" description="Auto-run rules and triggers" icon={<Zap size={16} />}>
@@ -1939,7 +1939,7 @@ function AutomationSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
 
 /* ── Notifications ─────────────────────────────────────────────────── */
 
-function NotificationsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function NotificationsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   return (
     <div className="space-y-4">
       <SettingsCard title="Alerts" description="What you get notified about" icon={<Bell size={16} />}>
@@ -2246,7 +2246,7 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
 /* ── Advanced ──────────────────────────────────────────────────────── */
 
-function AdvancedSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   return (
     <div className="space-y-4">
       <SettingsCard title="Developer options" description="Advanced overrides" icon={<Terminal size={16} />}>
@@ -2302,7 +2302,7 @@ function AdvancedSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
 
 /* ── System Control (owner only) ───────────────────────────────────── */
 
-function SystemControlSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function SystemControlSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border p-4" style={{ borderColor: "#ef444430", backgroundColor: "#ef444408" }}>
@@ -2356,7 +2356,7 @@ function SystemControlSection({ T }: { T: ReturnType<typeof useTheme>["resolvedC
 
 /* ── Locked section ────────────────────────────────────────────────── */
 
-function LockedSection({ T, label }: { T: ReturnType<typeof useTheme>["resolvedColors"]; label: string }) {
+function LockedSection({ T: _T, label }: { T: ReturnType<typeof useTheme>["resolvedColors"]; label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <Lock size={32} className="text-white/20" />

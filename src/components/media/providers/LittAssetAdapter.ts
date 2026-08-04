@@ -11,7 +11,6 @@
 import type {
   MediaCapabilities,
   MediaItem,
-  MediaPlaybackState,
   MediaProviderId,
 } from "../media-types";
 import { DirectAudioAdapter } from "./DirectAudioAdapter";

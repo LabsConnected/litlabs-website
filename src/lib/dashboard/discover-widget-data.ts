@@ -16,7 +16,7 @@ export interface DiscoverFeedItem {
  * Resolve discover feed data for the dashboard widget.
  * Returns recent public posts.
  */
-export async function resolveDiscoverFeedWidget(userId: string): Promise<DiscoverFeedItem[]> {
+export async function resolveDiscoverFeedWidget(_userId: string): Promise<DiscoverFeedItem[]> {
   if (!isAdminSupabaseConfigured()) return [];
 
   try {

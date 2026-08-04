@@ -66,7 +66,7 @@ function buildChecklistBlock(items: string[]): { type: BlockType; content: Recor
   };
 }
 
-function buildTaskBlock(title: string, description: string): { type: BlockType; content: Record<string, unknown> } {
+function _buildTaskBlock(title: string, description: string): { type: BlockType; content: Record<string, unknown> } {
   return {
     type: "task",
     content: { title, description, status: "todo", taskId: null },
@@ -77,7 +77,7 @@ function buildCodeBlock(code: string, language: string, filename?: string): { ty
   return { type: "code", content: { language, code, filename } };
 }
 
-function buildDecisionBlock(title: string, rationale: string): { type: BlockType; content: Record<string, unknown> } {
+function _buildDecisionBlock(title: string, rationale: string): { type: BlockType; content: Record<string, unknown> } {
   return { type: "decision", content: { title, rationale } };
 }
 

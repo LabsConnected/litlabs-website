@@ -46,7 +46,7 @@ function CategoryIcon({ category, size = 16 }: { category: Attachment["category"
 // Status indicator
 // ---------------------------------------------------------------------------
 
-function StatusBadge({ status, progress, error }: { status: Attachment["status"]; progress: number | null; error: string | null }) {
+function StatusBadge({ status, progress, error: _error }: { status: Attachment["status"]; progress: number | null; error: string | null }) {
   switch (status) {
     case "uploading":
       return (
@@ -110,6 +110,7 @@ function AttachmentCard({
       {/* Preview area */}
       <div className="relative flex h-14 w-full items-center justify-center overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
         {isImage ? (
+          /* eslint-disable-next-line @next/next/no-img-element -- blob/object URLs from user uploads */
           <img src={previewUrl ?? ""} alt={name} className="h-full w-full object-cover" />
         ) : isVideo ? (
           <video src={previewUrl ?? ""} className="h-full w-full object-cover" muted />

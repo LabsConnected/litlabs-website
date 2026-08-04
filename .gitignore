@@ -59,6 +59,7 @@ next-env.d.ts
 tsc_errors.txt
 tsc_*.txt
 tsc-out.txt
+tsc-output.txt
 
 # Build artifacts
 /build

@@ -17,7 +17,7 @@
  * - Tool status events never become assistant dialogue.
  */
 
-import type { ChatMessage, LiTTEvent, InputMode, MessageError } from "./types";
+import type { ChatMessage, InputMode, MessageError } from "./types";
 import { getEventBus } from "./event-bus";
 
 export function generateId(prefix = "msg"): string {

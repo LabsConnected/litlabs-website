@@ -248,7 +248,7 @@ export class LiTTRealtimeSessionController {
       if (wantScreen) {
         await this.acquireScreen();
       }
-    } catch (err) {
+    } catch (_err) {
       // Error already emitted by acquire methods
       return;
     }
@@ -354,7 +354,7 @@ export class LiTTRealtimeSessionController {
         this.screenStream = null;
         this.updateIndicators({ screen: "inactive" });
       });
-    } catch (err) {
+    } catch (_err) {
       // Screen share is optional — don't fail the session
       this.updateIndicators({ screen: "inactive" });
     }

@@ -24,7 +24,6 @@ import {
   getDailyForecast,
   describeWeatherCode,
   type WeatherResult,
-  type GeoLocation,
 } from "./weather-provider";
 
 export type WeatherToolResponse =

@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
-import { listCheckpoints, createCheckpoint, getCheckpoint } from "@/lib/missions/mission-repository";
-import { createTerminalToken } from "@/lib/terminal-auth";
-
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "http://localhost:4001";
+import { listCheckpoints, createCheckpoint } from "@/lib/missions/mission-repository";
 
 /**
  * GET /api/studio-projects/[projectId]/checkpoints

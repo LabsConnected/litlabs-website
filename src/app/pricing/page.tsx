@@ -265,8 +265,6 @@ export default function PricingPage() {
     [isSignedIn],
   );
 
-  const founder = PLANS.founder;
-
   return (
     <main className={styles.page}>
       <div className={styles.wallpaper} aria-hidden="true">

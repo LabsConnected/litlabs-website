@@ -129,34 +129,7 @@ export default function StudioHealthPanel({
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (refreshKey > 0) void load(); }, [load, refreshKey]);
 
-  // External trigger: when runTrigger increments, run all checks automatically
-  const lastRunTrigger = useRef(0);
-  useEffect(() => {
-    if (runTrigger > 0 && runTrigger !== lastRunTrigger.current && mode === "checks" && projectId) {
-      lastRunTrigger.current = runTrigger;
-      void runAllChecks();
-    }
-  }, [runTrigger, mode, projectId]);
-
-  const runCheck = async (id: CheckId) => {
-    if (!projectId || !RUNNABLE_CHECKS.has(id)) return;
-    setRunning(id);
-    setError(null);
-    setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? { ...check, status: "running" } : check) }));
-    try {
-      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/checks`, { method: "POST", credentials: "include", headers: await authHeaders(true), body: JSON.stringify({ check: id }) });
-      const data = await response.json().catch(() => null) as { check?: HealthCheck; error?: string } | null;
-      if (!data?.check || !isCheck(data.check)) throw new Error(data?.error ?? `Malformed ${id} check response`);
-      setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? data.check! : check) }));
-    } catch (runError) {
-      setError(runError instanceof Error ? runError.message : `Failed to run ${id}`);
-      setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? { ...check, status: "failed", timestamp: new Date().toISOString(), error: runError instanceof Error ? runError.message : `Failed to run ${id}` } : check) }));
-    } finally {
-      setRunning(null);
-    }
-  };
-
-  const runAllChecks = async () => {
+  const runAllChecks = useCallback(async () => {
     if (!projectId) return;
     setRunningAll(true);
     setError(null);
@@ -187,6 +160,33 @@ export default function StudioHealthPanel({
       setError(runError instanceof Error ? runError.message : "Failed to run all checks");
     } finally {
       setRunningAll(false);
+    }
+  }, [projectId, authHeaders]);
+
+  // External trigger: when runTrigger increments, run all checks automatically
+  const lastRunTrigger = useRef(0);
+  useEffect(() => {
+    if (runTrigger > 0 && runTrigger !== lastRunTrigger.current && mode === "checks" && projectId) {
+      lastRunTrigger.current = runTrigger;
+      void runAllChecks();
+    }
+  }, [runTrigger, mode, projectId, runAllChecks]);
+
+  const runCheck = async (id: CheckId) => {
+    if (!projectId || !RUNNABLE_CHECKS.has(id)) return;
+    setRunning(id);
+    setError(null);
+    setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? { ...check, status: "running" } : check) }));
+    try {
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/checks`, { method: "POST", credentials: "include", headers: await authHeaders(true), body: JSON.stringify({ check: id }) });
+      const data = await response.json().catch(() => null) as { check?: HealthCheck; error?: string } | null;
+      if (!data?.check || !isCheck(data.check)) throw new Error(data?.error ?? `Malformed ${id} check response`);
+      setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? data.check! : check) }));
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : `Failed to run ${id}`);
+      setPayload((current) => ({ ...current, checks: current.checks.map((check) => check.id === id ? { ...check, status: "failed", timestamp: new Date().toISOString(), error: runError instanceof Error ? runError.message : `Failed to run ${id}` } : check) }));
+    } finally {
+      setRunning(null);
     }
   };
 

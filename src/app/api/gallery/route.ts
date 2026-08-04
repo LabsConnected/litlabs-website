@@ -35,7 +35,7 @@ function getVideoThumbnailUrl(rawUrl: string): string | null {
 }
 
 // Demo gallery items when DB is not configured
-const DEMO_GALLERY = [
+const _DEMO_GALLERY = [
   {
     id: "demo_1",
     title: "Neon Cyber City",

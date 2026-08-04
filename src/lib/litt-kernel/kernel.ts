@@ -65,7 +65,7 @@ export function routeKernel(request: KernelRequest): KernelResult {
   const intent: IntentClassification = classifyIntent(request.message);
 
   // 2. Resolve context
-  const context = resolveContext({
+  const _context = resolveContext({
     userId: request.userId,
     conversationId: request.conversationId,
     projectId: request.projectId,

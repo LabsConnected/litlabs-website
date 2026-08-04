@@ -20,9 +20,7 @@ export function MediaNowPlayingCard() {
     toggle,
     next,
     previous,
-    showCollapsed,
     showExpanded,
-    dockMode,
     loadUrl,
   } = useMediaHub();
   const [input, setInput] = useState("");
@@ -77,6 +75,7 @@ export function MediaNowPlayingCard() {
         <>
           {/* Artwork */}
           {playback.item?.artworkUrl && (
+            /* eslint-disable-next-line @next/next/no-img-element -- remote artwork from media providers */
             <img
               src={playback.item.artworkUrl}
               alt=""

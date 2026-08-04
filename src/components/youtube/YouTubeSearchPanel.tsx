@@ -10,7 +10,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Search, Play, Plus, X, Loader2, Music, AlertCircle, Clock } from "lucide-react";
+import { Search, Play, Plus, X, Loader2, Music, AlertCircle } from "lucide-react";
 import { useYouTubePlayer } from "@/context/YouTubePlayerContext";
 
 interface SearchResult {

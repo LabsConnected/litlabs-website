@@ -24,7 +24,6 @@ import {
   YT_STATE,
   type YTPlayerState,
   type YTPlayerError,
-  type YTVideo,
   type YTQueueItem,
   type YTDockMode,
   type YTPersistedState,
