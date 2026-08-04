@@ -171,6 +171,9 @@ export default function GamesPage() {
               <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
                 <Gamepad2 size={16} /> Open Retro Arcade
               </Link>
+              <Link href="/games/dos" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
+                <Play size={16} fill="currentColor" /> DOS Classics
+              </Link>
               <Link href="#quick-play" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10">
                 <Play size={16} fill="currentColor" /> Quick Play
               </Link>
