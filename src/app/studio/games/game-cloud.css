@@ -1,0 +1,192 @@
+/* LiTTree Game Cloud — Registry */
+.gc-page {
+  width: 100%;
+  min-height: 100vh;
+  background: #08060F;
+  color: #F5F1FA;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 32px 28px;
+  box-sizing: border-box;
+}
+
+.gc-hero {
+  margin-bottom: 28px;
+}
+.gc-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #9B4DFF;
+  background: rgba(155, 77, 255, 0.08);
+  border: 1px solid rgba(155, 77, 255, 0.15);
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.gc-hero-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin: 0 0 6px;
+}
+.gc-hero-sub {
+  font-size: 14px;
+  color: #70687E;
+  margin: 0;
+}
+
+.gc-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.gc-tabs {
+  display: flex;
+  gap: 6px;
+}
+.gc-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #A29AAF;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.gc-tab:hover { background: rgba(155, 77, 255, 0.08); color: #F5F1FA; }
+.gc-tab.active { background: rgba(155, 77, 255, 0.12); border-color: rgba(155, 77, 255, 0.25); color: #F5F1FA; }
+.gc-tab-count {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(155, 77, 255, 0.15);
+  color: #9B4DFF;
+}
+.gc-search {
+  width: 240px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(155, 77, 255, 0.12);
+  background: rgba(20, 15, 31, 0.72);
+  color: #F5F1FA;
+  font-size: 14px;
+  outline: none;
+  transition: all 150ms ease;
+}
+.gc-search::placeholder { color: #70687E; }
+.gc-search:focus { border-color: rgba(155, 77, 255, 0.4); box-shadow: 0 0 0 3px rgba(155, 77, 255, 0.08); }
+
+.gc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.gc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(20, 15, 31, 0.72);
+  border: 1px solid rgba(155, 77, 255, 0.12);
+  text-decoration: none;
+  color: inherit;
+  transition: all 200ms ease;
+  overflow: hidden;
+}
+.gc-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(155, 77, 255, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 0 20px rgba(155, 77, 255, 0.1);
+}
+.gc-card-glow {
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 100px; height: 100px;
+  border-radius: 50%;
+  background: var(--game-color);
+  opacity: 0.08;
+  filter: blur(30px);
+  transition: opacity 200ms ease;
+}
+.gc-card:hover .gc-card-glow { opacity: 0.15; }
+.gc-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.gc-card-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: rgba(155, 77, 255, 0.1);
+  border: 1px solid rgba(155, 77, 255, 0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  color: var(--game-color);
+}
+.gc-card-play {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #9B4DFF, #7C3AED);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 200ms ease;
+}
+.gc-card:hover .gc-card-play { opacity: 1; transform: scale(1); }
+.gc-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.gc-card-desc {
+  font-size: 13px;
+  color: #A29AAF;
+  line-height: 1.5;
+  margin: 0 0 14px;
+  flex: 1;
+}
+.gc-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #70687E;
+}
+.gc-card-tag {
+  text-transform: capitalize;
+}
+.gc-card-dot {
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: #70687E;
+}
+.gc-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px;
+  color: #70687E;
+}
+.gc-empty-icon { font-size: 32px; margin-bottom: 8px; }
+
+@media (max-width: 640px) {
+  .gc-controls { flex-direction: column; align-items: stretch; }
+  .gc-search { width: 100%; }
+  .gc-grid { grid-template-columns: 1fr; }
+}
