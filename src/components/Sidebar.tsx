@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Hammer,
   Image as ImageIcon,
+  MessageCircle,
   MessageSquare,
   Music2,
   PanelLeftClose,
@@ -43,6 +44,7 @@ const QUICK_TOOLS = [
   { label: "Terminal", href: "/studio?tool=terminal", icon: TerminalSquare, color: "#34d399" },
   { label: "Agents", href: "/agents", icon: Bot, color: "#c084fc" },
   { label: "Assets", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
+  { label: "Discover", href: "/discover", icon: MessageCircle, color: "#f472b6" },
 ] as const;
 
 function SidebarContent({

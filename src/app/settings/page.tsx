@@ -63,6 +63,17 @@ export default function SettingsPage() {
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") || "/studio";
 
+  // Read ?section= from the URL on mount so deep links like
+  // /settings?section=connections&returnTo=/dashboard land on the right tab.
+  useEffect(() => {
+    const section = searchParams.get("section");
+    if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {
+      setActiveSection(section);
+      setMobileSection(section);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const sections = visibleSections();
 
   const filteredSections = useMemo(() => {

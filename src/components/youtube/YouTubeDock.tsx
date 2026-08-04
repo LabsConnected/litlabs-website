@@ -226,10 +226,11 @@ export function YouTubeDock() {
           </div>
           {/* Playing indicator */}
           {isPlaying && (
-            <div className="flex items-end gap-0.5">
-              <span className="h-2 w-0.5 animate-pulse rounded-full bg-purple-400" style={{ animationDelay: "0ms" }} />
-              <span className="h-3 w-0.5 animate-pulse rounded-full bg-purple-400" style={{ animationDelay: "150ms" }} />
-              <span className="h-2 w-0.5 animate-pulse rounded-full bg-purple-400" style={{ animationDelay: "300ms" }} />
+            <div className="studio-playing-bars">
+              <span />
+              <span />
+              <span />
+              <span />
             </div>
           )}
         </div>

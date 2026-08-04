@@ -1080,6 +1080,51 @@ export function useCanonicalConversation({
     }
   }, [getStore, authHeaders, loadMessages, setSendError]);
 
+  // Rename the active conversation (server-side PATCH).
+  const renameConversation = useCallback(async (title: string): Promise<boolean> => {
+    const s = getStore();
+    const conversationId = s.selectedConversationId;
+    if (!conversationId || !title.trim()) return false;
+    try {
+      const response = await fetch(`/api/studio/conversations/${conversationId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: await authHeaders(true),
+        body: JSON.stringify({ expectedRevision: s.revision, patch: { title: title.trim() } }),
+      });
+      if (!response.ok) {
+        setSendError("Failed to rename this conversation.");
+        return false;
+      }
+      s.setConversations(s.conversations.map((c) => c.id === conversationId ? { ...c, title: title.trim() } : c));
+      return true;
+    } catch {
+      setSendError("Network error while renaming this conversation.");
+      return false;
+    }
+  }, [getStore, authHeaders, setSendError]);
+
+  // Export the active conversation as a JSON download.
+  const exportConversation = useCallback(() => {
+    const s = getStore();
+    const conversationId = s.selectedConversationId;
+    const conversation = s.getSelectedConversation();
+    if (!conversationId || !conversation) return;
+    const payload = {
+      id: conversationId,
+      title: conversation.title,
+      exportedAt: new Date().toISOString(),
+      messages: s.messagesByConversationId[conversationId] ?? [],
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(conversation.title || "conversation").replace(/[^a-z0-9-_]+/gi, "-").toLowerCase()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [getStore]);
+
   // Agent switching — stays within the same conversation
   const switchAgent = useCallback((id: AgentId) => {
     setActiveAgentId(id);
@@ -1118,6 +1163,8 @@ export function useCanonicalConversation({
     // Canonical conversation management (sessions are server-side conversations)
     createConversation,
     deleteConversation,
+    renameConversation,
+    exportConversation,
     switchAgent,
     selectedConversationId,
     conversations,

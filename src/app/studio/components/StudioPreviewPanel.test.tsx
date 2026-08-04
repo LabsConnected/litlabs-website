@@ -30,7 +30,7 @@ describe("StudioPreviewPanel", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ runtimeStatus: "stopped", previewUrl: null, runtimeError: null }), { status: 200 }));
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
 
-    await screen.findByText("Workspace not prepared");
+    await screen.findByText("Preview not started");
     fireEvent.click(screen.getByRole("button", { name: /prepare preview/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });

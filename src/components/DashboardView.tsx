@@ -2,8 +2,11 @@
 
 import dynamic from "next/dynamic";
 
-const DashboardV2 = dynamic(
-  () => import("@/components/dashboard/v2/DashboardV2").then((m) => m.DashboardV2),
+const MissionControlDashboard = dynamic(
+  () =>
+    import("@/components/dashboard/v2/MissionControlDashboard").then(
+      (m) => m.MissionControlDashboard,
+    ),
   {
     ssr: false,
     loading: () => (
@@ -15,5 +18,5 @@ const DashboardV2 = dynamic(
 );
 
 export default function DashboardView() {
-  return <DashboardV2 />;
+  return <MissionControlDashboard />;
 }

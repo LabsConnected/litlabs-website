@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   PanelRightClose,
   PanelRightOpen,
@@ -48,7 +48,6 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 ];
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
-  { id: "activity", label: "Activity", icon: Activity },
   { id: "terminal", label: "Terminal", icon: Terminal },
 ];
 
@@ -355,6 +354,54 @@ export function StudioDrawer({
   onTabChange: (t: DrawerTab) => void;
   children?: React.ReactNode;
 }) {
+  // Resizable drawer height — persisted to localStorage so the user's
+  // preferred terminal/activity size survives reloads.
+  const DRAWER_MIN = 120;
+  const DRAWER_MAX_DVH = 75;
+  const DRAWER_STORAGE_KEY = "studio-drawer-height";
+  const [drawerHeight, setDrawerHeight] = useState<number>(() => {
+    if (typeof window === "undefined") return 240;
+    const stored = window.localStorage.getItem(DRAWER_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    return Number.isFinite(parsed) && parsed >= DRAWER_MIN ? parsed : 240;
+  });
+  const draggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(0);
+
+  const clampHeight = useCallback((h: number) => {
+    const max = Math.round(window.innerHeight * (DRAWER_MAX_DVH / 100));
+    return Math.max(DRAWER_MIN, Math.min(max, h));
+  }, []);
+
+  const onHandlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Only the resize grip initiates a drag (not the tab bar).
+    if ((e.target as HTMLElement).dataset.resizeGrip !== "true") return;
+    e.preventDefault();
+    draggingRef.current = true;
+    startYRef.current = e.clientY;
+    startHeightRef.current = drawerHeight;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }, [drawerHeight]);
+
+  const onHandlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const delta = startYRef.current - e.clientY;
+    const next = clampHeight(startHeightRef.current + delta);
+    setDrawerHeight(next);
+  }, [clampHeight]);
+
+  const onHandlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    try { window.localStorage.setItem(DRAWER_STORAGE_KEY, String(drawerHeight)); } catch { /* noop */ }
+  }, [drawerHeight]);
+
   // Lock body scroll when the drawer is open on mobile so the page
   // doesn't scroll behind it. Drawer never covers the composer — it
   // sits above it with a capped height.
@@ -387,7 +434,7 @@ export function StudioDrawer({
           aria-expanded={open}
         >
           {open ? <PanelBottomClose size={13} className="pointer-events-none" /> : <PanelBottomOpen size={13} className="pointer-events-none" />}
-          <span>{open ? "Close" : "Activity / Terminal"}</span>
+          <span>{open ? "Close" : "Terminal"}</span>
         </button>
       </div>
 
@@ -397,9 +444,32 @@ export function StudioDrawer({
           style={{
             backgroundColor: "var(--studio-surface)",
             borderColor: "var(--studio-border)",
-            height: "min(240px, 30dvh)",
+            height: drawerHeight,
           }}
+          onPointerDown={onHandlePointerDown}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={onHandlePointerUp}
+          onPointerCancel={onHandlePointerUp}
         >
+          {/* Drag-to-resize grip — drag up to enlarge, down to shrink */}
+          <div
+            data-resize-grip="true"
+            className="group flex shrink-0 cursor-row-resize items-center justify-center border-b py-1 transition hover:bg-white/5"
+            style={{ borderColor: "var(--studio-border)", touchAction: "none" }}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Drag to resize panel"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowUp") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h + 32)); }
+              if (e.key === "ArrowDown") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h - 32)); }
+            }}
+          >
+            <div
+              data-resize-grip="true"
+              className="h-1 w-10 rounded-full bg-white/15 transition group-hover:bg-white/30 group-active:bg-[var(--litt-primary)]"
+            />
+          </div>
           <div className="flex shrink-0 items-center gap-0.5 border-b px-1.5" style={{ borderColor: "var(--studio-border)" }}>
             {DRAWER_TABS.map((t) => {
               const Icon = t.icon;

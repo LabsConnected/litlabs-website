@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Camera,
@@ -10,7 +10,6 @@ import {
   Square,
   Loader2,
   Plus,
-  Paperclip,
   X,
   Volume2,
   VolumeX,
@@ -29,6 +28,10 @@ import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } 
 import { useUserPlan } from "../hooks/useUserPlan";
 import { ChevronDown, Check, Lock } from "lucide-react";
 import Link from "next/link";
+import { useStudioAttachments } from "../hooks/useStudioAttachments";
+import AttachmentMenu from "./AttachmentMenu";
+import AttachmentPreviewStrip from "./AttachmentPreviewStrip";
+import MediaRecorderPanel from "./MediaRecorderPanel";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -91,12 +94,32 @@ export default function CommandComposer({
   const [showAttach, setShowAttach] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [recorderMode, setRecorderMode] = useState<"audio" | "video" | "screen" | null>(null);
+  const [attachAnchorRect, setAttachAnchorRect] = useState<DOMRect | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const attachTriggerRef = useRef<HTMLButtonElement>(null);
   const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
   const [modelRect, setModelRect] = useState<DOMRect | null>(null);
+
+  // Universal attachment system
+  const {
+    attachments,
+    canAdd,
+    addFiles,
+    addLink,
+    addRecording,
+    addCameraPhoto,
+    removeAttachment,
+    retryAttachment,
+    reorderAttachment,
+    clearAll,
+    getReadyUrls,
+    isProcessing,
+  } = useStudioAttachments();
   const selectModel = useStudioModelStore((s) => s.selectModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
@@ -138,6 +161,66 @@ export default function CommandComposer({
     ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
   }, [value]);
 
+  // Clipboard paste — images and files directly into the composer.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        addFiles(files);
+      }
+      // Also check for pasted text that is a URL
+      const text = e.clipboardData?.getData("text/plain")?.trim();
+      if (text && files.length === 0) {
+        try {
+          const url = new URL(text);
+          if (url.protocol === "http:" || url.protocol === "https:") {
+            // Don't auto-add links on paste — let user use the menu
+            // to avoid intercepting normal text paste
+          }
+        } catch {
+          // not a URL — ignore
+        }
+      }
+    };
+    const ta = textareaRef.current;
+    ta?.addEventListener("paste", onPaste);
+    return () => ta?.removeEventListener("paste", onPaste);
+  }, [addFiles]);
+
+  // Drag-and-drop handlers for the composer area
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only clear if leaving the composer (not entering a child)
+    if (e.currentTarget === e.target) {
+      setDragOver(false);
+    }
+  }, []);
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      addFiles(files);
+    }
+  }, [addFiles]);
+
   // Position agent popover on open.
   useEffect(() => {
     if (!agentOpen) return;
@@ -171,20 +254,24 @@ export default function CommandComposer({
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy || submittingRef.current) return; // prevent duplicate submits
-    if (!value.trim() && snapshots.length === 0) return;
+    const readyUrls = getReadyUrls();
+    if (!value.trim() && readyUrls.length === 0 && snapshots.length === 0) return;
     submittingRef.current = true;
-    const attachments = [...snapshots];
+    // Merge legacy snapshots (camera data URLs) with new attachment URLs
+    const attachments = [...snapshots, ...readyUrls];
     const textToSend = value;
     // Clear input immediately for responsiveness — the controller owns
     // the message now. If the controller rejects, we restore.
     onChange("");
     setSnapshots([]);
+    clearAll();
     try {
       const result = await onSend(textToSend, attachments.length ? attachments : undefined);
       if (!result?.accepted) {
-        // Controller rejected — restore text and attachments
+        // Controller rejected — restore text and snapshots
         onChange(textToSend);
-        setSnapshots(attachments);
+        setSnapshots(attachments.filter((a) => a.startsWith("data:")));
+        // Note: new attachment system files are not restored — user re-adds
       }
       if (result?.reply) speakText(result.reply);
     } finally {
@@ -192,15 +279,8 @@ export default function CommandComposer({
     }
   };
 
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setSnapshots((prev) => [...prev, dataUrl]);
-    };
-    reader.readAsDataURL(file);
-  };
+  // Note: legacy handleFile removed — universal attachment system handles all file types.
+  // Camera snapshots from CameraTool still use the `snapshots` state directly.
 
   // Mic button state.
   const micState = (() => {
@@ -255,14 +335,23 @@ export default function CommandComposer({
         </div>
       )}
 
-      {/* Snapshot previews */}
+      {/* Attachment previews — universal system */}
+      <AttachmentPreviewStrip
+        attachments={attachments}
+        onRemove={removeAttachment}
+        onRetry={retryAttachment}
+        onReorder={reorderAttachment}
+        onClearAll={clearAll}
+      />
+
+      {/* Legacy camera snapshots (from CameraTool) */}
       {snapshots.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-1">
           {snapshots.map((src, i) => (
             <div key={i} className="relative">
               <img
                 src={src}
-                alt={`Attachment ${i + 1}`}
+                alt={`Camera snapshot ${i + 1}`}
                 className="h-12 w-12 rounded-lg border object-cover"
                 style={{ borderColor: "var(--studio-border-strong)" }}
               />
@@ -275,7 +364,7 @@ export default function CommandComposer({
                   borderColor: "var(--studio-border-strong)",
                   color: "var(--text-secondary)",
                 }}
-                aria-label={`Remove attachment ${i + 1}`}
+                aria-label={`Remove snapshot ${i + 1}`}
               >
                 <X size={9} className="pointer-events-none" />
               </button>
@@ -286,70 +375,89 @@ export default function CommandComposer({
 
       {/* Input row — capped at composer max width, centered */}
       <div
-        className="relative flex items-end gap-1.5 rounded-2xl border px-2 py-2 transition-all focus-within:border-purple-400/40"
+        className={`relative flex items-end gap-1.5 rounded-2xl border px-2 py-2 transition-all focus-within:border-purple-400/40 ${dragOver ? "border-purple-400/60 bg-purple-500/5" : ""}`}
         style={{
-          borderColor: "var(--studio-border-strong)",
-          backgroundColor: "var(--studio-card)",
+          borderColor: dragOver ? "rgba(168,85,247,0.4)" : "var(--studio-border-strong)",
+          backgroundColor: dragOver ? "rgba(168,85,247,0.04)" : "var(--studio-card)",
+          boxShadow: "var(--studio-glow-purple-soft)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
           backdropFilter: "blur(8px)",
         }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
-        {/* Attachment menu */}
+        {/* Drag overlay */}
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ backgroundColor: "rgba(168,85,247,0.08)" }}>
+            <span className="text-[11px] font-bold" style={{ color: "#c084fc" }}>
+              Drop files to attach
+            </span>
+          </div>
+        )}
+
+        {/* Attachment menu — universal 10-option popover */}
         <button
+          ref={attachTriggerRef}
           type="button"
-          onClick={() => setShowAttach((v) => !v)}
+          onClick={() => {
+            if (attachTriggerRef.current) setAttachAnchorRect(attachTriggerRef.current.getBoundingClientRect());
+            setShowAttach((v) => !v);
+          }}
           className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition"
           style={{
-            color: "var(--text-muted)",
+            color: showAttach ? "#c084fc" : "var(--text-muted)",
             borderColor: showAttach ? "var(--studio-border-strong)" : "transparent",
-            backgroundColor: showAttach ? "rgba(255,255,255,0.06)" : "transparent",
+            backgroundColor: showAttach ? "rgba(168,85,247,0.08)" : "transparent",
           }}
-          aria-label="Attachments"
-          title="Attachments"
+          aria-label="Attach files, media, or links"
+          title="Attach"
+          aria-expanded={Boolean(showAttach)}
         >
           <Plus
             size={18}
             className={`pointer-events-none shrink-0 transition-transform ${showAttach ? "rotate-45" : ""}`}
           />
+          {attachments.length > 0 && (
+            <span
+              className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[8px] font-black"
+              style={{ backgroundColor: "#a855f7", color: "#fff" }}
+            >
+              {attachments.length}
+            </span>
+          )}
         </button>
-        {showAttach && (
-          <div
-            className="absolute bottom-full left-2.5 mb-1 z-[150] w-44 rounded-xl border p-1 shadow-2xl"
-            style={{
-              backgroundColor: "var(--studio-elevated)",
-              borderColor: "var(--studio-border-strong)",
+        {showAttach && attachAnchorRect && (
+          <AttachmentMenu
+            open={showAttach}
+            onClose={() => setShowAttach(false)}
+            onFiles={addFiles}
+            onCamera={() => onToggleCamera?.()}
+            onRecordVideo={() => setRecorderMode("video")}
+            onRecordAudio={() => setRecorderMode("audio")}
+            onScreenCapture={() => setRecorderMode("screen")}
+            onLink={(url) => addLink(url)}
+            onProjectFile={() => {
+              // TODO: open project file picker (needs workspace files API)
+              // For now, trigger the files input as a fallback
+              fileInputRef.current?.click();
             }}
-          >
-            <button
-              type="button"
-              onClick={() => { fileInputRef.current?.click(); setShowAttach(false); }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <Paperclip size={13} className="pointer-events-none" /> Upload image
-            </button>
-            <button
-              type="button"
-              onClick={() => { onToggleCamera?.(); setShowAttach(false); }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <Camera size={13} className="pointer-events-none" /> Camera snapshot
-            </button>
-          </div>
+            attachmentCount={attachments.length}
+            anchorRect={attachAnchorRect}
+          />
         )}
+        {/* Hidden file input for fallback / project file */}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          multiple
           className="hidden"
-          title="Upload image"
-          aria-label="Upload image attachment"
+          title="Upload files"
+          aria-label="Upload files attachment"
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleFile(f);
+            if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
             e.target.value = "";
           }}
         />
@@ -531,18 +639,18 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={busy ? onCancel : submit}
-          disabled={disabled || (!busy && !value.trim() && snapshots.length === 0)}
+          disabled={disabled || (!busy && !value.trim() && snapshots.length === 0 && attachments.length === 0)}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={busy ? "Cancel response" : "Send message"}
           title={busy ? "Cancel response" : "Send message"}
           style={{
             background: busy
               ? "rgba(227,179,65,0.18)"
-              : value.trim() || snapshots.length
+              : value.trim() || snapshots.length || attachments.length
                 ? "linear-gradient(135deg, var(--litt-primary), #2eff4a)"
                 : "transparent",
-            color: busy ? "#e3b341" : value.trim() || snapshots.length ? "#000" : "var(--text-muted)",
-            boxShadow: value.trim() || snapshots.length ? "var(--studio-glow-green)" : "none",
+            color: busy ? "#e3b341" : value.trim() || snapshots.length || attachments.length ? "#000" : "var(--text-muted)",
+            boxShadow: value.trim() || snapshots.length || attachments.length ? "var(--studio-glow-green)" : "none",
           }}
         >
           {busy ? (
@@ -652,6 +760,20 @@ export default function CommandComposer({
           </button>
         </div>
       )}
+
+      {/* Media recorder panel — audio/video/screen capture */}
+      {recorderMode && (
+        <MediaRecorderPanel
+          mode={recorderMode}
+          onClose={() => setRecorderMode(null)}
+          onComplete={(file, source) => {
+            if (source === "record-audio") addRecording(file, "record-audio");
+            else if (source === "record-video") addRecording(file, "record-video");
+            else addRecording(file, "screen");
+            setRecorderMode(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -689,7 +811,7 @@ function AgentPopover({
       ref={ref}
       role="dialog"
       aria-label="Select agent"
-      className="fixed z-[200] w-64 max-h-[260px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md"
+      className="fixed z-[200] w-64 max-h-[260px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
       style={{
         left,
         top,
@@ -804,7 +926,7 @@ function ModelPopover({
       ref={ref}
       role="dialog"
       aria-label="Select model"
-      className="fixed z-[200] max-h-[350px] w-72 overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md"
+      className="fixed z-[200] max-h-[350px] w-72 overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
       style={{
         left,
         top,

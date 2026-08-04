@@ -448,15 +448,16 @@ function CommandStudioContent() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
-  // Studio internal tabs (Chat | Code | Preview | Files | Terminal)
-  // "Files" (Canvas) tab disabled for v1 — persistence is unfinished.
-  const studioTabs: { id: StudioMode; label: string }[] = [
-    { id: "work", label: "Chat" },
-    { id: "preview", label: "Preview" },
-    { id: "code", label: "Code" },
+  // Primary workspace tabs — always visible: Chat | Create | Preview | Code
+  // Chat = studio/work, Create = create destination, Preview = studio/preview, Code = studio/code
+  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
+    { id: "chat", label: "Chat", destination: "studio", mode: "work" },
+    { id: "create", label: "Create", destination: "create", mode: "image" },
+    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
+    { id: "code", label: "Code", destination: "studio", mode: "code" },
   ];
 
-  // Create internal tabs (Image | Video | Audio | Music | Brand)
+  // Create secondary tabs — visible only when Create is active
   const createTabs: { id: CreateMode; label: string }[] = [
     { id: "image", label: "Image" },
     { id: "video", label: "Video" },
@@ -488,6 +489,11 @@ function CommandStudioContent() {
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
+          onRenameChatAction={() => {
+            const title = window.prompt("Rename conversation:", conversation.conversations.find((c) => c.id === conversation.selectedConversationId)?.title ?? "");
+            if (title) void conversation.renameConversation(title);
+          }}
+          onExportChatAction={() => conversation.exportConversation()}
           hasConversation={Boolean(conversation.selectedConversationId)}
           projectReady={projectReady}
           capabilities={capabilities}
@@ -499,51 +505,81 @@ function CommandStudioContent() {
           <CommandStudioNav active={destination} onSelect={handleSelectDestination} onSelectMoreMode={handleSelectMoreMode} />
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Internal tab strip for Studio + Create destinations */}
-            {(destination === "studio" || destination === "create") && (
+            {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
+            <div
+              className="flex shrink-0 items-center gap-0.5 border-b px-2"
+              style={{
+                height: 36,
+                backgroundColor: "var(--studio-surface)",
+                borderColor: "var(--studio-border)",
+              }}
+            >
+              {primaryTabs.map((t) => {
+                const isActive =
+                  t.destination === "studio"
+                    ? destination === "studio" && studioMode === t.mode
+                    : destination === t.destination;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      if (t.destination === "studio") {
+                        setDestination("studio");
+                        setStudioMode(t.mode as StudioMode);
+                        if (t.mode === "work") setWorkSurface("conversation");
+                      } else {
+                        setDestination(t.destination);
+                      }
+                    }}
+                    className="relative rounded-md px-3 py-1.5 text-[11px] font-bold transition-all"
+                    style={{
+                      color: isActive ? "var(--text-primary)" : "var(--text-muted)",
+                      backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
+                    }}
+                    aria-label={t.label}
+                  >
+                    {t.label}
+                    {isActive && (
+                      <span
+                        className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                        style={{
+                          background: "linear-gradient(90deg, var(--spark-primary), var(--violet-accent))",
+                          boxShadow: "0 0 6px var(--spark-primary)",
+                        }}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
+            {destination === "create" && (
               <div
                 className="flex shrink-0 items-center gap-0.5 border-b px-2"
                 style={{
-                  height: 36,
+                  height: 32,
                   backgroundColor: "var(--studio-surface)",
                   borderColor: "var(--studio-border)",
                 }}
               >
-                {(destination === "studio" ? studioTabs : createTabs).map((t) => {
-                  const isActive = destination === "studio" ? studioMode === t.id : createMode === t.id;
+                {createTabs.map((t) => {
+                  const isActive = createMode === t.id;
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => {
-                        if (destination === "studio") {
-                          setStudioMode(t.id as StudioMode);
-                          // Clicking the visible Work tab always returns
-                          // to the conversation surface. Build must be
-                          // explicitly routed again to show the Builder.
-                          if (t.id === "work") setWorkSurface("conversation");
-                        } else {
-                          setCreateMode(t.id as CreateMode);
-                        }
-                      }}
-                      className="relative rounded-md px-3 py-1.5 text-[11px] font-bold transition-all"
+                      onClick={() => setCreateMode(t.id)}
+                      className="rounded-md px-2.5 py-1 text-[10px] font-bold transition-all"
                       style={{
-                        color: isActive ? "var(--text-primary)" : "var(--text-muted)",
-                        backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
+                        color: isActive ? "var(--spark-primary)" : "var(--text-muted)",
+                        backgroundColor: isActive ? "rgba(168,85,247,0.1)" : "transparent",
                       }}
                       aria-label={t.label}
                     >
                       {t.label}
-                      {isActive && (
-                        <span
-                          className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
-                          style={{
-                            background: "linear-gradient(90deg, var(--spark-primary), var(--violet-accent))",
-                            boxShadow: "0 0 6px var(--spark-primary)",
-                          }}
-                          aria-hidden
-                        />
-                      )}
                     </button>
                   );
                 })}
@@ -840,7 +876,7 @@ function StudioWorkSurface({
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
   projectName: string | null;
-  sourceType: "github" | "blank" | "template" | null;
+  sourceType: "github" | "blank" | "template" | "upload" | null;
   githubInstalled: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;
