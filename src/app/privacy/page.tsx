@@ -29,7 +29,13 @@ export default function PrivacyPage() {
             🛡️ Privacy Policy
           </div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: June 5, 2026 · Your Data is Protected
+            DRAFT — OWNER/LEGAL REVIEW REQUIRED · Last Updated: August 4, 2026
+          </p>
+          <p className="mt-3 text-[10px] opacity-80 rounded-md border border-amber-400/30 bg-amber-400/5 p-3">
+            <strong>DRAFT NOTICE:</strong> This Privacy Policy is a draft
+            prepared from an actual data-flow audit of the LiTTree LabStudios
+            codebase. It has not been approved as final legal copy. Do not
+            publish until reviewed and approved by the owner and legal counsel.
           </p>
         </div>
 
@@ -47,24 +53,60 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Personal Data:</strong> Email address, username, profile
-                information provided during registration via Clerk
+                <strong>Account Data:</strong> Email address, username, and
+                profile information provided during registration via Clerk
                 authentication.
               </li>
               <li>
                 <strong>Usage Data:</strong> Browser type, browser version,
-                pages visited, time spent on pages, unique device identifiers,
-                and other diagnostic data.
+                pages visited, time spent on pages, and device identifiers
+                collected through standard web protocols.
               </li>
               <li>
-                <strong>Local Storage:</strong> Theme preferences, LiTTBits
-                balance, profile settings, and visitor counts stored locally in
-                your browser.
+                <strong>Local Storage:</strong> Theme preferences, UI state,
+                and cached session metadata stored locally in your browser.
+                LiTTBits balances are <strong>not</strong> stored in local
+                storage — they are stored server-side in our Supabase credit
+                ledger.
               </li>
               <li>
-                <strong>Agent Interactions:</strong> Messages sent to AI agents
-                via our API are processed through Google Gemini. We do not
-                permanently store chat logs unless explicitly saved by the user.
+                <strong>Conversations &amp; Project Memory:</strong> Messages
+                sent to AI agents, conversation history, project context, and
+                agent memories are <strong>durably stored</strong> in our
+                Supabase database. Conversations are linked to your account and
+                projects, and persist across sessions.
+              </li>
+              <li>
+                <strong>LiTTBits Ledger:</strong> Your LiTTBits balance,
+                transaction history (grants, spending, purchases), and billing
+                records are stored server-side in our Supabase credit ledger.
+              </li>
+              <li>
+                <strong>Uploaded Media &amp; Attachments:</strong> Files,
+                images, audio, and other media you upload or generate are
+                stored in Cloudflare R2 object storage and linked to your
+                account.
+              </li>
+              <li>
+                <strong>Voice Data:</strong> When you use voice features in
+                Studio, your microphone audio is streamed to Inworld AI for
+                speech-to-text transcription. The transcribed text is processed
+                through the canonical Studio conversation. Generated responses
+                may be sent to Inworld&apos;s dedicated TTS service for audio
+                playback.
+              </li>
+              <li>
+                <strong>Camera &amp; Screen Sharing:</strong> When you use
+                camera preview or screen sharing features in Studio, camera
+                output and screen content are processed locally in your browser
+                and may be shared within your active session. These features
+                require explicit browser permission prompts.
+              </li>
+              <li>
+                <strong>GitHub Connection Data:</strong> When you connect a
+                GitHub repository, we store repository references, branch
+                information, and deployment metadata to enable project
+                synchronization and terminal workspace provisioning.
               </li>
             </ul>
           </section>
@@ -83,12 +125,25 @@ export default function PrivacyPage() {
               <li>Providing and maintaining the Platform functionality.</li>
               <li>Authenticating users and securing accounts via Clerk.</li>
               <li>
-                Processing marketplace transactions and LiTTBits economy.
+                Processing subscriptions, LiTTBits grants, and marketplace
+                transactions via Stripe.
+              </li>
+              <li>
+                Routing AI requests to appropriate model providers based on
+                task type, model availability, and user configuration.
+              </li>
+              <li>
+                Storing conversation history, project memory, and agent context
+                to provide continuity across sessions.
+              </li>
+              <li>
+                Provisioning terminal workspaces and synchronizing GitHub
+                repositories.
               </li>
               <li>Analyzing usage patterns to improve the Platform.</li>
               <li>
-                Communicating updates, security alerts, and promotional
-                materials.
+                Communicating updates, security alerts, and service
+                notifications.
               </li>
             </ul>
           </section>
@@ -98,14 +153,64 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              3. Data Storage & Security
+              3. AI Model Provider Routing
             </h2>
-            <p>
-              We use industry-standard security measures including encryption in
-              transit (TLS/SSL) and secure authentication providers. Your data
-              is stored via Supabase and Clerk, both of which maintain SOC 2
-              compliance. However, no method of transmission over the Internet
-              is 100% secure.
+            <p className="mb-2">
+              Your AI conversations and generation requests are processed
+              through multiple model providers depending on the task type,
+              model availability, and your configuration. Providers include:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Google Gemini:</strong> Primary LLM and image
+                generation (free tier).
+              </li>
+              <li>
+                <strong>OpenRouter:</strong> Fallback LLM routing with
+                multiple models (DeepSeek, Mistral, Llama, Qwen, Trinity).
+              </li>
+              <li>
+                <strong>Groq:</strong> Fast inference and audio transcription
+                (Whisper).
+              </li>
+              <li>
+                <strong>OpenAI:</strong> Premium LLM and media generation
+                (BYOK — Bring Your Own Key).
+              </li>
+              <li>
+                <strong>Anthropic:</strong> Premium LLM (BYOK).
+              </li>
+              <li>
+                <strong>Together:</strong> FLUX image generation.
+              </li>
+              <li>
+                <strong>Fal:</strong> Image generation.
+              </li>
+              <li>
+                <strong>MiniMax:</strong> 3D generation (Space model).
+              </li>
+              <li>
+                <strong>Alibaba:</strong> Image and video generation.
+              </li>
+              <li>
+                <strong>Recraft:</strong> Vector and logo image generation.
+              </li>
+              <li>
+                <strong>Cloudflare:</strong> Image generation.
+              </li>
+              <li>
+                <strong>ElevenLabs:</strong> Music and audio generation.
+              </li>
+              <li>
+                <strong>Inworld AI:</strong> Voice speech-to-text and
+                text-to-speech.
+              </li>
+            </ul>
+            <p className="mt-2">
+              Each provider processes data according to its own privacy policy.
+              Your conversation content and generation requests are transmitted
+              to these providers via encrypted connections. We do not expose
+              API credentials to the browser.
             </p>
           </section>
 
@@ -114,28 +219,87 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              4. Third-Party Services
+              4. Data Storage &amp; Security
+            </h2>
+            <p className="mb-2">
+              We use industry-standard security measures including encryption
+              in transit (TLS/SSL) and secure authentication. Your data is
+              stored as follows:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Authentication data:</strong> Managed by Clerk (SOC 2
+                compliant).
+              </li>
+              <li>
+                <strong>Database:</strong> Supabase (PostgreSQL) stores user
+                accounts, conversations, project memory, LiTTBits credit
+                ledger, subscriptions, and marketplace data.
+              </li>
+              <li>
+                <strong>File storage:</strong> Cloudflare R2 stores uploaded
+                and generated media (images, audio, video, assets).
+              </li>
+              <li>
+                <strong>Payment data:</strong> Processed by Stripe. We do not
+                store full card numbers — Stripe handles PCI-compliant payment
+                data.
+              </li>
+              <li>
+                <strong>Code &amp; terminal workspaces:</strong> Provisioned on
+                Railway infrastructure with per-user isolation.
+              </li>
+            </ul>
+            <p className="mt-2">
+              No method of transmission over the Internet is 100% secure. While
+              we strive to protect your data, we cannot guarantee absolute
+              security.
+            </p>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              5. Third-Party Services
             </h2>
             <p className="mb-2">We use the following third-party services:</p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
                 <strong>Clerk:</strong> Authentication and user management.
-                Clerk Privacy Policy applies.
               </li>
               <li>
-                <strong>Supabase:</strong> Database and storage for agent
-                listings and user data.
+                <strong>Supabase:</strong> Database, conversations, project
+                memory, and LiTTBits credit ledger.
               </li>
               <li>
-                <strong>Google Gemini API:</strong> Processes AI agent
-                conversations. Data is handled per Google&apos;s Privacy Policy.
+                <strong>Stripe:</strong> Payment processing for subscriptions
+                and marketplace transactions.
               </li>
               <li>
-                <strong>Stripe:</strong> Payment processing for marketplace
-                transactions.
+                <strong>Cloudflare R2:</strong> Object storage for media and
+                assets.
               </li>
               <li>
-                <strong>Vercel:</strong> Hosting and analytics infrastructure.
+                <strong>Vercel:</strong> Hosting and deployment infrastructure.
+              </li>
+              <li>
+                <strong>Railway:</strong> Terminal workspace provisioning and
+                voice proxy.
+              </li>
+              <li>
+                <strong>GitHub:</strong> Repository connections for project
+                synchronization.
+              </li>
+              <li>
+                <strong>Inworld AI:</strong> Voice speech-to-text and
+                text-to-speech.
+              </li>
+              <li>
+                <strong>AI Model Providers:</strong> Google Gemini, OpenRouter,
+                Groq, OpenAI, Anthropic, Together, Fal, MiniMax, Alibaba,
+                Recraft, Cloudflare, ElevenLabs — as described in Section 3.
               </li>
             </ul>
           </section>
@@ -145,14 +309,31 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              5. Cookies & Tracking
+              6. Cookies &amp; Local Storage
             </h2>
-            <p>
-              We use cookies and similar tracking technologies to track activity
-              on our Platform and hold certain information. You can instruct
-              your browser to refuse all cookies or to indicate when a cookie is
-              being sent. Our cookie consent banner allows granular control over
-              optional tracking.
+            <p className="mb-2">
+              We use minimal cookies and browser storage:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Authentication cookies:</strong> Set by Clerk to
+                maintain your signed-in session.
+              </li>
+              <li>
+                <strong>Local storage:</strong> Theme preferences, UI state,
+                and cached session metadata. LiTTBits balances are fetched from
+                the server, not stored locally.
+              </li>
+              <li>
+                <strong>Analytics:</strong> Vercel Analytics may collect basic
+                usage metrics (page views, performance). No cross-site
+                tracking or advertising cookies are used.
+              </li>
+            </ul>
+            <p className="mt-2">
+              You can instruct your browser to refuse all cookies. Note that
+              this may affect Platform functionality, particularly
+              authentication.
             </p>
           </section>
 
@@ -161,7 +342,40 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              6. Your Data Rights
+              7. Data Retention
+            </h2>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Conversations &amp; project memory:</strong> Retained
+                for the lifetime of your account unless you delete them.
+              </li>
+              <li>
+                <strong>LiTTBits ledger:</strong> Transaction history is
+                retained for billing and audit purposes.
+              </li>
+              <li>
+                <strong>Uploaded media:</strong> Retained until you delete the
+                associated project or asset.
+              </li>
+              <li>
+                <strong>Voice data:</strong> Audio streams are processed in
+                real-time by Inworld AI for transcription and TTS. We do not
+                store raw audio recordings unless explicitly saved as part of a
+                project.
+              </li>
+              <li>
+                <strong>Account data:</strong> Retained while your account is
+                active. You may request deletion at any time.
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              8. Your Data Rights
             </h2>
             <p className="mb-2">
               Depending on your location, you may have the right to:
@@ -171,6 +385,8 @@ export default function PrivacyPage() {
               <li>Request correction or deletion of your personal data.</li>
               <li>Object to or restrict processing of your data.</li>
               <li>Export your data in a portable format.</li>
+              <li>Disconnect GitHub repositories and revoke access.</li>
+              <li>Delete conversations and project memory.</li>
             </ul>
             <p className="mt-2">
               To exercise these rights, contact us at support@litlabs.net.
@@ -182,7 +398,42 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              7. Children&apos;s Privacy
+              9. User Controls
+            </h2>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Voice:</strong> Microphone access requires explicit
+                browser permission and can be revoked at any time in your
+                browser settings.
+              </li>
+              <li>
+                <strong>Camera:</strong> Camera preview requires explicit
+                browser permission and is only active when you open the camera
+                tool in Studio.
+              </li>
+              <li>
+                <strong>Screen sharing:</strong> Screen share requires explicit
+                browser permission and is only active during an active share
+                session.
+              </li>
+              <li>
+                <strong>GitHub:</strong> You can disconnect repositories at any
+                time from your Studio settings.
+              </li>
+              <li>
+                <strong>AI providers (BYOK):</strong> When you provide your own
+                API keys (OpenAI, Anthropic), those keys are stored encrypted
+                and used only for your requests.
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              10. Children&apos;s Privacy
             </h2>
             <p>
               Our Platform does not address anyone under the age of 13. We do
@@ -198,7 +449,23 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              8. Changes to This Policy
+              11. Security Limitations
+            </h2>
+            <p>
+              While we use industry-standard security practices, no platform is
+              perfectly secure. AI model providers may retain conversation data
+              according to their own policies. We recommend not sharing
+              sensitive personal information, trade secrets, or credentials in
+              AI conversations.
+            </p>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              12. Changes to This Policy
             </h2>
             <p>
               We may update our Privacy Policy from time to time. We will notify
@@ -212,7 +479,7 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              9. Contact Us
+              13. Contact Us
             </h2>
             <p>
               If you have any questions about this Privacy Policy, please
