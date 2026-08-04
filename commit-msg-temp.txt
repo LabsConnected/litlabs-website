@@ -1,34 +1,30 @@
-fix: separate workspace, terminal, writeAccess, and approvalRequired concepts
+fix: image generation pipeline — storage fallback, auto-quality fallback, quota error
 
-The runtime status logic was conflating four independent concepts:
-- workspace readiness (provisioned + mounted)
-- terminal connection (WebSocket transport)
-- write surface availability (can files be written)
-- approval requirement (safety policy)
+Three issues were breaking image generation:
 
-Previously: writeAccess = workspaceReady && terminalConnected, and
-approvalRequired = !writeAccess. This meant a disconnected terminal
-was reported as "approval required" — wrong on both counts.
+1. Gemini images were not persisted to durable storage. The handler
+   returned a raw data:image/png;base64,... URL which can be several MB.
+   Large data URLs break localStorage (history gets truncated) and
+   cause "Failed to load image" in the <img> tag.
 
-Now each field is independent:
-- executionAvailable = workspaceReady && terminalConnected (can run commands)
-- writeSurfaceAvailable = workspaceReady || terminalConnected (a write surface exists)
-- writeApprovalRequired = always true (policy — writes always need approval)
-- terminalConnected = client WebSocket state (reported separately)
-- voiceConfigured / voiceSessionConnected = separate from execution
+2. Auto-quality mode had no fallback when all quality providers failed.
+   If Gemini quota was exhausted and FAL/Recraft were not configured,
+   the user got a hard 502 with no recovery.
 
-Changes:
-- runtime-state.ts: add terminalServerReachable, writeSurfaceAvailable,
-  voiceConfigured, voiceSessionConnected fields
-- useProjectRuntime.ts: stop deriving writeAccess from terminal connection
-- messages/route.ts: approvalRequired = true (policy), not !writeAccess
-- project-runtime/route.ts: correct server-side state derivation
-- runtime-context-injector.ts: update generateProjectStatusAnswer to
-  report terminal disconnection and approval as separate facts;
-  workspace.write tool now checks terminal connection, not approval
-- useConnectionSummary.ts: document that writeAccess means "a write
-  surface exists", not "approval is waived"
-- litt-grounding.test.ts: update 5 tests to match separated logic
+3. Gemini quota exhaustion (429) was reported as a generic
+   "PROVIDER_ERROR" with no actionable guidance.
+
+Fixes:
+- Renamed persistToR2 → persistImage. Tries R2 first, then falls back
+  to Supabase Storage (bucket: studio-images) when R2 is not configured.
+  Returns a durable public URL instead of a fragile data URL.
+- Added Gemini to the persistImage call list (was only alibaba/fal/
+  openai/recraft).
+- Added Pollinations as a last-resort fallback in auto-quality mode
+  so users always get an image even when all paid providers are down.
+- Detect 429 quota errors and return code "QUOTA_EXCEEDED" with an
+  actionable message: "Try Auto Best (Free) mode which uses
+  Pollinations — no API key needed."
 
 Quality gate: typecheck PASS, lint 0 errors, 1236 tests passed, 192 pages
 
