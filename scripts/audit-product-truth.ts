@@ -57,6 +57,7 @@ const ALLOWED_FILES = new Set([
   "src/config/product-truth.ts",
   "scripts/audit-product-truth.ts",
   "tests/product-truth-consistency.test.ts",
+  "tests/stripe-catalog-contract.test.ts", // Tests that banned phrases do NOT appear
   "tests/playwright/billing.spec.ts", // Tests that $49 does NOT appear
 ]);
 

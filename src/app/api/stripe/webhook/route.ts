@@ -477,9 +477,55 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // ── Credit pack / plan refund: debit LBC ──
-        // Only debit LBC for credit_pack or plan refunds — never for agents.
-        if (refundClerkId) {
+        // ── Plan / Founder refund: revoke entitlement ──
+        // For plan refunds (including Founder), revoke the subscription
+        // entitlement. Do NOT debit LiTTBits for Founder refunds — Founder
+        // has 0 LiTTBits. For subscription plans, the credits were already
+        // consumed; revoking access is the correct action.
+        const refundPlanId = refundMeta.plan_id as PlanId | undefined;
+        if (refundPlanId && refundClerkId) {
+          const plan = PLANS[refundPlanId];
+          if (plan) {
+            const { data: refundUser } = await sb
+              .from("users")
+              .select("id")
+              .eq("clerk_id", refundClerkId)
+              .single();
+            if (refundUser) {
+              // Revoke the subscription/entitlement
+              await sb
+                .from("subscriptions")
+                .update({
+                  status: "refunded",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", refundUser.id)
+                .eq("plan", refundPlanId);
+
+              // For one_time plans (Founder), do NOT debit LiTTBits —
+              // Founder has 0 LiTTBits. For subscription plans, debit
+              // the refunded amount from purchased balance.
+              if (plan.billingType === "subscription") {
+                try {
+                  await sb.rpc("debit_credits", {
+                    p_user_id: refundUser.id,
+                    p_amount: charge.amount_refunded / 100,
+                    p_category: "refund",
+                    p_description: `Refund for charge ${charge.id}`,
+                    p_idempotency_key: `refund_${charge.id}`,
+                  });
+                } catch {
+                  // Ledger not available — skip
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        // ── Credit pack refund: debit LBC ──
+        // Only debit LBC for credit_pack refunds — never for agents or plans.
+        if (refundProductType === "credit_pack" && refundClerkId) {
           const { data: refundUser } = await sb
             .from("users")
             .select("id")

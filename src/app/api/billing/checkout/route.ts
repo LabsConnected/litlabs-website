@@ -57,12 +57,24 @@ export async function POST(req: NextRequest) {
     params.append("cancel_url", `${origin}/pricing?canceled=true`);
     params.append("allow_promotion_codes", "true");
     params.append("billing_address_collection", "auto");
-    params.append("automatic_tax[enabled]", "false");
+    // Automatic tax is disabled by default. Enable only after Stripe Tax
+    // is fully configured (registrations, product tax codes, tax behavior).
+    // See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
+    const autoTaxEnabled = process.env.STRIPE_AUTOMATIC_TAX_ENABLED === "true";
+    params.append("automatic_tax[enabled]", autoTaxEnabled ? "true" : "false");
     params.append(`metadata[clerk_id]`, clerkId);
     params.append(`metadata[plan_id]`, plan.id);
+    params.append(`metadata[product_type]`, "plan");
     if (mode === "subscription") {
       params.append("subscription_data[metadata][clerk_id]", clerkId);
       params.append("subscription_data[metadata][plan_id]", plan.id);
+      params.append("subscription_data[metadata][product_type]", "plan");
+    } else {
+      // For one-time payments (Founder), propagate metadata to the
+      // PaymentIntent so refund handlers can classify the charge.
+      params.append("payment_intent_data[metadata][clerk_id]", clerkId);
+      params.append("payment_intent_data[metadata][plan_id]", plan.id);
+      params.append("payment_intent_data[metadata][product_type]", "plan");
     }
 
     // Idempotency: use clerkId + planId + timestamp window to prevent

@@ -8,6 +8,10 @@ import {
   BANNED_PHRASES,
   DAILY_LITTBITS_ENABLED,
   CREDIT_PACKS_ENABLED,
+  STRIPE_AUTOMATIC_TAX_ENABLED,
+  VERIFIED_STRIPE_PLANS,
+  VERIFIED_PREMIUM_AGENTS,
+  LEGACY_STRIPE_PRODUCTS,
 } from "@/config/product-truth";
 import { PLANS } from "@/config/plans";
 import { AGENT_DEFINITIONS, CORE_PERSONALITIES as REGISTRY_CORE } from "@/lib/agent-registry";
@@ -182,6 +186,35 @@ describe("Product-truth consistency", () => {
 
     it("Founder prices match", () => {
       expect(PLAN_CONTRACTS.founder.priceCents).toBe(PLANS.founder.monthlyPriceCents);
+    });
+  });
+
+  describe("Stripe catalog alignment", () => {
+    it("verified Stripe plan prices match plans.ts", () => {
+      expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(PLANS.creator_beta.monthlyPriceCents);
+      expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(PLANS.pro_builder_beta.monthlyPriceCents);
+      expect(VERIFIED_STRIPE_PLANS.founder.priceCents).toBe(PLANS.founder.monthlyPriceCents);
+    });
+
+    it("verified Stripe plan env vars match plans.ts", () => {
+      expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe(PLANS.creator_beta.stripePriceIdEnv);
+      expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.envVar).toBe(PLANS.pro_builder_beta.stripePriceIdEnv);
+      expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBe(PLANS.founder.stripePriceIdEnv);
+    });
+
+    it("LiTT Growth mismatch is documented", () => {
+      expect(VERIFIED_PREMIUM_AGENTS["litt-growth"].status).toBe("mismatch");
+    });
+
+    it("automatic tax is disabled by default", () => {
+      expect(STRIPE_AUTOMATIC_TAX_ENABLED).toBe(false);
+    });
+
+    it("legacy products do not include current plan prices", () => {
+      const legacyPrices = LEGACY_STRIPE_PRODUCTS.map((p) => p.price);
+      expect(legacyPrices).not.toContain("$7/month");
+      expect(legacyPrices).not.toContain("$19/month");
+      expect(legacyPrices).not.toContain("$149 one-time");
     });
   });
 });

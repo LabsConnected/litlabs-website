@@ -352,6 +352,15 @@ export const DAILY_LITTBITS_ENABLED = process.env.ENABLE_DAILY_LITTBITS === "tru
  */
 export const CREDIT_PACKS_ENABLED = false;
 
+/**
+ * Stripe automatic tax — disabled by default.
+ * Enable only after Stripe Tax is fully configured (registrations,
+ * product tax codes, tax behavior, address collection).
+ * See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
+ */
+export const STRIPE_AUTOMATIC_TAX_ENABLED =
+  process.env.STRIPE_AUTOMATIC_TAX_ENABLED === "true";
+
 // ---------------------------------------------------------------------------
 // Banned Obsolete Phrases (for automated auditing)
 // ---------------------------------------------------------------------------
@@ -383,9 +392,79 @@ export const POLICY_STATUSES = {
   creditPacks: "NOT APPROVED — no catalog exists",
   monthlyRefresh: "APPROVED — per billing cycle for paid plans",
   creditExpiration: "APPROVED — monthly resets, starter/purchased do not expire",
-  founderCheckout: "DISABLED — awaiting approved $149 Stripe Price ID",
+  founderCheckout: "DISABLED — awaiting Price ID wiring and test verification",
   refunds: "NO POLICY — do not promise refunds",
+  automaticTax: "DISABLED — awaiting Stripe Tax configuration",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Verified Stripe Catalog (as of 2026-08-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * The three official plan products already exist in Stripe at the correct
+ * prices. They need to be wired to environment variables — do NOT create
+ * new Stripe products for these.
+ */
+export const VERIFIED_STRIPE_PLANS = {
+  creator_beta: {
+    stripeStatus: "exists",
+    priceCents: 700,
+    priceMode: "recurring" as const,
+    envVar: "STRIPE_PRICE_CREATOR_BETA",
+  },
+  pro_builder_beta: {
+    stripeStatus: "exists",
+    priceCents: 1900,
+    priceMode: "recurring" as const,
+    envVar: "STRIPE_PRICE_PRO_BUILDER_BETA",
+  },
+  founder: {
+    stripeStatus: "exists",
+    priceCents: 14900,
+    priceMode: "one_time" as const,
+    envVar: "STRIPE_PRICE_FOUNDER",
+  },
+} as const;
+
+/**
+ * Premium marketplace agents that exist as Stripe products.
+ * These are separate from subscription-tier internal specialists.
+ * Purchases remain disabled until all gates pass.
+ */
+export const VERIFIED_PREMIUM_AGENTS = {
+  "litt-coder-pro": {
+    name: "LiTT Coder Pro",
+    stripePriceCents: 2900,
+    dbPriceCents: 2900,
+    status: "matches" as const,
+  },
+  "litt-social": {
+    name: "LiTT Social",
+    stripePriceCents: 1500,
+    dbPriceCents: 1500,
+    status: "matches" as const,
+  },
+  "litt-growth": {
+    name: "LiTT Growth",
+    stripePriceCents: 2000,
+    dbPriceCents: 1900,
+    status: "mismatch" as const,
+    note: "Stripe has $20; DB has $19. Owner must create a new $19 Price in Stripe and archive the $20 Price. Do not attach the $20 Price ID to the $19 DB version.",
+  },
+} as const;
+
+/**
+ * Legacy membership products that must be archived in Stripe.
+ * Do NOT reference these in code, pricing, checkout, SEO, or documentation.
+ * Do NOT cancel existing customers automatically.
+ */
+export const LEGACY_STRIPE_PRODUCTS = [
+  { name: "LiTTree-LabStudios Basic Membership", price: "$9.99/month" },
+  { name: "LiTTree-LabStudios Elite Membership", price: "$39/month" },
+  { name: "LiTTree-LabStudios Starter Membership", price: "$5/month" },
+  { name: "LiTTree-LabStudios Pro Membership", price: "$19.99/month" },
+] as const;
 
 // ---------------------------------------------------------------------------
 // Feature Availability

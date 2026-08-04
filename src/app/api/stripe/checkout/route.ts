@@ -99,7 +99,11 @@ export async function POST(req: NextRequest) {
       product.allowPromotionCodes ? "true" : "false",
     );
     params.append("billing_address_collection", "auto");
-    params.append("automatic_tax[enabled]", "false");
+    // Automatic tax is disabled by default. Enable only after Stripe Tax
+    // is fully configured (registrations, product tax codes, tax behavior).
+    // See docs/STRIPE_CATALOG_WIRING.md for the configuration checklist.
+    const autoTaxEnabled = process.env.STRIPE_AUTOMATIC_TAX_ENABLED === "true";
+    params.append("automatic_tax[enabled]", autoTaxEnabled ? "true" : "false");
 
     // Line items — server-controlled, never client-supplied.
     if (product.stripePriceId) {
