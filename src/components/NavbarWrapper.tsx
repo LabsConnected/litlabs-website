@@ -6,10 +6,13 @@ import { Bell, Search, Settings, Sparkles } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { usePathname } from "next/navigation";
 
+import { isFeatureEnabled } from "@/config/feature-flags";
+
 const desktopLinks = [
   ["Dashboard", "/dashboard"],
   ["Studio", "/studio"],
   ["Gallery", "/gallery"],
+  ["Games", "/games"],
   ["Discover", "/discover"],
   ["Marketplace", "/marketplace"],
   ["Pricing", "/pricing"],
@@ -25,6 +28,12 @@ export default function NavbarWrapper() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  const visibleLinks = desktopLinks.filter(([, href]) => {
+    if (href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
+    if (href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
+    return true;
+  });
 
   return (
     <header
@@ -57,7 +66,7 @@ export default function NavbarWrapper() {
           <span className="text-sm tracking-[-.025em] lg:hidden">LiTTree</span>
         </Link>
         <nav className="ml-2 flex items-center gap-0.5 lg:ml-4 lg:gap-1">
-          {desktopLinks.map(([label, href]) => {
+          {visibleLinks.map(([label, href]) => {
             const active = pathname === href || pathname?.startsWith(`${href}/`);
             return (
               <Link

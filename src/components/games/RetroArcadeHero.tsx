@@ -43,7 +43,7 @@ export function RetroArcadeHero({ variant = "full" }: { variant?: "full" | "bann
       </div>
 
       {/* Visible hero caption — the text the user wants on the top page */}
-      <p className="px-1 text-center text-sm font-medium leading-6 text-white/55 sm:text-base">
+      <p className="px-1 text-center text-sm font-medium leading-6 text-white/65 sm:text-base">
         LiTT Retro Arcade featuring the LiTTree mascot, supported retro systems, private ROM library, local saves, custom controls, and import actions
       </p>
     </section>

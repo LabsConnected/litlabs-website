@@ -166,7 +166,7 @@ export default function GamesPage() {
           <div className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
             <p className="text-xs font-black uppercase tracking-[.3em] text-orange-400">Game Cloud</p>
             <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Play instantly.</h1>
-            <p className="mt-3 max-w-xl text-base text-white/55">Bring games you legally own. Build your own with LiTT.</p>
+            <p className="mt-3 max-w-xl text-base text-white/65">Bring games you legally own. Build your own with LiTT.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400">
                 <Gamepad2 size={16} /> Open Retro Arcade
@@ -178,7 +178,7 @@ export default function GamesPage() {
                 <Wand2 size={16} /> Build a Game
               </Link>
             </div>
-            <div className="mt-5 text-[11px] font-medium text-white/35">
+            <div className="mt-5 text-[11px] font-medium text-white/55">
               Instant browser games · Private local ROM storage · Keyboard, touch and gamepad
             </div>
           </div>
@@ -198,7 +198,7 @@ export default function GamesPage() {
                 </span>
                 <div>
                   <h3 className="text-lg font-black">{recentRetro.title}</h3>
-                  <p className="text-xs text-white/45">Retro Arcade · Last played on this device</p>
+                  <p className="text-xs text-white/60">Retro Arcade · Last played on this device</p>
                 </div>
                 <span className="ml-4 flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-black text-black">
                   <Play size={13} fill="currentColor" /> Resume
@@ -231,7 +231,7 @@ export default function GamesPage() {
               <div key={item.title} className="relative overflow-hidden rounded-2xl border p-5" style={{ borderColor: `${item.color}28`, background: `linear-gradient(145deg, ${item.color}12, rgba(255,255,255,.02))` }}>
                 <div className="mb-4 h-1.5 w-12 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 18px ${item.color}` }} />
                 <h3 className="text-sm font-black text-white">{item.title}</h3>
-                <p className="mt-2 text-xs leading-5 text-white/45">{item.detail}</p>
+                <p className="mt-2 text-xs leading-5 text-white/60">{item.detail}</p>
               </div>
             ))}
           </div>
@@ -243,7 +243,7 @@ export default function GamesPage() {
             <div>
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-violet-400">Build with LiTT</p>
               <h2 className="mt-2 text-xl font-black sm:text-2xl">Make your own game in Studio</h2>
-              <p className="mt-2 max-w-md text-sm text-white/55">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
+              <p className="mt-2 max-w-md text-sm text-white/65">Use AI agents to design, code, and ship original mini-games — no engine setup required.</p>
             </div>
             <Link href="/studio?tool=image" className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-400">
               <Wand2 size={16} /> Open Studio
@@ -255,7 +255,7 @@ export default function GamesPage() {
         <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">
           <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-400/4 p-4">
             <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
-            <p className="text-xs leading-5 text-white/50">
+            <p className="text-xs leading-5 text-white/60">
               LiTTree does not provide commercial ROM files. Only import games you own or public-domain homebrew. Your imported files remain in your browser.
             </p>
           </div>
@@ -269,13 +269,13 @@ export default function GamesPage() {
               <h2 className="mt-1 text-xl font-black sm:text-2xl">Browser games — no install</h2>
             </div>
             <div className="relative w-full max-w-48">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50" size={14} />
               <input
                 type="text"
                 placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-orange-500/40"
+                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/50 focus:border-orange-500/40"
               />
             </div>
           </div>
@@ -304,7 +304,7 @@ export default function GamesPage() {
                       <Play size={15} fill="currentColor" />
                     </span>
                   </div>
-                  <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/70 backdrop-blur-sm">
+                  <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white/80 backdrop-blur-sm">
                     {game.launchMode === "embedded" ? "Play here" : "New tab"}
                   </span>
                 </div>
@@ -313,14 +313,14 @@ export default function GamesPage() {
                     <h3 className="truncate text-sm font-black">{game.title}</h3>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleToggleFav(game.id); }}
-                      className="shrink-0 text-white/20 transition hover:text-white"
+                      className="shrink-0 text-white/50 transition hover:text-white"
                       aria-label={favorites.includes(game.id) ? `Unfavorite ${game.title}` : `Favorite ${game.title}`}
                     >
                       <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} className={favorites.includes(game.id) ? "text-orange-500" : ""} />
                     </button>
                   </div>
-                  <p className="mt-1 line-clamp-1 text-xs text-white/40">{game.description}</p>
-                  <div className="mt-2 flex items-center gap-2 text-[10px] text-white/30">
+                  <p className="mt-1 line-clamp-1 text-xs text-white/60">{game.description}</p>
+                  <div className="mt-2 flex items-center gap-2 text-[10px] text-white/55">
                     <span className="capitalize">{game.category}</span>
                     <span>·</span>
                     <span>{game.players}P</span>
@@ -332,7 +332,7 @@ export default function GamesPage() {
 
           {filteredGames.length === 0 && (
             <div className="py-12 text-center">
-              <p className="text-white/40">No games found matching &quot;{searchQuery}&quot;.</p>
+              <p className="text-white/60">No games found matching &quot;{searchQuery}&quot;.</p>
               <button onClick={() => setSearchQuery("")} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">Clear search</button>
             </div>
           )}
@@ -357,7 +357,7 @@ export default function GamesPage() {
                     </button>
                     <div>
                       <div className="font-black">{selectedGame.title}</div>
-                      <div className="text-[10px] text-white/40">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
+                      <div className="text-[10px] text-white/55">{selectedGame.platform.toUpperCase()} · {selectedGame.licenseLabel}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -380,7 +380,7 @@ export default function GamesPage() {
                     <button
                       onClick={() => handleToggleFav(selectedGame.id)}
                       className="rounded-lg border border-white/10 p-2 hover:bg-white/10"
-                      style={{ color: favorites.includes(selectedGame.id) ? "#f97316" : "rgba(255,255,255,0.4)" }}
+                      style={{ color: favorites.includes(selectedGame.id) ? "#f97316" : "rgba(255,255,255,0.6)" }}
                       aria-label={favorites.includes(selectedGame.id) ? "Unfavorite" : "Favorite"}
                     >
                       <Heart size={16} fill={favorites.includes(selectedGame.id) ? "#f97316" : "none"} />
@@ -411,7 +411,7 @@ export default function GamesPage() {
                       <div className="absolute inset-0 flex items-center justify-center bg-black">
                         <div className="text-center">
                           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                          <p className="mt-3 text-xs text-white/40">Loading {selectedGame.title}…</p>
+                          <p className="mt-3 text-xs text-white/60">Loading {selectedGame.title}…</p>
                           <a
                             href={selectedGame.html5Url}
                             target="_blank"
@@ -440,7 +440,7 @@ export default function GamesPage() {
                     )}
                   </>
                 ) : (
-                  <div className="flex h-full items-center justify-center text-white/40">
+                  <div className="flex h-full items-center justify-center text-white/60">
                     <p>No playable game available.</p>
                   </div>
                 )}
@@ -460,7 +460,7 @@ export default function GamesPage() {
 
               {/* Footer bar — hidden in fullscreen */}
               {!isFullscreen && (
-                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/40">
+                <div className="mt-2 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] text-white/55">
                   <span>👤 {selectedGame.players}P</span>
                   <span>🛡️ {selectedGame.licenseLabel}</span>
                   {selectedGame.sourceUrl && (
@@ -473,7 +473,7 @@ export default function GamesPage() {
                       <ExternalLink size={11} /> Open in new tab
                     </a>
                   )}
-                  <span className="ml-auto text-white/25">Press Esc to close · Click outside to exit</span>
+                  <span className="ml-auto text-white/50">Press Esc to close · Click outside to exit</span>
                 </div>
               )}
             </div>
