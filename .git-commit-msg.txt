@@ -1,15 +1,10 @@
-feat: remove broken Claude from model picker, activate all n8n workflows
+fix: DOS Box Lab — robust js-dos script loading with polling + CDN fallback
 
-- Remove Claude Sonnet from BYOK picker and code models (no Anthropic API key)
-- R2 storage already configured (all 5 env vars verified on Vercel)
-- n8n: All 4 workflows now active:
-  - AI Workflow Orchestration (was already active)
-  - Email + Social Digest (was already active)
-  - Stripe Customer Onboarding (fixed Gmail params, replaced Slack with HTTP Request)
-  - GitHub to Supabase Sync (rebuilt with Code node + HTTP Request for Discord)
-- Replaced Slack/Discord native nodes with HTTP Request nodes using env var webhook URLs
-- Cleaned up duplicate workflows and test workflow
-- Generated new n8n API key (old one expired)
+- Replace 500ms setTimeout with proper polling (100ms interval, 8s timeout)
+- Load both local and CDN CSS simultaneously
+- Try local script first, fall back to CDN if window.Dos not set
+- Show "Loading DOS engine..." spinner while script loads
+- Better error message if both sources fail
 
 Generated with [Devin](https://devin.ai)
 

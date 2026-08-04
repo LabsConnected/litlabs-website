@@ -35,6 +35,10 @@ const JS_DOS_CSS = "/jsdos/js-dos.css";
 const JS_DOS_CDN_SCRIPT = "https://v8.js-dos.com/latest/js-dos.js";
 const JS_DOS_CDN_CSS = "https://v8.js-dos.com/latest/js-dos.css";
 
+// Poll for window.Dos with a longer timeout — the 322KB script needs time to parse
+const DOS_POLL_INTERVAL_MS = 100;
+const DOS_POLL_TIMEOUT_MS = 8_000;
+
 // Digger — a classic DOS game, bundled locally to avoid CDN death
 const DEMO_BUNDLE_URL = "/jsdos/demo-digger.jsdos";
 
@@ -63,71 +67,96 @@ export default function DosPlayer({
   const [initStartTime, setInitStartTime] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
 
-  /* Load the js-dos script + CSS once, with CDN fallback */
+  /* Load the js-dos script + CSS once, with CDN fallback and polling */
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.Dos) {
-      const id = setTimeout(() => {
-        setScriptLoaded(true);
-        setScriptSource("local");
-      }, 0);
-      return () => clearTimeout(id);
+      setScriptLoaded(true);
+      setScriptSource("local");
+      return;
     }
 
-    let css = document.createElement("link");
+    let cancelled = false;
+
+    // Load CSS
+    const css = document.createElement("link");
     css.rel = "stylesheet";
     css.href = JS_DOS_CSS;
     document.head.appendChild(css);
 
-    let script = document.createElement("script");
-    script.src = JS_DOS_SCRIPT;
-    script.async = true;
+    // Also load CDN CSS as backup
+    const cdnCss = document.createElement("link");
+    cdnCss.rel = "stylesheet";
+    cdnCss.href = JS_DOS_CDN_CSS;
+    document.head.appendChild(cdnCss);
 
-    const loadFromCdn = () => {
-      css = document.createElement("link");
-      css.rel = "stylesheet";
-      css.href = JS_DOS_CDN_CSS;
-      document.head.appendChild(css);
+    // Try loading script from local first, CDN as fallback
+    const tryLoadScript = (src: string, isCdn: boolean): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = true;
+        if (isCdn) script.crossOrigin = "anonymous";
 
-      script = document.createElement("script");
-      script.src = JS_DOS_CDN_SCRIPT;
-      script.async = true;
-      script.crossOrigin = "anonymous";
-      script.onload = () => {
-        if (window.Dos) {
-          setScriptLoaded(true);
-          setScriptSource("cdn");
-        } else {
-          setError("js-dos engine loaded but window.Dos is undefined");
-          setScriptSource("failed");
-          setLoadState("error");
-        }
-      };
-      script.onerror = () => {
-        setError("Failed to load js-dos engine from both local and CDN sources");
+        const timeout = window.setTimeout(() => {
+          resolve(false);
+        }, 10_000);
+
+        script.onload = () => {
+          window.clearTimeout(timeout);
+          // Poll for window.Dos — the script may need time to initialize
+          const startTime = Date.now();
+          const poll = window.setInterval(() => {
+            if (cancelled) {
+              window.clearInterval(poll);
+              return;
+            }
+            if (window.Dos) {
+              window.clearInterval(poll);
+              resolve(true);
+            } else if (Date.now() - startTime > DOS_POLL_TIMEOUT_MS) {
+              window.clearInterval(poll);
+              resolve(false);
+            }
+          }, DOS_POLL_INTERVAL_MS);
+        };
+
+        script.onerror = () => {
+          window.clearTimeout(timeout);
+          resolve(false);
+        };
+
+        document.head.appendChild(script);
+      });
+    };
+
+    (async () => {
+      // Try local first
+      let success = await tryLoadScript(JS_DOS_SCRIPT, false);
+      if (cancelled) return;
+
+      if (success) {
+        setScriptLoaded(true);
+        setScriptSource("local");
+        return;
+      }
+
+      // Try CDN
+      success = await tryLoadScript(JS_DOS_CDN_SCRIPT, true);
+      if (cancelled) return;
+
+      if (success) {
+        setScriptLoaded(true);
+        setScriptSource("cdn");
+      } else {
+        setError("Failed to load js-dos engine from both local and CDN sources. Check your browser's content blocker or network connection.");
         setScriptSource("failed");
         setLoadState("error");
-      };
-      document.head.appendChild(script);
-    };
-
-    script.onload = () => {
-      setTimeout(() => {
-        if (window.Dos) {
-          setScriptLoaded(true);
-          setScriptSource("local");
-        } else {
-          loadFromCdn();
-        }
-      }, 500);
-    };
-    script.onerror = () => {
-      loadFromCdn();
-    };
-    document.head.appendChild(script);
+      }
+    })();
 
     return () => {
-      // Don't remove — other instances may need it
+      cancelled = true;
     };
   }, []);
 
@@ -457,6 +486,12 @@ export default function DosPlayer({
 
           {/* Demo button */}
           <div className="max-w-md mx-auto text-center">
+            {!scriptLoaded && scriptSource !== "failed" && (
+              <div className="mb-3 flex items-center justify-center gap-2 text-[11px]" style={{ color: T.textMuted }}>
+                <Loader2 size={12} className="animate-spin" />
+                Loading DOS engine...
+              </div>
+            )}
             <button
               onClick={handleDemo}
               disabled={!scriptLoaded}
