@@ -168,6 +168,7 @@ function CommandStudioContent() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
@@ -226,6 +227,12 @@ function CommandStudioContent() {
     onRouteInspectorAction: (tab) => {
       setInspectorTab(tab);
       setInspectorOpen(true);
+    },
+    onRunHealthChecks: () => {
+      // Open the checks panel and trigger run-all
+      setInspectorTab("checks");
+      setInspectorOpen(true);
+      setHealthRunTrigger((n) => n + 1);
     },
     serverProjectId: capabilities.projectId,
   });
@@ -599,6 +606,7 @@ function CommandStudioContent() {
                   messages: conversation.messages,
                   busy: conversation.busy,
                   workspaceRevision,
+                  healthRunTrigger,
                   onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
                   onWorkspacePrepared: () => { void refreshCapabilities(); },
                 }}

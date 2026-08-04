@@ -42,50 +42,6 @@ export const BUILT_IN_AGENTS: Record<AgentSlug, BuiltInAgent> = {
       "agent_note",
     ],
   },
-  researcher: {
-    slug: "researcher",
-    displayName: "Researcher",
-    systemPrompt: "You are Researcher — the research and synthesis specialist.",
-    capabilities: ["chat", "research"],
-    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
-  },
-  writer: {
-    slug: "writer",
-    displayName: "Writer",
-    systemPrompt: "You are Writer — the content and copy specialist.",
-    capabilities: ["chat", "writing"],
-    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
-  },
-  marketer: {
-    slug: "marketer",
-    displayName: "Marketer",
-    systemPrompt: "You are Marketer — the marketing and growth specialist.",
-    capabilities: ["chat", "marketing"],
-    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
-  },
-  coder: {
-    slug: "coder",
-    displayName: "Coder",
-    systemPrompt: "You are Coder — the engineering and implementation specialist.",
-    capabilities: ["chat", "code_review", "terminal", "github", "deployment"],
-    memoryTypes: [
-      "user_preference",
-      "project_fact",
-      "project_decision",
-      "architecture",
-      "workflow",
-      "constraint",
-      "conversation_summary",
-      "agent_note",
-    ],
-  },
-  analyst: {
-    slug: "analyst",
-    displayName: "Analyst",
-    systemPrompt: "You are Analyst — the data and analytics specialist.",
-    capabilities: ["chat", "research"],
-    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
-  },
   // Premium marketplace agents — full-service AI workers.
   nova: {
     slug: "nova",
@@ -107,6 +63,52 @@ export const BUILT_IN_AGENTS: Record<AgentSlug, BuiltInAgent> = {
     systemPrompt: "You are Echo — the AI Creative Partner inside LiTTree Lab Studios. You are a full-service creative companion that learns brand voice, plans content, creates media, and maintains content workflows.",
     capabilities: ["chat", "creative", "image", "design"],
     memoryTypes: ["user_preference", "project_fact", "project_decision", "conversation_summary", "agent_note"],
+  },
+  // Legacy agent slugs — kept for backward compatibility with existing
+  // conversations. Coding and research requests route to LiTT.
+  researcher: {
+    slug: "researcher",
+    displayName: "LiTT",
+    systemPrompt: LITT_SYSTEM_PROMPT,
+    capabilities: ["chat", "code_review", "project_management", "terminal", "github", "deployment"],
+    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
+  },
+  writer: {
+    slug: "writer",
+    displayName: "LiTT",
+    systemPrompt: LITT_SYSTEM_PROMPT,
+    capabilities: ["chat", "code_review", "project_management"],
+    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
+  },
+  marketer: {
+    slug: "marketer",
+    displayName: "LiTT",
+    systemPrompt: LITT_SYSTEM_PROMPT,
+    capabilities: ["chat", "project_management"],
+    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
+  },
+  coder: {
+    slug: "coder",
+    displayName: "LiTT",
+    systemPrompt: LITT_SYSTEM_PROMPT,
+    capabilities: ["chat", "code_review", "terminal", "github", "deployment"],
+    memoryTypes: [
+      "user_preference",
+      "project_fact",
+      "project_decision",
+      "architecture",
+      "workflow",
+      "constraint",
+      "conversation_summary",
+      "agent_note",
+    ],
+  },
+  analyst: {
+    slug: "analyst",
+    displayName: "LiTT",
+    systemPrompt: LITT_SYSTEM_PROMPT,
+    capabilities: ["chat", "code_review", "project_management"],
+    memoryTypes: ["user_preference", "project_fact", "conversation_summary", "agent_note"],
   },
 } as const;
 

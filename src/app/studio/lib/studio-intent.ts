@@ -195,7 +195,14 @@ function buildIntentResult(
     case "open_preview":
       return { intent, tool, message: "Opening Preview." };
     case "project_health":
-      return { intent, message: "Opening Project Health." };
+      return {
+        intent,
+        message: "I'll run a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will stream into the Project Health panel.",
+        actions: [
+          { label: "Run all checks", action: "run_all_checks" },
+          { label: "View results", action: "view_health" },
+        ],
+      };
     case "open_approvals":
       return { intent, message: "Opening Approvals." };
     case "connect_github":
