@@ -107,7 +107,7 @@ export default async function AgentDetailPage({
             <span className="text-xs font-bold text-white/40">{planPrice}</span>
             <span className="text-xs text-white/30">·</span>
             <span className="text-xs font-bold text-white/40">
-              {agent.cost.perRun} LiTTBits/run
+              {agent.cost.perRun} credits/run
             </span>
           </div>
         </div>
@@ -200,7 +200,7 @@ export default async function AgentDetailPage({
                 <div className="flex justify-between text-xs">
                   <span className="text-white/40">Cost per run</span>
                   <span className="font-bold text-white/60">
-                    {agent.cost.perRun === 0 ? "Free" : `${agent.cost.perRun} LiTTBits`}
+                    {agent.cost.perRun === 0 ? "Free" : `${agent.cost.perRun} credits`}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">

@@ -165,7 +165,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
   },
   {
     id: "littbits",
-    label: "LiTTBits",
+    label: "AI Credits",
     description: "Your credit balance and plan",
     category: "user",
     defaultPlacement: { x: 0, y: 16, width: 3, height: 2 },

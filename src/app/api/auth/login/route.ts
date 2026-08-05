@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPassword } from "@/lib/db";
 import { signToken } from "@/lib/jwt";
+import { withRateLimit } from "@/lib/rate-limiter";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     let email = "";
     let password = "";
+    let turnstileToken = "";
     let isJson = false;
 
     const contentType = req.headers.get("content-type") || "";
@@ -14,10 +17,28 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       email = body.email || "";
       password = body.password || "";
+      turnstileToken = body.turnstileToken || "";
     } else {
       const formData = await req.formData();
       email = (formData.get("email") as string) || "";
       password = (formData.get("password") as string) || "";
+      turnstileToken = (formData.get("turnstileToken") as string) || "";
+    }
+
+    // Verify Turnstile token if configured (bot protection)
+    if (turnstileToken) {
+      const turnstileResult = await verifyTurnstileToken(turnstileToken);
+      if (!turnstileResult.success) {
+        if (isJson) {
+          return NextResponse.json(
+            { error: "Bot verification failed" },
+            { status: 403 },
+          );
+        }
+        return NextResponse.redirect(
+          new URL("/login?error=Bot+verification+failed", req.url),
+        );
+      }
     }
 
     if (!email || !password) {
@@ -71,3 +92,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+// Strict limit: 5 login attempts per minute to prevent credential stuffing
+export const POST = withRateLimit(handler, 5, 60);

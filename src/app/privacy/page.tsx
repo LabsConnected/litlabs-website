@@ -65,7 +65,7 @@ export default function PrivacyPage() {
               <li>
                 <strong>Local Storage:</strong> Theme preferences, UI state,
                 and cached session metadata stored locally in your browser.
-                LiTTBits balances are <strong>not</strong> stored in local
+                AI credit balances are <strong>not</strong> stored in local
                 storage — they are stored server-side in our Supabase credit
                 ledger.
               </li>
@@ -77,7 +77,7 @@ export default function PrivacyPage() {
                 projects, and persist across sessions.
               </li>
               <li>
-                <strong>LiTTBits Ledger:</strong> Your LiTTBits balance,
+                <strong>AI Credit Ledger:</strong> Your AI credit balance,
                 transaction history (grants, spending, purchases), and billing
                 records are stored server-side in our Supabase credit ledger.
               </li>
@@ -125,7 +125,7 @@ export default function PrivacyPage() {
               <li>Providing and maintaining the Platform functionality.</li>
               <li>Authenticating users and securing accounts via Clerk.</li>
               <li>
-                Processing subscriptions, LiTTBits grants, and marketplace
+                Processing subscriptions, AI credit grants, and marketplace
                 transactions via Stripe.
               </li>
               <li>
@@ -233,7 +233,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Database:</strong> Supabase (PostgreSQL) stores user
-                accounts, conversations, project memory, LiTTBits credit
+                accounts, conversations, project memory, AI credit
                 ledger, subscriptions, and marketplace data.
               </li>
               <li>
@@ -271,7 +271,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Supabase:</strong> Database, conversations, project
-                memory, and LiTTBits credit ledger.
+                memory, and AI credit ledger.
               </li>
               <li>
                 <strong>Stripe:</strong> Payment processing for subscriptions
@@ -321,7 +321,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Local storage:</strong> Theme preferences, UI state,
-                and cached session metadata. LiTTBits balances are fetched from
+                and cached session metadata. AI credit balances are fetched from
                 the server, not stored locally.
               </li>
               <li>
@@ -350,7 +350,7 @@ export default function PrivacyPage() {
                 for the lifetime of your account unless you delete them.
               </li>
               <li>
-                <strong>LiTTBits ledger:</strong> Transaction history is
+                <strong>AI credit ledger:</strong> Transaction history is
                 retained for billing and audit purposes.
               </li>
               <li>
@@ -362,6 +362,19 @@ export default function PrivacyPage() {
                 real-time by Inworld AI for transcription and TTS. We do not
                 store raw audio recordings unless explicitly saved as part of a
                 project.
+              </li>
+              <li>
+                <strong>Audit events:</strong> Security and operational audit
+                logs are retained for <strong>90 days</strong>, then
+                automatically purged. IP addresses and user agents are only
+                recorded for security-critical events (errors, rate limiting,
+                denied approvals, deployments) — routine events do not capture
+                IP or device information.
+              </li>
+              <li>
+                <strong>Rate limit data:</strong> IP-based rate limit counters
+                are purged after <strong>1 hour</strong>. These are used solely
+                for abuse prevention and do not constitute a tracking record.
               </li>
               <li>
                 <strong>Account data:</strong> Retained while your account is
@@ -390,6 +403,15 @@ export default function PrivacyPage() {
             </ul>
             <p className="mt-2">
               To exercise these rights, contact us at support@litlabs.net.
+              We will respond to your request <strong>within 30 days</strong>,
+              as required by GDPR Article 12. For complex requests, we may extend
+              this by up to 60 additional days and will inform you of the extension
+              within the first 30 days.
+            </p>
+            <p className="mt-2">
+              You can also export your data directly from
+              <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}> Settings → Privacy &amp; Security</a>
+              without contacting us, or delete your data via the same page.
             </p>
           </section>
 
@@ -398,7 +420,70 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              9. User Controls
+              9. Data Subject Access Requests (DSAR)
+            </h2>
+            <p className="mb-2">
+              If you wish to access, correct, export, or delete your personal data,
+              you can:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                <strong>Self-service:</strong> Use the Export and Delete buttons in
+                <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}> Settings → Privacy &amp; Security</a>.
+                These actions take effect immediately on our database.
+              </li>
+              <li>
+                <strong>Email request:</strong> Email support@litlabs.net with the
+                subject line &ldquo;Data Request&rdquo;. Include your account email so we
+                can verify your identity.
+              </li>
+            </ul>
+            <p className="mt-2">
+              We will verify your identity before processing any request. We
+              respond to all valid requests <strong>within 30 days</strong>.
+            </p>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              10. Data Breach Response
+            </h2>
+            <p className="mb-2">
+              In the event of a personal data breach, we will:
+            </p>
+            <ul className="list-disc pl-5 space-y-1 opacity-80">
+              <li>
+                Assess the breach within <strong>24 hours</strong> of discovery to
+                determine its scope and severity.
+              </li>
+              <li>
+                Notify the relevant supervisory authority within
+                <strong> 72 hours</strong> of becoming aware of the breach, as
+                required by GDPR Article 33.
+              </li>
+              <li>
+                Notify affected users without undue delay if the breach is likely
+                to result in a high risk to their rights and freedoms (GDPR
+                Article 34).
+              </li>
+              <li>
+                Document the breach, its effects, and the remedial action taken.
+              </li>
+            </ul>
+            <p className="mt-2">
+              To report a suspected breach, email support@litlabs.net immediately.
+            </p>
+          </section>
+
+          <section>
+            <h2
+              className="text-sm font-bold uppercase tracking-wider mb-2"
+              style={{ color: "var(--header-color)" }}
+            >
+              11. User Controls
             </h2>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
@@ -433,7 +518,7 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              10. Children&apos;s Privacy
+              12. Children&apos;s Privacy
             </h2>
             <p>
               Our Platform does not address anyone under the age of 13. We do
@@ -449,7 +534,7 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              11. Security Limitations
+              13. Security Limitations
             </h2>
             <p>
               While we use industry-standard security practices, no platform is
@@ -465,7 +550,7 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              12. Changes to This Policy
+              14. Changes to This Policy
             </h2>
             <p>
               We may update our Privacy Policy from time to time. We will notify
@@ -479,7 +564,7 @@ export default function PrivacyPage() {
               className="text-sm font-bold uppercase tracking-wider mb-2"
               style={{ color: "var(--header-color)" }}
             >
-              13. Contact Us
+              15. Contact Us
             </h2>
             <p>
               If you have any questions about this Privacy Policy, please

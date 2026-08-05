@@ -29,7 +29,7 @@ export async function GET(
 
   if (isOwnerOrAdmin) {
     return NextResponse.json({
-      plan: "elite",
+      plan: "pro_builder_beta",
       status: "active",
       current_period_end: null,
       is_admin: true,

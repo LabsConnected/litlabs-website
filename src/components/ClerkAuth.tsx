@@ -211,7 +211,7 @@ function UpgradeButton() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  LiTTBits / Usage badge                                             */
+/*  AI Credits / Usage badge                                           */
 /* ------------------------------------------------------------------ */
 function UsageBadge({ accentColor }: { accentColor: string }) {
   const { balance, isLoading } = useWallet();
@@ -224,7 +224,7 @@ function UsageBadge({ accentColor }: { accentColor: string }) {
         border: `1px solid ${accentColor}25`,
         minHeight: 36,
       }}
-      title="Your LiTTBits balance"
+      title="Your AI credits balance"
     >
       <Coins size={11} /> {isLoading ? "—" : balance.toLocaleString()}
     </span>

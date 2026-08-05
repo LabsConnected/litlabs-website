@@ -9,8 +9,9 @@ import {
   parseJarvisActions,
 } from "@/lib/litt-context";
 import { detectAndExecuteTool, detectToolIntent } from "@/lib/litt-intelligence/tool-executor";
+import { withRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -95,3 +96,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

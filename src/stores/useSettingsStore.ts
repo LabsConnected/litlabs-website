@@ -27,7 +27,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "appearance", label: "Appearance", description: "Theme, colors, fonts, effects", icon: "Palette", minMode: "standard" },
   { id: "workspace", label: "Workspace", description: "Studio layout and defaults", icon: "Briefcase", minMode: "standard" },
   { id: "notifications", label: "Notifications", description: "Alerts, email, quiet hours", icon: "Bell", minMode: "standard" },
-  { id: "billing", label: "Billing & LiTTBits", description: "Plan, usage, beta credits", icon: "Sparkles", minMode: "standard" },
+  { id: "billing", label: "Billing & Credits", description: "Plan, usage, beta credits", icon: "Sparkles", minMode: "standard" },
   { id: "privacy", label: "Privacy & Security", description: "Sessions, data, audit log", icon: "Shield", minMode: "standard" },
 
   // ── Advanced: page customization, navigation, devices ─────────────

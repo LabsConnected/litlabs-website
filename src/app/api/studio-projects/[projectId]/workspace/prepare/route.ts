@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import type { CanonicalProject } from "@/lib/projects/types";
 import {
   getProject,
   updateProjectWorkspace,
@@ -57,10 +58,17 @@ export async function POST(
 
   // Ensure the project exists as a canonical studio_projects row before
   // we try to lock or update it. Legacy projects are migrated here explicitly.
-  const canonical = await ensureCanonicalStudioProject(projectId, userId);
-  if (!canonical) {
+  let canonical: CanonicalProject;
+  try {
+    canonical = await ensureCanonicalStudioProject(projectId, userId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not establish canonical project record";
     return NextResponse.json(
-      { error: "Could not establish canonical project record" },
+      {
+        error: message,
+        projectId,
+        userId,
+      },
       { status: 500 },
     );
   }

@@ -10,6 +10,7 @@
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
+import { studioLog } from "@/lib/studio/logger";
 import type { StudioProjectRow, LegacyProjectRow } from "./types";
 import {
   rowToCanonical,
@@ -302,14 +303,22 @@ export async function updateProjectWorkspace(
 export async function ensureCanonicalStudioProject(
   projectId: string,
   userId: string,
-): Promise<CanonicalProject | null> {
+): Promise<CanonicalProject> {
   // 1. Check studio_projects first
-  const { data: existing } = await supabaseAdmin
+  const { data: existing, error: existingErr } = await supabaseAdmin
     .from(TABLE)
     .select("*")
     .eq("id", projectId)
     .eq("user_id", userId)
     .maybeSingle();
+
+  if (existingErr) {
+    studioLog("ensureCanonical:studio_projects_query_error", {
+      projectId,
+      userId,
+      errorClass: existingErr.message,
+    });
+  }
 
   if (existing) {
     return rowToCanonical(existing as StudioProjectRow);
@@ -323,7 +332,39 @@ export async function ensureCanonicalStudioProject(
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (legacyErr || !legacyRow) return null;
+  if (legacyErr) {
+    studioLog("ensureCanonical:legacy_query_error", {
+      projectId,
+      userId,
+      errorClass: legacyErr.message,
+    });
+    throw new Error(`[ensureCanonical] legacy query failed: ${legacyErr.message}`);
+  }
+
+  if (!legacyRow) {
+    // Project doesn't exist in either table — check if it exists at all
+    // (different user_id or not found) to give a better diagnostic
+    const { data: anyRow } = await supabaseAdmin
+      .from(LEGACY_TABLE)
+      .select("id, user_id")
+      .eq("id", projectId)
+      .maybeSingle();
+    if (anyRow && anyRow.user_id !== userId) {
+      studioLog("ensureCanonical:ownership_mismatch", {
+        projectId,
+        userId,
+        errorClass: `Project owned by ${anyRow.user_id}, not ${userId}`,
+      });
+      throw new Error(`[ensureCanonical] project owned by ${anyRow.user_id}, not ${userId}`);
+    } else {
+      studioLog("ensureCanonical:not_found", {
+        projectId,
+        userId,
+        errorClass: "Project not found in studio_projects or legacy projects table",
+      });
+      throw new Error('[ensureCanonical] project not found in studio_projects or legacy table');
+    }
+  }
 
   const legacy = legacyRow as LegacyProjectRow;
 
@@ -337,6 +378,7 @@ export async function ensureCanonicalStudioProject(
     slug: legacy.repository,
     source_type: "github",
     access_mode: legacy.repository_private ? "private" : "public",
+    template_id: null,
     github_installation_id: legacy.github_installation_id,
     github_repository_id: legacy.repository_id,
     github_owner: legacy.owner,
@@ -344,12 +386,22 @@ export async function ensureCanonicalStudioProject(
     github_full_name: legacy.repository_full_name,
     github_default_branch: legacy.default_branch,
     github_branch: legacy.working_branch ?? legacy.selected_branch ?? legacy.default_branch,
+    latest_commit_sha: null,
     workspace_id: legacy.workspace_id ?? null,
     workspace_status: "not_prepared",
     workspace_root: null,
     workspace_error: null,
     workspace_prepared_at: null,
     runtime_status: "stopped",
+    preview_url: null,
+    runtime_error: null,
+    framework: null,
+    package_manager: null,
+    root_directory: ".",
+    development_command: null,
+    build_command: null,
+    test_command: null,
+    install_command: null,
     created_at: legacy.created_at,
     updated_at: new Date().toISOString(),
   };
@@ -360,7 +412,24 @@ export async function ensureCanonicalStudioProject(
     .select()
     .maybeSingle();
 
-  if (insertErr || !inserted) return null;
+  if (insertErr) {
+    studioLog("ensureCanonical:upsert_error", {
+      projectId,
+      userId,
+      errorClass: insertErr.message,
+    });
+    throw new Error(`[ensureCanonical] upsert failed: ${insertErr.message}`);
+  }
+
+  if (!inserted) {
+    studioLog("ensureCanonical:upsert_no_data", {
+      projectId,
+      userId,
+      errorClass: "Upsert returned no data",
+    });
+    throw new Error('[ensureCanonical] upsert returned no data');
+  }
+
   return rowToCanonical(inserted as StudioProjectRow);
 }
 

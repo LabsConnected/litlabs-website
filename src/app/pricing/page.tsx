@@ -79,11 +79,11 @@ const CARD_PLANS: CardPlan[] = [
 const usageRules = [
   {
     title: "One visible balance",
-    copy: "See all your credits in one place — no hidden balances or surprise charges.",
+    copy: "See all your AI credits in one place — no hidden balances or surprise charges.",
   },
   {
     title: "Credits per billing cycle",
-    copy: "Paid plans grant LiTTBits after each successful billing cycle. Starter credits do not expire.",
+    copy: "Paid plans grant AI credits after each successful billing cycle. Starter credits do not expire.",
   },
   {
     title: "Fair usage tracking",
@@ -93,17 +93,17 @@ const usageRules = [
 
 const faq = [
   {
-    question: "What are LiTTBits?",
+    question: "What are AI credits?",
     answer:
-      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime.",
+      "AI credits are platform credits used for billable AI actions such as chat, code generation, image creation, video generation, media processing, and terminal runtime.",
   },
   {
     question: "How does video generation work?",
     answer:
-      "Video is metered usage. Create a 5-second clip starting at $0.79 in LiTTBits. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.",
+      "Video is metered usage. Create a 5-second clip starting at $0.79 in AI credits. Choose Draft, Quality, or Video with Audio. The exact cost is shown before you generate. Cinema and 4K are coming soon.",
   },
   {
-    question: "Do I keep my existing Beta LiTTBits?",
+    question: "Do I keep my existing Beta credits?",
     answer:
       "Yes. Existing balances remain visible. Monthly plan credits are used first, followed by promotional and purchased credits.",
   },
@@ -191,7 +191,7 @@ function PlanCard({
       <div className={styles.allowanceGrid}>
         <div className={styles.allowance}>
           <strong>{plan.credits}</strong>
-          <span>LiTTBits monthly</span>
+          <span>AI credits monthly</span>
         </div>
         <div className={styles.allowance}>
           <strong>{plan.projectLimit}</strong>

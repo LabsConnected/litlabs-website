@@ -30,24 +30,18 @@ import { SystemHealthStrip } from "./SystemHealthStrip";
 import { ActionButton } from "./DashboardV2Primitives";
 import { Icon, getGreeting, timeAgo, STATUS_COLORS } from "./dashboard-v2-utils";
 import type { DashboardData } from "./dashboard-v2-types";
+import { D as DashTokens } from "@/lib/dashboard/tokens";
 
 // ---------------------------------------------------------------------------
 // Premium design tokens — deep black-violet matching Studio
 // ---------------------------------------------------------------------------
 
 const D = {
+  ...DashTokens,
   bg: "#060410",
   bgGradient:
     "radial-gradient(circle at 15% 0%, rgba(124,58,237,0.12), transparent 40%), radial-gradient(circle at 85% 15%, rgba(168,85,247,0.06), transparent 30%), #060410",
-  surface: "rgba(255,255,255,0.025)",
-  surfaceHover: "rgba(255,255,255,0.04)",
-  border: "rgba(168,85,247,0.12)",
-  borderActive: "rgba(168,85,247,0.3)",
-  accent: "#a970ff",
-  accentGreen: "#B6FF4A",
-  textPrimary: "#eef4ff",
-  textMuted: "rgba(238,244,255,0.45)",
-  textDim: "rgba(238,244,255,0.25)",
+  borderActive: "var(--dash-border-strong)",
 };
 
 // ---------------------------------------------------------------------------

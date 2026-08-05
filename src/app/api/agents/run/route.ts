@@ -3,8 +3,9 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { randomUUID } from "crypto";
 import { recordAgentRun } from "@/lib/metrics";
+import { withRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ queued: true, id: data.id });
 }
 
-export async function GET(req: NextRequest) {
+async function getHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -73,3 +74,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ runs: data || [] });
 }
+
+export const POST = withRateLimit(handler, 10, 60);
+export const GET = withRateLimit(getHandler, 30, 60);

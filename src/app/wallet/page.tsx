@@ -56,7 +56,7 @@ function WalletContent() {
     const ok = await claim();
     setClaimMsg(
       ok
-        ? "Daily bonus claimed! +50 LiTTBits"
+        ? "Daily bonus claimed! +50 AI credits"
         : "Daily bonus is currently unavailable.",
     );
   }, [claim]);
@@ -69,7 +69,7 @@ function WalletContent() {
   return (
     <PageShell
       title="Wallet"
-      subtitle="LiTTBits balance and usage"
+      subtitle="AI credits balance and usage"
       icon={<Wallet size={28} />}
     >
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -96,7 +96,7 @@ function WalletContent() {
                       {balance.toLocaleString()}
                     </span>
                     <span className="text-sm font-bold opacity-60">
-                      LiTTBits
+                      AI credits
                     </span>
                   </>
                 )}
@@ -142,9 +142,9 @@ function WalletContent() {
             },
             {
               href: "/wallet?tab=litbits",
-              label: "LiTTBits info",
+              label: "Credit info",
               icon: Sparkles,
-              desc: "How LiTTBits work",
+              desc: "How AI credits work",
             },
           ].map((item) => (
             <Link
@@ -180,17 +180,17 @@ function WalletContent() {
               className="text-lg font-black mb-3"
               style={{ color: T.headerColor }}
             >
-              How LiTTBits work
+              How AI credits work
             </h2>
             <ul className="space-y-2 text-sm opacity-75">
-              <li>• New accounts start with 500 starter LiTTBits (one-time).</li>
+              <li>• New accounts start with 500 starter AI credits (one-time).</li>
               <li>
-                • Paid plans grant LiTTBits after each successful billing cycle.
+                • Paid plans grant AI credits after each successful billing cycle.
               </li>
               <li>
                 • Spend on Studio generation, agents, and marketplace items.
               </li>
-              <li>• Starter and purchased LiTTBits do not expire.</li>
+              <li>• Starter and purchased credits do not expire.</li>
             </ul>
           </div>
         )}

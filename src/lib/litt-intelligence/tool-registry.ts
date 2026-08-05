@@ -693,6 +693,52 @@ export function registerInternalTools(): void {
         enabled: true,
       },
     },
+    // ─── Web Intelligence (Browserbase-powered unified web capability) ──
+    {
+      tool: {
+        id: "web.intelligence",
+        name: "Web Intelligence",
+        description:
+          "Unified web capability: search, fetch, research, browse, observe, act, extract, verify, compare, monitor, screenshot, and PDF. " +
+          "Uses Browserbase as the execution layer with smart escalation (cache → search → fetch → browser). " +
+          "All results are saved to the Source Registry with citations and evidence.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            operation: {
+              type: "string",
+              enum: ["search", "fetch", "research", "browse", "observe", "act", "extract", "verify", "compare", "monitor", "screenshot", "pdf"],
+              description: "The web intelligence operation to perform",
+            },
+            query: { type: "string", description: "Search or research query" },
+            url: { type: "string", description: "Target URL for fetch/browse/observe/act/extract/screenshot/pdf/monitor" },
+            urls: { type: "array", items: { type: "string" }, description: "Multiple URLs for compare" },
+            action: { type: "string", description: "Natural language action for act operation" },
+            instruction: { type: "string", description: "Extraction or observation instruction" },
+            claim: { type: "string", description: "Claim to verify" },
+            schema: { type: "object", description: "Zod-compatible schema for structured extraction" },
+            forceBrowser: { type: "boolean", description: "Skip cache/fetch and use a full browser session" },
+            useProxies: { type: "boolean", description: "Route through residential proxies (paid feature)" },
+            maxResults: { type: "number", description: "Max results for search/research (default 5)" },
+            ownerId: { type: "string", description: "User ID for source ownership" },
+            projectId: { type: "string", description: "Project ID for source scoping" },
+          },
+          required: ["operation", "ownerId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["web_search"],
+        requiredPermissions: ["web:search"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: false,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+    },
     // ─── Terminal (disabled for public users) ─────────────────
     {
       tool: {

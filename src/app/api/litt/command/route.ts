@@ -4,6 +4,7 @@ import { promisify } from "util";
 import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/roles";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -27,7 +28,7 @@ function checkCommand(root: string, action: CheckAction) {
   return { file: process.execPath, args: [path.join(/* turbopackIgnore: true */ root, script), ...args] };
 }
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -95,3 +96,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

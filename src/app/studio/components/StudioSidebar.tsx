@@ -333,7 +333,7 @@ const SYSTEM_ENTRIES: SheetEntry[] = [
   { label: "Voice & Camera", icon: Mic, href: "/settings/agents/voice" },
   { label: "AI & Models", icon: Cpu, href: "/settings" },
   { label: "Privacy & Security", icon: Shield, href: "/settings" },
-  { label: "Billing & LiTTBits", icon: Sparkles, href: "/settings" },
+  { label: "Billing & Credits", icon: Sparkles, href: "/settings" },
 ];
 
 /* ── Mobile bottom tab bar ───────────────────────────────────────── */

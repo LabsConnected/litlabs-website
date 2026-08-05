@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/jwt";
+import { withRateLimit } from "@/lib/rate-limiter";
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const token = req.cookies.get("auth-token")?.value;
     if (!token) return NextResponse.json({ user: null });
@@ -20,3 +21,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ user: null });
   }
 }
+
+export const GET = withRateLimit(handler, 60, 60);

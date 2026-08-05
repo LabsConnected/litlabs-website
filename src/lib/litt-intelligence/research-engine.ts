@@ -278,3 +278,31 @@ function detectResearchIntent(message: string): string {
   if (/integrate|connect|add/i.test(message)) return "integrate";
   return "general";
 }
+
+// ─── Factory: create a fully-wired ResearchEngine ────────────────
+
+/**
+ * Create a ResearchEngine with all available providers registered,
+ * including the Browserbase provider (if BROWSERBASE_API_KEY is set).
+ * Providers that lack their required env vars are silently skipped.
+ */
+export async function createResearchEngine(): Promise<ResearchEngine> {
+  const engine = new ResearchEngine();
+
+  // Register Browserbase provider (Search + Fetch API) — highest priority
+  // because it's the most capable and cost-effective fast path.
+  const { getBrowserbaseProvider } = await import("./browserbase-provider");
+  const bbProvider = getBrowserbaseProvider();
+  if (bbProvider) {
+    engine.registerProvider(bbProvider);
+  }
+
+  // Register existing providers (they self-skip if env vars are missing)
+  const { GitHubSearchProvider, WebSearchProvider, PackageRegistryProvider, OpenAPIDirectoryProvider } = await import("./research-providers");
+  engine.registerProvider(new GitHubSearchProvider());
+  engine.registerProvider(new WebSearchProvider());
+  engine.registerProvider(new PackageRegistryProvider());
+  engine.registerProvider(new OpenAPIDirectoryProvider());
+
+  return engine;
+}

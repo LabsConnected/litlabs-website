@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -12,7 +13,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
  * Body: { text: string, voice?: "alloy"|"echo"|"fable"|"onyx"|"nova"|"shimmer" }
  * Returns: { audioUrl: string } (data URL, base64 MP3)
  */
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const { userId } = await auth(req);
     if (!userId) {
@@ -70,3 +71,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

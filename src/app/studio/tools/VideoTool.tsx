@@ -175,7 +175,7 @@ export default function VideoTool() {
       return;
     }
     if (!canAfford) {
-      setError(`Need ${cost} LiTTBits.`);
+      setError(`Need ${cost} AI credits.`);
       return;
     }
     setError(null);
@@ -361,7 +361,7 @@ export default function VideoTool() {
             backgroundColor: T.boxBg,
           }}
         >
-          <Sparkles size={10} /> {coinBalance ?? "—"} LiTTBits
+          <Sparkles size={10} /> {coinBalance ?? "—"} credits
         </div>
       </div>
 

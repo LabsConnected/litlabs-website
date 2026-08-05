@@ -13,6 +13,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgent } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
 import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service";
+import { buildUserContext, buildContextBlock } from "@/lib/context/context-engine";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug } from "@/lib/studio/types";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
@@ -146,6 +147,38 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   });
   const memoryContext = formatMemoryContext(memories);
 
+  // 7.5. Build unified user context via the Context Engine
+  let userContextBlock = "";
+  try {
+    const userCtx = await buildUserContext({
+      userId,
+      headers: req.headers,
+      project: {
+        id: ctx.projectId,
+        name: ctx.projectName,
+        repositoryConnected: ctx.capabilities.repositoryConnected,
+        repositoryName: ctx.repositoryName ?? null,
+        activeBranch: ctx.activeBranch ?? null,
+      },
+      activeAgent: {
+        slug: agentSlug,
+        mode: "standard",
+        instanceId: null,
+      },
+      conversation: {
+        id: conversation.id,
+        title: conversation.title ?? null,
+      },
+      memory: {
+        user: memories.filter((m) => m.memory_type === "user_preference"),
+        project: memories.filter((m) => m.memory_type === "project_fact"),
+      },
+    });
+    userContextBlock = buildContextBlock(userCtx);
+  } catch {
+    // Best-effort — don't block regeneration
+  }
+
   // 8. Build system prompt
   const kernelCapabilities: CapabilityRecord[] = [];
   if (ctx.capabilities.repositoryConnected) {
@@ -189,6 +222,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     kernelSystemPrompt,
     projectBlock,
     translated.contextBlock,
+    userContextBlock,
     memoryContext,
   ].filter(Boolean).join("\n");
 

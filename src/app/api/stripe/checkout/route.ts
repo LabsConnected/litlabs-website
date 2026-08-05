@@ -36,7 +36,9 @@ function getAppUrl(): string {
   return url;
 }
 
-export async function POST(req: NextRequest) {
+import { withRateLimit } from "@/lib/rate-limiter";
+
+async function handler(req: NextRequest) {
   try {
     const { clerkId } = await auth(req);
     if (!clerkId) {
@@ -181,3 +183,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

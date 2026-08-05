@@ -83,7 +83,7 @@ export interface UserPreferencesRow {
   locale: string | null;
   temperature_unit: "celsius" | "fahrenheit";
   distance_unit: "metric" | "imperial";
-  location_mode: "none" | "manual_city" | "device_location";
+  location_mode: "none" | "manual_city" | "device_location" | "confirmed";
   saved_city: string | null;
   saved_region: string | null;
   country_code: string | null;

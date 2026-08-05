@@ -3,11 +3,12 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { PLANS, type PlanId } from "@/config/plans";
 import { getCreditBalances } from "@/lib/wallet-ledger";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth(req);
     if (!clerkId) {
@@ -71,3 +72,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Failed to load subscription" }, { status: 500 });
   }
 }
+
+export const GET = withRateLimit(handler, 30, 60);

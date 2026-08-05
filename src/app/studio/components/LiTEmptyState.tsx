@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
 import StudioActivityTimeline from "./StudioActivityTimeline";
+import { STUDIO_AGENTS } from "../stores/useStudioAgentStore";
 import type { AgentId } from "../stores/useStudioAgentStore";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import type { ProviderHealth } from "../stores/useStudioModelStore";
@@ -259,7 +260,6 @@ export default function LiTEmptyState({
   const [hovered, setHovered] = useState<PrimaryAction | null>(null);
   const onPick = onPickAction ?? (() => {});
   const greetingName = displayName?.trim() || "there";
-  const connectedToolCount = capabilities?.availableTools?.length ?? 0;
   const connectedProviderCount = capabilities?.connectedProviders?.length ?? 0;
   const voiceReady = capabilities?.voiceHealth.available ?? false;
 
@@ -332,8 +332,8 @@ export default function LiTEmptyState({
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em]">
           {[
-            `${connectedToolCount} tools ready`,
-            `${connectedProviderCount} providers connected`,
+            `${STUDIO_AGENTS.length} agents ready`,
+            `${connectedProviderCount} AI providers`,
             voiceReady ? "Voice live" : "Voice offline",
             hasProject ? "Project linked" : "No project linked",
           ].map((item) => (
@@ -442,8 +442,8 @@ export default function LiTEmptyState({
 
           <div className="mt-4 grid grid-cols-2 gap-2">
             {[
-              { label: "Agents ready", value: connectedProviderCount || 0 },
-              { label: "Tools online", value: connectedToolCount || 0 },
+              { label: "Agents ready", value: STUDIO_AGENTS.length },
+              { label: "AI providers", value: connectedProviderCount || 0 },
               { label: "Voice", value: voiceReady ? "On" : "Off" },
               { label: "Project", value: hasProject ? "Linked" : "None" },
             ].map((item) => (

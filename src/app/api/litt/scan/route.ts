@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { auth } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,7 +115,7 @@ function apiRoute(filePath: string): string {
     .replace(/\[([^\]]+)\]/g, ":$1");
 }
 
-export async function GET(req: NextRequest) {
+async function getHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -202,3 +203,5 @@ export async function GET(req: NextRequest) {
     { headers: { "Cache-Control": "no-store" } },
   );
 }
+
+export const GET = withRateLimit(getHandler, 30, 60);

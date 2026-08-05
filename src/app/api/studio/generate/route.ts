@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { withRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest) {
   const { userId } = await auth(request);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Also handle GET for health check
-export async function GET() {
+async function getHandler() {
   return NextResponse.json({
     status: "ok",
     providers: [
@@ -147,3 +148,6 @@ export async function GET() {
     default: "pollinations",
   });
 }
+
+export const POST = withRateLimit(handler, 10, 60);
+export const GET = withRateLimit(getHandler, 30, 60);

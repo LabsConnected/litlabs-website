@@ -104,6 +104,7 @@ export function detectToolIntent(message: string): { tool: ToolId; weatherType?:
 export async function detectAndExecuteTool(
   userId: string,
   message: string,
+  options?: { clientIp?: string; headers?: Headers },
 ): Promise<ToolExecutionResult> {
   const intent = detectToolIntent(message);
   if (!intent) {
@@ -116,7 +117,7 @@ export async function detectAndExecuteTool(
   }
 
   if (intent.tool === "weather") {
-    return executeWeatherTool(userId, message, intent.weatherType ?? "current");
+    return executeWeatherTool(userId, message, intent.weatherType ?? "current", options?.headers);
   }
 
   return {
@@ -138,9 +139,11 @@ async function executeWeatherTool(
   userId: string,
   message: string,
   type: "current" | "hourly" | "daily",
+  headers?: Headers,
 ): Promise<ToolExecutionResult> {
   const ctx = await getUserContext(userId, {
     capabilities: ["weather.current", "weather.hourly", "weather.daily"],
+    headers,
   });
 
   const result = await fetchWeatherForUser(ctx, { type });

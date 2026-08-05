@@ -599,7 +599,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">Free</div>
               <div className="text-[10px] text-white/40">Free forever</div>
               <div className="mt-3 space-y-1">
-                {["1 active project", "500 starter LiTTBits", "LiTT and Spark", "Basic tools"].map((f) => (
+                {["1 active project", "500 starter AI credits", "LiTT and Spark", "Basic tools"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-emerald-400" /> {f}
                   </div>
@@ -616,7 +616,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">$7/month</div>
               <div className="text-[10px] text-white/40">Founder pricing · later $15</div>
               <div className="mt-3 space-y-1">
-                {["5 active projects", "6,000 monthly LiTTBits", "GitHub connection", "Voice mode"].map((f) => (
+                {["5 active projects", "6,000 monthly AI credits", "GitHub connection", "Voice mode"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-cyan-400" /> {f}
                   </div>
@@ -633,7 +633,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">$19/month</div>
               <div className="text-[10px] text-white/40">Founder pricing · later $39</div>
               <div className="mt-3 space-y-1">
-                {["25 active projects", "20,000 monthly LiTTBits", "Terminal runtime", "Vercel deployment"].map((f) => (
+                {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Vercel deployment"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-violet-400" /> {f}
                   </div>
@@ -672,7 +672,7 @@ function MarketplaceInner() {
               {[
                 { state: "Free", desc: "Core skills and tools — no charge", color: "text-emerald-300" },
                 { state: "Included", desc: "Included with Creator or Pro plan", color: "text-cyan-300" },
-                { state: "LiTTBit usage", desc: "External-cost tools charge LiTTBits per use", color: "text-violet-300" },
+                { state: "Credit usage", desc: "External-cost tools charge AI credits per use", color: "text-violet-300" },
                 { state: "Coming soon", desc: "Not yet available", color: "text-amber-300" },
               ].map((item) => (
                 <div key={item.state} className="flex items-center gap-2 text-[11px]">

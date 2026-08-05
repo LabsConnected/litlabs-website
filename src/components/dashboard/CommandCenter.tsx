@@ -130,7 +130,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: "projects", label: "Recent Projects", visible: true, order: 5 },
   { id: "connections", label: "Connection Health", visible: true, order: 6 },
   { id: "creations", label: "Recent Creations", visible: true, order: 7 },
-  { id: "usage", label: "Usage & LiTTBits", visible: true, order: 8 },
+  { id: "usage", label: "Usage & Credits", visible: true, order: 8 },
   { id: "activity", label: "Live Activity", visible: true, order: 9 },
   { id: "suggestions", label: "LiTT Suggestions", visible: true, order: 10 },
   { id: "deployments", label: "Deployments", visible: true, order: 11 },
@@ -605,7 +605,7 @@ function UsageWidget({ wallet, usage, loading }: { wallet: WalletData | null; us
       </div>
       <div>
         <div className="flex items-center justify-between text-xs mb-1">
-          <span className="opacity-50">Monthly LiTTBits</span>
+          <span className="opacity-50">Monthly AI credits</span>
           <span className="font-bold" style={{ color: T.accentColor }}>{balance.toLocaleString()} remaining</span>
         </div>
         <div className="h-2 rounded-full overflow-hidden" style={{ background: `${T.borderColor}20` }}>

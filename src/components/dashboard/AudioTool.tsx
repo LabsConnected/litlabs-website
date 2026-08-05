@@ -590,11 +590,11 @@ export default function AudioTool() {
             <span style={{ color: T.accentColor }} className="font-bold">
               {balance.toLocaleString()}
             </span>{" "}
-            LiTTBits
+            credits
           </span>
           {balance < LITTBITS_COST[tab] && (
             <span className="text-yellow-400 font-bold">
-              Insufficient LiTTBits
+              Insufficient credits
             </span>
           )}
         </div>
@@ -625,7 +625,7 @@ export default function AudioTool() {
           >
             {tab === "tts" ? <Mic size={15} /> : <Music size={15} />}
             Generate · <Coins size={12} />
-            {LITTBITS_COST[tab]} LiTTBits
+            {LITTBITS_COST[tab]} credits
           </button>
         )}
       </div>

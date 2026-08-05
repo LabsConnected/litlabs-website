@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +10,10 @@ export const dynamic = "force-dynamic";
  * POST /api/gallery/[id]/like
  * Toggles like on a gallery item.
  */
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function handler(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { userId } = await auth(request).catch(() => ({ userId: null }));
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -54,3 +58,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Failed to toggle like" }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 30, 60);

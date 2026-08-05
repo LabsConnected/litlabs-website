@@ -23,7 +23,7 @@ export interface UserLocation {
   country: string | null;
   latitude: number | null;
   longitude: number | null;
-  source: "manual_city" | "device_location" | "none";
+  source: "manual_city" | "device_location" | "ip_auto" | "ip_fallback" | "vercel" | "confirmed" | "none";
 }
 
 export interface UserContext {
@@ -112,9 +112,36 @@ const DEFAULT_CAPS_TO_CHECK: CapabilityId[] = [
   "location.update",
 ];
 
+// ─── Vercel Geo Header Parsing ──────────────────────────────────
+
+/**
+ * Parse Vercel's native geolocation headers to determine user location.
+ * Vercel injects x-vercel-ip-city, x-vercel-ip-latitude, etc. on all
+ * Edge and Serverless deployments. This is the production-safe way to
+ * auto-detect location — no third-party API calls needed.
+ *
+ * @see https://vercel.com/changelog/ip-geolocation-for-serverless-functions
+ */
+function parseVercelGeoHeaders(headers: Headers): UserLocation | null {
+  const city = headers.get("x-vercel-ip-city");
+  const latitude = headers.get("x-vercel-ip-latitude");
+  const longitude = headers.get("x-vercel-ip-longitude");
+
+  if (!city && !latitude) return null;
+
+  return {
+    city: city ?? null,
+    region: headers.get("x-vercel-ip-country-region") ?? null,
+    country: headers.get("x-vercel-ip-country-code") ?? null,
+    latitude: latitude ? parseFloat(latitude) : null,
+    longitude: longitude ? parseFloat(longitude) : null,
+    source: "vercel",
+  };
+}
+
 export async function getUserContext(
   userId: string,
-  options?: { capabilities?: CapabilityId[] },
+  options?: { capabilities?: CapabilityId[]; headers?: Headers },
 ): Promise<UserContext> {
   const capsToCheck = options?.capabilities ?? DEFAULT_CAPS_TO_CHECK;
 
@@ -125,17 +152,24 @@ export async function getUserContext(
   ]);
 
   if (!prefs) {
+    // No preferences row — try Vercel geo headers if available
+    let location: UserLocation = { ...DEFAULT_CONTEXT.location };
+    if (options?.headers) {
+      const geo = parseVercelGeoHeaders(options.headers);
+      if (geo) location = geo;
+    }
     return {
       ...DEFAULT_CONTEXT,
       userId,
       displayName: profile.displayName,
       email: profile.email,
+      location,
       capabilities,
       fetchedAt: Date.now(),
     };
   }
 
-  const location: UserLocation = {
+  let location: UserLocation = {
     city: prefs.saved_city,
     region: prefs.saved_region,
     country: prefs.country_code,
@@ -143,6 +177,12 @@ export async function getUserContext(
     longitude: null,
     source: prefs.location_mode as UserLocation["source"],
   };
+
+  // If no manual location, try Vercel geo headers as fallback
+  if ((!location.city || location.source === "none") && options?.headers) {
+    const geo = parseVercelGeoHeaders(options.headers);
+    if (geo) location = geo;
+  }
 
   return {
     userId,
@@ -182,4 +222,52 @@ export function formatTemperature(
   }
   const f = (celsius * 9) / 5 + 32;
   return `${Math.round(f)}\u00B0F`;
+}
+
+/**
+ * Build a USER CONTEXT block for the system prompt.
+ * This gives LiTT awareness of who they're talking to — name, location,
+ * timezone, preferences — so responses feel personal, not generic.
+ */
+export function buildUserContextBlock(ctx: UserContext): string {
+  const lines: string[] = [
+    "USER CONTEXT (use this to personalize responses — name, location, preferences):",
+  ];
+
+  if (ctx.displayName) {
+    lines.push(`  Name: ${ctx.displayName}`);
+  }
+  if (ctx.email) {
+    lines.push(`  Email: ${ctx.email}`);
+  }
+  if (ctx.location.city) {
+    const locSource = ctx.location.source === "ip_auto" ? " (auto-detected from IP)" : "";
+    lines.push(`  Location: ${ctx.location.city}${ctx.location.region ? `, ${ctx.location.region}` : ""}${ctx.location.country ? `, ${ctx.location.country}` : ""}${locSource}`);
+  }
+  if (ctx.timezone) {
+    lines.push(`  Timezone: ${ctx.timezone}`);
+  }
+  if (ctx.temperatureUnit) {
+    lines.push(`  Temperature unit: ${ctx.temperatureUnit}`);
+  }
+  if (ctx.newsInterests.length > 0) {
+    lines.push(`  News interests: ${ctx.newsInterests.join(", ")}`);
+  }
+  if (ctx.dailyBriefingEnabled) {
+    lines.push(`  Daily briefing: enabled${ctx.dailyBriefingTime ? ` at ${ctx.dailyBriefingTime}` : ""}`);
+  }
+
+  if (lines.length === 1) {
+    return ""; // No user context available
+  }
+
+  lines.push("");
+  lines.push("RULES:");
+  lines.push("- Use the user's name naturally in conversation, not every sentence.");
+  lines.push("- Use their location for weather, local recommendations, and time references.");
+  lines.push("- If location is not set and they ask about weather, ask what city they're in — don't give a robot error.");
+  lines.push("- Honor their temperature unit preference (celsius vs fahrenheit).");
+  lines.push("- Remember what they share in conversation — their preferences should grow over time.");
+
+  return lines.join("\n");
 }

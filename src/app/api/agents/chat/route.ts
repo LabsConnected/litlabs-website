@@ -14,6 +14,7 @@ import {
   generateProjectStatusAnswer,
   type RuntimeContextSnapshot,
 } from "@/lib/litt-intelligence/runtime-context-injector";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -166,7 +167,7 @@ When asked to generate images, describe what you are going to create and then co
 If a request requires approval or is ambiguous, ask one clear question. Prefer action over endless planning.`;
 }
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -354,3 +355,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

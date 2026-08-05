@@ -254,7 +254,7 @@ export default function DashboardWidgets({
               {claimed ? "Reward Claimed!" : "Daily Reward"}
             </div>
             <div className="text-[10px]" style={{ color: T.textMuted }}>
-              {claimed ? "Come back tomorrow" : "+50 LiTTBits"}
+              {claimed ? "Come back tomorrow" : "+50 AI credits"}
             </div>
             <button
               onClick={onClaimAction}

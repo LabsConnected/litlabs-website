@@ -30,6 +30,8 @@ import {
   type RuntimeContextSnapshot,
 } from "@/lib/litt-intelligence/runtime-context-injector";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
+import { harvestUserPreferences } from "@/lib/studio/memory-service";
+import { buildUserContext, buildContextBlock } from "@/lib/context/context-engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -325,59 +327,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
   const intent = detectIntent(message);
 
-  // 5.6. Deterministic project-status answer — bypass LLM for accuracy.
-  // When the user asks "where do things stand", return the exact runtime values.
-  if (intent.category === "project_status" && intent.confidence > 0) {
-    const statusAnswer = generateProjectStatusAnswer(runtimeSnapshot);
+  // 5.6. User context is now built after memory recall (step 8) so it can
+  // aggregate memories, active agent, workspace, and conversation into one
+  // unified LittUserContext object. See step 8.5 below.
 
-    // Insert the assistant message with the deterministic answer
-    const statusResult = await insertMessage({
-      conversationId: conversation.id,
-      ownerId: userId,
-      projectId: conversation.projectId,
-      role: "assistant",
-      agentSlug,
-      agentMode,
-      agentInstanceId: runtimeAgent?.agentInstanceId || null,
-      content: statusAnswer,
-      status: "completed",
-      parentMessageId: userMessage.id,
-    });
-    const statusMsg = statusResult.message;
-
-    void persistMemory(
-      `User: ${message}\nLiTT: ${statusAnswer}`,
-      userId,
-      conversation.projectId,
-      {
-        agentSlug,
-        agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-        memoryNamespace: runtimeAgent?.memoryNamespace,
-        conversationId: conversation.id,
-        memoryType: "conversation_summary",
-      },
-    );
-
-    studioLog("message:intent-routed", {
-      conversationId: conversation.id,
-      projectId: conversation.projectId,
-      userId,
-      intent: intent.category,
-      confidence: intent.confidence,
-    });
-
-    return NextResponse.json({
-      userMessage,
-      assistantMessage: statusMsg ?? { ...userMessage, role: "assistant", content: statusAnswer, status: "completed" },
-      revision: newRevision,
-      intentRouted: true,
-      intent: intent.category,
-    });
-  }
-
-  // 5.7. Weather tool — call the live weather tool before the LLM.
+  // 5.7. Weather tool — try the live weather tool first. If it succeeds,
+  // return the result directly. If it fails (e.g. no location set),
+  // fall through to the LLM so LiTT can ask conversationally.
+  let weatherContextBlock = "";
   if (intent.category === "weather" && intent.confidence > 0) {
-    const toolResult = await detectAndExecuteTool(userId, message);
+    const toolResult = await detectAndExecuteTool(userId, message, { headers: req.headers });
     if (toolResult.executed) {
       const weatherResult = await insertMessage({
         conversationId: conversation.id,
@@ -421,6 +380,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         tool: toolResult.metadata,
       });
     }
+    // Tool failed — inject the error as context so LiTT can respond naturally
+    weatherContextBlock = `WEATHER TOOL RESULT: ${toolResult.text}. Use this to respond conversationally — if no location is set, ask the user what city they're in. Don't repeat the error verbatim.`;
+  }
+
+  // 5.8. Project status — inject the deterministic status data as context
+  // and let the LLM deliver it with personality. No more robot bypass.
+  let statusContextBlock = "";
+  if (intent.category === "project_status" && intent.confidence > 0) {
+    const statusData = generateProjectStatusAnswer(runtimeSnapshot);
+    statusContextBlock = `PROJECT STATUS DATA (deliver this information conversationally, like a friend giving an update — not a robot reading a dashboard):\n${statusData}`;
   }
 
   // 6. Load prior completed messages from DB (excluding the just-inserted user message)
@@ -448,6 +417,45 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     limit: 5,
   });
   const memoryContext = formatMemoryContext(memories);
+
+  // 8.5. Build the unified LittUserContext via the Context Engine.
+  // This aggregates identity, location, preferences, project, workspace,
+  // active agent, conversation, and memory into one canonical object.
+  // All existing infrastructure is reused — no new services added.
+  let userContextBlock = "";
+  try {
+    const userCtx = await buildUserContext({
+      userId,
+      headers: req.headers,
+      project: {
+        id: ctx.projectId,
+        name: ctx.projectName,
+        repositoryConnected: ctx.capabilities.repositoryConnected,
+        repositoryName: ctx.repositoryName ?? null,
+        activeBranch: ctx.activeBranch ?? null,
+      },
+      workspace: {
+        mode: runtimeContext.workspaceStatus ?? "studio",
+        selectedNode: null,
+      },
+      activeAgent: {
+        slug: agentSlug,
+        mode: agentMode,
+        instanceId: runtimeAgent?.agentInstanceId ?? null,
+      },
+      conversation: {
+        id: conversation.id,
+        title: conversation.title ?? null,
+      },
+      memory: {
+        user: memories.filter((m) => m.memory_type === "user_preference"),
+        project: memories.filter((m) => m.memory_type === "project_fact"),
+      },
+    });
+    userContextBlock = buildContextBlock(userCtx);
+  } catch {
+    // User context is nice-to-have, not critical. Skip on failure.
+  }
 
   // 9. Build system prompt
   const kernelCapabilities: CapabilityRecord[] = [];
@@ -511,6 +519,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     conversationContext,
     translated.contextBlock,
     runtimeContextBlock,
+    userContextBlock,
+    statusContextBlock,
+    weatherContextBlock,
     toolManifest.manifestBlock,
     memoryContext,
   ].filter(Boolean).join("\n");
@@ -652,6 +663,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             memoryType: "conversation_summary",
           },
         );
+
+        // Auto-harvest user preferences from the conversation (city, name, etc.)
+        void harvestUserPreferences(message, userId, conversation.projectId, {
+          agentSlug,
+          conversationId: conversation.id,
+        });
 
         studioLog("message:sent", {
           conversationId: conversation.id,

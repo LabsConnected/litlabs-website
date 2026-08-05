@@ -2,6 +2,7 @@ import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -42,7 +43,7 @@ function extractSupermemoryId(result: unknown): string | null {
   return typeof candidate === "string" ? candidate : null;
 }
 
-export async function POST(req: NextRequest) {
+async function postHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function getHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -260,7 +261,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
+async function deleteHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -311,7 +312,7 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-export async function PATCH(req: NextRequest) {
+async function patchHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -367,3 +368,8 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(postHandler, 30, 60);
+export const GET = withRateLimit(getHandler, 60, 60);
+export const DELETE = withRateLimit(deleteHandler, 20, 60);
+export const PATCH = withRateLimit(patchHandler, 30, 60);

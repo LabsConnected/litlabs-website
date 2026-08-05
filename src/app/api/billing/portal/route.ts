@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth(req);
     if (!clerkId) {
@@ -72,3 +73,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

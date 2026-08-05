@@ -157,7 +157,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     features: [
       "LiTT & Spark",
       "1 active project",
-      "500 starter LiTTBits (one-time)",
+      "500 starter AI credits (one-time)",
       "Free AI routing",
       "Basic code generation",
       "Basic image generation",
@@ -183,7 +183,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
       "LiTT & Spark",
       "Research, writing & marketing skills",
       "5 active projects",
-      "6,000 LiTTBits per billing cycle",
+      "6,000 AI credits per billing cycle",
       "Private projects",
       "GitHub connection",
       "Project downloads",
@@ -210,7 +210,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
       "Coding & analytics skills",
       "Everything in Creator Beta",
       "25 active projects",
-      "20,000 LiTTBits per billing cycle",
+      "20,000 AI credits per billing cycle",
       "Terminal runtime",
       "Advanced coding models",
       "Diff and approval",
@@ -280,12 +280,12 @@ export function formatPriceMonthly(cents: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// LiTTBits Terminology
+// AI Credits Terminology
 // ---------------------------------------------------------------------------
 
 export const LITTBITS_TERMINOLOGY = {
-  singular: "LiTTBit",
-  plural: "LiTTBits",
+  singular: "AI credit",
+  plural: "AI credits",
   abbreviation: "LBC",
   /** Terms that must NEVER be used in user-facing copy. */
   bannedTerms: ["coins", "coin pack", "coin packs", "tokens", "crypto", "cryptocurrency", "cash"],
@@ -377,8 +377,8 @@ export const BANNED_PHRASES: string[] = [
   "coin packs",
   "15% off future credit packs",
   "20% off credit packs",
-  "5,000 bonus LiTTBits",
-  "500 monthly LiTTBits",
+  "5,000 bonus AI credits",
+  "500 monthly AI credits",
   "AI creative studio",
   "AI project workspace",
 ];

@@ -3,6 +3,7 @@ import { generateText } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { newRequestId, jsonError } from "@/lib/api-route-helpers";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 // ── Route configuration ──────────────────────────────────────────
 // Node.js runtime (uses Node-only SDKs). maxDuration gives Vercel enough
@@ -22,7 +23,7 @@ function getSupermemory() {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const requestId = newRequestId();
   try {
     const { userId } = await auth(req);
@@ -132,3 +133,5 @@ Output the code files immediately.`;
     return jsonError(500, message, requestId, error);
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,10 @@ export const dynamic = "force-dynamic";
  * POST /api/gallery/[id]/comments
  * Adds a comment to a gallery item.
  */
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function getHandler(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { userId } = await auth(request).catch(() => ({ userId: null }));
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,7 +42,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function postHandler(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { userId } = await auth(request).catch(() => ({ userId: null }));
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -77,3 +84,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Failed to add comment" }, { status: 500 });
   }
 }
+
+export const GET = withRateLimit(getHandler, 60, 60);
+export const POST = withRateLimit(postHandler, 20, 60);

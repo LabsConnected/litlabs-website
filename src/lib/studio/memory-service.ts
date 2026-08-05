@@ -376,3 +376,77 @@ export function formatMemoryContext(memories: MemoryRecord[]): string {
   const lines = memories.map((m) => `- ${m.content}`);
   return `\n\nRELEVANT MEMORIES (project-scoped):\n${lines.join("\n")}\n---`;
 }
+
+// ─── User Preference Harvesting ──────────────────────────────────
+
+const CITY_PATTERNS: RegExp[] = [
+  /\bi(?:'m| am)?\s+(?:in|from|live in)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})/,
+  /\bmy\s+(?:city|town)\s+is\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})/i,
+  /\bi(?:'m| am)?\s+in\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\s+(?:right now|currently)/i,
+];
+
+const NAME_PATTERNS: RegExp[] = [
+  /\bmy\s+name\s+is\s+([A-Z][a-zA-Z]+)/i,
+  /\bi(?:'m| am)\s+([A-Z][a-zA-Z]+)\b/,
+  /\bcall\s+me\s+([A-Z][a-zA-Z]+)/i,
+];
+
+const TIMEZONE_PATTERNS: RegExp[] = [
+  /\bmy\s+timezone\s+is\s+(UTC[+-]\d+|[A-Za-z_]+\/[A-Za-z_]+)/i,
+  /\bi(?:'m| am)\s+in\s+(UTC[+-]\d+|[A-Za-z_]+\/[A-Za-z_]+)\s+time/i,
+];
+
+/**
+ * Harvest user preferences from a conversation message and store them
+ * as user_preference memories. Uses simple pattern matching — no LLM call.
+ * Only stores new info that isn't already known.
+ */
+export async function harvestUserPreferences(
+  message: string,
+  ownerId: string,
+  projectId: string,
+  options: {
+    agentSlug?: AgentSlug;
+    conversationId?: string;
+  } = {},
+): Promise<void> {
+  const found: string[] = [];
+
+  for (const pattern of CITY_PATTERNS) {
+    const match = message.match(pattern);
+    if (match?.[1]) {
+      found.push(`User's city: ${match[1].trim()}`);
+      break;
+    }
+  }
+
+  for (const pattern of NAME_PATTERNS) {
+    const match = message.match(pattern);
+    if (match?.[1] && match[1].length >= 2 && !["LiTT", "Spark", "The"].includes(match[1])) {
+      found.push(`User's name: ${match[1].trim()}`);
+      break;
+    }
+  }
+
+  for (const pattern of TIMEZONE_PATTERNS) {
+    const match = message.match(pattern);
+    if (match?.[1]) {
+      found.push(`User's timezone: ${match[1].trim()}`);
+      break;
+    }
+  }
+
+  if (found.length === 0) return;
+
+  for (const pref of found) {
+    try {
+      await persistMemory(pref, ownerId, projectId, {
+        agentSlug: options.agentSlug,
+        conversationId: options.conversationId,
+        memoryType: "user_preference",
+      });
+    } catch {
+      // Best-effort — don't let preference harvesting break chat
+    }
+  }
+}

@@ -7,10 +7,9 @@
  * (max-w-[1680px]) with:
  *   - 6-column metric strip
  *   - large left operational column (project runtime, mission queue, activity)
- *   - right control rail (system status, owner pulse, operating rules)
+ *   - right control rail (system status, operating rules)
  *
  * Fetches from /api/dashboard/mission-control (aggregated server-side).
- * Owner data (growth, revenue) only renders when ownerMode === true.
  *
  * Preserves the global Media Hub via MediaHubProvider.
  */
@@ -21,29 +20,9 @@ import { useUser } from "@clerk/nextjs";
 import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { Icon } from "./dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
-import { useDashboardLayout } from "@/lib/dashboard/layout-store";
-import { getWidgetDefinition } from "@/lib/dashboard/widget-registry";
-import { WidgetLibraryDrawer } from "@/components/dashboard/widgets/WidgetLibraryDrawer";
-import {
-  LiTTQuickAskWidget,
-  MissionQueueWidget,
-  CurrentProjectWidget,
-  ProjectRuntimeWidget,
-  PendingApprovalsWidget,
-  RecentActivityWidget,
-  RecentCreationsWidget,
-  MyGalleryWidget,
-  TrendingGalleryWidget,
-  DiscoverFeedWidget,
-  MusicPlayerWidget,
-  LiTTBitsWidget,
-  NotificationsWidget,
-  DeploymentsWidget,
-  SavedItemsWidget,
-  OwnerMetricWidget,
-  SystemHealthWidget,
-  AuditEventsWidget,
-} from "@/components/dashboard/widgets/DashboardWidgets";
+import { DraggableWidgetGrid } from "@/components/dashboard/v2/DraggableWidgetGrid";
+import { D as DashTokens } from "@/lib/dashboard/tokens";
+import { useDashboardTheme } from "@/lib/dashboard/theme-store";
 import type { RecentCreation } from "@/lib/dashboard/recent-creations";
 import type { GalleryWidgetData } from "@/lib/dashboard/gallery-widget-data";
 import type { DiscoverFeedItem } from "@/lib/dashboard/discover-widget-data";
@@ -53,23 +32,12 @@ import type { DiscoverFeedItem } from "@/lib/dashboard/discover-widget-data";
 // ---------------------------------------------------------------------------
 
 const D = {
+  ...DashTokens,
   bg: "transparent",
-  bgGradient:
-    "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.18), transparent 60%), radial-gradient(circle at 85% 20%, rgba(168,85,247,0.08), transparent 35%), radial-gradient(circle at 10% 80%, rgba(99,102,241,0.06), transparent 40%), transparent",
-  surface: "rgba(255,255,255,0.03)",
-  surfaceHover: "rgba(255,255,255,0.06)",
-  border: "rgba(168,85,247,0.15)",
-  borderActive: "rgba(168,85,247,0.4)",
-  accent: "#a970ff",
-  accentGreen: "#B6FF4A",
-  accentAmber: "#F97316",
-  accentRed: "#ef4444",
-  accentCyan: "#65f4ff",
-  textPrimary: "#eef4ff",
-  textMuted: "rgba(238,244,255,0.5)",
-  textDim: "rgba(238,244,255,0.3)",
-  glow: "0 0 24px rgba(168,85,247,0.15)",
-  glowGreen: "0 0 20px rgba(182,255,74,0.12)",
+  bgGradient: DashTokens.heroGradient,
+  borderActive: "var(--dash-border-strong)",
+  glow: DashTokens.glow,
+  glowGreen: DashTokens.glowGreen,
 };
 
 // ---------------------------------------------------------------------------
@@ -146,7 +114,7 @@ function MetricCard({
   const dotColor = statusColor ?? (isEmpty ? D.textDim : highlight ? D.accentGreen : D.accent);
   return (
     <div
-      className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.02]"
+      className="dash-metric group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.02]"
       style={{
         background: highlight ? `${D.accent}08` : D.surface,
         borderColor: highlight ? `${D.accent}30` : D.border,
@@ -277,7 +245,7 @@ function MissionCard({
         </div>
         <div
           className="h-1.5 overflow-hidden rounded-full"
-          style={{ background: "rgba(255,255,255,0.05)" }}
+          style={{ background: D.skeleton }}
         >
           <div
             className="h-full rounded-full"
@@ -325,7 +293,7 @@ function HealthGrid({
                     key={service.id}
                     className="rounded-xl border p-3"
                     style={{
-                      background: "rgba(0,0,0,0.2)",
+                      background: D.bg,
                       borderColor: D.border,
                     }}
                   >
@@ -395,25 +363,14 @@ export function MissionControlDashboard() {
   const { user } = useUser();
   const displayName = user?.firstName || user?.username || "there";
 
-  // Widget system
-  const [customizeOpen, setCustomizeOpen] = useState(false);
+  // Widget system — DraggableWidgetGrid manages its own layout state
   const [widgetData, setWidgetData] = useState<{
     recentCreations?: RecentCreation[];
     gallery?: GalleryWidgetData;
     discoverFeed?: DiscoverFeedItem[];
   }>({});
-  const ownerMode = data?.ownerMode ?? false;
-  const userId = data?.ownerMode ? "owner" : "user"; // layout key — real userId not needed for localStorage
-  const {
-    placements,
-    updatePlacement,
-    toggleCollapsed,
-    toggleHidden,
-    addWidget,
-    removeWidget,
-    resetLayout,
-    moveWidget,
-  } = useDashboardLayout(userId, ownerMode);
+  // Owner mode UI removed from dashboard — owner data still accessible via /api/owner
+  const ownerMode = false;
 
   // Fetch widget data (recent creations, gallery, discover feed)
   const loadWidgetData = useCallback(async () => {
@@ -492,19 +449,19 @@ export function MissionControlDashboard() {
           {/* Skeleton header */}
           <div className="mb-5 rounded-3xl border p-5" style={{ borderColor: D.border, background: D.surface, backdropFilter: "blur(20px)" }}>
             <div className="flex items-center gap-2">
-              <div className="h-5 w-40 animate-pulse rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
-              <div className="h-5 w-16 animate-pulse rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+              <div className="h-5 w-40 animate-pulse rounded-full" style={{ background: D.skeleton }} />
+              <div className="h-5 w-16 animate-pulse rounded-full" style={{ background: D.skeleton }} />
             </div>
-            <div className="mt-3 h-8 w-64 animate-pulse rounded-lg" style={{ background: "rgba(255,255,255,0.06)" }} />
-            <div className="mt-2 h-4 w-96 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+            <div className="mt-3 h-8 w-64 animate-pulse rounded-lg" style={{ background: D.skeleton }} />
+            <div className="mt-2 h-4 w-96 animate-pulse rounded" style={{ background: D.skeletonDim }} />
           </div>
           {/* Skeleton metric strip */}
           <div className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="rounded-2xl border p-4" style={{ borderColor: D.border, background: D.surface }}>
-                <div className="h-3 w-20 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.06)" }} />
-                <div className="mt-3 h-7 w-16 animate-pulse rounded-lg" style={{ background: "rgba(255,255,255,0.06)" }} />
-                <div className="mt-2 h-3 w-24 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+                <div className="h-3 w-20 animate-pulse rounded" style={{ background: D.skeleton }} />
+                <div className="mt-3 h-7 w-16 animate-pulse rounded-lg" style={{ background: D.skeleton }} />
+                <div className="mt-2 h-3 w-24 animate-pulse rounded" style={{ background: D.skeletonDim }} />
               </div>
             ))}
           </div>
@@ -535,7 +492,7 @@ export function MissionControlDashboard() {
         <header
           className="mb-5 flex flex-col gap-4 rounded-3xl border p-5 md:flex-row md:items-center md:justify-between"
           style={{
-            background: "linear-gradient(135deg, rgba(0,0,0,0.4), rgba(124,58,237,0.05))",
+            background: D.cardBg,
             borderColor: `${D.accent}30`,
             backdropFilter: "blur(20px)",
             boxShadow: D.glow,
@@ -557,18 +514,6 @@ export function MissionControlDashboard() {
                 />
                 LiTT Mission Control
               </span>
-              {data?.ownerMode ? (
-                <span
-                  className="rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[.16em]"
-                  style={{
-                    borderColor: `${D.accentAmber}33`,
-                    background: `${D.accentAmber}15`,
-                    color: D.accentAmber,
-                  }}
-                >
-                  Owner
-                </span>
-              ) : null}
             </div>
             <h1
               className="mt-3 text-2xl font-black tracking-[-.04em] sm:text-3xl"
@@ -600,43 +545,48 @@ export function MissionControlDashboard() {
               />
               Refresh
             </button>
-            <button
-              type="button"
-              onClick={() => setCustomizeOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition hover:opacity-80"
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[.14em]"
               style={{
-                borderColor: `${D.accent}40`,
-                background: `${D.accent}10`,
-                color: D.accent,
+                borderColor: `${D.accentGreen}33`,
+                background: `${D.accentGreen}10`,
+                color: D.accentGreen,
               }}
+              title="Auto-refreshing every 30 seconds"
             >
-              <Icon name="settings" size={14} />
-              Customize
-            </button>
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: D.accentGreen,
+                  animation: "pulse 2s ease-in-out infinite",
+                }}
+              />
+              Live
+            </span>
+            <ThemeToggle />
             <Link
               href="/studio?tool=chat"
               className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition hover:opacity-90"
-              style={{ background: D.accent, color: "#fff" }}
+              style={{ background: D.accent, color: D.textOnAccent }}
             >
               <Icon name="play" size={14} />
               Continue Mission
             </Link>
-            {data?.ownerMode ? (
-              <Link
-                href="/owner"
-                className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black transition hover:opacity-80"
-                style={{
-                  borderColor: `${D.accentAmber}40`,
-                  background: `${D.accentAmber}15`,
-                  color: D.accentAmber,
-                }}
-              >
-                <Icon name="shield" size={14} />
-                God Control
-              </Link>
-            ) : null}
           </div>
         </header>
+
+        {/* === Breadcrumb nav === */}
+        <nav
+          className="mb-5 flex items-center gap-1.5 text-[11px] font-bold"
+          style={{ color: D.textDim }}
+          aria-label="Breadcrumb"
+        >
+          <Link href="/" className="transition hover:opacity-70" style={{ color: D.textMuted }}>
+            Home
+          </Link>
+          <Icon name="chevron" size={10} style={{ color: D.textDim }} />
+          <span style={{ color: D.textPrimary }}>Dashboard</span>
+        </nav>
 
         {/* === Error banner === */}
         {error ? (
@@ -645,7 +595,7 @@ export function MissionControlDashboard() {
             style={{
               borderColor: `${D.accentRed}33`,
               background: `${D.accentRed}10`,
-              color: "#fca5a5",
+              color: D.dangerText,
             }}
           >
             <Icon name="alert" size={17} />
@@ -802,9 +752,9 @@ export function MissionControlDashboard() {
           <div className="space-y-5">
             {/* Active Project Runtime */}
             <section
-              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
+              className="dash-card rounded-3xl border p-5 transition-all duration-300 hover:border-[var(--dash-card-hover-border)]"
               style={{
-                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
+                background: D.cardBg,
                 borderColor: D.border,
                 backdropFilter: "blur(20px)",
               }}
@@ -862,9 +812,9 @@ export function MissionControlDashboard() {
 
             {/* Mission Queue */}
             <section
-              className="rounded-3xl border p-5"
+              className="dash-card rounded-3xl border p-5"
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: D.bg,
                 borderColor: D.border,
                 backdropFilter: "blur(16px)",
               }}
@@ -920,7 +870,7 @@ export function MissionControlDashboard() {
                     <Link
                       href="/studio?tool=chat"
                       className="mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black"
-                      style={{ background: D.accent, color: "#fff" }}
+                      style={{ background: D.accent, color: D.textOnAccent }}
                     >
                       <Icon name="sparkles" size={14} />
                       Start Mission
@@ -932,9 +882,9 @@ export function MissionControlDashboard() {
 
             {/* Live Activity */}
             <section
-              className="rounded-3xl border p-5"
+              className="dash-card rounded-3xl border p-5"
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: D.bg,
                 borderColor: D.border,
                 backdropFilter: "blur(16px)",
               }}
@@ -1030,9 +980,9 @@ export function MissionControlDashboard() {
           <aside className="space-y-5">
             {/* System Status */}
             <section
-              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
+              className="dash-card rounded-3xl border p-5 transition-all duration-300 hover:border-[var(--dash-card-hover-border)]"
               style={{
-                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
+                background: D.cardBg,
                 borderColor: D.border,
                 backdropFilter: "blur(20px)",
               }}
@@ -1054,74 +1004,11 @@ export function MissionControlDashboard() {
               </div>
             </section>
 
-            {/* Owner Live Pulse — owner only */}
-            {data?.ownerMode && data.growth ? (
-              <section
-                className="rounded-3xl border p-5"
-                style={{
-                  borderColor: `${D.accentAmber}26`,
-                  background: `${D.accentAmber}0a`,
-                  backdropFilter: "blur(16px)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <Icon name="users" size={17} style={{ color: D.accentAmber }} />
-                  <h2
-                    className="text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    Owner Live Pulse
-                  </h2>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <MetricCard
-                    label="Visitors Online"
-                    value={data.growth.visitorsOnline}
-                    icon="globe"
-                  />
-                  <MetricCard
-                    label="Members Online"
-                    value={data.growth.signedInOnline}
-                    icon="users"
-                  />
-                  <MetricCard
-                    label="Signups Today"
-                    value={data.growth.signupsToday}
-                    icon="users"
-                  />
-                  <MetricCard
-                    label="Studio Opens"
-                    value={data.growth.studioOpensToday}
-                    icon="activity"
-                  />
-                  <MetricCard
-                    label="First Prompts"
-                    value={data.growth.firstPromptsToday}
-                    icon="message"
-                  />
-                  <MetricCard
-                    label="Upgrades"
-                    value={data.growth.upgradesToday}
-                    icon="dollar"
-                  />
-                </div>
-
-                <Link
-                  href="/owner"
-                  className="mt-4 inline-flex items-center gap-2 text-xs font-black transition hover:opacity-80"
-                  style={{ color: D.accentAmber }}
-                >
-                  Open full God Control
-                  <Icon name="arrow" size={13} />
-                </Link>
-              </section>
-            ) : null}
-
             {/* Operating Rules */}
             <section
-              className="rounded-3xl border p-5 transition-all duration-300 hover:border-[rgba(168,85,247,0.25)]"
+              className="dash-card rounded-3xl border p-5 transition-all duration-300 hover:border-[var(--dash-card-hover-border)]"
               style={{
-                background: "linear-gradient(135deg, rgba(0,0,0,0.35), rgba(124,58,237,0.03))",
+                background: D.cardBg,
                 borderColor: D.border,
                 backdropFilter: "blur(20px)",
               }}
@@ -1175,160 +1062,39 @@ export function MissionControlDashboard() {
           </aside>
         </div>
 
-        {/* === Widget Grid — only show widgets with data === */}
+        {/* === Draggable Widget Grid === */}
         <section className="mt-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.textDim }}>
-              Widgets
-            </h2>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px]" style={{ color: D.textDim }}>
-                {placements.filter((p) => !p.hidden).length} active
-              </span>
-              <button
-                type="button"
-                onClick={() => setCustomizeOpen(true)}
-                className="text-[10px] font-bold transition hover:opacity-80"
-                style={{ color: D.accent }}
-              >
-                + Add widget
-              </button>
-            </div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {placements.filter((p) => !p.hidden).map((p) => {
-              const def = getWidgetDefinition(p.widgetId);
-              if (!def) return null;
-              const widgetProps = {
-                collapsed: p.collapsed,
-                onToggleCollapse: () => toggleCollapsed(p.widgetId),
-                onRemove: () => removeWidget(p.widgetId),
-              };
-
-              // Check if widget has data — hide empty ones unless they're interactive
-              const hasData = (() => {
-                switch (p.widgetId) {
-                  case "litt-quick-ask": return true; // always show — interactive
-                  case "mission-queue": return (data?.missions ?? []).length > 0;
-                  case "current-project": return !!data?.project;
-                  case "project-runtime": return !!data?.project;
-                  case "pending-approvals": return (data?.missions ?? []).some(m => m.state === "awaiting_approval");
-                  case "recent-activity": return (data?.activity ?? []).length > 0;
-                  case "recent-creations": return (widgetData.recentCreations ?? []).length > 0;
-                  case "my-gallery": return (widgetData.gallery?.myGallery ?? []).length > 0;
-                  case "trending-gallery": return (widgetData.gallery?.trending ?? []).length > 0;
-                  case "discover-feed": return (widgetData.discoverFeed ?? []).length > 0;
-                  case "music-player": return true; // always show — interactive
-                  case "littbits": return (data?.billing.balance ?? 0) > 0;
-                  case "notifications": return false; // hide by default
-                  case "deployments": return false; // hide by default
-                  case "saved-items": return false; // hide by default
-                  case "system-health": return true; // always show
-                  case "audit-events": return false; // hide by default
-                  // Owner metrics — only show if there's real data
-                  case "visitors-online": return ownerMode && (data?.growth?.visitorsOnline ?? 0) > 0;
-                  case "signed-in-online": return ownerMode && (data?.growth?.signedInOnline ?? 0) > 0;
-                  case "signups-today": return ownerMode && (data?.growth?.signupsToday ?? 0) > 0;
-                  case "studio-opens": return ownerMode && (data?.growth?.studioOpensToday ?? 0) > 0;
-                  case "first-prompts": return ownerMode && (data?.growth?.firstPromptsToday ?? 0) > 0;
-                  case "upgrades": return ownerMode && (data?.growth?.upgradesToday ?? 0) > 0;
-                  case "revenue": return ownerMode && (data?.billing.revenueTodayCents ?? 0) > 0;
-                  case "provider-costs": return ownerMode && (data?.billing.estimatedProviderCostTodayCents ?? 0) > 0;
-                  case "failed-tools": return false;
-                  case "failed-jobs": return false;
-                  case "terminal-sessions": return false;
-                  case "litt-live-sessions": return false;
-                  case "marketplace-installs": return false;
-                  default: return false;
-                }
-              })();
-
-              if (!hasData) return null;
-
-              const renderWidget = () => {
-                switch (p.widgetId) {
-                  case "litt-quick-ask": return <LiTTQuickAskWidget {...widgetProps} />;
-                  case "mission-queue": return <MissionQueueWidget {...widgetProps} data={data} />;
-                  case "current-project": return <CurrentProjectWidget {...widgetProps} data={data} />;
-                  case "project-runtime": return <ProjectRuntimeWidget {...widgetProps} data={data} />;
-                  case "pending-approvals": return <PendingApprovalsWidget {...widgetProps} data={data} />;
-                  case "recent-activity": return <RecentActivityWidget {...widgetProps} data={data} />;
-                  case "recent-creations": return <RecentCreationsWidget {...widgetProps} creations={widgetData.recentCreations ?? []} />;
-                  case "my-gallery": return <MyGalleryWidget {...widgetProps} items={widgetData.gallery?.myGallery ?? []} />;
-                  case "trending-gallery": return <TrendingGalleryWidget {...widgetProps} items={widgetData.gallery?.trending ?? []} />;
-                  case "discover-feed": return <DiscoverFeedWidget {...widgetProps} posts={widgetData.discoverFeed ?? []} />;
-                  case "music-player": return <MusicPlayerWidget {...widgetProps} />;
-                  case "littbits": return <LiTTBitsWidget {...widgetProps} data={data} />;
-                  case "notifications": return <NotificationsWidget {...widgetProps} />;
-                  case "deployments": return <DeploymentsWidget {...widgetProps} />;
-                  case "saved-items": return <SavedItemsWidget {...widgetProps} />;
-                  case "visitors-online": return <OwnerMetricWidget {...widgetProps} title="Visitors Online" icon="eye" value={data?.growth?.visitorsOnline ?? 0} />;
-                  case "signed-in-online": return <OwnerMetricWidget {...widgetProps} title="Signed-in Users" icon="users" value={data?.growth?.signedInOnline ?? 0} />;
-                  case "signups-today": return <OwnerMetricWidget {...widgetProps} title="Signups Today" icon="user-plus" value={data?.growth?.signupsToday ?? 0} />;
-                  case "studio-opens": return <OwnerMetricWidget {...widgetProps} title="Studio Opens" icon="sparkles" value={data?.growth?.studioOpensToday ?? 0} />;
-                  case "first-prompts": return <OwnerMetricWidget {...widgetProps} title="First Prompts" icon="message" value={data?.growth?.firstPromptsToday ?? 0} />;
-                  case "upgrades": return <OwnerMetricWidget {...widgetProps} title="Upgrades" icon="trending" value={data?.growth?.upgradesToday ?? 0} />;
-                  case "revenue": return <OwnerMetricWidget {...widgetProps} title="Revenue" icon="dollar" value={`$${((data?.billing.revenueTodayCents ?? 0) / 100).toFixed(2)}`} detail="today" />;
-                  case "provider-costs": return <OwnerMetricWidget {...widgetProps} title="Provider Costs" icon="cpu" value={`$${((data?.billing.estimatedProviderCostTodayCents ?? 0) / 100).toFixed(2)}`} detail="est. today" />;
-                  case "failed-tools": return <OwnerMetricWidget {...widgetProps} title="Failed Tools" icon="alert" value="—" />;
-                  case "failed-jobs": return <OwnerMetricWidget {...widgetProps} title="Failed Jobs" icon="alert" value="—" />;
-                  case "terminal-sessions": return <OwnerMetricWidget {...widgetProps} title="Terminal Sessions" icon="terminal" value="—" />;
-                  case "litt-live-sessions": return <OwnerMetricWidget {...widgetProps} title="LiTT Live Sessions" icon="bot" value="—" />;
-                  case "marketplace-installs": return <OwnerMetricWidget {...widgetProps} title="Marketplace Installs" icon="shopping" value="—" />;
-                  case "system-health": return <SystemHealthWidget {...widgetProps} data={data} />;
-                  case "audit-events": return <AuditEventsWidget {...widgetProps} />;
-                  default: return null;
-                }
-              };
-              return (
-                <div key={p.widgetId} className="min-h-[120px]">
-                  {renderWidget()}
-                </div>
-              );
-            })}
-          </div>
-          {/* Show a helpful empty state if no widgets have data */}
-          {placements.filter((p) => !p.hidden).every((p) => {
-            const def = getWidgetDefinition(p.widgetId);
-            if (!def) return true;
-            // Same logic as above — if all widgets are hidden, show the CTA
-            const interactiveWidgets = ["litt-quick-ask", "music-player", "system-health"];
-            return !interactiveWidgets.includes(p.widgetId);
-          }) ? (
-            <div
-              className="rounded-2xl border p-8 text-center"
-              style={{ background: D.surface, borderColor: D.border }}
-            >
-              <div className="text-sm font-bold" style={{ color: D.textMuted }}>
-                No widget data yet
-              </div>
-              <p className="mt-2 text-xs" style={{ color: D.textDim }}>
-                Connect a project, start a mission, or create something in the Studio to see live data here.
-              </p>
-              <Link
-                href="/studio?tool=chat"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition hover:opacity-90"
-                style={{ background: D.accent, color: "#fff" }}
-              >
-                <Icon name="play" size={14} />
-                Open Studio
-              </Link>
-            </div>
-          ) : null}
+          <DraggableWidgetGrid
+            data={data}
+            widgetData={widgetData}
+            ownerMode={ownerMode}
+          />
         </section>
       </div>
-
-      {/* Widget Library Drawer */}
-      <WidgetLibraryDrawer
-        open={customizeOpen}
-        onClose={() => setCustomizeOpen(false)}
-        placements={placements}
-        ownerMode={ownerMode}
-        onAdd={addWidget}
-        onRemove={removeWidget}
-        onReset={resetLayout}
-      />
     </main>
+  );
+}
+
+/** Prominent light/dark theme toggle for the dashboard header. */
+function ThemeToggle() {
+  const { theme, toggleTheme } = useDashboardTheme();
+  const isLight = theme === "light";
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:scale-105 active:scale-95"
+      style={{
+        borderColor: isLight ? `${D.accentAmber}40` : D.borderStrong,
+        background: isLight ? `${D.accentAmber}12` : D.surface,
+        color: isLight ? D.accentAmber : D.textMuted,
+      }}
+      aria-label={`Switch to ${isLight ? "dark" : "light"} theme`}
+      title={`Switch to ${isLight ? "dark" : "light"} theme`}
+    >
+      <Icon name={isLight ? "moon" : "sun"} size={14} />
+      <span className="hidden sm:inline">{isLight ? "Dark" : "Light"}</span>
+    </button>
   );
 }
 

@@ -6,6 +6,7 @@ import {
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
 import { newRequestId, jsonError } from "@/lib/api-route-helpers";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -175,7 +176,7 @@ function classifyByExtension(ext: string): { mime: string; category: "image" | "
   return { mime, category: "document" };
 }
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const requestId = newRequestId();
   let userId: string | null;
   try {
@@ -310,3 +311,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 20, 60);

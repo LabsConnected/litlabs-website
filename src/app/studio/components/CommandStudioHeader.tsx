@@ -622,7 +622,7 @@ function WorkspaceStatusPopover({
           label="Wallet"
           value={walletBalance === null ? "—" : `${walletBalance.toLocaleString()} LBC`}
           ok={walletBalance !== null && walletBalance > 0}
-          detail="LiTTBits balance"
+          detail="AI credits balance"
         />
         <StatusRow
           label="Environment"

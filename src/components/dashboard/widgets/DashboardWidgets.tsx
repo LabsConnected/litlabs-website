@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Dashboard widget components — each widget renders its own content.
  * Widget data comes from canonical APIs, never from localStorage.
@@ -8,23 +6,10 @@
 import Link from "next/link";
 import { Icon } from "../../dashboard/v2/dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
-import type { GalleryWidgetData, GalleryWidgetItem } from "@/lib/dashboard/gallery-widget-data";
+import type { GalleryWidgetItem } from "@/lib/dashboard/gallery-widget-data";
 import type { DiscoverFeedItem } from "@/lib/dashboard/discover-widget-data";
 import type { RecentCreation } from "@/lib/dashboard/recent-creations";
-
-const D = {
-  surface: "rgba(255,255,255,0.025)",
-  surfaceHover: "rgba(255,255,255,0.04)",
-  border: "rgba(168,85,247,0.12)",
-  accent: "#a970ff",
-  accentGreen: "#B6FF4A",
-  accentAmber: "#F97316",
-  accentRed: "#ef4444",
-  accentCyan: "#65f4ff",
-  textPrimary: "#eef4ff",
-  textMuted: "rgba(238,244,255,0.45)",
-  textDim: "rgba(238,244,255,0.25)",
-};
+import { D } from "@/lib/dashboard/tokens";
 
 /* ── Widget shell ───────────────────────────────────────────────── */
 
@@ -48,7 +33,7 @@ export function WidgetShell({
   return (
     <div
       className="flex h-full flex-col rounded-2xl border"
-      style={{ background: "rgba(0,0,0,0.3)", borderColor: D.border, backdropFilter: "blur(16px)" }}
+      style={{ background: D.bg, borderColor: D.border, backdropFilter: "blur(16px)" }}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2.5" style={{ borderColor: D.border }}>
         <div className="flex min-w-0 items-center gap-2">
@@ -95,7 +80,7 @@ function WidgetEmpty({ icon, message, actionLabel, actionHref }: { icon: string;
       <Icon name={icon} size={20} style={{ color: `${D.accent}66` }} />
       <div className="text-xs" style={{ color: D.textMuted }}>{message}</div>
       {actionLabel && actionHref && (
-        <Link href={actionHref} className="mt-1 rounded-lg px-3 py-1.5 text-[10px] font-bold" style={{ background: D.accent, color: "#fff" }}>
+        <Link href={actionHref} className="mt-1 rounded-lg px-3 py-1.5 text-[10px] font-bold" style={{ background: D.accent, color: D.textOnAccent }}>
           {actionLabel}
         </Link>
       )}
@@ -135,7 +120,7 @@ export function MissionQueueWidget({ data, collapsed, onToggleCollapse, onRemove
                 <span className="truncate text-xs font-bold" style={{ color: D.textPrimary }}>{m.title}</span>
                 <span className="shrink-0 text-[9px] font-black uppercase" style={{ color: D.accentGreen }}>{m.state}</span>
               </div>
-              <div className="mt-2 h-1 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.05)" }}>
+              <div className="mt-2 h-1 overflow-hidden rounded-full" style={{ background: D.skeleton }}>
                 <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, m.progress))}%`, background: `linear-gradient(to right, ${D.accent}, ${D.accentGreen})` }} />
               </div>
             </Link>
@@ -160,7 +145,7 @@ export function CurrentProjectWidget({ data, collapsed, onToggleCollapse, onRemo
             <span className="rounded-full border px-2 py-0.5 text-[9px] font-bold" style={{ borderColor: `${D.accentCyan}40`, color: D.accentCyan }}>{project.terminalState}</span>
             <span className="rounded-full border px-2 py-0.5 text-[9px] font-bold" style={{ borderColor: `${D.accentAmber}40`, color: D.accentAmber }}>{project.deploymentState}</span>
           </div>
-          <Link href="/studio?tool=code" className="mt-auto rounded-lg px-3 py-2 text-center text-[10px] font-black" style={{ background: D.accent, color: "#fff" }}>
+          <Link href="/studio?tool=code" className="mt-auto rounded-lg px-3 py-2 text-center text-[10px] font-black" style={{ background: D.accent, color: D.textOnAccent }}>
             Open in Studio
           </Link>
         </div>
@@ -356,7 +341,7 @@ export function MusicPlayerWidget({ collapsed, onToggleCollapse, onRemove }: Wid
 
 export function LiTTBitsWidget({ data, collapsed, onToggleCollapse, onRemove }: WidgetProps & { data: MissionControlResponse | null }) {
   return (
-    <WidgetShell title="LiTTBits" icon="wallet" accent={D.accentGreen} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onRemove={onRemove}>
+    <WidgetShell title="AI Credits" icon="wallet" accent={D.accentGreen} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onRemove={onRemove}>
       <div className="flex flex-1 flex-col items-center justify-center gap-1">
         <div className="text-2xl font-black" style={{ color: D.accentGreen }}>{(data?.billing.balance ?? 0).toLocaleString()}</div>
         <div className="text-[10px]" style={{ color: D.textMuted }}>{data?.billing.plan ?? "Free"} plan</div>

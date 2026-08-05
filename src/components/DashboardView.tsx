@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { DashboardThemeProvider } from "@/components/dashboard/DashboardThemeProvider";
 
 const MissionControlDashboard = dynamic(
   () =>
@@ -18,5 +19,9 @@ const MissionControlDashboard = dynamic(
 );
 
 export default function DashboardView() {
-  return <MissionControlDashboard />;
+  return (
+    <DashboardThemeProvider>
+      <MissionControlDashboard />
+    </DashboardThemeProvider>
+  );
 }

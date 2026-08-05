@@ -2331,8 +2331,8 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         )}
       </SettingsCard>
 
-      {/* LiTTBits Balance */}
-      <SettingsCard title="LiTTBits" description="Platform credits for AI actions">
+      {/* AI Credits Balance */}
+      <SettingsCard title="AI Credits" description="Platform credits for AI actions">
         {loading ? (
           <div className="flex items-center gap-2 text-xs text-white/40">
             <Loader2 size={12} className="animate-spin" /> Loading…
@@ -2340,9 +2340,9 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         ) : (
           <>
             <div className="rounded-xl border p-4" style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
-              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} LiTTBits</div>
+              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} credits</div>
               <p className="mt-1 text-xs text-white/40">
-                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta LiTTBits (no cash value)`}
+                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta credits (no cash value)`}
                 {betaBalance === 0 && "Available balance"}
               </p>
             </div>
@@ -2362,7 +2362,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
             </div>
             {betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
-                Beta LiTTBits are consumed after paid credits. Expiration is defined per grant.
+                Beta credits are consumed after paid credits. Expiration is defined per grant.
               </p>
             )}
           </>
@@ -2395,6 +2395,60 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 
 function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    setErrorMsg(null);
+    setStatusMsg(null);
+    try {
+      const res = await fetch("/api/account/export", { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Export failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] ?? "litlabs-data-export.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setStatusMsg("Your data has been exported.");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/account", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Delete failed");
+      }
+      setStatusMsg("Your data has been deleted. You will be signed out shortly.");
+      // Give the user a moment to read the message, then sign out
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 2500);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Delete failed");
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -2412,23 +2466,60 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         <Link href="/account" className="mt-2 inline-block text-xs font-bold" style={{ color: T.accentColor }}>Manage sessions →</Link>
       </SettingsCard>
 
-      <SettingsCard title="Data management" description="Export or delete your data">
+      <SettingsCard title="Data management" description="Export or delete your data (GDPR)">
+        {statusMsg && (
+          <div className="mb-3 rounded-lg border border-emerald-400/20 bg-emerald-400/5 p-2.5 text-xs text-emerald-300">
+            {statusMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="mb-3 rounded-lg border border-red-400/20 bg-red-400/5 p-2.5 text-xs text-red-300">
+            {errorMsg}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          <button type="button"
-            className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 hover:bg-white/5">
-            Export data
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting || deleting}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 hover:bg-white/5 disabled:opacity-50"
+          >
+            {exporting && <Loader2 size={12} className="animate-spin" />}
+            {exporting ? "Exporting..." : "Export data"}
           </button>
-          <button type="button" onClick={() => setConfirmDelete(!confirmDelete)}
-            className="rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-400/10">
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(!confirmDelete)}
+            disabled={exporting || deleting}
+            className="rounded-lg border border-red-400/20 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-400/10 disabled:opacity-50"
+          >
             Delete all data
           </button>
         </div>
         {confirmDelete && (
           <div className="mt-3 rounded-lg border border-red-400/20 bg-red-400/5 p-3">
-            <p className="text-xs text-red-300">This will permanently delete all your conversations, memories, and project data. This cannot be undone.</p>
+            <p className="text-xs text-red-300">
+              This permanently deletes all your conversations, memories, project data, and credit history from our database.
+              Your Clerk auth account must be deleted separately via the Clerk dashboard. This cannot be undone.
+            </p>
             <div className="mt-2 flex gap-2">
-              <button type="button" className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-bold text-white">Confirm delete</button>
-              <button type="button" onClick={() => setConfirmDelete(false)} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60">Cancel</button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {deleting && <Loader2 size={12} className="animate-spin" />}
+                {deleting ? "Deleting..." : "Confirm delete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 disabled:opacity-50"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}
