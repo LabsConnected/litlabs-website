@@ -143,6 +143,29 @@ export const visualBuildDurationSeconds = new Histogram({
   registers: [registry],
 });
 
+// ─── API Resilience Metrics ────────────────────────────────────────
+export const apiRetriesTotal = new Counter({
+  name: "litlabs_api_retries_total",
+  help: "Total API retries by status code and outcome (recovered/exhausted)",
+  labelNames: ["status_code", "outcome"] as const,
+  registers: [registry],
+});
+
+export const apiErrorsTotal = new Counter({
+  name: "litlabs_api_errors_total",
+  help: "Total API errors by type (timeout/network/http/html)",
+  labelNames: ["type", "status_code"] as const,
+  registers: [registry],
+});
+
+export const apiRetryLatencySeconds = new Histogram({
+  name: "litlabs_api_retry_latency_seconds",
+  help: "Total time spent in apiFetch including retries",
+  labelNames: ["endpoint"] as const,
+  buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
+  registers: [registry],
+});
+
 // ─── Helpers ───────────────────────────────────────────────────────
 
 /**
@@ -202,6 +225,32 @@ export function recordEvalScore(params: {
   const { dimension, agent, score } = params;
   evalScores.labels({ dimension, agent }).set(score);
   evalRunsTotal.labels({ dimension, agent }).inc();
+}
+
+/**
+ * Record an API retry event (from apiFetch).
+ */
+export function recordApiRetry(params: {
+  statusCode: number;
+  recovered: boolean;
+}): void {
+  const { statusCode, recovered } = params;
+  apiRetriesTotal
+    .labels({ status_code: String(statusCode), outcome: recovered ? "recovered" : "exhausted" })
+    .inc();
+}
+
+/**
+ * Record an API error (from apiFetch).
+ */
+export function recordApiError(params: {
+  type: "timeout" | "network" | "http" | "html";
+  statusCode?: number;
+}): void {
+  const { type, statusCode } = params;
+  apiErrorsTotal
+    .labels({ type, status_code: String(statusCode ?? 0) })
+    .inc();
 }
 
 /**

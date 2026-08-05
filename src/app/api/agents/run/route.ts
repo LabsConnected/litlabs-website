@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { randomUUID } from "crypto";
+import { recordAgentRun } from "@/lib/metrics";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
@@ -17,8 +18,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing agentName or task" }, { status: 400 });
   }
 
+  const startTime = Date.now();
+
   const admin = getSupabaseAdmin();
   if (!admin) {
+    recordAgentRun({ agent: agentName, mode: "queued", status: "success", durationMs: Date.now() - startTime });
     return NextResponse.json({ queued: true, id: randomUUID(), note: "Supabase not configured, agent task logged locally" });
   }
 
@@ -34,9 +38,11 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
+    recordAgentRun({ agent: agentName, mode: "queued", status: "error", durationMs: Date.now() - startTime });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  recordAgentRun({ agent: agentName, mode: "queued", status: "success", durationMs: Date.now() - startTime });
   return NextResponse.json({ queued: true, id: data.id });
 }
 

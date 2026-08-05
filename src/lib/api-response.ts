@@ -215,6 +215,10 @@ export interface ApiFetchOptions extends RequestInit {
   retries?: number;
   /** Base delay between retries (exponential backoff). Default 500ms. */
   retryDelayMs?: number;
+  /** Called when a retry is attempted (for metrics/telemetry). */
+  onRetry?: (info: { statusCode: number; attempt: number }) => void;
+  /** Called when an error is surfaced (for metrics/telemetry). */
+  onError?: (info: { type: "timeout" | "network" | "http" | "html"; statusCode: number }) => void;
 }
 
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
@@ -253,6 +257,8 @@ export async function apiFetch<T = unknown>(
     retries = 1,
     retryDelayMs = 500,
     signal: externalSignal,
+    onRetry,
+    onError,
     ...fetchOpts
   } = opts;
 
@@ -306,6 +312,7 @@ export async function apiFetch<T = unknown>(
 
       // Network failure or timeout — retry, then surface as ApiResponseError
       if (attempt < maxAttempts) {
+        onRetry?.({ statusCode: 0, attempt });
         try {
           await delay(retryDelayMs * attempt, externalSignal);
         } catch {
@@ -317,6 +324,7 @@ export async function apiFetch<T = unknown>(
       const isTimeout =
         fetchErr instanceof DOMException &&
         (fetchErr.name === "TimeoutError" || fetchErr.name === "AbortError");
+      onError?.({ type: isTimeout ? "timeout" : "network", statusCode: 0 });
       lastError = new ApiResponseError({
         status: 0,
         endpoint: typeof input === "string" ? input : input.toString(),
@@ -339,9 +347,13 @@ export async function apiFetch<T = unknown>(
         lastError = err;
         // Retry only on transient server errors
         if (attempt < maxAttempts && RETRYABLE_STATUS.has(err.status)) {
+          onRetry?.({ statusCode: err.status, attempt });
           await delay(retryDelayMs * attempt, externalSignal);
           continue;
         }
+        // Surface error type for metrics
+        const errType = err.responseType === "html" ? "html" : "http";
+        onError?.({ type: errType, statusCode: err.status });
       }
       throw err;
     }

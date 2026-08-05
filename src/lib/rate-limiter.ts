@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { newRequestId } from "@/lib/api-route-helpers";
+import { httpRequestTotal, httpRequestDurationSeconds } from "@/lib/metrics";
 
 interface RateLimitResult {
   success: boolean;
@@ -104,6 +105,10 @@ export function withRateLimit<T>(
   window: number = 60,
 ) {
   return async (request: NextRequest, context?: T) => {
+    const _httpStart = Date.now();
+    const _method = request.method;
+    const _route = request.nextUrl?.pathname || new URL(request.url).pathname;
+
     const { success, remaining, resetTime } = await rateLimit(
       request,
       limit,
@@ -111,6 +116,8 @@ export function withRateLimit<T>(
     );
 
     if (!success) {
+      httpRequestTotal.labels({ method: _method, route: _route, status: "429" }).inc();
+      httpRequestDurationSeconds.labels({ method: _method, route: _route, status: "429" }).observe((Date.now() - _httpStart) / 1000);
       return new NextResponse(
         JSON.stringify({ error: "Rate limit exceeded", retryAfter: resetTime }),
         {
@@ -134,6 +141,8 @@ export function withRateLimit<T>(
       const requestId = newRequestId();
       const message = err instanceof Error ? err.message : "Internal server error";
       console.error(`[api] ${requestId} 500 (unhandled): ${message}\n${err instanceof Error ? err.stack ?? "" : ""}`);
+      httpRequestTotal.labels({ method: _method, route: _route, status: "500" }).inc();
+      httpRequestDurationSeconds.labels({ method: _method, route: _route, status: "500" }).observe((Date.now() - _httpStart) / 1000);
       return new NextResponse(
         JSON.stringify({ success: false, requestId, error: "Internal server error", code: "INTERNAL_ERROR" }),
         {
@@ -153,6 +162,9 @@ export function withRateLimit<T>(
     } catch {
       /* immutable headers on plain Response — ignore */
     }
+    const _status = String(response.status);
+    httpRequestTotal.labels({ method: _method, route: _route, status: _status }).inc();
+    httpRequestDurationSeconds.labels({ method: _method, route: _route, status: _status }).observe((Date.now() - _httpStart) / 1000);
     return response;
   };
 }

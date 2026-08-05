@@ -24,6 +24,7 @@ import type {
   IntegrationPlan,
   ProjectIntelligenceSnapshot,
 } from "./types";
+import { recordEvalScore } from "@/lib/metrics";
 
 // ─── Evaluation dimensions ──────────────────────────────────────
 
@@ -114,6 +115,13 @@ export class CandidateEvaluator {
     candidates: CandidateInput[],
   ): IntegrationRecommendation {
     const evaluations = candidates.map((c) => this.evaluate(c));
+
+    // Record eval scores as Prometheus metrics
+    for (const eval_ of evaluations) {
+      for (const score of eval_.scores) {
+        recordEvalScore({ dimension: score.dimension, agent: eval_.name, score: score.score });
+      }
+    }
 
     // Sort by overall score (descending)
     const sorted = [...evaluations].sort((a, b) => b.overallScore - a.overallScore);

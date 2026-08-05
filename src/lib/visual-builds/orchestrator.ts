@@ -3,6 +3,7 @@ import { createMission, createRun, createStep, getMission, updateMissionStatus, 
 import { getProject, updateProjectRuntime, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
+import { visualBuildsTotal, visualBuildDurationSeconds } from "@/lib/metrics";
 import { capturePreviewWithChrome } from "./capture";
 import { buildAssetQuery, createImageGenerationProvider, createStockAssetProvider } from "./providers";
 import { assetInspectionIsValid, DEFAULT_VISUAL_ASSET_ALLOWLIST, inspectAsset, inspectAssetBuffer } from "./security";
@@ -121,6 +122,7 @@ export async function runVisualBuild(input: {
   userId: string;
   request: VisualBuildRequest;
 }): Promise<VisualBuildExecutionResult> {
+  const _vbStartTime = Date.now();
   const project = await getProject(input.projectId, input.userId);
   if (!project) {
     throw new Error("Project not found");
@@ -634,6 +636,11 @@ export async function runVisualBuild(input: {
     previewUrl: previewUrlPath,
     runtimeError: null,
   });
+
+  // Record visual build metrics
+  const _vbDuration = Date.now() - _vbStartTime;
+  visualBuildsTotal.labels({ stage: build.status, status: complete ? "success" : "failed" }).inc();
+  visualBuildDurationSeconds.labels({ stage: build.status }).observe(_vbDuration / 1000);
 
   return {
     build,
