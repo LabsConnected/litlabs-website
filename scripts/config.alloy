@@ -1,20 +1,26 @@
 /**
- * Alloy configuration for Grafana Cloud observability (metrics only).
+ * Alloy configuration for Grafana Cloud observability (metrics + logs).
  *
- * Collects Windows host metrics (CPU, disk, network, memory, services)
- * and forwards them to Grafana Cloud Prometheus via remote_write.
+ * Collects:
+ *   - Windows host metrics (CPU, disk, network, memory, services)
+ *   - Next.js app metrics (LLM calls, agent runs, eval scores, HTTP)
+ *   - Windows Event Logs (Application + System)
+ *
+ * Forwards to Grafana Cloud via:
+ *   - Prometheus remote_write (metrics)
+ *   - Loki write (logs)
  *
  * Secrets are read from environment variables via sys.env() — never
  * hardcoded. Required env vars:
- *   GCLOUD_RW_API_KEY  — Grafana Cloud access policy token (metrics:write)
+ *   GCLOUD_RW_API_KEY  — Grafana Cloud access policy token (metrics:write + logs:write)
+ *   GCLOUD_LOKI_URL    — Loki push URL (e.g. https://logs-prod-XXX-us-east-2.grafana.net)
  *
- * The username and URL are baked in (not secrets):
+ * The Prometheus username and URL are baked in (not secrets):
  *   User: 3425326
  *   URL:  https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
  */
 
 // ─── Self-monitoring (Alloy's own metrics) ─────────────────────────
-// API key is read via sys.env() directly in the remote_write block below.
 prometheus.exporter.self "alloy_check" {}
 
 discovery.relabel "alloy_check" {
@@ -136,5 +142,74 @@ prometheus.remote_write "grafanacloud" {
       username = "3425326"
       password = sys.env("GCLOUD_RW_API_KEY")
     }
+  }
+}
+
+// ─── Loki write to Grafana Cloud ───────────────────────────────────
+// GCLOUD_LOKI_URL must be set as a machine env var (e.g.
+// https://logs-prod-XXX-us-east-2.grafana.net/loki/api/v1/push)
+loki.write "grafana_cloud_loki" {
+  endpoint {
+    url = sys.env("GCLOUD_LOKI_URL")
+
+    basic_auth {
+      username = "3425326"
+      password = sys.env("GCLOUD_RW_API_KEY")
+    }
+  }
+}
+
+// ─── Windows Event Logs → Loki ─────────────────────────────────────
+// Application event log
+loki.relabel "logs_integrations_windows_exporter_application" {
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/windows_exporter"
+  }
+}
+
+loki.source.windowsevent "logs_integrations_windows_exporter_application" {
+  locale                  = 1033
+  eventlog_name           = "Application"
+  bookmark_path           = "./bookmarks-app.xml"
+  poll_interval           = "0s"
+  use_incoming_timestamp  = true
+  forward_to              = [loki.relabel.logs_integrations_windows_exporter_application.receiver]
+  labels                  = {
+    source = "windows-eventlog-application",
+  }
+}
+
+// System event log
+loki.relabel "logs_integrations_windows_exporter_system" {
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/windows_exporter"
+  }
+}
+
+loki.source.windowsevent "logs_integrations_windows_exporter_system" {
+  locale                  = 1033
+  eventlog_name           = "System"
+  bookmark_path           = "./bookmarks-sys.xml"
+  poll_interval           = "0s"
+  use_incoming_timestamp  = true
+  forward_to              = [loki.relabel.logs_integrations_windows_exporter_system.receiver]
+  labels                  = {
+    source = "windows-eventlog-system",
   }
 }
