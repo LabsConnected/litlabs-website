@@ -33,7 +33,7 @@
       "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
       "targets": [{
-        "expr": "(1 - (windows_os_visible_memory_bytes / windows_cs_physical_memory_bytes)) * 100 > 90",
+        "expr": "(1 - (windows_memory_physical_free_bytes / windows_memory_physical_total_bytes)) * 100 > 90",
         "legendFormat": "memory",
         "refId": "A"
       }],

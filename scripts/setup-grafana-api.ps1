@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
   Configure Grafana Cloud via HTTP API — data sources, dashboards, alerts.
@@ -76,8 +75,11 @@ $dashboards = @(
   @{ file = "grafana/dashboard-project-health.json";  name = "Project Health" }
 )
 
+# Resolve paths relative to project root (parent of scripts/)
+$projectRoot = Split-Path $PSScriptRoot -Parent
+
 foreach ($db in $dashboards) {
-  $dbPath = Join-Path $PSScriptRoot $db.file
+  $dbPath = Join-Path $projectRoot $db.file
   if (!(Test-Path $dbPath)) {
     Write-Host "  Skipping $($db.name) — file not found: $dbPath" -ForegroundColor Red
     continue

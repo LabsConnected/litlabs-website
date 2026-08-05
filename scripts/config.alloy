@@ -58,6 +58,7 @@ prometheus.exporter.windows "integrations_windows_exporter" {
     "cpu",
     "cs",
     "logical_disk",
+    "memory",
     "net",
     "os",
     "service",
