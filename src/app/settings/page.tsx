@@ -1470,20 +1470,81 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
 
 /* ── LiTT & Spark ──────────────────────────────────────────────────── */
 
+const AGENT_DEFAULT_SETTINGS = {
+  defaultAgent: "litt",
+  responseStyle: "concise",
+  spokenLength: "medium",
+  approvalRequired: true,
+  projectAwareness: true,
+  memoryUsage: true,
+  proactiveSuggestions: false,
+  terminalAccess: true,
+  fileWrite: false,
+  githubAccess: false,
+  deployApproval: true,
+};
+
 function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [settings, setSettings] = useState({
-    defaultAgent: "litt",
-    responseStyle: "concise",
-    spokenLength: "medium",
-    approvalRequired: true,
-    projectAwareness: true,
-    memoryUsage: true,
-    proactiveSuggestions: false,
-    terminalAccess: true,
-    fileWrite: false,
-    githubAccess: false,
-    deployApproval: true,
-  });
+  const STORAGE_KEY = "litlabs:agent-settings";
+
+  const [settings, setSettings] = useState(AGENT_DEFAULT_SETTINGS);
+  const [savedSettings, setSavedSettings] = useState(AGENT_DEFAULT_SETTINGS);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [loaded, setLoaded] = useState(false);
+
+  // Load saved settings from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const merged = { ...AGENT_DEFAULT_SETTINGS, ...parsed };
+        setSettings(merged);
+        setSavedSettings(merged);
+      }
+    } catch {
+      // ignore parse errors
+    }
+    setLoaded(true);
+  }, []);
+
+  // Track unsaved changes
+  const hasUnsavedChanges = loaded && JSON.stringify(settings) !== JSON.stringify(savedSettings);
+
+  const updateSetting = useCallback(<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaveStatus("saving");
+    try {
+      // Save to localStorage
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+
+      // Also try to persist server-side (fire-and-forget — works if migration is applied)
+      try {
+        await fetch("/api/settings/agents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(settings),
+        });
+      } catch {
+        // Server-side save is best-effort — localStorage is the source of truth for now
+      }
+
+      setSavedSettings(settings);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [settings]);
+
+  const handleDiscard = useCallback(() => {
+    setSettings(savedSettings);
+    setSaveStatus("idle");
+  }, [savedSettings]);
 
   return (
     <div className="space-y-4">
@@ -1493,7 +1554,7 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
             { id: "litt", name: "LiTT", desc: "Operating agent" },
             { id: "spark", name: "Spark", desc: "Creative agent" },
           ].map((a) => (
-            <button key={a.id} type="button" onClick={() => setSettings({ ...settings, defaultAgent: a.id })}
+            <button key={a.id} type="button" onClick={() => updateSetting("defaultAgent", a.id)}
               className="rounded-xl border p-3 text-left transition-all"
               style={{ borderColor: settings.defaultAgent === a.id ? `${T.accentColor}40` : "rgba(255,255,255,0.06)", backgroundColor: settings.defaultAgent === a.id ? `${T.accentColor}10` : "transparent" }}>
               <div className="text-sm font-bold" style={{ color: settings.defaultAgent === a.id ? T.accentColor : "rgba(255,255,255,0.8)" }}>{a.name}</div>
@@ -1509,7 +1570,7 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
             <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Response style</span>
             <div className="mt-1 flex gap-2">
               {["concise", "detailed", "casual"].map((v) => (
-                <button key={v} type="button" onClick={() => setSettings({ ...settings, responseStyle: v })}
+                <button key={v} type="button" onClick={() => updateSetting("responseStyle", v)}
                   className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
                   style={{ borderColor: settings.responseStyle === v ? T.accentColor : "rgba(255,255,255,0.08)", color: settings.responseStyle === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
                   {v}
@@ -1521,7 +1582,7 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
             <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Spoken response length</span>
             <div className="mt-1 flex gap-2">
               {["short", "medium", "long"].map((v) => (
-                <button key={v} type="button" onClick={() => setSettings({ ...settings, spokenLength: v })}
+                <button key={v} type="button" onClick={() => updateSetting("spokenLength", v)}
                   className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize"
                   style={{ borderColor: settings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.08)", color: settings.spokenLength === v ? T.accentColor : "rgba(255,255,255,0.5)" }}>
                   {v}
@@ -1534,21 +1595,56 @@ function AgentsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"]
 
       <SettingsCard title="Behavior" description="Agent autonomy and awareness">
         <div className="space-y-3">
-          <ToggleRow title="Require approval for actions" description="Ask before executing" checked={settings.approvalRequired} onChange={(v) => setSettings({ ...settings, approvalRequired: v })} />
-          <ToggleRow title="Project awareness" description="Agents know your project context" checked={settings.projectAwareness} onChange={(v) => setSettings({ ...settings, projectAwareness: v })} />
-          <ToggleRow title="Memory usage" description="Use conversation history and memory" checked={settings.memoryUsage} onChange={(v) => setSettings({ ...settings, memoryUsage: v })} />
-          <ToggleRow title="Proactive suggestions" description="Agents suggest next steps" checked={settings.proactiveSuggestions} onChange={(v) => setSettings({ ...settings, proactiveSuggestions: v })} />
+          <ToggleRow title="Require approval for actions" description="Ask before executing" checked={settings.approvalRequired} onChange={(v) => updateSetting("approvalRequired", v)} />
+          <ToggleRow title="Project awareness" description="Agents know your project context" checked={settings.projectAwareness} onChange={(v) => updateSetting("projectAwareness", v)} />
+          <ToggleRow title="Memory usage" description="Use conversation history and memory" checked={settings.memoryUsage} onChange={(v) => updateSetting("memoryUsage", v)} />
+          <ToggleRow title="Proactive suggestions" description="Agents suggest next steps" checked={settings.proactiveSuggestions} onChange={(v) => updateSetting("proactiveSuggestions", v)} />
         </div>
       </SettingsCard>
 
       <SettingsCard title="Tool permissions" description="What agents are allowed to do">
         <div className="space-y-3">
-          <ToggleRow title="Terminal execution" description="Allow agents to run commands" checked={settings.terminalAccess} onChange={(v) => setSettings({ ...settings, terminalAccess: v })} />
-          <ToggleRow title="File write access" description="Allow agents to modify files" checked={settings.fileWrite} onChange={(v) => setSettings({ ...settings, fileWrite: v })} />
-          <ToggleRow title="GitHub access" description="Allow agents to push and create PRs" checked={settings.githubAccess} onChange={(v) => setSettings({ ...settings, githubAccess: v })} />
-          <ToggleRow title="Deployment approval" description="Require approval before deploying" checked={settings.deployApproval} onChange={(v) => setSettings({ ...settings, deployApproval: v })} />
+          <ToggleRow title="Terminal execution" description="Allow agents to run commands" checked={settings.terminalAccess} onChange={(v) => updateSetting("terminalAccess", v)} />
+          <ToggleRow title="File write access" description="Allow agents to modify files" checked={settings.fileWrite} onChange={(v) => updateSetting("fileWrite", v)} />
+          <ToggleRow title="GitHub access" description="Allow agents to push and create PRs" checked={settings.githubAccess} onChange={(v) => updateSetting("githubAccess", v)} />
+          <ToggleRow title="Deployment approval" description="Require approval before deploying" checked={settings.deployApproval} onChange={(v) => updateSetting("deployApproval", v)} />
         </div>
       </SettingsCard>
+
+      {/* Save / Discard bar */}
+      <div className="sticky bottom-4 z-10 flex items-center justify-between rounded-xl border p-3"
+        style={{
+          borderColor: hasUnsavedChanges ? `${T.accentColor}40` : "rgba(255,255,255,0.06)",
+          backgroundColor: "rgba(10,10,15,0.95)",
+          backdropFilter: "blur(8px)",
+        }}>
+        <div className="flex items-center gap-2">
+          {saveStatus === "saved" && <Check size={14} style={{ color: T.accentColor }} />}
+          {saveStatus === "saving" && <Loader2 size={14} className="animate-spin" style={{ color: T.accentColor }} />}
+          <span className="text-[11px]" style={{
+            color: saveStatus === "error" ? "#ef4444"
+              : saveStatus === "saved" ? T.accentColor
+              : hasUnsavedChanges ? "rgba(255,255,255,0.6)"
+              : "rgba(255,255,255,0.3)",
+          }}>
+            {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Save failed" : hasUnsavedChanges ? "Unsaved changes" : "All changes saved"}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          {hasUnsavedChanges && (
+            <button type="button" onClick={handleDiscard}
+              className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition-all"
+              style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>
+              Discard
+            </button>
+          )}
+          <button type="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === "saving"}
+            className="rounded-lg px-4 py-1.5 text-[11px] font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+            {saveStatus === "saving" ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
