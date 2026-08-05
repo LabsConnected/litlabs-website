@@ -5,6 +5,7 @@ import {
   updateProjectWorkspace,
   ensureCanonicalStudioProject,
   claimProvisioningLock,
+  recoverStaleProvisioning,
 } from "@/lib/projects/project-repository";
 import { prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationToken } from "@/lib/github-app";
@@ -63,6 +64,11 @@ export async function POST(
       { status: 500 },
     );
   }
+
+  // Recover stale provisioning locks before checking status.
+  // If a previous serverless invocation crashed after claiming the lock,
+  // the row stays `provisioning` forever without this recovery step.
+  await recoverStaleProvisioning(projectId, userId);
 
   // If already provisioning, tell the client to poll
   if (canonical.workspaceStatus === "provisioning") {

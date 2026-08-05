@@ -103,7 +103,7 @@ const TRUTH_RULES = `TRUTH RULES:
 /* ------------------------------------------------------------------ */
 /*  LiTT — the lead operating agent (Starter, free)                    */
 /* ------------------------------------------------------------------ */
-const LITT: AgentDefinition = {
+export const LITT: AgentDefinition = {
   id: "litt",
   slug: "litt",
   name: "LiTT",
@@ -176,7 +176,7 @@ Adapt to verified project context. For engineering requests, provide production-
 /* ------------------------------------------------------------------ */
 /*  Spark — the creative companion (Starter, free)                     */
 /* ------------------------------------------------------------------ */
-const SPARK: AgentDefinition = {
+export const SPARK: AgentDefinition = {
   id: "spark",
   slug: "spark",
   name: "Spark",

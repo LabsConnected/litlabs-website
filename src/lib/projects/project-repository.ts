@@ -401,6 +401,41 @@ export async function claimProvisioningLock(
 }
 
 /**
+ * Recover stale provisioning locks.
+ *
+ * If a serverless function crashes after claiming the lock, the row stays
+ * `provisioning` forever — no new claim can proceed because
+ * `claimProvisioningLock` only matches `not_prepared`/`failed`.
+ *
+ * This function atomically transitions stale `provisioning` → `failed`
+ * with `workspace_error = 'Provisioning timed out'`, allowing the next
+ * caller to claim the lock.
+ */
+export async function recoverStaleProvisioning(
+  projectId: string,
+  userId: string,
+  maxAgeMs: number = 300000, // 5 minutes
+): Promise<boolean> {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      workspace_status: "failed",
+      workspace_error: "Provisioning timed out",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .eq("workspace_status", "provisioning")
+    .lt("updated_at", cutoff)
+    .select()
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return true;
+}
+
+/**
  * Update runtime fields on a canonical project.
  */
 export async function updateProjectRuntime(

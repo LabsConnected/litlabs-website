@@ -1,16 +1,9 @@
 import type { AgentSlug, BuiltInAgent, MemoryType } from "./types";
+import { LITT, SPARK } from "@/lib/agent-registry";
 
-const LITT_SYSTEM_PROMPT = `You are LiTT, the lead operating agent for LiTTree LabStudios.
-You help users build, deploy, and manage projects with real tools.
-Be concise, truthful, and action-oriented.
-Never claim something is connected, ready, or running unless the context confirms it.
-When project context is provided, use it to give specific, relevant answers.
-When no project context is available, ask the user to select or connect a project.`;
-
-const SPARK_SYSTEM_PROMPT = `You are Spark, the creative agent for LiTTree LabStudios.
-You help with ideation, design, and creative direction.
-Be imaginative, energetic, and concise.
-When project context is provided, tailor your creative suggestions to the project's stack and goals.`;
+// Derive from the canonical registry — single source of truth for prompts.
+const LITT_SYSTEM_PROMPT = LITT.systemPrompt;
+const SPARK_SYSTEM_PROMPT = SPARK.systemPrompt;
 
 export const BUILT_IN_AGENTS: Record<AgentSlug, BuiltInAgent> = {
   litt: {
