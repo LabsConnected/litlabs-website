@@ -37,7 +37,11 @@ export type TerminalStatus =
   | "disconnected"
   | "connecting"
   | "connected"
-  | "error";
+  | "error"
+  | "unavailable"
+  | "project_context_missing"
+  | "pty_failed"
+  | "auth_failed";
 
 export interface TerminalConnectionState {
   status: TerminalStatus;
@@ -85,7 +89,15 @@ export function terminalStatusToCapability(
       capStatus = "connecting";
       break;
     case "error":
+    case "pty_failed":
+    case "auth_failed":
       capStatus = "error";
+      break;
+    case "project_context_missing":
+      capStatus = "error";
+      break;
+    case "unavailable":
+      capStatus = "unavailable";
       break;
     default:
       capStatus = "unavailable";

@@ -32,14 +32,17 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   ...INITIAL_STATE,
 
   setStatus: (status) =>
-    set((state) => ({
-      status,
-      connectedAt:
-        status === "connected" && state.status !== "connected"
-          ? new Date().toISOString()
-          : state.connectedAt,
-      error: status === "error" ? state.error : status === "disconnected" ? null : state.error,
-    })),
+    set((state) => {
+      const isErrorState = ["error", "pty_failed", "auth_failed", "project_context_missing", "unavailable"].includes(status);
+      return {
+        status,
+        connectedAt:
+          status === "connected" && state.status !== "connected"
+            ? new Date().toISOString()
+            : state.connectedAt,
+        error: isErrorState ? state.error : status === "disconnected" ? null : state.error,
+      };
+    }),
 
   setSession: (sessionId, _cwd) => set({ sessionId }),
 

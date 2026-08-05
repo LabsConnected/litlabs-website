@@ -164,7 +164,7 @@ export const TerminalPanel = forwardRef<
             connectTimeoutRef.current = null;
           }
           terminalStore.setError("PTY server unavailable after 5 reconnection attempts");
-          terminalStore.setStatus("error");
+          terminalStore.setStatus("unavailable");
           term.writeln("\x1b[31m❌ PTY server unavailable. Click Retry to try again.\x1b[0m");
           onLog?.("[WS] Reconnection failed after 5 attempts");
         });
@@ -235,9 +235,10 @@ export const TerminalPanel = forwardRef<
               });
               socketRef.current = retrySocket;
               retrySocket.on("connect_error", (nextErr: Error) => {
+                const isAuth = /unauthorized|forbidden|auth/i.test(nextErr.message || "");
                 terminalStore.setError(nextErr.message);
-                terminalStore.setStatus("error");
-                term.writeln(`\x1b[31m❌ PTY connection failed: ${nextErr.message}\x1b[0m`);
+                terminalStore.setStatus(isAuth ? "auth_failed" : "pty_failed");
+                term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
                 onLog?.(`[WS] Connect error: ${nextErr.message}`);
               });
               retrySocket.on("connect", () => {
@@ -250,7 +251,7 @@ export const TerminalPanel = forwardRef<
             }).catch((authErr: unknown) => {
               const message = authErr instanceof Error ? authErr.message : "Terminal authentication failed";
               terminalStore.setError(message);
-              terminalStore.setStatus("error");
+              terminalStore.setStatus("auth_failed");
               term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
               onLog?.(`[AUTH] ${message}`);
             });
@@ -261,8 +262,8 @@ export const TerminalPanel = forwardRef<
             connectTimeoutRef.current = null;
           }
           terminalStore.setError(err.message);
-          terminalStore.setStatus("error");
-          term.writeln(`\x1b[31m❌ PTY connection failed: ${err.message}\x1b[0m`);
+          terminalStore.setStatus(isUnauthorized ? "auth_failed" : "pty_failed");
+          term.writeln(`\x1b[31m❌ ${isUnauthorized ? "Authentication failed" : "PTY connection failed"}: ${err.message}\x1b[0m`);
           onLog?.(`[WS] Connect error: ${err.message}`);
         });
 
@@ -351,9 +352,10 @@ export const TerminalPanel = forwardRef<
                       terminalStore.setStatus("connected");
                     });
                     retrySocket.on("connect_error", (nextErr: Error) => {
+                      const isAuth = /unauthorized|forbidden|auth/i.test(nextErr.message || "");
                       terminalStore.setError(nextErr.message);
-                      terminalStore.setStatus("error");
-                      term.writeln(`\x1b[31m❌ PTY connection failed: ${nextErr.message}\x1b[0m`);
+                      terminalStore.setStatus(isAuth ? "auth_failed" : "pty_failed");
+                      term.writeln(`\x1b[31m❌ ${isAuth ? "Authentication failed" : "PTY connection failed"}: ${nextErr.message}\x1b[0m`);
                     });
                   });
                 }
@@ -375,7 +377,8 @@ export const TerminalPanel = forwardRef<
             term.writeln(`\x1b[31m❌ ${prepMessage}\x1b[0m`);
             onLog?.(`[WORKSPACE] ${prepMessage}`);
             terminalStore.setError(prepMessage);
-            terminalStore.setStatus("error");
+            const isContextMissing = /canonical project|not found|project context/i.test(prepMessage);
+            terminalStore.setStatus(isContextMissing ? "project_context_missing" : "error");
           });
           return;
         }
@@ -385,6 +388,9 @@ export const TerminalPanel = forwardRef<
             : "Terminal authentication failed";
         term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
         onLog?.(`[AUTH] ${message}`);
+        const isAuth = /auth|unauthorized|forbidden/i.test(message);
+        terminalStore.setError(message);
+        terminalStore.setStatus(isAuth ? "auth_failed" : "error");
       });
 
     return () => {

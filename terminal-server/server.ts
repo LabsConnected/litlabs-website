@@ -106,7 +106,12 @@ async function probeDockerAvailability(): Promise<{ value: boolean; reason: stri
 }
 
 if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
-  throw new Error("TERMINAL_USE_DOCKER=true is required in production");
+  console.warn(
+    "[Terminal] WARNING: Running in production without Docker isolation (TERMINAL_USE_DOCKER=false). " +
+      "PTY sessions will run directly on the host with no container isolation. " +
+      "This is acceptable for Railway deployments but less secure than Docker mode. " +
+      "Set TERMINAL_USE_DOCKER=true and provide a Docker daemon for full isolation.",
+  );
 }
 
 // Warn if workspace root is the ephemeral default in production — cloned

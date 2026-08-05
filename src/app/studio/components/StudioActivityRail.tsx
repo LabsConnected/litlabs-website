@@ -68,7 +68,7 @@ interface StudioActivityRailProps {
   activeAgentId: AgentId;
   projectName: string | null;
   modelLabel: string;
-  terminalStatus: "connected" | "disconnected" | "connecting" | "error";
+  terminalStatus: import("@/lib/capabilities/types").TerminalStatus;
   repositoryName: string | null;
   branch?: string | null;
   onOpenTerminal?: () => void;
@@ -581,8 +581,22 @@ export default function StudioActivityRail({
             <HealthRow
               icon={Rocket}
               label="Terminal"
-              value={terminalStatus === "connected" ? "Connected" : terminalStatus === "connecting" ? "Connecting…" : "Disconnected"}
-              status={terminalStatus === "connected" ? "success" : terminalStatus === "connecting" ? "pending" : "muted"}
+              value={
+                terminalStatus === "connected" ? "Connected" :
+                terminalStatus === "connecting" ? "Connecting…" :
+                terminalStatus === "project_context_missing" ? "Project context missing" :
+                terminalStatus === "pty_failed" ? "PTY failed" :
+                terminalStatus === "auth_failed" ? "Auth failed" :
+                terminalStatus === "unavailable" ? "Unavailable" :
+                terminalStatus === "error" ? "Error" :
+                "Disconnected"
+              }
+              status={
+                terminalStatus === "connected" ? "success" :
+                terminalStatus === "connecting" ? "pending" :
+                terminalStatus === "disconnected" ? "muted" :
+                "error"
+              }
               onClick={terminalStatus !== "connected" ? onOpenTerminal : undefined}
             />
             <HealthRow

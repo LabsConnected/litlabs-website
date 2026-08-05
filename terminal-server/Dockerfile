@@ -23,10 +23,14 @@ COPY . .
 # Build the terminal server
 RUN npm run build
 
-# Workspace root
-ENV TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
+# Workspace root — Railway persistent volume mount point
+ENV TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
 ENV TERMINAL_SERVER_PORT=4001
 ENV TERMINAL_USE_DOCKER=false
+ENV NODE_ENV=production
+
+# Create the workspace directory
+RUN mkdir -p /data/littree-workspaces
 
 EXPOSE 4001
 

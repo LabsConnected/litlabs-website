@@ -377,7 +377,7 @@ export async function ensureCanonicalStudioProject(
     name: legacy.repository_full_name || legacy.repository,
     slug: legacy.repository,
     source_type: "github",
-    access_mode: legacy.repository_private ? "private" : "public",
+    access_mode: legacy.repository_private ? "private" : "shared",
     template_id: null,
     github_installation_id: legacy.github_installation_id,
     github_repository_id: legacy.repository_id,
