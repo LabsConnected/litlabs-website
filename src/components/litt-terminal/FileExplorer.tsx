@@ -20,10 +20,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl =
-    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  const envUrl = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
+  const wsUrl = envUrl && !envUrl.includes("localhost")
+    ? envUrl
+    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
   const fetchEntries = useCallback(
     async (path: string) => {

@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
-import { StudioShell } from "@/components/studio/shell/StudioShell";
+import CommandStudio from "./components/CommandStudio";
 import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
 
 function StudioHub() {
@@ -132,7 +132,7 @@ function StudioHub() {
     );
   }
 
-  return <StudioShell />;
+  return <CommandStudio />;
 }
 
 export default function StudioPage() {
