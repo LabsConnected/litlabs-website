@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { CODE_MODELS as MODELS } from "@/lib/studio-models";
+import { apiFetch, ApiResponseError } from "@/lib/api-response";
 import {
   Bot,
   Copy,
@@ -23,6 +24,8 @@ import {
   Play,
   Brain,
   RotateCcw,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 
 type Message = {
@@ -102,6 +105,8 @@ export default function CanvasTool() {
   const [qualityLevel, setQualityLevel] = useState("polished");
   const [selectedIntent, setSelectedIntent] = useState("");
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -190,6 +195,7 @@ export default function CanvasTool() {
     async (text: string) => {
       if (!text.trim() || isLoading) return;
       setInput("");
+      setApiError(null);
       setIsLoading(true);
 
       const userMsg: Message = {
@@ -211,9 +217,8 @@ export default function CanvasTool() {
           ? `\nQuality level: ${qualityPrompt.label} — ${qualityPrompt.desc}.`
           : "";
 
-        const res = await fetch("/api/ai-chat", {
+        const data = await apiFetch<{ text?: string; response?: string; error?: string }>("/api/ai-chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
             messages: [
@@ -228,9 +233,6 @@ export default function CanvasTool() {
             ],
           }),
         });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Request failed");
 
         // Handle streaming or JSON response
         let responseText = "";
@@ -263,15 +265,34 @@ export default function CanvasTool() {
           setPreviewMode("code");
         }
       } catch (err) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "system",
-            content: `Error: ${err instanceof Error ? err.message : "Failed to get response"}`,
-            ts: new Date().toLocaleTimeString(),
-          },
-        ]);
+        // Preserve the user's prompt so they can edit and retry
+        setLastFailedPrompt(text);
+        setInput(text);
+
+        if (err instanceof ApiResponseError) {
+          setApiError(err.toDiagnostic());
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Request failed: ${err.message}`,
+              ts: new Date().toLocaleTimeString(),
+            },
+          ]);
+        } else {
+          const msg = err instanceof Error ? err.message : "Failed to get response";
+          setApiError(msg);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              content: `Error: ${msg}`,
+              ts: new Date().toLocaleTimeString(),
+            },
+          ]);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -671,6 +692,47 @@ export default function CanvasTool() {
                     style={{ color: "#34d399" }}
                   >
                     <Loader2 size={13} className="animate-spin" /> Building...
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {apiError && !isLoading && (
+              <div
+                className="rounded-xl p-3.5"
+                style={{
+                  backgroundColor: "#ef444408",
+                  border: "1px solid #ef444430",
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" style={{ color: "#ef4444" }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-black mb-1" style={{ color: "#ef4444" }}>
+                      Request failed
+                    </p>
+                    <p
+                      className="text-[10px] font-mono leading-relaxed mb-2.5"
+                      style={{ color: T.textMuted }}
+                    >
+                      {apiError}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setApiError(null);
+                        if (lastFailedPrompt) {
+                          sendMessage(lastFailedPrompt);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all hover:scale-105"
+                      style={{
+                        backgroundColor: "#ef444415",
+                        color: "#ef4444",
+                        border: "1px solid #ef444430",
+                      }}
+                    >
+                      <RefreshCw size={10} /> Retry
+                    </button>
                   </div>
                 </div>
               </div>

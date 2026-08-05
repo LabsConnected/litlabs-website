@@ -2,6 +2,7 @@
 // Serverless-compatible rate limiter using Supabase
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { newRequestId } from "@/lib/api-route-helpers";
 
 interface RateLimitResult {
   success: boolean;
@@ -124,7 +125,27 @@ export function withRateLimit<T>(
       );
     }
 
-    const response = await (handler as (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>)(request, context);
+    let response: NextResponse | Response;
+    try {
+      response = await (handler as (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>)(request, context);
+    } catch (err) {
+      // Top-level safety net: never let an unhandled exception bubble up,
+      // which would cause Vercel to render an HTML 500 page instead of JSON.
+      const requestId = newRequestId();
+      const message = err instanceof Error ? err.message : "Internal server error";
+      console.error(`[api] ${requestId} 500 (unhandled): ${message}\n${err instanceof Error ? err.stack ?? "" : ""}`);
+      return new NextResponse(
+        JSON.stringify({ success: false, requestId, error: "Internal server error", code: "INTERNAL_ERROR" }),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+            "X-Request-Id": requestId,
+          },
+        },
+      );
+    }
     try {
       response.headers.set("X-RateLimit-Limit", String(limit));
       response.headers.set("X-RateLimit-Remaining", String(remaining));

@@ -143,7 +143,8 @@ describe("cross-user isolation: ai-chat auth gate (P0-1)", () => {
     expect(src).not.toMatch(/userId\s*\|\|\s*["']anonymous["']/);
     // Must return 401 when userId is missing
     expect(src).toMatch(/if\s*\(!userId\)/);
-    expect(src).toMatch(/status:\s*401/);
+    // Accepts both `status: 401` (inline) and `jsonError(401, ...)` (helper)
+    expect(src).toMatch(/(?:status:\s*401|jsonError\(\s*401)/);
   });
 });
 

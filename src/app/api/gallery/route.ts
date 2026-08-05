@@ -4,6 +4,10 @@ import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 
+// ── Route configuration ──────────────────────────────────────────
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 function getYoutubeIdFromUrl(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl);

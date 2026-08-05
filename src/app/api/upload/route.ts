@@ -5,6 +5,12 @@ import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
+import { newRequestId, jsonError } from "@/lib/api-route-helpers";
+
+// ── Route configuration ──────────────────────────────────────────
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Size limits by media type
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -170,9 +176,15 @@ function classifyByExtension(ext: string): { mime: string; category: "image" | "
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth(req);
+  const requestId = newRequestId();
+  let userId: string | null;
+  try {
+    ({ userId } = await auth(req));
+  } catch (err) {
+    return jsonError(500, "Authentication check failed", requestId, err);
+  }
   if (!userId)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonError(401, "Unauthorized", requestId);
 
   try {
     const form = await req.formData();

@@ -20,7 +20,7 @@ import {
   Eye,
   ArrowRight,
 } from "lucide-react";
-import { readApiResponse } from "../lib/create-api";
+import { apiFetch, readApiResponse, type ApiJson } from "@/lib/api-response";
 
 const PROMPT_PRESETS = [
   "A cyberpunk street market at night, neon signs flickering, people walking in rain, cinematic slow motion",
@@ -115,12 +115,10 @@ export default function VideoTool() {
     setIdeaError(null);
     setIdeas([]);
     try {
-      const res = await fetch("/api/media/suggest-video-ideas", {
+      const data = await apiFetch<ApiJson>("/api/media/suggest-video-ideas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: url }),
       });
-      const data = await readApiResponse(res, "Video ideas");
       setIdeas(Array.isArray(data.ideas) ? data.ideas : []);
     } catch (err) {
       setIdeaError(err instanceof Error ? err.message : "Could not analyze photo");
@@ -137,8 +135,7 @@ export default function VideoTool() {
       setUploadedImagePreview(preview);
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
-      const data = await readApiResponse(res, "Upload");
+      const data = await apiFetch<ApiJson>("/api/upload", { method: "POST", body: form });
       const uploadUrl = data.url as string | undefined;
       if (!uploadUrl || data.fallback) {
         throw new Error("Upload succeeded but no public URL returned. Supabase Storage may not be configured.");
@@ -201,9 +198,8 @@ export default function VideoTool() {
       const isAlibaba = isHappyHorse;
       const apiModel = isAlibaba ? "happyhorse-1.1-i2v" : "veo-3.1-fast-generate-preview";
 
-      const res = await fetch("/api/media/generate-video", {
+      const data = await apiFetch<ApiJson>("/api/media/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isAlibaba
             ? {
@@ -223,7 +219,6 @@ export default function VideoTool() {
               },
         ),
       });
-      const data = await readApiResponse(res, "Video");
 
       // ── Polling: different endpoints for Alibaba vs Veo ────────────
       const taskId = data.taskId as string | undefined;
@@ -256,19 +251,15 @@ export default function VideoTool() {
             model: apiModel,
           }),
         });
-        if (!statusRes.ok) {
-          const err = await statusRes.json().catch(() => ({}));
-          throw new Error(err.error || `Polling failed: HTTP ${statusRes.status}`);
-        }
-        const statusData = await statusRes.json();
+        const statusData = await readApiResponse<ApiJson>(statusRes);
         if (statusData.done && statusData[videoUrlKey]) {
           let videoUrl: string;
           if (isAlibaba) {
             // Alibaba: URL is already a public R2 URL (saved server-side)
-            videoUrl = statusData[videoUrlKey];
+            videoUrl = statusData[videoUrlKey] as string;
           } else {
             // Veo: download the blob and create an object URL
-            const videoRes = await fetch(statusData[videoUrlKey]);
+            const videoRes = await fetch(statusData[videoUrlKey] as string);
             if (!videoRes.ok) throw new Error("Failed to download generated video.");
             const blob = await videoRes.blob();
             videoUrl = URL.createObjectURL(blob);
@@ -289,7 +280,7 @@ export default function VideoTool() {
           break;
         }
         if (statusData.done && !statusData[videoUrlKey]) {
-          throw new Error(statusData.error || "Video generation completed but no video URL returned.");
+          throw new Error((statusData.error as string) || "Video generation completed but no video URL returned.");
         }
       }
 

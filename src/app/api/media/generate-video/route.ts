@@ -5,6 +5,13 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
 
+// ── Route configuration ──────────────────────────────────────────
+// Video generation is long-running; needs headroom beyond the default
+// 10s function timeout, otherwise Vercel returns an HTML 504 page.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 async function handler(req: NextRequest) {

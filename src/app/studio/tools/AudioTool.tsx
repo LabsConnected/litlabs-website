@@ -17,7 +17,7 @@ import {
   Mic,
   Volume2,
 } from "lucide-react";
-import { readApiResponse } from "../lib/create-api";
+import { apiFetch, type ApiJson } from "@/lib/api-response";
 
 const VOICES = [
   { id: "Kore", label: "Kore", desc: "Warm & clear" },
@@ -119,12 +119,10 @@ export default function AudioTool() {
           ? { prompt: text.trim(), voice }
           : { prompt: text.trim(), model: musicModel };
 
-      const res = await fetch(endpoint, {
+      const data = await apiFetch<ApiJson>(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await readApiResponse(res, "Audio");
       const audioBase64 = data.audioBase64 as string | undefined;
       if (!audioBase64) throw new Error("No audio returned");
 

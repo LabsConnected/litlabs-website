@@ -39,7 +39,7 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
-import { readApiResponse } from "../lib/create-api";
+import { apiFetch, type ApiJson } from "@/lib/api-response";
 
 type Workspace = {
   id: string;
@@ -935,16 +935,11 @@ export default function ImageTool() {
           body.strength = strength;
         }
 
-        const res = await fetch("/api/media/generate", {
+        const data = await apiFetch<ApiJson>("/api/media/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
           credentials: "include",
           body: JSON.stringify(body),
         });
-        const data = await readApiResponse(res, "Image");
         const downloadUrl = data.downloadUrl as string;
         const thumbUrl = data.thumbUrl as string | undefined;
         const isFree = data.free === true;
@@ -1029,12 +1024,8 @@ export default function ImageTool() {
       if (!gen.fileUrl) return;
       setStatus("saving");
       try {
-        const res = await fetch("/api/gallery", {
+        await apiFetch<ApiJson>("/api/gallery", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
           credentials: "include",
           body: JSON.stringify({
             url: gen.fileUrl,
@@ -1044,7 +1035,6 @@ export default function ImageTool() {
             category: galleryCategory,
           }),
         });
-        await readApiResponse(res, "Image");
         setStatus("succeeded");
         setError(
           gallerySharePublic
@@ -3007,7 +2997,8 @@ export default function ImageTool() {
                               setImgError(null);
                               handleGenerate();
                             }}
-                            className="px-4 py-2 text-xs font-bold rounded-lg"
+                            disabled={isWorking}
+                            className="px-4 py-2 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
                             style={{
                               backgroundColor: T.accentColor,
                               color: T.bgColor,
@@ -3075,7 +3066,8 @@ export default function ImageTool() {
                     <div className="flex items-center justify-center gap-2">
                       <button
                         onClick={handleGenerate}
-                        className="px-4 py-2 text-xs font-bold rounded-lg"
+                        disabled={isWorking}
+                        className="px-4 py-2 text-xs font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{
                           backgroundColor: T.accentColor,
                           color: T.bgColor,

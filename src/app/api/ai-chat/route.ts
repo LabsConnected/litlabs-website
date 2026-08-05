@@ -2,6 +2,15 @@ import { Supermemory } from "supermemory";
 import { generateText } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { newRequestId, jsonError } from "@/lib/api-route-helpers";
+
+// ── Route configuration ──────────────────────────────────────────
+// Node.js runtime (uses Node-only SDKs). maxDuration gives Vercel enough
+// headroom for LLM calls; without it, a slow provider triggers a Vercel
+// 504 HTML page instead of a JSON error.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -14,16 +23,17 @@ function getSupermemory() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = newRequestId();
   try {
     const { userId } = await auth(req);
     if (!userId) {
-      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      return jsonError(401, "Authentication required", requestId);
     }
     const uid = userId;
 
     const { messages, model = "gemini-flash" } = await req.json();
     if (!messages || !messages.length) {
-      return NextResponse.json({ error: "Messages required" }, { status: 400 });
+      return jsonError(400, "Messages required", requestId);
     }
 
     const lastMessage = messages[messages.length - 1]?.content || "";
@@ -113,9 +123,12 @@ Output the code files immediately.`;
       text: result.text,
       provider: result.provider,
       model: result.model,
+      requestId,
+    }, {
+      headers: { "X-Request-Id": requestId },
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Chat failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonError(500, message, requestId, error);
   }
 }
