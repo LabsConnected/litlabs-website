@@ -36,7 +36,7 @@ import {
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "http://localhost:4001";
+  "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
 /**
  * Create a mission for a project.

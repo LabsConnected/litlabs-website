@@ -104,7 +104,7 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
 
-    const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
+    const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
     if (!wsUrl) {
       terminalStore.setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_WS_URL.");

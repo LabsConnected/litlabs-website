@@ -24,7 +24,7 @@ export function CodeEditor({
   const wsUrl =
     process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "";
+    "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
   const loadFile = useCallback(async () => {
     if (!filePath) return;
