@@ -58,6 +58,7 @@
     "@xterm/xterm": "^6.0.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "bcryptjs": "^3.0.3",
+    "braintrust": "^3.27.0",
     "hash-wasm": "^4.12.0",
     "jose": "^6.2.3",
     "lucide-react": "^1.24.0",

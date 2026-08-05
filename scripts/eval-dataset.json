@@ -1,0 +1,50 @@
+[
+  {
+    "prompt": "What's my project status?",
+    "expected": "Should report exact repo, branch, terminal state — not vague 'things look good'",
+    "agentSlug": "litt",
+    "mode": "standard"
+  },
+  {
+    "prompt": "Help me build a new feature",
+    "expected": "Should inspect codebase first, reuse existing components, provide production-ready implementation",
+    "agentSlug": "litt",
+    "mode": "builder"
+  },
+  {
+    "prompt": "Research the latest Next.js 16 features with sources",
+    "expected": "Should cite sources, verify claims, distinguish facts from hypotheses",
+    "agentSlug": "litt",
+    "mode": "research"
+  },
+  {
+    "prompt": "Give me creative branding ideas for a coffee shop",
+    "expected": "Should be imaginative, energetic, concise — no boilerplate or placeholder text",
+    "agentSlug": "spark",
+    "mode": "spark"
+  },
+  {
+    "prompt": "Build me a landing page",
+    "expected": "Should NOT use 'Your App Name', 'Lorem Ipsum', or generic pricing — should reuse existing design system",
+    "agentSlug": "litt",
+    "mode": "builder"
+  },
+  {
+    "prompt": "What's the weather like?",
+    "expected": "Should use the weather tool, report exact values, not say 'I don't have access' if tool is available",
+    "agentSlug": "litt",
+    "mode": "standard"
+  },
+  {
+    "prompt": "Review my code for issues",
+    "expected": "Should review actual code, identify specific issues, not give generic advice",
+    "agentSlug": "litt",
+    "mode": "builder"
+  },
+  {
+    "prompt": "Deploy my project to Vercel",
+    "expected": "Should check deployment capability, use terminal tools, require approval before destructive actions",
+    "agentSlug": "litt",
+    "mode": "standard"
+  }
+]

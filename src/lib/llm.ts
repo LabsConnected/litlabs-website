@@ -30,6 +30,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
+import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -70,6 +71,8 @@ export interface LLMOptions {
   userApiKey?: string;
   /** BYOK: which BYOK provider to use. */
   byokProvider?: "openai" | "anthropic";
+  /** Braintrust eval metadata (agent slug, mode, conversation ID, etc.). */
+  evalMetadata?: LLMCallMetadata;
 }
 
 export interface LLMUsage {
@@ -453,7 +456,7 @@ export async function generateText(
         { prompt, systemPrompt, task, opts: options },
         timeoutMs,
       );
-      return {
+      const result = {
         text: r.text,
         provider,
         model: r.model,
@@ -461,6 +464,18 @@ export async function generateText(
         latencyMs: Date.now() - t0,
         failover,
       };
+      logLLMCall({
+        prompt,
+        systemPrompt,
+        output: result.text,
+        provider: result.provider,
+        model: result.model,
+        latencyMs: result.latencyMs,
+        failover: result.failover,
+        usage: result.usage,
+        metadata: options.evalMetadata ?? {},
+      });
+      return result;
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
@@ -545,6 +560,13 @@ export async function streamText(
   const failover: LLMProvider[] = [];
   const t0 = Date.now();
 
+  // Accumulate streamed chunks for Braintrust logging on stream completion.
+  const _chunks: string[] = [];
+  const wrappedOnChunk = (text: string) => {
+    _chunks.push(text);
+    onChunk(text);
+  };
+
   let lastErr: unknown = null;
   for (const provider of chain) {
     // Circuit breaker: skip models temporarily marked unavailable
@@ -553,35 +575,47 @@ export async function streamText(
       continue;
     }
     try {
+      let result: { provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[] };
       if (provider === "gemini") {
-        return await streamViaGemini(
+        result = await streamViaGemini(
           { prompt, systemPrompt, task, opts: options },
-          onChunk,
+          wrappedOnChunk,
           t0,
           failover,
           onReasoning,
         );
-      }
-      if (provider === "groq" || provider === "groq-whisper") {
-        return await streamViaGroq(
+      } else if (provider === "groq" || provider === "groq-whisper") {
+        result = await streamViaGroq(
           provider,
           { prompt, systemPrompt, task, opts: options },
-          onChunk,
+          wrappedOnChunk,
+          t0,
+          failover,
+          timeoutMs,
+          onReasoning,
+        );
+      } else {
+        result = await streamViaOpenRouter(
+          provider,
+          { prompt, systemPrompt, task, opts: options },
+          wrappedOnChunk,
           t0,
           failover,
           timeoutMs,
           onReasoning,
         );
       }
-      return await streamViaOpenRouter(
-        provider,
-        { prompt, systemPrompt, task, opts: options },
-        onChunk,
-        t0,
-        failover,
-        timeoutMs,
-        onReasoning,
-      );
+      logLLMCall({
+        prompt,
+        systemPrompt,
+        output: _chunks.join(""),
+        provider: result.provider,
+        model: result.model,
+        latencyMs: result.latencyMs,
+        failover: result.failover,
+        metadata: options.evalMetadata ?? {},
+      });
+      return result;
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
