@@ -5,7 +5,7 @@ test('signup with turnstile mock succeeds', async ({ page }) => {
   await page.fill('input[name="email"]', 'e2e+turnstile@example.com');
   await page.fill('input[name="password"]', 'P@ssword123!');
   await page.evaluate(() => {
-    // @ts-ignore
+    // @ts-expect-error — test-only global injected for Turnstile mock
     window.__TEST_TURNSTILE_TOKEN = 'test-token';
   });
   await page.click('button[type="submit"]');

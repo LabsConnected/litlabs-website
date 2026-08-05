@@ -6,6 +6,22 @@
  * provider health. Never prints secret values.
  */
 
+import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+
+// Load .env.local first if it exists, then .env
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+console.log("DEBUG: envLocalPath =", envLocalPath, "exists =", fs.existsSync(envLocalPath));
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+}
+const envPath = path.resolve(process.cwd(), ".env");
+console.log("DEBUG: envPath =", envPath, "exists =", fs.existsSync(envPath));
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+}
+
 const INTEGRATION_ENV_REQUIREMENTS: Record<string, string[]> = {
   clerk: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
   supabase: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],

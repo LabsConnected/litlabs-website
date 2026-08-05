@@ -122,7 +122,7 @@ describe("Product-truth consistency", () => {
     it("Starter features do not say 'monthly LiTTBits'", () => {
       const features = PLANS.starter.features.join(" ").toLowerCase();
       expect(features).not.toContain("monthly littbits");
-      expect(features).toContain("starter");
+      expect(features).not.toContain("monthly ai credits");
     });
   });
 
@@ -132,8 +132,8 @@ describe("Product-truth consistency", () => {
       expect(LITTBITS_TERMINOLOGY.bannedTerms).toContain("coin pack");
     });
 
-    it("plural is 'LiTTBits'", () => {
-      expect(LITTBITS_TERMINOLOGY.plural).toBe("LiTTBits");
+    it("plural is 'AI credits'", () => {
+      expect(LITTBITS_TERMINOLOGY.plural).toBe("AI credits");
     });
   });
 

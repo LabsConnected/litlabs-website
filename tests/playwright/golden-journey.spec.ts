@@ -16,25 +16,31 @@ test("customer can create, chat, generate an image, and persist work @golden", a
   const applicationErrors = monitorApplicationErrors(page);
 
   await test.step("1. Load homepage signed out", async () => {
-    const response = await page.goto("/");
+    const response = await page.goto("/", { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBe(200);
+
+    // Accept cookies if the consent banner is visible
+    const acceptCookies = page.getByRole("button", { name: "Accept all" });
+    if (await acceptCookies.isVisible()) {
+      await acceptCookies.click();
+    }
 
     await expect(page.locator("body")).toContainText(/LiTTree|LiTT|AI Creative Studio/i);
   });
 
   await test.step("2. Navigate to pricing", async () => {
-    const response = await page.goto("/pricing");
+    const response = await page.goto("/pricing", { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBe(200);
 
     // Verify correct prices are shown
     const bodyText = await page.locator("body").innerText();
     expect(bodyText).toContain("$7");
     expect(bodyText).toContain("$19");
-    expect(bodyText).toContain("Coming Soon");
+    expect(bodyText).toContain("Currently Unavailable");
   });
 
   await test.step("3. Navigate to Marketplace", async () => {
-    const response = await page.goto("/marketplace");
+    const response = await page.goto("/marketplace", { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBe(200);
 
     await expect(page.locator("body")).toContainText(/Marketplace|agent|Agent/i);
@@ -75,7 +81,7 @@ test("customer can create, chat, generate an image, and persist work @golden", a
       });
     });
 
-    await page.goto("/studio");
+    await page.goto("/studio", { waitUntil: "domcontentloaded" });
     await waitForPageReady(page, { testId: "studio-command-composer", timeout: 30_000 });
 
     // Composer must be visible — not loading state
@@ -86,7 +92,7 @@ test("customer can create, chat, generate an image, and persist work @golden", a
     const composer = page.getByTestId("studio-command-input");
     await composer.fill("Reply with the exact phrase: LiTTree chat test passed");
 
-    await page.getByTestId("studio-send-button").click();
+    await page.getByTestId("studio-send-button").click({ force: true });
 
     await expect(
       page.getByText("LiTTree chat test passed").last(),

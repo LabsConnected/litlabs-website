@@ -175,3 +175,9 @@ PHASE0_ARCHITECTURE_MAP.md
 *.swp
 *.swo
 n8n/CREDENTIALS.md
+
+# Build/test artifacts
+LiTTreeLabStudio-AI-Context.zip
+LiTTreeLabStudio-AI-Context/
+tree.txt
+tests/playwright/test_output*.txt

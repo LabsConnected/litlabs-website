@@ -128,6 +128,10 @@ vi.mock("../stores/useStudioAgentStore", () => ({
     litt: { displayName: "LiTT", systemPrompt: "", avatar: "" },
     spark: { displayName: "Spark", systemPrompt: "", avatar: "" },
   },
+  STUDIO_AGENTS: [
+    { displayName: "LiTT", systemPrompt: "", avatar: "" },
+    { displayName: "Spark", systemPrompt: "", avatar: "" },
+  ],
 }));
 
 vi.mock("../hooks/useCanonicalConversation", () => ({

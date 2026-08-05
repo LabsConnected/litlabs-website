@@ -1,4 +1,4 @@
-export async function alertLog(event: string, meta: Record<string, any>) {
+export async function alertLog(event: string, meta: Record<string, unknown>) {
   try {
     if (process.env.SLACK_ALERT_WEBHOOK) {
       await fetch(process.env.SLACK_ALERT_WEBHOOK, {

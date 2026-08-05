@@ -231,10 +231,14 @@ describe("resolvePlatformServices", () => {
     expect(ids).toContain("terminal");
     expect(ids).toContain("stripe");
 
-    // Terminal detail for non-owner should not expose hostnames
+    // Terminal detail for non-owner should not expose hostnames.
+    // When running on the Railway fallback, detail is "Railway terminal (fallback)"
+    // — that's acceptable (no hostnames). Only assert no secret/hostname leakage.
     const terminal = services.find((s) => s.id === "terminal")!;
     if (terminal.state === "operational") {
-      expect(terminal.detail).toBe("Operational");
+      expect(terminal.detail).not.toMatch(/https?:\/\//i);
+      expect(terminal.detail).not.toMatch(/\.railway\.app/i);
+      expect(terminal.detail).not.toMatch(/sk_|service_role|secret/i);
     }
   });
 

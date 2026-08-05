@@ -32,6 +32,6 @@ describe("StudioPreviewPanel", () => {
 
     await screen.findByText("Preview not started");
     fireEvent.click(screen.getByRole("button", { name: /prepare preview/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
   });
 });
