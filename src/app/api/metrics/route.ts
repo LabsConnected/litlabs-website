@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest) {
         "Cache-Control": "no-cache, no-store, must-revalidate",
       },
     });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to collect metrics" },
       { status: 500 },
