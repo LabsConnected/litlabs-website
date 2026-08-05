@@ -22,8 +22,10 @@ describe("StudioPreviewPanel", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }), { status: 200 }));
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName="owner/repo" branch="main" workspaceStatus="ready" />);
 
-    await waitFor(() => expect(screen.getByTitle("Demo preview")).toBeTruthy());
-    expect(screen.getByRole("button", { name: /open/i })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTitle("Demo preview")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /open/i })).toBeTruthy();
+    });
   });
 
   it("shows the unavailable state when the project is not prepared", async () => {

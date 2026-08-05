@@ -366,7 +366,7 @@ async function main() {
       "conversations", "payment_records", "push_subscriptions",
     ];
     let tablesOk = 0;
-    let tablesMissing: string[] = [];
+    const tablesMissing: string[] = [];
     for (const table of criticalTables) {
       try {
         const res = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*&limit=1`, {
