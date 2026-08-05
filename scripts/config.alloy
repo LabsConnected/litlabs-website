@@ -90,6 +90,43 @@ prometheus.relabel "integrations_windows_exporter" {
   }
 }
 
+// ─── Next.js app metrics (litlabs.net) ─────────────────────────────
+// Scrapes the /metrics endpoint exposed by the Next.js app.
+// In dev, the app runs on http://localhost:3000.
+// In production, update the target to the deployed URL or keep localhost
+// if Alloy runs on the same host.
+discovery.relabel "litlabs_app" {
+  targets = [{
+    "__address__" = "localhost:3000",
+  }]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "litlabs/app"
+  }
+}
+
+prometheus.scrape "litlabs_app" {
+  targets         = discovery.relabel.litlabs_app.output
+  forward_to      = [prometheus.relabel.litlabs_app.receiver]
+  scrape_interval = "15s"
+  metrics_path    = "/metrics"
+}
+
+prometheus.relabel "litlabs_app" {
+  forward_to = [prometheus.remote_write.grafanacloud.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+}
+
 // ─── Prometheus remote_write to Grafana Cloud ──────────────────────
 prometheus.remote_write "grafanacloud" {
   endpoint {

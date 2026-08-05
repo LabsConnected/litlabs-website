@@ -1,0 +1,181 @@
+{
+  "title": "LiTTree Lab Studios — Project Health",
+  "uid": "litlabs-project-health",
+  "tags": ["litlabs", "project", "health"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Build Status (by branch)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "litlabs_build_status",
+        "legendFormat": "{{branch}} ({{commit}})",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "1": { "text": "Success", "color": "green" }, "0": { "text": "Failed", "color": "red" }, "-1": { "text": "In Progress", "color": "yellow" } }, "type": "value" }
+          ],
+          "thresholds": { "steps": [{ "color": "red", "value": -1 }, { "color": "yellow", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Deploy Status (by environment)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "litlabs_deploy_status",
+        "legendFormat": "{{environment}}",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "1": { "text": "Success", "color": "green" }, "0": { "text": "Failed", "color": "red" }, "-1": { "text": "In Progress", "color": "yellow" } }, "type": "value" }
+          ],
+          "thresholds": { "steps": [{ "color": "red", "value": -1 }, { "color": "yellow", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Build Duration (seconds by branch)",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "litlabs_build_duration_seconds",
+        "legendFormat": "{{branch}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 4,
+      "title": "Eval Score Trends (by dimension over time)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "litlabs_eval_score",
+        "legendFormat": "{{dimension}} / {{agent}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } }
+    },
+    {
+      "id": 5,
+      "title": "Eval Run Count (by dimension)",
+      "type": "bargauge",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "increase(litlabs_eval_runs_total[24h])",
+        "legendFormat": "{{dimension}} / {{agent}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 6,
+      "title": "Visual Build Pipeline (by stage)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "sum by(stage, status) (rate(litlabs_visual_builds_total[1h]))",
+        "legendFormat": "{{stage}} / {{status}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 7,
+      "title": "LLM Provider Distribution (24h)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "sum by(provider) (increase(litlabs_llm_calls_total[24h]))",
+        "legendFormat": "{{provider}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Token Consumption (24h by provider)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "sum by(provider) (increase(litlabs_llm_tokens_total[24h]))",
+        "legendFormat": "{{provider}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 9,
+      "title": "Agent Activity (24h by agent)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "sum by(agent, status) (increase(litlabs_agent_runs_total[24h]))",
+        "legendFormat": "{{agent}} / {{status}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 10,
+      "title": "HTTP Error Rate (5xx by route)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "sum by(route) (rate(litlabs_http_requests_total{status=~\"5..\"}[5m]))",
+        "legendFormat": "{{route}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 11,
+      "title": "Node.js Event Loop Lag (app health)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 35 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "nodejs_eventloop_lag_seconds * 1000",
+        "legendFormat": "event loop lag (ms)",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 12,
+      "title": "GC Duration (app health)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 35 },
+      "datasource": { "type": "prometheus", "uid": "grafanacloud-vastantelope1841-prom" },
+      "targets": [{
+        "expr": "rate(nodejs_gc_duration_seconds_sum[5m]) / rate(nodejs_gc_duration_seconds_count[5m])",
+        "legendFormat": "avg GC ({{kind}})",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

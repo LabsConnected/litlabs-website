@@ -31,6 +31,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
 import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
+import { recordLLMCall } from "@/lib/metrics";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -475,10 +476,28 @@ export async function generateText(
         usage: result.usage,
         metadata: options.evalMetadata ?? {},
       });
+      recordLLMCall({
+        provider,
+        model: r.model,
+        task,
+        status: "success",
+        latencyMs: result.latencyMs,
+        promptTokens: r.usage?.prompt,
+        completionTokens: r.usage?.completion,
+        failoverFrom: failover.length > 0 ? failover : undefined,
+      });
       return result;
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      recordLLMCall({
+        provider,
+        model: "unknown",
+        task,
+        status: "error",
+        latencyMs: Date.now() - t0,
+        failoverFrom: failover.length > 0 ? failover : undefined,
+      });
       // Mark model unavailable on 404 (model not found)
       if (isProviderError && err.status === 404) {
         markModelUnavailable(provider);
@@ -615,10 +634,26 @@ export async function streamText(
         failover: result.failover,
         metadata: options.evalMetadata ?? {},
       });
+      recordLLMCall({
+        provider: result.provider,
+        model: result.model,
+        task,
+        status: "success",
+        latencyMs: result.latencyMs,
+        failoverFrom: result.failover.length > 0 ? result.failover : undefined,
+      });
       return result;
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      recordLLMCall({
+        provider,
+        model: "unknown",
+        task,
+        status: "error",
+        latencyMs: Date.now() - t0,
+        failoverFrom: failover.length > 0 ? failover : undefined,
+      });
       // Mark model unavailable on 404 (model not found)
       if (isProviderError && err.status === 404) {
         markModelUnavailable(provider);
