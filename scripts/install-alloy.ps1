@@ -4,11 +4,11 @@
   Install and configure Grafana Alloy for LiTTreeLabStudio observability.
 .DESCRIPTION
   This script:
-    1. Downloads and installs the Alloy agent (Windows amd64)
-    2. Prompts securely for the Grafana Cloud API key (never hardcoded)
-    3. Sets the GCLOUD_RW_API_KEY machine-level env var
-    4. Copies config.alloy to the Alloy config directory
-    5. Installs and starts the Alloy Windows service
+    1. Prompts securely for the Grafana Cloud API key (never hardcoded)
+    2. Sets the GCLOUD_RW_API_KEY machine-level env var
+    3. Copies config.alloy to the Alloy config directory
+    4. Downloads the Alloy installer and runs it silently with our config
+    5. Starts the Alloy Windows service
 
   The Grafana Cloud username (3425326) and Prometheus push URL are
   baked into config.alloy — only the API key needs to be provided
@@ -57,43 +57,8 @@ Write-Host "  Set: GCLOUD_RW_API_KEY (machine-level)"
 $apiKey = $null
 [GC]::Collect()
 
-# ─── 3. Download + install Alloy ───────────────────────────────────
-Write-Host "`n[3/4] Installing Alloy v$AlloyVersion" -ForegroundColor Yellow
-$alloyDir = "C:\Program Files\GrafanaLabs\Alloy"
-$alloyExe = Join-Path $alloyDir "alloy.exe"
-
-if (Test-Path $alloyExe) {
-  Write-Host "  Alloy already installed at $alloyExe — skipping download"
-} else {
-  $downloadUrl = "https://github.com/grafana/alloy/releases/download/v$AlloyVersion/alloy-windows-amd64.exe.zip"
-  $zipPath = "$env:TEMP\alloy-windows-amd64.zip"
-
-  Write-Host "  Downloading from $downloadUrl"
-  Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing
-
-  if (!(Test-Path $alloyDir)) {
-    New-Item -ItemType Directory -Path $alloyDir -Force | Out-Null
-  }
-
-  Write-Host "  Extracting to $alloyDir"
-  Expand-Archive -Path $zipPath -DestinationPath $alloyDir -Force
-  Remove-Item $zipPath -Force
-
-  # The zip may contain alloy-windows-amd64.exe — rename to alloy.exe
-  $downloadedExe = Join-Path $alloyDir "alloy-windows-amd64.exe"
-  if (Test-Path $downloadedExe) {
-    Move-Item $downloadedExe $alloyExe -Force
-  }
-
-  if (!(Test-Path $alloyExe)) {
-    Write-Error "Alloy binary not found after extraction. Check the zip contents."
-    exit 1
-  }
-  Write-Host "  Alloy installed at $alloyExe"
-}
-
-# ─── 4. Copy config + install service ──────────────────────────────
-Write-Host "`n[4/4] Installing config + service" -ForegroundColor Yellow
+# ─── 3. Copy config to Alloy config dir ────────────────────────────
+Write-Host "`n[3/4] Installing config" -ForegroundColor Yellow
 $configDir = "C:\ProgramData\GrafanaLabs\Alloy"
 if (!(Test-Path $configDir)) {
   New-Item -ItemType Directory -Path $configDir -Force | Out-Null
@@ -108,27 +73,65 @@ if (!(Test-Path $ConfigPath)) {
 Copy-Item $ConfigPath $configDest -Force
 Write-Host "  Config installed at $configDest"
 
-# Check if service already exists
+# ─── 4. Download + run Alloy installer ─────────────────────────────
+Write-Host "`n[4/4] Installing Alloy v$AlloyVersion" -ForegroundColor Yellow
+$alloyDir = "C:\Program Files\GrafanaLabs\Alloy"
+$alloyExe = Join-Path $alloyDir "alloy-windows-amd64.exe"
+
+# Check if Alloy is already installed
 $existingService = Get-Service "Alloy" -ErrorAction SilentlyContinue
 if ($existingService) {
-  Write-Host "  Alloy service already exists — restarting with new config"
+  Write-Host "  Alloy service already exists — stopping for reconfiguration"
   Stop-Service "Alloy" -Force -ErrorAction SilentlyContinue
-} else {
-  Write-Host "  Installing Alloy service..."
-  & $alloyExe install `
-    --config.file $configDest `
-    --config.format "alloy" `
-    2>&1 | Write-Host
+}
 
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "Alloy service install failed (exit $LASTEXITCODE)"
+if (Test-Path $alloyExe) {
+  Write-Host "  Alloy already installed at $alloyExe — skipping download"
+} else {
+  # Download the INSTALLER (not the plain binary) — it handles service registration
+  $installerUrl = "https://github.com/grafana/alloy/releases/download/v$AlloyVersion/alloy-installer-windows-amd64.exe"
+  $installerPath = "$env:TEMP\alloy-installer-windows-amd64.exe"
+
+  Write-Host "  Downloading installer from $installerUrl"
+  Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+
+  # Run silent install with our config file
+  # /S = silent, /CONFIG= path to config.alloy
+  Write-Host "  Running silent install with config: $configDest"
+  $installArgs = "/S /CONFIG=`"$configDest`""
+  Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -NoNewWindow
+
+  Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+  if (!(Test-Path $alloyExe)) {
+    Write-Error "Alloy binary not found after install. Check the installer output."
+    exit 1
+  }
+  Write-Host "  Alloy installed at $alloyExe"
+}
+
+# ─── Start/restart service ─────────────────────────────────────────
+Write-Host "`n  Starting Alloy service..." -ForegroundColor Yellow
+
+# If service exists, restart it. If not, the installer should have created it.
+$svc = Get-Service "Alloy" -ErrorAction SilentlyContinue
+if ($svc) {
+  Restart-Service "Alloy" -Force
+} else {
+  # Fallback: if the installer didn't create the service, create it manually
+  # using sc.exe with the service wrapper
+  $serviceExe = Join-Path $alloyDir "alloy-service-windows-amd64.exe"
+  if (Test-Path $serviceExe) {
+    Write-Host "  Service not found — creating manually with sc.exe"
+    & sc.exe create "Alloy" binPath= "`"$serviceExe`"" start= "auto"
+    & sc.exe description "Alloy" "Grafana Alloy observability agent"
+    Start-Service "Alloy"
+  } else {
+    Write-Error "Alloy service not found and service wrapper binary missing. Installation may have failed."
     exit 1
   }
 }
 
-# Restart to pick up new config + env vars
-Write-Host "  Starting Alloy service..."
-Restart-Service "Alloy" -Force
 Start-Sleep -Seconds 3
 
 # ─── Verify ────────────────────────────────────────────────────────
