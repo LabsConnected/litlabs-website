@@ -22,7 +22,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 // ─── Snake-to-camel mapper ───────────────────────────────────────
 // Supabase returns snake_case columns; our TS interfaces use camelCase.
 function snakeToCamel(s: string): string {
-  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  return s.replace(/_([a-z0-9])/gi, (_, c) => c.toUpperCase());
 }
 
 function mapConfigRow(row: Record<string, unknown>): ReceptionConfig {
