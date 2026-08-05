@@ -1,0 +1,446 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "manifestVersion": "1.0.0",
+  "generatedAt": "2026-08-05",
+  "generatedBy": "Devin architecture mapping",
+  "project": {
+    "name": "LiTTree Lab Studios",
+    "package": "litlabs-website",
+    "version": "1.0.0",
+    "branch": "fix/studio-essentials",
+    "headCommit": "b11acc6d"
+  },
+  "buildStatus": {
+    "typecheck": "pass (tsc --noEmit exit 0, strict mode)",
+    "lint": "pass (0 errors, 49 warnings — all unused vars in test files)",
+    "productionBuild": "not run in this session (heavy on Windows; AGENTS.md says use Codespaces)",
+    "auditTableClaimOfBrokenBuild": "STALE — recent commits on fix/studio-essentials fixed it"
+  },
+  "stack": {
+    "framework": "Next.js 16 (App Router, Turbopack)",
+    "react": "19.2",
+    "language": "TypeScript 5 (strict)",
+    "styling": "Tailwind CSS v4",
+    "packageManager": "pnpm 9.15",
+    "node": "22+",
+    "auth": "Clerk + custom JWT (jose)",
+    "database": "Supabase (Postgres + RLS)",
+    "payments": "Stripe",
+    "storage": "Cloudflare R2 (S3-compatible)",
+    "ai": ["OpenRouter", "Gemini (@google/genai)", "Together", "Fal", "MiniMax", "Alibaba"],
+    "state": "Zustand",
+    "validation": "Zod 4",
+    "realtime": ["socket.io-client", "ws", "Gemini Live WebSocket"],
+    "terminal": "Docker-isolated workspace server (terminal-server/), BLOCKED on Railway — see knownFollowUps",
+    "deploy": "Vercel; Docker available for self-hosting"
+  },
+  "agents": {
+    "summary": "3 distinct registries serving 3 different layers. NOT pure duplication — but LiTT's system prompt is duplicated 3x with divergent content (P1 fragmentation risk).",
+    "registries": [
+      {
+        "id": "canonical",
+        "file": "src/lib/agent-registry.ts",
+        "role": "Product/billing identity — single source of truth for agent identity, plan gating, prompts, tools, pricing. Pure data module (no server-only imports) — imported by both server and client.",
+        "exports": ["AgentDefinition", "AGENT_DEFINITIONS", "AGENT_REGISTRY", "CORE_PERSONALITIES", "INTERNAL_SPECIALISTS", "MARKETPLACE_SPECIALISTS", "FREE_AGENTS", "SPECIALIST_AGENTS", "PREMIUM_AGENTS", "getAgentDefinition", "getStudioAgents", "getMarketplaceAgents", "getAgentsForPlan", "planIncludesAgent"],
+        "serverOnly": false
+      },
+      {
+        "id": "studio-runtime",
+        "file": "src/lib/studio/agent-registry.ts",
+        "role": "Studio chat runtime config — memory types per slug, capability flags, legacy slug→LiTT aliasing. Used by Studio conversation message route.",
+        "exports": ["BUILT_IN_AGENTS", "resolveAgent", "isValidAgentSlug", "getAgentMemoryTypes"],
+        "serverOnly": false
+      },
+      {
+        "id": "litt-modes",
+        "file": "src/lib/litt-intelligence/agent-profiles.ts",
+        "role": "LiTT internal mode profiles (standard/builder/research/spark) — tool permission levels, memory scope, immutable per-profile prompts. Loaded by API route BEFORE memory retrieval or model invocation.",
+        "exports": ["AgentProfile", "AGENT_PROFILES", "getAgentProfile"],
+        "serverOnly": true
+      }
+    ],
+    "runtimeDerivation": {
+      "file": "src/lib/agents.ts",
+      "note": "AgentOrchestrator + AGENTS map DERIVED from canonical registry via definitionToAgent(). Not a 4th source of truth — but a runtime orchestrator layer. Legacy IDs (littcode, littlebit) added as non-enumerable aliases."
+    },
+    "canonicalAgents": [
+      { "slug": "litt", "name": "LiTT", "tier": "core", "minimumPlan": "starter", "billing": "free", "studioVisible": true, "marketplaceVisible": false },
+      { "slug": "spark", "name": "Spark", "tier": "core", "minimumPlan": "starter", "billing": "free", "studioVisible": true, "marketplaceVisible": false },
+      { "slug": "researcher", "name": "Researcher", "tier": "internal-specialist", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": false, "marketplaceVisible": true },
+      { "slug": "writer", "name": "Writer", "tier": "internal-specialist", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": false, "marketplaceVisible": true },
+      { "slug": "marketer", "name": "Marketer", "tier": "internal-specialist", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": false, "marketplaceVisible": true },
+      { "slug": "coder", "name": "Coder", "tier": "internal-specialist", "minimumPlan": "pro_builder_beta", "billing": "subscription", "studioVisible": false, "marketplaceVisible": true },
+      { "slug": "analyst", "name": "Analyst", "tier": "internal-specialist", "minimumPlan": "pro_builder_beta", "billing": "subscription", "studioVisible": false, "marketplaceVisible": true },
+      { "slug": "nova", "name": "Nova", "tier": "marketplace", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": true, "marketplaceVisible": true },
+      { "slug": "forge", "name": "Forge", "tier": "marketplace", "minimumPlan": "pro_builder_beta", "billing": "subscription", "studioVisible": true, "marketplaceVisible": true },
+      { "slug": "echo", "name": "Echo", "tier": "marketplace", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": true, "marketplaceVisible": true }
+    ],
+    "littModes": ["standard", "builder", "research", "spark"],
+    "fragmentationRisk": "LiTT system prompt duplicated in agent-registry.ts (LITT const), studio/agent-registry.ts (LITT_SYSTEM_PROMPT), and litt-intelligence/agent-profiles.ts (STANDARD_PROMPT). Content diverges — canonical one in agent-registry.ts is most complete; litt-intelligence has mode-specific grounding rules; studio has stripped version. P1 — consolidate or derive."
+  },
+  "subsystems": {
+    "note": "Grouped by subdirectory under src/lib/. 'root' = files directly in src/lib/. serverOnly flags modules importing server-only or supabase-admin.",
+    "groups": {
+      "root": {
+        "path": "src/lib/",
+        "modules": [
+          { "file": "agent-registry.ts", "role": "Canonical agent identity, plan gating, prompts, pricing", "serverOnly": false },
+          { "file": "agent-billing.ts", "role": "Reserve → execute → settle/refund flow for marketplace agent runs", "serverOnly": true },
+          { "file": "agent-entitlements.ts", "role": "Server-side authorization for agent runs — plan/entitlement checks", "serverOnly": true },
+          { "file": "agent-logger.ts", "role": "Logging agent actions + command executions to Supabase agent_logs", "serverOnly": true },
+          { "file": "agent-runtime.ts", "role": "Single entry point for loading agent runtime config with auth/entitlement verification", "serverOnly": true },
+          { "file": "agent-selection.ts", "role": "Canonical runtime identity — built-in slug or marketplace instance ID", "serverOnly": false },
+          { "file": "agent-validation.ts", "role": "Input validation for agent task requests", "serverOnly": false },
+          { "file": "agent-work-queue.ts", "role": "Background work queue with retry + cost cap", "serverOnly": true },
+          { "file": "agent-worker.ts", "role": "Worker matrix polling/executing background tasks", "serverOnly": true },
+          { "file": "agents.ts", "role": "AgentOrchestrator + AGENTS map derived from canonical registry", "serverOnly": false },
+          { "file": "auth.ts", "role": "Clerk auth helpers (requireAuth, getAuth) with test bypass", "serverOnly": true },
+          { "file": "authz.ts", "role": "Wallet mutation authorization (timing-safe secret compare)", "serverOnly": true },
+          { "file": "avatars.ts", "role": "Agent avatar metadata (CSS + emoji only)", "serverOnly": false },
+          { "file": "chatRooms.ts", "role": "Chat room definitions for multi-agent coordination", "serverOnly": false },
+          { "file": "code-scanner.ts", "role": "VS Code-style codebase analysis for LiTT", "serverOnly": false },
+          { "file": "color-templates.ts", "role": "Coloring page templates with categories/difficulty", "serverOnly": false },
+          { "file": "command-executor.ts", "role": "Single chokepoint for server-side shell commands (allowlist, timeout, redaction)", "serverOnly": true },
+          { "file": "db.ts", "role": "Legacy admin credentials DB helpers", "serverOnly": true },
+          { "file": "deployments.ts", "role": "Deployment tracking types/helpers", "serverOnly": true },
+          { "file": "director-graph.ts", "role": "Director agent graph planner for multi-agent task orchestration", "serverOnly": false },
+          { "file": "discord.ts", "role": "Multi-channel Discord webhook notifications", "serverOnly": true },
+          { "file": "entitlements.ts", "role": "User entitlement resolution for plan-based feature access", "serverOnly": true },
+          { "file": "env.ts", "role": "Environment variable validation with Zod schemas", "serverOnly": true },
+          { "file": "fetch-auth.ts", "role": "Client-side fetch wrapper with auth headers", "serverOnly": false },
+          { "file": "file-audit.ts", "role": "File operation audit logging to agent_logs", "serverOnly": true },
+          { "file": "games.ts", "role": "Game Cloud System types for HTML5 gaming", "serverOnly": false },
+          { "file": "gemini.ts", "role": "Gemini compat layer — delegates to unified LLM client", "serverOnly": false },
+          { "file": "github-app.ts", "role": "GitHub App installation tokens + webhook signature verification", "serverOnly": true },
+          { "file": "github-install-state.ts", "role": "Secure GitHub App install state tokens (HMAC)", "serverOnly": true },
+          { "file": "ha-api.ts", "role": "Home Assistant API bridge for smart home", "serverOnly": true },
+          { "file": "ha-tools.ts", "role": "Home Assistant tool definitions for LLM tool-calling", "serverOnly": true },
+          { "file": "jwt.ts", "role": "JWT sign/verify using jose with AUTH_SECRET", "serverOnly": true },
+          { "file": "litt-context.ts", "role": "Legacy Jarvis action types for LiTT context", "serverOnly": false },
+          { "file": "litt.ts", "role": "Legacy LiTT notification types", "serverOnly": false },
+          { "file": "llm.ts", "role": "Unified LLM client — Gemini primary, Groq speed, OpenRouter fallback", "serverOnly": false },
+          { "file": "llm-completion.ts", "role": "Legacy LLM completion interface", "serverOnly": false },
+          { "file": "llm-executor.ts", "role": "LLM executor for background task processing", "serverOnly": true },
+          { "file": "media.ts", "role": "Media generation helpers", "serverOnly": true },
+          { "file": "mission-control.ts", "role": "Mission control service", "serverOnly": true },
+          { "file": "music.ts", "role": "Music preferences helpers", "serverOnly": false },
+          { "file": "navigation.ts", "role": "Navigation helpers", "serverOnly": false },
+          { "file": "r2.ts", "role": "Cloudflare R2 storage (audio + binary, S3-compatible)", "serverOnly": true },
+          { "file": "rate-limiter.ts", "role": "Serverless rate limiter using Supabase", "serverOnly": true },
+          { "file": "roles.ts", "role": "Clerk role helpers (admin/user)", "serverOnly": true },
+          { "file": "seo.ts", "role": "SEO helpers", "serverOnly": false },
+          { "file": "siteConfig.ts", "role": "Site config", "serverOnly": false },
+          { "file": "studio-models.ts", "role": "Studio model definitions", "serverOnly": false },
+          { "file": "supabase.ts", "role": "Supabase client factory (anon key, client-side)", "serverOnly": false },
+          { "file": "supabase-admin.ts", "role": "Server-side Supabase admin (SERVICE_ROLE, bypass RLS)", "serverOnly": true },
+          { "file": "supabase-client.ts", "role": "Browser Supabase client factory (@supabase/ssr)", "serverOnly": false },
+          { "file": "system-health.ts", "role": "System health checks", "serverOnly": true },
+          { "file": "terminal-auth.ts", "role": "Terminal token create/verify for workspace auth", "serverOnly": true },
+          { "file": "terminal-client.ts", "role": "Browser terminal token management + auth headers", "serverOnly": false },
+          { "file": "terminal-internal-client.ts", "role": "Service-to-service terminal-server client (shared secret)", "serverOnly": true },
+          { "file": "tokens.ts", "role": "Invite code + API key generation/hashing (SHA-256)", "serverOnly": true },
+          { "file": "usage.ts", "role": "Usage helpers", "serverOnly": true },
+          { "file": "user-db.ts", "role": "User DB helpers", "serverOnly": true },
+          { "file": "wallet-ledger.ts", "role": "Wallet/credit ledger", "serverOnly": true },
+          { "file": "wallpapers.ts", "role": "Wallpaper helpers", "serverOnly": false },
+          { "file": "voice-client.ts", "role": "Voice client", "serverOnly": false }
+        ]
+      },
+      "ai": {
+        "path": "src/lib/ai/",
+        "modules": [
+          { "file": "client.ts", "role": "Simple AI chat client wrapper for /api/ai/chat (exports askJarvis)", "serverOnly": false },
+          { "file": "providers.ts", "role": "AI provider impls for Ollama, OpenAI, OpenRouter", "serverOnly": false }
+        ]
+      },
+      "arcade": {
+        "path": "src/lib/arcade/",
+        "modules": [
+          { "file": "EmulatorSessionController.ts", "role": "Typed parent-side controller for isolated EmulatorJS iframe", "serverOnly": false }
+        ]
+      },
+      "canvas": {
+        "path": "src/lib/canvas/",
+        "modules": [
+          { "file": "actions.ts", "role": "Canvas action detection from messages", "serverOnly": false },
+          { "file": "repository.ts", "role": "Server-side CRUD for canvases, blocks, revisions (undo/redo)", "serverOnly": true },
+          { "file": "types.ts", "role": "Canvas system types — artifact-backed structured work surfaces", "serverOnly": false }
+        ]
+      },
+      "capabilities": {
+        "path": "src/lib/capabilities/",
+        "modules": [
+          { "file": "studio-context.ts", "role": "Build studio capability context from projects + github_installations", "serverOnly": true },
+          { "file": "translate.ts", "role": "Convert internal capability flags → user-facing plain-English for LLM", "serverOnly": false },
+          { "file": "types.ts", "role": "Capability status + interface types", "serverOnly": false }
+        ]
+      },
+      "connections": {
+        "path": "src/lib/connections/",
+        "modules": [
+          { "file": "audit.ts", "role": "Connection audit logging for connect/disconnect/error", "serverOnly": false },
+          { "file": "state.ts", "role": "In-memory connection state management", "serverOnly": false }
+        ]
+      },
+      "connectors": {
+        "path": "src/lib/connectors/",
+        "modules": [
+          { "file": "connector-repository.ts", "role": "Server-side repository for user connections + platform integrations", "serverOnly": true },
+          { "file": "db-types.ts", "role": "Database row types for LiTT connector tables", "serverOnly": false },
+          { "file": "provider-registry.ts", "role": "Canonical provider definitions + capability IDs for all connector types", "serverOnly": false }
+        ]
+      },
+      "dashboard": {
+        "path": "src/lib/dashboard/",
+        "modules": [
+          { "file": "discover-widget-data.ts", "role": "Resolve discover feed widget data from Supabase", "serverOnly": true },
+          { "file": "gallery-widget-data.ts", "role": "Resolve gallery widget data from Supabase", "serverOnly": true },
+          { "file": "layout-store.ts", "role": "Dashboard layout persistence per user + breakpoint (localStorage + API sync)", "serverOnly": false },
+          { "file": "recent-creations.ts", "role": "Resolve recent creations for dashboard widget", "serverOnly": true },
+          { "file": "widget-registry.ts", "role": "Canonical definitions for all dashboard widgets", "serverOnly": false }
+        ]
+      },
+      "emulator": {
+        "path": "src/lib/emulator/",
+        "modules": [
+          { "file": "arcade-launch.ts", "role": "Arcade launch state machine + BS-X BIOS validation", "serverOnly": false },
+          { "file": "asset-preflight.ts", "role": "Verify EmulatorJS assets return HTTP 200 + SHA-256 checksum", "serverOnly": false },
+          { "file": "control-profiles.ts", "role": "System-specific control profiles for EmulatorJS (core mapping)", "serverOnly": false },
+          { "file": "core-fallback.ts", "role": "NES core fallback sequence (fceumm → nestopia → nestopia-legacy)", "serverOnly": false },
+          { "file": "rom-validation.ts", "role": "Validate ROM files — iNES header check + SHA-256", "serverOnly": false },
+          { "file": "runtime-bridge.ts", "role": "Parent-side typed postMessage bridge (React ↔ iframe)", "serverOnly": false },
+          { "file": "types.ts", "role": "EmulatorJS runtime types — typed contract parent ↔ iframe", "serverOnly": false },
+          { "file": "watchdogs.ts", "role": "Stage-specific watchdog manager with per-stage timeouts", "serverOnly": false }
+        ]
+      },
+      "integrations": {
+        "path": "src/lib/integrations/",
+        "modules": [
+          { "file": "status.ts", "role": "Integration health checking with cached results", "serverOnly": true },
+          { "file": "types.ts", "role": "Integration state/status types with env var checking", "serverOnly": false }
+        ]
+      },
+      "litt": {
+        "path": "src/lib/litt/",
+        "modules": [
+          { "file": "types.ts", "role": "LiTT canonical types — messages, events, capabilities, voice provider interfaces", "serverOnly": false },
+          { "file": "event-bus.ts", "role": "LiTTEventBus — one typed event stream for all Studio surfaces", "serverOnly": false },
+          { "file": "conversation-engine.ts", "role": "ConversationEngine — canonical message lifecycle (streaming, persistence, canvas linking)", "serverOnly": false },
+          { "file": "canvas/canvas-engine.ts", "role": "CanvasEngine — Conversation Canvas with live transcript + work surface", "serverOnly": false },
+          { "file": "capability/capability-registry.ts", "role": "Legacy capability registry — single source of truth for tool/capability state", "serverOnly": false },
+          { "file": "live/LiTTRealtimeSessionController.ts", "role": "Canonical owner of unified LiTT Live realtime multimodal session", "serverOnly": false },
+          { "file": "live/types.ts", "role": "LiTT Live realtime multimodal session types", "serverOnly": false },
+          { "file": "voice/openai-realtime.ts", "role": "OpenAI Realtime API voice provider (WebRTC)", "serverOnly": false },
+          { "file": "voice/text-only-fallback.ts", "role": "Text-only fallback provider — always available", "serverOnly": false }
+        ]
+      },
+      "litt-intelligence": {
+        "path": "src/lib/litt-intelligence/",
+        "modules": [
+          { "file": "agent-identity.ts", "role": "Canonical agent identity types — LiTT is single primary agent with modes", "serverOnly": false },
+          { "file": "agent-profiles.ts", "role": "Immutable server-side agent profiles per mode (prompts, tool perms, memory scope)", "serverOnly": true },
+          { "file": "evaluator.ts", "role": "Candidate evaluation engine with 15 dimensions", "serverOnly": false },
+          { "file": "index.ts", "role": "LiTT Intelligence Layer public API (re-exports scanner, knowledge, research, evaluation)", "serverOnly": false },
+          { "file": "knowledge-service.ts", "role": "Structured project knowledge service with reconciliation rules", "serverOnly": true },
+          { "file": "mcp-adapter.ts", "role": "MCP client adapter — converts MCP server tools to LiTT tool definitions", "serverOnly": true },
+          { "file": "openapi-adapter.ts", "role": "OpenAPI adapter — parses 3.x specs, generates LiTT tool definitions", "serverOnly": true },
+          { "file": "permission-gate.ts", "role": "Permission gate — checks user consent + capability before connector tool calls", "serverOnly": true },
+          { "file": "project-scanner.ts", "role": "Project intelligence scanner — structured snapshot via deterministic tools", "serverOnly": true },
+          { "file": "research-engine.ts", "role": "Research/discovery engine with provider-based architecture", "serverOnly": true },
+          { "file": "research-providers.ts", "role": "Research provider impls (SearXNG, Firecrawl)", "serverOnly": true },
+          { "file": "runtime-context-injector.ts", "role": "Builds structured context + deterministic intent routing before LLM call", "serverOnly": true },
+          { "file": "tool-executor.ts", "role": "Shared intent detection + tool execution for Studio chat + LiTT command-center", "serverOnly": true },
+          { "file": "tool-registry.ts", "role": "Canonical tool registry — every executable tool declares schema, risk, approval policy", "serverOnly": false },
+          { "file": "types.ts", "role": "LiTT Intelligence Layer type definitions", "serverOnly": false },
+          { "file": "user-context.ts", "role": "Aggregates user profile, preferences, location, permissions", "serverOnly": true },
+          { "file": "weather-provider.ts", "role": "Open-Meteo weather provider (current, hourly, daily, geocoding)", "serverOnly": true },
+          { "file": "weather-tool.ts", "role": "Combines user context + permission gate + weather provider", "serverOnly": true }
+        ]
+      },
+      "litt-kernel": {
+        "path": "src/lib/litt-kernel/",
+        "modules": [
+          { "file": "kernel.ts", "role": "LiTT Kernel orchestrator — single entry point for request routing", "serverOnly": false },
+          { "file": "index.ts", "role": "LiTT Kernel public API — import from here, not individual modules", "serverOnly": false },
+          { "file": "intent-router.ts", "role": "Classifies user message into intent (mode, domains, requirements) before LLM", "serverOnly": false },
+          { "file": "mode-router.ts", "role": "Maps mode → default skills, tools, model profile, execution budget", "serverOnly": false },
+          { "file": "context-resolver.ts", "role": "Resolves active Kernel context from scattered state", "serverOnly": false },
+          { "file": "capability-registry.ts", "role": "LiTT capability registry — verified capability graph probed from real state", "serverOnly": false },
+          { "file": "event-bus.ts", "role": "Typed pub/sub for Kernel events", "serverOnly": false },
+          { "file": "principles.ts", "role": "Deterministic enforcement of Constitution principles in code", "serverOnly": false },
+          { "file": "prompt-composer.ts", "role": "Assembles system prompt by loading sections from docs/litt/", "serverOnly": false },
+          { "file": "schemas.ts", "role": "LiTT Kernel Zod schemas for runtime validation at boundaries", "serverOnly": false },
+          { "file": "types.ts", "role": "LiTT Kernel type definitions — control contract", "serverOnly": false }
+        ]
+      },
+      "missions": {
+        "path": "src/lib/missions/",
+        "modules": [
+          { "file": "mission-executor.ts", "role": "Mission execution — coordinates LLM, files, approvals, validation, checkpoints", "serverOnly": true },
+          { "file": "mission-repository.ts", "role": "Mission repository — server-side persistence", "serverOnly": true }
+        ]
+      },
+      "music": {
+        "path": "src/lib/music/",
+        "modules": [
+          { "file": "generation-service.ts", "role": "Core music generation lifecycle (Supabase admin, credit ledger, R2)", "serverOnly": true },
+          { "file": "safety-filter.ts", "role": "Prompt + lyrics safety filtering (runs BEFORE LBC reserve)", "serverOnly": false },
+          { "file": "providers/index.ts", "role": "Provider abstraction — frontend never talks to providers directly", "serverOnly": false },
+          { "file": "providers/factory.ts", "role": "Music provider factory — resolves by name with env-based API keys", "serverOnly": true },
+          { "file": "providers/elevenlabs.ts", "role": "ElevenLabs Music adapter", "serverOnly": true },
+          { "file": "providers/mureka.ts", "role": "Mureka async adapter", "serverOnly": true },
+          { "file": "providers/mock.ts", "role": "Stateless mock provider for dev/testing — never burns API credits", "serverOnly": true },
+          { "file": "providers/http.ts", "role": "Shared fetch-with-timeout helper", "serverOnly": true }
+        ]
+      },
+      "projects": {
+        "path": "src/lib/projects/",
+        "modules": [
+          { "file": "project-repository.ts", "role": "Canonical project repository — server-side Project operations", "serverOnly": true },
+          { "file": "resolve-current-project.ts", "role": "Shared server helper to resolve user's current project", "serverOnly": true },
+          { "file": "runtime-state.ts", "role": "Canonical ProjectRuntimeState — one source of truth for active project runtime", "serverOnly": false },
+          { "file": "types.ts", "role": "Canonical project types — unified Project model (studio_projects canonical)", "serverOnly": false },
+          { "file": "use-active-project.ts", "role": "Unified active project hook — server-authoritative via /api/project/active", "serverOnly": false }
+        ]
+      },
+      "studio": {
+        "path": "src/lib/studio/",
+        "modules": [
+          { "file": "agent-registry.ts", "role": "Studio-specific built-in agent registry (memory types, legacy slug aliasing)", "serverOnly": false },
+          { "file": "conversation-service.ts", "role": "Studio conversation CRUD (conversations + messages, Supabase)", "serverOnly": true },
+          { "file": "index.ts", "role": "Studio public API — re-exports types and services", "serverOnly": false },
+          { "file": "logger.ts", "role": "Studio event logging with structured context", "serverOnly": false },
+          { "file": "memory-service.ts", "role": "Studio memory recall/persist with agent/project/conversation scoping", "serverOnly": true },
+          { "file": "message-copy.ts", "role": "Utilities for copying/downloading conversation messages", "serverOnly": false },
+          { "file": "project-resolver.ts", "role": "Resolve project context + capabilities for Studio", "serverOnly": true },
+          { "file": "types.ts", "role": "Studio type definitions (agents, conversations, messages, memory, capabilities)", "serverOnly": false }
+        ]
+      },
+      "visual-builds": {
+        "path": "src/lib/visual-builds/",
+        "modules": [
+          { "file": "orchestrator.ts", "role": "Visual build orchestrator — asset search, generation, validation, storage, render, capture, review", "serverOnly": true },
+          { "file": "repository.ts", "role": "Visual build repository — CRUD for builds, plans, assets, captures, reviews", "serverOnly": true },
+          { "file": "capture.ts", "role": "Browser capture using Chrome/Chromium with WebSocket CDP", "serverOnly": true },
+          { "file": "providers.ts", "role": "Visual asset providers (stock search + image generation)", "serverOnly": true },
+          { "file": "qa.ts", "role": "Visual build QA — reviews generated visuals against requirements with LLM", "serverOnly": true },
+          { "file": "security.ts", "role": "Visual asset security — allowlist, SHA-256, DNS resolution, content-type", "serverOnly": true },
+          { "file": "storage.ts", "role": "Visual asset storage — download, upload to R2, deduplicate by checksum", "serverOnly": true },
+          { "file": "observability.ts", "role": "Visual build observability logging to Supabase", "serverOnly": true },
+          { "file": "types.ts", "role": "Visual build types — status, source, mode, quality, viewport, budget, plan, build, asset, capture, review", "serverOnly": false }
+        ]
+      },
+      "visual-packs": {
+        "path": "src/lib/visual-packs/",
+        "modules": [
+          { "file": "generation-presets.ts", "role": "Image generation presets (prompts, styles, aspect ratios)", "serverOnly": false },
+          { "file": "types.ts", "role": "Visual pack types (themes, wallpapers, fonts, effects)", "serverOnly": false }
+        ]
+      },
+      "youtube": {
+        "path": "src/lib/youtube/",
+        "modules": [
+          { "file": "YouTubePlayerController.ts", "role": "Canonical owner of YouTube IFrame Player API instance, queue, playback state", "serverOnly": false },
+          { "file": "types.ts", "role": "YouTube IFrame Player API type declarations", "serverOnly": false },
+          { "file": "url-parser.ts", "role": "YouTube URL parsing (extract video/playlist IDs)", "serverOnly": false }
+        ]
+      }
+    },
+    "legacyNotes": [
+      "src/lib/litt-context.ts exports JarvisAction types — legacy naming, file is NOT jarvis.ts (does not exist)",
+      "src/lib/litt.ts exports legacy notification types (separate from src/lib/litt/ subsystem dir)",
+      "src/lib/capability-registry.ts (root) is legacy — superseded by litt-kernel/capability-registry.ts and litt/capability/capability-registry.ts",
+      "src/lib/llm-completion.ts is legacy LLM interface — prefer src/lib/llm.ts"
+    ]
+  },
+  "routes": {
+    "note": "Next.js App Router. Route groups in parentheses are non-URL segments. (auth) group; (dashboard) group was removed per AGENTS.md.",
+    "pageCount": 56,
+    "apiRouteCount": 110,
+    "layoutCount": 36,
+    "keyPages": [
+      { "path": "/", "file": "src/app/page.tsx" },
+      { "path": "/studio", "file": "src/app/studio/page.tsx" },
+      { "path": "/dashboard", "file": "src/app/dashboard/page.tsx" },
+      { "path": "/litt", "file": "src/app/litt/page.tsx" },
+      { "path": "/marketplace", "file": "src/app/marketplace/page.tsx" },
+      { "path": "/pricing", "file": "src/app/pricing/page.tsx" },
+      { "path": "/projects", "file": "src/app/projects/page.tsx" },
+      { "path": "/settings", "file": "src/app/settings/page.tsx" },
+      { "path": "/(auth)/login", "file": "src/app/(auth)/login/page.tsx" }
+    ],
+    "keyApiRoutes": [
+      { "path": "/api/studio/conversations/[conversationId]/messages", "methods": ["POST", "GET"], "note": "Main Studio chat entry — imports 18 lib modules across studio, litt-intelligence, litt-kernel, agent-runtime, agent-billing" },
+      { "path": "/api/agents/chat", "methods": ["POST"], "note": "Legacy agent chat — uses agents.ts, llm.ts, litt-intelligence" },
+      { "path": "/api/gemini/chat", "methods": ["POST"], "note": "Gemini chat — uses llm, agents, litt-kernel, canvas actions" },
+      { "path": "/api/litt/think", "methods": ["POST"] },
+      { "path": "/api/litt/command", "methods": ["POST"] },
+      { "path": "/api/missions/[missionId]", "methods": ["GET", "PATCH"] },
+      { "path": "/api/approvals/[approvalId]", "methods": ["GET", "POST"] },
+      { "path": "/api/studio-projects/[projectId]/workspace/prepare", "methods": ["POST"], "note": "Workspace provisioning — has stale-lock TODO (see knownFollowUps)" },
+      { "path": "/api/terminal/token", "methods": ["GET"] },
+      { "path": "/api/marketplace/agents/[id]/install", "methods": ["POST", "DELETE", "PATCH"] },
+      { "path": "/api/billing/checkout", "methods": ["POST"] },
+      { "path": "/api/stripe/webhook", "methods": ["POST"] }
+    ],
+    "fullInventory": "See dependency-graph.json (routes array) for the complete 110 API route + 56 page inventory with methods and libImports."
+  },
+  "components": {
+    "note": "62 .tsx files mapped (9 had read errors in subagent pass — listed in unmappedFiles). Categories are subdirectories under src/components/.",
+    "categories": ["root", "branding", "chat", "color", "companion", "dashboard", "dashboard/v2", "dashboard/widgets", "games", "media", "youtube"],
+    "keyComponents": [
+      { "file": "src/components/LayoutShell.tsx", "role": "Root layout shell — composes Navbar, Footer, MobileBottomNav, CookieConsent, UserSync, AnimatedBackground, ServiceWorker, GlobalCompanion, YouTubePlayerShell" },
+      { "file": "src/components/dashboard/DashboardV2.tsx", "role": "Dashboard V2 entry" },
+      { "file": "src/components/dashboard/v2/DashboardV2.tsx", "role": "Dashboard V2 (v2 subdir version)" },
+      { "file": "src/components/dashboard/AutonomicLoopBanner.tsx", "role": "Autonomic loop banner (lives directly in DashboardView per AGENTS.md — (dashboard) group removed)" },
+      { "file": "src/components/dashboard/LiTTTerminal.tsx", "role": "LiTT terminal UI — imports AGENTS, voice helpers" },
+      { "file": "src/components/dashboard/widgets/DashboardWidgets.tsx", "role": "20 widget exports (WidgetShell, LiTTQuickAsk, MissionQueue, CurrentProject, etc.)" },
+      { "file": "src/components/Sidebar.tsx", "role": "Sidebar — uses NAV_GROUPS, COLLAPSED_KEY, LiTTPresenceCard, BrandLogo" },
+      { "file": "src/components/LiTTChatBox.tsx", "role": "LiTT chat box — uses askJarvis from ai/client" },
+      { "file": "src/components/companion/GlobalCompanion.tsx", "role": "Global companion widget" }
+    ],
+    "unmappedFiles": [
+      "src/components/games/GameGrid.tsx",
+      "src/components/games/GameLibrary.tsx",
+      "src/components/games/GamePreview.tsx",
+      "src/components/games/GameStats.tsx",
+      "src/components/games/Leaderboard.tsx",
+      "src/components/games/PlayButton.tsx",
+      "src/components/games/ScoreCard.tsx",
+      "src/components/footer/FooterWrapper.tsx",
+      "src/components/footer/Footer.tsx"
+    ]
+  },
+  "knownFollowUps": [
+    {
+      "id": "stale-provisioning-lock",
+      "priority": "P3",
+      "status": "TODO",
+      "location": "src/lib/projects/project-repository.ts claimProvisioningLock()",
+      "issue": "If request crashes after claiming lock, row stays 'provisioning' forever — no new claim can proceed (only matches not_prepared/failed).",
+      "requiredRecovery": "Detect provisioning rows older than 5min, atomically transition stale → failed with workspace_error='Provisioning timed out', allow new claim. Implement as recoverStaleProvisioning(projectId, userId, maxAgeMs) called at top of prepare route."
+    },
+    {
+      "id": "production-docker-runtime",
+      "priority": "P3",
+      "status": "BLOCKED",
+      "location": "terminal-server/Dockerfile",
+      "issue": "Terminal server requires Docker for workspace isolation. Railway does not provide Docker daemon inside containers.",
+      "blockers": ["Dedicated VM with Docker + littree-terminal:latest image", "OR sandbox provider (E2B, Fly Machines) replacing Docker isolation"],
+      "currentConfig": "TERMINAL_USE_DOCKER=false, TERMINAL_WORKSPACE_ROOT=/tmp/... — both must change for production"
+    },
+    {
+      "id": "agent-registry-fragmentation",
+      "priority": "P1",
+      "status": "OPEN",
+      "issue": "LiTT system prompt duplicated 3x with divergent content across agent-registry.ts, studio/agent-registry.ts, litt-intelligence/agent-profiles.ts. Consolidate or derive from one source."
+    }
+  ],
+  "verificationCommands": {
+    "typecheck": "npx tsc --noEmit",
+    "lint": "pnpm lint",
+    "test": "pnpm test",
+    "build": "pnpm build",
+    "dev": "pnpm dev"
+  }
+}
