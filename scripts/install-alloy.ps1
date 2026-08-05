@@ -7,12 +7,8 @@
     1. Prompts securely for the Grafana Cloud API key (never hardcoded)
     2. Sets the GCLOUD_RW_API_KEY machine-level env var
     3. Copies config.alloy to the Alloy config directory
-    4. Downloads the Alloy installer and runs it silently with our config
+    4. Installs Alloy via winget (preferred) or direct download
     5. Starts the Alloy Windows service
-
-  The Grafana Cloud username (3425326) and Prometheus push URL are
-  baked into config.alloy — only the API key needs to be provided
-  at install time via secure prompt.
 
   Stack: prometheus-prod-56-prod-us-east-2.grafana.net
   User:  3425326
@@ -21,11 +17,8 @@
 #>
 
 param(
-  # Path to the config.alloy file (defaults to scripts/config.alloy)
   [string]$ConfigPath = (Join-Path $PSScriptRoot "config.alloy"),
-
-  # Alloy version to install
-  [string]$AlloyVersion = "1.8.0"
+  [string]$AlloyVersion = "1.18.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,82 +45,111 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 Write-Host "`n[2/4] Setting environment variable" -ForegroundColor Yellow
 [Environment]::SetEnvironmentVariable("GCLOUD_RW_API_KEY", $apiKey, "Machine")
 Write-Host "  Set: GCLOUD_RW_API_KEY (machine-level)"
-
-# Clear plaintext key from memory
 $apiKey = $null
 [GC]::Collect()
 
-# ─── 3. Copy config to Alloy config dir ────────────────────────────
+# ─── 3. Copy config ────────────────────────────────────────────────
 Write-Host "`n[3/4] Installing config" -ForegroundColor Yellow
 $configDir = "C:\ProgramData\GrafanaLabs\Alloy"
 if (!(Test-Path $configDir)) {
   New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 }
 $configDest = Join-Path $configDir "config.alloy"
-
 if (!(Test-Path $ConfigPath)) {
   Write-Error "Config file not found: $ConfigPath"
   exit 1
 }
-
 Copy-Item $ConfigPath $configDest -Force
 Write-Host "  Config installed at $configDest"
 
-# ─── 4. Download + run Alloy installer ─────────────────────────────
-Write-Host "`n[4/4] Installing Alloy v$AlloyVersion" -ForegroundColor Yellow
+# ─── 4. Install Alloy ──────────────────────────────────────────────
+Write-Host "`n[4/4] Installing Alloy" -ForegroundColor Yellow
 $alloyDir = "C:\Program Files\GrafanaLabs\Alloy"
 $alloyExe = Join-Path $alloyDir "alloy-windows-amd64.exe"
 
-# Check if Alloy is already installed
+# Clean up any broken partial install from previous attempts
+if ((Test-Path $alloyExe) -and !(Get-Service "Alloy" -ErrorAction SilentlyContinue)) {
+  Write-Host "  Cleaning up previous partial install..."
+  Remove-Item $alloyDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Check if service already exists
 $existingService = Get-Service "Alloy" -ErrorAction SilentlyContinue
 if ($existingService) {
   Write-Host "  Alloy service already exists — stopping for reconfiguration"
   Stop-Service "Alloy" -Force -ErrorAction SilentlyContinue
 }
 
-if (Test-Path $alloyExe) {
-  Write-Host "  Alloy already installed at $alloyExe — skipping download"
-} else {
-  # Download the INSTALLER (not the plain binary) — it handles service registration
+# Method 1: Try winget (cleanest)
+$installed = $false
+if (Get-Command winget -ErrorAction SilentlyContinue) {
+  Write-Host "  Trying winget install..."
+  try {
+    winget install GrafanaLabs.Alloy --accept-package-agreements --accept-source-agreements 2>&1 | Write-Host
+    if (Test-Path $alloyExe) {
+      Write-Host "  Alloy installed via winget"
+      $installed = $true
+    }
+  } catch {
+    Write-Host "  winget install failed, falling back to direct download" -ForegroundColor DarkYellow
+  }
+}
+
+# Method 2: Direct download of installer binary
+if (!$installed) {
+  Write-Host "  Downloading Alloy installer v$AlloyVersion..."
   $installerUrl = "https://github.com/grafana/alloy/releases/download/v$AlloyVersion/alloy-installer-windows-amd64.exe"
-  $installerPath = "$env:TEMP\alloy-installer-windows-amd64.exe"
+  $installerPath = "$env:TEMP\alloy-installer.exe"
 
-  Write-Host "  Downloading installer from $installerUrl"
-  Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+  try {
+    # Use -MaximumRedirection to follow GitHub release redirects
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -MaximumRedirection 10
 
-  # Run silent install with our config file
-  # /S = silent, /CONFIG= path to config.alloy
-  Write-Host "  Running silent install with config: $configDest"
-  $installArgs = "/S /CONFIG=`"$configDest`""
-  Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -NoNewWindow
+    # Verify we got a real executable, not an HTML 404 page
+    $fileInfo = Get-Item $installerPath
+    if ($fileInfo.Length -lt 1MB) {
+      $content = Get-Content $installerPath -Raw -ErrorAction SilentlyContinue
+      if ($content -match "<html" -or $content -match "Page not found") {
+        Remove-Item $installerPath -Force
+        Write-Error "Downloaded file is not a valid executable (got HTML 404 page). Check the version URL: $installerUrl"
+        exit 1
+      }
+    }
 
-  Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+    Write-Host "  Running silent install..."
+    # /S = silent, /CONFIG= path to config.alloy
+    Start-Process -FilePath $installerPath -ArgumentList "/S", "/CONFIG=`"$configDest`"" -Wait -NoNewWindow
+    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
-  if (!(Test-Path $alloyExe)) {
-    Write-Error "Alloy binary not found after install. Check the installer output."
+    if (Test-Path $alloyExe) {
+      Write-Host "  Alloy installed at $alloyExe"
+      $installed = $true
+    } else {
+      Write-Error "Alloy binary not found after install. Installer may have failed."
+      exit 1
+    }
+  } catch {
+    Write-Error "Failed to download installer: $_"
     exit 1
   }
-  Write-Host "  Alloy installed at $alloyExe"
 }
 
 # ─── Start/restart service ─────────────────────────────────────────
 Write-Host "`n  Starting Alloy service..." -ForegroundColor Yellow
-
-# If service exists, restart it. If not, the installer should have created it.
 $svc = Get-Service "Alloy" -ErrorAction SilentlyContinue
 if ($svc) {
   Restart-Service "Alloy" -Force
 } else {
-  # Fallback: if the installer didn't create the service, create it manually
-  # using sc.exe with the service wrapper
+  # Fallback: create service manually with sc.exe using the service wrapper
   $serviceExe = Join-Path $alloyDir "alloy-service-windows-amd64.exe"
   if (Test-Path $serviceExe) {
-    Write-Host "  Service not found — creating manually with sc.exe"
+    Write-Host "  Service not found — creating with sc.exe..."
     & sc.exe create "Alloy" binPath= "`"$serviceExe`"" start= "auto"
     & sc.exe description "Alloy" "Grafana Alloy observability agent"
     Start-Service "Alloy"
   } else {
-    Write-Error "Alloy service not found and service wrapper binary missing. Installation may have failed."
+    Write-Error "Alloy service not created by installer and service wrapper binary missing."
+    Write-Host "  Try manual install: winget install GrafanaLabs.Alloy" -ForegroundColor Yellow
     exit 1
   }
 }
@@ -159,4 +181,3 @@ Write-Host ""
 Write-Host "Useful commands:"
 Write-Host "  Get-Service Alloy"
 Write-Host "  & '$alloyExe' components"
-Write-Host "  Get-EventLog -LogName Application -Source Alloy -Newest 10"
