@@ -284,6 +284,123 @@ export async function updateProjectWorkspace(
 }
 
 /**
+ * Ensure a project exists as a canonical row in studio_projects.
+ *
+ * If the project already exists in studio_projects, return it.
+ * If it only exists in the legacy `projects` table, insert a new
+ * studio_projects row with the same ID and GitHub metadata.
+ *
+ * This is an explicit, idempotent operation — NOT a hidden side effect
+ * of updateProjectWorkspace. Call this before workspace provisioning
+ * to guarantee the canonical row exists.
+ *
+ * The legacy row is never deleted. listProjects() deduplicates by
+ * github_repository_id so both tables can coexist safely.
+ *
+ * Safe under concurrent calls: uses upsert with onConflict: id.
+ */
+export async function ensureCanonicalStudioProject(
+  projectId: string,
+  userId: string,
+): Promise<CanonicalProject | null> {
+  // 1. Check studio_projects first
+  const { data: existing } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existing) {
+    return rowToCanonical(existing as StudioProjectRow);
+  }
+
+  // 2. Read the legacy row if studio_projects doesn't have it
+  const { data: legacyRow, error: legacyErr } = await supabaseAdmin
+    .from(LEGACY_TABLE)
+    .select("*")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (legacyErr || !legacyRow) return null;
+
+  const legacy = legacyRow as LegacyProjectRow;
+
+  // 3. Insert into studio_projects with the same ID, preserving GitHub metadata.
+  //    Use onConflict: id to handle the race where another concurrent call
+  //    inserts the same row between our SELECT and INSERT.
+  const insert: Record<string, unknown> = {
+    id: legacy.id,
+    user_id: legacy.user_id,
+    name: legacy.repository_full_name || legacy.repository,
+    slug: legacy.repository,
+    source_type: "github",
+    access_mode: legacy.repository_private ? "private" : "public",
+    github_installation_id: legacy.github_installation_id,
+    github_repository_id: legacy.repository_id,
+    github_owner: legacy.owner,
+    github_repo: legacy.repository,
+    github_full_name: legacy.repository_full_name,
+    github_default_branch: legacy.default_branch,
+    github_branch: legacy.working_branch ?? legacy.selected_branch ?? legacy.default_branch,
+    workspace_id: legacy.workspace_id ?? null,
+    workspace_status: "not_prepared",
+    workspace_root: null,
+    workspace_error: null,
+    workspace_prepared_at: null,
+    runtime_status: "stopped",
+    created_at: legacy.created_at,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from(TABLE)
+    .upsert(insert, { onConflict: "id" })
+    .select()
+    .maybeSingle();
+
+  if (insertErr || !inserted) return null;
+  return rowToCanonical(inserted as StudioProjectRow);
+}
+
+/**
+ * Atomically claim workspace provisioning for a project.
+ *
+ * Uses a conditional UPDATE to transition workspace_status from
+ * "not_prepared" or "failed" to "provisioning". Only one request
+ * can successfully make this transition — concurrent requests will
+ * see 0 rows returned and know another request owns provisioning.
+ *
+ * This is a database-backed lock that works across separate server
+ * instances (unlike an in-memory Map). The lock is released by
+ * transitioning to "ready" or "failed" via updateProjectWorkspace.
+ *
+ * Returns the updated canonical project if this caller claimed the
+ * lock, or null if another request already owns provisioning.
+ */
+export async function claimProvisioningLock(
+  projectId: string,
+  userId: string,
+): Promise<CanonicalProject | null> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      workspace_status: "provisioning",
+      workspace_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .in("workspace_status", ["not_prepared", "failed"])
+    .select()
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToCanonical(data as StudioProjectRow);
+}
+
+/**
  * Update runtime fields on a canonical project.
  */
 export async function updateProjectRuntime(
