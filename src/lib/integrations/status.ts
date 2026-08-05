@@ -101,13 +101,18 @@ async function testR2Health(): Promise<boolean | null> {
   return true;
 }
 
+const RAILWAY_TERMINAL_URL = "https://litlabs-terminal-server-production-0be1.up.railway.app";
+
 async function testTerminalHealth(): Promise<{ serverReachable: boolean; url: string | null }> {
   const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
   const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  const endpoint = explicit
+  const rawEndpoint = explicit
     ? explicit.replace(/\/$/, "")
     : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
-  if (!endpoint) return { serverReachable: false, url: null };
+  // Fall back to Railway terminal URL if env var is empty or points to localhost
+  const endpoint = rawEndpoint && !rawEndpoint.includes("localhost")
+    ? rawEndpoint
+    : RAILWAY_TERMINAL_URL;
   try {
     const res = await fetch(`${endpoint}/health`, {
       signal: AbortSignal.timeout(4000),

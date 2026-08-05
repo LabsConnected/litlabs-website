@@ -6,9 +6,14 @@ export const runtime = "nodejs";
 
 function getTerminalHttpUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
-  if (explicit) return explicit.replace(/\/$/, "");
   const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  return ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
+  const raw = explicit
+    ? explicit.replace(/\/$/, "")
+    : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
+  // Fall back to Railway terminal URL if env var is empty or points to localhost
+  return raw && !raw.includes("localhost")
+    ? raw
+    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
 }
 
 async function handler(req: NextRequest) {

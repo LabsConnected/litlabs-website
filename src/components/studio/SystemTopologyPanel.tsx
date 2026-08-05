@@ -11,9 +11,13 @@ type CheckState = "checking" | "ready" | "warning" | "offline";
 
 const terminalUrl = () => {
   const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
-  if (explicit) return explicit.replace(/\/$/, "");
   const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  return ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
+  const raw = explicit
+    ? explicit.replace(/\/$/, "")
+    : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
+  return raw && !raw.includes("localhost")
+    ? raw
+    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
 };
 
 export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }: { compact?: boolean; terminalHttpUrl?: string }) {

@@ -33,10 +33,14 @@ import {
   type ValidationResult,
 } from "./mission-repository";
 
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://litlabs-terminal-server-production-0be1.up.railway.app";
+const TERMINAL_BASE = () => {
+  const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
+    "";
+  return raw && !raw.includes("localhost")
+    ? raw
+    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
+};
 
 /**
  * Create a mission for a project.

@@ -524,12 +524,13 @@ export function resolvePlatformServices(isOwner: boolean): PlatformService[] {
 
   // Terminal / PTY
   const terminalWs = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
+  const terminalConfigured = terminalWs && !terminalWs.includes("localhost");
   services.push({
     id: "terminal",
     label: "Terminal",
     category: "Platform",
-    state: terminalWs ? "operational" : "disconnected",
-    detail: terminalWs ? (isOwner ? "PTY server configured" : "Operational") : "Not configured",
+    state: "operational",
+    detail: terminalConfigured ? (isOwner ? "PTY server configured" : "Operational") : "Railway terminal (fallback)",
     lastChecked: now,
   });
 

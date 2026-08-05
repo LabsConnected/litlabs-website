@@ -9,11 +9,15 @@
  * operations. The browser calls Next.js, which calls terminal-server.
  */
 
+const RAILWAY_TERMINAL_URL = "https://litlabs-terminal-server-production-0be1.up.railway.app";
+
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-const TERMINAL_BASE = () =>
-  process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://litlabs-terminal-server-production-0be1.up.railway.app";
+const TERMINAL_BASE = () => {
+  const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
+    "";
+  return raw && !raw.includes("localhost") ? raw : RAILWAY_TERMINAL_URL;
+};
 
 export interface WorkspacePrepareResponse {
   workspaceId: string;

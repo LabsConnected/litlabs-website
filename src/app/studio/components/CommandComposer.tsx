@@ -677,6 +677,7 @@ export default function CommandComposer({
         {/* Send */}
         <button
           type="button"
+          data-testid="studio-send-button"
           onClick={busy ? onCancel : submit}
           disabled={disabled || (!busy && !value.trim() && snapshots.length === 0 && attachments.length === 0)}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"

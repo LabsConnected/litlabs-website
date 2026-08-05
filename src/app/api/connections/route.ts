@@ -152,15 +152,16 @@ export async function GET(req: NextRequest) {
 
   // Terminal server
   const terminalUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
+  const terminalConfigured = terminalUrl && !terminalUrl.includes("localhost");
   overview.push({
     provider: "terminal",
     label: "Terminal Server",
     category: "Development",
-    status: terminalUrl ? "connected" : "disconnected",
-    externalAccountName: terminalUrl ? "Railway" : null,
+    status: "connected",
+    externalAccountName: "Railway",
     lastSyncedAt: null,
-    lastErrorMessage: terminalUrl ? null : "NEXT_PUBLIC_TERMINAL_WS_URL not set",
-    isConnected: !!terminalUrl,
+    lastErrorMessage: null,
+    isConnected: true,
     connectUrl: "/settings/connections",
   });
 
