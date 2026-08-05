@@ -13,10 +13,8 @@
  *   URL:  https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
  */
 
-// ─── Secret resolution ─────────────────────────────────────────────
-local.api_key = sys.env("GCLOUD_RW_API_KEY");
-
 // ─── Self-monitoring (Alloy's own metrics) ─────────────────────────
+// API key is read via sys.env() directly in the remote_write block below.
 prometheus.exporter.self "alloy_check" {}
 
 discovery.relabel "alloy_check" {
@@ -99,7 +97,7 @@ prometheus.remote_write "grafanacloud" {
 
     basic_auth {
       username = "3425326"
-      password = local.api_key
+      password = sys.env("GCLOUD_RW_API_KEY")
     }
   }
 }
