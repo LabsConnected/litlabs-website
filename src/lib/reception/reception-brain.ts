@@ -19,6 +19,42 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase";
 
+// ─── Snake-to-camel mapper ───────────────────────────────────────
+// Supabase returns snake_case columns; our TS interfaces use camelCase.
+function snakeToCamel(s: string): string {
+  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+function mapConfigRow(row: Record<string, unknown>): ReceptionConfig {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
+  return out as unknown as ReceptionConfig;
+}
+
+function mapServiceRow(row: Record<string, unknown>): ReceptionService {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
+  return out as unknown as ReceptionService;
+}
+
+function mapBookingRow(row: Record<string, unknown>): ReceptionBooking {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
+  return out as unknown as ReceptionBooking;
+}
+
+function mapLeadRow(row: Record<string, unknown>): ReceptionLead {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
+  return out as unknown as ReceptionLead;
+}
+
+function mapEscalationRow(row: Record<string, unknown>): ReceptionEscalation {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
+  return out as unknown as ReceptionEscalation;
+}
+
 // ─── Types ───────────────────────────────────────────────────────
 
 export interface ReceptionConfig {
@@ -214,23 +250,30 @@ export async function getConfig(ownerId: string): Promise<ReceptionConfig | null
         .insert(newConfig)
         .select()
         .single();
-      return created as unknown as ReceptionConfig | null;
+      return created ? mapConfigRow(created as Record<string, unknown>) : null;
     }
     return null;
   }
-  return data as unknown as ReceptionConfig;
+  return mapConfigRow(data as Record<string, unknown>);
 }
 
 export async function updateConfig(ownerId: string, updates: Partial<ReceptionConfig>): Promise<ReceptionConfig | null> {
+  // Convert camelCase updates to snake_case for the DB
+  const snakeUpdates: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(updates)) {
+    snakeUpdates[k.replace(/([A-Z])/g, "_$1").toLowerCase()] = v;
+  }
+  snakeUpdates["updated_at"] = new Date().toISOString();
+
   const { data, error } = await supabaseAdmin
     .from("reception_config")
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(snakeUpdates)
     .eq("owner_id", ownerId)
     .select()
     .single();
 
   if (error) return null;
-  return data as unknown as ReceptionConfig;
+  return mapConfigRow(data as Record<string, unknown>);
 }
 
 // ─── Services ────────────────────────────────────────────────────
@@ -246,7 +289,7 @@ export async function listServices(ownerId: string, activeOnly = false): Promise
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return data as unknown as ReceptionService[];
+  return data.map((r) => mapServiceRow(r as Record<string, unknown>));
 }
 
 export async function getService(ownerId: string, serviceId: string): Promise<ReceptionService | null> {
@@ -258,7 +301,7 @@ export async function getService(ownerId: string, serviceId: string): Promise<Re
     .single();
 
   if (error || !data) return null;
-  return data as unknown as ReceptionService;
+  return mapServiceRow(data as Record<string, unknown>);
 }
 
 export async function createService(ownerId: string, service: Partial<ReceptionService>): Promise<ReceptionService | null> {
@@ -292,7 +335,7 @@ export async function createService(ownerId: string, service: Partial<ReceptionS
     .single();
 
   if (error) return null;
-  return data as unknown as ReceptionService;
+  return mapServiceRow(data as Record<string, unknown>);
 }
 
 export async function updateService(ownerId: string, serviceId: string, updates: Partial<ReceptionService>): Promise<ReceptionService | null> {
@@ -321,7 +364,7 @@ export async function updateService(ownerId: string, serviceId: string, updates:
     .single();
 
   if (error) return null;
-  return data as unknown as ReceptionService;
+  return mapServiceRow(data as Record<string, unknown>);
 }
 
 export async function deleteService(ownerId: string, serviceId: string): Promise<boolean> {
@@ -401,7 +444,7 @@ export async function createBooking(
     source: input.source ?? "voice",
   });
 
-  return data as unknown as ReceptionBooking;
+  return mapBookingRow(data as Record<string, unknown>);
 }
 
 export async function getBooking(ownerId: string, bookingId: string): Promise<ReceptionBooking | null> {
@@ -413,7 +456,7 @@ export async function getBooking(ownerId: string, bookingId: string): Promise<Re
     .single();
 
   if (error || !data) return null;
-  return data as unknown as ReceptionBooking;
+  return mapBookingRow(data as Record<string, unknown>);
 }
 
 export async function listBookings(ownerId: string, options?: { status?: string; date?: string; limit?: number }): Promise<ReceptionBooking[]> {
@@ -430,7 +473,7 @@ export async function listBookings(ownerId: string, options?: { status?: string;
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return data as unknown as ReceptionBooking[];
+  return (data as Record<string, unknown>[]).map(mapBookingRow);
 }
 
 export async function findBookingsByCustomer(ownerId: string, email: string): Promise<ReceptionBooking[]> {
@@ -443,7 +486,7 @@ export async function findBookingsByCustomer(ownerId: string, email: string): Pr
     .limit(10);
 
   if (error || !data) return [];
-  return data as unknown as ReceptionBooking[];
+  return (data as Record<string, unknown>[]).map(mapBookingRow);
 }
 
 export async function updateBookingStatus(ownerId: string, bookingId: string, status: string, notes?: string): Promise<ReceptionBooking | null> {
@@ -465,7 +508,7 @@ export async function updateBookingStatus(ownerId: string, bookingId: string, st
                     status === "rescheduled" ? "reception_booking_rescheduled" : "reception_booking_updated";
   await logEvent(ownerId, eventType, { booking_id: bookingId, status });
 
-  return data as unknown as ReceptionBooking;
+  return mapBookingRow(data as Record<string, unknown>);
 }
 
 export async function rescheduleBooking(ownerId: string, bookingId: string, newDate: string, newTime: string): Promise<ReceptionBooking | null> {
@@ -489,7 +532,7 @@ export async function rescheduleBooking(ownerId: string, bookingId: string, newD
 
   if (error) return null;
   await logEvent(ownerId, "reception_booking_rescheduled", { booking_id: bookingId, new_date: newDate, new_time: newTime });
-  return data as unknown as ReceptionBooking;
+  return mapBookingRow(data as Record<string, unknown>);
 }
 
 /** Check if a time slot is available (no conflicts). */
@@ -596,7 +639,7 @@ export async function createLead(
     source: input.source ?? "voice",
   });
 
-  return data as unknown as ReceptionLead;
+  return mapLeadRow(data as Record<string, unknown>);
 }
 
 export async function updateLeadStatus(ownerId: string, leadId: string, status: string, leadScore?: number): Promise<ReceptionLead | null> {
@@ -612,7 +655,7 @@ export async function updateLeadStatus(ownerId: string, leadId: string, status: 
     .single();
 
   if (error) return null;
-  return data as unknown as ReceptionLead;
+  return mapLeadRow(data as Record<string, unknown>);
 }
 
 export async function findLeadByEmail(ownerId: string, email: string): Promise<ReceptionLead | null> {
@@ -626,7 +669,7 @@ export async function findLeadByEmail(ownerId: string, email: string): Promise<R
     .single();
 
   if (error || !data) return null;
-  return data as unknown as ReceptionLead;
+  return mapLeadRow(data as Record<string, unknown>);
 }
 
 export async function listLeads(ownerId: string, options?: { status?: string; limit?: number }): Promise<ReceptionLead[]> {
@@ -641,7 +684,7 @@ export async function listLeads(ownerId: string, options?: { status?: string; li
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return data as unknown as ReceptionLead[];
+  return (data as Record<string, unknown>[]).map(mapLeadRow);
 }
 
 // ─── Escalations ─────────────────────────────────────────────────
@@ -695,7 +738,7 @@ export async function createEscalation(
     urgency: input.urgency ?? "normal",
   });
 
-  return data as unknown as ReceptionEscalation;
+  return mapEscalationRow(data as Record<string, unknown>);
 }
 
 export async function listEscalations(ownerId: string, options?: { status?: string; limit?: number }): Promise<ReceptionEscalation[]> {
@@ -710,7 +753,7 @@ export async function listEscalations(ownerId: string, options?: { status?: stri
 
   const { data, error } = await query;
   if (error || !data) return [];
-  return data as unknown as ReceptionEscalation[];
+  return (data as Record<string, unknown>[]).map(mapEscalationRow);
 }
 
 // ─── Staff Hours ─────────────────────────────────────────────────
