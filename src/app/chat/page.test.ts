@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChatRedirectUrl } from "./page";
+import { buildChatRedirectUrl } from "@/lib/chat/redirect";
 
 describe("/chat redirect", () => {
   it("preserves conversation and arbitrary query parameters", () => {

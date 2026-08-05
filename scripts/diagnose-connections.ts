@@ -4,20 +4,48 @@
  *
  * Runs a full diagnostic of all integration environment variables and
  * provider health. Never prints secret values.
+ *
+ * Also serves as a "crash report" — gathering all the context a user
+ * would need to send to support: env var presence (local + Vercel),
+ * provider health, terminal server status, Supabase table check,
+ * git state, and build info.
  */
 
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
+
+// Resolve the project root: walk up from cwd to find package.json
+function findProjectRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, "package.json")) && fs.existsSync(path.join(dir, ".env.local"))) {
+      return dir;
+    }
+    // Also check for the real path (handles symlinks/junctions)
+    try {
+      const real = fs.realpathSync(dir);
+      if (fs.existsSync(path.join(real, "package.json")) && fs.existsSync(path.join(real, ".env.local"))) {
+        return real;
+      }
+    } catch { /* ignore */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback: use the directory of this script
+  return path.resolve(__dirname, "..");
+}
+
+const PROJECT_ROOT = findProjectRoot();
 
 // Load .env.local first if it exists, then .env
-const envLocalPath = path.resolve(process.cwd(), ".env.local");
-console.log("DEBUG: envLocalPath =", envLocalPath, "exists =", fs.existsSync(envLocalPath));
+const envLocalPath = path.resolve(PROJECT_ROOT, ".env.local");
 if (fs.existsSync(envLocalPath)) {
   dotenv.config({ path: envLocalPath });
 }
-const envPath = path.resolve(process.cwd(), ".env");
-console.log("DEBUG: envPath =", envPath, "exists =", fs.existsSync(envPath));
+const envPath = path.resolve(PROJECT_ROOT, ".env");
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
@@ -280,6 +308,135 @@ async function main() {
 
   console.log(`\n${"─".repeat(50)}`);
   console.log(`Results: ${passCount} PASS, ${warnCount} WARN, ${failCount} FAIL\n`);
+
+  // ─── Crash Report Context ───────────────────────────────────
+  // Gather system info that would help debug a crash or support ticket
+  console.log("\n╔══════════════════════════════════════════════╗");
+  console.log("║   System Snapshot (Crash Report Context)     ║");
+  console.log("╚══════════════════════════════════════════════╝\n");
+
+  // Git state
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: PROJECT_ROOT, encoding: "utf-8" }).trim();
+    const commit = execSync("git rev-parse --short HEAD", { cwd: PROJECT_ROOT, encoding: "utf-8" }).trim();
+    const status = execSync("git status --porcelain", { cwd: PROJECT_ROOT, encoding: "utf-8" }).trim();
+    const dirty = status ? `${status.split("\n").length} uncommitted files` : "clean";
+    console.log(`Git: ${branch} @ ${commit} (${dirty})`);
+  } catch {
+    console.log("Git: unable to read (not a git repo?)");
+  }
+
+  // Node / pnpm versions
+  try {
+    const nodeVer = process.version;
+    const pnpmVer = execSync("pnpm --version", { encoding: "utf-8" }).trim();
+    console.log(`Runtime: Node ${nodeVer}, pnpm ${pnpmVer}`);
+  } catch {
+    console.log(`Runtime: Node ${process.version}`);
+  }
+
+  // Project root
+  console.log(`Project root: ${PROJECT_ROOT}`);
+  console.log(`CWD: ${process.cwd()}`);
+
+  // Env file presence
+  const envLocalExists = fs.existsSync(path.resolve(PROJECT_ROOT, ".env.local"));
+  const envExists = fs.existsSync(path.resolve(PROJECT_ROOT, ".env"));
+  console.log(`Env files: .env.local=${envLocalExists}, .env=${envExists}`);
+
+  // Count total env vars loaded (without printing values)
+  const envVarCount = Object.keys(process.env).filter(k =>
+    INTEGRATION_ENV_REQUIREMENTS &&
+    Object.values(INTEGRATION_ENV_REQUIREMENTS).flat().includes(k)
+  ).filter(k => {
+    const v = process.env[k];
+    return v && v.length >= 5 && !v.includes("your-") && !v.includes("placeholder");
+  }).length;
+  const totalRequired = Object.values(INTEGRATION_ENV_REQUIREMENTS).flat().length;
+  console.log(`Integration env vars loaded: ${envVarCount}/${totalRequired}`);
+
+  // Supabase connectivity + key tables
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (supabaseUrl && supabaseKey) {
+    const criticalTables = [
+      "users", "studio_projects", "user_preferences", "reception_config",
+      "reception_services", "reception_bookings", "web_sources", "credit_ledger",
+      "wallets", "agent_entitlements", "missions", "mission_runs",
+      "conversations", "payment_records", "push_subscriptions",
+    ];
+    let tablesOk = 0;
+    let tablesMissing: string[] = [];
+    for (const table of criticalTables) {
+      try {
+        const res = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*&limit=1`, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          tablesOk++;
+        } else {
+          tablesMissing.push(`${table}(HTTP ${res.status})`);
+        }
+      } catch {
+        tablesMissing.push(`${table}(timeout)`);
+      }
+    }
+    console.log(`Supabase tables: ${tablesOk}/${criticalTables.length} accessible`);
+    if (tablesMissing.length > 0) {
+      console.log(`  Missing/inaccessible: ${tablesMissing.join(", ")}`);
+    }
+  } else {
+    console.log("Supabase: not configured (cannot check tables)");
+  }
+
+  // ElevenLabs reception webhook test
+  const internalKey = process.env.INTERNAL_API_KEY;
+  if (internalKey && supabaseUrl) {
+    try {
+      const testBody = JSON.stringify({ conversation_id: "diag-test", caller_id: "+0000000000" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/api/internal/elevenlabs/init`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${internalKey}`, "Content-Type": "application/json" },
+        body: testBody,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        console.log("ElevenLabs init webhook: reachable (200 OK)");
+      } else {
+        console.log(`ElevenLabs init webhook: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.log(`ElevenLabs init webhook: ${err instanceof Error ? err.message : "unreachable"}`);
+    }
+  } else {
+    console.log("ElevenLabs init webhook: INTERNAL_API_KEY not set locally");
+  }
+
+  // Terminal server health (detailed)
+  const termHttpUrl = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
+  const termWsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
+  if (termHttpUrl || termWsUrl) {
+    const endpoint = (termHttpUrl || termWsUrl?.replace(/^wss:/, "https:").replace(/^ws:/, "http:"))?.replace(/\/$/, "");
+    if (endpoint) {
+      try {
+        const res = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(4000) });
+        if (res.ok) {
+          const health = await res.json();
+          console.log(`Terminal server: ${health.status} (${health.readiness}) — docker: ${health.checks?.docker ?? "unknown"}`);
+        } else {
+          console.log(`Terminal server: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        console.log(`Terminal server: ${err instanceof Error ? err.message : "unreachable"}`);
+      }
+    }
+  } else {
+    console.log("Terminal server: no URL configured locally");
+  }
+
+  console.log(`\nTimestamp: ${new Date().toISOString()}`);
+  console.log("");
 
   if (failCount > 0) process.exit(1);
 }

@@ -4,8 +4,8 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "next dev --turbo",
-    "dev:webpack": "next dev --webpack",
+    "dev": "next dev --turbo -p 3001",
+    "dev:webpack": "next dev --webpack -p 3001",
     "build": "next build",
     "build:webpack": "next build --webpack",
     "prebuild": "node -e \"if(require('fs').existsSync('scripts/verify-emulatorjs-assets.mjs')){process.exitCode=require('child_process').spawnSync('node',['scripts/verify-emulatorjs-assets.mjs'],{stdio:'inherit'}).status}else{console.log('Skipping emulatorjs verify (scripts/ not deployed)')}\"",
