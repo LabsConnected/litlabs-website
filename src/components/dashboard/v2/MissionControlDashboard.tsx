@@ -487,18 +487,41 @@ export function MissionControlDashboard() {
 
   if (loading) {
     return (
-      <div
-        className="flex min-h-screen items-center justify-center"
-        style={{ background: D.bg }}
-      >
-        <div className="flex items-center gap-3 text-sm" style={{ color: D.textMuted }}>
-          <div
-            className="h-5 w-5 animate-spin rounded-full border-2"
-            style={{ borderColor: `${D.accent}30`, borderTopColor: D.accent }}
-          />
-          Loading Mission Control…
+      <main className="min-h-screen" style={{ background: D.bgGradient, color: D.textPrimary }}>
+        <div className="mx-auto w-full max-w-[1680px] px-4 py-5 lg:px-6 xl:px-8">
+          {/* Skeleton header */}
+          <div className="mb-5 rounded-3xl border p-5" style={{ borderColor: D.border, background: D.surface, backdropFilter: "blur(20px)" }}>
+            <div className="flex items-center gap-2">
+              <div className="h-5 w-40 animate-pulse rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+              <div className="h-5 w-16 animate-pulse rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+            </div>
+            <div className="mt-3 h-8 w-64 animate-pulse rounded-lg" style={{ background: "rgba(255,255,255,0.06)" }} />
+            <div className="mt-2 h-4 w-96 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+          </div>
+          {/* Skeleton metric strip */}
+          <div className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border p-4" style={{ borderColor: D.border, background: D.surface }}>
+                <div className="h-3 w-20 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.06)" }} />
+                <div className="mt-3 h-7 w-16 animate-pulse rounded-lg" style={{ background: "rgba(255,255,255,0.06)" }} />
+                <div className="mt-2 h-3 w-24 animate-pulse rounded" style={{ background: "rgba(255,255,255,0.04)" }} />
+              </div>
+            ))}
+          </div>
+          {/* Skeleton two-column */}
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.8fr)]">
+            <div className="space-y-5">
+              <div className="h-64 animate-pulse rounded-3xl border" style={{ borderColor: D.border, background: D.surface }} />
+              <div className="h-48 animate-pulse rounded-3xl border" style={{ borderColor: D.border, background: D.surface }} />
+              <div className="h-48 animate-pulse rounded-3xl border" style={{ borderColor: D.border, background: D.surface }} />
+            </div>
+            <div className="space-y-5">
+              <div className="h-56 animate-pulse rounded-3xl border" style={{ borderColor: D.border, background: D.surface }} />
+              <div className="h-40 animate-pulse rounded-3xl border" style={{ borderColor: D.border, background: D.surface }} />
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -510,7 +533,7 @@ export function MissionControlDashboard() {
       <div className="mx-auto w-full max-w-[1680px] px-4 py-5 lg:px-6 xl:px-8">
         {/* === Header === */}
         <header
-          className="mb-5 flex flex-col gap-4 rounded-3xl border p-5 lg:flex-row lg:items-center lg:justify-between"
+          className="mb-5 flex flex-col gap-4 rounded-3xl border p-5 md:flex-row md:items-center md:justify-between"
           style={{
             background: "linear-gradient(135deg, rgba(0,0,0,0.4), rgba(124,58,237,0.05))",
             borderColor: `${D.accent}30`,
@@ -639,7 +662,7 @@ export function MissionControlDashboard() {
         ) : null}
 
         {/* === Metric strip === */}
-        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
           <MetricCard
             label="Active Missions"
             value={activeMissions.length}
@@ -687,8 +710,94 @@ export function MissionControlDashboard() {
           />
         </section>
 
+        {/* === Quick Actions bar === */}
+        <section className="mb-5">
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+            <Link
+              href="/studio?tool=chat"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accent}33`,
+                background: `${D.accent}10`,
+              }}
+            >
+              <Icon name="message" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Ask LiTT
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Continue the active project conversation.
+              </div>
+            </Link>
+            <Link
+              href="/studio?tool=code"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentCyan}22`,
+                background: `${D.accentCyan}0f`,
+              }}
+            >
+              <Icon name="code" size={18} style={{ color: D.accentCyan }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                LiTT Code
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Files, editor, terminal, checks, and preview.
+              </div>
+            </Link>
+            <Link
+              href="/studio?mission=Run%20a%20complete%20project%20health%20check"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentGreen}22`,
+                background: `${D.accentGreen}0e`,
+              }}
+            >
+              <Icon name="heart" size={18} style={{ color: D.accentGreen }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Health Scan
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Run actual checks against the active workspace.
+              </div>
+            </Link>
+            <Link
+              href="/deployments"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentAmber}22`,
+                background: `${D.accentAmber}0e`,
+              }}
+            >
+              <Icon name="rocket" size={18} style={{ color: D.accentAmber }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Deploy
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Preview, production, logs, and rollback.
+              </div>
+            </Link>
+            <Link
+              href="/games"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accent}33`,
+                background: `${D.accent}10`,
+              }}
+            >
+              <Icon name="gamepad" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Games
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Game Cloud, Retro Arcade and browser games.
+              </div>
+            </Link>
+          </div>
+        </section>
+
         {/* === Two-column layout === */}
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.8fr)]">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.8fr)]">
           {/* Left operational column */}
           <div className="space-y-5">
             {/* Active Project Runtime */}
@@ -700,7 +809,7 @@ export function MissionControlDashboard() {
                 backdropFilter: "blur(20px)",
               }}
             >
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div
                     className="text-[10px] font-black uppercase tracking-[.2em]"
@@ -749,105 +858,6 @@ export function MissionControlDashboard() {
                   ) : null}
                 </div>
               </div>
-
-              {/* 5 primary actions */}
-              <div className="mt-5 grid gap-3 md:grid-cols-5">
-                <Link
-                  href="/studio?tool=chat"
-                  className="rounded-2xl border p-4 transition hover:opacity-90"
-                  style={{
-                    borderColor: `${D.accent}33`,
-                    background: `${D.accent}10`,
-                  }}
-                >
-                  <Icon name="message" size={18} style={{ color: D.accent }} />
-                  <div
-                    className="mt-3 text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    Ask LiTT
-                  </div>
-                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Continue the active project conversation.
-                  </div>
-                </Link>
-                <Link
-                  href="/studio?tool=code"
-                  className="rounded-2xl border p-4 transition hover:opacity-90"
-                  style={{
-                    borderColor: `${D.accentCyan}22`,
-                    background: `${D.accentCyan}0f`,
-                  }}
-                >
-                  <Icon name="code" size={18} style={{ color: D.accentCyan }} />
-                  <div
-                    className="mt-3 text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    LiTT Code
-                  </div>
-                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Files, editor, terminal, checks, and preview.
-                  </div>
-                </Link>
-                <Link
-                  href="/studio?mission=Run%20a%20complete%20project%20health%20check"
-                  className="rounded-2xl border p-4 transition hover:opacity-90"
-                  style={{
-                    borderColor: `${D.accentGreen}22`,
-                    background: `${D.accentGreen}0e`,
-                  }}
-                >
-                  <Icon name="heart" size={18} style={{ color: D.accentGreen }} />
-                  <div
-                    className="mt-3 text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    Health Scan
-                  </div>
-                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Run actual checks against the active workspace.
-                  </div>
-                </Link>
-                <Link
-                  href="/deployments"
-                  className="rounded-2xl border p-4 transition hover:opacity-90"
-                  style={{
-                    borderColor: `${D.accentAmber}22`,
-                    background: `${D.accentAmber}0e`,
-                  }}
-                >
-                  <Icon name="rocket" size={18} style={{ color: D.accentAmber }} />
-                  <div
-                    className="mt-3 text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    Deploy
-                  </div>
-                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Preview, production, logs, and rollback.
-                  </div>
-                </Link>
-                <Link
-                  href="/games"
-                  className="rounded-2xl border p-4 transition hover:opacity-90"
-                  style={{
-                    borderColor: `${D.accent}33`,
-                    background: `${D.accent}10`,
-                  }}
-                >
-                  <Icon name="gamepad" size={18} style={{ color: D.accent }} />
-                  <div
-                    className="mt-3 text-sm font-black"
-                    style={{ color: D.textPrimary }}
-                  >
-                    Games
-                  </div>
-                  <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                    Game Cloud, Retro Arcade and browser games.
-                  </div>
-                </Link>
-              </div>
             </section>
 
             {/* Mission Queue */}
@@ -883,7 +893,7 @@ export function MissionControlDashboard() {
                 </Link>
               </div>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {(data?.missions ?? []).slice(0, 6).map((mission) => (
                   <MissionCard key={mission.id} mission={mission} />
                 ))}
@@ -1185,7 +1195,7 @@ export function MissionControlDashboard() {
               </button>
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {placements.filter((p) => !p.hidden).map((p) => {
               const def = getWidgetDefinition(p.widgetId);
               if (!def) return null;
