@@ -54,8 +54,74 @@ const MAX_READ_SIZE = 2 * 1024 * 1024;
 const MAX_WRITE_SIZE = 1 * 1024 * 1024;
 const MAX_PATH_LENGTH = 4096;
 
+/**
+ * Probe whether Docker is actually available — not just whether the env var
+ * is set. Checks that the Docker CLI exists, the daemon responds, and (when
+ * Docker mode is enabled) the required image and network exist.
+ *
+ * Result is cached for 30s to avoid spawning `docker` on every health check.
+ */
+let dockerProbeCache: { value: boolean; reason: string; at: number } | null = null;
+const DOCKER_PROBE_TTL_MS = 30_000;
+
+async function probeDockerAvailability(): Promise<{ value: boolean; reason: string }> {
+  if (!USE_DOCKER) return { value: false, reason: "TERMINAL_USE_DOCKER is not set to true" };
+  if (dockerProbeCache && Date.now() - dockerProbeCache.at < DOCKER_PROBE_TTL_MS) {
+    return { value: dockerProbeCache.value, reason: dockerProbeCache.reason };
+  }
+
+  const { execFile } = await import("child_process");
+  const image = process.env.DOCKER_TERMINAL_IMAGE || "littree-terminal:latest";
+
+  const checkCmd = (args: string[]): Promise<{ ok: boolean; stderr: string }> =>
+    new Promise((resolve) => {
+      execFile("docker", args, { timeout: 5000 }, (_err, _stdout, stderr) => {
+        resolve({ ok: !_err, stderr: (stderr || "").trim() });
+      });
+    });
+
+  // 1. Is the Docker daemon running?
+  const daemon = await checkCmd(["info", "--format", "{{.ServerVersion}}"]);
+  if (!daemon.ok) {
+    dockerProbeCache = { value: false, reason: "Docker daemon not reachable", at: Date.now() };
+    return { value: false, reason: "Docker daemon not reachable" };
+  }
+
+  // 2. Does the required image exist?
+  const imageCheck = await checkCmd(["image", "inspect", image]);
+  if (!imageCheck.ok) {
+    dockerProbeCache = { value: false, reason: `Image ${image} not found`, at: Date.now() };
+    return { value: false, reason: `Image ${image} not found` };
+  }
+
+  // 3. Does the required network exist?
+  const networkCheck = await checkCmd(["network", "inspect", "littree-terminal"]);
+  if (!networkCheck.ok) {
+    dockerProbeCache = { value: false, reason: "Network littree-terminal not found", at: Date.now() };
+    return { value: false, reason: "Network littree-terminal not found" };
+  }
+
+  dockerProbeCache = { value: true, reason: "ok", at: Date.now() };
+  return { value: true, reason: "ok" };
+}
+
 if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
   throw new Error("TERMINAL_USE_DOCKER=true is required in production");
+}
+
+// Warn if workspace root is the ephemeral default in production — cloned
+// repositories and the workspace registry (.workspaces.json) will be lost
+// on every container restart. Operators should mount a persistent volume
+// and set TERMINAL_WORKSPACE_ROOT to that path.
+if (
+  process.env.NODE_ENV === "production" &&
+  (!process.env.TERMINAL_WORKSPACE_ROOT || WORKSPACE_ROOT.startsWith("/tmp"))
+) {
+  console.warn(
+    "[Terminal] WARNING: TERMINAL_WORKSPACE_ROOT is not set or points to /tmp. " +
+      "Workspaces will be lost on restart. Mount a persistent volume and set " +
+      "TERMINAL_WORKSPACE_ROOT to the mounted path (e.g. /data/littree-workspaces).",
+  );
 }
 
 mkdirSync(WORKSPACE_ROOT, { recursive: true });
@@ -94,19 +160,25 @@ app.get("/health/live", (_req, res) => {
   });
 });
 
-app.get("/health/ready", (_req, res) => {
+app.get("/health/ready", async (_req, res) => {
   const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
   const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
   const workspaceReady = workspaceRoot.length > 0;
+  const dockerProbe = await probeDockerAvailability();
 
   const checks = {
     authConfigured,
     internalServiceConfigured,
     workspaceRoot: workspaceReady,
-    docker: USE_DOCKER,
+    docker: dockerProbe.value,
+    dockerReason: dockerProbe.reason,
   };
 
+  // Docker readiness is reported but does NOT block the overall readiness
+  // in development (host PTY mode). In production, Docker mode is required
+  // by the startup guard, so if the probe fails the health check will
+  // correctly report docker: false.
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
 
   res.status(allReady ? 200 : 503).json({
@@ -125,11 +197,12 @@ app.get("/health/ready", (_req, res) => {
 });
 
 // Backward-compatible /health — returns readiness check
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
   const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
   const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
   const workspaceReady = workspaceRoot.length > 0;
+  const dockerProbe = await probeDockerAvailability();
   const allReady = authConfigured && internalServiceConfigured && workspaceReady;
 
   res.status(allReady ? 200 : 503).json({
@@ -142,7 +215,8 @@ app.get("/health", (_req, res) => {
       authConfigured,
       internalServiceConfigured,
       workspaceRoot: workspaceReady,
-      docker: USE_DOCKER,
+      docker: dockerProbe.value,
+      dockerReason: dockerProbe.reason,
     },
     reasons: allReady
       ? []

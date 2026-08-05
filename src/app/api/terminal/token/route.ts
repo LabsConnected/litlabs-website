@@ -22,7 +22,10 @@ export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId");
 
   try {
-    // If projectId is provided, bind the token to the project's workspace
+    // If projectId is provided, the token MUST be bound to the project's
+    // workspace. We do NOT issue a fallback unbound token — that would let
+    // the terminal server open a generic directory instead of the actual
+    // repository, silently hiding the provisioning failure.
     if (projectId) {
       try {
         const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
@@ -30,16 +33,22 @@ export async function GET(request: NextRequest) {
           createTerminalToken(userId, { workspaceId, projectId }),
           { headers: { "Cache-Control": "no-store" } },
         );
-      } catch {
-        // If workspace isn't ready, return a plain token without workspace binding
-        // The client can still connect but won't get project-bound PTY
+      } catch (err) {
+        // Workspace is not ready — tell the client to prepare it first.
+        // The UI should call POST /api/studio-projects/[projectId]/workspace/prepare,
+        // wait until workspaceStatus === "ready", then retry this endpoint.
         return NextResponse.json(
-          createTerminalToken(userId),
-          { headers: { "Cache-Control": "no-store" } },
+          {
+            code: "WORKSPACE_NOT_READY",
+            error: "Prepare the project workspace before opening the terminal.",
+            detail: err instanceof Error ? err.message : undefined,
+          },
+          { status: 409, headers: { "Cache-Control": "no-store" } },
         );
       }
     }
 
+    // No projectId — issue a plain token (for non-project terminals)
     return NextResponse.json(createTerminalToken(userId), {
       headers: { "Cache-Control": "no-store" },
     });

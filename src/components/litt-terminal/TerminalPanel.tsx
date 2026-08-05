@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { clearTerminalTokenCache, getTerminalToken } from "@/lib/terminal-client";
+import { clearTerminalTokenCache, getTerminalToken, WorkspaceNotReadyError } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -49,7 +49,7 @@ export const TerminalPanel = forwardRef<
   const commandBufferRef = useRef<string>("");
   const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
-  const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string } | null>(null);
+  const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string; workspaceId?: string | null; projectId?: string | null } | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [copiedAll, setCopiedAll] = useState(false);
@@ -198,18 +198,22 @@ export const TerminalPanel = forwardRef<
           }
         });
 
-        connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell" }) => {
+        connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell", workspaceId: wsId = null, projectId: sessProjectId = null }) => {
           // Clear connection timeout — session is verified
           if (connectTimeoutRef.current) {
             clearTimeout(connectTimeoutRef.current);
             connectTimeoutRef.current = null;
           }
-          setSessionInfo({ sessionId: sid, cwd, shell });
+          setSessionInfo({ sessionId: sid, cwd, shell, workspaceId: wsId, projectId: sessProjectId });
           terminalStore.setSession(sid, cwd);
+          terminalStore.setWorkspace(wsId);
           terminalStore.setStatus("connected");
           terminalStore.setHeartbeat(new Date().toISOString());
           term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
-          onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
+          if (wsId) term.writeln(`\x1b[36m   workspace: ${wsId}\x1b[0m`);
+          if (sessProjectId) term.writeln(`\x1b[36m   project: ${sessProjectId}\x1b[0m`);
+          term.writeln(`\x1b[36m   cwd: ${cwd}\x1b[0m`);
+          onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}... ws=${wsId ?? "none"} project=${sessProjectId ?? "none"} cwd=${cwd}`);
         });
 
         connectedSocket.on("connect_error", (err: Error) => {
@@ -283,7 +287,7 @@ export const TerminalPanel = forwardRef<
             if (cmd) {
               onCommand?.(cmd);
               if (cmd.startsWith("litt ")) {
-                connectedSocket.emit("litt:command", cmd);
+                connectedSocket.emit("litt-code:command", cmd);
                 commandBufferRef.current = "";
                 return;
               }
@@ -303,6 +307,78 @@ export const TerminalPanel = forwardRef<
         resize();
       })
       .catch((error) => {
+        // WorkspaceNotReadyError → trigger workspace preparation, then retry
+        if (error instanceof WorkspaceNotReadyError && projectId) {
+          term.writeln("\x1b[33m⏳ Workspace not ready — preparing project workspace...\x1b[0m");
+          onLog?.("[WORKSPACE] Not ready — calling prepare endpoint");
+          terminalStore.setStatus("connecting");
+
+          // Poll the prepare endpoint until the workspace is ready or fails.
+          // Handles PROVISIONING_IN_PROGRESS (409) by waiting and retrying.
+          const prepareUrl = `/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`;
+          const maxAttempts = 30; // 30 × 2s = 60s max wait
+          let attempt = 0;
+
+          const pollPrepare = (): Promise<void> =>
+            fetch(prepareUrl, { method: "POST", credentials: "include" })
+              .then(async (resp) => {
+                if (disposed) return;
+                const body = await resp.json().catch(() => ({}));
+                if (resp.ok && body.workspaceStatus === "ready") {
+                  term.writeln("\x1b[32m✅ Workspace ready — connecting terminal...\x1b[0m");
+                  onLog?.("[WORKSPACE] Ready — retrying token fetch");
+                  clearTerminalTokenCache();
+                  // Retry token fetch now that workspace is prepared
+                  return connect().then((token) => {
+                    if (disposed) return;
+                    const retrySocket = io(wsUrl, {
+                      auth: { token },
+                      transports: ["websocket", "polling"],
+                      reconnectionAttempts: 5,
+                    });
+                    socketRef.current = retrySocket;
+                    retrySocket.on("connect", () => {
+                      setConnected(true);
+                      terminalStore.setStatus("connecting");
+                      onConnectionChange?.(true);
+                      term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+                    });
+                    retrySocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell", workspaceId: wsId = null, projectId: sessProjectId = null }) => {
+                      if (connectTimeoutRef.current) { clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
+                      setSessionInfo({ sessionId: sid, cwd, shell, workspaceId: wsId, projectId: sessProjectId });
+                      terminalStore.setSession(sid, cwd);
+                      terminalStore.setWorkspace(wsId);
+                      terminalStore.setStatus("connected");
+                    });
+                    retrySocket.on("connect_error", (nextErr: Error) => {
+                      terminalStore.setError(nextErr.message);
+                      terminalStore.setStatus("error");
+                      term.writeln(`\x1b[31m❌ PTY connection failed: ${nextErr.message}\x1b[0m`);
+                    });
+                  });
+                }
+                // 409 PROVISIONING_IN_PROGRESS — wait and retry
+                if (resp.status === 409 && body.code === "PROVISIONING_IN_PROGRESS") {
+                  attempt++;
+                  if (attempt >= maxAttempts) {
+                    throw new Error("Workspace provisioning timed out after 60s");
+                  }
+                  term.writeln(`\x1b[33m   provisioning in progress... (${attempt}/${maxAttempts})\x1b[0m`);
+                  return new Promise<void>((resolve) => setTimeout(resolve, 2000)).then(pollPrepare);
+                }
+                // Other errors
+                throw new Error(body.error || `Prepare failed (${resp.status})`);
+              });
+
+          void pollPrepare().catch((prepErr: unknown) => {
+            const prepMessage = prepErr instanceof Error ? prepErr.message : "Workspace preparation failed";
+            term.writeln(`\x1b[31m❌ ${prepMessage}\x1b[0m`);
+            onLog?.(`[WORKSPACE] ${prepMessage}`);
+            terminalStore.setError(prepMessage);
+            terminalStore.setStatus("error");
+          });
+          return;
+        }
         const message =
           error instanceof Error
             ? error.message
@@ -445,14 +521,32 @@ export const TerminalPanel = forwardRef<
               <Plug size={10} /> Real PTY disconnected
             </span>
           )}
-          {/* Repository, branch, CWD, approval mode */}
+          {/* Repository, branch, CWD, approval mode + diagnostic info */}
           {(repositoryName || branch || (connected && sessionInfo)) && (
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-neutral-500">
               {repositoryName && <span className="truncate"><span className="text-neutral-600">repo:</span> {repositoryName}</span>}
               {branch && <span className="truncate"><span className="text-neutral-600">branch:</span> {branch}</span>}
               {connected && sessionInfo && <span className="truncate"><span className="text-neutral-600">cwd:</span> {sessionInfo.cwd}</span>}
               {connected && sessionInfo && <span className="truncate"><span className="text-neutral-600">shell:</span> {sessionInfo.shell}</span>}
+              {projectId && <span className="truncate"><span className="text-neutral-600">project:</span> {projectId.slice(0, 12)}…</span>}
+              {connected && sessionInfo?.workspaceId && <span className="truncate"><span className="text-neutral-600">workspace:</span> {sessionInfo.workspaceId.slice(0, 16)}…</span>}
+              {projectId && (
+                <span className="truncate" title={sessionInfo?.workspaceId ? "Token is bound to this workspace" : "Token is not bound — workspace not ready"}>
+                  <span className="text-neutral-600">token:</span>{" "}
+                  {sessionInfo?.workspaceId ? (
+                    <span className="text-green-400">bound</span>
+                  ) : (
+                    <span className="text-amber-400">unbound</span>
+                  )}
+                </span>
+              )}
               <span className="truncate"><span className="text-neutral-600">approval:</span> {approvalMode === "auto" ? "auto-approve safe commands" : "manual approval for destructive commands"}</span>
+            </div>
+          )}
+          {/* Latest connection error */}
+          {terminalStore.error && terminalStore.status === "error" && (
+            <div className="mt-1 text-[9px] text-red-400/70" title={terminalStore.error}>
+              <span className="text-neutral-600">last error:</span> {terminalStore.error.slice(0, 80)}
             </div>
           )}
         </div>

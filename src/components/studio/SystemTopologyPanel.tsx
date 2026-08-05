@@ -21,19 +21,23 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { summary, refresh: refreshCaps } = useCapabilities();
   const endpoint = useMemo(() => (terminalHttpUrl || terminalUrl()).replace(/\/$/, ""), [terminalHttpUrl]);
-  const [terminalHealth, setTerminalHealth] = useState<{ ok?: boolean; docker?: boolean } | null>(null);
+  const [terminalHealth, setTerminalHealth] = useState<{ readiness?: string; checks?: { docker?: boolean; dockerReason?: string; authConfigured?: boolean; internalServiceConfigured?: boolean; workspaceRoot?: boolean } } | null>(null);
+  const [terminalOnline, setTerminalOnline] = useState(false);
   const [checking, setChecking] = useState(true);
   const [message, setMessage] = useState("");
 
   const refresh = useCallback(async () => {
     setChecking(true);
     setMessage("");
-    if (!endpoint) { setTerminalHealth(null); setChecking(false); return; }
+    if (!endpoint) { setTerminalHealth(null); setTerminalOnline(false); setChecking(false); return; }
     try {
       const response = await fetch(`${endpoint}/health`, { cache: "no-store", signal: AbortSignal.timeout(6000) });
       if (!response.ok) throw new Error("Gateway unavailable");
-      setTerminalHealth(await response.json());
-    } catch { setTerminalHealth(null); }
+      const health = await response.json();
+      setTerminalHealth(health);
+      // Terminal is online only when the HTTP response succeeded AND readiness is "ready"
+      setTerminalOnline(response.ok && health?.readiness === "ready");
+    } catch { setTerminalHealth(null); setTerminalOnline(false); }
     finally { setChecking(false); }
     void refreshCaps();
   }, [endpoint, refreshCaps]);
@@ -51,7 +55,24 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
     return m;
   }, [summary]);
 
-  const gateway: CheckState = checking ? "checking" : terminalHealth?.ok ? "ready" : endpoint ? "offline" : "warning";
+  // Terminal is only "ready" if the server reports readiness AND Docker is
+  // available (when Docker mode is expected). In production the terminal
+  // requires Docker for isolation — reporting "Online" without Docker would
+  // be misleading. If Docker is not configured (dev host-PTY mode), we still
+  // allow "ready" so local development works.
+  const dockerReady = terminalHealth?.checks?.docker === true;
+  const dockerNotExpected = terminalHealth?.checks?.dockerReason?.includes("TERMINAL_USE_DOCKER is not set");
+  const terminalFullyReady = terminalOnline && (dockerReady || dockerNotExpected);
+
+  const gateway: CheckState = checking
+    ? "checking"
+    : terminalFullyReady
+      ? "ready"
+      : terminalOnline
+        ? "warning" // server is up but Docker is not ready
+        : endpoint
+          ? "offline"
+          : "warning";
 
   const capToCheckState = (status: CapabilityStatus): CheckState => {
     if (status === "ready" || status === "running") return "ready";
@@ -63,8 +84,8 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
   const items: Array<{ label: string; value: string; state: CheckState; icon: typeof Terminal; action?: () => void; actionLabel?: string }> = [
     { label: "Frontend", value: "Connected", state: "ready", icon: Waypoints },
     { label: "Auth", value: !isLoaded ? "Checking" : isSignedIn ? "Verified" : "Missing", state: !isLoaded ? "checking" : isSignedIn ? "ready" : "warning", icon: ShieldCheck, action: !isSignedIn ? () => router.push("/sign-in") : undefined, actionLabel: !isSignedIn ? "Sign in" : undefined },
-    { label: "Terminal", value: gateway === "ready" ? "Online" : gateway === "checking" ? "Checking" : endpoint ? "Offline" : "Not configured", state: gateway, icon: Terminal, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open terminal" },
-    { label: "Docker", value: checking ? "Checking" : terminalHealth?.docker ? "Ready" : "Not configured", state: checking ? "checking" : terminalHealth?.docker ? "ready" : "warning", icon: Boxes, action: () => router.push("/settings#workspace"), actionLabel: "Configure runtime" },
+    { label: "Terminal", value: gateway === "ready" ? "Online" : gateway === "warning" ? "Docker required" : gateway === "checking" ? "Checking" : endpoint ? "Offline" : "Not configured", state: gateway, icon: Terminal, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open terminal" },
+    { label: "Docker", value: checking ? "Checking" : terminalHealth?.checks?.docker ? "Ready" : "Not configured", state: checking ? "checking" : terminalHealth?.checks?.docker ? "ready" : "warning", icon: Boxes, action: () => router.push("/settings#workspace"), actionLabel: "Configure runtime" },
     { label: "Workspace", value: capMap.get("runtime.sandbox")?.status === "ready" ? "Loaded" : "No project loaded", state: capToCheckState(capMap.get("runtime.sandbox")?.status ?? "not_configured"), icon: FolderGit2, action: () => router.push("/studio?tool=plugins"), actionLabel: "Start a project" },
     { label: "Preview", value: capMap.get("runtime.sandbox")?.status === "running" ? "Running" : "No server running", state: capToCheckState(capMap.get("runtime.sandbox")?.status ?? "not_configured"), icon: Rocket, action: () => router.push("/studio?tool=terminal"), actionLabel: "Start preview" },
     { label: "Logs", value: capMap.get("terminal")?.status === "running" ? "Streaming" : "Not started", state: capToCheckState(capMap.get("terminal")?.status ?? "not_configured"), icon: ExternalLink, action: () => router.push("/studio?tool=terminal"), actionLabel: "Open logs" },

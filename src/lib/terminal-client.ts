@@ -6,6 +6,17 @@ type CachedTerminalToken = {
   projectId: string | null;
 };
 
+export class WorkspaceNotReadyError extends Error {
+  code: string;
+  detail?: string;
+  constructor(message: string, detail?: string) {
+    super(message);
+    this.name = "WorkspaceNotReadyError";
+    this.code = "WORKSPACE_NOT_READY";
+    this.detail = detail;
+  }
+}
+
 let cached: CachedTerminalToken | null = null;
 let pending: Promise<string> | null = null;
 
@@ -41,9 +52,14 @@ export async function getTerminalToken(
   })
     .then(async (response) => {
       const body = (await response.json().catch(() => ({}))) as Partial<
-        CachedTerminalToken & { error: string }
+        CachedTerminalToken & { error: string; code?: string; detail?: string }
       >;
       if (!response.ok || !body.token || !body.expiresAt) {
+        // Surface workspace-not-ready distinctly so the UI can trigger
+        // workspace preparation before retrying.
+        if (response.status === 409 && body.code === "WORKSPACE_NOT_READY") {
+          throw new WorkspaceNotReadyError(body.error || "Workspace not ready", body.detail);
+        }
         throw new Error(body.error || "Terminal authentication failed");
       }
       cached = { token: body.token, expiresAt: body.expiresAt, projectId: requestedProjectId };
