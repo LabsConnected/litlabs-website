@@ -8,7 +8,7 @@
     "package": "litlabs-website",
     "version": "1.0.0",
     "branch": "fix/studio-essentials",
-    "headCommit": "b11acc6d"
+    "headCommit": "55f67eaa"
   },
   "buildStatus": {
     "typecheck": "pass (tsc --noEmit exit 0, strict mode)",
@@ -76,7 +76,7 @@
       { "slug": "echo", "name": "Echo", "tier": "marketplace", "minimumPlan": "creator_beta", "billing": "subscription", "studioVisible": true, "marketplaceVisible": true }
     ],
     "littModes": ["standard", "builder", "research", "spark"],
-    "fragmentationRisk": "LiTT system prompt duplicated in agent-registry.ts (LITT const), studio/agent-registry.ts (LITT_SYSTEM_PROMPT), and litt-intelligence/agent-profiles.ts (STANDARD_PROMPT). Content diverges — canonical one in agent-registry.ts is most complete; litt-intelligence has mode-specific grounding rules; studio has stripped version. P1 — consolidate or derive."
+    "fragmentationRisk": "RESOLVED in commit 55f67eaa. LITT and SPARK are now exported from agent-registry.ts; studio/agent-registry.ts and litt-intelligence/agent-profiles.ts derive their prompts from the canonical source via LITT.systemPrompt / SPARK.systemPrompt. Mode-specific grounding rules remain additive in litt-intelligence (correct — they are runtime context, not product identity)."
   },
   "subsystems": {
     "note": "Grouped by subdirectory under src/lib/. 'root' = files directly in src/lib/. serverOnly flags modules importing server-only or supabase-admin.",
@@ -415,10 +415,9 @@
     {
       "id": "stale-provisioning-lock",
       "priority": "P3",
-      "status": "TODO",
-      "location": "src/lib/projects/project-repository.ts claimProvisioningLock()",
-      "issue": "If request crashes after claiming lock, row stays 'provisioning' forever — no new claim can proceed (only matches not_prepared/failed).",
-      "requiredRecovery": "Detect provisioning rows older than 5min, atomically transition stale → failed with workspace_error='Provisioning timed out', allow new claim. Implement as recoverStaleProvisioning(projectId, userId, maxAgeMs) called at top of prepare route."
+      "status": "RESOLVED (commit 55f67eaa)",
+      "location": "src/lib/projects/project-repository.ts recoverStaleProvisioning()",
+      "resolution": "recoverStaleProvisioning(projectId, userId, maxAgeMs=300000) added. Atomically transitions stale 'provisioning' → 'failed' with workspace_error='Provisioning timed out' when updated_at older than 5 min. Called in prepare route before claimProvisioningLock."
     },
     {
       "id": "production-docker-runtime",
@@ -432,8 +431,8 @@
     {
       "id": "agent-registry-fragmentation",
       "priority": "P1",
-      "status": "OPEN",
-      "issue": "LiTT system prompt duplicated 3x with divergent content across agent-registry.ts, studio/agent-registry.ts, litt-intelligence/agent-profiles.ts. Consolidate or derive from one source."
+      "status": "RESOLVED (commit 55f67eaa)",
+      "resolution": "LITT and SPARK exported from agent-registry.ts. studio/agent-registry.ts and litt-intelligence/agent-profiles.ts now derive prompts from canonical source via LITT.systemPrompt / SPARK.systemPrompt. Mode-specific grounding rules remain additive in litt-intelligence (correct — runtime context, not product identity)."
     }
   ],
   "verificationCommands": {

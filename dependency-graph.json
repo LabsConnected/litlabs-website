@@ -91,7 +91,9 @@
       { "from": "@/lib/litt-intelligence/user-context", "to": "@/lib/connectors/provider-registry" },
       { "from": "@/lib/litt-intelligence/permission-gate", "to": "@/lib/connectors/provider-registry" },
       { "from": "@/lib/litt-intelligence/permission-gate", "to": "@/lib/connectors/connector-repository" },
-      { "from": "@/lib/arcade/EmulatorSessionController", "to": "@/lib/emulator/types" }
+      { "from": "@/lib/arcade/EmulatorSessionController", "to": "@/lib/emulator/types" },
+      { "from": "@/lib/studio/agent-registry", "to": "@/lib/agent-registry", "note": "Added 55f67eaa — derives LITT/SPARK prompts from canonical" },
+      { "from": "@/lib/litt-intelligence/agent-profiles", "to": "@/lib/agent-registry", "note": "Added 55f67eaa — derives STANDARD_PROMPT base from LITT.systemPrompt" }
     ],
     "routeToLib": [
       { "from": "api/settings/agents", "to": ["@/lib/auth", "@/lib/rate-limiter", "@/lib/user-db"] },
@@ -215,10 +217,12 @@
       { "from": "@/lib/agent-registry", "to": "@/lib/agents (AGENTS map via definitionToAgent)", "type": "derivation" },
       { "from": "@/lib/agent-registry", "to": "@/lib/agent-entitlements (getAgentDefinition)", "type": "lookup" },
       { "from": "@/lib/agent-registry", "to": "@/lib/agent-runtime (getAgentDefinition)", "type": "lookup" },
-      { "from": "@/lib/studio/agent-registry (BUILT_IN_AGENTS)", "to": "api/studio/conversations/[id]/messages (resolveAgent, isValidAgentSlug)", "type": "runtime-config", "note": "Independent of canonical registry — owns memory types + legacy slug aliasing" },
-      { "from": "@/lib/litt-intelligence/agent-profiles (AGENT_PROFILES)", "to": "api/studio/conversations/[id]/messages (getProfile)", "type": "mode-profile", "note": "Independent of canonical registry — owns tool permissions + memory scope per LiTT mode" }
+      { "from": "@/lib/agent-registry (LITT, SPARK exports)", "to": "@/lib/studio/agent-registry (LITT.systemPrompt, SPARK.systemPrompt)", "type": "prompt-derivation", "note": "Added in commit 55f67eaa — studio now derives prompts from canonical source" },
+      { "from": "@/lib/agent-registry (LITT export)", "to": "@/lib/litt-intelligence/agent-profiles (STANDARD_PROMPT base)", "type": "prompt-derivation", "note": "Added in commit 55f67eaa — litt-intelligence now uses LITT.systemPrompt as base, appends mode-specific grounding rules" },
+      { "from": "@/lib/studio/agent-registry (BUILT_IN_AGENTS)", "to": "api/studio/conversations/[id]/messages (resolveAgent, isValidAgentSlug)", "type": "runtime-config", "note": "Owns memory types + legacy slug aliasing; prompts now derived from canonical" },
+      { "from": "@/lib/litt-intelligence/agent-profiles (AGENT_PROFILES)", "to": "api/studio/conversations/[id]/messages (getProfile)", "type": "mode-profile", "note": "Owns tool permissions + memory scope per LiTT mode; base prompt derived from canonical" }
     ],
-    "fragmentationRisk": "LiTT system prompt maintained independently in 3 files. No single derivation chain unifies them."
+    "fragmentationRisk": "RESOLVED (commit 55f67eaa). LITT/SPARK exported from agent-registry.ts; studio and litt-intelligence derive prompts from canonical source. Mode-specific grounding rules remain additive in litt-intelligence (correct — runtime context, not product identity)."
   },
   "stats": {
     "libToLibEdges": 58,
