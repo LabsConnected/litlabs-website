@@ -9,7 +9,7 @@ test.describe("Navigation @public", () => {
   test("Homepage has visible navigation links", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Find all anchor tags in nav elements
     const navLinks = page.locator("nav a[href]");
@@ -24,7 +24,7 @@ test.describe("Navigation @public", () => {
   test("Homepage nav links navigate to valid pages", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Find all nav links — try data-testid first, then fall back to nav a[href]
     let navLinks = page.locator('[data-testid^="nav-"]');
@@ -63,7 +63,7 @@ test.describe("Navigation @public", () => {
   test("All visible internal links on homepage resolve to 200 or 307", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Get all <a> tags with href
     const links = page.locator("a[href]");

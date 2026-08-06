@@ -409,8 +409,8 @@ export default function PrivacyPage() {
               within the first 30 days.
             </p>
             <p className="mt-2">
-              You can also export your data directly from
-              <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}> Settings → Privacy &amp; Security</a>
+              You can also export your data directly from{" "}
+              <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}>Settings → Privacy &amp; Security</a>{" "}
               without contacting us, or delete your data via the same page.
             </p>
           </section>
@@ -428,8 +428,8 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>
-                <strong>Self-service:</strong> Use the Export and Delete buttons in
-                <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}> Settings → Privacy &amp; Security</a>.
+                <strong>Self-service:</strong> Use the Export and Delete buttons in{" "}
+                <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}>Settings → Privacy &amp; Security</a>.{" "}
                 These actions take effect immediately on our database.
               </li>
               <li>

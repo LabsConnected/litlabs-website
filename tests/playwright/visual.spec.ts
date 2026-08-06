@@ -11,7 +11,13 @@ import { monitorApplicationErrors, assertNoErrors } from "./helpers";
  * in the same CI environment where they will be compared.
  */
 
+// Skip visual regression when testing against a remote deployment —
+// baselines are OS/browser specific and only valid in local/CI environments.
+const isRemoteUrl = !!(process.env.PLAYWRIGHT_BASE_URL || process.env.SMOKE_TEST_URL);
+
 test.describe("Visual regression @public", () => {
+  test.skip(isRemoteUrl, "Visual regression baselines are local/CI only");
+
   test("Homepage desktop layout", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/");

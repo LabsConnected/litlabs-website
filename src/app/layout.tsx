@@ -134,6 +134,7 @@ export default function RootLayout({
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#03050b" }}
+        suppressHydrationWarning
       >
         {hasClerk ? (
           <ClerkProvider

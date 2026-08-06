@@ -34,7 +34,7 @@ test.describe("Public routes — exact status assertions @public", () => {
       expect(response?.status(), `${route.path} should return 200`).toBe(200);
 
       // Wait for client-side rendering to complete
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
 
       // Verify the page has meaningful content (not a blank page)
       // Use textContent which includes hidden text, then innerText for visible

@@ -87,11 +87,11 @@ export default function CookiesPage() {
             <h2 className="text-sm font-bold uppercase tracking-wider mb-2" style={{ color: "var(--header-color)" }}>Your Rights</h2>
             <p>
               Under GDPR, you have the right to access, export, correct, and delete
-              your personal data. You can export or delete your data directly from
-              <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}> Settings → Privacy &amp; Security</a>,
+              your personal data. You can export or delete your data directly from{" "}
+              <a href="/settings" className="underline" style={{ color: "var(--link-color)" }}>Settings → Privacy &amp; Security</a>,{" "}
               or email support@litlabs.net with a data request. We respond to all
-              valid requests within 30 days. See our
-              <a href="/privacy" className="underline" style={{ color: "var(--link-color)" }}> Privacy Policy</a>
+              valid requests within 30 days. See our{" "}
+              <a href="/privacy" className="underline" style={{ color: "var(--link-color)" }}>Privacy Policy</a>{" "}
               for full details.
             </p>
           </section>
