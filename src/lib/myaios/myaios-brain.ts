@@ -261,7 +261,12 @@ export async function updateConfig(ownerId: string, updates: Partial<MyaiosConfi
   // Convert camelCase updates to snake_case for the DB
   const snakeUpdates: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(updates)) {
-    snakeUpdates[k.replace(/([A-Z])/g, "_$1").toLowerCase()] = v;
+    // Special-case: myaios247 → myaios_24_7 (not myaios_2_4_7)
+    if (k === "myaios247") {
+      snakeUpdates["myaios_24_7"] = v;
+    } else {
+      snakeUpdates[k.replace(/([A-Z])/g, "_$1").toLowerCase()] = v;
+    }
   }
   snakeUpdates["updated_at"] = new Date().toISOString();
 

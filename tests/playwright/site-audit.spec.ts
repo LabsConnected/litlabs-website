@@ -37,7 +37,7 @@ const PUBLIC_ROUTES = [
   { path: "/discover", name: "Discover", expectedText: /Discover|Community|community|Creator|creator/i },
   { path: "/agents", name: "Agents", expectedText: /Agent|agent|AI/i },
   { path: "/games", name: "Games", expectedText: /Game|game|Play|play|Arcade|arcade/i },
-  { path: "/social", name: "Social", expectedText: /Social|social|Community|community/i },
+  { path: "/social", name: "Social", expectedText: /Social|social|Community|community/i, redirectsTo: "/discover" },
 ];
 
 const PROTECTED_ROUTES = [
@@ -113,8 +113,17 @@ test.describe("Site Audit — Public Routes @public", () => {
 
       const response = await page.goto(route.path, { waitUntil: "domcontentloaded" });
 
-      // 1. Status code
-      expect(response?.status(), `${route.path} should return 200`).toBe(200);
+      // 1. Status code — 200 for normal pages, 307 for redirects
+      const status = response?.status() ?? 0;
+      if (route.redirectsTo) {
+        expect(status === 200 || status === 307 || status === 302, `${route.path} should return 200 or redirect`).toBe(true);
+        // If redirected, navigate to the destination
+        if (status === 307 || status === 302) {
+          await page.waitForURL(route.redirectsTo, { waitUntil: "domcontentloaded" });
+        }
+      } else {
+        expect(status, `${route.path} should return 200`).toBe(200);
+      }
 
       // 2. Body content
       await page.waitForLoadState("domcontentloaded");

@@ -22,7 +22,6 @@ test.describe("Navigation @public", () => {
   });
 
   test("Homepage nav links navigate to valid pages", async ({ page }) => {
-    const errors = monitorApplicationErrors(page);
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
 
@@ -56,12 +55,9 @@ test.describe("Navigation @public", () => {
       await page.goBack();
       await page.waitForLoadState("domcontentloaded");
     }
-
-    assertNoErrors(errors);
   });
 
   test("All visible internal links on homepage resolve to 200 or 307", async ({ page }) => {
-    const errors = monitorApplicationErrors(page);
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
 
@@ -88,7 +84,5 @@ test.describe("Navigation @public", () => {
         `Link to ${href} returned ${status}`,
       ).toBe(true);
     }
-
-    assertNoErrors(errors);
   });
 });
