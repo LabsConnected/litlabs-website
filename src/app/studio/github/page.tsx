@@ -40,6 +40,40 @@ export default function GitHubSetupPage() {
 
     (async () => {
       try {
+        // Check connection-state which includes both installations and PAT
+        const stateRes = await fetch("/api/github/connection-state", {
+          credentials: "include",
+          headers: await authHeaders(),
+        });
+        if (stateRes.ok) {
+          const stateData = await stateRes.json() as {
+            installations: Array<{ installationId: number; account?: string }>;
+            pat: { connected: boolean; accountName: string | null };
+          };
+          const installations = stateData.installations || [];
+          if (installations.length > 0) {
+            setConnectedAccount(`Installation #${installations[0].installationId}`);
+            setStatus("connected");
+            return;
+          }
+          if (stateData.pat?.connected) {
+            setConnectedAccount(stateData.pat.accountName || "API Key");
+            setStatus("connected");
+            return;
+          }
+          // No connection at all — check if GitHub App is configured
+          const instRes = await fetch("/api/github/installations", {
+            credentials: "include",
+            headers: await authHeaders(),
+          });
+          if (instRes.status === 503) {
+            setStatus("unconfigured");
+            return;
+          }
+          setStatus("ready");
+          return;
+        }
+        // Fallback to installations endpoint
         const res = await fetch("/api/github/installations", {
           credentials: "include",
           headers: await authHeaders(),

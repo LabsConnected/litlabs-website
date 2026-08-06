@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getPATConnection } from "@/lib/github-pat";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,12 +46,20 @@ export async function GET(request: NextRequest) {
 
     if (projError) throw projError;
 
+    // Check PAT connection
+    const patConnection = await getPATConnection(userId);
+
     return NextResponse.json({
       installations: (installations || []).map((i) => ({
         installationId: i.installation_id,
         setupAction: i.setup_action,
         updatedAt: i.updated_at,
       })),
+      pat: patConnection ? {
+        connected: true,
+        accountName: patConnection.accountName,
+        scopes: patConnection.scopes,
+      } : { connected: false },
       projects: (projects || []).map((p) => ({
         id: p.id,
         owner: p.owner,

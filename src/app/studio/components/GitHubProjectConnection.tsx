@@ -9,6 +9,7 @@ import {
   ChevronDown,
   GitBranch,
   GitPullRequest,
+  KeyRound,
   Loader2,
   Plus,
   RefreshCw,
@@ -19,6 +20,12 @@ type Installation = {
   installationId: number;
   setupAction: string | null;
   updatedAt: string;
+};
+
+type PATInfo = {
+  connected: boolean;
+  accountName: string | null;
+  scopes: string[];
 };
 
 type Repository = {
@@ -57,6 +64,7 @@ export default function GitHubProjectConnection() {
   const { isLoaded, isSignedIn, getToken } = useClerkAuth();
 
   const [installations, setInstallations] = useState<Installation[]>([]);
+  const [patInfo, setPatInfo] = useState<PATInfo | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -92,6 +100,7 @@ export default function GitHubProjectConnection() {
       const data = await res.json();
       setInstallations(data.installations || []);
       setProjects(data.projects || []);
+      setPatInfo(data.pat || null);
       if (data.installations?.length === 1) {
         setSelectedInstallation(data.installations[0].installationId);
       }
@@ -106,9 +115,11 @@ export default function GitHubProjectConnection() {
     fetchConnectionState();
   }, [fetchConnectionState]);
 
-  // Fetch repositories when an installation is selected
+  // Fetch repositories when an installation is selected, or auto-fetch for PAT
   useEffect(() => {
-    if (!selectedInstallation) {
+    // If no installations but PAT is connected, fetch repos without installation_id
+    const shouldFetch = selectedInstallation || (patInfo?.connected && installations.length === 0);
+    if (!shouldFetch) {
       setRepositories([]);
       return;
     }
@@ -116,10 +127,10 @@ export default function GitHubProjectConnection() {
     setError(null);
     (async () => {
       try {
-        const res = await fetch(
-          `/api/github/repositories?installation_id=${selectedInstallation}`,
-          { credentials: "include", headers: await authHeaders() },
-        );
+        const url = selectedInstallation
+          ? `/api/github/repositories?installation_id=${selectedInstallation}`
+          : `/api/github/repositories`;
+        const res = await fetch(url, { credentials: "include", headers: await authHeaders() });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to load repositories");
@@ -132,11 +143,16 @@ export default function GitHubProjectConnection() {
         setLoadingRepos(false);
       }
     })();
-  }, [selectedInstallation, authHeaders]);
+  }, [selectedInstallation, authHeaders, patInfo, installations.length]);
 
   // Fetch branches when a repo is selected
   useEffect(() => {
-    if (!selectedRepo || !selectedInstallation) {
+    if (!selectedRepo) {
+      setBranches([]);
+      return;
+    }
+    // Need either an installation or a PAT
+    if (!selectedInstallation && !patInfo?.connected) {
       setBranches([]);
       return;
     }
@@ -144,10 +160,10 @@ export default function GitHubProjectConnection() {
     setError(null);
     (async () => {
       try {
-        const res = await fetch(
-          `/api/github/branches?installation_id=${selectedInstallation}&owner=${selectedRepo.owner}&repo=${selectedRepo.name}`,
-          { credentials: "include", headers: await authHeaders() },
-        );
+        const branchUrl = selectedInstallation
+          ? `/api/github/branches?installation_id=${selectedInstallation}&owner=${selectedRepo.owner}&repo=${selectedRepo.name}`
+          : `/api/github/branches?owner=${selectedRepo.owner}&repo=${selectedRepo.name}`;
+        const res = await fetch(branchUrl, { credentials: "include", headers: await authHeaders() });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to load branches");
@@ -161,10 +177,11 @@ export default function GitHubProjectConnection() {
         setLoadingBranches(false);
       }
     })();
-  }, [selectedRepo, selectedInstallation, authHeaders]);
+  }, [selectedRepo, selectedInstallation, authHeaders, patInfo]);
 
   const createProject = async () => {
-    if (!selectedRepo || !selectedInstallation || !selectedBranch) return;
+    if (!selectedRepo || !selectedBranch) return;
+    if (!selectedInstallation && !patInfo?.connected) return;
     setCreating(true);
     setError(null);
     setSuccess(null);
@@ -174,7 +191,7 @@ export default function GitHubProjectConnection() {
         credentials: "include",
         headers: await authHeaders(true),
         body: JSON.stringify({
-          github_installation_id: selectedInstallation,
+          github_installation_id: selectedInstallation || null,
           repository_id: selectedRepo.id,
           owner: selectedRepo.owner,
           repository: selectedRepo.name,
@@ -228,21 +245,32 @@ export default function GitHubProjectConnection() {
     );
   }
 
-  if (installations.length === 0) {
+  const hasConnection = installations.length > 0 || patInfo?.connected;
+
+  if (!hasConnection) {
     return (
       <div className="rounded-2xl border p-6 text-center" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
         <GitPullRequest size={28} className="mx-auto mb-3" style={{ color: tokens.primary }} />
-        <div className="mb-1 font-black text-sm" style={{ color: tokens.text }}>No GitHub installation</div>
+        <div className="mb-1 font-black text-sm" style={{ color: tokens.text }}>No GitHub connection</div>
         <p className="mb-4 text-xs leading-relaxed" style={{ color: tokens.textMuted }}>
-          Install the LiTTree-LabStudios GitHub App to connect repositories.
+          Install the GitHub App or connect a Personal Access Token from Settings → Connections.
         </p>
-        <button
-          onClick={() => (window.location.href = "/api/github/install")}
-          className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black"
-          style={{ backgroundColor: tokens.primary, color: tokens.background }}
-        >
-          <Plus size={12} /> Install GitHub App
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => (window.location.href = "/api/github/install")}
+            className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-black"
+            style={{ backgroundColor: tokens.primary, color: tokens.background }}
+          >
+            <Plus size={12} /> Install GitHub App
+          </button>
+          <button
+            onClick={() => (window.location.href = "/settings/connections")}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold"
+            style={{ borderColor: `${T.borderColor}50`, color: tokens.textMuted }}
+          >
+            <KeyRound size={12} /> Connect via API Key
+          </button>
+        </div>
       </div>
     );
   }
@@ -318,6 +346,13 @@ export default function GitHubProjectConnection() {
         <div className="mb-3 text-[10px] font-black uppercase tracking-widest" style={{ color: tokens.textMuted }}>
           Connect a repository
         </div>
+
+        {/* PAT badge */}
+        {patInfo?.connected && installations.length === 0 && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[10px] text-emerald-400">
+            <Check size={10} /> Connected via API Key as <strong>{patInfo.accountName}</strong>
+          </div>
+        )}
 
         {/* Step 1: Select installation */}
         {installations.length > 1 && (
