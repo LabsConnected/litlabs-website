@@ -1,11 +1,12 @@
 ﻿{
   "name": "@litt/code-cli",
   "version": "0.1.0",
-  "description": "LiTT Code agentic development CLI",
+  "description": "LiTT Code + MyAios CLI tools",
   "type": "module",
   "bin": {
     "litt": "./dist/litt-code-cli.js",
-    "litt-code": "./dist/litt-code-cli.js"
+    "litt-code": "./dist/litt-code-cli.js",
+    "myaios": "./dist/myaios-cli.js"
   },
   "files": [
     "dist"
@@ -15,8 +16,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "pnpm --filter @litt/agent-core build && rimraf dist && tsc -p tsconfig.json",
     "dev": "pnpm --filter @litt/agent-core build && tsx src/litt-code-cli.tsx",
+    "dev:myaios": "tsx src/myaios-cli.ts",
     "start": "node dist/litt-code-cli.js",
-    "validate": "pnpm typecheck && pnpm build && node dist/litt-code-cli.js --help"
+    "validate": "pnpm typecheck && pnpm build && node dist/litt-code-cli.js --help && node dist/myaios-cli.js --help"
   },
   "dependencies": {
     "@litt/agent-core": "workspace:*",

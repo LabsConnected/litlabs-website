@@ -5,7 +5,8 @@ import { useTheme } from "@/context/ThemeContext";
 import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import { IntegrationCard, IntegrationSummaryBar } from "@/components/settings/IntegrationCard";
 import Link from "next/link";
-import { Loader2, ArrowLeft, Activity } from "lucide-react";
+import { Loader2, ArrowLeft, Activity, KeyRound } from "lucide-react";
+import GitHubPATDrawer from "./GitHubPATDrawer";
 
 type MetaStatus = {
   connected: boolean;
@@ -23,6 +24,7 @@ export default function ConnectionsPage() {
   const T = useTheme().resolvedColors;
   const { status, loading, error, refresh } = useIntegrationStatus();
   const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
+  const [patDrawerOpen, setPatDrawerOpen] = useState(false);
 
   const fetchMetaStatus = useCallback(async () => {
     try {
@@ -51,6 +53,8 @@ export default function ConnectionsPage() {
       window.location.href = "/settings/connections/diagnostics";
     } else if (actionType === "test") {
       void refresh();
+    } else if (actionType === "connect_pat") {
+      setPatDrawerOpen(true);
     }
   };
 
@@ -122,6 +126,43 @@ export default function ConnectionsPage() {
               </Section>
             )}
 
+            {/* GitHub PAT — alternative to GitHub App */}
+            <Section title="GitHub (API Key)" description="Connect with a Personal Access Token if the GitHub App isn't available">
+              <div
+                className="rounded-xl border p-4"
+                style={{ background: T.boxBg, borderColor: `${T.borderColor}30` }}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex h-9 w-9 items-center justify-center rounded-lg"
+                      style={{ background: `${T.accentColor}15` }}
+                    >
+                      <KeyRound size={16} style={{ color: T.accentColor }} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold" style={{ color: T.headerColor }}>
+                        Personal Access Token
+                      </h3>
+                      <span className="text-[10px] opacity-50">Alternative to GitHub App install</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPatDrawerOpen(true)}
+                  className="w-full rounded-lg border px-3 py-2 text-[11px] font-bold transition-all hover:opacity-80"
+                  style={{
+                    borderColor: `${T.accentColor}30`,
+                    color: T.accentColor,
+                    backgroundColor: `${T.accentColor}08`,
+                  }}
+                >
+                  Connect with API Key
+                </button>
+              </div>
+            </Section>
+
             {runtime.length > 0 && (
               <Section title="Runtime" description="Terminal and workspace execution">
                 {runtime.map((i) => (
@@ -188,6 +229,8 @@ export default function ConnectionsPage() {
           </div>
         )}
       </div>
+
+      <GitHubPATDrawer open={patDrawerOpen} onClose={() => setPatDrawerOpen(false)} />
     </div>
   );
 }

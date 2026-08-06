@@ -103,7 +103,63 @@ litt-code --model openai/gpt-4o-mini "summarize this file"
 
 ---
 
-## 2 — LiTTree PowerShell 7 module
+## 2 — MyAios CLI
+
+Terminal interface for the MyAios Brain — manage services, bookings, leads, config, and more.
+
+### Use locally (no build needed)
+
+```powershell
+pnpm dev:myaios -- --help
+pnpm dev:myaios -- list-services
+pnpm dev:myaios -- get-config
+pnpm dev:myaios -- create-lead --name "Jane Doe" --email "jane@example.com" --phone "555-1234"
+```
+
+### Register globally
+
+```powershell
+pnpm link --global
+myaios --help
+myaios list-services
+```
+
+### Configuration
+
+| Var | Purpose | Default |
+|-----|---------|---------|
+| `MYAIOS_URL` | API base URL | `https://litlabs.net` |
+| `INTERNAL_API_KEY` | API auth key | — |
+| `MYAIOS_OWNER_ID` | Owner ID for operations | — |
+
+Or pass via flags: `--url`, `--key`, `--owner`
+
+### Commands
+
+| Command | Action |
+|---------|--------|
+| `get-config` | Get MyAios configuration |
+| `update-config` | Update config (business name, greeting, hours, etc.) |
+| `list-services` | List all active services |
+| `get-service <id>` | Get a single service |
+| `create-service` | Create a new service |
+| `delete-service <id>` | Delete a service |
+| `get-slots <id> <date>` | Get available booking slots |
+| `create-booking` | Create a booking |
+| `get-booking <id>` | Get a booking by ID |
+| `find-bookings <email>` | Find bookings by customer email |
+| `reschedule-booking <id> <date> <time>` | Reschedule a booking |
+| `cancel-booking <id>` | Cancel a booking |
+| `create-lead` | Capture a lead |
+| `update-lead <id> <status>` | Update lead status |
+| `escalate` | Create a human escalation |
+| `dashboard` | Get dashboard summary |
+| `staff-hours` | Get staff availability |
+| `update-staff-hours` | Update staff hours |
+
+---
+
+## 3 — LiTTree PowerShell 7 module
 
 Installs `Invoke-Director`, `Invoke-Builder`, `Get-LiTTreeAgent` etc.
 
