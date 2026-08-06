@@ -32,7 +32,7 @@ export default function GitHubPATDrawer({
   const checkStatus = useCallback(async () => {
     setChecking(true);
     try {
-      const res = await fetch("/api/github/pat/status", {
+      const res = await fetch("/api/github/pat", {
         credentials: "include",
         headers: await authHeaders(),
       });
