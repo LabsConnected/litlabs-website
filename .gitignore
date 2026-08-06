@@ -28,6 +28,9 @@ prod-only.json
 # Screenshot artifacts (generated during dev/testing)
 studio-after.png
 studio-before.png
+
+# Home directory archive (stray files moved from C:\Users\litbi, not part of project)
+_home_archive/
 studio-current.png
 studio-mobile.png
 screenshots/
