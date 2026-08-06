@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getInstallationOctokit } from "@/lib/github-app";
+import { getPATOctokit } from "@/lib/github-pat";
 
 export async function POST(request: NextRequest) {
   const { userId } = await auth(request);
@@ -13,33 +14,47 @@ export async function POST(request: NextRequest) {
   const installationId = body.installation_id;
   const fullReconcile = body.full === true;
 
-  if (!installationId) {
-    return NextResponse.json(
-      { error: "Missing installation_id" },
-      { status: 400 },
-    );
-  }
-
-  const id = typeof installationId === "number" ? installationId : parseInt(installationId, 10);
-  if (Number.isNaN(id)) {
-    return NextResponse.json({ error: "Invalid installation_id" }, { status: 400 });
-  }
-
-  const { data: instRow, error: instError } = await supabaseAdmin
-    .from("github_installations")
-    .select("installation_id, user_id")
-    .eq("user_id", userId)
-    .eq("installation_id", id)
-    .single();
-  if (instError || !instRow) {
-    return NextResponse.json({ error: "Installation not found for user" }, { status: 404 });
-  }
-
   const syncRunId = crypto.randomUUID();
   const startedAt = new Date();
   const results: Array<{ repo: string; status: string; error?: string }> = [];
 
   try {
+    let octokit;
+    let useApp = false;
+    let providerAccountId: string;
+
+    if (installationId) {
+      const id = typeof installationId === "number" ? installationId : parseInt(installationId, 10);
+      if (Number.isNaN(id)) {
+        return NextResponse.json({ error: "Invalid installation_id" }, { status: 400 });
+      }
+
+      const { data: instRow, error: instError } = await supabaseAdmin
+        .from("github_installations")
+        .select("installation_id, user_id")
+        .eq("user_id", userId)
+        .eq("installation_id", id)
+        .single();
+      if (instError || !instRow) {
+        return NextResponse.json({ error: "Installation not found for user" }, { status: 404 });
+      }
+
+      octokit = await getInstallationOctokit(id);
+      useApp = true;
+      providerAccountId = String(id);
+    } else {
+      // Fall back to PAT
+      const pat = await getPATOctokit(userId);
+      if (!pat) {
+        return NextResponse.json(
+          { error: "No GitHub connection found. Install the GitHub App or connect a Personal Access Token." },
+          { status: 404 },
+        );
+      }
+      octokit = pat.octokit;
+      providerAccountId = pat.accountName || "pat";
+    }
+
     await supabaseAdmin.from("integration_sync_runs").insert({
       id: syncRunId,
       integration_account_id: null,
@@ -49,9 +64,7 @@ export async function POST(request: NextRequest) {
       started_at: startedAt.toISOString(),
     });
 
-    const octokit = await getInstallationOctokit(id);
-
-    // Paginate all repositories accessible to the installation
+    // Paginate all repositories
     const repos: Array<{
       id: number;
       full_name: string;
@@ -61,17 +74,35 @@ export async function POST(request: NextRequest) {
       private: boolean;
       html_url: string;
     }> = [];
-    let page = 1;
-    const perPage = 100;
-    while (true) {
-      const { data: pageData } = await octokit.rest.apps.listReposAccessibleToInstallation({
-        per_page: perPage,
-        page,
-      });
-      repos.push(...(pageData.repositories || []));
-      if ((pageData.repositories || []).length < perPage) break;
-      page++;
-      if (page > 20) break;
+
+    if (useApp) {
+      let page = 1;
+      const perPage = 100;
+      while (true) {
+        const { data: pageData } = await octokit.rest.apps.listReposAccessibleToInstallation({
+          per_page: perPage,
+          page,
+        });
+        repos.push(...(pageData.repositories || []));
+        if ((pageData.repositories || []).length < perPage) break;
+        page++;
+        if (page > 20) break;
+      }
+    } else {
+      let page = 1;
+      const perPage = 100;
+      while (true) {
+        const { data: pageData } = await octokit.rest.repos.listForAuthenticatedUser({
+          per_page: perPage,
+          page,
+          sort: "updated",
+          direction: "desc",
+        });
+        repos.push(...pageData);
+        if (pageData.length < perPage) break;
+        page++;
+        if (page > 20) break;
+      }
     }
 
     // Find or create integration_account for this GitHub installation
@@ -80,7 +111,7 @@ export async function POST(request: NextRequest) {
       .select("id")
       .eq("user_id", userId)
       .eq("provider", "github")
-      .eq("provider_account_id", String(id))
+      .eq("provider_account_id", providerAccountId)
       .single();
 
     let accountId = account?.id;
@@ -90,8 +121,8 @@ export async function POST(request: NextRequest) {
         .insert({
           user_id: userId,
           provider: "github",
-          provider_account_id: String(id),
-          provider_account_name: `Installation #${id}`,
+          provider_account_id: providerAccountId,
+          provider_account_name: useApp ? `Installation #${providerAccountId}` : `PAT: ${providerAccountId}`,
           status: "connected",
           last_connected_at: new Date().toISOString(),
           last_synced_at: new Date().toISOString(),

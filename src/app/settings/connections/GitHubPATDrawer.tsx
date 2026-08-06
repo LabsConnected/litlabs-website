@@ -8,9 +8,11 @@ import { Loader2, X, Check, AlertCircle, KeyRound, ExternalLink } from "lucide-r
 export default function GitHubPATDrawer({
   open,
   onClose,
+  onConnectionChange,
 }: {
   open: boolean;
   onClose: () => void;
+  onConnectionChange?: () => void;
 }) {
   const { resolvedColors: T } = useTheme();
   const { getToken } = useClerkAuth();
@@ -78,6 +80,7 @@ export default function GitHubPATDrawer({
       setAccountName(data.accountName || null);
       setIsConnected(true);
       setToken("");
+      onConnectionChange?.();
     } catch (err) {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Unknown error");
@@ -97,6 +100,7 @@ export default function GitHubPATDrawer({
         setIsConnected(false);
         setAccountName(null);
         setStatus("idle");
+        onConnectionChange?.();
       } else {
         const data = await res.json() as { error?: string };
         setStatus("error");

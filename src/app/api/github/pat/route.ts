@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/github/pat/status
+ * GET /api/github/pat
  * Returns whether the user has a GitHub PAT connection.
  */
 export async function GET(request: NextRequest) {
@@ -16,10 +16,11 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from("user_connections")
-    .select("id, provider_account_name, status, last_connected_at, metadata")
+    .select("id, provider_account_name, status, scopes, last_connected_at, metadata")
     .eq("user_id", userId)
     .eq("provider", "github")
     .eq("connection_reference", "pat")
+    .eq("revoked", false)
     .maybeSingle();
 
   if (error) {
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
     connected: true,
     accountName: data.provider_account_name || null,
     status: data.status,
+    scopes: data.scopes || [],
     lastConnectedAt: data.last_connected_at || null,
   });
 }
@@ -199,15 +201,26 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "No PAT connection found" }, { status: 404 });
   }
 
-  // Credentials are cascade-deleted
-  const { error } = await supabaseAdmin
+  // Soft-delete: revoke instead of hard delete for audit trail
+  const { error: revokeErr } = await supabaseAdmin
     .from("user_connections")
-    .delete()
+    .update({
+      status: "revoked",
+      revoked: true,
+      revoked_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", existing.id);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (revokeErr) {
+    return NextResponse.json({ error: revokeErr.message }, { status: 500 });
   }
+
+  // Delete the stored credential (token) for security
+  await supabaseAdmin
+    .from("user_connection_credentials")
+    .delete()
+    .eq("user_connection_id", existing.id);
 
   return NextResponse.json({ success: true });
 }

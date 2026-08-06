@@ -5,7 +5,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import { IntegrationCard, IntegrationSummaryBar } from "@/components/settings/IntegrationCard";
 import Link from "next/link";
-import { Loader2, ArrowLeft, Activity, KeyRound } from "lucide-react";
+import { Loader2, ArrowLeft, Activity, KeyRound, Check, AlertCircle } from "lucide-react";
 import GitHubPATDrawer from "./GitHubPATDrawer";
 
 type MetaStatus = {
@@ -25,6 +25,7 @@ export default function ConnectionsPage() {
   const { status, loading, error, refresh } = useIntegrationStatus();
   const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
   const [patDrawerOpen, setPatDrawerOpen] = useState(false);
+  const [patStatus, setPatStatus] = useState<{ connected: boolean; accountName: string | null; scopes: string[] } | null>(null);
 
   const fetchMetaStatus = useCallback(async () => {
     try {
@@ -36,9 +37,24 @@ export default function ConnectionsPage() {
     }
   }, []);
 
+  const fetchPATStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/github/pat", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean; accountName?: string; scopes?: string[] };
+        setPatStatus({ connected: data.connected, accountName: data.accountName ?? null, scopes: data.scopes ?? [] });
+      } else {
+        setPatStatus({ connected: false, accountName: null, scopes: [] });
+      }
+    } catch {
+      setPatStatus({ connected: false, accountName: null, scopes: [] });
+    }
+  }, []);
+
   useEffect(() => {
     void fetchMetaStatus();
-  }, [fetchMetaStatus]);
+    void fetchPATStatus();
+  }, [fetchMetaStatus, fetchPATStatus]);
 
   const handleAction = (actionId: string, actionType: string) => {
     if (actionType === "connect" && actionId === "install") {
@@ -147,7 +163,25 @@ export default function ConnectionsPage() {
                       <span className="text-[10px] opacity-50">Alternative to GitHub App install</span>
                     </div>
                   </div>
+                  {patStatus?.connected && (
+                    <div
+                      className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
+                    >
+                      <Check size={10} /> Connected
+                    </div>
+                  )}
                 </div>
+
+                {patStatus?.connected && patStatus.accountName && (
+                  <div className="mb-3 rounded-lg border px-3 py-2 text-[11px]" style={{ borderColor: `${T.borderColor}20`, background: T.bgColor }}>
+                    <span className="opacity-50">Account:</span>{" "}
+                    <span className="font-bold" style={{ color: T.textColor }}>{patStatus.accountName}</span>
+                    {patStatus.scopes.length > 0 && (
+                      <span className="ml-2 opacity-40">Scopes: {patStatus.scopes.join(", ")}</span>
+                    )}
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setPatDrawerOpen(true)}
@@ -158,7 +192,7 @@ export default function ConnectionsPage() {
                     backgroundColor: `${T.accentColor}08`,
                   }}
                 >
-                  Connect with API Key
+                  {patStatus?.connected ? "Manage API Key" : "Connect with API Key"}
                 </button>
               </div>
             </Section>
@@ -230,7 +264,7 @@ export default function ConnectionsPage() {
         )}
       </div>
 
-      <GitHubPATDrawer open={patDrawerOpen} onClose={() => setPatDrawerOpen(false)} />
+      <GitHubPATDrawer open={patDrawerOpen} onClose={() => setPatDrawerOpen(false)} onConnectionChange={fetchPATStatus} />
     </div>
   );
 }
