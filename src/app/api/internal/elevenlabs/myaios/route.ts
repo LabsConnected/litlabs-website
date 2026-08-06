@@ -1,7 +1,7 @@
 /**
- * Internal API: Reception Brain (Unified)
+ * Internal API: Myaios Brain (Unified)
  *
- * ONE endpoint for all Reception operations. Called by:
+ * ONE endpoint for all Myaios operations. Called by:
  *   - ElevenLabs voice tools (during phone calls)
  *   - LiTT chat (admin commands like "set hours to 9-5")
  *   - Web booking page (public bookings)
@@ -9,8 +9,8 @@
  * Auth: x-internal-api-key OR Authorization: Bearer (matches INTERNAL_API_KEY)
  *
  * Operations:
- *   get_config          — get reception configuration
- *   update_config       — update reception config (admin)
+ *   get_config          — get myaios configuration
+ *   update_config       — update myaios config (admin)
  *   list_services       — list all services
  *   get_service         — get a single service
  *   create_service      — create a service (admin)
@@ -32,7 +32,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import * as Brain from "@/lib/reception/reception-brain";
+import * as Brain from "@/lib/myaios/myaios-brain";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     const result = await handleOperation(operation, ownerId, params);
     return NextResponse.json({ result });
   } catch (err) {
-    console.error(`[reception] Error in ${operation}:`, err);
+    console.error(`[myaios] Error in ${operation}:`, err);
     return NextResponse.json({
       result: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
     });
@@ -93,12 +93,12 @@ async function handleOperation(
     // ─── Config ──────────────────────────────────────────────
     case "get_config": {
       const config = await Brain.getConfig(ownerId);
-      if (!config) return "No reception configuration found.";
+      if (!config) return "No myaios configuration found.";
       return JSON.stringify({
         businessName: config.businessName,
         receptionistName: config.receptionistName,
         greeting: config.greeting,
-        reception247: config.reception247,
+        myaios247: config.myaios247,
         timezone: config.timezone,
         cancellationPolicy: config.cancellationPolicy,
         bookingPageSlug: config.bookingPageSlug,
@@ -106,7 +106,7 @@ async function handleOperation(
     }
 
     case "update_config": {
-      const updates: Partial<Brain.ReceptionConfig> = {};
+      const updates: Partial<Brain.MyaiosConfig> = {};
       if (typeof p.business_name === "string") updates.businessName = p.business_name;
       if (typeof p.business_description === "string") updates.businessDescription = p.business_description;
       if (typeof p.website === "string") updates.website = p.website;
@@ -115,14 +115,14 @@ async function handleOperation(
       if (typeof p.timezone === "string") updates.timezone = p.timezone;
       if (typeof p.greeting === "string") updates.greeting = p.greeting;
       if (typeof p.instructions === "string") updates.instructions = p.instructions;
-      if (typeof p.reception_24_7 === "boolean") updates.reception247 = p.reception_24_7;
+      if (typeof p.myaios_24_7 === "boolean") updates.myaios247 = p.myaios_24_7;
       if (typeof p.cancellation_policy === "string") updates.cancellationPolicy = p.cancellation_policy;
       if (typeof p.confirmation_message === "string") updates.confirmationMessage = p.confirmation_message;
       if (typeof p.booking_page_intro === "string") updates.bookingPageIntro = p.booking_page_intro;
 
       const config = await Brain.updateConfig(ownerId, updates);
       if (!config) return "Failed to update configuration.";
-      return `Configuration updated. Business: ${config.businessName}, Reception 24/7: ${config.reception247}.`;
+      return `Configuration updated. Business: ${config.businessName}, Myaios 24/7: ${config.myaios247}.`;
     }
 
     // ─── Services ────────────────────────────────────────────
@@ -162,7 +162,7 @@ async function handleOperation(
     case "update_service": {
       const serviceId = (p.service_id as string) || "";
       if (!serviceId) return "Missing service_id.";
-      const updates: Partial<Brain.ReceptionService> = {};
+      const updates: Partial<Brain.MyaiosService> = {};
       if (typeof p.name === "string") updates.name = p.name;
       if (typeof p.description === "string") updates.description = p.description;
       if (typeof p.price_cents === "number") updates.priceCents = p.price_cents;

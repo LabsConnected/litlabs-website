@@ -99,16 +99,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ result });
     }
 
-    // ─── Reception tools ──────────────────────────────────
-    // All reception operations route through the Reception Brain
-    if (toolName === "reception") {
+    // ─── Myaios tools ──────────────────────────────────
+    // All myaios operations route through the Myaios Brain
+    if (toolName === "myaios") {
       const operation = (parameters.operation as string) || "";
-      const result = await executeReceptionTool(operation, parameters, userId, conversationId);
+      const result = await executeMyaiosTool(operation, parameters, userId, conversationId);
       return NextResponse.json({ result });
     }
 
     return NextResponse.json({
-      result: `Unknown tool: ${toolName}. Available tools: web_intelligence, memory_recall, reception.`,
+      result: `Unknown tool: ${toolName}. Available tools: web_intelligence, memory_recall, myaios.`,
     });
   } catch (err) {
     console.error(`[elevenlabs-tools] Error executing ${toolName}:`, err);
@@ -225,20 +225,20 @@ async function executeMemoryRecallTool(
   return `I found ${memories.length} relevant memories. ${summaries}`;
 }
 
-// ─── Tool: reception ────────────────────────────────────────────
+// ─── Tool: myaios ────────────────────────────────────────────
 
-async function executeReceptionTool(
+async function executeMyaiosTool(
   operation: string,
   parameters: Record<string, unknown>,
   userId: string,
   conversationId: string,
 ): Promise<string> {
-  // Forward to the unified Reception Brain endpoint
+  // Forward to the unified Myaios Brain endpoint
   const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL
     ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
     : process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
 
-  const response = await fetch(`${baseUrl}/api/internal/elevenlabs/reception`, {
+  const response = await fetch(`${baseUrl}/api/internal/elevenlabs/myaios`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -256,7 +256,7 @@ async function executeReceptionTool(
   });
 
   if (!response.ok) {
-    return `I wasn't able to complete that reception operation. Error: ${response.status}`;
+    return `I wasn't able to complete that myaios operation. Error: ${response.status}`;
   }
 
   const data = await response.json();

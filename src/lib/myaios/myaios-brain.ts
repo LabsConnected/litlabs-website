@@ -1,5 +1,5 @@
 /**
- * LiTT Reception Brain — Shared Intelligence Layer
+ * LiTT Myaios Brain — Shared Intelligence Layer
  *
  * ONE brain. Multiple interfaces (chat, voice, admin).
  * No duplicated business logic.
@@ -8,9 +8,9 @@
  *   - Service catalog (with Stripe price mapping)
  *   - Booking management (create, reschedule, cancel, lookup)
  *   - Lead capture + qualification
- *   - Staff availability (separate from 24/7 reception)
+ *   - Staff availability (separate from 24/7 myaios)
  *   - Human escalation
- *   - Reception configuration
+ *   - Myaios configuration
  *   - Operational analytics events
  *
  * Security: server-only. Uses supabaseAdmin for all DB access.
@@ -25,39 +25,39 @@ function snakeToCamel(s: string): string {
   return s.replace(/_([a-z0-9])/gi, (_, c) => c.toUpperCase());
 }
 
-function mapConfigRow(row: Record<string, unknown>): ReceptionConfig {
+function mapConfigRow(row: Record<string, unknown>): MyaiosConfig {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
-  return out as unknown as ReceptionConfig;
+  return out as unknown as MyaiosConfig;
 }
 
-function mapServiceRow(row: Record<string, unknown>): ReceptionService {
+function mapServiceRow(row: Record<string, unknown>): MyaiosService {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
-  return out as unknown as ReceptionService;
+  return out as unknown as MyaiosService;
 }
 
-function mapBookingRow(row: Record<string, unknown>): ReceptionBooking {
+function mapBookingRow(row: Record<string, unknown>): MyaiosBooking {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
-  return out as unknown as ReceptionBooking;
+  return out as unknown as MyaiosBooking;
 }
 
-function mapLeadRow(row: Record<string, unknown>): ReceptionLead {
+function mapLeadRow(row: Record<string, unknown>): MyaiosLead {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
-  return out as unknown as ReceptionLead;
+  return out as unknown as MyaiosLead;
 }
 
-function mapEscalationRow(row: Record<string, unknown>): ReceptionEscalation {
+function mapEscalationRow(row: Record<string, unknown>): MyaiosEscalation {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[snakeToCamel(k)] = v;
-  return out as unknown as ReceptionEscalation;
+  return out as unknown as MyaiosEscalation;
 }
 
 // ─── Types ───────────────────────────────────────────────────────
 
-export interface ReceptionConfig {
+export interface MyaiosConfig {
   id: string;
   ownerId: string;
   businessName: string;
@@ -72,8 +72,8 @@ export interface ReceptionConfig {
   greeting: string;
   instructions: string | null;
   fallbackBehavior: string;
-  reception247: boolean;
-  receptionHours: Record<string, unknown>;
+  myaios247: boolean;
+  myaiosHours: Record<string, unknown>;
   bookingRules: Record<string, unknown>;
   cancellationPolicy: string;
   reschedulingPolicy: string;
@@ -89,7 +89,7 @@ export interface ReceptionConfig {
   bookingPageIntro: string;
 }
 
-export interface ReceptionService {
+export interface MyaiosService {
   id: string;
   ownerId: string;
   name: string;
@@ -113,7 +113,7 @@ export interface ReceptionService {
   metadata: Record<string, unknown>;
 }
 
-export interface ReceptionBooking {
+export interface MyaiosBooking {
   id: string;
   ownerId: string;
   serviceId: string | null;
@@ -141,7 +141,7 @@ export interface ReceptionBooking {
   updatedAt: string;
 }
 
-export interface ReceptionLead {
+export interface MyaiosLead {
   id: string;
   ownerId: string;
   name: string | null;
@@ -170,7 +170,7 @@ export interface ReceptionLead {
   updatedAt: string;
 }
 
-export interface ReceptionEscalation {
+export interface MyaiosEscalation {
   id: string;
   ownerId: string;
   customerName: string | null;
@@ -226,9 +226,9 @@ function calculateEndTime(startTime: string, durationMinutes: number): string {
 
 // ─── Config ──────────────────────────────────────────────────────
 
-export async function getConfig(ownerId: string): Promise<ReceptionConfig | null> {
+export async function getConfig(ownerId: string): Promise<MyaiosConfig | null> {
   const { data, error } = await supabaseAdmin
-    .from("reception_config")
+    .from("myaios_config")
     .select("*")
     .eq("owner_id", ownerId)
     .single();
@@ -236,7 +236,7 @@ export async function getConfig(ownerId: string): Promise<ReceptionConfig | null
   if (error || !data) {
     // Try to get the default config and clone it for this owner
     const { data: defaultConfig } = await supabaseAdmin
-      .from("reception_config")
+      .from("myaios_config")
       .select("*")
       .eq("id", "default")
       .single();
@@ -246,7 +246,7 @@ export async function getConfig(ownerId: string): Promise<ReceptionConfig | null
       delete (newConfig as Record<string, unknown>).created_at;
       delete (newConfig as Record<string, unknown>).updated_at;
       const { data: created } = await supabaseAdmin
-        .from("reception_config")
+        .from("myaios_config")
         .insert(newConfig)
         .select()
         .single();
@@ -257,7 +257,7 @@ export async function getConfig(ownerId: string): Promise<ReceptionConfig | null
   return mapConfigRow(data as Record<string, unknown>);
 }
 
-export async function updateConfig(ownerId: string, updates: Partial<ReceptionConfig>): Promise<ReceptionConfig | null> {
+export async function updateConfig(ownerId: string, updates: Partial<MyaiosConfig>): Promise<MyaiosConfig | null> {
   // Convert camelCase updates to snake_case for the DB
   const snakeUpdates: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(updates)) {
@@ -266,7 +266,7 @@ export async function updateConfig(ownerId: string, updates: Partial<ReceptionCo
   snakeUpdates["updated_at"] = new Date().toISOString();
 
   const { data, error } = await supabaseAdmin
-    .from("reception_config")
+    .from("myaios_config")
     .update(snakeUpdates)
     .eq("owner_id", ownerId)
     .select()
@@ -278,9 +278,9 @@ export async function updateConfig(ownerId: string, updates: Partial<ReceptionCo
 
 // ─── Services ────────────────────────────────────────────────────
 
-export async function listServices(ownerId: string, activeOnly = false): Promise<ReceptionService[]> {
+export async function listServices(ownerId: string, activeOnly = false): Promise<MyaiosService[]> {
   let query = supabaseAdmin
-    .from("reception_services")
+    .from("myaios_services")
     .select("*")
     .eq("owner_id", ownerId)
     .order("sort_order", { ascending: true });
@@ -292,9 +292,9 @@ export async function listServices(ownerId: string, activeOnly = false): Promise
   return data.map((r) => mapServiceRow(r as Record<string, unknown>));
 }
 
-export async function getService(ownerId: string, serviceId: string): Promise<ReceptionService | null> {
+export async function getService(ownerId: string, serviceId: string): Promise<MyaiosService | null> {
   const { data, error } = await supabaseAdmin
-    .from("reception_services")
+    .from("myaios_services")
     .select("*")
     .eq("owner_id", ownerId)
     .eq("id", serviceId)
@@ -304,7 +304,7 @@ export async function getService(ownerId: string, serviceId: string): Promise<Re
   return mapServiceRow(data as Record<string, unknown>);
 }
 
-export async function createService(ownerId: string, service: Partial<ReceptionService>): Promise<ReceptionService | null> {
+export async function createService(ownerId: string, service: Partial<MyaiosService>): Promise<MyaiosService | null> {
   const row = {
     owner_id: ownerId,
     name: service.name || "Untitled Service",
@@ -329,7 +329,7 @@ export async function createService(ownerId: string, service: Partial<ReceptionS
   };
 
   const { data, error } = await supabaseAdmin
-    .from("reception_services")
+    .from("myaios_services")
     .insert(row)
     .select()
     .single();
@@ -338,7 +338,7 @@ export async function createService(ownerId: string, service: Partial<ReceptionS
   return mapServiceRow(data as Record<string, unknown>);
 }
 
-export async function updateService(ownerId: string, serviceId: string, updates: Partial<ReceptionService>): Promise<ReceptionService | null> {
+export async function updateService(ownerId: string, serviceId: string, updates: Partial<MyaiosService>): Promise<MyaiosService | null> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (updates.name !== undefined) row.name = updates.name;
   if (updates.description !== undefined) row.description = updates.description;
@@ -356,7 +356,7 @@ export async function updateService(ownerId: string, serviceId: string, updates:
   if (updates.availableHoursEnd !== undefined) row.available_hours_end = updates.availableHoursEnd;
 
   const { data, error } = await supabaseAdmin
-    .from("reception_services")
+    .from("myaios_services")
     .update(row)
     .eq("owner_id", ownerId)
     .eq("id", serviceId)
@@ -369,7 +369,7 @@ export async function updateService(ownerId: string, serviceId: string, updates:
 
 export async function deleteService(ownerId: string, serviceId: string): Promise<boolean> {
   const { error } = await supabaseAdmin
-    .from("reception_services")
+    .from("myaios_services")
     .delete()
     .eq("owner_id", ownerId)
     .eq("id", serviceId);
@@ -377,7 +377,7 @@ export async function deleteService(ownerId: string, serviceId: string): Promise
 }
 
 /** Format a service for speech/text output. */
-export function formatServiceForOutput(service: ReceptionService): string {
+export function formatServiceForOutput(service: MyaiosService): string {
   const price = formatPrice(service.priceCents, service.priceInterval, service.currency, service.priceOnRequest);
   return `${service.name} — ${price} (${service.durationMinutes} min). ${service.description}`;
 }
@@ -403,7 +403,7 @@ export async function createBooking(
     source?: string;
     conversationId?: string;
   },
-): Promise<ReceptionBooking | null> {
+): Promise<MyaiosBooking | null> {
   const endTime = calculateEndTime(input.bookingTime, input.serviceDurationMinutes);
   const paymentRequired = input.servicePriceCents !== null && input.servicePriceCents !== undefined && input.servicePriceCents > 0;
 
@@ -430,7 +430,7 @@ export async function createBooking(
   };
 
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .insert(row)
     .select()
     .single();
@@ -438,7 +438,7 @@ export async function createBooking(
   if (error) return null;
 
   // Log event
-  await logEvent(ownerId, "reception_booking_completed", {
+  await logEvent(ownerId, "myaios_booking_completed", {
     booking_id: (data as Record<string, unknown>).id,
     service_name: input.serviceName,
     source: input.source ?? "voice",
@@ -447,9 +447,9 @@ export async function createBooking(
   return mapBookingRow(data as Record<string, unknown>);
 }
 
-export async function getBooking(ownerId: string, bookingId: string): Promise<ReceptionBooking | null> {
+export async function getBooking(ownerId: string, bookingId: string): Promise<MyaiosBooking | null> {
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .select("*")
     .eq("owner_id", ownerId)
     .eq("id", bookingId)
@@ -459,9 +459,9 @@ export async function getBooking(ownerId: string, bookingId: string): Promise<Re
   return mapBookingRow(data as Record<string, unknown>);
 }
 
-export async function listBookings(ownerId: string, options?: { status?: string; date?: string; limit?: number }): Promise<ReceptionBooking[]> {
+export async function listBookings(ownerId: string, options?: { status?: string; date?: string; limit?: number }): Promise<MyaiosBooking[]> {
   let query = supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .select("*")
     .eq("owner_id", ownerId)
     .order("booking_date", { ascending: true })
@@ -476,9 +476,9 @@ export async function listBookings(ownerId: string, options?: { status?: string;
   return (data as Record<string, unknown>[]).map(mapBookingRow);
 }
 
-export async function findBookingsByCustomer(ownerId: string, email: string): Promise<ReceptionBooking[]> {
+export async function findBookingsByCustomer(ownerId: string, email: string): Promise<MyaiosBooking[]> {
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .select("*")
     .eq("owner_id", ownerId)
     .eq("customer_email", email)
@@ -489,12 +489,12 @@ export async function findBookingsByCustomer(ownerId: string, email: string): Pr
   return (data as Record<string, unknown>[]).map(mapBookingRow);
 }
 
-export async function updateBookingStatus(ownerId: string, bookingId: string, status: string, notes?: string): Promise<ReceptionBooking | null> {
+export async function updateBookingStatus(ownerId: string, bookingId: string, status: string, notes?: string): Promise<MyaiosBooking | null> {
   const row: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
   if (notes !== undefined) row.notes = notes;
 
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .update(row)
     .eq("owner_id", ownerId)
     .eq("id", bookingId)
@@ -504,20 +504,20 @@ export async function updateBookingStatus(ownerId: string, bookingId: string, st
   if (error) return null;
 
   // Log event
-  const eventType = status === "cancelled" ? "reception_booking_cancelled" :
-                    status === "rescheduled" ? "reception_booking_rescheduled" : "reception_booking_updated";
+  const eventType = status === "cancelled" ? "myaios_booking_cancelled" :
+                    status === "rescheduled" ? "myaios_booking_rescheduled" : "myaios_booking_updated";
   await logEvent(ownerId, eventType, { booking_id: bookingId, status });
 
   return mapBookingRow(data as Record<string, unknown>);
 }
 
-export async function rescheduleBooking(ownerId: string, bookingId: string, newDate: string, newTime: string): Promise<ReceptionBooking | null> {
+export async function rescheduleBooking(ownerId: string, bookingId: string, newDate: string, newTime: string): Promise<MyaiosBooking | null> {
   const existing = await getBooking(ownerId, bookingId);
   if (!existing) return null;
 
   const endTime = calculateEndTime(newTime, existing.serviceDurationMinutes);
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .update({
       booking_date: newDate,
       booking_time: newTime,
@@ -531,7 +531,7 @@ export async function rescheduleBooking(ownerId: string, bookingId: string, newD
     .single();
 
   if (error) return null;
-  await logEvent(ownerId, "reception_booking_rescheduled", { booking_id: bookingId, new_date: newDate, new_time: newTime });
+  await logEvent(ownerId, "myaios_booking_rescheduled", { booking_id: bookingId, new_date: newDate, new_time: newTime });
   return mapBookingRow(data as Record<string, unknown>);
 }
 
@@ -539,7 +539,7 @@ export async function rescheduleBooking(ownerId: string, bookingId: string, newD
 export async function checkSlotAvailability(ownerId: string, date: string, startTime: string, durationMinutes: number): Promise<boolean> {
   const endTime = calculateEndTime(startTime, durationMinutes);
   const { data, error } = await supabaseAdmin
-    .from("reception_bookings")
+    .from("myaios_bookings")
     .select("booking_time, booking_end_time")
     .eq("owner_id", ownerId)
     .eq("booking_date", date)
@@ -558,7 +558,7 @@ export async function checkSlotAvailability(ownerId: string, date: string, start
 /** Generate available time slots for a date. */
 export async function getAvailableSlots(
   ownerId: string,
-  service: ReceptionService,
+  service: MyaiosService,
   date: string,
 ): Promise<string[]> {
   const dayOfWeek = new Date(date + "T00:00:00").getDay();
@@ -605,7 +605,7 @@ export async function createLead(
     userId?: string;
     notes?: string;
   },
-): Promise<ReceptionLead | null> {
+): Promise<MyaiosLead | null> {
   const row = {
     owner_id: ownerId,
     name: input.name ?? null,
@@ -626,14 +626,14 @@ export async function createLead(
   };
 
   const { data, error } = await supabaseAdmin
-    .from("reception_leads")
+    .from("myaios_leads")
     .insert(row)
     .select()
     .single();
 
   if (error) return null;
 
-  await logEvent(ownerId, "reception_lead_created", {
+  await logEvent(ownerId, "myaios_lead_created", {
     lead_id: (data as Record<string, unknown>).id,
     interest: input.interest,
     source: input.source ?? "voice",
@@ -642,12 +642,12 @@ export async function createLead(
   return mapLeadRow(data as Record<string, unknown>);
 }
 
-export async function updateLeadStatus(ownerId: string, leadId: string, status: string, leadScore?: number): Promise<ReceptionLead | null> {
+export async function updateLeadStatus(ownerId: string, leadId: string, status: string, leadScore?: number): Promise<MyaiosLead | null> {
   const row: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
   if (leadScore !== undefined) row.lead_score = leadScore;
 
   const { data, error } = await supabaseAdmin
-    .from("reception_leads")
+    .from("myaios_leads")
     .update(row)
     .eq("owner_id", ownerId)
     .eq("id", leadId)
@@ -658,9 +658,9 @@ export async function updateLeadStatus(ownerId: string, leadId: string, status: 
   return mapLeadRow(data as Record<string, unknown>);
 }
 
-export async function findLeadByEmail(ownerId: string, email: string): Promise<ReceptionLead | null> {
+export async function findLeadByEmail(ownerId: string, email: string): Promise<MyaiosLead | null> {
   const { data, error } = await supabaseAdmin
-    .from("reception_leads")
+    .from("myaios_leads")
     .select("*")
     .eq("owner_id", ownerId)
     .eq("email", email)
@@ -672,9 +672,9 @@ export async function findLeadByEmail(ownerId: string, email: string): Promise<R
   return mapLeadRow(data as Record<string, unknown>);
 }
 
-export async function listLeads(ownerId: string, options?: { status?: string; limit?: number }): Promise<ReceptionLead[]> {
+export async function listLeads(ownerId: string, options?: { status?: string; limit?: number }): Promise<MyaiosLead[]> {
   let query = supabaseAdmin
-    .from("reception_leads")
+    .from("myaios_leads")
     .select("*")
     .eq("owner_id", ownerId)
     .order("created_at", { ascending: false })
@@ -706,7 +706,7 @@ export async function createEscalation(
     leadId?: string;
     source?: string;
   },
-): Promise<ReceptionEscalation | null> {
+): Promise<MyaiosEscalation | null> {
   const row = {
     owner_id: ownerId,
     customer_name: input.customerName ?? null,
@@ -725,14 +725,14 @@ export async function createEscalation(
   };
 
   const { data, error } = await supabaseAdmin
-    .from("reception_escalations")
+    .from("myaios_escalations")
     .insert(row)
     .select()
     .single();
 
   if (error) return null;
 
-  await logEvent(ownerId, "reception_escalated", {
+  await logEvent(ownerId, "myaios_escalated", {
     escalation_id: (data as Record<string, unknown>).id,
     reason: input.reason,
     urgency: input.urgency ?? "normal",
@@ -741,9 +741,9 @@ export async function createEscalation(
   return mapEscalationRow(data as Record<string, unknown>);
 }
 
-export async function listEscalations(ownerId: string, options?: { status?: string; limit?: number }): Promise<ReceptionEscalation[]> {
+export async function listEscalations(ownerId: string, options?: { status?: string; limit?: number }): Promise<MyaiosEscalation[]> {
   let query = supabaseAdmin
-    .from("reception_escalations")
+    .from("myaios_escalations")
     .select("*")
     .eq("owner_id", ownerId)
     .order("created_at", { ascending: false })
@@ -760,7 +760,7 @@ export async function listEscalations(ownerId: string, options?: { status?: stri
 
 export async function getStaffHours(ownerId: string): Promise<StaffHours[]> {
   const { data, error } = await supabaseAdmin
-    .from("reception_staff_hours")
+    .from("myaios_staff_hours")
     .select("*")
     .eq("owner_id", ownerId)
     .eq("active", true);
@@ -771,7 +771,7 @@ export async function getStaffHours(ownerId: string): Promise<StaffHours[]> {
 
 export async function updateStaffHours(ownerId: string, staffId: string, schedule: Record<string, unknown>): Promise<StaffHours | null> {
   const { data, error } = await supabaseAdmin
-    .from("reception_staff_hours")
+    .from("myaios_staff_hours")
     .update({ schedule, updated_at: new Date().toISOString() })
     .eq("owner_id", ownerId)
     .eq("id", staffId)
@@ -782,7 +782,7 @@ export async function updateStaffHours(ownerId: string, staffId: string, schedul
   return data as unknown as StaffHours;
 }
 
-/** Check if staff are currently available (not just reception). */
+/** Check if staff are currently available (not just myaios). */
 export async function isStaffAvailable(ownerId: string, date?: string): Promise<boolean> {
   const staff = await getStaffHours(ownerId);
   if (staff.length === 0) return false; // No staff configured = not available
@@ -805,7 +805,7 @@ export async function logEvent(
   conversationId?: string,
 ): Promise<void> {
   try {
-    await supabaseAdmin.from("reception_events").insert({
+    await supabaseAdmin.from("myaios_events").insert({
       owner_id: ownerId,
       event_type: eventType,
       metadata: metadata ?? {},
@@ -821,7 +821,7 @@ export async function logEvent(
 
 export async function getDashboardSummary(ownerId: string): Promise<{
   activeBookings: number;
-  upcomingBookings: ReceptionBooking[];
+  upcomingBookings: MyaiosBooking[];
   newLeads: number;
   openEscalations: number;
   activeServices: number;

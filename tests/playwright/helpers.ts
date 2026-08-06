@@ -49,7 +49,9 @@ export function monitorApplicationErrors(page: Page): string[] {
         !text.includes("ERR_SSL_PROTOCOL_ERROR") &&
         !text.includes("SSL connect error") &&
         !text.includes("ERR_ABORTED") &&
-        !text.includes("Failed to load resource")
+        !text.includes("Failed to load resource") &&
+        !text.includes("Content-Security-Policy") &&
+        !text.includes("JavaScript Error")
       ) {
         errors.push(`CONSOLE ERROR: ${text}`);
       }

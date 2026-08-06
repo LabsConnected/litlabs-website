@@ -44,7 +44,7 @@ import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase";
 import { buildUserContext, formatContextForPrompt } from "@/lib/context/context-engine";
 import { listProjects } from "@/lib/projects/project-repository";
-import { getConfig, listServices, formatServiceForOutput } from "@/lib/reception/reception-brain";
+import { getConfig, listServices, formatServiceForOutput } from "@/lib/myaios/myaios-brain";
 
 export const runtime = "nodejs";
 
@@ -181,10 +181,10 @@ export async function POST(req: NextRequest) {
     console.error("[elevenlabs-init] Context build failed:", err);
   }
 
-  // Step 4: Load Reception config + service catalog
+  // Step 4: Load Myaios config + service catalog
   // This gives LiTT the business context it needs to answer questions
   // about services, pricing, and bookings during the call
-  let receptionContext = "";
+  let myaiosContext = "";
   try {
     const [config, services] = await Promise.all([
       getConfig(userId),
@@ -192,22 +192,22 @@ export async function POST(req: NextRequest) {
     ]);
 
     if (config) {
-      receptionContext += `\n\nRECEPTION CONTEXT:\n`;
-      receptionContext += `Business: ${config.businessName} — ${config.businessDescription}\n`;
-      receptionContext += `Reception 24/7: ${config.reception247}\n`;
-      receptionContext += `Cancellation policy: ${config.cancellationPolicy}\n`;
+      myaiosContext += `\n\nMYAIOS CONTEXT:\n`;
+      myaiosContext += `Business: ${config.businessName} — ${config.businessDescription}\n`;
+      myaiosContext += `Myaios 24/7: ${config.myaios247}\n`;
+      myaiosContext += `Cancellation policy: ${config.cancellationPolicy}\n`;
       if (config.bookingPageSlug) {
-        receptionContext += `Booking page: https://app.reception.ai/smb-public/book/${config.bookingPageSlug}\n`;
+        myaiosContext += `Booking page: https://app.myaios.ai/smb-public/book/${config.bookingPageSlug}\n`;
       }
     }
 
     if (services.length > 0) {
-      receptionContext += `\nACTIVE SERVICES (use these for pricing and booking):\n`;
-      receptionContext += services.map((s) => formatServiceForOutput(s)).join("\n");
-      receptionContext += `\n\nWhen a caller wants to book, use the reception tool with operation "get_available_slots" to find times, then "create_booking" to book.`;
+      myaiosContext += `\nACTIVE SERVICES (use these for pricing and booking):\n`;
+      myaiosContext += services.map((s) => formatServiceForOutput(s)).join("\n");
+      myaiosContext += `\n\nWhen a caller wants to book, use the myaios tool with operation "get_available_slots" to find times, then "create_booking" to book.`;
     }
   } catch (err) {
-    console.error("[elevenlabs-init] Reception context failed:", err);
+    console.error("[elevenlabs-init] Myaios context failed:", err);
   }
 
   // Step 5: Build the first message (personalized greeting)
@@ -216,11 +216,11 @@ export async function POST(req: NextRequest) {
     ? `Hey ${firstName}, LiTT here — what can I help with?`
     : "Hey, LiTT here — what can I help with?";
 
-  console.log(`[elevenlabs-init] Resolved: ${displayName || "unknown"}, project: ${projectName || "none"}, reception: ${receptionContext ? "loaded" : "none"}`);
+  console.log(`[elevenlabs-init] Resolved: ${displayName || "unknown"}, project: ${projectName || "none"}, myaios: ${myaiosContext ? "loaded" : "none"}`);
 
   // Step 6: Return dynamic variables + first message override
   // These flow into:
-  //   - The system prompt via {{user_name}}, {{user_context}}, {{reception_context}}
+  //   - The system prompt via {{user_name}}, {{user_context}}, {{myaios_context}}
   //   - Tool calls via {{user_id}}, {{project_id}}
   return NextResponse.json({
     conversation_initiation_client_data: {
@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
         project_id: projectId,
         user_name: firstName,
         user_context: contextBlock,
-        reception_context: receptionContext,
+        myaios_context: myaiosContext,
       },
       conversation_config_override: {
         agent: {
