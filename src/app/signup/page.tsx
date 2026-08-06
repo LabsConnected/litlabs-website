@@ -50,8 +50,9 @@ export default function SignupPage() {
       >
         <h1 className="text-xl font-black mb-4">Create account</h1>
 
-        <label className="block text-xs font-bold mb-1.5 opacity-80">Email</label>
+        <label htmlFor="signup-email" className="block text-xs font-bold mb-1.5 opacity-80">Email</label>
         <input
+          id="signup-email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -59,8 +60,9 @@ export default function SignupPage() {
           className="w-full rounded-lg bg-white/5 border border-[#3b4773] px-3 py-2 text-sm mb-4 outline-none focus:border-[#B6FF4A]"
         />
 
-        <label className="block text-xs font-bold mb-1.5 opacity-80">Password</label>
+        <label htmlFor="signup-password" className="block text-xs font-bold mb-1.5 opacity-80">Password</label>
         <input
+          id="signup-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

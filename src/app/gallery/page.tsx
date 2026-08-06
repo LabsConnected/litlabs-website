@@ -943,6 +943,7 @@ export default function Gallery() {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
+            aria-label="Sort gallery items"
             className="px-2 py-1.5 rounded-lg text-[11px] outline-none cursor-pointer"
             style={{
               backgroundColor: T.bgColor + "80",
@@ -1375,6 +1376,7 @@ export default function Gallery() {
         {galleryLoading && items.length === 0 && (
           <div
             className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            role="status"
             aria-label="Loading gallery"
           >
             {[0, 1, 2, 3, 4, 5].map((index) => (

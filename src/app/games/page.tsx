@@ -309,13 +309,14 @@ export default function GamesPage() {
               return (
                 <article
                   key={game.id}
-                  className="group relative cursor-pointer overflow-hidden rounded-2xl border border-[#9B4DFF]/15 bg-[#140F1F]/72 transition hover:-translate-y-1 hover:border-[#9B4DFF]/35 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(155,77,255,0.15)]"
-                  onClick={() => launchGame(game)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") launchGame(game); }}
-                  aria-label={`Play ${displayTitle}`}
+                  className="group relative overflow-hidden rounded-2xl border border-[#9B4DFF]/15 bg-[#140F1F]/72 transition hover:-translate-y-1 hover:border-[#9B4DFF]/35 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(155,77,255,0.15)]"
                 >
+                  <button
+                    type="button"
+                    onClick={() => launchGame(game)}
+                    className="absolute inset-0 z-10 cursor-pointer"
+                    aria-label={`Play ${displayTitle}`}
+                  />
                   {/* Cover art */}
                   <div className="relative aspect-4/3 overflow-hidden">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -368,7 +369,7 @@ export default function GamesPage() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleToggleFav(game.id); }}
-                        className="shrink-0 text-white/50 transition hover:text-white"
+                        className="relative z-20 shrink-0 text-white/50 transition hover:text-white"
                         aria-label={favorites.includes(game.id) ? `Unfavorite ${displayTitle}` : `Favorite ${displayTitle}`}
                       >
                         <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} className={favorites.includes(game.id) ? "text-orange-500" : ""} />
