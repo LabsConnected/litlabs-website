@@ -129,6 +129,10 @@ test.describe("Site Audit — Public Routes @public", () => {
 
       // 2. Body content
       await page.waitForLoadState("domcontentloaded");
+      // For redirected pages, wait for network to settle so Axe doesn't hit a destroyed context
+      if (route.redirectsTo) {
+        await page.waitForLoadState("networkidle").catch(() => {});
+      }
       const bodyText = await page.locator("body").innerText();
       const bodyHtml = await page.locator("body").innerHTML();
       const totalContent = bodyText.length + bodyHtml.length;
