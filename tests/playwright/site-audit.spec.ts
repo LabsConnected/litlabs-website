@@ -134,9 +134,12 @@ test.describe("Site Audit — Public Routes @public", () => {
       const totalContent = bodyText.length + bodyHtml.length;
       expect(totalContent, `${route.path} should have body content > 100 chars`).toBeGreaterThan(100);
 
-      // 3. Expected text
+      // 3. Expected text — use destination's expected text if redirected
+      const checkRoute = route.redirectsTo
+        ? PUBLIC_ROUTES.find((r) => r.path === route.redirectsTo) ?? route
+        : route;
       const hasExpectedText = await page.locator("body").textContent();
-      expect(hasExpectedText, `${route.path} should contain expected text`).toMatch(route.expectedText);
+      expect(hasExpectedText, `${route.path} should contain expected text`).toMatch(checkRoute.expectedText);
 
       // 4. Meta tags
       const title = await page.title();
