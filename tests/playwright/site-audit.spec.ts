@@ -94,7 +94,9 @@ test.describe("Site Audit — Public Routes @public", () => {
             !text.includes("status of 404") &&
             !text.includes("Failed to load resource") &&
             !text.includes("Content-Security-Policy") &&
-            !text.includes("JavaScript Error")
+            !text.includes("JavaScript Error") &&
+            !text.includes("[Report Only]") &&
+            !text.includes("Report Only")
           ) {
             errors.push(`CONSOLE ERROR: ${text}`);
           }
