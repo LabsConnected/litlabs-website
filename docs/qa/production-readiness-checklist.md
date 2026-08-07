@@ -26,6 +26,7 @@
 **Why:** Legacy backup `.env` files contained the Supabase service role key. Exposure assessment confirmed no git exposure, but rotation is best practice.
 
 **How:**
+
 1. Go to [Supabase Dashboard](https://supabase.com/dashboard) → Project `rokbfvuoqildggnhappy`
 2. Settings → API → "API Keys" section
 3. Click "Rotate" on the service role key
@@ -43,6 +44,7 @@
 **Why:** Code fixes (P0-2, P0-3, P1-3, llm/health) are pushed but not yet deployed.
 
 **How:**
+
 1. Go to [Vercel Dashboard](https://vercel.com/dashboard) → `litlabs-website` project
 2. Deployments tab → "Redeploy" or push should auto-deploy
 3. Verify deployment completes successfully
@@ -62,21 +64,25 @@
 **How:** Follow the phased rollout in [`docs/qa/waf-custom-rules-tuning-pack.md`](./waf-custom-rules-tuning-pack.md) §2.
 
 **Phase 1 (safest, deploy first):**
+
 - Rule 9: Already done (app code fix)
 - Rule 10: Webhook exclusions (narrowly scoped skip of bot-detection rules only)
 - Rule 13: Auth no-store cache policy (via Cache Rules, not WAF)
 - Rule 1: Attack tools (start in **Log** mode)
 
 **Phase 2 (after reviewing Phase 1 logs):**
+
 - Rule 1: Escalate Log → Block
 - Rule 3: Spam bots (Log → Block)
 - Rule 12: Public page cache headers (via Cache Rules)
 
 **Phase 3 (after reviewing Phase 2 logs):**
+
 - Rule 2: Aggressive scrapers (Log/Managed Challenge, path-scoped to browser routes)
 - Rule 5: Allow legitimate crawlers (use `cf.bot_management.verified_bot`, not UA strings)
 
 **Phase 4 (hold/deferred):**
+
 - Rules 4, 6, 7, 8 — need additional validation before deployment
 
 **Priority:** Medium — deploy after Vercel redeploy confirms production is healthy
@@ -88,6 +94,7 @@
 **Why:** Same precautionary reasoning as Supabase. No confirmed exposure.
 
 **How:**
+
 - Stripe: Dashboard → Developers → API Keys → Rotate secret key
 - Clerk: Dashboard → API Keys → Rotate secret key
 - Update in Vercel env vars after rotation
