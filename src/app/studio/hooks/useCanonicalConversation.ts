@@ -882,7 +882,7 @@ export function useCanonicalConversation({
               } else if (evt.type === "done") {
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
-                errorPayload = { message: evt.message, partialText: evt.partialText };
+                errorPayload = { message: evt.message, detail: evt.detail, partialText: evt.partialText };
               }
             } catch {
               // ignore malformed chunk
@@ -892,7 +892,11 @@ export function useCanonicalConversation({
 
         if (errorPayload) {
           const partial = errorPayload.partialText;
+          const detail = (errorPayload as { detail?: string }).detail;
           const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          if (detail) {
+            console.error("[studio] provider error detail:", detail);
+          }
           getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
             content: partial ? partial : reply,

@@ -674,6 +674,33 @@ export default function CommandComposer({
           />
         </button>
 
+        {/* LiTT presence indicator — idle green ring, thinking spinning ring */}
+        <div
+          className="relative flex h-11 w-11 shrink-0 items-center justify-center"
+          aria-label={busy ? "LiTT is thinking" : "LiTT is ready"}
+          title={busy ? "LiTT is thinking…" : "LiTT is ready"}
+        >
+          {/* Outer animated ring */}
+          <div
+            className={`absolute inset-1 rounded-full ${busy ? "animate-spin" : ""}`}
+            style={{
+              border: `2px solid ${busy ? "var(--litt-primary)" : "rgba(114,242,56,0.4)"}`,
+              borderTopColor: busy ? "transparent" : "rgba(114,242,56,0.8)",
+              transition: "border-color 0.3s ease",
+            }}
+          />
+          {/* Inner glow dot */}
+          <div
+            className="h-2 w-2 rounded-full transition-all"
+            style={{
+              backgroundColor: busy ? "var(--litt-primary)" : "#72f238",
+              boxShadow: busy
+                ? "0 0 8px var(--litt-primary), 0 0 16px var(--litt-primary)"
+                : "0 0 4px rgba(114,242,56,0.6)",
+            }}
+          />
+        </div>
+
         {/* Send */}
         <button
           type="button"
