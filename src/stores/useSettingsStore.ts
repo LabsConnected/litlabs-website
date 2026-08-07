@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ControlMode = "standard" | "advanced" | "pro" | "owner";
+export type ControlMode = "standard" | "advanced" | "pro";
 
 export interface SettingsSection {
   id: string;
@@ -8,16 +8,14 @@ export interface SettingsSection {
   description: string;
   icon: string;
   minMode: ControlMode;
-  ownerOnly?: boolean;
 }
 
-export const MODE_ORDER: ControlMode[] = ["standard", "advanced", "pro", "owner"];
+export const MODE_ORDER: ControlMode[] = ["standard", "advanced", "pro"];
 
 export const MODE_META: Record<ControlMode, { label: string; description: string; color: string }> = {
   standard: { label: "Standard", description: "Account, appearance, notifications, billing, privacy.", color: "#22c55e" },
   advanced: { label: "Advanced", description: "Page layouts, navigation, devices, performance, diagnostics.", color: "#3b82f6" },
   pro: { label: "Pro", description: "AI routing, agents, connections, automation, developer workflow.", color: "#a855f7" },
-  owner: { label: "Owner", description: "Platform-wide administrative controls.", color: "#ef4444" },
 };
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -40,9 +38,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "agents", label: "LiTT & Spark", description: "Agent behavior and permissions", icon: "Bot", minMode: "pro" },
   { id: "connections", label: "Connections", description: "GitHub, Vercel, Supabase, AI keys", icon: "Plug", minMode: "pro" },
   { id: "automation", label: "Automation", description: "Triggers, schedules, retries", icon: "Zap", minMode: "pro" },
-
-  // ── Owner: platform-wide administrative controls ──────────────────
-  { id: "system", label: "System Control", description: "Owner-only platform controls", icon: "Server", minMode: "owner", ownerOnly: true },
 ];
 
 interface SettingsStore {
@@ -50,14 +45,11 @@ interface SettingsStore {
   activeSection: string;
   searchQuery: string;
   hasUnsavedChanges: boolean;
-  isOwner: boolean;
-  isAdmin: boolean;
 
   setControlMode: (mode: ControlMode) => void;
   setActiveSection: (section: string) => void;
   setSearchQuery: (q: string) => void;
   setUnsaved: (v: boolean) => void;
-  setOwner: (v: boolean) => void;
   visibleSections: () => SettingsSection[];
 }
 
@@ -67,7 +59,7 @@ function loadControlMode(): ControlMode {
   if (typeof window === "undefined") return "standard";
   try {
     const stored = localStorage.getItem(CONTROL_MODE_STORAGE_KEY);
-    if (stored === "standard" || stored === "advanced" || stored === "pro" || stored === "owner") return stored;
+    if (stored === "standard" || stored === "advanced" || stored === "pro") return stored;
     return "standard";
   } catch {
     return "standard";
@@ -79,8 +71,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   activeSection: "overview",
   searchQuery: "",
   hasUnsavedChanges: false,
-  isOwner: false,
-  isAdmin: false,
 
   setControlMode: (controlMode) => {
     set({ controlMode });
@@ -93,15 +83,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   setActiveSection: (activeSection) => set({ activeSection }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setUnsaved: (hasUnsavedChanges) => set({ hasUnsavedChanges }),
-  setOwner: (isOwner) => set({ isOwner, isAdmin: isOwner }),
 
   visibleSections: () => {
-    const { controlMode, searchQuery, isOwner } = get();
+    const { controlMode, searchQuery } = get();
     const modeIdx = MODE_ORDER.indexOf(controlMode);
     return SETTINGS_SECTIONS.filter((s) => {
       const sIdx = MODE_ORDER.indexOf(s.minMode);
       if (sIdx > modeIdx) return false;
-      if (s.ownerOnly && !isOwner) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         return s.label.toLowerCase().includes(q) || s.description.toLowerCase().includes(q);

@@ -664,7 +664,7 @@ export function useCanonicalConversation({
         requestAbortRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 120_000);
         requestTimeoutId = timeoutId;
-        const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${conversationId}/messages`, {
+        const makeRequest = async (revision: number) => fetch(`/api/studio/conversations/${activeConversationId}/messages`, {
           method: "POST",
           credentials: "include",
           headers: await authHeaders(true),
@@ -828,7 +828,7 @@ export function useCanonicalConversation({
           const errorText = data?.error
             ? (data.detail ? `${data.error}: ${data.detail}` : data.error)
             : `Server returned an unexpected response format (status ${response.status}, keys: ${Object.keys(data).join(",") || "none"}). Check network tab.`;
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
+          getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             status: "failed",
             content: errorText,
           });
@@ -840,7 +840,7 @@ export function useCanonicalConversation({
         // Consume the event stream and update the optimistic assistant
         // message incrementally so tokens (and reasoning) appear live.
         if (!response.body) {
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
+          getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             status: "failed",
             content: "No response body from server.",
           });
