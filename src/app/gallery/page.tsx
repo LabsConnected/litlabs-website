@@ -1598,19 +1598,30 @@ export default function Gallery() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigator.clipboard.writeText(
-                          window.location.origin + "/gallery#" + item.id,
-                        );
-                        showToast("Link copied!", "success");
+                        const url = `${window.location.origin}/gallery#${item.id}`;
+                        const share = async () => {
+                          try {
+                            if (navigator?.share) {
+                              await navigator.share({ title: item.title, text: `By ${item.artist}`, url });
+                              showToast("Shared", "success");
+                              return;
+                            }
+                          } catch {
+                            // fallback to copy
+                          }
+                          await navigator.clipboard.writeText(url);
+                          showToast("Link copied!", "success");
+                        };
+                        share();
                       }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center text-xs backdrop-blur-sm transition-all hover:scale-110"
                       style={{
                         backgroundColor: T.bgColor + "cc",
                         color: T.textColor,
                       }}
-                      title="Copy link"
+                      title="Share"
                     >
-                      🔗
+                      ↗
                     </button>
                   </div>
                 </div>

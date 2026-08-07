@@ -50,7 +50,7 @@ export type LLMProvider =
   | "openrouter-trinity"
   | "openrouter-vision";
 
-export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok";
+export type ModelCategory = "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
 
 export interface LLMOptions {
   task?: LLMTask;
@@ -152,12 +152,25 @@ function markModelUnavailable(provider: string): void {
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
 function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
-  if (opts.provider) return [opts.provider];
+  // "litt-alias" models (LiTT Balanced/Reasoning/Code) should use the full
+  // fallback chain — the apiProvider is a *preference*, not a hard pin.
+  // Without this, a single provider failure bricks the conversation.
+  if (opts.provider && opts.category !== "litt-alias") return [opts.provider];
+
+  // For litt-alias, build a chain starting with the preferred provider
+  // then falling back to the others.
+  if (opts.category === "litt-alias" && opts.provider) {
+    const preferred = opts.provider;
+    const all: LLMProvider[] = ["gemini", "groq", "openrouter-free"];
+    const fallbacks = all.filter((p): p is LLMProvider => p !== preferred);
+    return [preferred, ...fallbacks];
+  }
 
   // Category-based routing takes precedence if specified
   if (opts.category) {
     switch (opts.category) {
       case "auto":
+      case "litt-alias":
         return ["gemini", "groq", "openrouter-free"];
       case "free":
         return ["gemini", "openrouter-free", "groq"];

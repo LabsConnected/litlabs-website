@@ -11,8 +11,8 @@ const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 import {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
-  Server, Search, ChevronRight, Check, Loader2,
-  RotateCcw, Lock, ArrowLeft, Camera, Volume2,
+  Search, ChevronRight, Check, Loader2,
+  RotateCcw, ArrowLeft, Camera, Volume2,
   Monitor, Moon, Sun,
 } from "lucide-react";
 import {
@@ -40,12 +40,13 @@ import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import type { LayoutStyle } from "@/context/ThemeContext";
 import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/studio/stores/useStudioModelStore";
 import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
+import { useLocalSettings } from "@/hooks/useLocalSettings";
 
 /* ── Icon map ──────────────────────────────────────────────────────── */
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>> = {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
-  Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal, Server,
+  Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
 };
 
 /* ── Main page ─────────────────────────────────────────────────────── */
@@ -54,7 +55,7 @@ export default function SettingsPage() {
   const { resolvedColors: T } = useTheme();
   const {
     controlMode, activeSection, searchQuery, hasUnsavedChanges,
-    isOwner, setControlMode, setActiveSection, setSearchQuery,
+    setControlMode, setActiveSection, setSearchQuery,
     setUnsaved, visibleSections,
   } = useSettingsStore();
 
@@ -144,7 +145,6 @@ export default function SettingsPage() {
             sections={filteredSections}
             allSections={SETTINGS_SECTIONS}
             controlMode={controlMode}
-            isOwner={isOwner}
             activeSection={activeSection}
             onSectionClick={handleSectionClick}
             onModeChange={setControlMode}
@@ -191,7 +191,6 @@ export default function SettingsPage() {
           <ModeSelector
             controlMode={controlMode}
             onModeChange={setControlMode}
-            isOwner={isOwner}
             T={T}
           />
         </div>
@@ -205,7 +204,7 @@ export default function SettingsPage() {
                   title={activeSectionMeta.label}
                   description={activeSectionMeta.description}
                 />
-                <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} isOwner={isOwner} />
+                <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
               </>
             )}
           </main>
@@ -215,7 +214,6 @@ export default function SettingsPage() {
               sections={filteredSections}
               allSections={SETTINGS_SECTIONS}
               controlMode={controlMode}
-              isOwner={isOwner}
               onSectionClick={handleSectionClick}
               onModeChange={setControlMode}
               searchQuery={searchQuery}
@@ -236,12 +234,11 @@ export default function SettingsPage() {
             <ModeSelector
               controlMode={controlMode}
               onModeChange={setControlMode}
-              isOwner={isOwner}
               T={T}
             />
           </div>
           {activeSectionMeta && (
-            <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} isOwner={isOwner} />
+            <SettingsContent section={activeSectionMeta.id} T={T} controlMode={controlMode} />
           )}
         </main>
       </div>
@@ -263,7 +260,6 @@ function SettingsNav({
   sections,
   allSections,
   controlMode,
-  isOwner,
   activeSection,
   onSectionClick,
   onModeChange,
@@ -275,7 +271,6 @@ function SettingsNav({
   sections: SettingsSection[];
   allSections: SettingsSection[];
   controlMode: ControlMode;
-  isOwner: boolean;
   activeSection: string;
   onSectionClick: (id: string) => void;
   onModeChange: (m: ControlMode) => void;
@@ -326,7 +321,7 @@ function SettingsNav({
           const Icon = ICONS[section.icon] ?? LayoutGrid;
           const isActive = activeSection === section.id;
           const sIdx = MODE_ORDER.indexOf(section.minMode);
-          const isLocked = sIdx > modeIdx || (section.ownerOnly && !isOwner);
+          const isLocked = sIdx > modeIdx;
           const lockedMode = MODE_META[section.minMode];
 
           if (isLocked && !hasSearch) {
@@ -351,7 +346,7 @@ function SettingsNav({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[13px] font-bold text-white/50">{section.label}</span>
-                    <Lock size={10} className="text-white/30" />
+                    <span className="text-[10px] text-white/30">🔒</span>
                   </div>
                   <div className="truncate text-[10px] text-white/25">
                     {section.description}
@@ -412,12 +407,10 @@ function SettingsNav({
 function ModeSelector({
   controlMode,
   onModeChange,
-  isOwner,
   T: _T,
 }: {
   controlMode: ControlMode;
   onModeChange: (m: ControlMode) => void;
-  isOwner: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const [open, setOpen] = useState(false);
@@ -454,14 +447,12 @@ function ModeSelector({
             {MODE_ORDER.map((mode) => {
               const m = MODE_META[mode];
               const isActive = controlMode === mode;
-              const isLocked = mode === "owner" && !isOwner;
               return (
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => { if (!isLocked) { onModeChange(mode); setOpen(false); } }}
-                  disabled={isLocked}
-                  className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+                  onClick={() => { onModeChange(mode); setOpen(false); }}
+                  className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5"
                 >
                   <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: m.color }} />
                   <div className="min-w-0 flex-1">
@@ -469,7 +460,6 @@ function ModeSelector({
                       <span className="text-xs font-bold" style={{ color: isActive ? m.color : "rgba(255,255,255,0.8)" }}>
                         {m.label}
                       </span>
-                      {isLocked && <Lock size={10} className="text-white/30" />}
                       {isActive && <Check size={10} style={{ color: m.color }} />}
                     </div>
                     <p className="text-[9px] text-white/40">{m.description}</p>
@@ -490,7 +480,6 @@ function MobileSectionList({
   sections,
   allSections,
   controlMode,
-  isOwner,
   onSectionClick,
   onModeChange,
   searchQuery,
@@ -500,7 +489,6 @@ function MobileSectionList({
   sections: SettingsSection[];
   allSections: SettingsSection[];
   controlMode: ControlMode;
-  isOwner: boolean;
   onSectionClick: (id: string) => void;
   onModeChange: (m: ControlMode) => void;
   searchQuery: string;
@@ -551,7 +539,6 @@ function MobileSectionList({
           <ModeSelector
             controlMode={controlMode}
             onModeChange={onModeChange}
-            isOwner={isOwner}
             T={_T}
           />
         </div>
@@ -561,7 +548,7 @@ function MobileSectionList({
         {displaySections.map((section) => {
           const Icon = ICONS[section.icon] ?? LayoutGrid;
           const sIdx = MODE_ORDER.indexOf(section.minMode);
-          const isLocked = sIdx > modeIdx || (section.ownerOnly && !isOwner);
+          const isLocked = sIdx > modeIdx;
           const lockedMode = MODE_META[section.minMode];
 
           if (isLocked && !hasSearch) {
@@ -590,7 +577,7 @@ function MobileSectionList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-bold text-white/60">{section.label}</span>
-                    <Lock size={10} className="text-white/30" />
+                    <span className="text-[10px] text-white/30">🔒</span>
                   </div>
                   <div className="truncate text-[10px] text-white/30">{section.description}</div>
                 </div>
@@ -643,12 +630,10 @@ function SettingsContent({
   section,
   T,
   controlMode,
-  isOwner,
 }: {
   section: string;
   T: ReturnType<typeof useTheme>["resolvedColors"];
   controlMode: ControlMode;
-  isOwner: boolean;
 }) {
   switch (section) {
     case "overview":
@@ -679,8 +664,6 @@ function SettingsContent({
       return <PerformanceSection T={T} />;
     case "advanced":
       return <AdvancedSection T={T} />;
-    case "system":
-      return isOwner ? <SystemControlSection T={T} /> : <LockedSection T={T} label="System Control" />;
     default:
       return null;
   }
@@ -1365,6 +1348,10 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
 function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { selectedModel, selectModel, providerHealth } = useStudioModelStore();
+  const [spend, updateSpend] = useLocalSettings("spend-limits", {
+    dailyLimit: "5",
+    monthlyLimit: "50",
+  });
 
   const categoryLabels: Record<string, string> = {
     auto: "Auto Best",
@@ -1437,8 +1424,8 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
       {/* Spend limits */}
       <SettingsCard title="Spending limits" description="Control AI costs">
         <div className="grid gap-4 sm:grid-cols-2">
-          <SettingsInput label="Daily spend limit ($)" value="5" onChange={() => {}} type="number" />
-          <SettingsInput label="Monthly spend limit ($)" value="50" onChange={() => {}} type="number" />
+          <SettingsInput label="Daily spend limit ($)" value={spend.dailyLimit} onChange={(v) => updateSpend("dailyLimit", v)} type="number" />
+          <SettingsInput label="Monthly spend limit ($)" value={spend.monthlyLimit} onChange={(v) => updateSpend("monthlyLimit", v)} type="number" />
         </div>
       </SettingsCard>
 
@@ -2159,23 +2146,47 @@ function ConnectionsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolve
 /* ── Automation ────────────────────────────────────────────────────── */
 
 function AutomationSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const [s, update] = useLocalSettings("automation", {
+    autoRunTests: false,
+    autoOpenPreview: true,
+    autoSave: true,
+    requireDeployApproval: true,
+    requireFileWriteApproval: false,
+    autoRetry: true,
+    maxRetries: 3,
+  });
+
   return (
     <div className="space-y-4">
       <SettingsCard title="Workflow automation" description="Auto-run rules and triggers" icon={<Zap size={16} />}>
         <div className="space-y-3">
-          <ToggleRow title="Auto-run tests" description="Run tests on file changes" checked={false} onChange={() => {}} />
-          <ToggleRow title="Auto-open preview" description="Open preview after build" checked={true} onChange={() => {}} />
-          <ToggleRow title="Auto-save" description="Save changes automatically" checked={true} onChange={() => {}} />
+          <ToggleRow title="Auto-run tests" description="Run tests on file changes" checked={s.autoRunTests} onChange={(v) => update("autoRunTests", v)} />
+          <ToggleRow title="Auto-open preview" description="Open preview after build" checked={s.autoOpenPreview} onChange={(v) => update("autoOpenPreview", v)} />
+          <ToggleRow title="Auto-save" description="Save changes automatically" checked={s.autoSave} onChange={(v) => update("autoSave", v)} />
         </div>
       </SettingsCard>
       <SettingsCard title="Approval rules" description="When to ask before acting">
         <div className="space-y-3">
-          <ToggleRow title="Require deployment approval" description="Ask before deploying to production" checked={true} onChange={() => {}} />
-          <ToggleRow title="Require file write approval" description="Ask before modifying files" checked={false} onChange={() => {}} />
+          <ToggleRow title="Require deployment approval" description="Ask before deploying to production" checked={s.requireDeployApproval} onChange={(v) => update("requireDeployApproval", v)} />
+          <ToggleRow title="Require file write approval" description="Ask before modifying files" checked={s.requireFileWriteApproval} onChange={(v) => update("requireFileWriteApproval", v)} />
         </div>
       </SettingsCard>
       <SettingsCard title="Failure recovery" description="What happens when things go wrong">
-        <ToggleRow title="Auto-retry on failure" description="Retry failed operations" checked={true} onChange={() => {}} />
+        <div className="space-y-3">
+          <ToggleRow title="Auto-retry on failure" description="Retry failed operations" checked={s.autoRetry} onChange={(v) => update("autoRetry", v)} />
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Max retries</span>
+            <div className="mt-1 flex gap-2">
+              {[1, 2, 3, 5].map((n) => (
+                <button key={n} type="button" onClick={() => update("maxRetries", n)}
+                  className="rounded-lg border px-3 py-1.5 text-[10px] font-bold"
+                  style={{ borderColor: s.maxRetries === n ? _T.accentColor : "rgba(255,255,255,0.08)", color: s.maxRetries === n ? _T.accentColor : "rgba(255,255,255,0.5)" }}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </SettingsCard>
     </div>
   );
@@ -2184,23 +2195,41 @@ function AutomationSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolved
 /* ── Notifications ─────────────────────────────────────────────────── */
 
 function NotificationsSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const [s, update] = useLocalSettings("notifications", {
+    browserNotifications: true,
+    emailNotifications: false,
+    missionCompletion: true,
+    deploymentFailures: true,
+    connectionErrors: true,
+    billingUsage: false,
+    securityAlerts: true,
+    quietHoursEnabled: false,
+    quietStart: "22:00",
+    quietEnd: "08:00",
+  });
+
   return (
     <div className="space-y-4">
       <SettingsCard title="Alerts" description="What you get notified about" icon={<Bell size={16} />}>
         <div className="space-y-3">
-          <ToggleRow title="Browser notifications" description="Show desktop notifications" checked={true} onChange={() => {}} />
-          <ToggleRow title="Email notifications" description="Send alerts to your email" checked={false} onChange={() => {}} />
-          <ToggleRow title="Mission completion" description="When a mission finishes" checked={true} onChange={() => {}} />
-          <ToggleRow title="Deployment failures" description="When a deployment fails" checked={true} onChange={() => {}} />
-          <ToggleRow title="Connection errors" description="When a service disconnects" checked={true} onChange={() => {}} />
-          <ToggleRow title="Billing usage" description="When you approach spend limits" checked={false} onChange={() => {}} />
-          <ToggleRow title="Security alerts" description="Suspicious activity on your account" checked={true} onChange={() => {}} />
+          <ToggleRow title="Browser notifications" description="Show desktop notifications" checked={s.browserNotifications} onChange={(v) => update("browserNotifications", v)} />
+          <ToggleRow title="Email notifications" description="Send alerts to your email" checked={s.emailNotifications} onChange={(v) => update("emailNotifications", v)} />
+          <ToggleRow title="Mission completion" description="When a mission finishes" checked={s.missionCompletion} onChange={(v) => update("missionCompletion", v)} />
+          <ToggleRow title="Deployment failures" description="When a deployment fails" checked={s.deploymentFailures} onChange={(v) => update("deploymentFailures", v)} />
+          <ToggleRow title="Connection errors" description="When a service disconnects" checked={s.connectionErrors} onChange={(v) => update("connectionErrors", v)} />
+          <ToggleRow title="Billing usage" description="When you approach spend limits" checked={s.billingUsage} onChange={(v) => update("billingUsage", v)} />
+          <ToggleRow title="Security alerts" description="Suspicious activity on your account" checked={s.securityAlerts} onChange={(v) => update("securityAlerts", v)} />
         </div>
       </SettingsCard>
       <SettingsCard title="Quiet hours" description="Mute notifications during specific times">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <SettingsInput label="Start" value="22:00" onChange={() => {}} type="time" />
-          <SettingsInput label="End" value="08:00" onChange={() => {}} type="time" />
+        <div className="space-y-3">
+          <ToggleRow title="Enable quiet hours" description="Mute notifications during a time window" checked={s.quietHoursEnabled} onChange={(v) => update("quietHoursEnabled", v)} />
+          {s.quietHoursEnabled && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SettingsInput label="Start" value={s.quietStart} onChange={(v) => update("quietStart", v)} type="time" />
+              <SettingsInput label="End" value={s.quietEnd} onChange={(v) => update("quietEnd", v)} type="time" />
+            </div>
+          )}
         </div>
       </SettingsCard>
     </div>
@@ -2399,6 +2428,12 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
   const [deleting, setDeleting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [privacy, updatePrivacy] = useLocalSettings("privacy", {
+    analyticsOptIn: false,
+    publicProfile: true,
+    conversationStorage: true,
+    memoryUsage: true,
+  });
 
   const handleExport = async () => {
     setExporting(true);
@@ -2454,10 +2489,10 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
     <div className="space-y-4">
       <SettingsCard title="Data privacy" description="Control your data" icon={<Shield size={16} />}>
         <div className="space-y-3">
-          <ToggleRow title="Analytics opt-in" description="Share usage data to improve LiTTree" checked={false} onChange={() => {}} />
-          <ToggleRow title="Public profile" description="Make your profile visible to others" checked={true} onChange={() => {}} />
-          <ToggleRow title="Conversation storage" description="Save conversations to your account" checked={true} onChange={() => {}} />
-          <ToggleRow title="Memory usage" description="Allow agents to remember context" checked={true} onChange={() => {}} />
+          <ToggleRow title="Analytics opt-in" description="Share usage data to improve LiTTree" checked={privacy.analyticsOptIn} onChange={(v) => updatePrivacy("analyticsOptIn", v)} />
+          <ToggleRow title="Public profile" description="Make your profile visible to others" checked={privacy.publicProfile} onChange={(v) => updatePrivacy("publicProfile", v)} />
+          <ToggleRow title="Conversation storage" description="Save conversations to your account" checked={privacy.conversationStorage} onChange={(v) => updatePrivacy("conversationStorage", v)} />
+          <ToggleRow title="Memory usage" description="Allow agents to remember context" checked={privacy.memoryUsage} onChange={(v) => updatePrivacy("memoryUsage", v)} />
         </div>
       </SettingsCard>
 
@@ -2535,7 +2570,14 @@ function PrivacySection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 /* ── Performance ───────────────────────────────────────────────────── */
 
 function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [perfMode, setPerfMode] = useState<"battery" | "balanced" | "high" | "auto">("auto");
+  const [s, update] = useLocalSettings("performance", {
+    perfMode: "auto" as "battery" | "balanced" | "high" | "auto",
+    reduceAnimation: false,
+    reduceBackgroundEffects: false,
+    lazyLoadTools: true,
+    pauseInBackground: true,
+    lowerPreviewQuality: false,
+  });
 
   const perfOptions = [
     { id: "battery" as const, label: "Battery", desc: "Minimize effects and animations" },
@@ -2549,14 +2591,14 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       <SettingsCard title="Performance mode" description="Adjust visual effects and speed" icon={<Gauge size={16} />}>
         <div className="space-y-2">
           {perfOptions.map((opt) => (
-            <button key={opt.id} type="button" onClick={() => setPerfMode(opt.id)}
+            <button key={opt.id} type="button" onClick={() => update("perfMode", opt.id)}
               className="flex w-full items-center justify-between rounded-xl border p-3 text-left transition-all"
-              style={{ borderColor: perfMode === opt.id ? `${T.accentColor}40` : "rgba(255,255,255,0.06)", backgroundColor: perfMode === opt.id ? `${T.accentColor}10` : "transparent" }}>
+              style={{ borderColor: s.perfMode === opt.id ? `${T.accentColor}40` : "rgba(255,255,255,0.06)", backgroundColor: s.perfMode === opt.id ? `${T.accentColor}10` : "transparent" }}>
               <div>
-                <div className="text-xs font-bold" style={{ color: perfMode === opt.id ? T.accentColor : "rgba(255,255,255,0.8)" }}>{opt.label}</div>
+                <div className="text-xs font-bold" style={{ color: s.perfMode === opt.id ? T.accentColor : "rgba(255,255,255,0.8)" }}>{opt.label}</div>
                 <div className="text-[10px] text-white/40">{opt.desc}</div>
               </div>
-              {perfMode === opt.id && <Check size={14} style={{ color: T.accentColor }} />}
+              {s.perfMode === opt.id && <Check size={14} style={{ color: T.accentColor }} />}
             </button>
           ))}
         </div>
@@ -2568,11 +2610,11 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
       <SettingsCard title="Controls" description="Fine-tune performance">
         <div className="space-y-3">
-          <ToggleRow title="Reduce animation" description="Minimize motion and transitions" checked={perfMode === "battery"} onChange={() => {}} />
-          <ToggleRow title="Reduce background effects" description="Disable particles and animated backgrounds" checked={perfMode === "battery"} onChange={() => {}} />
-          <ToggleRow title="Lazy-load heavy tools" description="Defer loading Studio tools until needed" checked={true} onChange={() => {}} />
-          <ToggleRow title="Pause effects in background" description="Stop animations when tab is not visible" checked={true} onChange={() => {}} />
-          <ToggleRow title="Lower preview quality" description="Reduce preview rendering quality" checked={false} onChange={() => {}} />
+          <ToggleRow title="Reduce animation" description="Minimize motion and transitions" checked={s.reduceAnimation || s.perfMode === "battery"} onChange={(v) => update("reduceAnimation", v)} />
+          <ToggleRow title="Reduce background effects" description="Disable particles and animated backgrounds" checked={s.reduceBackgroundEffects || s.perfMode === "battery"} onChange={(v) => update("reduceBackgroundEffects", v)} />
+          <ToggleRow title="Lazy-load heavy tools" description="Defer loading Studio tools until needed" checked={s.lazyLoadTools} onChange={(v) => update("lazyLoadTools", v)} />
+          <ToggleRow title="Pause effects in background" description="Stop animations when tab is not visible" checked={s.pauseInBackground} onChange={(v) => update("pauseInBackground", v)} />
+          <ToggleRow title="Lower preview quality" description="Reduce preview rendering quality" checked={s.lowerPreviewQuality} onChange={(v) => update("lowerPreviewQuality", v)} />
         </div>
       </SettingsCard>
     </div>
@@ -2582,13 +2624,36 @@ function PerformanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 /* ── Advanced ──────────────────────────────────────────────────────── */
 
 function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const [dev, updateDev] = useLocalSettings("developer", {
+    debugMode: false,
+    verboseLogging: false,
+    experimentalFeatures: false,
+  });
+  const [flags, updateFlag] = useLocalSettings("feature-flags", {
+    maintenanceMode: false,
+    newRegistration: true,
+    marketplace: true,
+    betaMode: true,
+    billingEnabled: false,
+  });
+
   return (
     <div className="space-y-4">
       <SettingsCard title="Developer options" description="Advanced overrides" icon={<Terminal size={16} />}>
         <div className="space-y-3">
-          <ToggleRow title="Debug mode" description="Show debug information in UI" checked={false} onChange={() => {}} />
-          <ToggleRow title="Verbose logging" description="Detailed console output" checked={false} onChange={() => {}} />
-          <ToggleRow title="Experimental features" description="Enable beta features" checked={false} onChange={() => {}} />
+          <ToggleRow title="Debug mode" description="Show debug information in UI" checked={dev.debugMode} onChange={(v) => updateDev("debugMode", v)} />
+          <ToggleRow title="Verbose logging" description="Detailed console output" checked={dev.verboseLogging} onChange={(v) => updateDev("verboseLogging", v)} />
+          <ToggleRow title="Experimental features" description="Enable beta features" checked={dev.experimentalFeatures} onChange={(v) => updateDev("experimentalFeatures", v)} />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Feature flags" description="Enable or disable platform features">
+        <div className="space-y-3">
+          <ToggleRow title="Maintenance mode" description="Take the platform offline" checked={flags.maintenanceMode} onChange={(v) => updateFlag("maintenanceMode", v)} />
+          <ToggleRow title="New user registration" description="Allow new signups" checked={flags.newRegistration} onChange={(v) => updateFlag("newRegistration", v)} />
+          <ToggleRow title="Marketplace" description="Enable marketplace" checked={flags.marketplace} onChange={(v) => updateFlag("marketplace", v)} />
+          <ToggleRow title="Beta mode" description="Show beta features to all users" checked={flags.betaMode} onChange={(v) => updateFlag("betaMode", v)} />
+          <ToggleRow title="Billing enablement" description="Allow purchases (disabled in beta)" checked={flags.billingEnabled} onChange={(v) => updateFlag("billingEnabled", v)} />
         </div>
       </SettingsCard>
 
@@ -2605,7 +2670,7 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
 
       <SettingsCard title="Diagnostics" description="System health and capability states">
         <div className="space-y-2">
-          {["Raw capability states", "Debug logs", "API configuration", "Terminal diagnostics", "Feature flags"].map((item) => (
+          {["Raw capability states", "Debug logs", "API configuration", "Terminal diagnostics", "Worker status", "Queue status", "Cache controls", "Database tools"].map((item) => (
             <button key={item} type="button"
               className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
               style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}>
@@ -2635,68 +2700,6 @@ function AdvancedSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedCo
   );
 }
 
-/* ── System Control (owner only) ───────────────────────────────────── */
+/* ── System Control removed — feature flags and system health
+       moved into Advanced section ─────────────────────────────────── */
 
-function SystemControlSection({ T: _T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border p-4" style={{ borderColor: "#ef444430", backgroundColor: "#ef444408" }}>
-        <div className="flex items-center gap-2">
-          <Server size={16} className="text-red-400" />
-          <span className="text-sm font-black text-red-400">System Control</span>
-        </div>
-        <p className="mt-1 text-xs text-white/50">
-          These controls affect the entire platform. Changes are audit-logged and require confirmation.
-        </p>
-      </div>
-
-      <SettingsCard title="Feature flags" description="Enable or disable platform features" icon={<Server size={16} />}>
-        <div className="space-y-3">
-          <ToggleRow title="Maintenance mode" description="Take the platform offline" checked={false} onChange={() => {}} />
-          <ToggleRow title="New user registration" description="Allow new signups" checked={true} onChange={() => {}} />
-          <ToggleRow title="Marketplace" description="Enable marketplace" checked={true} onChange={() => {}} />
-          <ToggleRow title="Beta mode" description="Show beta features to all users" checked={true} onChange={() => {}} />
-          <ToggleRow title="Billing enablement" description="Allow purchases (disabled in beta)" checked={false} onChange={() => {}} />
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="User management" description="Roles and permissions">
-        <div className="space-y-2">
-          {["User roles", "User suspension", "Balance adjustments", "Global permissions"].map((action) => (
-            <button key={action} type="button"
-              className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
-              style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}>
-              {action}
-              <ChevronRight size={12} className="pointer-events-none text-white/30" />
-            </button>
-          ))}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="System health" description="Infrastructure status">
-        <div className="space-y-2">
-          {["Worker status", "Queue status", "Cache controls", "Database tools", "System providers"].map((item) => (
-            <button key={item} type="button"
-              className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-bold transition-all hover:bg-white/5"
-              style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)" }}>
-              {item}
-              <ChevronRight size={12} className="pointer-events-none text-white/30" />
-            </button>
-          ))}
-        </div>
-      </SettingsCard>
-    </div>
-  );
-}
-
-/* ── Locked section ────────────────────────────────────────────────── */
-
-function LockedSection({ T: _T, label }: { T: ReturnType<typeof useTheme>["resolvedColors"]; label: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <Lock size={32} className="text-white/20" />
-      <p className="mt-4 text-sm font-bold text-white/40">{label} is locked</p>
-      <p className="mt-1 text-xs text-white/25">Owner verification required to access this section.</p>
-    </div>
-  );
-}

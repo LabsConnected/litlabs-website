@@ -35,7 +35,7 @@ const CARD_PLANS: CardPlan[] = [
     id: "starter",
     name: PLANS.starter.name,
     label: "Explore LiTTree",
-    price: formatPrice(PLANS.starter.monthlyPriceCents),
+    price: formatPrice(PLANS.starter.default_price),
     suffix: "forever",
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
@@ -49,7 +49,7 @@ const CARD_PLANS: CardPlan[] = [
     id: "creator_beta",
     name: PLANS.creator_beta.name,
     label: "Best for creators",
-    price: formatPrice(PLANS.creator_beta.monthlyPriceCents),
+    price: formatPrice(PLANS.creator_beta.default_price),
     suffix: "/month",
     futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
     description: PLANS.creator_beta.description,
@@ -64,7 +64,7 @@ const CARD_PLANS: CardPlan[] = [
     id: "pro_builder_beta",
     name: PLANS.pro_builder_beta.name,
     label: "For serious builders",
-    price: formatPrice(PLANS.pro_builder_beta.monthlyPriceCents),
+    price: formatPrice(PLANS.pro_builder_beta.default_price),
     suffix: "/month",
     futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
     description: PLANS.pro_builder_beta.description,
@@ -355,6 +355,29 @@ export default function PricingPage() {
         </article>
 
         {error ? <div className={styles.errorBanner}>{error}</div> : null}
+      </section>
+
+      <section className={styles.trustSection} aria-label="Trust signals">
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Trust & support</p>
+            <h2>Built for real workflows, with real protections.</h2>
+          </div>
+          <p>If something breaks, you keep what you built. If you change your mind, you keep your access.</p>
+        </div>
+        <div className={styles.trustGrid}>
+          {[
+            { title: "Cancel anytime", copy: "Cancellation stops future renewals. Access continues through the paid period." },
+            { title: "No surprise charges", copy: "Billable actions show cost before they run. Credits are used predictably." },
+            { title: "Your assets stay yours", copy: "Downgrades and cancellations never delete projects, media, or data." },
+            { title: "Support channel", copy: "Need help? Reach out from Settings → Connections → Diagnostics." },
+          ].map((item) => (
+            <article key={item.title} className={styles.trustCard}>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className={styles.rulesSection}>

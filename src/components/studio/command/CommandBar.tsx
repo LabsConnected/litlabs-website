@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useStudioStore } from "@/stores/useStudioStore";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -38,7 +39,8 @@ const DEFAULT_COMMANDS: CommandItem[] = [
 ];
 
 export function CommandBar() {
-  const { commandBarOpen, setCommandBarOpen } = useStudioStore();
+  const router = useRouter();
+  const { commandBarOpen, setCommandBarOpen, setMode, setLeftRailTab, setBottomDockTab } = useStudioStore();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +60,46 @@ export function CommandBar() {
       )
     : DEFAULT_COMMANDS;
 
+  const executeCommand = (cmd: CommandItem | undefined) => {
+    if (!cmd) return;
+    setCommandBarOpen(false);
+    switch (cmd.id) {
+      case "build":
+      case "create-app":
+      case "design-logo":
+      case "generate-image":
+      case "generate-music":
+        setMode("canvas");
+        setLeftRailTab("projects");
+        break;
+      case "open-terminal":
+        setBottomDockTab("terminal");
+        break;
+      case "open-files":
+        setLeftRailTab("files");
+        break;
+      case "open-preview":
+        setMode("preview");
+        break;
+      case "deploy":
+      case "run-tests":
+        setLeftRailTab("deploy");
+        break;
+      case "remember":
+        setMode("chat");
+        setBottomDockTab("chat");
+        break;
+      case "memory":
+        setLeftRailTab("memory");
+        break;
+      case "agents":
+        setLeftRailTab("agents");
+        break;
+      default:
+        break;
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -67,11 +109,7 @@ export function CommandBar() {
       setSelectedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const selected = filtered[selectedIndex];
-      if (selected) {
-        // TODO: Execute command
-        setCommandBarOpen(false);
-      }
+      executeCommand(filtered[selectedIndex]);
     }
   };
 
@@ -128,7 +166,7 @@ export function CommandBar() {
                     <button
                       key={cmd.id}
                       onMouseEnter={() => setSelectedIndex(index)}
-                      onClick={() => setCommandBarOpen(false)}
+                      onClick={() => executeCommand(cmd)}
                       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
                         active ? "bg-[#8b5cf6]/10" : "hover:bg-white/[0.02]"
                       }`}

@@ -16,7 +16,7 @@
     "performance": "Use pnpm filters for targeted builds. Enable incremental type checking. Run typecheck in background."
   },
   "paths": {
-    "primary": "C:/Users/litbi/CascadeProjects/litlab",
+    "primary": "E:/LiTTreeLabStudio Prod",
     "codespace": "/workspaces/litlabs-website",
     "archived": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo"
   },
@@ -26,7 +26,16 @@
       "agentChat": "Ctrl+; a",
       "terminalSend": "Ctrl+Enter",
       "quickFix": "Ctrl+.",
-      "renameSymbol": "F2"
+      "renameSymbol": "F2",
+      "jumpToDefinition": "F12",
+      "peekDefinition": "Alt+F12",
+      "multiCursor": "Alt+Click",
+      "lineDuplicate": "Shift+Alt+Down"
+    },
+    "buildOptimizations": {
+      "incremental": true,
+      "turboPackCache": true,
+      "typeCheckOnlyChanged": true
     }
   }
 }

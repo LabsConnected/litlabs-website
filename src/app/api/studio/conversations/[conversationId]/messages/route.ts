@@ -294,15 +294,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     ? { [provider]: body.model } as Record<string, string>
     : undefined;
 
-  // Debug: log the LLM routing parameters
-  console.log("[studio messages] LLM params:", {
-    category,
-    provider,
-    model: body.model,
-    modelOverride,
-    promptLength: prompt.length,
-    agentSlug,
-  });
   const encoder = new TextEncoder();
   const event = (payload: Record<string, unknown>) =>
     encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
@@ -396,7 +387,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }, reservedCredits);
         }
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
-        console.error("[studio messages] streamText failed:", errorMsg, "| prompt length:", prompt.length, "| category:", category, "| provider:", provider);
         studioLog("message:failed", {
           conversationId: conversation.id,
           userId,
@@ -405,8 +395,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         });
         controller.enqueue(event({
           type: "error",
-          message: "Provider unavailable",
-          detail: errorMsg,
+          message: errorMsg,
           partialText: assistantText || undefined,
         }));
       } finally {

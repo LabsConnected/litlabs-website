@@ -28,6 +28,8 @@
  *   get_dashboard       — get dashboard summary
  *   get_staff_hours     — get staff availability
  *   update_staff_hours  — update staff hours (admin)
+ *   get_project_knowledge — get verified project knowledge (architecture, deps, etc.)
+ *   search_project_knowledge — search project knowledge by keyword
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -397,7 +399,44 @@ async function handleOperation(
       return `Staff hours updated for ${result.staffName}.`;
     }
 
+    // ─── Project Knowledge ───────────────────────────────────
+    case "get_project_knowledge": {
+      const projectId = (p.project_id as string) || "";
+      if (!projectId) return "Missing project_id.";
+      const category = p.category as string | undefined;
+      const { KnowledgeService } = await import("@/lib/litt-intelligence/knowledge-service");
+      const ks = new KnowledgeService();
+      const records = await ks.search(ownerId, projectId, {
+        category: category as never,
+        verificationStatus: "verified",
+        limit: 20,
+      });
+      if (records.length === 0) return "No project knowledge found. Ask the owner to scan the project first.";
+      return records.map((r) =>
+        `[${r.category}] ${r.content}${r.sourceReference ? ` (source: ${r.sourceReference})` : ""}`,
+      ).join("\n");
+    }
+
+    case "search_project_knowledge": {
+      const projectId = (p.project_id as string) || "";
+      const query = (p.query as string) || "";
+      if (!projectId || !query) return "Missing project_id or query.";
+      const { KnowledgeService } = await import("@/lib/litt-intelligence/knowledge-service");
+      const ks = new KnowledgeService();
+      const records = await ks.search(ownerId, projectId, { limit: 30 });
+      if (records.length === 0) return "No project knowledge found.";
+      const lower = query.toLowerCase();
+      const matches = records.filter((r) =>
+        r.content.toLowerCase().includes(lower) ||
+        r.category.toLowerCase().includes(lower),
+      );
+      if (matches.length === 0) return `No knowledge matching "${query}".`;
+      return matches.map((r) =>
+        `[${r.category}] ${r.content}${r.sourceReference ? ` (source: ${r.sourceReference})` : ""}`,
+      ).join("\n");
+    }
+
     default:
-      return `Unknown operation: ${operation}. Available: get_config, update_config, list_services, get_service, create_service, update_service, delete_service, get_available_slots, create_booking, get_booking, find_bookings, reschedule_booking, cancel_booking, create_lead, update_lead_status, create_escalation, get_dashboard, get_staff_hours, update_staff_hours`;
+      return `Unknown operation: ${operation}. Available: get_config, update_config, list_services, get_service, create_service, update_service, delete_service, get_available_slots, create_booking, get_booking, find_bookings, reschedule_booking, cancel_booking, create_lead, update_lead_status, create_escalation, get_dashboard, get_staff_hours, update_staff_hours, get_project_knowledge, search_project_knowledge`;
   }
 }

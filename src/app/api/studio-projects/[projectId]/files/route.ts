@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace, getProject, updateProjectWorkspace } from "@/lib/projects/project-repository";
+import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
+import { getInstallationToken } from "@/lib/github-app";
 
 /**
  * Project-bound file operations.
@@ -22,6 +24,7 @@ const TERMINAL_BASE = () =>
 /**
  * GET /api/studio-projects/[projectId]/files?path=...
  * List directory contents in the project workspace.
+ * Auto-recovers if the terminal server lost the workspace.
  */
 export async function GET(
   request: NextRequest,
@@ -33,7 +36,72 @@ export async function GET(
   const { projectId } = await params;
 
   try {
-    const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+    let verified;
+    try {
+      verified = await verifyProjectWorkspace(projectId, userId);
+    } catch (verifyErr) {
+      // Workspace might be stale (terminal server restarted).
+      // Try to auto-re-prepare before giving up.
+      const code = (verifyErr as { code?: string }).code;
+      if (code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY") {
+        // Check if the workspace still exists on the terminal server
+        const project = await getProject(projectId, userId);
+        if (project && project.workspaceId) {
+          const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+          if (!ws) {
+            // Workspace was lost — reset and re-prepare
+            await updateProjectWorkspace(projectId, userId, {
+              workspaceId: null,
+              workspaceStatus: "not_prepared",
+              workspaceRoot: null,
+              workspaceError: null,
+            });
+
+            // Re-prepare
+            if (project.sourceType === "github" && project.githubInstallationId && project.githubOwner && project.githubRepo) {
+              const githubToken = await getInstallationToken(project.githubInstallationId);
+              const result = await prepareWorkspaceInternal({
+                sourceType: "github",
+                userId,
+                projectId,
+                installationId: project.githubInstallationId,
+                owner: project.githubOwner,
+                repo: project.githubRepo,
+                branch: project.githubBranch ?? "main",
+                commitSha: project.latestCommitSha,
+                githubToken,
+              });
+              await updateProjectWorkspace(projectId, userId, {
+                workspaceId: result.workspaceId,
+                workspaceStatus: "ready",
+                workspaceRoot: result.root,
+                workspaceError: null,
+              });
+              // Retry verification
+              verified = await verifyProjectWorkspace(projectId, userId);
+            } else {
+              throw verifyErr;
+            }
+          } else {
+            // Workspace exists but isn't marked ready — update status
+            await updateProjectWorkspace(projectId, userId, {
+              workspaceStatus: ws.ready ? "ready" : "preparing",
+            });
+            if (ws.ready) {
+              verified = await verifyProjectWorkspace(projectId, userId);
+            } else {
+              throw verifyErr;
+            }
+          }
+        } else {
+          throw verifyErr;
+        }
+      } else {
+        throw verifyErr;
+      }
+    }
+
+    const { workspaceId } = verified;
     const path = request.nextUrl.searchParams.get("path") || ".";
     const { token } = createTerminalToken(userId);
 

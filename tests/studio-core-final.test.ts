@@ -58,7 +58,29 @@ vi.mock("@/lib/capabilities/translate", () => ({
 }));
 
 vi.mock("@/lib/litt-kernel", () => ({
-  routeKernel: vi.fn(() => ({ decision: { mode: "chat", guidance: "" } })),
+  routeKernel: vi.fn(() => ({
+    decision: {
+      routing: {
+        mode: "chat",
+        domains: [],
+        requiresProject: false,
+        requiresCurrentInformation: false,
+        requiresPrivateData: false,
+        requiresExecution: false,
+      },
+      planning: {
+        required: false,
+        specialistRoles: [],
+        parallelAllowed: false,
+      },
+      governance: {
+        risk: "low",
+        approvalRequired: false,
+        reflection: "light",
+      },
+      guidance: "",
+    },
+  })),
   composeSystemPrompt: vi.fn(() => "System prompt"),
   adaptLegacyCapability: vi.fn(),
 }));

@@ -31,7 +31,7 @@ export async function PATCH(
     const ownership = await checkOwnership(canvasId, userId);
     if ("error" in ownership) return ownership.error;
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const actor = (body.actor as "user" | "litt" | "spark" | "system") ?? "user";
     const sourceMessageId = body.sourceMessageId as string | undefined;
 

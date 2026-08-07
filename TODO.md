@@ -1,6 +1,6 @@
 # Terminal Pipeline — Known Follow-Ups
 
-## Stale Provisioning Lock Recovery (TODO)
+## Stale Provisioning Lock Recovery (DONE)
 
 `claimProvisioningLock()` in `src/lib/projects/project-repository.ts` transitions
 `workspace_status` from `not_prepared`/`failed` to `provisioning`. If the request
@@ -8,15 +8,13 @@ crashes after claiming the lock (serverless timeout, OOM, network failure), the 
 stays `provisioning` forever — no new claim can proceed because `claimProvisioningLock`
 only matches `not_prepared`/`failed`.
 
-**Required recovery logic:**
-- Detect `workspace_status = 'provisioning'` where `updated_at` is older than a safe
-  timeout (e.g. 5 minutes)
-- Atomically transition stale `provisioning` -> `failed` with
-  `workspace_error = 'Provisioning timed out'`
-- Allow a new `claimProvisioningLock` to succeed on the now-`failed` row
-- Preserve the previous `workspace_error` for diagnostics if it exists
-- Implement as `recoverStaleProvisioning(projectId, userId, maxAgeMs)` called at the
-  top of the prepare route before `claimProvisioningLock`
+**Implemented:**
+- `recoverStaleProvisioning(projectId, userId, maxAgeMs)` detects stale `provisioning`
+  rows older than 5 minutes and atomically transitions them to `failed`
+- Previous `workspace_error` is preserved and appended with ` | Provisioning timed out`
+  for diagnostics
+- Called at the top of `src/app/api/studio-projects/[projectId]/workspace/prepare/route.ts`
+  before `claimProvisioningLock`
 
 ## Production Runtime (BLOCKED)
 

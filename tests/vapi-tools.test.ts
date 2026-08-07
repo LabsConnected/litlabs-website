@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
+import { NextRequest } from "next/server";
 import {
   isSafeWorkspacePath,
   isSafeToolName,
@@ -348,11 +349,25 @@ describe("POST /api/vapi/tools — route handler", () => {
     rateLimit: vi.fn(() => Promise.resolve({ success: true, remaining: 59, resetTime: 60 })),
   }));
 
-  // Import after mocks are set up
-  const { POST } = await import("@/app/api/vapi/tools/route");
-  const { getProject } = await import("@/lib/projects/project-repository");
-  const { resolveCurrentProject } = await import("@/lib/projects/resolve-current-project");
-  const { getDeployments } = await import("@/lib/deployments");
+  let POST: typeof import("@/app/api/vapi/tools/route").POST;
+  let getProject: typeof import("@/lib/projects/project-repository").getProject;
+  let verifyProjectWorkspace: typeof import("@/lib/projects/project-repository").verifyProjectWorkspace;
+  let updateProjectRuntime: typeof import("@/lib/projects/project-repository").updateProjectRuntime;
+  let resolveCurrentProject: typeof import("@/lib/projects/resolve-current-project").resolveCurrentProject;
+  let getDeployments: typeof import("@/lib/deployments").getDeployments;
+
+  beforeAll(async () => {
+    const route = await import("@/app/api/vapi/tools/route");
+    POST = route.POST;
+    const projectRepo = await import("@/lib/projects/project-repository");
+    getProject = projectRepo.getProject;
+    verifyProjectWorkspace = projectRepo.verifyProjectWorkspace;
+    updateProjectRuntime = projectRepo.updateProjectRuntime;
+    const resolveProj = await import("@/lib/projects/resolve-current-project");
+    resolveCurrentProject = resolveProj.resolveCurrentProject;
+    const deps = await import("@/lib/deployments");
+    getDeployments = deps.getDeployments;
+  });
 
   function makeRequest(body: unknown, headers: Record<string, string> = {}): import("next/server").NextRequest {
     return new NextRequest("https://litlabs.net/api/vapi/tools", {

@@ -16,6 +16,10 @@ export async function POST(req: Request) {
   const rl = await withRateLimit({ key, tier: 'ai' });
   if (rl) return rl;
 
-  // TODO: preflight estimate, require confirm, call provider, log billing
-  return NextResponse.json({ ok: true, detail: 'execute placeholder' });
+  // Provider execution must be wired to a real billing + auth path.
+  // Returning success without executing is a silent failure.
+  return NextResponse.json(
+    { error: "not_implemented", detail: "Provider execute is not wired" },
+    { status: 501 }
+  );
 }

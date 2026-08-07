@@ -57,7 +57,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const actor = (body.actor as "user" | "litt" | "spark" | "system") ?? "user";
     const sourceMessageId = body.sourceMessageId as string | undefined;
 

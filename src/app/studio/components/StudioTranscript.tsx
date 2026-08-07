@@ -491,6 +491,22 @@ export default function StudioTranscript({
                     }}
                   />
                 )}
+                {/* Work log progress indicator — shows step completion for assistant messages */}
+                {!isUser && !isStreaming && hasContent && (
+                  <div
+                    className="mt-1 flex items-center gap-1.5 px-1 text-[9px] font-bold"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: isFailed ? "#ef4444" : "var(--litt-primary)" }}
+                      aria-hidden
+                    />
+                    <span>
+                      Work log · {isFailed ? "0" : (message.actions?.length ?? 1)} of {message.actions?.length ?? 1} steps {isFailed ? "failed" : "complete"}
+                    </span>
+                  </div>
+                )}
                 {/* Pinned indicator badge */}
                 {isPinned && (
                   <div

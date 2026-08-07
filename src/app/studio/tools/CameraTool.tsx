@@ -5,7 +5,7 @@ import CameraSession from "../components/CameraSession";
 import { useTheme } from "@/context/ThemeContext";
 import { Sparkles, Save, Trash2, Loader2 } from "lucide-react";
 
-export default function CameraTool() {
+export default function CameraTool({ onStatusChange }: { onStatusChange?: (status: string) => void }) {
   const { resolvedColors: T } = useTheme();
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [visionResult, setVisionResult] = useState<string | null>(null);
@@ -76,6 +76,7 @@ export default function CameraTool() {
         modelName="Gemini 2.5 Flash Vision"
         onSnapshot={handleSnapshot}
         onClose={clearSnapshot}
+        onStatusChange={onStatusChange}
       />
 
       {snapshot && (

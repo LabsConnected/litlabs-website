@@ -40,6 +40,10 @@ export interface RawCapabilities {
     errorCode?: string;
     message?: string;
   };
+  /** Camera dock is open in the Studio. Client-derived. */
+  cameraActive?: boolean;
+  /** Camera stream status (live, paused, idle, etc). Client-derived. */
+  cameraStatus?: string;
 }
 
 export interface CapabilityTranslation {
@@ -235,6 +239,21 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push(`Voice activity: ${voiceActivityState}`);
   parts.push(`Voice summary: ${voiceFullState}`);
 
+  // ── Camera state (INDEPENDENT of voice/GitHub/terminal) ──
+  const cameraActive = caps.cameraActive === true;
+  const cameraStatus = caps.cameraStatus ?? "idle";
+  let cameraState: string;
+  if (cameraActive && cameraStatus === "live") {
+    cameraState = "Camera is active and streaming live video. The user can capture a frame and ask you to analyze it via the Camera tool's 'Ask LiTT what it sees' button. You CAN see camera frames when the user explicitly shares them.";
+  } else if (cameraActive && cameraStatus === "paused") {
+    cameraState = "Camera is open but paused. The user can resume the feed and capture a frame for you to analyze.";
+  } else if (cameraActive) {
+    cameraState = "Camera dock is open but the stream is not live yet.";
+  } else {
+    cameraState = "Camera is not open. The user can open the Camera tool from the Studio toolbar to capture frames for you to analyze.";
+  }
+  parts.push(`Camera: ${cameraState}`);
+
   parts.push(
     `Other services: ${hasConnections ? connected.join(", ") : "none connected"}`,
   );
@@ -257,6 +276,10 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- If live microphone state is unavailable, say: \"I received your voice transcript. The microphone is no longer listening.\" Do not pretend you can hear in real-time.");
   parts.push("- Voice is push-to-talk only. Do not tell the user you are continuously listening or that they can just speak freely. They must tap the microphone to talk.");
   parts.push("- If a transcript was rejected (filler, noise, duplicate, too short), do not respond to it. Only respond to transcripts the user explicitly sent or approved.");
+  parts.push("- Camera is a SEPARATE capability from voice. Camera being off does NOT mean voice is off. Voice being off does NOT mean camera is off.");
+  parts.push("- You CAN see camera frames when the user explicitly shares them via the Camera tool. Do NOT claim you cannot see the camera — say 'I can see frames you share from the Camera tool' instead.");
+  parts.push("- Do NOT claim you are continuously watching the camera feed. You only see frames the user explicitly captures and sends.");
+  parts.push("- If the user asks 'can you see through the camera', answer based on the Camera state above. If camera is active, say yes and explain they can capture a frame for you to analyze. If camera is not open, tell them to open the Camera tool.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
   parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
   parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Report voice, GitHub, and terminal SEPARATELY. Example: 'Chat and Inworld voice are available. GitHub and the terminal are not connected, so build tools are currently unavailable.' Do NOT group voice with GitHub or terminal.");

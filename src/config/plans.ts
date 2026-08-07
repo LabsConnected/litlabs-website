@@ -13,6 +13,7 @@ export interface PlanDefinition {
   billingType: BillingType;
   monthlyPriceCents: number | null;
   standardPriceCents: number | null;
+  default_price: number | null;
   stripePriceIdEnv?: string;
   monthlyCredits: number;
   activeProjectLimit: number;
@@ -30,6 +31,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     billingType: "free",
     monthlyPriceCents: 0,
     standardPriceCents: 0,
+    default_price: 0,
     monthlyCredits: 500,
     activeProjectLimit: 1,
     features: [
@@ -53,6 +55,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     billingType: "subscription",
     monthlyPriceCents: 700,
     standardPriceCents: 1500,
+    default_price: 700,
     stripePriceIdEnv: "STRIPE_PRICE_CREATOR_BETA",
     monthlyCredits: 6000,
     activeProjectLimit: 5,
@@ -78,6 +81,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     billingType: "subscription",
     monthlyPriceCents: 1900,
     standardPriceCents: 3900,
+    default_price: 1900,
     stripePriceIdEnv: "STRIPE_PRICE_PRO_BUILDER_BETA",
     monthlyCredits: 20000,
     activeProjectLimit: 25,
@@ -105,6 +109,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     billingType: "one_time",
     monthlyPriceCents: 14900,
     standardPriceCents: null,
+    default_price: 14900,
     stripePriceIdEnv: "STRIPE_PRICE_FOUNDER",
     monthlyCredits: 0,
     activeProjectLimit: 5,
