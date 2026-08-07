@@ -29,8 +29,22 @@ const homeSchema = {
       "@type": "Organization",
       "@id": `${SITE_URL}/#organization`,
       name: SITE_NAME,
-      alternateName: ["LiTT Labs", "litlabs.net"],
+      alternateName: [
+        "LiTTree",
+        "LiTTree Labs",
+        "LiTTree LabStudio",
+        "LitLabs",
+        "Lit Labs",
+        "LiTT Labs",
+        "litlabs.net",
+      ],
       url: SITE_URL,
+      sameAs: [
+        // TODO: add real profile URLs — X, GitHub, YouTube, LinkedIn, Instagram.
+        // sameAs is the single strongest entity-disambiguation signal for a
+        // brand Google does not yet recognize. Leave this array out entirely
+        // rather than shipping placeholder or empty values.
+      ],
       logo: {
         "@type": "ImageObject",
         url: absoluteUrl("/icon-512.png"),

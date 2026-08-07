@@ -30,6 +30,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: absoluteUrl("/showcase"),
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    ...["artist-launch-site", "small-business-dashboard", "music-campaign"].map(
+      (slug) => ({
+        url: absoluteUrl(`/showcase/${slug}`),
+        changeFrequency: "monthly" as const,
+        priority: 0.7,
+      }),
+    ),
+    {
       url: absoluteUrl("/privacy"),
       changeFrequency: "yearly",
       priority: 0.3,
