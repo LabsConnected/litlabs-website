@@ -210,6 +210,60 @@ export async function POST(req: NextRequest) {
     console.error("[elevenlabs-init] Myaios context failed:", err);
   }
 
+  // Step 4b: Load project knowledge so LiTT can answer questions about
+  // the caller's actual project — tech stack, architecture, dependencies,
+  // known issues, and capabilities. This is what makes MyAios "read" the
+  // project instead of just knowing business config.
+  if (projectId) {
+    try {
+      const { KnowledgeService } = await import("@/lib/litt-intelligence/knowledge-service");
+      const ks = new KnowledgeService();
+      const records = await ks.search(userId, projectId, {
+        verificationStatus: "verified",
+        limit: 30,
+      });
+
+      if (records.length > 0) {
+        myaiosContext += `\n\nPROJECT KNOWLEDGE (${records.length} facts):\n`;
+        // Group by category for readability
+        const byCategory = new Map<string, string[]>();
+        for (const r of records) {
+          const arr = byCategory.get(r.category) ?? [];
+          arr.push(r.content);
+          byCategory.set(r.category, arr);
+        }
+        for (const [category, items] of byCategory) {
+          myaiosContext += `\n${category.toUpperCase().replace(/_/g, " ")}:\n`;
+          myaiosContext += items.map((c) => `  - ${c}`).join("\n");
+        }
+        myaiosContext += `\n\nUse the myaios tool with operation "search_project_knowledge" to find specific facts about the project.`;
+      }
+    } catch (err) {
+      console.error("[elevenlabs-init] Project knowledge failed:", err);
+    }
+  }
+
+  // Step 4c: Inject project metadata (framework, repo, branch) so LiTT
+  // knows what the caller is working on even without knowledge records
+  if (projectId) {
+    try {
+      const { getProject } = await import("@/lib/projects/project-repository");
+      const project = await getProject(projectId, userId);
+      if (project) {
+        myaiosContext += `\n\nPROJECT METADATA:\n`;
+        myaiosContext += `Name: ${project.name}\n`;
+        if (project.githubFullName) myaiosContext += `Repository: ${project.githubFullName}\n`;
+        if (project.githubBranch) myaiosContext += `Branch: ${project.githubBranch}\n`;
+        if (project.framework) myaiosContext += `Framework: ${project.framework}\n`;
+        if (project.packageManager) myaiosContext += `Package manager: ${project.packageManager}\n`;
+        if (project.buildCommand) myaiosContext += `Build: ${project.buildCommand}\n`;
+        myaiosContext += `Workspace: ${project.workspaceStatus}\n`;
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
   // Step 5: Build the first message (personalized greeting)
   const firstName = displayName.split(" ")[0] || "";
   const firstMessage = firstName

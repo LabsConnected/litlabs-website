@@ -16,7 +16,7 @@
     "performance": "Use pnpm filters for targeted builds. Enable incremental type checking. Run typecheck in background."
   },
   "paths": {
-    "primary": "C:/Users/litbi/CascadeProjects/litlab",
+    "primary": "E:/LiTTreeLabStudio Prod",
     "codespace": "/workspaces/litlabs-website",
     "archived": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo"
   },
