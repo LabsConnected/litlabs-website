@@ -486,21 +486,37 @@ export async function recoverStaleProvisioning(
   maxAgeMs: number = 300000, // 5 minutes
 ): Promise<boolean> {
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-  const { data, error } = await supabaseAdmin
+
+  // Fetch the stale row first so we can preserve any existing error message.
+  const { data: stale, error: fetchError } = await supabaseAdmin
+    .from(TABLE)
+    .select("workspace_error")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .eq("workspace_status", "provisioning")
+    .lt("updated_at", cutoff)
+    .maybeSingle();
+
+  if (fetchError || !stale) return false;
+
+  const previousError = stale.workspace_error;
+  const newError = previousError
+    ? `${previousError} | Provisioning timed out`
+    : "Provisioning timed out";
+
+  const { error: updateError } = await supabaseAdmin
     .from(TABLE)
     .update({
       workspace_status: "failed",
-      workspace_error: "Provisioning timed out",
+      workspace_error: newError,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)
     .eq("user_id", userId)
     .eq("workspace_status", "provisioning")
-    .lt("updated_at", cutoff)
-    .select()
-    .maybeSingle();
+    .lt("updated_at", cutoff);
 
-  if (error || !data) return false;
+  if (updateError) return false;
   return true;
 }
 
