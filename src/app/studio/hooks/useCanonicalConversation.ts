@@ -689,19 +689,19 @@ export function useCanonicalConversation({
         if (response.status === 409) {
           // Revision conflict — reload messages from server and retry once with
           // the refreshed revision so the user's message still sends.
-          await loadMessages(conversationId);
+          await loadMessages(activeConversationId);
           const s409 = getStore();
           s409.setMessages(
-            conversationId,
+            activeConversationId,
             s409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
           );
-          seedOptimisticMessages(conversationId);
+          seedOptimisticMessages(activeConversationId);
           response = await makeRequest(s409.revision);
           if (response.status === 409) {
-            await loadMessages(conversationId);
+            await loadMessages(activeConversationId);
             const sFinal409 = getStore();
             sFinal409.setMessages(
-              conversationId,
+              activeConversationId,
               sFinal409.getMessages().filter((m) => !m.id.startsWith("optimistic_")),
             );
             setSendError("Conversation was updated by another session. Your message was not sent — please try again.");
@@ -720,7 +720,7 @@ export function useCanonicalConversation({
           if (isAuthError) {
             // Auth failure — roll back optimistic messages entirely (the
             // user message was NOT persisted) and require reauthentication.
-            rollbackOptimistic(conversationId);
+            rollbackOptimistic(activeConversationId);
             setRequiresReauth(true);
             setSendError("Your Studio session expired. Refresh the page and sign in again.");
             return { accepted: false, persisted: false, errorKind: "auth" };
@@ -728,7 +728,7 @@ export function useCanonicalConversation({
           if (response.status === 429) {
             // Rate limited — show a friendly message with the retry window.
             // The user message was not persisted; roll back optimistic msgs.
-            rollbackOptimistic(conversationId);
+            rollbackOptimistic(activeConversationId);
             const retryAfter = response.headers.get("Retry-After");
             const secs = retryAfter ? parseInt(retryAfter, 10) : 60;
             const friendly = secs > 60
@@ -739,7 +739,7 @@ export function useCanonicalConversation({
           }
           // Non-auth HTTP failure — the user message was not persisted.
           // Roll back optimistic messages and show the error.
-          rollbackOptimistic(conversationId);
+          rollbackOptimistic(activeConversationId);
           const errorText = data.detail
             ? `${data.error}: ${data.detail}`
             : data.error || `Request failed (${response.status})`;
@@ -762,7 +762,7 @@ export function useCanonicalConversation({
           } | null;
           if (!data) {
             // JSON parse failed — server returned non-JSON for a 200 response
-            rollbackOptimistic(conversationId);
+            rollbackOptimistic(activeConversationId);
             const errorText = "Server returned an invalid response (not JSON). Check network tab.";
             setSendError(errorText);
             return { accepted: false, persisted: false, errorKind: "network" };
@@ -771,13 +771,13 @@ export function useCanonicalConversation({
             const s2 = getStore();
             const userMsg = data.userMessage;
             const assistantMsg = data.assistantMessage;
-            s2.updateMessage(conversationId, optimisticUserId, {
+            s2.updateMessage(activeConversationId, optimisticUserId, {
               id: userMsg.id,
               content: userMsg.content,
               createdAt: userMsg.createdAt,
             });
             if (!assistantMsg.content?.trim()) {
-              s2.updateMessage(conversationId, optimisticAssistantId, {
+              s2.updateMessage(activeConversationId, optimisticAssistantId, {
                 id: assistantMsg.id,
                 content: "The response was empty. Please try again.",
                 status: "failed",
@@ -786,7 +786,7 @@ export function useCanonicalConversation({
               setSendError("The AI returned an empty response. Please try again.");
               return { accepted: false, persisted: true, errorKind: "provider" };
             }
-            s2.updateMessage(conversationId, optimisticAssistantId, {
+            s2.updateMessage(activeConversationId, optimisticAssistantId, {
               id: assistantMsg.id,
               content: assistantMsg.content,
               status: "completed",
@@ -801,14 +801,14 @@ export function useCanonicalConversation({
           if (data?.duplicate) {
             const s2 = getStore();
             const userMsg = data.userMessage;
-            s2.updateMessage(conversationId, optimisticUserId, {
+            s2.updateMessage(activeConversationId, optimisticUserId, {
               id: userMsg?.id ?? optimisticUserId,
               content: userMsg?.content ?? text,
               createdAt: userMsg?.createdAt ?? optimisticTimestamp,
             });
             if (data.assistantMessage) {
               const assistantMsg = data.assistantMessage;
-              s2.updateMessage(conversationId, optimisticAssistantId, {
+              s2.updateMessage(activeConversationId, optimisticAssistantId, {
                 id: assistantMsg.id,
                 content: assistantMsg.content,
                 status: "completed",
@@ -818,11 +818,11 @@ export function useCanonicalConversation({
               return { accepted: true, persisted: true, reply: assistantMsg.content };
             }
             s2.setMessages(
-              conversationId,
+              activeConversationId,
               s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
             );
             s2.setRevision(data.revision ?? expectedRevision);
-            setTimeout(() => void loadMessages(conversationId!), 2000);
+            setTimeout(() => void loadMessages(activeConversationId), 2000);
             return { accepted: true, persisted: true };
           }
           const errorText = data?.error
@@ -964,7 +964,7 @@ export function useCanonicalConversation({
           });
           return { accepted: true, persisted: true, reply: assistantText };
         }
-        sFinal.updateMessage(conversationId, optimisticAssistantId, {
+        sFinal.updateMessage(activeConversationId, optimisticAssistantId, {
           status: "failed",
           content: "The stream ended unexpectedly. Please try again.",
         });
@@ -981,7 +981,7 @@ export function useCanonicalConversation({
           // may or may not have been persisted; roll back the assistant bubble
           // but keep the user message (the server may have persisted it).
           s.setMessages(
-            conversationId!,
+            activeConversationId,
             s.getMessages().filter((m) => m.id !== optimisticAssistantId),
           );
           setSendError("The request timed out. Please try again.");
@@ -989,7 +989,7 @@ export function useCanonicalConversation({
         }
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
-        s.updateMessage(conversationId!, optimisticAssistantId, {
+        s.updateMessage(activeConversationId, optimisticAssistantId, {
           status: "failed",
           content: reply,
         });
