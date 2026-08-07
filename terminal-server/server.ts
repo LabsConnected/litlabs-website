@@ -142,6 +142,21 @@ if (
   );
 }
 
+// Warn if workspace root is the ephemeral default in production — cloned
+// repositories and the workspace registry (.workspaces.json) will be lost
+// on every container restart. Operators should mount a persistent volume
+// and set TERMINAL_WORKSPACE_ROOT to that path.
+if (
+  process.env.NODE_ENV === "production" &&
+  (!process.env.TERMINAL_WORKSPACE_ROOT || WORKSPACE_ROOT.startsWith("/tmp"))
+) {
+  console.warn(
+    "[Terminal] WARNING: TERMINAL_WORKSPACE_ROOT is not set or points to /tmp. " +
+      "Workspaces will be lost on restart. Mount a persistent volume and set " +
+      "TERMINAL_WORKSPACE_ROOT to the mounted path (e.g. /data/littree-workspaces).",
+  );
+}
+
 mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 const app = express();

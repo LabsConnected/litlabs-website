@@ -10,6 +10,24 @@ import {
 } from "@/lib/projects/project-repository";
 import { prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationToken } from "@/lib/github-app";
+<<<<<<< HEAD
+=======
+
+/**
+ * In-memory single-flight lock for workspace preparation.
+ *
+ * Keyed by `userId:projectId`. If a provisioning operation is already
+ * in progress for the same project, concurrent requests receive a 409
+ * PROVISIONING_IN_PROGRESS instead of starting a duplicate clone.
+ *
+ * In a serverless environment (Vercel), each invocation may be a separate
+ * instance, so this lock is best-effort within a single instance. The
+ * terminal server's prepareWorkspace is also idempotent — it checks for
+ * an existing workspace by projectId before cloning — which provides a
+ * second layer of protection against duplicate clones.
+ */
+const provisioningLocks = new Map<string, Promise<{ workspaceId: string; workspaceStatus: string; workspaceRoot: string; branch?: string; commitSha?: string }>>();
+>>>>>>> abb47e31 (WIP: apply pending studio-essentials changes)
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -56,6 +74,7 @@ export async function POST(
     });
   }
 
+<<<<<<< HEAD
   // Ensure the project exists as a canonical studio_projects row before
   // we try to lock or update it. Legacy projects are migrated here explicitly.
   let canonical: CanonicalProject;
@@ -72,6 +91,48 @@ export async function POST(
       { status: 500 },
     );
   }
+=======
+  // Single-flight: if provisioning is already in progress for this project,
+  // return 409 so the client can poll instead of starting a duplicate clone.
+  const lockKey = `${userId}:${projectId}`;
+  const existing = provisioningLocks.get(lockKey);
+  if (existing) {
+    return NextResponse.json(
+      {
+        code: "PROVISIONING_IN_PROGRESS",
+        error: "Workspace provisioning is already in progress.",
+        workspaceStatus: "provisioning",
+      },
+      { status: 409 },
+    );
+  }
+
+  // Start provisioning and store the promise so concurrent requests can detect it
+  const provisioningPromise = doProvision(project, projectId, userId);
+  provisioningLocks.set(lockKey, provisioningPromise);
+
+  try {
+    const result = await provisioningPromise;
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Workspace provisioning failed";
+    return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    provisioningLocks.delete(lockKey);
+  }
+}
+
+async function doProvision(
+  project: NonNullable<Awaited<ReturnType<typeof getProject>>>,
+  projectId: string,
+  userId: string,
+): Promise<{ workspaceId: string; workspaceStatus: string; workspaceRoot: string; branch?: string; commitSha?: string }> {
+  // Mark as provisioning
+  await updateProjectWorkspace(projectId, userId, {
+    workspaceStatus: "provisioning",
+    workspaceError: null,
+  });
+>>>>>>> abb47e31 (WIP: apply pending studio-essentials changes)
 
   // Recover stale provisioning locks before checking status.
   // If a previous serverless invocation crashed after claiming the lock,
@@ -137,10 +198,7 @@ export async function POST(
         workspaceStatus: "failed",
         workspaceError: "Project has no valid source for workspace provisioning",
       });
-      return NextResponse.json(
-        { error: "Project has no valid source for workspace provisioning" },
-        { status: 400 },
-      );
+      throw new Error("Project has no valid source for workspace provisioning");
     }
 
     // Persist the workspace ID and root — transitions provisioning → ready
@@ -152,13 +210,13 @@ export async function POST(
       workspaceError: null,
     });
 
-    return NextResponse.json({
+    return {
       workspaceId: result.workspaceId,
       workspaceStatus: "ready",
       workspaceRoot: result.root,
       branch: result.branch,
       commitSha: result.commitSha,
-    });
+    };
   } catch (err) {
     // Transition provisioning → failed, releasing the lock
     const message = err instanceof Error ? err.message : "Workspace provisioning failed";
@@ -166,6 +224,6 @@ export async function POST(
       workspaceStatus: "failed",
       workspaceError: message,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    throw err;
   }
 }

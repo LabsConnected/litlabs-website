@@ -280,8 +280,82 @@ export async function updateProjectWorkspace(
     .select()
     .maybeSingle();
 
-  if (error || !data) return null;
-  return rowToCanonical(data as StudioProjectRow);
+  if (data) {
+    return rowToCanonical(data as StudioProjectRow);
+  }
+
+  // UPDATE matched 0 rows in studio_projects. If the project exists in the
+  // legacy `projects` table, migrate it into studio_projects so workspace
+  // fields can be persisted. Without this, workspace preparation succeeds on
+  // the terminal server but the workspaceId is never saved — every subsequent
+  // token request would see workspaceStatus="not_prepared" and return 409.
+  if (!error) {
+    const migrated = await migrateLegacyProjectToStudio(projectId, userId, update);
+    if (migrated) return migrated;
+  }
+
+  return null;
+}
+
+/**
+ * Migrate a legacy `projects` row into `studio_projects` so workspace fields
+ * can be persisted. Called by updateProjectWorkspace when the UPDATE on
+ * studio_projects matches 0 rows.
+ *
+ * This is a non-destructive migration — the legacy row is NOT deleted.
+ * listProjects() already deduplicates by github_repository_id.
+ */
+async function migrateLegacyProjectToStudio(
+  projectId: string,
+  userId: string,
+  workspaceUpdate: Record<string, unknown>,
+): Promise<CanonicalProject | null> {
+  // Fetch the legacy row
+  const { data: legacyRow, error: legacyErr } = await supabaseAdmin
+    .from(LEGACY_TABLE)
+    .select("*")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (legacyErr || !legacyRow) return null;
+
+  const legacy = legacyRow as LegacyProjectRow;
+
+  // Insert into studio_projects with the same ID, carrying over GitHub fields
+  // and applying the workspace update in the same operation.
+  const insert: Record<string, unknown> = {
+    id: legacy.id,
+    user_id: legacy.user_id,
+    name: legacy.repository_full_name || legacy.repository,
+    slug: legacy.repository,
+    source_type: "github",
+    access_mode: legacy.repository_private ? "private" : "public",
+    github_installation_id: legacy.github_installation_id,
+    github_repository_id: legacy.repository_id,
+    github_owner: legacy.owner,
+    github_repo: legacy.repository,
+    github_full_name: legacy.repository_full_name,
+    github_default_branch: legacy.default_branch,
+    github_branch: legacy.working_branch ?? legacy.selected_branch ?? legacy.default_branch,
+    workspace_id: workspaceUpdate.workspace_id ?? legacy.workspace_id ?? null,
+    workspace_status: workspaceUpdate.workspace_status ?? "not_prepared",
+    workspace_root: workspaceUpdate.workspace_root ?? null,
+    workspace_error: workspaceUpdate.workspace_error ?? null,
+    workspace_prepared_at: workspaceUpdate.workspace_prepared_at ?? null,
+    runtime_status: "stopped",
+    created_at: legacy.created_at,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from(TABLE)
+    .insert(insert)
+    .select()
+    .maybeSingle();
+
+  if (insertErr || !inserted) return null;
+  return rowToCanonical(inserted as StudioProjectRow);
 }
 
 /**
