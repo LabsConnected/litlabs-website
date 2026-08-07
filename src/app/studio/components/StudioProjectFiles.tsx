@@ -242,6 +242,19 @@ export default function StudioProjectFiles({
     await loadDirectory(".");
   }, [loadDirectory]);
 
+  // Listen for Canvas Accept events — refresh file tree when Canvas writes files
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === projectId) {
+        void refresh();
+      }
+    };
+    window.addEventListener("studio:files-changed", handler);
+    return () => window.removeEventListener("studio:files-changed", handler);
+  }, [projectId, refresh]);
+
   const toggleFolder = useCallback(async (entry: FileEntry) => {
     if (entry.type !== "folder") return;
     if (expanded.has(entry.path)) {
