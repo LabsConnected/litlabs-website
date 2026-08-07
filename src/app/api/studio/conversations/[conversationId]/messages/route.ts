@@ -10,91 +10,25 @@ import {
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
 import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
-import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
+import { buildStudioContext } from "@/lib/studio/project-resolver";
 import { recallMemories, persistMemory, formatMemoryContext } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug } from "@/lib/studio/types";
-import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
-import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
-import type { CapabilityRecord } from "@/lib/litt-kernel";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import {
+  buildPrompt,
+  buildRunContextFromStudio,
+  parseRuntimeContextHint,
+  HISTORY_LIMIT,
+} from "@/lib/litt-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;
-}
-
-const HISTORY_LIMIT = 12;
-
-const TERMINAL_EXECUTION_STATES = ["available", "unavailable", "connecting", "degraded", "error"] as const;
-const TERMINAL_STATES = ["disconnected", "connecting", "connected", "error"] as const;
-const VOICE_INPUT_STATES = ["idle", "requesting_permission", "connecting", "listening", "error"] as const;
-const VOICE_STATES = ["idle", "requesting_permission", "connecting", "listening", "user_speaking", "processing", "assistant_speaking", "muted", "error"] as const;
-const VOICE_OUTPUT_STATES = ["idle", "connecting", "speaking", "error"] as const;
-
-type RuntimeContext = {
-  terminalExecution?: (typeof TERMINAL_EXECUTION_STATES)[number];
-  terminalStatus?: (typeof TERMINAL_STATES)[number];
-  terminalSessionId?: string | null;
-  voiceTransportConnected?: boolean;
-  voiceInputState?: (typeof VOICE_INPUT_STATES)[number];
-  voiceMicrophoneOn?: boolean;
-  voiceState?: (typeof VOICE_STATES)[number];
-  voiceOutputState?: (typeof VOICE_OUTPUT_STATES)[number];
-  voiceHealth?: {
-    configured: boolean;
-    tokenService: "healthy" | "error" | "unknown";
-    available: boolean;
-  };
-  writeAccess?: boolean;
-  activeBranch?: string;
-  repositoryName?: string;
-  workspaceStatus?: string;
-  selectedModelLabel?: string;
-  selectedModelId?: string;
-};
-
-function parseVoiceHealth(value: unknown): RuntimeContext["voiceHealth"] {
-  if (!value || typeof value !== "object") return undefined;
-  const input = value as Record<string, unknown>;
-  const tokenService = input.tokenService === "healthy" || input.tokenService === "error" || input.tokenService === "unknown"
-    ? input.tokenService
-    : "unknown";
-  return {
-    configured: input.configured === true,
-    tokenService,
-    available: input.available === true,
-  };
-}
-
-function parseRuntimeContext(value: unknown): RuntimeContext {
-  if (!value || typeof value !== "object") return {};
-  const input = value as Record<string, unknown>;
-  const isValue = <T extends readonly string[]>(values: T, candidate: unknown): candidate is T[number] =>
-    typeof candidate === "string" && values.includes(candidate);
-  return {
-    terminalExecution: isValue(TERMINAL_EXECUTION_STATES, input.terminalExecution) ? input.terminalExecution : undefined,
-    terminalStatus: isValue(TERMINAL_STATES, input.terminalStatus) ? input.terminalStatus : undefined,
-    terminalSessionId: typeof input.terminalSessionId === "string" && input.terminalSessionId.length <= 200
-      ? input.terminalSessionId
-      : null,
-    voiceTransportConnected: input.voiceTransportConnected === true,
-    voiceInputState: isValue(VOICE_INPUT_STATES, input.voiceInputState) ? input.voiceInputState : undefined,
-    voiceMicrophoneOn: input.voiceMicrophoneOn === true,
-    voiceState: isValue(VOICE_STATES, input.voiceState) ? input.voiceState : undefined,
-    voiceOutputState: isValue(VOICE_OUTPUT_STATES, input.voiceOutputState) ? input.voiceOutputState : undefined,
-    voiceHealth: parseVoiceHealth(input.voiceHealth),
-    writeAccess: input.writeAccess === true,
-    activeBranch: typeof input.activeBranch === "string" && input.activeBranch.length <= 200 ? input.activeBranch : undefined,
-    repositoryName: typeof input.repositoryName === "string" && input.repositoryName.length <= 200 ? input.repositoryName : undefined,
-    workspaceStatus: typeof input.workspaceStatus === "string" && input.workspaceStatus.length <= 100 ? input.workspaceStatus : undefined,
-    selectedModelLabel: typeof input.selectedModelLabel === "string" && input.selectedModelLabel.length <= 100 ? input.selectedModelLabel : undefined,
-    selectedModelId: typeof input.selectedModelId === "string" && input.selectedModelId.length <= 100 ? input.selectedModelId : undefined,
-  };
 }
 
 /**
@@ -124,7 +58,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const runtimeContext = parseRuntimeContext(body.runtimeContext);
+  const runtimeContext = parseRuntimeContextHint(body.runtimeContext);
   const message = body.message;
   const clientRequestId = body.clientRequestId;
   const expectedRevision = body.expectedRevision;
@@ -274,82 +208,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   });
   const memoryContext = formatMemoryContext(memories);
 
-  // 9. Build system prompt
-  const kernelCapabilities: CapabilityRecord[] = [];
-  if (ctx.capabilities.repositoryConnected) {
-    kernelCapabilities.push(adaptLegacyCapability({ id: "github", status: "ready", name: "Repository" }));
-  }
-
-  const kernelResult = routeKernel({
-    message,
+  // 9. Build the prompt via the shared LiTT runtime prompt-builder.
+  // The runtime owns Kernel routing, capability translation, project
+  // context, memory context, and transcript assembly — the route only
+  // owns the revision RPC and message persistence.
+  const runCtx = buildRunContextFromStudio({
     userId,
-    conversationId: conversation.id,
-    projectId: conversation.projectId,
-    missionId: null,
-    canvasId: null,
-    capabilities: kernelCapabilities,
+    clerkId,
+    studioCtx: ctx,
+    history,
+    memoryContext,
+    runtimeContextHint: runtimeContext,
+    agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
   });
 
-  const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
-  const projectBlock = buildProjectContextBlock(ctx);
+  const built = buildPrompt(runCtx, {
+    message,
+    agentSlug,
+    agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
+  }, runtimeAgent);
 
-  const rawCaps: RawCapabilities = {
-    repository: ctx.capabilities.repositoryConnected ? "connected" : "none",
-    repositoryIndexed: ctx.capabilities.repositoryConnected,
-    repositoryName: runtimeContext.repositoryName ?? ctx.repositoryName ?? undefined,
-    activeBranch: runtimeContext.activeBranch ?? ctx.activeBranch ?? undefined,
-    writeAccess: runtimeContext.writeAccess,
-    workspaceStatus: runtimeContext.workspaceStatus,
-    selectedModelLabel: runtimeContext.selectedModelLabel,
-    terminalExecution: runtimeContext.terminalExecution ?? (ctx.capabilities.terminalConnected ? "available" : "unavailable"),
-    terminalStatus: runtimeContext.terminalStatus,
-    terminalSessionId: runtimeContext.terminalSessionId,
-    connectedProviders: ctx.capabilities.availableTools,
-    availableTools: ctx.capabilities.availableTools,
-    connectionSummary: ctx.capabilities.connectionSummary,
-    voiceTransportConnected: runtimeContext.voiceTransportConnected,
-    voiceMicrophoneOn: runtimeContext.voiceMicrophoneOn,
-    voiceInputState: runtimeContext.voiceInputState,
-    voiceState: runtimeContext.voiceState,
-    voiceOutputState: runtimeContext.voiceOutputState,
-    voiceHealth: runtimeContext.voiceHealth,
-  };
-  const translated = translateCapabilities(rawCaps);
-
-  const conversationContext = conversation.title
-    ? `CURRENT CONVERSATION: "${conversation.title}"`
-    : "CURRENT CONVERSATION: (untitled)";
-
-  const systemPrompt = [
-    // Use the runtime agent's version prompt for marketplace agents, or the
-    // kernel system prompt for builtin agents.
-    runtimeAgent?.systemPrompt || kernelSystemPrompt,
-    projectBlock,
-    conversationContext,
-    translated.contextBlock,
-    memoryContext,
-  ].filter(Boolean).join("\n");
-
-  // 10. Build the full prompt — current user message appears exactly once
-  const agentDisplayName = runtimeAgent?.displayName || resolveAgent(agentSlug)?.displayName || "Agent";
-  const transcript = history
-    .map((entry) =>
-      entry.role === "user"
-        ? `User: ${entry.content}`
-        : `${agentDisplayName}: ${entry.content}`,
-    )
-    .join("\n");
-
-  const prompt = [
-    systemPrompt,
-    "",
-    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-    `User: ${message}`,
-    "",
-    `${agentDisplayName}:`,
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n");
+  const prompt = built.fullPrompt;
+  const agentDisplayName = built.agentDisplayName;
 
   // 11. Insert pending assistant message
   const { message: assistantMessage } = await insertMessage({
@@ -413,6 +293,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const modelOverride = typeof body.model === "string" && provider
     ? { [provider]: body.model } as Record<string, string>
     : undefined;
+
+  // Debug: log the LLM routing parameters
+  console.log("[studio messages] LLM params:", {
+    category,
+    provider,
+    model: body.model,
+    modelOverride,
+    promptLength: prompt.length,
+    agentSlug,
+  });
   const encoder = new TextEncoder();
   const event = (payload: Record<string, unknown>) =>
     encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
@@ -506,6 +396,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }, reservedCredits);
         }
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
+        console.error("[studio messages] streamText failed:", errorMsg, "| prompt length:", prompt.length, "| category:", category, "| provider:", provider);
         studioLog("message:failed", {
           conversationId: conversation.id,
           userId,
@@ -515,6 +406,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         controller.enqueue(event({
           type: "error",
           message: "Provider unavailable",
+          detail: errorMsg,
           partialText: assistantText || undefined,
         }));
       } finally {

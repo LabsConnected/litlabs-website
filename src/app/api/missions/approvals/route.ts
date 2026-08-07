@@ -1,39 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { createMission, listMissions, type MissionResult } from "@/lib/missions";
+import { listPendingApprovals, resolveApproval, type MissionResult } from "@/lib/missions";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /**
- * GET /api/missions?projectId=...
- * List missions for the authenticated user.
+ * GET /api/missions/approvals
+ * List all pending approvals for the authenticated user.
  */
 async function getHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) return typedError(401, "Unauthorized");
-  const url = new URL(req.url);
-  const projectId = url.searchParams.get("projectId") ?? undefined;
-  return toResponse(await listMissions(userId, projectId));
+  return toResponse(await listPendingApprovals(userId));
 }
 
 /**
- * POST /api/missions
- * Create a new mission.
+ * POST /api/missions/approvals
+ * Resolve an approval (approve or deny).
+ * Body: { approvalId: string, decision: "approved" | "denied" }
  */
 async function postHandler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId) return typedError(401, "Unauthorized");
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return typedError(400, "Invalid JSON body"); }
-  return toResponse(await createMission({
-    ownerId: userId,
-    projectId: String(body.projectId ?? ""),
-    name: String(body.name ?? ""),
-    description: body.description as string | undefined,
-    graph: body.graph as Record<string, unknown> | undefined,
-  }));
+  const approvalId = body.approvalId as string | undefined;
+  const decision = body.decision as "approved" | "denied" | undefined;
+  if (!approvalId) return typedError(400, "approvalId is required");
+  if (decision !== "approved" && decision !== "denied") return typedError(400, "decision must be 'approved' or 'denied'");
+  return toResponse(await resolveApproval(userId, approvalId, decision));
 }
 
 export const GET = withRateLimit(getHandler, 60, 60);

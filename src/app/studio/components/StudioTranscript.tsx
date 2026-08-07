@@ -21,6 +21,146 @@ import {
   markdownToPlainText,
 } from "@/lib/studio/message-copy";
 
+/* ── Inline SVG icons for hover actions (lucide-react is pinned to ^1.24) ── */
+function IconReply({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </svg>
+  );
+}
+function IconPin({ size = 12, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14l-1.5-3h-11z" /><path d="M8 14V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v9" />
+    </svg>
+  );
+}
+function IconBranch({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
+function IconCopy({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function IconCheck({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+function IconRefresh({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+function IconSpeaker({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+    </svg>
+  );
+}
+
+/** Hover actions toolbar — appears on message hover with Copy, Reply, Pin, Regenerate, Branch. */
+function MessageHoverActions({
+  message,
+  isUser,
+  isFailed,
+  isLastAssistant,
+  isCopied,
+  copiedKind,
+  onCopyText,
+  onCopyMarkdown,
+  onSpeak,
+  onRegenerate,
+  onReply,
+  onPin,
+  onBranch,
+  isPinned,
+}: {
+  message: ChatMessage;
+  isUser: boolean;
+  isFailed: boolean;
+  isLastAssistant: boolean;
+  isCopied: boolean;
+  copiedKind: "text" | "markdown" | null;
+  onCopyText: () => void;
+  onCopyMarkdown: () => void;
+  onSpeak: () => void;
+  onRegenerate?: () => void;
+  onReply?: () => void;
+  onPin?: () => void;
+  onBranch?: () => void;
+  isPinned: boolean;
+}) {
+  if (isUser) return null;
+  if (!message.content?.trim()) return null;
+  const actions: { icon: React.ReactNode; label: string; onClick: () => void; active?: boolean; testId?: string }[] = [
+    {
+      icon: isCopied && copiedKind === "text" ? <IconCheck /> : <IconCopy />,
+      label: isCopied && copiedKind === "text" ? "Copied" : "Copy",
+      onClick: onCopyText,
+      active: isCopied && copiedKind === "text",
+      testId: `hover-copy-${message.id}`,
+    },
+    { icon: <IconReply />, label: "Reply", onClick: () => onReply?.() },
+    { icon: <IconPin filled={isPinned} />, label: isPinned ? "Unpin" : "Pin", onClick: () => onPin?.(), active: isPinned },
+    { icon: <IconSpeaker />, label: "Read", onClick: onSpeak },
+  ];
+  if (isCopied && copiedKind === "markdown") {
+    actions[0] = { icon: <IconCheck />, label: "Copied", onClick: onCopyMarkdown, active: true };
+  } else {
+    actions.push({ icon: <IconCopy />, label: "MD", onClick: onCopyMarkdown, testId: `hover-md-${message.id}` });
+  }
+  if (isLastAssistant && !isFailed && onRegenerate) {
+    actions.push({ icon: <IconRefresh />, label: "Regenerate", onClick: onRegenerate });
+  }
+  if (onBranch) {
+    actions.push({ icon: <IconBranch />, label: "Branch", onClick: onBranch });
+  }
+  if (isFailed && onRegenerate) {
+    actions.push({ icon: <IconRefresh />, label: "Retry", onClick: onRegenerate });
+  }
+  return (
+    <div
+      className="pointer-events-none absolute top-0 z-20 flex items-center gap-0.5 rounded-lg border p-0.5 opacity-0 shadow-xl transition-all duration-150 group-hover:opacity-100 group-hover:pointer-events-auto"
+      style={{
+        right: 0,
+        transform: "translateY(-100%)",
+        backgroundColor: "var(--studio-elevated, #1a1530)",
+        borderColor: "var(--studio-border-strong, rgba(255,255,255,0.12))",
+      }}
+    >
+      {actions.map((action, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={action.onClick}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/10"
+          style={{ color: action.active ? "#a3e635" : "var(--text-muted, rgba(255,255,255,0.5))" }}
+          title={action.label}
+          aria-label={action.label}
+          data-testid={action.testId}
+        >
+          {action.icon}
+          <span className="hidden sm:inline">{action.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ReasoningBlock({ reasoning, color, streaming }: { reasoning: string; color: string; streaming: boolean }) {
   const [open, setOpen] = useState(streaming);
   return (
@@ -121,6 +261,8 @@ export default function StudioTranscript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedKind, setCopiedKind] = useState<"text" | "markdown" | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -157,6 +299,38 @@ export default function StudioTranscript({
     downloadTextFile(`litt-conversation-${stamp}.md`, content, "text/markdown");
   }, [messages, agentMeta.displayName]);
 
+  const handlePin = useCallback((message: ChatMessage) => {
+    const id = message.id ?? "";
+    if (!id) return;
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleReply = useCallback((message: ChatMessage) => {
+    setReplyTarget(message);
+    // Dispatch event so the composer can quote this message
+    window.dispatchEvent(new CustomEvent("studio:reply-to", { detail: { id: message.id, content: message.content } }));
+    // Focus the composer
+    const composer = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
+    if (composer) {
+      composer.focus();
+      const quote = message.content.slice(0, 200).trim();
+      const current = composer.value;
+      if (!current.startsWith(">")) {
+        composer.value = `> ${quote.replace(/\n/g, "\n> ")}\n\n`;
+        composer.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  }, []);
+
+  const handleBranch = useCallback((message: ChatMessage) => {
+    window.dispatchEvent(new CustomEvent("studio:branch-from", { detail: { id: message.id, content: message.content } }));
+  }, []);
+
   const hasDownloadableMessages = messages.some((m) => m.content?.trim());
 
   return (
@@ -179,10 +353,11 @@ export default function StudioTranscript({
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
           const key = message.id || `msg_${index}`;
           const isCopied = copiedId === message.id;
+          const isPinned = pinnedIds.has(message.id ?? "");
           return (
             <div
               key={key}
-              className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+              className={`group flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"} ${isPinned ? "relative" : ""}`}
               data-testid={isUser ? "user-message" : "assistant-message"}
             >
               {isUser ? (
@@ -309,71 +484,49 @@ export default function StudioTranscript({
                     }}
                   />
                 )}
-                <div className="mt-1 flex flex-wrap items-center gap-2 px-1">
-                  <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
-                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                  </span>
-                  {!isUser && !isFailed && message.content?.trim() && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => speakText(message.content)}
-                        className="flex items-center gap-1 text-[9px] transition hover:opacity-80"
-                        style={{ color: "var(--text-muted)" }}
-                        title="Read aloud"
-                        aria-label="Read aloud"
-                      >
-                        Read
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyText(message)}
-                        className="flex items-center gap-1 text-[9px] transition hover:opacity-80"
-                        style={{ color: isCopied && copiedKind === "text" ? "#a3e635" : "var(--text-muted)" }}
-                        title="Copy plain text"
-                        aria-label="Copy plain text"
-                        data-testid={`copy-text-${message.id}`}
-                      >
-                        {isCopied && copiedKind === "text" ? "Copied" : "Copy"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyMarkdown(message)}
-                        className="flex items-center gap-1 text-[9px] transition hover:opacity-80"
-                        style={{ color: isCopied && copiedKind === "markdown" ? "#a3e635" : "var(--text-muted)" }}
-                        title="Copy Markdown"
-                        aria-label="Copy Markdown"
-                        data-testid={`copy-markdown-${message.id}`}
-                      >
-                        {isCopied && copiedKind === "markdown" ? "Copied" : "Markdown"}
-                      </button>
-                    </>
-                  )}
-                  {!isUser && isFailed && onRegenerateAction && (
-                    <button
-                      type="button"
-                      onClick={onRegenerateAction}
-                      className="flex items-center gap-1 text-[9px] font-bold transition hover:opacity-80"
-                      style={{ color: "#fca5a5" }}
-                      title="Retry"
-                      aria-label="Retry"
-                    >
-                      Retry
-                    </button>
-                  )}
-                  {isLastAssistant && !isFailed && onRegenerateAction && (
-                    <button
-                      type="button"
-                      onClick={onRegenerateAction}
-                      className="flex items-center gap-1 text-[9px] transition hover:opacity-80"
-                      style={{ color: "var(--text-muted)" }}
-                      title="Regenerate response"
-                      aria-label="Regenerate response"
-                    >
-                      Regenerate
-                    </button>
-                  )}
-                  {isCopied && <CopiedBadge show={isCopied} />}
+                {/* Pinned indicator badge */}
+                {isPinned && (
+                  <div
+                    className="flex items-center gap-1 px-1 text-[8px] font-bold uppercase tracking-wider"
+                    style={{ color: "#e3b341" }}
+                  >
+                    <IconPin size={8} filled /> Pinned
+                  </div>
+                )}
+                {/* Reply quote indicator */}
+                {replyTarget?.id === message.id && (
+                  <div
+                    className="px-1 text-[8px] font-bold uppercase tracking-wider"
+                    style={{ color: agentColor }}
+                  >
+                    ↩ Replying to this message
+                  </div>
+                )}
+                {/* Hover actions toolbar — replaces always-visible buttons */}
+                <div className="relative">
+                  <MessageHoverActions
+                    message={message}
+                    isUser={isUser}
+                    isFailed={isFailed}
+                    isLastAssistant={isLastAssistant}
+                    isCopied={isCopied}
+                    copiedKind={copiedKind}
+                    onCopyText={() => void handleCopyText(message)}
+                    onCopyMarkdown={() => void handleCopyMarkdown(message)}
+                    onSpeak={() => speakText(message.content)}
+                    onRegenerate={onRegenerateAction}
+                    onReply={() => handleReply(message)}
+                    onPin={() => handlePin(message)}
+                    onBranch={() => handleBranch(message)}
+                    isPinned={isPinned}
+                  />
+                  {/* Minimal timestamp — always visible, actions appear on hover */}
+                  <div className="mt-0.5 flex items-center gap-1.5 px-1">
+                    <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                    </span>
+                    {isCopied && <CopiedBadge show={isCopied} />}
+                  </div>
                 </div>
               </div>
             </div>

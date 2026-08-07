@@ -22,6 +22,30 @@ interface FileEntry {
   type: "file" | "folder";
   path: string;
   size?: number;
+  gitStatus?: "M" | "A" | "D" | "U" | "C";
+}
+
+/** Git status badge colors: M=yellow, A=green, D=red, U=blue, C=cyan */
+const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string; color: string; label: string }> = {
+  M: { bg: "rgba(227,179,65,0.15)", color: "#e3b341", label: "Modified" },
+  A: { bg: "rgba(114,242,56,0.15)", color: "#72f238", label: "Added" },
+  D: { bg: "rgba(239,68,68,0.15)", color: "#ef4444", label: "Deleted" },
+  U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
+  C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
+};
+
+function GitBadge({ status }: { status: NonNullable<FileEntry["gitStatus"]> }) {
+  const colors = GIT_BADGE_COLORS[status];
+  return (
+    <span
+      className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[7px] font-black"
+      style={{ backgroundColor: colors.bg, color: colors.color }}
+      title={colors.label}
+      aria-label={`Git: ${colors.label}`}
+    >
+      {status}
+    </span>
+  );
 }
 
 type DialogState =
@@ -351,6 +375,7 @@ export default function StudioProjectFiles({
               {entry.type === "folder" ? (isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : <span className="w-3" />}
               {entry.type === "folder" ? <Folder size={13} /> : <FileText size={13} />}
               <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              {entry.gitStatus && <GitBadge status={entry.gitStatus} />}
               {entry.type === "file" && <span className="hidden shrink-0 text-[8px] text-white/30 xl:inline">{formatSize(entry.size)}</span>}
             </button>
             {entry.type === "folder" && <>
@@ -420,6 +445,32 @@ export default function StudioProjectFiles({
                 {dirty && <span className="shrink-0 text-[9px] font-bold" style={{ color: "#e3b341" }}>Unsaved</span>}
                 <button type="button" onClick={() => void saveFile()} disabled={!dirty || saving || !writeAccess || Boolean(unsupportedPath)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-35" style={{ backgroundColor: dirty && writeAccess ? "var(--litt-primary)" : "var(--studio-surface)", color: dirty && writeAccess ? "#000" : "var(--text-muted)" }}><Save size={11} /> {saving ? "Saving" : "Save"}</button>
               </div>
+              {/* Contextual selection actions bar — Explain, Fix, Refactor, Add tests, Ask LiTT */}
+              {!unsupportedPath && !fileLoading && (
+                <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>
+                  {[
+                    { label: "Explain", prompt: `Explain what ${activePath} does` },
+                    { label: "Fix", prompt: `Find and fix bugs in ${activePath}` },
+                    { label: "Refactor", prompt: `Refactor ${activePath} for clarity` },
+                    { label: "Add tests", prompt: `Add unit tests for ${activePath}` },
+                    { label: "Ask LiTT", prompt: `Review ${activePath}` },
+                  ].map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent("studio:quick-action", { detail: { prompt: action.prompt } }));
+                      }}
+                      className="flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-[9px] font-bold transition hover:bg-white/8"
+                      style={{ color: "var(--text-muted)" }}
+                      aria-label={action.label}
+                      title={action.prompt}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               {unsupportedPath ? <div className="flex flex-1 items-center justify-center px-5 text-center text-[10px] leading-5" style={{ color: "var(--text-muted)" }}>This file type is not text-editable in Studio. It remains safe to browse, but binary content is not loaded into the editor.</div> : fileLoading ? <div className="flex flex-1 items-center justify-center gap-2 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={13} className="animate-spin" /> Opening file…</div> : <textarea value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} className="min-h-[220px] flex-1 resize-none bg-transparent p-3 font-mono text-[10px] leading-5 outline-none" style={{ color: "var(--text-primary)" }} aria-label={`Edit ${activePath}`} />}
             </>
           ) : <div className="flex flex-1 items-center justify-center px-5 text-center text-[10px] leading-5" style={{ color: "var(--text-muted)" }}>Select a text file to inspect and edit it. Changes stay local until you press Save.</div>}

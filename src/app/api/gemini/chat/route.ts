@@ -1,503 +1,216 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { streamText, generateText, type ModelCategory } from "@/lib/llm";
-import { AGENTS, Agent } from "@/lib/agents";
-import { auth } from "@/lib/auth";
-import { isAnonymousDevAllowed } from "@/lib/env";
-import { getSupabaseAdmin } from "@/lib/supabase";
-import type { Part } from "@google/generative-ai";
-import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
-import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
-import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
-import type { CapabilityRecord } from "@/lib/litt-kernel";
+import {
+  runLiTT,
+  resolveRequestContext,
+  buildPrompt,
+  executeRunStream,
+  verifyResult,
+  sanitizeOutput,
+  detectActions,
+  buildSseHeaders,
+  auditRun,
+  logLegacyAgentChat,
+  type LiTTRunRequest,
+} from "@/lib/litt-runtime";
+import { resolveRuntimeAgent } from "@/lib/agent-runtime";
+import { parseAgentSelection } from "@/lib/agent-selection";
+import { AGENTS } from "@/lib/agents";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-type HistoryEntry = { role: "user" | "assistant"; content: string };
-
 const DEFAULT_AGENT_SLUG = "litt";
-const HISTORY_LIMIT = 12;
-
-async function fetchMemories(query: string, userId: string): Promise<string> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return "";
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    const results = await sm.search.memories({ q: query, containerTag: userId, limit: 5 });
-    const memories = (results.results || []).map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk || "").filter(Boolean);
-    if (!memories.length) return "";
-    return `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}\n---`;
-  } catch {
-    return "";
-  }
-}
-
-async function saveMemory(content: string, userId: string, agentId: string): Promise<void> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return;
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    await sm.add({ content, containerTag: userId, metadata: { type: "agent-chat", agent: agentId } });
-  } catch {
-    // non-fatal
-  }
-}
-
-function sanitizeOutput(text: string): string {
-  return text.replace(/\{\{?userName\}?\}/gi, "there");
-}
-
-function dataUrlToInlineData(dataUrl: string) {
-  const match = dataUrl.match(/^data:([a-zA-Z0-9+/\-._]+);base64,(.+)$/);
-  if (!match) return null;
-  const mimeType = match[1];
-  const base64 = match[2];
-  // Only accept common image MIME types
-  if (!mimeType.startsWith("image/")) return null;
-  return { inlineData: { mimeType, data: base64 } };
-}
-
-async function generateWithImages(
-  systemPrompt: string,
-  userText: string,
-  history: HistoryEntry[],
-  images: string[],
-  modelName = "gemini-2.5-flash",
-): Promise<{ text: string; provider: string; model: string; latencyMs: number }> {
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  if (!key) throw new Error("Gemini API key not configured");
-  const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction: systemPrompt,
-  });
-
-  const contents: { role: "user" | "model"; parts: Part[] }[] = [];
-  for (const entry of history.slice(-HISTORY_LIMIT)) {
-    contents.push({
-      role: entry.role === "user" ? "user" : "model",
-      parts: [{ text: entry.content }],
-    });
-  }
-
-  const parts: Part[] = [{ text: userText }];
-  for (const image of images) {
-    const inline = dataUrlToInlineData(image);
-    if (inline) parts.push(inline as Part);
-  }
-  contents.push({ role: "user", parts });
-
-  const t0 = Date.now();
-  const result = await model.generateContent({ contents });
-  const text = result.response.text();
-  return { text, provider: "gemini", model: modelName, latencyMs: Date.now() - t0 };
-}
-
-function buildPrompt(
-  agent: Agent,
-  message: string,
-  history: HistoryEntry[],
-  memoryContext: string,
-  userName?: string,
-  capabilities?: Record<string, unknown>,
-): string {
-  const recentHistory = history.slice(-HISTORY_LIMIT);
-
-  const transcript = recentHistory
-    .map((entry) =>
-      entry.role === "user"
-        ? `User: ${entry.content}`
-        : `${agent.name}: ${entry.content}`,
-    )
-    .join("\n");
-
-  const resolvedName = userName?.trim() || "Member";
-  const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
-
-  const rawCaps: RawCapabilities = {
-    repository: capabilities?.repository as string | undefined,
-    repositoryIndexed: capabilities?.repositoryIndexed as boolean | undefined,
-    terminalExecution: capabilities?.terminalExecution as string | undefined,
-    writeAccess: capabilities?.writeAccess as boolean | undefined,
-    connectedProviders: capabilities?.connectedProviders as string[] | undefined,
-    availableTools: capabilities?.availableTools as string[] | undefined,
-    connectionSummary: capabilities?.connectionSummary as string | undefined,
-    voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
-    voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
-  };
-  const translated = translateCapabilities(rawCaps);
-
-  return [
-    systemPrompt,
-    translated.contextBlock,
-    memoryContext,
-    "",
-    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-    `User: ${message}`,
-    "",
-    `${agent.name}:`,
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n");
-}
-
-async function logConversation(
-  agent: Agent,
-  userId: string | null,
-  userMessage: string,
-  responseText: string,
-) {
-  try {
-    const admin = getSupabaseAdmin();
-    if (!admin) return; // Build-safe: null when env keys unavailable
-    await admin.from("agent_logs").insert({
-      agent_id: agent.id,
-      level: "info",
-      message: "Agent chat",
-      metadata: {
-        userId,
-        userMessage,
-        responseText,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  } catch {
-    // Failed to log agent chat:
-  }
-}
 
 /**
- * POST /api/gemini/chat
- * Body: { agentSlug, message, history?, provider?, stream?: boolean }
+ * POST /api/gemini/chat  (COMPATIBILITY ADAPTER)
+ *
+ * This endpoint is kept temporarily for backwards compatibility with
+ * existing clients. It now delegates all orchestration to the canonical
+ * LiTT Runtime (src/lib/litt-runtime) via /api/litt/run's logic.
+ *
+ * It no longer owns memory retrieval/saving, provider routing, prompt
+ * orchestration, capability resolution, tool selection, canvas action
+ * detection, or conversation logging — those live in the runtime.
+ *
+ * Legacy request body:
+ *   { agentSlug, message, history?, provider?, category?, model?, stream?,
+ *     userName?, images?, capabilities?, pageContext?, systemPrompt? (ignored) }
+ *
+ * Legacy response body:
+ *   - non-stream: { response, provider, model, latencyMs, actions? }
+ *   - stream:     SSE `data: { text }` chunks, then `data: { done, provider, model, latencyMs, actions }`, then `data: [DONE]`
  */
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
     return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  let body: Record<string, unknown>;
   try {
-    const { userId } = await auth(req);
-    const body = await req.json();
-    const {
-      agentSlug = DEFAULT_AGENT_SLUG,
-      message,
-      history = [],
-      provider,
-      category,
-      model: requestedModel,
-      stream = false,
-      userName,
-      images = [],
-      capabilities = {},
-      pageContext,
-      systemPrompt: _clientSystemPrompt, // never trusted — always ignored
-    } = body;
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
 
-    if (!message || typeof message !== "string") {
-      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+  const message = body.message;
+  if (typeof message !== "string" || !message.trim()) {
+    return NextResponse.json({ error: "Missing message" }, { status: 400 });
+  }
+
+  const agentSlug = typeof body.agentSlug === "string" ? body.agentSlug : DEFAULT_AGENT_SLUG;
+  const agent = AGENTS[agentSlug as keyof typeof AGENTS] ?? AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
+
+  // Convert legacy images[] into attachments[]
+  const images = Array.isArray(body.images) ? body.images : [];
+  const attachments: LiTTRunRequest["attachments"] = images
+    .filter((u): u is string => typeof u === "string")
+    .map((dataUrl) => ({ type: "image" as const, dataUrl }));
+
+  // Convert legacy capabilities{} into runtimeContext{} (a hint only —
+  // the server re-resolves project/branch state from Supabase).
+  const capabilities = (body.capabilities ?? {}) as Record<string, unknown>;
+  const runtimeContext: Record<string, unknown> = { ...capabilities };
+  if (typeof body.activeCanvasId === "string") runtimeContext.activeCanvasId = body.activeCanvasId;
+
+  const runRequest: LiTTRunRequest = {
+    message,
+    conversationId: typeof body.conversationId === "string" ? body.conversationId : undefined,
+    projectId: typeof (capabilities as Record<string, unknown>).projectId === "string"
+      ? (capabilities as Record<string, unknown>).projectId as string
+      : undefined,
+    activeCanvasId: typeof body.activeCanvasId === "string" ? body.activeCanvasId : undefined,
+    agentMode: "studio",
+    requestedProvider: typeof body.provider === "string" ? body.provider : undefined,
+    requestedModel: typeof body.model === "string" ? body.model : undefined,
+    attachments: attachments.length > 0 ? attachments : undefined,
+    stream: body.stream === true,
+    agentSlug,
+    agentInstanceId: typeof body.agentInstanceId === "string" ? body.agentInstanceId : undefined,
+    history: Array.isArray(body.history) ? body.history as LiTTRunRequest["history"] : undefined,
+    category: typeof body.category === "string" ? body.category : undefined,
+    userName: typeof body.userName === "string" ? body.userName : undefined,
+    pageContext: body.pageContext as LiTTRunRequest["pageContext"],
+    runtimeContext,
+    // clientSystemPrompt is intentionally never trusted — always ignored.
+  };
+
+  try {
+    if (runRequest.stream) {
+      // Streaming: run the runtime pipeline directly and emit the LEGACY SSE
+      // shape ({ text } chunks + { done: true, ... } final + [DONE]) so
+      // existing clients keep working without changes.
+      return runLiTTStreamLegacy({ httpRequest: req, req: runRequest, agentId: agent.id });
     }
 
-    // ─── Auth gate ─────────────────────────────────────────────
-    // Unauthenticated requests are only allowed for the Global Companion
-    // (a strict, limited contract). Studio and Agent requests require
-    // authentication. ALLOW_ANONYMOUS_DEV bypasses in local development.
-    const isCompanion = pageContext?.surface === "global_companion";
-    const isDev = isAnonymousDevAllowed();
-
-    if (!userId && !isDev) {
-      if (!isCompanion) {
-        return NextResponse.json(
-          { error: "Authentication required" },
-          { status: 401 },
-        );
-      }
-      // Companion mode for unauthenticated users — strict limits below.
+    const { status, body: resultBody, outcome } = await runLiTT({ httpRequest: req, req: runRequest });
+    if (status !== 200) {
+      return NextResponse.json({ error: "Runtime error" }, { status });
     }
 
-    const isAuthenticated = Boolean(userId);
-    const uid = userId ?? (isDev ? "anonymous-dev" : null);
+    // Legacy agent_logs row for backward compatibility.
+    logLegacyAgentChat(agent.id, outcome.ctx.userId, message, resultBody.text);
 
-    const agent =
-      AGENTS[agentSlug as keyof typeof AGENTS] ??
-      AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
-
-    // Memories only for authenticated users — never for anonymous companion.
-    const memoryContext = isAuthenticated && uid ? await fetchMemories(message, uid) : "";
-
-    // ─── Companion mode (unauthenticated) ──────────────────────
-    // Unauthenticated companion requests get a strict, limited contract:
-    // no Kernel routing, no capabilities, no tools, no canvas actions,
-    // no expensive provider selection. Server-owned system prompt only.
-    const isAnonymousCompanion = !isAuthenticated && !isDev && isCompanion;
-
-    if (isAnonymousCompanion) {
-      const companionHistory = history.slice(-HISTORY_LIMIT);
-      const transcript = companionHistory
-        .map((entry: HistoryEntry) =>
-          entry.role === "user" ? `User: ${entry.content}` : `${agent.name}: ${entry.content}`,
-        )
-        .join("\n");
-      const prompt = [
-        "You are LiTT, the LiTTree LabStudios companion.",
-        "You are NOT in Studio. You cannot edit files, run commands, access projects,",
-        "or use any tools. You can answer questions, explain features, navigate, and",
-        "suggest actions. If the user needs deep work (files, code, terminal, canvas,",
-        "deployments), suggest they sign in and open Studio.",
-        "Keep responses concise and helpful. Do not claim capabilities you do not have.",
-        "",
-        transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-        `User: ${message}`,
-        "",
-        `${agent.name}:`,
-      ].join("\n");
-
-      const r = await generateText(
-        prompt,
-        { task: "chat", category: "free", maxTokens: 1024 },
-        undefined,
-      );
-      const cleanText = sanitizeOutput(r.text);
-      return NextResponse.json({
-        response: cleanText,
-        provider: r.provider,
-        model: r.model,
-        latencyMs: r.latencyMs,
-      });
-    }
-
-    // ─── LiTT Kernel routing (authenticated or dev only) ───────
-    // The Kernel classifies intent, checks capabilities, and composes
-    // a system prompt with mode-specific guidance + verified capabilities.
-    // This replaces the static agent prompt with a context-aware one.
-    const kernelCapabilities: CapabilityRecord[] = (() => {
-      // Adapt the legacy capability format from the client into
-      // CapabilityRecord objects for the Kernel.
-      const caps = capabilities as Record<string, unknown>;
-      const records: CapabilityRecord[] = [];
-      if (caps.repository === "connected") {
-        records.push(adaptLegacyCapability({ id: "github", status: "ready", name: "Repository" }));
-      }
-      if (caps.terminalExecution === "available") {
-        records.push(adaptLegacyCapability({ id: "pty", status: "ready", name: "Terminal" }));
-      }
-      if (caps.voiceTransportConnected) {
-        records.push(adaptLegacyCapability({ id: "voice", status: "ready", name: "Voice" }));
-      }
-      return records;
-    })();
-
-    const kernelResult = routeKernel({
-      message,
-      userId: userId ?? null,
-      conversationId: null, // not yet wired from session
-      projectId: (capabilities as Record<string, unknown>)?.projectId as string | null ?? null,
-      missionId: null,
-      canvasId: (body.activeCanvasId as string) ?? null,
-      capabilities: kernelCapabilities,
-    });
-
-    // Compose the Kernel system prompt (Constitution + mode guidance +
-    // verified capabilities). Falls back to the legacy agent prompt if
-    // the Kernel fails for any reason.
-    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
-
-    // Use the Kernel prompt as the base, then layer on the legacy
-    // capability translation block + memory + history (same as before).
-    const rawCaps: RawCapabilities = {
-      repository: capabilities?.repository as string | undefined,
-      repositoryIndexed: capabilities?.repositoryIndexed as boolean | undefined,
-      terminalExecution: capabilities?.terminalExecution as string | undefined,
-      writeAccess: capabilities?.writeAccess as boolean | undefined,
-      connectedProviders: capabilities?.connectedProviders as string[] | undefined,
-      availableTools: capabilities?.availableTools as string[] | undefined,
-      connectionSummary: capabilities?.connectionSummary as string | undefined,
-      voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
-      voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
-      voiceHealth: capabilities?.voiceHealth as RawCapabilities["voiceHealth"],
-    };
-    const translated = translateCapabilities(rawCaps);
-
-    // Build page context block for the global companion
-    const pageContextBlock = pageContext?.surface === "global_companion"
-      ? [
-          "",
-          "CURRENT PAGE CONTEXT (global companion — the user is NOT in Studio):",
-          `Page: ${pageContext.pageTitle || "Unknown"}`,
-          `Route: ${pageContext.route || "/"}`,
-          pageContext.activeEntity
-            ? `Viewing: ${pageContext.activeEntity.type.replace("_", " ")} — ${pageContext.activeEntity.name}`
-            : null,
-          pageContext.authenticated ? "User is signed in." : "User is not signed in.",
-          "You are in the global companion panel. You can answer questions, explain features,",
-          "navigate, and suggest actions. If the user needs deep work (files, code, terminal,",
-          "canvas, deployments), suggest they open Studio. Do NOT claim you can edit files",
-          "or run commands from here — those require Studio.",
-        ].filter(Boolean).join("\n")
-      : null;
-
-    const systemPrompt = [
-      kernelSystemPrompt,
-      translated.contextBlock,
-      pageContextBlock,
-      memoryContext,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const geminiModel =
-      typeof requestedModel === "string" && requestedModel.startsWith("gemini")
-        ? requestedModel
-        : "gemini-2.5-flash";
-
-    // Multimodal path: send image snapshots directly to Gemini
-    const imageArray = Array.isArray(images) ? images : [];
-    if (imageArray.length > 0 && !stream) {
-      const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
-      const cleanText = sanitizeOutput(r.text);
-      if (isAuthenticated && uid) {
-        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
-      }
-      return NextResponse.json({
-        response: cleanText,
-        provider: r.provider,
-        model: r.model,
-        latencyMs: r.latencyMs,
-      });
-    }
-
-    // Build the full prompt using the Kernel-composed system prompt +
-    // transcript + user message (same structure as buildPrompt, but
-    // with the Kernel's context-aware system prompt instead of the
-    // static agent prompt).
-    const recentHistory = history.slice(-HISTORY_LIMIT);
-    const transcript = recentHistory
-      .map((entry: HistoryEntry) =>
-        entry.role === "user"
-          ? `User: ${entry.content}`
-          : `${agent.name}: ${entry.content}`,
-      )
-      .join("\n");
-    const prompt = [
-      systemPrompt,
-      "",
-      transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-      `User: ${message}`,
-      "",
-      `${agent.name}:`,
-    ]
-      .filter((line) => line !== undefined)
-      .join("\n");
-
-    if (!stream) {
-      const r = await generateText(
-        prompt,
-        {
-          task: "chat",
-          provider: category ? undefined : provider,
-          category: category as ModelCategory | undefined,
-          maxTokens: 2048,
-          modelOverride: requestedModel && provider ? { [provider]: requestedModel } : undefined,
-        },
-        undefined,
-      );
-      const cleanText = sanitizeOutput(r.text);
-      await logConversation(agent, userId, message, cleanText);
-      if (isAuthenticated && uid) {
-        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
-      }
-
-      // Detect canvas actions from the user message (explicit) and
-      // from the response (suggested). Explicit actions are ready to
-      // execute; suggested actions are shown as chips.
-      const activeCanvasId = (body.activeCanvasId as string) ?? null;
-      const explicitActions = detectCanvasActions(message, activeCanvasId);
-      const suggestedActions = detectSuggestedActions(cleanText);
-      // Deduplicate — if explicit actions exist, don't also suggest
-      const actions = explicitActions.length > 0 ? explicitActions : suggestedActions;
-
-      return NextResponse.json({
-        response: cleanText,
-        provider: r.provider,
-        model: r.model,
-        latencyMs: r.latencyMs,
-        actions,
-      });
-    }
-
-    const encoder = new TextEncoder();
-    const sse = new ReadableStream({
-      async start(controller) {
-        let assistantText = "";
-        try {
-          const r = await streamText(
-            prompt,
-            (chunk) => {
-              const cleanChunk = sanitizeOutput(chunk);
-              assistantText += cleanChunk;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ text: cleanChunk })}\n\n`),
-              );
-            },
-            {
-              task: "chat",
-              provider: category ? undefined : provider,
-              category: category as ModelCategory | undefined,
-              maxTokens: 2048,
-              modelOverride: requestedModel && provider ? { [provider]: requestedModel } : undefined,
-            },
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                done: true,
-                provider: r.provider,
-                model: r.model,
-                latencyMs: r.latencyMs,
-                actions: (() => {
-                  const activeCanvasId = (body.activeCanvasId as string) ?? null;
-                  const explicit = detectCanvasActions(message, activeCanvasId);
-                  const suggested = detectSuggestedActions(assistantText);
-                  return explicit.length > 0 ? explicit : suggested;
-                })(),
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "stream error";
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
-          );
-        } finally {
-          controller.close();
-          if (assistantText) {
-            await logConversation(agent, userId, message, assistantText);
-            if (isAuthenticated && uid) {
-              await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
-            }
-          }
-        }
-      },
-    });
-
-    return new Response(sse, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
+    return NextResponse.json({
+      response: resultBody.text,
+      provider: resultBody.provider,
+      model: resultBody.model,
+      latencyMs: resultBody.latencyMs,
+      actions: resultBody.actions,
     });
   } catch (err) {
-    // LLM chat route error:
     return NextResponse.json(
       { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
   }
+}
+
+/**
+ * Streaming adapter: runs the canonical runtime pipeline and re-emits events
+ * in the legacy SSE shape consumed by existing clients:
+ *   data: { text }
+ *   data: { done: true, provider, model, latencyMs, actions }
+ *   data: [DONE]
+ */
+async function runLiTTStreamLegacy(args: {
+  httpRequest: NextRequest;
+  req: LiTTRunRequest;
+  agentId: string;
+}): Promise<Response> {
+  const { httpRequest, req, agentId } = args;
+  const ctx = await resolveRequestContext(httpRequest, req);
+
+  if (!ctx.isAuthenticated && !ctx.isDev && !ctx.isAnonymousCompanion) {
+    return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Resolve marketplace runtime agent if supplied.
+  let runtimeAgent = null;
+  if (req.agentInstanceId && ctx.clerkId) {
+    const selection = parseAgentSelection(req.agentInstanceId);
+    if (selection) {
+      const result = await resolveRuntimeAgent({ clerkId: ctx.clerkId, selection });
+      if (result.ok && result.agent) runtimeAgent = result.agent;
+    }
+  }
+
+  const prompt = buildPrompt(ctx, req, runtimeAgent);
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let assistantText = "";
+      try {
+        const result = await executeRunStream(req, prompt.fullPrompt, prompt.systemPrompt, {
+          onText: (chunk) => {
+            const clean = sanitizeOutput(chunk);
+            assistantText += clean;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: clean })}\n\n`));
+          },
+        });
+
+        const verified = verifyResult(assistantText);
+        auditRun({
+          userId: ctx.userId,
+          conversationId: ctx.conversationId,
+          projectId: ctx.projectId,
+          mode: ctx.mode,
+          agentSlug: req.agentSlug,
+          agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
+          provider: result.provider,
+          model: result.model,
+          latencyMs: result.latencyMs,
+          status: verified.ok ? "completed" : "failed",
+          errorClass: verified.warning,
+        });
+        logLegacyAgentChat(agentId, ctx.userId, req.message, verified.text);
+
+        const actions = detectActions(req.message, verified.text, req.activeCanvasId);
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              done: true,
+              provider: result.provider,
+              model: result.model,
+              latencyMs: result.latencyMs,
+              actions,
+            })}\n\n`,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "stream error";
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`));
+      } finally {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers: buildSseHeaders() });
 }
 
 export const POST = withRateLimit(handler, 60, 60);

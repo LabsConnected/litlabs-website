@@ -311,6 +311,63 @@ const PROVIDER_OPTIONS = [
 
 /* ─── Component ───────────────────────────────────────────────────────── */
 
+/** LiTT robot mascot SVG — illustrated robot with glowing eyes, antenna, chest light. */
+function LiTTRobotMascot({ size = 80, color = "#a855f7" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" fill="none" aria-hidden>
+      {/* Antenna */}
+      <line x1="60" y1="8" x2="60" y2="22" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <circle cx="60" cy="6" r="3" fill={color}>
+        <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+      </circle>
+      {/* Head */}
+      <rect x="32" y="22" width="56" height="44" rx="14" fill="#1a1530" stroke={color} strokeWidth="2" />
+      {/* Eyes */}
+      <circle cx="48" cy="42" r="5" fill={color}>
+        <animate attributeName="opacity" values="1;0.6;1" dur="3s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="72" cy="42" r="5" fill={color}>
+        <animate attributeName="opacity" values="1;0.6;1" dur="3s" repeatCount="indefinite" />
+      </circle>
+      {/* Eye glow */}
+      <circle cx="48" cy="42" r="8" fill={color} opacity="0.2" />
+      <circle cx="72" cy="42" r="8" fill={color} opacity="0.2" />
+      {/* Mouth */}
+      <path d="M50 54 Q60 58 70 54" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.6" />
+      {/* Body */}
+      <rect x="36" y="68" width="48" height="36" rx="10" fill="#1a1530" stroke={color} strokeWidth="2" />
+      {/* Chest light */}
+      <circle cx="60" cy="86" r="6" fill="#22d3ee">
+        <animate attributeName="opacity" values="0.8;0.3;0.8" dur="1.5s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="60" cy="86" r="10" fill="#22d3ee" opacity="0.15" />
+      {/* Arms */}
+      <line x1="36" y1="76" x2="28" y2="84" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <line x1="84" y1="76" x2="92" y2="84" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Inspiration grid with real Unsplash photos and gradient fallbacks. */
+const INSPIRATION_IMAGES = [
+  { url: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=400&fit=crop", label: "Cyberpunk street", prompt: "Cyberpunk street at night, neon signs, rain reflections, cinematic", fallback: "linear-gradient(135deg, #0a0014, #ff006e)" },
+  { url: "https://images.unsplash.com/photo-1448375240586-882707db888b?w=400&h=400&fit=crop", label: "Forest cabin", prompt: "Cozy forest cabin in autumn, golden light, misty trees, photorealistic", fallback: "linear-gradient(135deg, #1a2e00, #4a7c00)" },
+  { url: "https://images.unsplash.com/photo-1451187580459-9546f5f4f4f4?w=400&h=400&fit=crop", label: "Space station", prompt: "Space station interior, futuristic, blue glow, zero gravity, sci-fi", fallback: "linear-gradient(135deg, #000033, #0066ff)" },
+  { url: "https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?w=400&h=400&fit=crop", label: "Neon portrait", prompt: "Neon lit portrait, magenta and cyan lighting, moody, cinematic", fallback: "linear-gradient(135deg, #1a0033, #ff00ff)" },
+  { url: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&h=400&fit=crop", label: "Mountain sunrise", prompt: "Mountain sunrise, golden hour, misty peaks, landscape photography", fallback: "linear-gradient(135deg, #2a1a00, #ff8800)" },
+  { url: "https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=400&h=400&fit=crop", label: "Abstract art", prompt: "Abstract 3D render, flowing shapes, iridescent, octane, vibrant", fallback: "linear-gradient(135deg, #001a33, #00ffcc)" },
+];
+
+/** Visual style cards — top 6 styles with image backgrounds. */
+const VISUAL_STYLE_CARDS = [
+  { label: "Cinematic", url: "https://images.unsplash.com/photo-1536440136628-849c29e73647?w=300&h=200&fit=crop", prompt: "cinematic film still", fallback: "linear-gradient(135deg, #1a0000, #8b0000)" },
+  { label: "LiTTree Cyberpunk", url: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&h=200&fit=crop", prompt: "cyberpunk neon noir", fallback: "linear-gradient(135deg, #0a0014, #ff006e)" },
+  { label: "Photoreal", url: "https://images.unsplash.com/photo-1502134249127-cc8f4c66a1c3?w=300&h=200&fit=crop", prompt: "photorealistic", fallback: "linear-gradient(135deg, #1a1a1a, #4a4a4a)" },
+  { label: "Illustration", url: "https://images.unsplash.com/photo-1567095761124-6fd5d6fb8b14?w=300&h=200&fit=crop", prompt: "digital illustration", fallback: "linear-gradient(135deg, #1a0033, #6600ff)" },
+  { label: "3D Render", url: "https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=300&h=200&fit=crop", prompt: "3D render octane", fallback: "linear-gradient(135deg, #001a33, #00ddff)" },
+  { label: "Anime", url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=300&h=200&fit=crop", prompt: "anime studio ghibli", fallback: "linear-gradient(135deg, #001a00, #00ff88)" },
+];
+
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
 
@@ -375,6 +432,8 @@ export default function ImageTool() {
     }
   });
   const [imgError, setImgError] = useState<string | null>(null);
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  const [imageHovered, setImageHovered] = useState(false);
 
   /* ── UI state ── */
   // Use shared WalletContext rather than localStorage or ad-hoc fetches
@@ -1208,8 +1267,8 @@ export default function ImageTool() {
                 >
                   <Zap size={9} /> Enhance
                 </button>
-                <span className="text-[9px]" style={{ color: T.textMuted + "60" }}>
-                  {prompt.length}
+                <span className="text-[9px]" style={{ color: prompt.length > 900 ? "#e3b341" : T.textMuted + "60" }}>
+                  {prompt.length} / 1000
                 </span>
               </div>
             </div>
@@ -1537,9 +1596,9 @@ export default function ImageTool() {
                 />
                 <div
                   className="text-right text-[9px]"
-                  style={{ color: T.textMuted + "60" }}
+                  style={{ color: prompt.length > 900 ? "#e3b341" : T.textMuted + "60" }}
                 >
-                  {prompt.length}
+                  {prompt.length} / 1000
                 </div>
               </div>
 
@@ -2834,15 +2893,84 @@ export default function ImageTool() {
               >
                 {currentResult?.fileUrl ? (
                   <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={currentResult.fileUrl}
-                      alt={currentResult.prompt}
-                      className="max-w-full max-h-full object-contain"
-                      style={{ borderRadius: "4px" }}
-                      onError={() => setImgError("Image failed to load.")}
-                      onLoad={() => setImgError(null)}
-                    />
+                    <div
+                      className="relative max-w-full max-h-full"
+                      onMouseEnter={() => setImageHovered(true)}
+                      onMouseLeave={() => setImageHovered(false)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={currentResult.fileUrl}
+                        alt={currentResult.prompt}
+                        className="max-w-full max-h-full object-contain"
+                        style={{ borderRadius: "4px" }}
+                        onError={() => setImgError("Image failed to load.")}
+                        onLoad={() => setImgError(null)}
+                      />
+                      {/* Favorite heart button — top right */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const id = currentResult.id;
+                          if (!id) return;
+                          setFavoritedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          });
+                        }}
+                        className="absolute top-2 right-2 grid h-8 w-8 place-items-center rounded-lg transition-all"
+                        style={{
+                          backgroundColor: "rgba(8,6,15,.55)",
+                          border: "none",
+                        }}
+                        aria-label="Favorite"
+                        title="Favorite"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={favoritedIds.has(currentResult.id ?? "") ? "#FF5263" : "none"} stroke={favoritedIds.has(currentResult.id ?? "") ? "#FF5263" : "rgba(255,255,255,.7)"} strokeWidth="2" aria-hidden>
+                          <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+                        </svg>
+                      </button>
+                      {/* Hover action overlay — bottom bar with quick actions */}
+                      {imageHovered && !imgError && (
+                        <div
+                          className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1.5 p-3"
+                          style={{
+                            background: "linear-gradient(to top, rgba(8,6,15,.82) 0%, rgba(8,6,15,.4) 60%, transparent 100%)",
+                          }}
+                        >
+                          <span className="mr-auto text-[10px] text-white/70 line-clamp-1 max-w-[50%]">
+                            {currentResult.prompt}
+                          </span>
+                          {[
+                            { label: "Download", icon: Download, onClick: () => handleDownload(currentResult.fileUrl!, currentResult.prompt) },
+                            { label: "Edit", icon: Wand2, onClick: () => { setPrompt(currentResult.prompt); } },
+                            { label: "Variation", icon: RefreshCw, onClick: handleGenerate },
+                            { label: "Canvas", icon: Layers, onClick: () => window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: currentResult.fileUrl } })) },
+                            { label: "Wallpaper", icon: Palette, onClick: () => window.dispatchEvent(new CustomEvent("studio:set-wallpaper", { detail: { url: currentResult.fileUrl } })) },
+                          ].map((action) => (
+                            <button
+                              key={action.label}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/15"
+                              style={{
+                                backgroundColor: "rgba(255,255,255,.09)",
+                                border: "1px solid rgba(255,255,255,.12)",
+                                color: "rgba(255,255,255,.8)",
+                              }}
+                              aria-label={action.label}
+                              title={action.label}
+                            >
+                              <action.icon size={10} className="pointer-events-none" />
+                              <span className="hidden sm:inline">{action.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     {imgError && (
                       <div
                         className="absolute inset-0 flex items-center justify-center"
@@ -2879,35 +3007,42 @@ export default function ImageTool() {
                     )}
                   </>
                 ) : isWorking ? (
-                  <div className="text-center select-none">
-                    <div className="relative w-24 h-24 mx-auto mb-4">
-                      <div
-                        className="absolute inset-0 rounded-full border-2 animate-ping opacity-30"
-                        style={{ borderColor: T.accentColor }}
-                      />
-                      <div
-                        className="absolute inset-2 rounded-full border animate-spin opacity-20"
-                        style={{
-                          borderColor: T.accentColor,
-                          borderTopColor: "transparent",
-                        }}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center text-3xl">
-                        🎨
-                      </div>
+                  <div className="w-full h-full overflow-y-auto p-6 select-none">
+                    <div className="text-[12px] font-bold mb-4" style={{ color: T.textMuted }}>
+                      Generating {batchSize > 1 ? `${batchSize} images` : "image"}…
                     </div>
-                    <p
-                      className="text-sm font-bold"
-                      style={{ color: T.textMuted }}
-                    >
-                      Forging...
-                    </p>
-                    <p
-                      className="text-[10px] mt-1 opacity-50"
-                      style={{ color: T.textMuted }}
-                    >
-                      {currentProvider.label}
-                    </p>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(240px, 1fr))` }}>
+                      {Array.from({ length: batchSize }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="relative rounded-lg border overflow-hidden"
+                          style={{
+                            borderColor: T.borderColor + "40",
+                            backgroundColor: T.boxBg,
+                            paddingBottom: "56.25%",
+                            animation: `pulse 1.8s ease-in-out ${i * 0.2}s infinite`,
+                          }}
+                        >
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                            <div
+                              className="h-7 w-7 rounded-full border-2 animate-spin"
+                              style={{
+                                borderColor: T.accentColor,
+                                borderTopColor: "transparent",
+                              }}
+                            />
+                            <span className="text-[10px] font-bold" style={{ color: T.textMuted }}>
+                              Generating…
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 text-center">
+                      <p className="text-[10px] opacity-50" style={{ color: T.textMuted }}>
+                        {currentProvider.label} · {aspectRatio}
+                      </p>
+                    </div>
                   </div>
                 ) : status === "failed" ? (
                   <div className="text-center px-8">
@@ -2954,7 +3089,121 @@ export default function ImageTool() {
                     </div>
                   </div>
                 ) : (
-                  <div className="w-full h-full overflow-y-auto p-4 space-y-4">
+                  <div className="w-full h-full overflow-y-auto p-4 space-y-5">
+                    {/* LiTT robot mascot empty state */}
+                    <div className="flex flex-col items-center justify-center py-6 select-none">
+                      <LiTTRobotMascot size={96} color={T.accentColor} />
+                      <h2 className="mt-4 text-lg font-black" style={{ color: T.textColor }}>
+                        Create your first image
+                      </h2>
+                      <p className="mt-1 text-[11px] text-center max-w-xs" style={{ color: T.textMuted }}>
+                        Describe what you want to see, pick a style, and let LiTT forge it into reality.
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          onClick={() => { setPrompt("A breathtaking cyberpunk cityscape at dusk, neon reflections in rain-soaked streets, cinematic lighting"); }}
+                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
+                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+                        >
+                          🌆 Cyberpunk city
+                        </button>
+                        <button
+                          onClick={() => { setPrompt("A serene Japanese garden with cherry blossoms, soft morning light, photorealistic"); }}
+                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
+                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+                        >
+                          🌸 Garden scene
+                        </button>
+                        <button
+                          onClick={() => { setPrompt("Abstract 3D render, flowing iridescent shapes, octane render, vibrant colors, 8k"); }}
+                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
+                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+                        >
+                          ✨ Abstract 3D
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Visual style cards — top 6 with image backgrounds */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                        <Palette size={10} />
+                        <span>Visual Styles</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {VISUAL_STYLE_CARDS.map((card) => {
+                          const isSelected = selectedStyle === card.prompt;
+                          return (
+                            <button
+                              key={card.label}
+                              onClick={() => { setSelectedStyle(card.prompt); addLog("info", `Style: ${card.label}`); }}
+                              disabled={isWorking}
+                              className="relative aspect-[3/2] rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
+                              style={{
+                                borderColor: isSelected ? T.accentColor : T.borderColor + "40",
+                                boxShadow: isSelected ? `0 0 12px ${T.accentColor}40` : "none",
+                              }}
+                            >
+                              <div className="absolute inset-0" style={{ background: card.fallback }} />
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={card.url}
+                                alt={card.label}
+                                className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
+                                onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                              <span className="absolute bottom-1.5 left-2 text-[10px] font-bold text-white drop-shadow">
+                                {card.label}
+                              </span>
+                              {isSelected && (
+                                <div className="absolute top-1.5 right-1.5 grid h-5 w-5 place-items-center rounded-full" style={{ backgroundColor: T.accentColor }}>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Inspiration grid — real photos */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                        <Sparkles size={10} />
+                        <span>Inspiration</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {INSPIRATION_IMAGES.map((img) => (
+                          <button
+                            key={img.label}
+                            onClick={() => { setPrompt(img.prompt); }}
+                            disabled={isWorking}
+                            className="relative aspect-square rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
+                            style={{ borderColor: T.borderColor + "40" }}
+                          >
+                            <div className="absolute inset-0" style={{ background: img.fallback }} />
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={img.url}
+                              alt={img.label}
+                              className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
+                              onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-1.5">
+                              <span className="text-[9px] font-bold text-white drop-shadow">{img.label}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Recent generations */}
                     {history.length > 0 && (
                       <div>
@@ -2986,38 +3235,14 @@ export default function ImageTool() {
                       </div>
                     )}
 
-                    {/* Prompt presets */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                        <Sparkles size={10} />
-                        <span>Try a prompt</span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {PROMPT_PRESETS.slice(0, 6).map((preset) => (
-                          <button
-                            key={preset}
-                            onClick={() => { setPrompt(preset); }}
-                            className="text-left p-2.5 rounded-lg border text-[10px] leading-relaxed transition-all hover:scale-[1.01]"
-                            style={{
-                              borderColor: T.borderColor + "30",
-                              backgroundColor: T.bgColor,
-                              color: T.textMuted,
-                            }}
-                          >
-                            <span className="line-clamp-2">{preset}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Inspiration gallery */}
+                    {/* Remaining style chips */}
                     <div>
                       <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
                         <Palette size={10} />
-                        <span>Styles</span>
+                        <span>More Styles</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {STYLE_PRESETS.slice(0, 10).map((style) => (
+                        {STYLE_PRESETS.slice(6, 14).map((style) => (
                           <button
                             key={style}
                             onClick={() => { setPrompt(prompt ? `${prompt}, ${style}` : style); }}
@@ -3032,16 +3257,6 @@ export default function ImageTool() {
                           </button>
                         ))}
                       </div>
-                    </div>
-
-                    {/* Empty hint */}
-                    <div className="text-center pt-2">
-                      <p className="text-[11px] font-bold" style={{ color: T.textMuted }}>
-                        Create something original.
-                      </p>
-                      <p className="text-[10px] mt-0.5 opacity-50" style={{ color: T.textMuted }}>
-                        Describe the image, choose a style, and generate.
-                      </p>
                     </div>
                   </div>
                 )}
