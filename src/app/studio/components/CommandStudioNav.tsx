@@ -105,8 +105,8 @@ export default function CommandStudioNav({
 
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const isActive = active === item.id;
           const isMore = item.id === "more";
+          const isActive = isMore ? (active === "more" || moreOpen) : active === item.id;
           return (
             <button
               key={item.id}
@@ -114,6 +114,8 @@ export default function CommandStudioNav({
               onClick={() => {
                 if (isMore) {
                   setMoreOpen((v) => !v);
+                  // Don't change destination until a sub-mode is picked
+                  return;
                 }
                 onSelect(item.id);
               }}

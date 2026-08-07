@@ -83,14 +83,25 @@ const QUALITY_LEVELS = [
 
 const PERSIST_KEY = "litlabs:canvas:files";
 const PERSIST_MSG_KEY = "litlabs:canvas:messages";
-// TODO(P0-4): Replace localStorage with server-backed storage (Supabase table
-// with RLS). This requires: (1) a canvas_files table, (2) an API endpoint for
-// save/load, (3) passing userId + projectId into CanvasTool as props. Currently
-// deferred because CanvasTool is a standalone component with no projectId
-// context, and this is a data-persistence issue (not cross-user leakage —
-// localStorage is origin-scoped). Will be addressed in the Studio rebuild.
 
-export default function CanvasTool() {
+/** Real LiTTree pricing — injected into AI prompt so generated pricing pages use real data. */
+const LITTREE_PRICING_CONTEXT = `
+LiTTree REAL pricing (use these exact values, not placeholders):
+- Starter: FREE, 500 AI credits (one-time), 1 active project, LiTT & Spark agents, code/image generation, public previews, community support
+- Creator Beta: $7/mo (was $15), 6,000 AI credits/mo, 5 active projects, research/writing/marketing skills, private projects, GitHub connection, voice mode, preview deployments
+- Pro Builder Beta: $19/mo (was $39), 20,000 AI credits/mo, 25 active projects, coding & analytics skills, terminal runtime, advanced coding models, diff review, Vercel deployment, Supabase integration, priority generation
+- Founding Member: $149 one-time, permanent Creator-level access, founder badge (limited to 100)
+
+Design system: dark theme, purple primary (#9B4DFF), green accent (#4DFF62), cyan (#65F4FF), bg #08060F, surface #0D0916.
+Use Tailwind CSS classes. Use Inter font. Cards should have rounded-2xl borders with subtle purple glow.
+`;
+
+interface CanvasToolProps {
+  /** Active studio project ID. When provided, Accept writes files to the workspace. */
+  projectId?: string | null;
+}
+
+export default function CanvasTool({ projectId }: CanvasToolProps) {
   const { resolvedColors: T } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -109,6 +120,11 @@ export default function CanvasTool() {
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /* ── Accept/Revert pipeline state ── */
+  const [acceptState, setAcceptState] = useState<"idle" | "writing" | "done" | "error">("idle");
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [writtenFiles, setWrittenFiles] = useState<string[]>([]);
 
   // Load persisted files and messages on mount
   useEffect(() => {
@@ -228,7 +244,7 @@ export default function CanvasTool() {
               })),
               {
                 role: "user",
-                content: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${qualityInstruction}${memoryContext}\n\nUser request: ${text}`,
+                content: `You are a code builder assistant for LiTTree Lab Studios. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${qualityInstruction}${LITTREE_PRICING_CONTEXT}${memoryContext}\n\nUser request: ${text}`,
               },
             ],
           }),
@@ -418,6 +434,49 @@ export default function CanvasTool() {
     });
     setActiveFile(name);
     setPreviewMode("code");
+  }, []);
+
+  /* ── Accept: write generated files to the active workspace ── */
+  const handleAccept = useCallback(async () => {
+    if (!projectId || generatedFiles.length === 0) return;
+    setAcceptState("writing");
+    setAcceptError(null);
+    setWrittenFiles([]);
+    const written: string[] = [];
+    try {
+      for (const file of generatedFiles) {
+        const resp = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "write", path: file.name, content: file.content }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text().catch(() => "Write failed");
+          throw new Error(`${file.name}: ${err}`);
+        }
+        written.push(file.name);
+        setWrittenFiles([...written]);
+      }
+      setAcceptState("done");
+      // Notify Studio to refresh file tree + preview
+      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, files: written } }));
+    } catch (err) {
+      setAcceptState("error");
+      setAcceptError(err instanceof Error ? err.message : "Failed to write files");
+    }
+  }, [projectId, generatedFiles]);
+
+  /* ── Revert: discard generated files (clears local state only) ── */
+  const handleRevert = useCallback(() => {
+    setGeneratedFiles([]);
+    setActiveFile("");
+    setMessages([]);
+    setInput("");
+    setSelectedIntent("");
+    setAcceptState("idle");
+    setWrittenFiles([]);
+    localStorage.removeItem(PERSIST_KEY);
+    localStorage.removeItem(PERSIST_MSG_KEY);
   }, []);
 
   return (
@@ -941,6 +1000,73 @@ export default function CanvasTool() {
               )}
             </div>
           </div>
+
+          {/* Accept / Revert bar — write generated files to workspace */}
+          {generatedFiles.length > 0 && projectId && (
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
+              style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg }}
+            >
+              {acceptState === "done" ? (
+                <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "#22c55e" }}>
+                  <Check size={14} />
+                  <span>{writtenFiles.length} file{writtenFiles.length > 1 ? "s" : ""} written to workspace</span>
+                  <span className="text-[10px] opacity-60" style={{ color: T.textMuted }}>
+                    ({writtenFiles.join(", ")})
+                  </span>
+                </div>
+              ) : acceptState === "error" ? (
+                <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "#ef4444" }}>
+                  <AlertCircle size={14} />
+                  <span className="truncate">{acceptError}</span>
+                </div>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                  {generatedFiles.length} file{generatedFiles.length > 1 ? "s" : ""} ready · Accept to write to workspace
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRevert}
+                  disabled={acceptState === "writing"}
+                  className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:opacity-80 disabled:opacity-40"
+                  style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
+                >
+                  <RotateCcw size={12} /> Revert
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAccept()}
+                  disabled={acceptState === "writing" || acceptState === "done"}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition disabled:opacity-40"
+                  style={{
+                    backgroundColor: acceptState === "done" ? "#22c55e20" : T.accentColor,
+                    color: acceptState === "done" ? "#22c55e" : "#000",
+                  }}
+                >
+                  {acceptState === "writing" ? (
+                    <><Loader2 size={12} className="animate-spin" /> Writing {writtenFiles.length}/{generatedFiles.length}…</>
+                  ) : acceptState === "done" ? (
+                    <><Check size={12} /> Accepted</>
+                  ) : (
+                    <><Check size={12} /> Accept &amp; Write</>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* No project warning — Accept unavailable without projectId */}
+          {generatedFiles.length > 0 && !projectId && (
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[10px]"
+              style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
+            >
+              <AlertCircle size={12} />
+              <span>Select a project to write generated files to the workspace. Files are saved locally only.</span>
+            </div>
+          )}
 
           {/* Code/Preview Content */}
           <div className="flex-1 overflow-auto">
