@@ -901,10 +901,28 @@ function StudioUnavailableSurface({
       <div className="w-full max-w-lg space-y-4 rounded-2xl border p-5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
         <div>
           <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--litt-primary)" }}>{destination}</div>
-          <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>Workspace status</h2>
+          <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>Pick a workspace</h2>
           <p className="mt-1 text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>
-            This surface is not available yet, but your live workspace context is still connected below.
+            Select a tool from the sidebar or pick one below to get started.
           </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: "Chat", desc: "Talk to LiTT", dest: "studio" as const, mode: "work" as const },
+            { label: "Create", desc: "Image, video, audio", dest: "create" as const, mode: "image" as const },
+            { label: "Code", desc: "Edit project files", dest: "studio" as const, mode: "code" as const },
+            { label: "Preview", desc: "Live preview", dest: "studio" as const, mode: "preview" as const },
+          ].map((tool) => (
+            <a
+              key={tool.label}
+              href={`?tool=${tool.dest === "studio" ? (tool.mode === "work" ? "chat" : tool.mode === "code" ? "code" : "build") : tool.mode}`}
+              className="block rounded-lg border p-3 transition hover:opacity-80"
+              style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}
+            >
+              <div className="text-[11px] font-black" style={{ color: "var(--text-primary)" }}>{tool.label}</div>
+              <div className="mt-0.5 text-[9px]" style={{ color: "var(--text-muted)" }}>{tool.desc}</div>
+            </a>
+          ))}
         </div>
         <div className="grid grid-cols-2 gap-2 text-[10px]">
           <div className="rounded-lg border p-2" style={{ borderColor: "var(--studio-border)" }}><span style={{ color: "var(--text-muted)" }}>Project</span><div className="mt-1 truncate font-bold" style={{ color: "var(--text-primary)" }}>{capabilities.projectName ?? "Not selected"}</div></div>
