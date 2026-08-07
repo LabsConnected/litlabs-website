@@ -882,7 +882,7 @@ export function useCanonicalConversation({
               } else if (evt.type === "done") {
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
-                errorPayload = { message: evt.message, detail: evt.detail, partialText: evt.partialText };
+                errorPayload = { message: evt.message, partialText: evt.partialText };
               }
             } catch {
               // ignore malformed chunk
