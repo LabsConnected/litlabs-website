@@ -178,6 +178,7 @@ export function buildPrompt(
         scanStatus: ctx.project.scanStatus,
         scanSummary: ctx.project.scanSummary,
         activeAgentSlug: agentSlug,
+        activeAgentMode: "standard",
         agentInstanceId: req.agentInstanceId ?? null,
         capabilities: ctx.project.capabilities,
       })
