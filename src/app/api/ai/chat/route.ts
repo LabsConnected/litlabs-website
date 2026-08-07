@@ -9,7 +9,7 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
     const message = body.message;
     const model = body.model ?? "llama3.2:3b";

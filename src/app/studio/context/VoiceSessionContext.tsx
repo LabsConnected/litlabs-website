@@ -829,7 +829,7 @@ export function VoiceSessionProvider({
       }
 
       // Fallback: browser SpeechSynthesis
-      console.debug("[Voice Pipeline] browser TTS fallback started");
+      if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] browser TTS fallback started");
       if (typeof window === "undefined" || !window.speechSynthesis) {
         console.warn("[Voice] speechSynthesis not available");
         finishSpeaking();
@@ -850,7 +850,7 @@ export function VoiceSessionProvider({
       utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
 
       utterance.onend = () => {
-        console.debug("[Voice Pipeline] playback ended (browser TTS)");
+        if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] playback ended (browser TTS)");
         finishSpeaking();
       };
       utterance.onerror = (e) => {
@@ -868,7 +868,7 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const interrupt = useCallback(() => {
-    console.debug("[Voice] interrupt");
+    if (process.env.NODE_ENV !== "production") console.debug("[Voice] interrupt");
     stopSpeaking();
   }, [stopSpeaking]);
 
@@ -954,7 +954,7 @@ export function VoiceSessionProvider({
     setPendingTranscriptState(null);
     setVoiceState("sending");
     voiceStateRef.current = "sending";
-    console.debug("[Voice Pipeline] user submitted transcript", { transcript: trimmed.slice(0, 80) });
+    if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] user submitted transcript", { transcript: trimmed.slice(0, 80) });
     onTurnRef.current(trimmed);
     setTiming({ aiResponseCompletedAt: Date.now() });
   }, [setTiming]);
@@ -964,7 +964,7 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const cancelRecording = useCallback(() => {
-    console.debug("[Voice] cancelRecording");
+    if (process.env.NODE_ENV !== "production") console.debug("[Voice] cancelRecording");
     if (inworldConnectedRef.current) {
       inworldSession.stopListening();
     }
@@ -1029,13 +1029,13 @@ export function VoiceSessionProvider({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && micActiveRef.current) {
-        console.debug("[Voice] tab hidden — stopping mic");
+        if (process.env.NODE_ENV !== "production") console.debug("[Voice] tab hidden — stopping mic");
         stopVoice();
       }
     };
     const handlePageHide = () => {
       if (micActiveRef.current) {
-        console.debug("[Voice] page hide — stopping mic");
+        if (process.env.NODE_ENV !== "production") console.debug("[Voice] page hide — stopping mic");
         stopVoice();
       }
     };

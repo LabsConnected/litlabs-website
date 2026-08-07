@@ -27,6 +27,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'captcha_failed' }, { status: 403 });
   }
 
-  // TODO: replace with your Clerk / auth signup logic
-  return NextResponse.json({ ok: true });
+  // Clerk handles signup on the client via @clerk/nextjs.
+  // This route exists only for bot/captcha telemetry and rate-limiting.
+  return NextResponse.json(
+    { error: "not_implemented", detail: "Use Clerk signup flow" },
+    { status: 501 }
+  );
 }

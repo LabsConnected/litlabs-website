@@ -291,7 +291,7 @@ export function useInworldSession(
       vadStateRef.current = "idle";
       const vad = new VoiceActivityDetector(analyser, {
         onSpeechStart: () => {
-          console.debug("[Voice VAD] speech started");
+          if (process.env.NODE_ENV !== "production") console.debug("[Voice VAD] speech started");
           shouldSendAudioRef.current = true;
           // Clear any previous audio buffer when speech starts
           if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -299,7 +299,7 @@ export function useInworldSession(
           }
         },
         onSpeechEnd: (durationMs) => {
-          console.debug("[Voice VAD] speech ended", { durationMs });
+          if (process.env.NODE_ENV !== "production") console.debug("[Voice VAD] speech ended", { durationMs });
           shouldSendAudioRef.current = false;
           vadSpeechDurationRef.current = durationMs;
           // Commit the audio buffer so Inworld transcribes it
@@ -549,7 +549,7 @@ export function useInworldSession(
                 if (!explicitTtsRef.current) {
                   interruptedRef.current = true;
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    console.debug("[Voice Pipeline] cancelling auto-response (not from speakText)");
+                    if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] cancelling auto-response (not from speakText)");
                     wsRef.current.send(JSON.stringify({ type: "response.cancel" }));
                   }
                 } else {
@@ -579,7 +579,7 @@ export function useInworldSession(
                 // Only play audio for explicit TTS calls (speakText) AND
                 // when not interrupted (auto-response cancellation).
                 if (explicitTtsRef.current && !interruptedRef.current && data.delta) {
-                  console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
+                  if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
                   const buffer = decodePcm16ToAudioBuffer(data.delta);
                   if (buffer) {
                     playbackQueueRef.current.push(buffer);
@@ -602,7 +602,7 @@ export function useInworldSession(
               case "response.completed":
                 // Response finished (normally or via cancel). Reset the
                 // interrupt flag so the next response's audio plays.
-                console.debug("[Voice Pipeline] playback ended (Inworld TTS)", { type: data.type });
+                if (process.env.NODE_ENV !== "production") console.debug("[Voice Pipeline] playback ended (Inworld TTS)", { type: data.type });
                 interruptedRef.current = false;
                 setState("idle");
                 onResponseComplete?.();
@@ -985,14 +985,14 @@ export function useInworldSession(
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.clear" }));
     }
-    console.debug("[Voice] mic paused (TTS echo isolation)");
+    if (process.env.NODE_ENV !== "production") console.debug("[Voice] mic paused (TTS echo isolation)");
   }, []);
 
   const resumeMic = useCallback(() => {
     // Apply cooldown after TTS ends before resuming
     setTimeout(() => {
       micPausedRef.current = false;
-      console.debug("[Voice] mic resumed (TTS echo isolation cooldown ended)");
+      if (process.env.NODE_ENV !== "production") console.debug("[Voice] mic resumed (TTS echo isolation cooldown ended)");
     }, VOICE_GATE_CONFIG.echo.postTtsCooldownMs);
   }, []);
 
