@@ -72,7 +72,7 @@ type WorkSurface = "conversation" | "builder";
 
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
-const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
+const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<string, unknown>>>> = {
   canvas: CanvasTool,
   image: ImageTool,
   video: VideoTool,
@@ -682,7 +682,7 @@ function CommandStudioContent() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent />
+                    <WorkspaceComponent projectId={capabilities.projectId} />
                   </div>
                 ) : (
                   <StudioUnavailableSurface
