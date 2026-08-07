@@ -128,6 +128,10 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
   ): Promise<NextResponse> {
     const { pathname } = req.nextUrl;
 
+    // Validate auth config on first request, not at module load.
+    // This prevents the blanket 500 that made production debugging impossible.
+    validateAuthConfig();
+
     // Skip webhooks + health checks + metrics — they verify themselves
     if (isWebhookPath(pathname) || isHealthPath(pathname)) {
       return (inner(req as never, ...rest as never[]) as Promise<NextResponse>) ??
@@ -219,34 +223,51 @@ const isTestAuthDisabled =
   process.env.PLAYWRIGHT_TEST === "true" &&
   !process.env.VERCEL;
 
-// In production or any deployed environment, Clerk MUST be configured.
-// The test bypass is valid in local CI/test environments.
-// ALLOW_ANONYMOUS_DEV=true in non-production lets local dev run without Clerk
-// (matches the behavior of auth() in src/lib/auth.ts).
-if (!clerkConfigured && !isTestAuthDisabled && !isAnonymousDevAllowed()) {
-  throw new Error(
-    "FATAL: Clerk is not configured. " +
-      "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY, " +
-      "or set ALLOW_ANONYMOUS_DEV=true for local development. " +
-      "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
-      "and VERCEL is absent.",
-  );
+/**
+ * Whether anonymous dev mode is allowed.
+ *
+ * ALLOW_ANONYMOUS_DEV=true lets local dev run without Clerk. In production
+ * (NODE_ENV=production) this is only honored when VERCEL is absent — i.e.
+ * local `next start` testing. On Vercel, production always requires real Clerk
+ * keys.
+ */
+function isAnonymousModeAllowed(): boolean {
+  if (process.env.VERCEL) return false; // deployed — never allow anonymous
+  return isAnonymousDevAllowed() || process.env.ALLOW_ANONYMOUS_DEV === "true";
 }
 
-// Also reject if someone sets PLAYWRIGHT_AUTH_DISABLED in a deployed environment
-if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
-  throw new Error(
-    "FATAL: PLAYWRIGHT_AUTH_DISABLED is set but not in a valid test environment. " +
-      "This flag requires CI=true, PLAYWRIGHT_TEST=true, and VERCEL absent.",
-  );
+/**
+ * Validate auth configuration. Called inside the request handler (not at module
+ * load) so the middleware module always loads successfully. A misconfigured
+ * deployed environment will still fail closed — but on the first request, not
+ * at import time, which prevents the blanket 500 that made debugging impossible.
+ */
+function validateAuthConfig(): void {
+  if (!clerkConfigured && !isTestAuthDisabled && !isAnonymousModeAllowed()) {
+    throw new Error(
+      "FATAL: Clerk is not configured. " +
+        "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY, " +
+        "or set ALLOW_ANONYMOUS_DEV=true for local development. " +
+        "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
+        "and VERCEL is absent.",
+    );
+  }
+
+  // Also reject if someone sets PLAYWRIGHT_AUTH_DISABLED in a deployed environment
+  if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
+    throw new Error(
+      "FATAL: PLAYWRIGHT_AUTH_DISABLED is set but not in a valid test environment. " +
+        "This flag requires CI=true, PLAYWRIGHT_TEST=true, and VERCEL absent.",
+    );
+  }
 }
 
 function setCacheHeaders(response: NextResponse, pathname: string): NextResponse {
-  if (["/about", "/contact", "/docs", "/pricing"].includes(pathname)) {
+  if (["/docs", "/pricing"].includes(pathname)) {
     response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
   }
 
-  if (pathname.startsWith("/login") || pathname.startsWith("/signup")) {
+  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) {
     response.headers.set("Cache-Control", "no-store, must-revalidate");
   }
 

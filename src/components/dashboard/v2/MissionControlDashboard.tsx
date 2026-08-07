@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { Icon } from "./dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
@@ -360,7 +360,7 @@ export function MissionControlDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useUser();
+  const { user } = useAppUser();
   const displayName = user?.firstName || user?.username || "there";
 
   // Widget system — DraggableWidgetGrid manages its own layout state

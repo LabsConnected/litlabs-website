@@ -118,7 +118,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       "Founder badge",
     ],
     beta: true,
-    enabled: false,
+    enabled: true,
     founderLimit: 100,
   },
 };

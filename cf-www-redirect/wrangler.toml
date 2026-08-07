@@ -1,0 +1,7 @@
+name = "www-redirect"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+routes = [
+  { pattern = "www.litlabs.net/*", zone_id = "856b63eeee14478c786991bad8bf16ea" }
+]

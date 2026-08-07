@@ -881,7 +881,13 @@ export function useCanonicalConversation({
             const payload = trimmed.slice(5).trim();
             if (payload === "[DONE]") continue;
             try {
-              const evt = JSON.parse(payload) as { type: string; text?: string; message?: string; partialText?: string };
+              const evt = JSON.parse(payload) as {
+                type: string;
+                text?: string;
+                message?: string;
+                partialText?: string;
+                detail?: { message?: string; partialText?: string };
+              };
               if (evt.type === "text" && typeof evt.text === "string") {
                 assistantText += evt.text;
                 flushUpdate();
@@ -891,7 +897,8 @@ export function useCanonicalConversation({
               } else if (evt.type === "done") {
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
-                errorPayload = { message: evt.message, partialText: evt.partialText };
+                const src = evt.detail ?? { message: evt.message, partialText: evt.partialText };
+                errorPayload = { message: src.message, partialText: src.partialText };
               }
             } catch {
               // ignore malformed chunk
