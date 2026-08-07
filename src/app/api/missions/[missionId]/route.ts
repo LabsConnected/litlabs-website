@@ -1,49 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getMission, updateMissionGraph } from "@/lib/missions/mission-repository";
+import { withRateLimit } from "@/lib/rate-limiter";
+import { getMission, updateMissionStatus, type MissionResult, type Mission } from "@/lib/missions";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+interface RouteParams { params: Promise<{ missionId: string }>; }
 
 /**
  * GET /api/missions/[missionId]
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ missionId: string }> },
-) {
+async function getHandler(req: NextRequest, ctx: RouteParams) {
   const { userId } = await auth(req);
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { missionId } = await params;
-  const mission = await getMission(missionId, userId);
-  if (!mission) return NextResponse.json({ error: "Mission not found" }, { status: 404 });
-
-  return NextResponse.json({ mission });
+  if (!userId) return typedError(401, "Unauthorized");
+  const { missionId } = await ctx.params;
+  return toResponse(await getMission(userId, missionId));
 }
 
 /**
  * PATCH /api/missions/[missionId]
- * Update mission graph.
- * Body: { graph?: object, name?: string }
+ * Update mission status (e.g. draft -> ready, ready -> running).
  */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ missionId: string }> },
-) {
-  const { userId } = await auth(request);
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function patchHandler(req: NextRequest, ctx: RouteParams) {
+  const { userId } = await auth(req);
+  if (!userId) return typedError(401, "Unauthorized");
+  const { missionId } = await ctx.params;
+  let body: Record<string, unknown>;
+  try { body = await req.json(); } catch { return typedError(400, "Invalid JSON body"); }
+  const status = body.status as Mission["status"] | undefined;
+  if (!status) return typedError(400, "status is required");
+  return toResponse(await updateMissionStatus(userId, missionId, status));
+}
 
-  const { missionId } = await params;
-  let body: { graph?: Record<string, unknown> };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+export const GET = withRateLimit(getHandler, 60, 60);
+export const PATCH = withRateLimit(patchHandler, 20, 60);
 
-  if (body.graph) {
-    const mission = await updateMissionGraph(missionId, userId, body.graph);
-    if (!mission) return NextResponse.json({ error: "Mission not found" }, { status: 404 });
-    return NextResponse.json({ mission });
-  }
-
-  return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+function typedError(status: number, error: string): NextResponse {
+  return NextResponse.json({ ok: false, error }, { status });
+}
+function toResponse<T>(result: MissionResult<T>): NextResponse {
+  if (result.ok) return NextResponse.json({ ok: true, data: result.data });
+  return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
 }

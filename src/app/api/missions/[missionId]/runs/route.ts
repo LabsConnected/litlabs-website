@@ -1,38 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { createMission, listMissions, type MissionResult } from "@/lib/missions";
+import { listRuns, createRun, getMission, type MissionResult } from "@/lib/missions";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+interface RouteParams { params: Promise<{ missionId: string }>; }
+
 /**
- * GET /api/missions?projectId=...
- * List missions for the authenticated user.
+ * GET /api/missions/[missionId]/runs
+ * List runs for a mission.
  */
-async function getHandler(req: NextRequest) {
+async function getHandler(req: NextRequest, ctx: RouteParams) {
   const { userId } = await auth(req);
   if (!userId) return typedError(401, "Unauthorized");
-  const url = new URL(req.url);
-  const projectId = url.searchParams.get("projectId") ?? undefined;
-  return toResponse(await listMissions(userId, projectId));
+  const { missionId } = await ctx.params;
+  return toResponse(await listRuns(userId, missionId));
 }
 
 /**
- * POST /api/missions
- * Create a new mission.
+ * POST /api/missions/[missionId]/runs
+ * Start a new run for a mission.
  */
-async function postHandler(req: NextRequest) {
+async function postHandler(req: NextRequest, ctx: RouteParams) {
   const { userId } = await auth(req);
   if (!userId) return typedError(401, "Unauthorized");
-  let body: Record<string, unknown>;
-  try { body = await req.json(); } catch { return typedError(400, "Invalid JSON body"); }
-  return toResponse(await createMission({
+  const { missionId } = await ctx.params;
+  // Verify the mission exists and belongs to the user
+  const missionResult = await getMission(userId, missionId);
+  if (!missionResult.ok) return toResponse(missionResult);
+  return toResponse(await createRun({
     ownerId: userId,
-    projectId: String(body.projectId ?? ""),
-    name: String(body.name ?? ""),
-    description: body.description as string | undefined,
-    graph: body.graph as Record<string, unknown> | undefined,
+    missionId,
+    projectId: missionResult.data!.project_id,
   }));
 }
 

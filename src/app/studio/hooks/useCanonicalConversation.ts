@@ -892,7 +892,11 @@ export function useCanonicalConversation({
 
         if (errorPayload) {
           const partial = errorPayload.partialText;
+          const detail = (errorPayload as { detail?: string }).detail;
           const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
+          if (detail) {
+            console.error("[studio] provider error detail:", detail);
+          }
           getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
             content: partial ? partial : reply,
