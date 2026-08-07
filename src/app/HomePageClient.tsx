@@ -32,7 +32,6 @@ function Header() {
           <a href="#creations" className="transition hover:text-[#a8ff2f]">Creations</a>
           <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
           <Link href="/games" className="transition hover:text-[#a8ff2f]">Games</Link>
-          <Link href="/discover" className="transition hover:text-[#a8ff2f]">Community</Link>
           <Link href="/marketplace" className="transition hover:text-[#a8ff2f]">Marketplace</Link>
           <Link href="/pricing" className="transition hover:text-[#a8ff2f]">Pricing</Link>
         </nav>
@@ -118,7 +117,6 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-white/50">Interactive product demonstration</div>
             <MissionSequence />
           </div>
         </div>
