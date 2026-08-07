@@ -3,6 +3,16 @@
 import { useState, useCallback, useMemo } from "react";
 import type { CanvasBlock } from "@/lib/canvas/types";
 import { cn } from "@/lib/utils";
+import {
+  NavbarBlock,
+  HeroBlock,
+  FeaturesBlock,
+  PricingBlock,
+  CtaBlock,
+  FooterBlock,
+  GalleryBlock,
+  TestimonialBlock,
+} from "./WebsiteBlockRenderer";
 
 // ─── Block renderer ──────────────────────────────────────────────
 
@@ -35,6 +45,23 @@ export function BlockRenderer({ block, onUpdate, onDelete, readOnly }: BlockRend
       return <FileBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
     case "preview":
       return <PreviewBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    // Website builder blocks
+    case "navbar":
+      return <NavbarBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "hero":
+      return <HeroBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "features":
+      return <FeaturesBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "pricing":
+      return <PricingBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "cta":
+      return <CtaBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "footer":
+      return <FooterBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "gallery":
+      return <GalleryBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
+    case "testimonial":
+      return <TestimonialBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
     default:
       return <UnknownBlock block={block} onUpdate={onUpdate} onDelete={onDelete} readOnly={readOnly} />;
   }

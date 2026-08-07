@@ -46,6 +46,7 @@ export type Canvas = z.infer<typeof CanvasSchema>;
 // ─── Canvas blocks ───────────────────────────────────────────────
 
 export const BlockTypeSchema = z.enum([
+  // Document/work blocks
   "heading",
   "paragraph",
   "checklist",
@@ -56,8 +57,30 @@ export const BlockTypeSchema = z.enum([
   "image",
   "file",
   "preview",
+  // Website builder blocks
+  "navbar",
+  "hero",
+  "features",
+  "pricing",
+  "cta",
+  "footer",
+  "gallery",
+  "testimonial",
 ]);
 export type BlockType = z.infer<typeof BlockTypeSchema>;
+
+/** Website builder block types (subset of BlockType). */
+export const WEBSITE_BLOCK_TYPES = [
+  "navbar",
+  "hero",
+  "features",
+  "pricing",
+  "cta",
+  "footer",
+  "gallery",
+  "testimonial",
+] as const;
+export type WebsiteBlockType = (typeof WEBSITE_BLOCK_TYPES)[number];
 
 // Per-type content schemas. The `content` JSONB column stores one of
 // these depending on the block `type`. Validation happens in the
@@ -135,6 +158,104 @@ export const PreviewContentSchema = z.object({
   label: z.string().default("Preview"),
 });
 export type PreviewContent = z.infer<typeof PreviewContentSchema>;
+
+// ─── Website builder block content schemas ──────────────────────
+
+export const NavbarContentSchema = z.object({
+  brand: z.string().default("Brand"),
+  links: z.array(z.object({ label: z.string(), href: z.string() })).default([]),
+  ctaLabel: z.string().default("Get Started"),
+  ctaHref: z.string().default("#"),
+});
+export type NavbarContent = z.infer<typeof NavbarContentSchema>;
+
+export const HeroContentSchema = z.object({
+  badge: z.string().default(""),
+  title: z.string().default("Build something amazing"),
+  subtitle: z.string().default("The fastest way to launch your next project."),
+  primaryLabel: z.string().default("Get Started"),
+  primaryHref: z.string().default("#"),
+  secondaryLabel: z.string().default("Learn More"),
+  secondaryHref: z.string().default("#"),
+  bgGradient: z.boolean().default(true),
+});
+export type HeroContent = z.infer<typeof HeroContentSchema>;
+
+export const FeatureItemSchema = z.object({
+  id: z.string(),
+  icon: z.string().default("✨"),
+  title: z.string(),
+  description: z.string(),
+});
+export type FeatureItem = z.infer<typeof FeatureItemSchema>;
+
+export const FeaturesContentSchema = z.object({
+  title: z.string().default("Features"),
+  subtitle: z.string().default("Everything you need, nothing you don't."),
+  columns: z.number().int().min(2).max(4).default(3),
+  items: z.array(FeatureItemSchema).default([]),
+});
+export type FeaturesContent = z.infer<typeof FeaturesContentSchema>;
+
+export const PricingTierSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price: z.string(),
+  period: z.string().default("/mo"),
+  description: z.string().default(""),
+  features: z.array(z.string()).default([]),
+  highlighted: z.boolean().default(false),
+  ctaLabel: z.string().default("Choose"),
+  ctaHref: z.string().default("#"),
+});
+export type PricingTier = z.infer<typeof PricingTierSchema>;
+
+export const PricingContentSchema = z.object({
+  title: z.string().default("Pricing"),
+  subtitle: z.string().default("Simple, transparent pricing."),
+  tiers: z.array(PricingTierSchema).default([]),
+});
+export type PricingContent = z.infer<typeof PricingContentSchema>;
+
+export const CtaContentSchema = z.object({
+  title: z.string().default("Ready to get started?"),
+  subtitle: z.string().default("Join thousands of builders shipping faster."),
+  label: z.string().default("Get Started"),
+  href: z.string().default("#"),
+});
+export type CtaContent = z.infer<typeof CtaContentSchema>;
+
+export const FooterContentSchema = z.object({
+  brand: z.string().default("Brand"),
+  description: z.string().default("Building the future, one project at a time."),
+  links: z.array(z.object({ label: z.string(), href: z.string() })).default([]),
+  copyright: z.string().default("© 2026 Brand. All rights reserved."),
+});
+export type FooterContent = z.infer<typeof FooterContentSchema>;
+
+export const GalleryContentSchema = z.object({
+  title: z.string().default("Gallery"),
+  subtitle: z.string().default("A look at what we've built."),
+  images: z.array(z.object({ url: z.string(), alt: z.string().default("") })).default([]),
+  columns: z.number().int().min(2).max(4).default(3),
+});
+export type GalleryContent = z.infer<typeof GalleryContentSchema>;
+
+export const TestimonialItemSchema = z.object({
+  id: z.string(),
+  quote: z.string(),
+  author: z.string(),
+  role: z.string().default(""),
+  avatar: z.string().default(""),
+});
+export type TestimonialItem = z.infer<typeof TestimonialItemSchema>;
+
+export const TestimonialContentSchema = z.object({
+  title: z.string().default("Testimonials"),
+  subtitle: z.string().default("Don't just take our word for it."),
+  items: z.array(TestimonialItemSchema).default([]),
+});
+export type TestimonialContent = z.infer<typeof TestimonialContentSchema>;
 
 export const CanvasBlockSchema = z.object({
   id: z.string().uuid(),

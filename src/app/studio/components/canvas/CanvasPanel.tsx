@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState, useMemo } from "react";
+import { useEffect, useCallback, useState, useMemo, useRef } from "react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
 import { useStudioAgentStore, AGENT_META, type ChatMessage } from "../../stores/useStudioAgentStore";
 import {
@@ -8,9 +8,11 @@ import {
   useConversationStore,
 } from "../../stores/useConversationStore";
 import { BlockRenderer } from "./BlockRenderer";
+import { BlockPalette } from "./BlockPalette";
 import { RevisionHistory } from "./RevisionHistory";
 import { cn } from "@/lib/utils";
-import type { ArtifactAction, CanvasBlock, Canvas } from "@/lib/canvas/types";
+import { generatePreviewHTML, generateComponent } from "@/lib/canvas/codegen";
+import type { ArtifactAction, CanvasBlock, Canvas, BlockType } from "@/lib/canvas/types";
 
 interface CanvasPanelProps {
   /** When an action chip is clicked in chat, pass it here to execute */
@@ -47,6 +49,14 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+  const [showPalette, setShowPalette] = useState(true);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exportCode, setExportCode] = useState("");
+  const [previewHTML, setPreviewHTML] = useState("");
+  const [dragOverBlockId, setDragOverBlockId] = useState<string | null>(null);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const canonicalMessages = useConversationStore(
@@ -205,9 +215,77 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
     }
   }, [activeCanvasId, loadBlocks, upsertCanvas, activeCanvas, setError]);
 
-  // ─── Render ─────────────────────────────────────────────────
+  // ─── Add block from palette ─────────────────────────────────
+  const handleAddBlock = useCallback(
+    async (type: BlockType, content: Record<string, unknown>) => {
+      if (!activeCanvasId) return;
+      try {
+        const res = await fetch(`/api/canvases/${activeCanvasId}/blocks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            blocks: [{ type, content }],
+            actor: "user",
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to add block");
+        const data = await res.json();
+        if (data.blocks) appendBlocks(activeCanvasId, data.blocks);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to add block");
+      }
+    },
+    [activeCanvasId, appendBlocks, setError],
+  );
+
+  // ─── Reorder blocks (drag-to-reorder) ───────────────────────
+  const handleReorderBlock = useCallback(
+    async (draggedId: string, targetId: string) => {
+      if (!activeCanvasId || draggedId === targetId) return;
+      const currentBlocks = blocks[activeCanvasId] ?? [];
+      const draggedIdx = currentBlocks.findIndex((b) => b.id === draggedId);
+      const targetIdx = currentBlocks.findIndex((b) => b.id === targetId);
+      if (draggedIdx === -1 || targetIdx === -1) return;
+
+      // Optimistic reorder in the store
+      const reordered = [...currentBlocks];
+      const [moved] = reordered.splice(draggedIdx, 1);
+      reordered.splice(targetIdx, 0, moved);
+      setBlocks(activeCanvasId, reordered);
+
+      // Persist positions to the backend
+      try {
+        await fetch(`/api/canvases/${activeCanvasId}/blocks/${draggedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ patch: { position: targetIdx }, actor: "user" }),
+        });
+      } catch {
+        // Best-effort — reload on error
+        await loadBlocks(activeCanvasId);
+      }
+    },
+    [activeCanvasId, blocks, setBlocks, loadBlocks],
+  );
+
+  // ─── Active blocks (declared early so handlers can reference it) ──
   const activeBlocks = activeCanvasId ? blocks[activeCanvasId] ?? [] : [];
 
+  // ─── Preview ────────────────────────────────────────────────
+  const handlePreview = useCallback(() => {
+    const html = generatePreviewHTML(activeBlocks);
+    setPreviewHTML(html);
+    setShowPreview(true);
+  }, [activeBlocks]);
+
+  // ─── Export code ─────────────────────────────────────────────
+  const handleExport = useCallback(() => {
+    const code = generateComponent(activeBlocks, "CanvasPage");
+    setExportCode(code);
+    setShowExport(true);
+  }, [activeBlocks]);
+
+  // ─── Render ─────────────────────────────────────────────────
   if (loading && canvases.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-white/40 text-sm">
@@ -234,6 +312,32 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
         <div className="flex items-center gap-1.5">
           {activeCanvas && (
             <>
+              <button
+                onClick={handlePreview}
+                className="text-xs text-cyan-300/70 hover:text-cyan-300 transition-colors px-2 py-1 rounded hover:bg-cyan-500/10"
+                title="Preview as a live page"
+              >
+                👁 Preview
+              </button>
+              <button
+                onClick={handleExport}
+                className="text-xs text-violet-300/70 hover:text-violet-300 transition-colors px-2 py-1 rounded hover:bg-violet-500/10"
+                title="Export blocks as React code"
+              >
+                {"</>"} Export
+              </button>
+              <button
+                onClick={() => setShowPalette(!showPalette)}
+                className={cn(
+                  "text-xs transition-colors px-2 py-1 rounded",
+                  showPalette
+                    ? "text-violet-300 bg-violet-500/10"
+                    : "text-white/40 hover:text-white/80 hover:bg-white/5",
+                )}
+                title="Toggle block palette"
+              >
+                ▦ Blocks
+              </button>
               <button
                 onClick={handleUndo}
                 className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
@@ -304,74 +408,130 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
         </div>
       )}
 
-      {/* Blocks */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {activeBlocks.length === 0 ? (
-          chatMessages.length > 0 ? (
-            <div className="space-y-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-2">
-                Live Conversation
-              </div>
-              {chatMessages.map((msg, i) => {
-                const isUser = msg.role === "user";
-                const agentMeta = AGENT_META[activeAgentId];
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      "rounded-lg border px-3 py-2.5 text-sm",
-                      isUser
-                        ? "border-cyan-500/20 bg-cyan-500/5"
-                        : "border-violet-500/20 bg-violet-500/5",
-                    )}
-                  >
-                    <div className="mb-1 flex items-center gap-1.5">
-                      <span
-                        className="h-4 w-4 rounded-full text-[8px] font-bold grid place-items-center text-white"
-                        style={{ backgroundColor: isUser ? "#06b6d4" : agentMeta.color }}
-                      >
-                        {isUser ? "U" : agentMeta.displayName.charAt(0)}
-                      </span>
-                      <span className="text-[10px] font-bold text-white/50">
-                        {isUser ? "You" : agentMeta.displayName}
-                      </span>
-                      {msg.createdAt && (
-                        <span className="text-[9px] text-white/20 ml-auto">
-                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap">
-                      {msg.content}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="text-white/30 text-sm mb-2">
-                {activeCanvas ? "This canvas is empty" : "No canvas selected"}
-              </div>
-              {activeCanvas && (
-                <div className="text-white/20 text-xs">
-                  LiTT will add blocks here as you work together.
-                  <br />
-                  Try saying &quot;make notes&quot; or &quot;open in canvas&quot; in chat.
-                </div>
-              )}
-            </div>
-          )
-        ) : (
-          activeBlocks.map((block) => (
-            <BlockRenderer
-              key={block.id}
-              block={block}
-              onUpdate={(patch) => void handleUpdateBlock(block.id, patch)}
-              onDelete={() => void handleDeleteBlock(block.id)}
-            />
-          ))
+      {/* Blocks area — palette sidebar + block list */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Block palette sidebar */}
+        {showPalette && activeCanvas && (
+          <div className="w-44 shrink-0 border-r border-white/5 bg-black/20">
+            <BlockPalette onAddBlock={(type, content) => void handleAddBlock(type, content)} />
+          </div>
         )}
+
+        {/* Block list */}
+        <div
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+        >
+          {activeBlocks.length === 0 ? (
+            chatMessages.length > 0 ? (
+              <div className="space-y-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-2">
+                  Live Conversation
+                </div>
+                {chatMessages.map((msg, i) => {
+                  const isUser = msg.role === "user";
+                  const agentMeta = AGENT_META[activeAgentId];
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "rounded-lg border px-3 py-2.5 text-sm",
+                        isUser
+                          ? "border-cyan-500/20 bg-cyan-500/5"
+                          : "border-violet-500/20 bg-violet-500/5",
+                      )}
+                    >
+                      <div className="mb-1 flex items-center gap-1.5">
+                        <span
+                          className="h-4 w-4 rounded-full text-[8px] font-bold grid place-items-center text-white"
+                          style={{ backgroundColor: isUser ? "#06b6d4" : agentMeta.color }}
+                        >
+                          {isUser ? "U" : agentMeta.displayName.charAt(0)}
+                        </span>
+                        <span className="text-[10px] font-bold text-white/50">
+                          {isUser ? "You" : agentMeta.displayName}
+                        </span>
+                        {msg.createdAt && (
+                          <span className="text-[9px] text-white/20 ml-auto">
+                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap">
+                        {msg.content}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className="flex h-full flex-col items-center justify-center text-center"
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const raw = e.dataTransfer.getData("application/json");
+                  if (!raw) return;
+                  try {
+                    const { type, content } = JSON.parse(raw);
+                    void handleAddBlock(type, content);
+                  } catch { /* ignore invalid drop data */ }
+                }}
+              >
+                <div className="text-white/30 text-sm mb-2">
+                  {activeCanvas ? "This canvas is empty — drag a block here" : "No canvas selected"}
+                </div>
+                {activeCanvas && (
+                  <div className="text-white/20 text-xs">
+                    Click or drag blocks from the palette to start building.
+                    <br />
+                    Or say &quot;make notes&quot; or &quot;open in canvas&quot; in chat.
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            activeBlocks.map((block) => (
+              <div
+                key={block.id}
+                draggable
+                onDragStart={(e) => {
+                  setDraggingBlockId(block.id);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragEnd={() => {
+                  setDraggingBlockId(null);
+                  setDragOverBlockId(null);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggingBlockId && draggingBlockId !== block.id) {
+                    setDragOverBlockId(block.id);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggingBlockId && draggingBlockId !== block.id) {
+                    void handleReorderBlock(draggingBlockId, block.id);
+                  }
+                  setDragOverBlockId(null);
+                  setDraggingBlockId(null);
+                }}
+                className={cn(
+                  "transition-all",
+                  draggingBlockId === block.id && "opacity-40",
+                  dragOverBlockId === block.id && "ring-2 ring-violet-500/40 -mt-1",
+                )}
+              >
+                <BlockRenderer
+                  block={block}
+                  onUpdate={(patch) => void handleUpdateBlock(block.id, patch)}
+                  onDelete={() => void handleDeleteBlock(block.id)}
+                />
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* Revision history drawer — slides up from bottom */}
@@ -413,6 +573,68 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Preview modal — renders blocks as a live page in an iframe */}
+      {showPreview && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-[#08090d]/98 border-t border-white/10">
+          <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+            <span className="text-sm font-medium text-white">Live Preview</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // Refresh preview
+                  const html = generatePreviewHTML(activeBlocks);
+                  setPreviewHTML(html);
+                }}
+                className="text-xs text-white/40 hover:text-white/80 px-2 py-1 rounded hover:bg-white/5"
+              >
+                ↻ Refresh
+              </button>
+              <button
+                onClick={() => setShowPreview(false)}
+                className="text-xs text-white/60 hover:text-white px-2 py-1 rounded hover:bg-white/5"
+              >
+                ✕ Close
+              </button>
+            </div>
+          </div>
+          <iframe
+            ref={previewIframeRef}
+            srcDoc={previewHTML}
+            className="flex-1 w-full border-0 bg-white"
+            title="Canvas Preview"
+            sandbox="allow-scripts"
+          />
+        </div>
+      )}
+
+      {/* Export code modal — shows generated React component */}
+      {showExport && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-[#08090d]/98 border-t border-white/10">
+          <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+            <span className="text-sm font-medium text-white">Exported React Component</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(exportCode).catch(() => {});
+                }}
+                className="text-xs text-cyan-300/70 hover:text-cyan-300 px-2 py-1 rounded hover:bg-cyan-500/10"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setShowExport(false)}
+                className="text-xs text-white/60 hover:text-white px-2 py-1 rounded hover:bg-white/5"
+              >
+                ✕ Close
+              </button>
+            </div>
+          </div>
+          <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-white/80 leading-relaxed">
+            <code>{exportCode}</code>
+          </pre>
         </div>
       )}
     </div>

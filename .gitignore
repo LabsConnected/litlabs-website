@@ -184,3 +184,6 @@ LiTTreeLabStudio-AI-Context.zip
 LiTTreeLabStudio-AI-Context/
 tree.txt
 tests/playwright/test_output*.txt
+
+.vercel
+.env*
