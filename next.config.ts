@@ -242,6 +242,12 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.litlabs.net" }],
+        destination: "https://litlabs.net/:path*",
+        permanent: true,
+      },
       { source: "/builder", destination: "/studio", permanent: false },
       { source: "/ai-builder", destination: "/studio", permanent: false },
       { source: "/chat", destination: "/studio?tool=chat", permanent: true },
