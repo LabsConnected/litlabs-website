@@ -223,16 +223,18 @@ CREATE OR REPLACE FUNCTION public.create_booking_atomic(
 ) RETURNS TABLE (id uuid, status text, duplicate boolean) AS $$
 DECLARE
   v_existing_id uuid;
+  v_existing_status text;
   v_available boolean;
   v_booking_id uuid;
 BEGIN
   -- 1. Idempotency check: if a booking with this key exists, return it
   IF p_idempotency_key IS NOT NULL THEN
-    SELECT id INTO v_existing_id FROM public.business_bookings
-    WHERE owner_id = p_owner_id AND idempotency_key = p_idempotency_key
+    SELECT bb.id, bb.status INTO v_existing_id, v_existing_status
+    FROM public.business_bookings AS bb
+    WHERE bb.owner_id = p_owner_id AND bb.idempotency_key = p_idempotency_key
     LIMIT 1;
     IF v_existing_id IS NOT NULL THEN
-      RETURN QUERY SELECT v_existing_id, status, true;
+      RETURN QUERY SELECT v_existing_id, v_existing_status, true;
       RETURN;
     END IF;
   END IF;
@@ -244,13 +246,13 @@ BEGIN
   END IF;
 
   -- 3. Create the booking
-  INSERT INTO public.business_bookings (
+  INSERT INTO public.business_bookings AS bb (
     owner_id, service_id, customer_name, customer_email, customer_phone,
     start_time, end_time, status, price_cents, idempotency_key, notes, metadata
   ) VALUES (
     p_owner_id, p_service_id, p_customer_name, p_customer_email, p_customer_phone,
     p_start_time, p_end_time, 'pending', p_price_cents, p_idempotency_key, p_notes, p_metadata
-  ) RETURNING id INTO v_booking_id;
+  ) RETURNING bb.id INTO v_booking_id;
 
   RETURN QUERY SELECT v_booking_id, 'pending', false;
 END;
