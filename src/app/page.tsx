@@ -39,12 +39,10 @@ const homeSchema = {
         "litlabs.net",
       ],
       url: SITE_URL,
-      sameAs: [
-        // TODO: add real profile URLs — X, GitHub, YouTube, LinkedIn, Instagram.
-        // sameAs is the single strongest entity-disambiguation signal for a
-        // brand Google does not yet recognize. Leave this array out entirely
-        // rather than shipping placeholder or empty values.
-      ],
+      // TODO: add sameAs with real profile URLs (X, GitHub, YouTube, LinkedIn,
+      // Instagram) once available. sameAs is the single strongest entity-
+      // disambiguation signal for a brand Google does not yet recognize.
+      // Omit the property entirely until then — an empty array is worse than absent.
       logo: {
         "@type": "ImageObject",
         url: absoluteUrl("/icon-512.png"),
