@@ -512,13 +512,15 @@ function CommandStudioContent() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
-  // Primary workspace tabs — always visible: Chat | Create | Preview | Code
-  // Chat = studio/work, Create = create destination, Preview = studio/preview, Code = studio/code
-  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
+  // Primary workspace tabs — always visible: Chat | Canvas | Code | Preview | Files
+  // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
+  // Preview = studio/preview, Files = opens inspector on files tab
+  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode; isFilesInspector?: boolean }[] = [
     { id: "chat", label: "Chat", destination: "studio", mode: "work" },
-    { id: "create", label: "Create", destination: "create", mode: "image" },
-    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
+    { id: "canvas", label: "Canvas", destination: "studio", mode: "files" },
     { id: "code", label: "Code", destination: "studio", mode: "code" },
+    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
+    { id: "files", label: "Files", destination: "studio", mode: "code", isFilesInspector: true },
   ];
 
   // Create secondary tabs — visible only when Create is active
@@ -580,8 +582,9 @@ function CommandStudioContent() {
               }}
             >
               {primaryTabs.map((t) => {
-                const isActive =
-                  t.destination === "studio"
+                const isActive = t.isFilesInspector
+                  ? inspectorOpen && inspectorTab === "files"
+                  : t.destination === "studio"
                     ? destination === "studio" && studioMode === t.mode
                     : destination === t.destination;
                 return (
@@ -589,6 +592,11 @@ function CommandStudioContent() {
                     key={t.id}
                     type="button"
                     onClick={() => {
+                      if (t.isFilesInspector) {
+                        setSidePanel((cur) => (cur === "inspector" && inspectorTab === "files" ? "none" : "inspector"));
+                        setInspectorTab("files");
+                        return;
+                      }
                       if (t.destination === "studio") {
                         setDestination("studio");
                         setStudioMode(t.mode as StudioMode);
@@ -738,6 +746,36 @@ function CommandStudioContent() {
               )}
             </StudioDrawer>
 
+            {/* Bottom status bar — preview status, context info, selected code indicator */}
+            {isStudioWorkConversation && (
+              <div
+                className="flex shrink-0 items-center gap-3 border-t px-3 py-1 text-[10px] font-medium overflow-hidden whitespace-nowrap"
+                style={{
+                  borderColor: "var(--studio-border)",
+                  backgroundColor: "var(--studio-surface)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {conversation.busy ? (
+                  <span className="flex items-center gap-1.5" style={{ color: "var(--spark-primary)" }}>
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: "var(--spark-primary)" }} />
+                    Refreshing preview…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} />
+                    Preview ready
+                  </span>
+                )}
+                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+                <span>Context: {conversation.messages.length} {conversation.messages.length === 1 ? "file" : "files"}</span>
+                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+                <span>Preview :8443</span>
+                <div className="flex-1" />
+                <span className="hidden sm:inline" style={{ color: "var(--text-secondary)" }}>Selected code</span>
+              </div>
+            )}
+
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
             {/* Reauthentication banner — visible when session expires during Studio use.
                 Disables the composer and offers a real recovery action. */}
@@ -804,6 +842,25 @@ function CommandStudioContent() {
                 liveActive={livePanelOpen && liveSession.isLive}
                 contextLine={contextLine}
               />
+            )}
+
+            {/* Keyboard shortcuts footer — visible in Studio/Work conversation */}
+            {isStudioWorkConversation && (
+              <div
+                className="hidden shrink-0 items-center justify-center gap-3 border-t px-3 py-1 text-[10px] font-medium md:flex"
+                style={{
+                  borderColor: "var(--studio-border)",
+                  backgroundColor: "var(--studio-surface)",
+                  color: "var(--text-muted)",
+                }}
+                aria-hidden
+              >
+                <span><kbd className="font-mono">⌘↵</kbd> send</span>
+                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+                <span><kbd className="font-mono">⌘K</kbd> command palette</span>
+                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+                <span><kbd className="font-mono">Esc</kbd> close overlay</span>
+              </div>
             )}
           </main>
 

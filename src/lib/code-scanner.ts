@@ -389,7 +389,7 @@ export function searchFileTree(node: FileNode, query: string): FileNode[] {
   const q = query.toLowerCase();
 
   function search(n: FileNode) {
-    if (n.name.toLowerCase().includes(q)) {
+    if (n.type === "file" && n.name.toLowerCase().includes(q)) {
       results.push(n);
     }
     if (n.children) {

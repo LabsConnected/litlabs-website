@@ -105,7 +105,8 @@ async function handler(req: NextRequest) {
 
     const { status, body: resultBody, outcome } = await runLiTT({ httpRequest: req, req: runRequest });
     if (status !== 200) {
-      return NextResponse.json({ error: "Runtime error" }, { status });
+      const errMsg = status === 401 ? "Authentication required" : "Runtime error";
+      return NextResponse.json({ error: errMsg }, { status });
     }
 
     // Legacy agent_logs row for backward compatibility.
@@ -116,7 +117,7 @@ async function handler(req: NextRequest) {
       provider: resultBody.provider,
       model: resultBody.model,
       latencyMs: resultBody.latencyMs,
-      actions: resultBody.actions,
+      actions: resultBody.actions && resultBody.actions.length > 0 ? resultBody.actions : undefined,
     });
   } catch (err) {
     return NextResponse.json(

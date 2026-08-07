@@ -60,7 +60,7 @@ function definitionToMeta(def: AgentDefinition): AgentMeta {
     color: def.color,
     tag: def.tag,
     role: def.role,
-    placeholder: `Message ${def.name}…`,
+    placeholder: `Ask ${def.name} anything…`,
     minimumPlan: def.minimumPlan,
     description: def.description,
     starterActions: def.starterActions,

@@ -641,6 +641,10 @@ export function useCanonicalConversation({
         seedOptimisticMessages(conversationId);
       }
 
+      // After this point conversationId is guaranteed non-null (either
+      // pre-existing or just created). Capture a narrowed const for closures.
+      const activeConversationId = conversationId;
+
       // Clear any previous send error
       setSendError(null);
 
@@ -853,7 +857,7 @@ export function useCanonicalConversation({
         let errorPayload: { message?: string; partialText?: string } | null = null;
 
         const flushUpdate = () => {
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
+          getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             content: assistantText,
             reasoning: reasoningText || undefined,
             status: "streaming",
@@ -892,12 +896,8 @@ export function useCanonicalConversation({
 
         if (errorPayload) {
           const partial = errorPayload.partialText;
-          const detail = (errorPayload as { detail?: string }).detail;
           const reply = sanitizeErrorMessage(errorPayload.message || "Provider unavailable");
-          if (detail) {
-            console.error("[studio] provider error detail:", detail);
-          }
-          getStore().updateMessage(conversationId, optimisticAssistantId, {
+          getStore().updateMessage(activeConversationId, optimisticAssistantId, {
             status: "failed",
             content: partial ? partial : reply,
             reasoning: reasoningText || undefined,
@@ -912,7 +912,7 @@ export function useCanonicalConversation({
           const userMsg = donePayload.userMessage as ConversationMessage;
           const assistantMsg = donePayload.assistantMessage as ConversationMessage;
           const s3 = getStore();
-          s3.updateMessage(conversationId, optimisticUserId, {
+          s3.updateMessage(activeConversationId, optimisticUserId, {
             id: userMsg.id,
             content: userMsg.content,
             createdAt: userMsg.createdAt,
@@ -920,7 +920,7 @@ export function useCanonicalConversation({
 
           // Guard against empty assistant response
           if (!assistantMsg.content || !assistantMsg.content.trim()) {
-            s3.updateMessage(conversationId, optimisticAssistantId, {
+            s3.updateMessage(activeConversationId, optimisticAssistantId, {
               id: assistantMsg.id,
               content: "The response was empty. Please try again.",
               status: "failed",
@@ -931,7 +931,7 @@ export function useCanonicalConversation({
             return { accepted: false, persisted: true, errorKind: "provider" };
           }
 
-          s3.updateMessage(conversationId, optimisticAssistantId, {
+          s3.updateMessage(activeConversationId, optimisticAssistantId, {
             id: assistantMsg.id,
             content: assistantMsg.content,
             reasoning: reasoningText || undefined,
@@ -957,7 +957,7 @@ export function useCanonicalConversation({
         // text we accumulated but mark completed so the bubble doesn't hang.
         const sFinal = getStore();
         if (assistantText.trim()) {
-          sFinal.updateMessage(conversationId, optimisticAssistantId, {
+          sFinal.updateMessage(activeConversationId, optimisticAssistantId, {
             content: assistantText,
             reasoning: reasoningText || undefined,
             status: "completed",
@@ -1233,7 +1233,7 @@ function buildIntentResponseMessage(
 }
 
 function sanitizeErrorMessage(raw: string): string {
-  if (/All LLM providers failed/i.test(raw)) {
+  if (/All LLM .*(failed|providers)/i.test(raw)) {
     return "LiTT couldn't reach the selected AI model. I tried the available backups, but none responded.\n\nTry again, or choose a different model from the selector.";
   }
   if (/OpenRouter \d{3}/i.test(raw)) {
@@ -1244,6 +1244,15 @@ function sanitizeErrorMessage(raw: string): string {
   }
   if (/OPENROUTER_API_KEY not set/i.test(raw)) {
     return "OpenRouter is not configured. Try Auto Best or Gemini.";
+  }
+  if (/GEMINI_API_KEY not set/i.test(raw)) {
+    return "Gemini is not configured. Try Auto Best or choose another model.";
+  }
+  if (/quota|rate limit|429/i.test(raw)) {
+    return "The AI provider is rate-limited. Please wait a moment and try again.";
+  }
+  if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(raw)) {
+    return "The AI provider rejected the API key. Check that the key is valid in Vercel env vars.";
   }
   return raw;
 }

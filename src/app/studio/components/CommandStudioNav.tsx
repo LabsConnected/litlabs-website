@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import {
   LayoutGrid,
   Shapes,
@@ -15,7 +16,6 @@ import {
   Terminal,
   Network,
   X,
-  Sprout,
   Home,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
@@ -78,23 +78,17 @@ export default function CommandStudioNav({
           borderRight: "1px solid var(--studio-border)",
         }}
       >
-        {/* LiTT logo mark */}
-        <Link
-          href="/dashboard"
-          className="group relative mb-1 flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:scale-105"
-          style={{
-            background: "linear-gradient(135deg, var(--litt-primary), var(--spark-primary))",
-            boxShadow: "var(--studio-glow-purple)",
-          }}
-          title="LiTT Studio — AI Operating System"
-          aria-label="Go to dashboard"
-        >
-          <Sprout
-            size={16}
-            strokeWidth={2.5}
-            className="text-black pointer-events-none"
+        {/* User avatar — Clerk UserButton for account access */}
+        <div className="mb-1 flex h-9 w-9 items-center justify-center">
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "h-9 w-9 rounded-xl",
+                userButtonPopoverCard: "rounded-xl border",
+              },
+            }}
           />
-        </Link>
+        </div>
 
         {/* Divider between logo and nav items */}
         <div
@@ -161,26 +155,26 @@ export default function CommandStudioNav({
         {/* Spacer pushes footer to bottom */}
         <div className="flex-1" />
 
-        {/* Plan / AI credits usage footer */}
+        {/* BITS balance footer — shows AI credits count */}
         <Link
           href="/wallet"
           className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
-          title={`AI credits: ${balance.toLocaleString()}`}
+          title={`BITS: ${balance.toLocaleString()}`}
           aria-label="View wallet"
         >
           <div className="flex flex-col items-center pointer-events-none">
-            <Sprout
-              size={14}
-              strokeWidth={2}
-              style={{ color: "var(--litt-primary)" }}
-              className="pointer-events-none"
-            />
             <span
-              className="text-[10px] font-black leading-none mt-0.5"
-              style={{ color: "var(--text-secondary)" }}
+              className="text-[11px] font-black leading-none"
+              style={{ color: "var(--litt-primary)" }}
             >
               {balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance}
+            </span>
+            <span
+              className="text-[7px] font-bold leading-none mt-0.5 uppercase tracking-wider"
+              style={{ color: "var(--text-muted)" }}
+            >
+              BITS
             </span>
           </div>
           <span
@@ -191,7 +185,7 @@ export default function CommandStudioNav({
               color: "var(--text-primary)",
             }}
           >
-            {balance.toLocaleString()} credits
+            {balance.toLocaleString()} BITS
           </span>
         </Link>
       </nav>
