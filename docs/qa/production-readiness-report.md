@@ -358,19 +358,23 @@ pnpm build    # exit 0, same result
 ## 8. Architecture Notes
 
 ### Auth Architecture
+
 - **Proxy/middleware:** `src/proxy.ts` (Next.js 16 renamed `middleware.ts` → `proxy.ts`). Runs bot detection → Clerk auth → route protection.
 - **Protected routes:** `/settings(.*)`, `/profile(.*)`, `/wallet(.*)`, `/dashboard(.*)`, `/agent-chat(.*)` + selected API routes. Unauthenticated → 307 redirect to `/sign-in?redirect=...` (pages) or 401 JSON (API).
 - **ClerkProvider:** Conditionally rendered in `layout.tsx` based on `hasClerk` check — **conflicts with home AGENTS.md** which says it should always render.
 - **Auth context:** `ClerkAuthContextProvider` has `NoClerkAuth` fallback that calls `/api/auth/session` — good design, but bypassed by components using `useSession()` directly.
 
 ### Database
+
 - Supabase project `rokbfvuoqildggnhappy`, schema in `supabase/schema.sql` (idempotent, `public.users` table with `clerk_id` column).
 - Migrations in `supabase/migrations/` — do not edit `schema.sql` directly.
 
 ### Rate Limiting
+
 - `src/lib/rate-limiter.ts` — Supabase-backed with in-process sliding-window fallback. Well-designed. Keyed by user ID (Clerk) or IP.
 
 ### Bot Protection
+
 - `src/proxy.ts` blocks attack tools (sqlmap, nikto, nmap, etc.), aggressive scrapers (scrapy, python-requests, curl, wget), spam bots (semrush, ahrefs). Allows Googlebot, Bingbot, social crawlers. Webhooks and health paths skip detection.
 
 ---
