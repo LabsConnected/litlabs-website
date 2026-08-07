@@ -6,6 +6,7 @@ import {
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
 import { PLANS, type PlanId } from "@/config/plans";
+import { confirmBookingPayment, recordAudit } from "@/lib/business-operations";
 
 async function isEventProcessed(sb: NonNullable<ReturnType<typeof getAdminSupabase>>, eventId: string): Promise<boolean> {
   const { data } = await sb
@@ -296,6 +297,31 @@ export async function POST(req: NextRequest) {
             .from("marketplace_orders")
             .update({ status: "failed", updated_at: new Date().toISOString() })
             .eq("id", failedOrder.id);
+        }
+        break;
+      }
+
+      case "payment_intent.succeeded": {
+        // ── Booking payment confirmation ──
+        // Confirms a business booking after Stripe payment succeeds.
+        // Only pending/pending_payment bookings are confirmed (idempotent —
+        // already-confirmed bookings are NOT re-confirmed).
+        // The booking_id and owner_id are passed via PaymentIntent metadata.
+        const pi = event.data.object as Stripe.PaymentIntent;
+        const piMeta = pi.metadata || {};
+        const bookingId = piMeta.booking_id as string | undefined;
+        const bookingOwnerId = piMeta.owner_id as string | undefined;
+        if (bookingId && bookingOwnerId) {
+          const result = await confirmBookingPayment(bookingOwnerId, bookingId, pi.id);
+          void recordAudit({
+            ownerId: bookingOwnerId,
+            toolId: "stripe.webhook",
+            action: "payment_intent.succeeded",
+            targetId: bookingId,
+            afterState: result.ok ? (result.data as unknown as Record<string, unknown>) : undefined,
+            result: result.ok ? "success" : "error",
+            errorMessage: result.error,
+          });
         }
         break;
       }

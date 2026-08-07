@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Eye, Loader2, RefreshCw, RotateCcw } from "lucide-react";
+import { ExternalLink, Eye, Loader2, Monitor, RefreshCw, RotateCcw, Smartphone, Tablet } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 type PreviewState = "loading" | "not_prepared" | "preparing" | "ready" | "stale" | "offline" | "failed";
+type DeviceMode = "desktop" | "tablet" | "mobile";
+
+const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: string }> = {
+  desktop: { w: 0, h: 0, label: "1280 × 720" },
+  tablet: { w: 768, h: 1024, label: "768 × 1024" },
+  mobile: { w: 390, h: 844, label: "390 × 844" },
+};
 
 interface PreviewPayload {
   runtimeStatus?: unknown;
@@ -43,6 +50,8 @@ export default function StudioPreviewPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [frameKey, setFrameKey] = useState(0);
+  const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
+  const [maximized, setMaximized] = useState(false);
 
   const authHeaders = useCallback(async (): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -115,19 +124,67 @@ export default function StudioPreviewPanel({
   const detail = state === "not_prepared" ? "The workspace needs preparation before a preview can start." : state === "offline" ? "The project preview endpoint is not currently available." : state === "stale" ? "A file changed. Refreshing the project preview status." : error ?? "The preview surface reports only real project runtime state.";
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2" data-testid="studio-preview-panel">
-      <div className="flex shrink-0 items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-        <Eye size={14} className="mt-0.5 shrink-0" style={{ color: "var(--litt-primary)" }} />
+    <div className={`flex flex-col gap-2 ${maximized ? "fixed inset-0 z-[300] p-3" : "h-full min-h-0"}`} data-testid="studio-preview-panel">
+      <div className="flex shrink-0 items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+        <Eye size={14} className="shrink-0" style={{ color: "var(--litt-primary)" }} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</div>
           <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }}>{repositoryName ?? "No repository"} · {branch ?? "Branch unavailable"}</div>
         </div>
+        {/* Device mode selector */}
+        {(state === "ready" || state === "stale") && (
+          <div className="flex items-center gap-0.5 rounded-lg border p-0.5" style={{ borderColor: "var(--studio-border)" }}>
+            {([
+              { mode: "desktop" as const, icon: Monitor, label: "Desktop" },
+              { mode: "tablet" as const, icon: Tablet, label: "Tablet" },
+              { mode: "mobile" as const, icon: Smartphone, label: "Mobile" },
+            ]).map(({ mode, icon: Icon, label }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setDeviceMode(mode)}
+                className="grid h-7 w-7 place-items-center rounded-md transition"
+                style={{
+                  backgroundColor: deviceMode === mode ? "rgba(114,242,56,0.12)" : "transparent",
+                  color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-muted)",
+                }}
+                aria-label={label}
+                aria-pressed={deviceMode === mode}
+                title={label}
+              >
+                <Icon size={12} className="pointer-events-none" />
+              </button>
+            ))}
+          </div>
+        )}
         <button type="button" onClick={() => void loadStatus(true)} disabled={state === "loading" || state === "preparing"} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh preview status" title="Refresh preview status"><RefreshCw size={13} className={state === "stale" ? "animate-spin" : ""} /></button>
+        {(state === "ready" || state === "stale") && (
+          <button type="button" onClick={() => setMaximized((v) => !v)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8" aria-label={maximized ? "Exit fullscreen" : "Maximize preview"} title={maximized ? "Exit fullscreen" : "Maximize"}>
+            {maximized ? <span className="text-[14px]">⤓</span> : <span className="text-[14px]">⤢</span>}
+          </button>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-        {(state === "ready" || state === "stale") && displayUrl ? <iframe key={frameKey} title={`${projectName ?? "Project"} preview`} src={displayUrl} className="min-h-[260px] flex-1 border-0 bg-white" sandbox="allow-scripts allow-forms allow-modals" /> : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "preparing" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "preparing"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}
-        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{label}</span>{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
+        {(state === "ready" || state === "stale") && displayUrl ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+            <iframe
+              key={frameKey}
+              title={`${projectName ?? "Project"} preview`}
+              src={displayUrl}
+              className="border-0 bg-white transition-all duration-200"
+              style={{
+                width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
+                height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
+                maxWidth: "100%",
+                borderRadius: deviceMode === "desktop" ? "0" : "8px",
+                boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
+              }}
+              sandbox="allow-scripts allow-forms allow-modals"
+            />
+          </div>
+        ) : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "preparing" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "preparing"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}
+        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}{label}</span>{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
       </div>
     </div>
   );
