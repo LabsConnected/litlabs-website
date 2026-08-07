@@ -254,7 +254,7 @@ export async function updateProjectWorkspace(
   projectId: string,
   userId: string,
   updates: {
-    workspaceId?: string;
+    workspaceId?: string | null;
     workspaceStatus?: string;
     workspaceRoot?: string | null;
     workspaceError?: string | null;

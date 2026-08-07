@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getProject } from "@/lib/projects/project-repository";
+import { getProject, updateProjectWorkspace } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 
 /**
@@ -42,10 +42,18 @@ export async function GET(
   try {
     const ws = await getWorkspaceInternal(project.workspaceId, userId);
     if (!ws) {
+      // Terminal no longer has this workspace. Reset the project so the
+      // client can re-prepare instead of being stuck on a stale "ready" state.
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceId: null,
+        workspaceStatus: "not_prepared",
+        workspaceRoot: null,
+        workspaceError: "Workspace not found on terminal server — re-prepare to continue",
+      });
       return NextResponse.json({
-        workspaceId: project.workspaceId,
-        workspaceStatus: "error",
-        workspaceError: "Workspace not found on terminal server",
+        workspaceId: null,
+        workspaceStatus: "not_prepared",
+        workspaceError: "Workspace not found on terminal server — re-prepare to continue",
       });
     }
 
