@@ -231,6 +231,7 @@ function CommandStudioContent() {
   }, [handleToggleActivity]);
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
+  const [cameraStatus, setCameraStatus] = useState<string>("idle");
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
   const [livePanelOpen, setLivePanelOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -303,6 +304,7 @@ function CommandStudioContent() {
       setHealthRunTrigger((n) => n + 1);
     },
     serverProjectId: capabilities.projectId,
+    cameraState: { active: cameraDock.open, status: cameraStatus },
   });
 
   // ── LiTT Live realtime session ──
@@ -923,10 +925,11 @@ function CommandStudioContent() {
       <MediaOverlayHost
         cameraDock={cameraDock}
         screenDock={screenDock}
-        onCameraClose={() => setCameraDock((v) => ({ ...v, open: false }))}
+        onCameraClose={() => { setCameraDock((v) => ({ ...v, open: false })); setCameraStatus("idle"); }}
         onScreenClose={() => setScreenDock((v) => ({ ...v, open: false }))}
         onCameraPosChange={(pos) => setCameraDock((v) => ({ ...v, pos }))}
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
+        onCameraStatusChange={setCameraStatus}
       />
 
       {/* LiTT Live — centered overlay for realtime voice + vision session.
@@ -1084,6 +1087,7 @@ function MediaOverlayHost({
   onScreenClose,
   onCameraPosChange,
   onScreenPosChange,
+  onCameraStatusChange,
 }: {
   cameraDock: { open: boolean; pos: DockPosition };
   screenDock: { open: boolean; pos: DockPosition };
@@ -1091,12 +1095,13 @@ function MediaOverlayHost({
   onScreenClose: () => void;
   onCameraPosChange: (pos: DockPosition) => void;
   onScreenPosChange: (pos: DockPosition) => void;
+  onCameraStatusChange?: (status: string) => void;
 }) {
   if (!cameraDock.open && !screenDock.open) return null;
   return (
     <>
       {cameraDock.open && (
-        <CameraDock pos={cameraDock.pos} onClose={onCameraClose} onMove={() => onCameraPosChange(nextPos(cameraDock.pos))} />
+        <CameraDock pos={cameraDock.pos} onClose={onCameraClose} onMove={() => onCameraPosChange(nextPos(cameraDock.pos))} onStatusChange={onCameraStatusChange} />
       )}
       {screenDock.open && (
         <ScreenDock pos={screenDock.pos} onClose={onScreenClose} onMove={() => onScreenPosChange(nextPos(screenDock.pos))} />
@@ -1148,10 +1153,10 @@ function DockFrame({
   );
 }
 
-function CameraDock({ pos, onClose, onMove }: { pos: DockPosition; onClose: () => void; onMove: () => void }) {
+function CameraDock({ pos, onClose, onMove, onStatusChange }: { pos: DockPosition; onClose: () => void; onMove: () => void; onStatusChange?: (status: string) => void }) {
   return (
     <DockFrame pos={pos} label="Camera" onClose={onClose} onMove={onMove}>
-      <CameraTool />
+      <CameraTool onStatusChange={onStatusChange} />
     </DockFrame>
   );
 }

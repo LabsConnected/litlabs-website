@@ -35,6 +35,7 @@ interface CameraSessionProps {
   modelName?: string;
   compact?: boolean;
   visionOnSend?: boolean;
+  onStatusChange?: (status: string) => void;
 }
 
 const STATUS_LABELS: Record<CameraStatus, string> = {
@@ -59,6 +60,7 @@ export default function CameraSession({
   modelName = "Local preview only",
   compact = false,
   visionOnSend = false,
+  onStatusChange,
 }: CameraSessionProps) {
   const { lastError, requestVideo, enumerateCameras, resetPermission } =
     useMediaPermissions();
@@ -71,6 +73,11 @@ export default function CameraSession({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Report status changes to parent so the LLM can be told camera state
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [status, onStatusChange]);
 
   const onTrackEnded = useCallback(() => {
     setStatus("error");
@@ -247,7 +254,7 @@ export default function CameraSession({
           <Camera size={14} /> Start camera
         </button>
         <p className="text-[9px] text-slate-500">
-          Local preview only — not connected to LiTT. Use the LiTT Live button for real-time voice + vision.
+          Camera preview — capture a frame and tap &ldquo;Ask LiTT&rdquo; to have LiTT analyze what you see.
         </p>
       </div>
     );

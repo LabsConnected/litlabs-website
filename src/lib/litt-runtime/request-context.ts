@@ -69,6 +69,8 @@ export function parseRuntimeContextHint(value: unknown): Partial<RawCapabilities
     repositoryName: typeof input.repositoryName === "string" && input.repositoryName.length <= 200 ? input.repositoryName : undefined,
     workspaceStatus: typeof input.workspaceStatus === "string" && input.workspaceStatus.length <= 100 ? input.workspaceStatus : undefined,
     selectedModelLabel: typeof input.selectedModelLabel === "string" && input.selectedModelLabel.length <= 100 ? input.selectedModelLabel : undefined,
+    cameraActive: input.cameraActive === true,
+    cameraStatus: typeof input.cameraStatus === "string" && input.cameraStatus.length <= 50 ? input.cameraStatus : undefined,
   };
 }
 
@@ -179,6 +181,8 @@ export async function resolveRequestContext(
     voiceState: hint.voiceState,
     voiceOutputState: hint.voiceOutputState,
     voiceHealth: hint.voiceHealth,
+    cameraActive: hint.cameraActive,
+    cameraStatus: hint.cameraStatus,
   };
 
   // Kernel capability records — only advertise capabilities the server can verify.
@@ -251,6 +255,8 @@ export function buildRunContextFromStudio(args: {
     voiceState: hint.voiceState,
     voiceOutputState: hint.voiceOutputState,
     voiceHealth: hint.voiceHealth,
+    cameraActive: hint.cameraActive,
+    cameraStatus: hint.cameraStatus,
   };
 
   const kernelCapabilities: CapabilityRecord[] = [];

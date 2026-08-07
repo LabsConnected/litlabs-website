@@ -431,8 +431,26 @@ async function handleFalImage(
   prompt: string,
   width: number,
   height: number,
+  negativePrompt?: string,
+  seed?: number,
 ): Promise<MediaResult> {
   if (!FAL_API_KEY) throw new Error("FAL.ai key missing — set FAL_KEY");
+
+  const body: Record<string, unknown> = {
+    prompt: prompt.trim(),
+    image_size: {
+      width: Math.min(width, 1440),
+      height: Math.min(height, 1440),
+    },
+    num_images: 1,
+    enable_safety_checker: true,
+  };
+  if (negativePrompt && negativePrompt.trim()) {
+    body.negative_prompt = negativePrompt.trim();
+  }
+  if (typeof seed === "number" && seed > 0) {
+    body.seed = seed;
+  }
 
   const submitRes = await fetch("https://queue.fal.run/fal-ai/flux/schnell", {
     method: "POST",
@@ -440,15 +458,7 @@ async function handleFalImage(
       "Content-Type": "application/json",
       Authorization: `Key ${FAL_API_KEY}`,
     },
-    body: JSON.stringify({
-      prompt: prompt.trim(),
-      image_size: {
-        width: Math.min(width, 1440),
-        height: Math.min(height, 1440),
-      },
-      num_images: 1,
-      enable_safety_checker: true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!submitRes.ok) {
@@ -724,18 +734,21 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 // ── Auto Best router ─────────────────────────────────────────────
 
 /**
- * Auto-free provider order: Cloudflare → Alibaba → Pollinations
- * Tries each in order until one succeeds.
+ * Auto-free provider order: Pollinations → Cloudflare → Alibaba
+ * Pollinations is always available (no key needed) so it goes first.
+ * Cloudflare and Alibaba are tried as faster alternatives when configured.
  */
-const AUTO_FREE_ORDER: MediaProviderId[] = ["cloudflare", "alibaba", "pollinations"];
+const AUTO_FREE_ORDER: MediaProviderId[] = ["pollinations", "cloudflare", "alibaba"];
 
 /**
- * Auto-quality provider order: Gemini Lite → Gemini → FAL → Recraft
+ * Auto-quality provider order: FAL → Recraft → Gemini → Pollinations
+ * FAL is the most reliable quality provider (fast, good output).
  * Recraft is preferred for vector/logo prompts.
+ * Gemini is tried later since its key has had issues.
  * Pollinations is always appended as a last-resort fallback so users
  * never get a hard 502 when all quality providers are down or unconfigured.
  */
-const AUTO_QUALITY_ORDER: MediaProviderId[] = ["gemini", "fal", "recraft", "pollinations"];
+const AUTO_QUALITY_ORDER: MediaProviderId[] = ["fal", "recraft", "gemini", "pollinations"];
 
 function isProviderConfigured(providerId: MediaProviderId): boolean {
   switch (providerId) {
@@ -816,7 +829,7 @@ async function dispatchProvider(
     });
   }
   if (providerId === "fal") {
-    return handleFalImage(prompt, width, height);
+    return handleFalImage(prompt, width, height, body.negativePrompt, body.seed);
   }
   if (providerId === "huggingface") {
     return handleHuggingFaceVideo(prompt, body.referenceUrl);

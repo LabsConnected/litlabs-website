@@ -8,8 +8,8 @@
  *   - Switch camera → cycles through available video devices
  *   - Close → stops the stream and closes the preview
  *
- * Does NOT claim LiTT can see the user. This is just a capture tool.
- * Live vision is handled by the Live Voice overlay.
+ * Camera frames can be analyzed by LiTT via the Camera tool's "Ask LiTT"
+ * button, which sends the captured frame to /api/media/analyze-image.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";

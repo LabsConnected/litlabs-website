@@ -873,3 +873,34 @@
     transition: none;
   }
 }
+
+.trustSection {
+  margin-top: 2.5rem;
+}
+.trustGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.trustCard {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+.trustCard h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  color: white;
+}
+.trustCard p {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  line-height: 1.45;
+}
+@media (max-width: 720px) {
+  .trustGrid {
+    grid-template-columns: 1fr;
+  }
+}

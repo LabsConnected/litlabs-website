@@ -1421,6 +1421,33 @@ export default function ImageTool() {
                   <Palette size={11} />
                   {selectedStyle ? selectedStyle.split(" ").slice(0, 2).join(" ") : "Style"}
                 </button>
+                {/* Lighting chip */}
+                <button
+                  onClick={() => setActiveTab("style")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(!!selectedLighting)}
+                >
+                  <Zap size={11} />
+                  {selectedLighting ? selectedLighting.split(" ").slice(0, 2).join(" ") : "Light"}
+                </button>
+                {/* Mood chip */}
+                <button
+                  onClick={() => setActiveTab("style")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(!!selectedMood)}
+                >
+                  <Flame size={11} />
+                  {selectedMood ? selectedMood.split(" ").slice(0, 2).join(" ") : "Mood"}
+                </button>
+                {/* Camera chip */}
+                <button
+                  onClick={() => setActiveTab("style")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(!!selectedCamera)}
+                >
+                  <ImageIcon size={11} />
+                  {selectedCamera ? selectedCamera.split(" ").slice(0, 2).join(" ") : "Camera"}
+                </button>
                 {/* Aspect ratio chip */}
                 <button
                   onClick={() => setActiveTab("settings")}
@@ -1448,6 +1475,29 @@ export default function ImageTool() {
                   <Flame size={11} />
                   {qualityPreset}
                 </button>
+                {/* Clear enhancements button */}
+                {(selectedStyle || selectedLighting || selectedMood || selectedCamera || selectedQualityTag) && (
+                  <button
+                    onClick={() => {
+                      setSelectedStyle(null);
+                      setSelectedLighting(null);
+                      setSelectedMood(null);
+                      setSelectedCamera(null);
+                      setSelectedQualityTag(null);
+                      addLog("info", "All enhancements cleared");
+                    }}
+                    disabled={isWorking}
+                    className="h-8 px-2 flex items-center gap-1 rounded-lg border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                    style={{
+                      borderColor: T.borderColor + "60",
+                      color: T.textMuted,
+                      backgroundColor: T.bgColor,
+                    }}
+                    title="Clear all selected styles, lighting, mood, camera, and quality tags"
+                  >
+                    <X size={11} /> Clear
+                  </button>
+                )}
               </div>
             </div>
 

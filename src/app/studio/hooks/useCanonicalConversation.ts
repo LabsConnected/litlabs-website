@@ -115,12 +115,15 @@ export function useCanonicalConversation({
   onRouteInspectorAction,
   onRunHealthChecks,
   serverProjectId,
+  cameraState,
 }: {
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRouteInspectorAction?: (tab: InspectorTab) => void;
   /** Triggered when LiTT should run all project health checks */
   onRunHealthChecks?: () => void;
   serverProjectId?: string | null;
+  /** Camera dock state — passed to the LLM so it knows camera is available */
+  cameraState?: { active: boolean; status: string };
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendErrorState] = useState<string | null>(null);
@@ -197,7 +200,9 @@ export function useCanonicalConversation({
     workspaceStatus: capabilities.workspaceStatus,
     selectedModelLabel: selectedModel.label,
     selectedModelId: selectedModel.id,
-  }), [capabilities, voiceTransportConnected, voiceInputState, voiceState, voiceOutputState, selectedModel]);
+    cameraActive: cameraState?.active ?? false,
+    cameraStatus: cameraState?.status ?? "idle",
+  }), [capabilities, voiceTransportConnected, voiceInputState, voiceState, voiceOutputState, selectedModel, cameraState]);
 
   // Subscribe to the messages slice reactively (selector pattern, matching
   // CanvasPanel). The no-selector + store.getMessages() approach relies on the

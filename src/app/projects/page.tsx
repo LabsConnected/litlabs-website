@@ -1,5 +1,6 @@
-"use client";
+﻿"use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
 import { useTheme } from "@/context/ThemeContext";
@@ -14,6 +15,8 @@ import {
   Image,
   Play,
   Plus,
+  RefreshCw,
+  Search,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -45,8 +48,53 @@ const QUICK_ACTIONS = [
   },
 ];
 
+type Project = {
+  id: string;
+  name: string;
+  repository?: string | null;
+  status?: string | null;
+  updated_at?: string | null;
+};
+
 export default function ProjectsPage() {
   const { resolvedColors: T } = useTheme();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const fetchProjects = useMemo(() => {
+    const controller = new AbortController();
+    return async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/projects", { signal: controller.signal, cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || "Failed to load projects");
+        setProjects(Array.isArray(data.projects) ? data.projects : []);
+      } catch (err) {
+        const name = (err as { name?: string })?.name;
+        if (name !== "AbortError") setError((err as Error)?.message || "Failed to load projects");
+      } finally {
+        setLoading(false);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const name = (p.name || p.repository || "").toLowerCase();
+      const repo = (p.repository || "").toLowerCase();
+      return name.includes(q) || repo.includes(q);
+    });
+  }, [projects, query]);
 
   return (
     <PageShell
@@ -155,6 +203,87 @@ export default function ProjectsPage() {
           </div>
         </section>
 
+        <section className="mt-8">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>
+                Your projects
+              </p>
+              <h2 className="mt-1 text-xl font-black" style={{ color: T.headerColor }}>
+                {filtered.length} {filtered.length === 1 ? "project" : "projects"}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 opacity-60" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search projects..."
+                  className="h-9 w-64 rounded-xl border bg-black/20 pl-9 pr-3 text-xs outline-none focus:border-cyan-300/40"
+                  style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={fetchProjects}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-bold"
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
+              >
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-20 text-sm opacity-70">Loading projects…</div>
+          ) : error ? (
+            <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-2xl border border-dashed p-10 text-center text-sm opacity-70">
+              {query ? "No projects match your search." : "No projects yet. Connect a repo in Project setup to get started."}
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((project) => (
+                <Link
+                  key={project.id}
+                  href={`/studio?project=${encodeURIComponent(project.id)}`}
+                  className="group flex flex-col gap-2 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5"
+                  style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black" style={{ color: T.headerColor }}>
+                        {project.name || "Untitled project"}
+                      </div>
+                      <div className="mt-1 truncate text-[11px] opacity-70" style={{ color: T.textMuted }}>
+                        {project.repository || "No repository linked"}
+                      </div>
+                    </div>
+                    <span
+                      className="shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase"
+                      style={{
+                        backgroundColor: `${T.accentColor}18`,
+                        color: T.accentColor,
+                        border: `1px solid ${T.accentColor}30`,
+                      }}
+                    >
+                      {project.status || "offline"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] opacity-60" style={{ color: T.textMuted }}>
+                    <span>{project.updated_at ? new Date(project.updated_at).toLocaleString() : "Not updated"}</span>
+                    <span className="inline-flex items-center gap-1 font-bold opacity-0 transition-opacity group-hover:opacity-100" style={{ color: T.accentColor }}>
+                      Open <ArrowRight size={12} />
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section className="mt-8 grid gap-3 md:grid-cols-3">
           {[
             { label: "Files", detail: "Browse project and uploaded files", href: "/library/files", icon: FileText },
@@ -175,3 +304,4 @@ export default function ProjectsPage() {
     </PageShell>
   );
 }
+

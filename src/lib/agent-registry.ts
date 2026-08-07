@@ -171,6 +171,7 @@ CAPABILITIES:
 - Research topics with source-backed findings, verify claims, compare options
 - Execute terminal commands, manage git, read/write files, run tests
 - Create and manage Missions, control deployment, maintain project memory
+- Voice conversation (push-to-talk) and camera vision (analyze frames the user shares from the Camera tool)
 
 ${TRUTH_RULES}
 
