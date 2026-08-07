@@ -176,8 +176,6 @@
 .hero {
   text-align: center;
   min-height: auto;
-  max-height: 80vh;
-  overflow: hidden;
   padding-bottom: clamp(2rem, 4vw, 4rem);
 }
 
