@@ -19,6 +19,7 @@ import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
+import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
@@ -48,6 +49,7 @@ const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
 const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
+const DesignCanvas = dynamic(() => import("../tools/DesignCanvas"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false });
 const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
@@ -74,6 +76,7 @@ type WorkSurface = "conversation" | "builder";
 // conversation is handled by useStudioConversation + StudioTranscript.
 const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<string, unknown>>>> = {
   canvas: CanvasTool,
+  design: DesignCanvas,
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
@@ -884,6 +887,9 @@ function CommandStudioContent() {
             />
           )}
         </div>
+
+        {/* Persistent music player — survives tool switches while audio plays */}
+        <PersistentMusicPlayer />
 
         {/* Mobile bottom nav — 5 destinations */}
         <MobileCommandNav active={destination} onSelect={handleSelectDestination} />

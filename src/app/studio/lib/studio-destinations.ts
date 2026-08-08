@@ -21,7 +21,7 @@ export type StudioDestination =
   | "more";
 
 /** Internal workspace modes inside the Studio destination. */
-export type StudioMode = "work" | "preview" | "code" | "files";
+export type StudioMode = "work" | "preview" | "code" | "files" | "design";
 
 /** Internal tabs inside the Create destination. */
 export type CreateMode = "image" | "video" | "audio" | "music";
@@ -73,6 +73,9 @@ export function mapLegacyToolToDestination(
     // Studio / Files — the Canvas surface
     case "canvas":
       return { destination: "studio", legacyTool: "canvas", mode: "files" };
+    // Studio / Design — freeform design canvas
+    case "design":
+      return { destination: "studio", legacyTool: "design", mode: "design" };
     // Studio / Code — the code surface
     case "code":
       return { destination: "studio", legacyTool: "code", mode: "code" };
@@ -133,6 +136,7 @@ export function destinationToLegacyTool(
     case "studio":
       if (mode === "code") return "code";
       if (mode === "files") return "canvas";
+      if (mode === "design") return "design";
       if (mode === "preview") return "build";
       return "chat";
     case "create":

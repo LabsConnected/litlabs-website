@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -10,7 +10,7 @@ import { useTheme } from "@/context/ThemeContext";
 import PageShell from "@/components/PageShell";
 
 export default function ShowcasePage() {
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, userId } = useClerkAuth();
   const router = useRouter();
 
   useEffect(() => {

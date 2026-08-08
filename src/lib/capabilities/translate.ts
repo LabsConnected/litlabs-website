@@ -25,6 +25,10 @@ export interface RawCapabilities {
   connectionSummary?: string;
   terminalStatus?: string;
   terminalSessionId?: string | null;
+  /** Specific failure stage from the terminal store — used for precise diagnostics. */
+  terminalFailureStage?: string | null;
+  /** Verified cwd from PTY session — only set when PTY is truly ready. */
+  terminalCwd?: string | null;
   /** Voice transport connected (TTS-ready). Client-derived. */
   voiceTransportConnected?: boolean;
   /** Microphone currently capturing audio. Client-derived. */
@@ -104,24 +108,36 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   }
 
   // ── Terminal / PTY state ──
+  // The terminal is only "available" when the PTY session is verified:
+  // socket connected + session:ready received + cwd confirmed.
+  // Any other state is a failure stage, not "available".
+  const termFailureStage = caps.terminalFailureStage ?? null;
+  const termCwd = caps.terminalCwd ?? null;
+
   let terminalState: string;
   let terminalAction: string;
 
-  if (termExec === "available") {
-    terminalState = "Project terminal is connected and ready.";
+  if (termExec === "available" && termCwd) {
+    terminalState = `Project terminal is connected and ready. Verified working directory: ${termCwd}`;
     terminalAction = "";
   } else if (termExec === "connecting") {
-    terminalState = "Project terminal is still connecting.";
+    terminalState = "Project terminal is still connecting (waiting for PTY session).";
     terminalAction =
-      "If the user asks about running commands, say: \"The repository connection and terminal connection are separate. The project terminal is still connecting, so I cannot run commands yet.\"";
+      "If the user asks about running commands, say: \"The terminal is still connecting — the PTY session is being established. I cannot run commands yet.\"";
   } else if (termExec === "error") {
-    terminalState = "Project terminal is unavailable (error).";
+    const stageMsg = termFailureStage
+      ? ` Failure stage: ${termFailureStage.replace(/_/g, " ")}.`
+      : "";
+    terminalState = `Project terminal is unavailable (error).${stageMsg}`;
     terminalAction =
-      "If the user asks about running commands, say: \"The repository may still be connected, but the project terminal is unavailable.\"";
+      "If the user asks about running commands, report the specific failure stage above. Do NOT offer to \"connect\" or \"fix\" the terminal — the system handles reconnection automatically. Say: \"The terminal encountered an error. The system will attempt to reconnect automatically. You can also click Retry in the terminal panel.\"";
   } else {
-    terminalState = "Project terminal is not connected.";
+    const stageMsg = termFailureStage
+      ? ` Failure stage: ${termFailureStage.replace(/_/g, " ")}.`
+      : "";
+    terminalState = `Project terminal is not connected.${stageMsg}`;
     terminalAction =
-      "If the user asks about running commands, say: \"The terminal is not connected. The repository and terminal are separate — you may still have GitHub access without a terminal.\"";
+      "If the user asks about running commands, report the specific failure stage above. Do NOT offer to \"connect\" the terminal — the system handles connection automatically. Do NOT say \"I'll connect it\" or \"Let me set that up.\" Instead say: \"The terminal is not connected. The system is attempting to establish a connection automatically. You can check the terminal panel for status.\"";
   }
 
   // ── Voice state (INDEPENDENT of GitHub/PTY — has its own config + transport) ──
@@ -233,6 +249,14 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
 
   if (terminalAction) parts.push(`  → Next action: ${terminalAction}`);
 
+  // Terminal verified cwd — only shown when PTY is truly ready
+  if (termCwd && termExec === "available") {
+    parts.push(`  Verified cwd: ${termCwd}`);
+  }
+  if (termFailureStage && termExec !== "available") {
+    parts.push(`  Failure stage: ${termFailureStage.replace(/_/g, " ")}`);
+  }
+
   parts.push(`Voice configuration: ${voiceConfigState}`);
   parts.push(`Voice transport: ${voiceTransportState}`);
   parts.push(`Voice microphone: ${voiceMicState}`);
@@ -269,6 +293,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- Never claim full repository access based only on an account connection. Distinguish: GitHub connected, repository selected, repository readable, and writes permitted.");
   parts.push("- When asked about repository status, report the exact repository name and branch if available. Example: 'Connected to owner/repo on branch main. Repository read access is available. Writes require approval. Terminal status: disconnected.'");
   parts.push("- Never guess terminal, voice, preview, or deployment status. Only report what the connection state above explicitly says.");
+  parts.push("- The terminal is ONLY connected when the state says \"connected and ready\" with a verified cwd. If it says \"connecting\", \"error\", or \"not connected\", the terminal is NOT available for command execution.");
+  parts.push("- NEVER offer to \"connect the terminal\", \"set up the terminal\", or \"fix the terminal connection\". The terminal connection is managed automatically by the system. You cannot initiate or repair terminal connections.");
+  parts.push("- NEVER say \"I'll connect it\" or \"Let me set that up\" regarding the terminal. The system auto-provisions workspaces and auto-connects PTY sessions.");
+  parts.push("- If the terminal is not connected, report the failure stage if available (e.g. \"workspace not provisioned\", \"socket unavailable\", \"auth failed\"). Do NOT claim you can resolve it.");
+  parts.push("- If the user asks you to run a command and the terminal is not connected, say: \"The terminal is not available right now. [Failure stage]. The system is attempting to reconnect automatically. You can check the Terminal panel for status or click Retry.\"");
   parts.push("- If voice is configured and the token service is healthy, voice is AVAILABLE even if the transport is not connected yet. Say \"voice is available\" not \"voice is disconnected\".");
   parts.push("- If voice configuration is unknown, say: Voice status is still being checked. Do not claim voice is working or unavailable.");
   parts.push("- NEVER say \"Yes, I can hear you\" or \"I can hear you\" merely because a text transcript arrived. Hearing is a real-time microphone state, not a transcript event.");

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { TerminalConnectionState, TerminalStatus } from "@/lib/capabilities/types";
+import type { TerminalConnectionState, TerminalStatus, TerminalFailureStage, TerminalDiagnostics } from "@/lib/capabilities/types";
 import { HEARTBEAT_TIMEOUT_MS, HEARTBEAT_STALE_MS } from "@/lib/capabilities/types";
 
 const INITIAL_STATE: TerminalConnectionState = {
@@ -12,6 +12,10 @@ const INITIAL_STATE: TerminalConnectionState = {
   connectedAt: null,
   lastHeartbeatAt: null,
   error: null,
+  cwd: null,
+  shell: null,
+  failureStage: null,
+  lastDisconnectReason: null,
 };
 
 interface TerminalStore extends TerminalConnectionState {
@@ -21,9 +25,13 @@ interface TerminalStore extends TerminalConnectionState {
   setWorkspace: (workspaceId: string | null) => void;
   setHeartbeat: (timestamp: string) => void;
   setError: (error: string | null) => void;
+  setFailureStage: (stage: TerminalFailureStage) => void;
+  setDisconnectReason: (reason: string | null) => void;
+  setVerifiedSession: (data: { sessionId: string; cwd: string; shell: string; workspaceId?: string | null; projectId?: string | null }) => void;
   reset: () => void;
   isUsable: () => boolean;
   checkStaleHeartbeat: () => void;
+  getDiagnostics: () => TerminalDiagnostics;
 }
 
 let staleCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -58,6 +66,24 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       status: error ? "error" : state.status,
     })),
 
+  setFailureStage: (stage) => set({ failureStage: stage }),
+
+  setDisconnectReason: (reason) => set({ lastDisconnectReason: reason }),
+
+  setVerifiedSession: (data) =>
+    set({
+      sessionId: data.sessionId,
+      cwd: data.cwd,
+      shell: data.shell,
+      workspaceId: data.workspaceId ?? null,
+      projectId: data.projectId ?? null,
+      status: "connected",
+      connectedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
+      failureStage: null,
+      error: null,
+    }),
+
   reset: () => set({ ...INITIAL_STATE }),
 
   isUsable: () => {
@@ -65,6 +91,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     return (
       state.status === "connected" &&
       state.sessionId !== null &&
+      state.cwd !== null &&
       state.lastHeartbeatAt !== null &&
       Date.now() - new Date(state.lastHeartbeatAt).getTime() < HEARTBEAT_TIMEOUT_MS
     );
@@ -78,9 +105,29 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         set({
           status: "error",
           error: `Heartbeat stale by ${Math.round(elapsed / 1000)}s`,
+          failureStage: "heartbeat_stale",
         });
       }
     }
+  },
+
+  getDiagnostics: () => {
+    const state = get();
+    return {
+      canonicalProjectId: state.projectId,
+      repository: null,
+      branch: null,
+      workspaceId: state.workspaceId,
+      workspaceStatus: null,
+      socketConnected: state.status === "connected" || state.status === "connecting",
+      ptyReady: state.status === "connected" && state.sessionId !== null && state.cwd !== null,
+      cwd: state.cwd,
+      shell: state.shell,
+      failureStage: state.failureStage,
+      lastError: state.error,
+      lastDisconnectReason: state.lastDisconnectReason,
+      lastCheckedAt: state.lastHeartbeatAt ?? state.connectedAt,
+    };
   },
 }));
 

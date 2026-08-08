@@ -87,9 +87,9 @@ describe("Product-truth consistency", () => {
       expect(PLAN_CONTRACTS.founder.credits).toBe(0);
     });
 
-    it("Founder checkout is disabled", () => {
-      expect(PLANS.founder.enabled).toBe(false);
-      expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
+    it("Founder checkout is enabled", () => {
+      expect(PLANS.founder.enabled).toBe(true);
+      expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(true);
     });
 
     it("Founder features do not mention six months, $49, or credit-pack discounts", () => {

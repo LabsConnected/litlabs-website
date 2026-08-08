@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 /**
  * Returns a fetch wrapper that sends `credentials: "include"` and an
@@ -15,7 +15,7 @@ import { useAuth } from "@clerk/nextjs";
  *   const res = await authedFetch("/api/marketplace/agents/.../install", { method: "POST" });
  */
 export function useAuthedFetch() {
-  const { getToken } = useAuth();
+  const { getToken } = useClerkAuth();
 
   return async function authedFetch(
     input: string,

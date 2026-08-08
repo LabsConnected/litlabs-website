@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { DashboardThemeProvider } from "@/components/dashboard/DashboardThemeProvider";
+import FloatingMusicWidget from "@/components/dashboard/FloatingMusicWidget";
 
 const MissionControlDashboard = dynamic(
   () =>
@@ -22,6 +23,7 @@ export default function DashboardView() {
   return (
     <DashboardThemeProvider>
       <MissionControlDashboard />
+      <FloatingMusicWidget />
     </DashboardThemeProvider>
   );
 }

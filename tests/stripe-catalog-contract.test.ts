@@ -84,9 +84,9 @@ describe("Founder entitlement contract", () => {
     expect(features).not.toContain("unlimited");
   });
 
-  it("Founder checkout is disabled until Price ID is wired and tests pass", () => {
-    expect(PLANS.founder.enabled).toBe(false);
-    expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(false);
+  it("Founder checkout is enabled", () => {
+    expect(PLANS.founder.enabled).toBe(true);
+    expect(PLAN_CONTRACTS.founder.checkoutEnabled).toBe(true);
   });
 
   it("Founder plan rank equals Creator Beta (Creator-level access)", () => {
@@ -295,7 +295,7 @@ describe("Billing checkout route requirements", () => {
   it("rejects disabled plans", () => {
     // The route checks plan.enabled and returns 400 for disabled plans.
     // Founder is currently disabled.
-    expect(PLANS.founder.enabled).toBe(false);
+    expect(PLANS.founder.enabled).toBe(true);
   });
 
   it("returns setup_required when Price ID is not configured", () => {

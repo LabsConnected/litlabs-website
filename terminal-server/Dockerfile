@@ -26,7 +26,6 @@ RUN npm run build
 # Workspace root — Railway persistent volume mount point
 ENV TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
 ENV TERMINAL_SERVER_PORT=4001
-ENV TERMINAL_USE_DOCKER=false
 ENV NODE_ENV=production
 
 # Create the workspace directory

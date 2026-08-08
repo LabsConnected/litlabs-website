@@ -107,7 +107,7 @@ Output the code files immediately.`;
 
     const result = await generateText(
       lastMessage,
-      { task: "code", category: "code", maxTokens: 8192 },
+      { task: "code", category: "code", maxTokens: 8192, timeoutMs: 15_000 },
       systemPrompt,
     );
 

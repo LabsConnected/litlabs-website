@@ -71,7 +71,7 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main className="relative z-10 min-h-screen">{children}</main>
+        <main id="main-content" className="relative z-10 min-h-screen">{children}</main>
         <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
@@ -87,6 +87,7 @@ export default function LayoutShell({
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper />
           <main
+            id="main-content"
             className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
               ownChrome ? "pb-0" : "pb-[calc(88px+env(safe-area-inset-bottom))]"
             }`}

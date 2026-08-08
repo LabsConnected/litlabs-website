@@ -7,6 +7,7 @@ import { WalletProvider } from "@/context/WalletContext";
 import { VisualProvider } from "@/context/VisualContext";
 import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
+import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import LayoutShell from "@/components/LayoutShell";
 import {
   DEFAULT_DESCRIPTION,
@@ -112,7 +113,9 @@ export default function RootLayout({
           <VisualProvider>
             <MediaHubProvider>
               <YouTubePlayerProvider>
-                <LayoutShell>{children}</LayoutShell>
+                <MusicPlayerProvider>
+                  <LayoutShell>{children}</LayoutShell>
+                </MusicPlayerProvider>
               </YouTubePlayerProvider>
             </MediaHubProvider>
           </VisualProvider>
@@ -136,6 +139,12 @@ export default function RootLayout({
         style={{ backgroundColor: "#03050b" }}
         suppressHydrationWarning
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-slate-950"
+        >
+          Skip to main content
+        </a>
         {hasClerk ? (
           <ClerkProvider
             publishableKey={clerkKey!}

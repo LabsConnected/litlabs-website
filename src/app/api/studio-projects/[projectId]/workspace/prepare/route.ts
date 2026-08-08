@@ -39,7 +39,7 @@ export async function POST(
   const { projectId } = await params;
 
   // Verify the user owns this project (checks both studio_projects and legacy)
-  let project = await getProject(projectId, userId);
+  const project = await getProject(projectId, userId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -47,33 +47,36 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // If workspace is already ready, verify it still exists on the terminal
-  // server. The terminal server is the source of truth — if it lost the
-  // workspace (restart, ephemeral storage), we must re-provision.
+  // If workspace is already ready in DB, verify it still exists on terminal-server.
+  // Railway restarts/crashes can lose in-memory workspaces while DB still says "ready".
   if (project.workspaceId && project.workspaceStatus === "ready") {
     try {
       const ws = await getWorkspaceInternal(project.workspaceId, userId);
       if (ws && ws.ready) {
+        // Workspace confirmed alive on terminal-server — return immediately
         return NextResponse.json({
           workspaceId: project.workspaceId,
           workspaceStatus: "ready",
           workspaceRoot: project.workspaceRoot,
         });
       }
-      // Workspace gone on terminal server — fall through to re-provision.
-      // Reset status so the provisioning flow runs a fresh clone.
+      // Workspace lost on terminal-server — fall through to re-provision
+      // Reset stale DB record so provisioning can proceed
       await updateProjectWorkspace(projectId, userId, {
+        workspaceId: null,
         workspaceStatus: "not_prepared",
-        workspaceError: "Workspace lost on terminal server — re-provisioning",
+        workspaceRoot: null,
+        workspaceError: null,
       });
-      project = { ...project, workspaceStatus: "not_prepared", workspaceError: "Workspace lost on terminal server — re-provisioning" };
     } catch {
-      // Terminal server unreachable — return the cached ready state.
-      // The token route will catch the desync and return WORKSPACE_NOT_READY.
-      return NextResponse.json({
-        workspaceId: project.workspaceId,
-        workspaceStatus: "ready",
-        workspaceRoot: project.workspaceRoot,
+      // If verification fails due to config issues, don't re-provision
+      // (the error will surface again during provisioning)
+      // Fall through to re-provision for network errors
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceId: null,
+        workspaceStatus: "not_prepared",
+        workspaceRoot: null,
+        workspaceError: null,
       });
     }
   }

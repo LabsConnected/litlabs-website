@@ -60,12 +60,12 @@ services:
       - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
       - TERMINAL_AUTH_SECRET=${TERMINAL_AUTH_SECRET}
       - TERMINAL_INTERNAL_SERVICE_KEY=${TERMINAL_INTERNAL_SERVICE_KEY}
-      - TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
+      - TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
       - TERMINAL_USE_DOCKER=false
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
     volumes:
-      - littree-workspaces:/tmp/littree-workspaces
+      - littree-workspaces:/data/littree-workspaces
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4001/health"]

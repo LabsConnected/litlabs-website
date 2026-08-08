@@ -11,6 +11,42 @@ interface RateLimitResult {
   resetTime: number;
 }
 
+const MAX_TRACKED_KEYS = 10000;
+const inMemoryTimestamps = new Map<string, number[]>();
+
+/**
+ * In-process sliding-window fallback used when Supabase is unreachable.
+ * This prevents an outage from leaving routes completely unprotected.
+ * Timestamps are scoped to the current serverless process; the window
+ * resets on redeploy/cold start, but it still bounds abuse inside a
+ * single warm instance.
+ */
+function inProcessRateLimit(key: string, limit: number, window: number): RateLimitResult {
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - window;
+  const timestamps = inMemoryTimestamps.get(key) ?? [];
+  const active = timestamps.filter((ts) => ts > windowStart);
+
+  if (active.length >= limit) {
+    const oldest = active[0] ?? now;
+    inMemoryTimestamps.set(key, active);
+    return { success: false, remaining: 0, resetTime: Math.max(1, oldest + window - now) };
+  }
+
+  active.push(now);
+  inMemoryTimestamps.set(key, active);
+
+  if (inMemoryTimestamps.size > MAX_TRACKED_KEYS) {
+    const first = inMemoryTimestamps.keys().next().value;
+    if (first) inMemoryTimestamps.delete(first);
+  }
+
+  const oldest = active[0] ?? now;
+  const resetTime = Math.max(1, window - (now - oldest));
+  const remaining = Math.max(0, limit - active.length);
+  return { success: true, remaining, resetTime };
+}
+
 /**
  * Rate limit a request using a Supabase-backed counter.
  *
@@ -18,9 +54,9 @@ interface RateLimitResult {
  * back to IP address for unauthenticated requests. This prevents a
  * single local-dev IP from exhausting the limit for all users.
  *
- * Always fails OPEN — if Supabase is unreachable or the table is
- * missing, the request is allowed through. Rate limiting is a
- * protection layer, not a hard gate.
+ * Falls back to an in-process sliding window if Supabase is unreachable
+ * or the table is missing, so a rate-limit outage no longer means
+ * unlimited requests.
  */
 export async function rateLimit(
   request: NextRequest,
@@ -40,8 +76,8 @@ export async function rateLimit(
 
   const admin = getSupabaseAdmin();
   if (!admin) {
-    // No Supabase admin — fail open
-    return { success: true, remaining: limit, resetTime: window };
+    // No Supabase admin — use in-process fallback
+    return inProcessRateLimit(key, limit, window);
   }
 
   try {
@@ -84,8 +120,8 @@ export async function rateLimit(
       resetTime,
     };
   } catch {
-    // Supabase error (table missing, connection timeout, etc.) — fail open
-    return { success: true, remaining: limit, resetTime: window };
+    // Supabase error (table missing, connection timeout, etc.) — use fallback
+    return inProcessRateLimit(key, limit, window);
   }
 }
 
