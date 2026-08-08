@@ -19,7 +19,15 @@
  */
 
 import "server-only";
-import { toolRegistry } from "./tool-registry";
+
+let _toolRegistry: typeof import("./tool-registry").toolRegistry | null = null;
+async function getToolRegistry() {
+  if (!_toolRegistry) {
+    const mod = await import("./tool-registry");
+    _toolRegistry = mod.toolRegistry;
+  }
+  return _toolRegistry;
+}
 
 export interface AgentLoopResult {
   /** Enriched prompt with tool results injected */
@@ -174,6 +182,7 @@ async function executeReadOnlyTool(
   toolId: string,
   inputs: Record<string, unknown>,
 ): Promise<{ success: boolean; result: unknown; summary: string }> {
+  const toolRegistry = await getToolRegistry();
   const result = await toolRegistry.execute(toolId, inputs, {
     hasApproval: true, // read-only tools auto-approve
     availableCapabilities: [],
