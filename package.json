@@ -123,13 +123,6 @@
       "nanoid@<3.3.17": "3.3.18",
       "socket.io-parser@<4.2.7": "4.2.7",
       "brace-expansion@>=4.0.0 <5.0.9": "5.0.9"
-    },
-    "auditConfig": {
-      "ignoreCves": [
-        "GHSA-vrm6-8vpv-qv8q",
-        "GHSA-v9p9-hfj2-hcw8",
-        "GHSA-vxpw-j846-p89q"
-      ]
     }
   }
 }
