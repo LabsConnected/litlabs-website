@@ -39,6 +39,7 @@ export type StudioTool =
   | "home"
   | "chat"
   | "canvas"
+  | "design"
   | "image"
   | "video"
   | "audio"
@@ -67,6 +68,7 @@ type ToolItem = {
 const PRIMARY_TOOLS: ToolItem[] = [
   { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "C" },
   { id: "canvas", label: "Canvas", icon: Layout, shortcut: "V" },
+  { id: "design", label: "Design", icon: Palette, shortcut: "D" },
   { id: "code", label: "Code", icon: Code, shortcut: "K" },
   { id: "build", label: "Build", icon: Hammer, shortcut: "B" },
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
