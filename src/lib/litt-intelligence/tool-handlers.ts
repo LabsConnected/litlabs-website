@@ -33,7 +33,6 @@ function safeExec(cmd: string, cwd?: string, timeoutMs = 10000): { stdout: strin
       timeout: timeoutMs,
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: 1024 * 1024,
-      shell: true,
     });
     return { stdout: stdout.trim(), stderr: "", exitCode: 0 };
   } catch (err) {
@@ -349,27 +348,27 @@ export async function handleProjectHealth(_inputs: Record<string, unknown>): Pro
   const results: Array<{ check: string; status: "pass" | "fail" | "warn" | "skip"; output: string }> = [];
 
   // TypeScript check
-  const tsc = safeExec("npx tsc --noEmit 2>&1 | head -50", repoRoot, 60000);
+  const tsc = safeExec("npx tsc --noEmit", repoRoot, 60000);
   results.push({
     check: "TypeScript",
     status: tsc.exitCode === 0 ? "pass" : "fail",
-    output: tsc.stdout || tsc.stderr || "No output",
+    output: (tsc.stdout || tsc.stderr || "No output").slice(0, 2000)
   });
 
   // Lint check
-  const lint = safeExec("npx eslint src/ --max-warnings 0 2>&1 | tail -30", repoRoot, 60000);
+  const lint = safeExec("npx eslint src/ --max-warnings 0", repoRoot, 60000);
   results.push({
     check: "ESLint",
     status: lint.exitCode === 0 ? "pass" : lint.exitCode === 1 ? "fail" : "warn",
-    output: lint.stdout || lint.stderr || "No output",
+    output: (lint.stdout || lint.stderr || "No output").slice(0, 2000)
   });
 
   // Test check
-  const test = safeExec("npx vitest --run 2>&1 | tail -30", repoRoot, 60000);
+  const test = safeExec("npx vitest --run", repoRoot, 60000);
   results.push({
     check: "Tests",
     status: test.exitCode === 0 ? "pass" : "fail",
-    output: test.stdout || test.stderr || "No output",
+    output: (test.stdout || test.stderr || "No output").slice(0, 2000)
   });
 
   // Git status
