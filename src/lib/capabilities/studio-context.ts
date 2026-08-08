@@ -11,6 +11,32 @@ export interface StudioContext {
 }
 
 /**
+ * Check if the terminal server is reachable and healthy.
+ * Uses a short timeout so chat never blocks on a slow/unreachable server.
+ */
+async function checkTerminalServerHealth(): Promise<boolean> {
+  const url = process.env.TERMINAL_SERVER_INTERNAL_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
+    "";
+  if (!url || url.includes("localhost")) return false;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(`${url}/health`, {
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    return data?.status === "ok" && data?.readiness === "ready";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build the studio capability context for a given Clerk user by inspecting
  * the same `projects` + `github_installations` tables that /api/capabilities
  * and /api/github/connection-state use. Falls back to an empty context on
@@ -29,6 +55,9 @@ export async function getStudioContext(userId?: string): Promise<StudioContext> 
   if (!userId) return base;
 
   try {
+    // Check terminal server health (parallel with DB queries)
+    const terminalHealthPromise = checkTerminalServerHealth();
+
     const { data: installations } = await supabaseAdmin
       .from("github_installations")
       .select("installation_id")
@@ -50,17 +79,24 @@ export async function getStudioContext(userId?: string): Promise<StudioContext> 
     }
 
     const repositoryConnected = !!repositoryName;
+    const terminalConnected = await terminalHealthPromise;
     const availableTools: string[] = [];
     if (repositoryConnected) availableTools.push("repository");
+    if (terminalConnected) availableTools.push("terminal");
 
-    const connectionSummary = repositoryConnected
-      ? `Connected: repository (${repositoryName})`
+    const connectedParts: string[] = [];
+    if (terminalConnected) connectedParts.push("terminal");
+    if (repositoryConnected) connectedParts.push(`repository (${repositoryName})`);
+
+    const connectionSummary = connectedParts.length > 0
+      ? `Connected: ${connectedParts.join(", ")}`
       : hasInstallation
         ? "GitHub installed — no repository selected."
         : "No services connected.";
 
     return {
       ...base,
+      terminalConnected,
       repositoryConnected,
       repositoryName,
       availableTools,
