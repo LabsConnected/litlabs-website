@@ -56,6 +56,7 @@ export type TerminalFailureStage =
   | "workspace_provisioning_failed" // prepare endpoint returned an error
   | "socket_unavailable" // WebSocket/Socket.IO connection failed
   | "pty_creation_failed" // session:ready never arrived or returned error
+  | "pty_timeout" // PTY connection timed out waiting for session:ready
   | "cwd_verification_failed" // PTY cwd does not match expected workspace
   | "heartbeat_stale"; // Heartbeat timed out
 

@@ -8,7 +8,7 @@ import {
   claimProvisioningLock,
   recoverStaleProvisioning,
 } from "@/lib/projects/project-repository";
-import { prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
+import { prepareWorkspaceInternal, getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { getInstallationToken } from "@/lib/github-app";
 
 /**
@@ -47,13 +47,38 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // If workspace is already ready, return it immediately
+  // If workspace is already ready in DB, verify it still exists on terminal-server.
+  // Railway restarts/crashes can lose in-memory workspaces while DB still says "ready".
   if (project.workspaceId && project.workspaceStatus === "ready") {
-    return NextResponse.json({
-      workspaceId: project.workspaceId,
-      workspaceStatus: "ready",
-      workspaceRoot: project.workspaceRoot,
-    });
+    try {
+      const ws = await getWorkspaceInternal(project.workspaceId, userId);
+      if (ws && ws.ready) {
+        // Workspace confirmed alive on terminal-server — return immediately
+        return NextResponse.json({
+          workspaceId: project.workspaceId,
+          workspaceStatus: "ready",
+          workspaceRoot: project.workspaceRoot,
+        });
+      }
+      // Workspace lost on terminal-server — fall through to re-provision
+      // Reset stale DB record so provisioning can proceed
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceId: null,
+        workspaceStatus: "not_prepared",
+        workspaceRoot: null,
+        workspaceError: null,
+      });
+    } catch {
+      // If verification fails due to config issues, don't re-provision
+      // (the error will surface again during provisioning)
+      // Fall through to re-provision for network errors
+      await updateProjectWorkspace(projectId, userId, {
+        workspaceId: null,
+        workspaceStatus: "not_prepared",
+        workspaceRoot: null,
+        workspaceError: null,
+      });
+    }
   }
 
   // Ensure the project exists as a canonical studio_projects row before

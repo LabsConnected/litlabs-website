@@ -127,19 +127,24 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
     terminalStore.setStatus("connecting");
 
-    // Connection timeout — if not connected within 10s, show error
-    if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
-    connectTimeoutRef.current = setTimeout(() => {
-      if (disposed) return;
-      if (terminalStore.status !== "connected") {
-        terminalStore.setError("PTY connection timed out after 10 seconds");
-        terminalStore.setStatus("error");
-        term.writeln("\x1b[31m❌ PTY connection timed out. Click Retry to try again.\x1b[0m");
-        onLog?.("[WS] Connection timed out after 10s");
-        socketRef.current?.disconnect();
-        socketRef.current = null;
-      }
-    }, CONNECTION_TIMEOUT_MS);
+    // Connection timeout — started ONLY when the socket is actually connecting
+    // (not during workspace provisioning, which can take up to 60s).
+    // startConnectTimeout() is called inside the .then() after token fetch.
+    const startConnectTimeout = () => {
+      if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = setTimeout(() => {
+        if (disposed) return;
+        if (terminalStore.status !== "connected") {
+          terminalStore.setError("PTY connection timed out after 10 seconds");
+          terminalStore.setStatus("error");
+          terminalStore.setFailureStage("pty_timeout");
+          term.writeln("\x1b[31m❌ PTY connection timed out. Click Retry to try again.\x1b[0m");
+          onLog?.("[WS] Connection timed out after 10s");
+          socketRef.current?.disconnect();
+          socketRef.current = null;
+        }
+      }, CONNECTION_TIMEOUT_MS);
+    };
     const resize = () => {
       fit.fit();
       socketRef.current?.emit("terminal:resize", {
@@ -158,6 +163,8 @@ export const TerminalPanel = forwardRef<
     void connect()
       .then((token) => {
         if (disposed) return;
+        // Start PTY timeout only now — workspace is ready, socket is connecting
+        startConnectTimeout();
         const connectedSocket = io(wsUrl, {
           auth: { token },
           transports: ["websocket", "polling"],
@@ -198,7 +205,12 @@ export const TerminalPanel = forwardRef<
         connectedSocket.on("disconnect", (reason) => {
           setConnected(false);
           setSessionInfo(null);
-          terminalStore.setStatus("disconnected");
+          // Preserve error state — don't overwrite an error with "disconnected"
+          // If we were already in an error/auth_failed state, keep it.
+          const currentStatus = terminalStore.status;
+          if (currentStatus !== "error" && currentStatus !== "auth_failed" && currentStatus !== "unavailable" && currentStatus !== "pty_failed") {
+            terminalStore.setStatus("disconnected");
+          }
           terminalStore.setDisconnectReason(reason);
           terminalStore.setSession(null);
           terminalStore.setWorkspace(null);
@@ -302,6 +314,9 @@ export const TerminalPanel = forwardRef<
         connectedSocket.on("terminal:error", (msg: string) => {
           term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
           outputBufferRef.current += `\n⚠ ${msg}`;
+          // Store the error so it survives disconnect
+          terminalStore.setError(msg);
+          terminalStore.setFailureStage("pty_creation_failed");
           onLog?.(`[ERROR] ${msg}`);
         });
 
@@ -356,6 +371,8 @@ export const TerminalPanel = forwardRef<
                   // Retry token fetch now that workspace is prepared
                   return connect().then((token) => {
                     if (disposed) return;
+                    // Start PTY timeout for retry socket
+                    startConnectTimeout();
                     const retrySocket = io(wsUrl, {
                       auth: { token },
                       transports: ["websocket", "polling"],
@@ -399,7 +416,11 @@ export const TerminalPanel = forwardRef<
                     retrySocket.on("disconnect", (reason: string) => {
                       setConnected(false);
                       setSessionInfo(null);
-                      terminalStore.setStatus("disconnected");
+                      // Preserve error state on disconnect
+                      const currentStatus = terminalStore.status;
+                      if (currentStatus !== "error" && currentStatus !== "auth_failed" && currentStatus !== "unavailable" && currentStatus !== "pty_failed") {
+                        terminalStore.setStatus("disconnected");
+                      }
                       terminalStore.setDisconnectReason(reason);
                       terminalStore.setSession(null);
                       onConnectionChange?.(false);
@@ -418,6 +439,8 @@ export const TerminalPanel = forwardRef<
 
                     retrySocket.on("terminal:error", (msg: string) => {
                       term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
+                      terminalStore.setError(msg);
+                      terminalStore.setFailureStage("pty_creation_failed");
                       onLog?.(`[ERROR] ${msg}`);
                     });
 
@@ -627,9 +650,26 @@ export const TerminalPanel = forwardRef<
               <Plug size={10} /> PTY connected (verified)
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
-              <Plug size={10} /> PTY disconnected
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
+                <Plug size={10} /> PTY disconnected
+                {terminalStore.lastDisconnectReason && (
+                  <span className="ml-1 text-[9px] text-amber-300/70">({terminalStore.lastDisconnectReason})</span>
+                )}
+              </span>
+              {terminalStore.error && (
+                <span className="text-[9px] text-amber-300/60" title={terminalStore.error}>{terminalStore.error.slice(0, 80)}</span>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setRetryCount((c) => c + 1)}
+                  className="rounded bg-amber-500/20 px-2 py-1 text-[9px] font-bold text-amber-300 hover:bg-amber-500/30"
+                  aria-label="Retry PTY connection"
+                >
+                  <RotateCcw size={10} className="mr-1 inline" /> Retry
+                </button>
+              </div>
+            </div>
           )}
           {/* Repository, branch, CWD, approval mode + diagnostic info */}
           {(repositoryName || branch || (connected && sessionInfo)) && (
@@ -641,12 +681,21 @@ export const TerminalPanel = forwardRef<
               {projectId && <span className="truncate"><span className="text-neutral-600">project:</span> {projectId.slice(0, 12)}…</span>}
               {connected && sessionInfo?.workspaceId && <span className="truncate"><span className="text-neutral-600">workspace:</span> {sessionInfo.workspaceId.slice(0, 16)}…</span>}
               {projectId && (
-                <span className="truncate" title={sessionInfo?.workspaceId ? "Token is bound to this workspace" : "Token is not bound — workspace not ready"}>
+                <span className="truncate" title={
+                  connected && sessionInfo?.workspaceId ? "Token is bound to this workspace" :
+                  connected ? "Token issued — PTY connected" :
+                  terminalStore.status === "connecting" ? "Token being fetched…" :
+                  "No token — terminal not connected"
+                }>
                   <span className="text-neutral-600">token:</span>{" "}
-                  {sessionInfo?.workspaceId ? (
+                  {connected && sessionInfo?.workspaceId ? (
                     <span className="text-green-400">bound</span>
+                  ) : connected ? (
+                    <span className="text-green-400">issued</span>
+                  ) : terminalStore.status === "connecting" ? (
+                    <span className="text-blue-400">fetching…</span>
                   ) : (
-                    <span className="text-amber-400">unbound</span>
+                    <span className="text-amber-400">none</span>
                   )}
                 </span>
               )}

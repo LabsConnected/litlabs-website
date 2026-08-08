@@ -120,10 +120,25 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
           onClick={() => {
             setWorkspaceStatus("preparing");
             setWorkspaceError(null);
-            // Re-trigger preparation by changing the effect dependency
             void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
-              .then(() => setWorkspaceStatus("ready"))
-              .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Retry failed"); });
+              .then(async (res) => {
+                if (res.ok) {
+                  const data = await res.json().catch(() => ({}));
+                  if (data.workspaceStatus === "ready") {
+                    setWorkspaceStatus("ready");
+                  } else if (data.workspaceStatus === "provisioning") {
+                    setWorkspaceStatus("preparing");
+                  } else {
+                    setWorkspaceStatus("error");
+                    setWorkspaceError(data.error ?? "Workspace preparation failed");
+                  }
+                } else {
+                  const data = await res.json().catch(() => ({}));
+                  setWorkspaceStatus("error");
+                  setWorkspaceError(data.error ?? `Preparation failed (${res.status})`);
+                }
+              })
+              .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Network error during retry"); });
           }}
           className="grid h-7 w-7 place-items-center rounded-lg hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
