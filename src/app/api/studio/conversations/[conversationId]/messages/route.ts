@@ -23,6 +23,7 @@ import {
   parseRuntimeContextHint,
   HISTORY_LIMIT,
 } from "@/lib/litt-runtime";
+import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -231,6 +232,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const prompt = built.fullPrompt;
   const agentDisplayName = built.agentDisplayName;
 
+  // 10.5. Run the LiTT Agent Loop — auto-inspect the repository before the LLM call.
+  // This gives LiTT real data (project scan, git status, file contents, health checks)
+  // so he can answer engineering questions with facts instead of asking the user to check.
+  const agentLoopResult = await runAgentLoop(message, conversation.projectId ?? "", prompt);
+  const finalPrompt = agentLoopResult.enrichedPrompt;
+
   // 11. Insert pending assistant message
   const { message: assistantMessage } = await insertMessage({
     conversationId: conversation.id,
@@ -253,7 +260,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let reservedCredits = 0;
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
-    const estimatedTokens = Math.ceil(prompt.length / 4) + 2048; // prompt + max output
+    const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
     const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
     const reserveResult = await reserveCredits(
       {
@@ -302,8 +309,21 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       let assistantText = "";
       let reasoningText = "";
       try {
+        // Stream tool execution events to the client so the UI can show
+        // "LiTT is scanning the project..." etc.
+        if (agentLoopResult.ranTools) {
+          for (const exec of agentLoopResult.toolExecutions) {
+            controller.enqueue(event({
+              type: "tool_execution",
+              toolId: exec.toolId,
+              success: exec.success,
+              summary: exec.summary,
+            }));
+          }
+        }
+
         const r = await streamText(
-          prompt,
+          finalPrompt,
           (chunk) => {
             assistantText += chunk;
             controller.enqueue(event({ type: "text", text: chunk }));
@@ -325,10 +345,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
         if (agentRunId) {
           const actualCredits = runtimeAgent
-            ? estimateCredits(Math.ceil(prompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
             : 0;
           void settleRun(agentRunId, {
-            inputTokens: Math.ceil(prompt.length / 4),
+            inputTokens: Math.ceil(finalPrompt.length / 4),
             outputTokens: Math.ceil(assistantText.length / 4),
             actualCredits,
             status: "completed",

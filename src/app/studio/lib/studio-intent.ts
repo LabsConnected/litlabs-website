@@ -48,8 +48,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "file_question",
     patterns: [
-      /^(what|which|list|show|inspect|read|open|view)\b.*\b(files?|file tree|repository|repo)\b/i,
-      /\b(read|open|edit|modify)\b.*\b(file|component|source)\b/i,
+      // Only intercept explicit "open the files panel" requests.
+      // Questions about files/structure go to the LLM which now has
+      // real file listing and reading from the agent loop.
+      /^(open|show|view|go to)\b.*\b(files?|file tree|file explorer)\b/i,
     ],
   },
   {
@@ -79,8 +81,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "project_health",
     patterns: [
-      /\b(project|workspace|codebase)\b.*\b(health|checks?|lint|typecheck|tests?|audit)\b/i,
-      /\b(run|show|open|check)\b.*\b(project health|quality checks?)\b/i,
+      // Only intercept explicit "open the health panel" requests.
+      // General health/lint/test questions go to the LLM which now has
+      // real auto-inspection data from the agent loop.
+      /^(open|show|view|go to)\b.*\b(project health|quality checks?|health panel)\b/i,
     ],
   },
   {
@@ -123,14 +127,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "run_command",
-    patterns: [
-      /\brun\b.*\bgit\b/i,
-      /\brun\b.*\bnpm\b/i,
-      /\brun\b.*\bpnpm\b/i,
-      /\brun\b.*\byarn\b/i,
-      /\brun\b.*\bcommand\b/i,
-      /\bexecute\b.*\bcommand\b/i,
-    ],
+    // Removed — run_command intent now goes to the LLM. The server-side
+    // agent loop and terminal.execute tool handle real command execution.
+    // Keeping the intent type for backwards compat but no patterns trigger it.
+    patterns: [],
   },
   {
     intent: "generate_image",
@@ -197,9 +197,8 @@ function buildIntentResult(
     case "project_health":
       return {
         intent,
-        message: "I'll run a complete project health check now — TypeScript, lint, tests, build, and security audit. Results will stream into the Project Health panel.",
+        message: "Opening the Project Health panel.",
         actions: [
-          { label: "Run all checks", action: "run_all_checks" },
           { label: "View results", action: "view_health" },
         ],
       };

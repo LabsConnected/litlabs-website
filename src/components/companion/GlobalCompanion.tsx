@@ -344,7 +344,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed bottom-24 right-6 z-[10000] flex w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a0c13]/95 shadow-2xl backdrop-blur-xl max-sm:inset-x-4 max-sm:bottom-20 max-sm:w-auto max-sm:max-w-none"
+      className="fixed bottom-24 right-6 z-[10000] flex w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a0c13]/95 shadow-2xl backdrop-blur-xl max-sm:inset-x-4 max-sm:bottom-[calc(96px+env(safe-area-inset-bottom))] max-sm:w-auto max-sm:max-w-none"
       style={{ maxHeight: "75dvh" }}
     >
       {/* Header */}
@@ -599,7 +599,7 @@ export function GlobalCompanion() {
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerCancel}
         onPointerCancel={handlePointerCancel}
-        className="fixed bottom-6 right-6 z-[10000] flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95"
+        className="fixed bottom-6 right-6 z-[10000] flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 max-sm:bottom-[calc(80px+env(safe-area-inset-bottom))]"
         style={{
           background: "radial-gradient(circle at 30% 30%, #1a1f2e 0%, #0a0c13 70%)",
           border: "2px solid rgba(34, 211, 238, 0.3)",

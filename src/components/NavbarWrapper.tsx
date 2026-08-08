@@ -74,18 +74,12 @@ export default function NavbarWrapper() {
             <Menu size={22} />
           </button>
 
-          {/* Logo — icon only on mobile/tablet, icon+text on lg+ */}
-          <BrandLogo
-            href="/dashboard"
-            size={38}
-            showText={false}
-            className="lg:hidden"
-          />
+          {/* Logo — single instance, text hidden on mobile/tablet via CSS */}
           <BrandLogo
             href="/dashboard"
             size={38}
             showText
-            className="hidden lg:inline-flex"
+            className="[&>span]:hidden lg:[&>span]:inline"
           />
 
           {/* Desktop nav links — visible on md+ */}

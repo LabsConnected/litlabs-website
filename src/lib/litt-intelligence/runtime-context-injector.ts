@@ -302,9 +302,20 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
     {
       id: "terminal.execute",
       name: "Terminal Execute",
-      description: "Executes shell commands in the project terminal",
-      available: ctx.terminalConnected,
-      unavailableReason: !ctx.terminalConnected ? "Terminal is disconnected" : undefined,
+      description: "Executes shell commands. Read-only commands (git status, ls, cat, tsc, lint, tests) run automatically. Mutation commands require approval.",
+      available: true,
+    },
+    {
+      id: "git.status",
+      name: "Git Status",
+      description: "Get current git status, branch, recent commits, and diff summary",
+      available: true,
+    },
+    {
+      id: "project.health",
+      name: "Project Health Check",
+      description: "Run TypeScript check, ESLint, and tests to assess project health",
+      available: true,
     },
     {
       id: "deployment.status",
@@ -314,22 +325,25 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       unavailableReason: ctx.deploymentStatus === null ? "No deployment information available" : undefined,
     },
     {
-      id: "workspace.write",
-      name: "Workspace Write",
-      description: "Writes files to the project workspace (requires approval)",
-      available: ctx.workspaceReady && ctx.terminalConnected,
-      unavailableReason: !ctx.workspaceReady
-        ? `Workspace is ${ctx.workspaceStatus || "not ready"}`
-        : !ctx.terminalConnected
-          ? "Terminal is disconnected — file writes require a connected terminal"
-          : undefined,
+      id: "files.list",
+      name: "List Files",
+      description: "Lists files in a project directory",
+      available: ctx.projectId !== null,
+      unavailableReason: ctx.projectId === null ? "No active project selected" : undefined,
     },
     {
-      id: "file.read",
-      name: "File Read",
+      id: "files.read",
+      name: "Read File",
       description: "Reads files from the project workspace",
-      available: ctx.workspaceReady,
-      unavailableReason: !ctx.workspaceReady ? `Workspace is ${ctx.workspaceStatus || "not ready"}` : undefined,
+      available: ctx.projectId !== null,
+      unavailableReason: ctx.projectId === null ? "No active project selected" : undefined,
+    },
+    {
+      id: "files.write",
+      name: "Write File",
+      description: "Writes files to the project workspace (requires approval)",
+      available: ctx.projectId !== null,
+      unavailableReason: ctx.projectId === null ? "No active project selected" : undefined,
     },
     {
       id: "weather.current",
@@ -516,10 +530,8 @@ export function explainUnavailableTool(toolId: string, ctx: RuntimeContextSnapsh
   switch (toolId) {
     case "terminal.execute":
     case "terminal.status":
-      if (!ctx.terminalConnected) {
-        return "The terminal is disconnected. To run commands, connect the terminal first.";
-      }
-      return "The terminal is connected but encountered an error.";
+      // terminal.execute is now always available via server-side exec
+      return "Terminal execution is available. Read-only commands run automatically; mutation commands require approval.";
 
     case "repository.info":
       if (!ctx.repositoryConnected) {
@@ -527,14 +539,13 @@ export function explainUnavailableTool(toolId: string, ctx: RuntimeContextSnapsh
       }
       return "Repository is connected but encountered an error.";
 
-    case "workspace.write":
-      if (!ctx.workspaceReady) {
-        return `The workspace is ${ctx.workspaceStatus || "not ready"}. Wait for workspace provisioning to complete.`;
+    case "files.write":
+    case "files.read":
+    case "files.list":
+      if (!ctx.projectId) {
+        return "No active project is selected. Select a project first.";
       }
-      if (!ctx.terminalConnected) {
-        return "The terminal is disconnected. File writes require a connected terminal. Connect the terminal first.";
-      }
-      return "Workspace write is available, but requires user approval before executing.";
+      return "File operations are available for this project.";
 
     case "deployment.status":
       return "No deployment information is available. Deploy from the Deployments page.";

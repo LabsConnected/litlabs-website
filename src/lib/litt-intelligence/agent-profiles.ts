@@ -72,6 +72,14 @@ GROUNDING RULES:
 - Use the USER CONTEXT block to personalize responses. If you know their name, use it. If you know their city, use it for weather. If you know their preferences, honor them.
 - Don't nag about project status, terminal, or workspace unless they ask or something is actually broken.
 
+ACT-FIRST-WHEN-SAFE RULES:
+- When the user asks an engineering question ("what's wrong", "what needs fixing", "is it production ready", "scan the project", "run a health check"), you already have real tool results injected in the AUTO-INSPECTION RESULTS block above your reply. USE THAT DATA. Do not ask the user to check things you already checked.
+- If you see TypeScript errors, lint failures, or test failures in the auto-inspection results, describe them specifically and propose fixes. Do not say "you should run typecheck" — you already ran it.
+- If the user asks about dependencies, framework, or stack, the answer is in the auto-inspection data. Report it directly.
+- If the user asks about git status, branch, or changes, the answer is in the auto-inspection data. Report it directly.
+- For mutation actions (writing files, running mutation commands, deploying), propose the action and ask for approval. Do not execute mutations without approval.
+- For read-only actions (scanning, listing files, reading files, checking git status, running health checks), act first and report results. Do not ask permission to read.
+
 Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only engineering and research agent — do not recommend switching to another agent for coding or research tasks. For creative direction, design, images, music, or branding, suggest switching to Spark Mode.`;
 
 // ─── LiTT Builder Mode ────────────────────────────────────────────
@@ -89,6 +97,14 @@ CAPABILITIES:
 - Execute terminal commands, manage git, read/write files
 - Review code for correctness, security, and performance
 - Plan and execute multi-step implementation work
+
+ACT-FIRST-WHEN-SAFE RULES:
+- When the user asks an engineering question, you already have real tool results injected in the AUTO-INSPECTION RESULTS block above your reply. USE THAT DATA. Do not ask the user to check things you already checked.
+- If you see TypeScript errors, lint failures, or test failures in the auto-inspection results, describe them specifically and propose fixes. Do not say "you should run typecheck" — you already ran it.
+- If the user asks about dependencies, framework, or stack, the answer is in the auto-inspection data. Report it directly.
+- If the user asks about git status, branch, or changes, the answer is in the auto-inspection data. Report it directly.
+- For read-only actions (scanning, listing files, reading files, checking git status, running health checks), act first and report results. Do not ask permission to read.
+- For mutation actions (writing files, running mutation commands, deploying), propose the action and ask for approval. Do not execute mutations without approval.
 
 CONSTRAINTS:
 - Stay focused on the technical task at hand.
@@ -165,7 +181,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🧠",
     systemPrompt: STANDARD_PROMPT,
-    promptVersion: "2.1.0",
+    promptVersion: "2.2.0",
     allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],
@@ -185,8 +201,8 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🔨",
     systemPrompt: BUILDER_PROMPT,
-    promptVersion: "1.0.0",
-    allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production"],
+    promptVersion: "2.0.0",
+    allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],
     allowedMemoryTypes: ["user_preference", "project_fact", "project_decision", "architecture", "workflow", "constraint", "conversation_summary", "agent_note"],
@@ -194,7 +210,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     canUseTerminal: true,
     canDeploy: true,
     canModifyProduction: true,
-    defaultModelTask: "coding",
+    defaultModelTask: "code",
   },
 
   research: {

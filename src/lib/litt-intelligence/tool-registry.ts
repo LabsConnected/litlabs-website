@@ -10,6 +10,15 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
+import {
+  handleProjectScan,
+  handleFilesList,
+  handleFilesRead,
+  handleFilesWrite,
+  handleGitStatus,
+  handleTerminalExecute,
+  handleProjectHealth,
+} from "./tool-handlers";
 
 // ─── Registry ───────────────────────────────────────────────────
 
@@ -262,7 +271,7 @@ const MUTATION_APPROVAL: ApprovalPolicy = {
   neverAllow: false,
 };
 
-const NEVER_ALLOW_APPROVAL: ApprovalPolicy = {
+const _NEVER_ALLOW_APPROVAL: ApprovalPolicy = {
   required: true,
   autoApproveReadOnly: false,
   requireExplicitForMutations: true,
@@ -276,9 +285,9 @@ export function registerInternalTools(): void {
       tool: {
         id: "project.scan",
         name: "Project Scan",
-        description: "Scan the active project and return a structured intelligence snapshot",
+        description: "Scan the active project and return a structured intelligence snapshot including stack, architecture, dependencies, tests, risks, and capabilities",
         source: "internal",
-        version: "1.0.0",
+        version: "1.1.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
         outputSchema: { type: "object" },
         requiredCapabilities: [],
@@ -291,6 +300,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
+      handler: handleProjectScan,
     },
     {
       tool: {
@@ -501,7 +511,7 @@ export function registerInternalTools(): void {
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" } }, required: ["projectId"] },
         outputSchema: { type: "array" },
-        requiredCapabilities: ["filesystem"],
+        requiredCapabilities: [],
         requiredPermissions: ["files:read"],
         risk: "low",
         approvalPolicy: READ_ONLY_APPROVAL,
@@ -511,6 +521,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
+      handler: handleFilesList,
     },
     {
       tool: {
@@ -521,7 +532,7 @@ export function registerInternalTools(): void {
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" } }, required: ["projectId", "path"] },
         outputSchema: { type: "object" },
-        requiredCapabilities: ["filesystem"],
+        requiredCapabilities: [],
         requiredPermissions: ["files:read"],
         risk: "low",
         approvalPolicy: READ_ONLY_APPROVAL,
@@ -531,6 +542,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
+      handler: handleFilesRead,
     },
     // ─── Mutation tools (require approval) ────────────────────
     {
@@ -562,7 +574,7 @@ export function registerInternalTools(): void {
         version: "1.0.0",
         inputSchema: { type: "object", properties: { projectId: { type: "string" }, path: { type: "string" }, content: { type: "string" } }, required: ["projectId", "path", "content"] },
         outputSchema: { type: "object" },
-        requiredCapabilities: ["filesystem"],
+        requiredCapabilities: [],
         requiredPermissions: ["files:write"],
         risk: "high",
         approvalPolicy: MUTATION_APPROVAL,
@@ -572,6 +584,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: true,
       },
+      handler: handleFilesWrite,
     },
     {
       tool: {
@@ -739,26 +752,71 @@ export function registerInternalTools(): void {
         enabled: true,
       },
     },
-    // ─── Terminal (disabled for public users) ─────────────────
+    // ─── Terminal (enabled with safe read-only allowlist) ────────
     {
       tool: {
         id: "terminal.execute",
         name: "Execute Terminal Command",
-        description: "Execute a terminal command in a sandboxed environment (Coming Soon)",
+        description: "Execute a terminal command. Read-only commands (git status, ls, cat, tsc, lint, tests) run automatically. Mutation commands (git commit, npm install, file writes) require approval.",
         source: "internal",
-        version: "1.0.0",
-        inputSchema: { type: "object", properties: { command: { type: "string" }, projectId: { type: "string" } }, required: ["command", "projectId"] },
+        version: "2.0.0",
+        inputSchema: { type: "object", properties: { command: { type: "string" }, projectId: { type: "string" }, hasApproval: { type: "boolean" } }, required: ["command", "projectId"] },
         outputSchema: { type: "object" },
-        requiredCapabilities: ["pty"],
+        requiredCapabilities: [],
         requiredPermissions: ["terminal:execute"],
-        risk: "critical",
-        approvalPolicy: NEVER_ALLOW_APPROVAL,
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
         timeoutMs: 30000,
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: false, // Disabled until cloud sandbox is complete
+        enabled: true,
       },
+      handler: handleTerminalExecute,
+    },
+    // ─── Git Status (read-only, auto-approved) ──────────────────
+    {
+      tool: {
+        id: "git.status",
+        name: "Git Status",
+        description: "Get current git status, branch, recent commits, and diff summary",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: handleGitStatus,
+    },
+    // ─── Project Health (read-only, auto-approved) ──────────────
+    {
+      tool: {
+        id: "project.health",
+        name: "Project Health Check",
+        description: "Run TypeScript check, ESLint, and tests to assess project health",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: handleProjectHealth,
     },
   ];
 

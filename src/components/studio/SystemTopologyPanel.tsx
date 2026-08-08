@@ -24,7 +24,7 @@ export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }
   const router = useRouter();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { summary, refresh: refreshCaps } = useCapabilities();
-  const endpoint = useMemo(() => (terminalHttpUrl || terminalUrl()).replace(/\/$/, ""), [terminalHttpUrl]);
+  const endpoint = useMemo<string>(() => (terminalHttpUrl || terminalUrl()).replace(/\/$/, ""), [terminalHttpUrl]);
   const [terminalHealth, setTerminalHealth] = useState<{ readiness?: string; checks?: { docker?: boolean; dockerReason?: string; authConfigured?: boolean; internalServiceConfigured?: boolean; workspaceRoot?: boolean } } | null>(null);
   const [terminalOnline, setTerminalOnline] = useState(false);
   const [checking, setChecking] = useState(true);

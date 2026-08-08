@@ -176,18 +176,12 @@ export default function CommandStudioHeader({
       }}
       data-testid="studio-header"
     >
-      {/* LiTT Studio logo — clickable to go to dashboard */}
-      <BrandLogo
-        href="/dashboard"
-        size={30}
-        showText={false}
-        className="md:hidden"
-      />
+      {/* LiTT Studio logo — single instance, text hidden on mobile via CSS */}
       <BrandLogo
         href="/dashboard"
         size={30}
         showText
-        className="hidden md:inline-flex"
+        className="[&>span]:hidden md:[&>span]:inline"
       />
 
       <StudioProjectPicker
