@@ -21,7 +21,39 @@ vi.mock("@/context/ThemeContext", () => ({
       textMuted: "#888",
       border: "#333",
     },
+    resolvedColors: {
+      accentColor: "#72f238",
+      background: "#000",
+      surface: "#111",
+      primary: "#72f238",
+      text: "#fff",
+      textMuted: "#888",
+      border: "#333",
+    },
   }),
+}));
+
+vi.mock("@/context/MusicPlayerContext", () => ({
+  useMusicPlayer: () => ({
+    currentTrack: null,
+    isPlaying: false,
+    queue: [],
+    play: vi.fn(),
+    pause: vi.fn(),
+    next: vi.fn(),
+    prev: vi.fn(),
+    togglePlay: vi.fn(),
+    seek: vi.fn(),
+    setVolume: vi.fn(),
+    clearQueue: vi.fn(),
+    addToQueue: vi.fn(),
+    removeFromQueue: vi.fn(),
+  }),
+  MusicPlayerProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock("./PersistentMusicPlayer", () => ({
+  default: () => <div data-testid="music-player" />,
 }));
 
 vi.mock("@/context/ProfileContext", () => ({

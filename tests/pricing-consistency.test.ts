@@ -54,8 +54,8 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
     });
 
-    it("Founder is disabled pending approved Stripe price", () => {
-      expect(PLANS.founder.enabled).toBe(false);
+    it("Founder is enabled with $149 one-time price", () => {
+      expect(PLANS.founder.enabled).toBe(true);
       expect(PLANS.founder.billingType).toBe("one_time");
       expect(PLANS.founder.monthlyPriceCents).toBe(14900);
       expect(PLANS.founder.name).toBe("Founding Member");
@@ -117,9 +117,9 @@ describe("Pricing contract — single source of truth", () => {
   });
 
   describe("Checkout safety — disabled plans cannot be purchased", () => {
-    it("Founder is disabled and cannot be purchased", () => {
+    it("Founder is enabled and can be purchased", () => {
       const founder = PLANS.founder;
-      expect(founder.enabled).toBe(false);
+      expect(founder.enabled).toBe(true);
       // The billing checkout route checks plan.enabled and returns 400
       // This test verifies the contract is enforced at the catalog level
     });
@@ -127,7 +127,7 @@ describe("Pricing contract — single source of truth", () => {
     it("Only enabled plans can be purchased", () => {
       const enabledPlans = PLAN_LIST.filter((p) => p.enabled && p.billingType !== "free");
       // Only creator_beta and pro_builder_beta should be purchasable
-      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "pro_builder_beta"]);
+      expect(enabledPlans.map((p) => p.id).sort()).toEqual(["creator_beta", "founder", "pro_builder_beta"]);
     });
   });
 });

@@ -231,8 +231,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
     credits: 0,
     creditGrantFrequency: "none",
     activeProjectLimit: 5,
-    // Checkout disabled until an approved $149 Stripe Price ID is supplied.
-    checkoutEnabled: false,
+    checkoutEnabled: true,
     beta: true,
     features: [
       "Permanent Creator-level access",
@@ -392,7 +391,7 @@ export const POLICY_STATUSES = {
   creditPacks: "NOT APPROVED — no catalog exists",
   monthlyRefresh: "APPROVED — per billing cycle for paid plans",
   creditExpiration: "APPROVED — monthly resets, starter/purchased do not expire",
-  founderCheckout: "DISABLED — awaiting Price ID wiring and test verification",
+  founderCheckout: "ENABLED — $149 one-time purchase",
   refunds: "NO POLICY — do not promise refunds",
   automaticTax: "DISABLED — awaiting Stripe Tax configuration",
 } as const;
