@@ -235,6 +235,7 @@ export default function CanvasTool({ projectId }: CanvasToolProps) {
 
         const data = await apiFetch<{ text?: string; response?: string; error?: string }>("/api/ai-chat", {
           method: "POST",
+          timeoutMs: 60_000,
           body: JSON.stringify({
             model,
             messages: [
