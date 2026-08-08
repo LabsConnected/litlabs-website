@@ -129,7 +129,7 @@ export default defineConfig({
     // ── Public (signed-out) projects — always run ──
     {
       name: "public-chromium",
-      testMatch: /public|routes|visual|accessibility|navigation|error-states|security|site-audit/,
+      testMatch: /public|routes|visual|accessibility|navigation|error-states|security|site-audit|terminal/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: { cookies: [], origins: [] },

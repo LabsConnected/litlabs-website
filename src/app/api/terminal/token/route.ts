@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
+import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 
 export const runtime = "nodejs";
 
@@ -10,8 +11,10 @@ export const runtime = "nodejs";
  * GET /api/terminal/token?projectId=xxx
  *
  * Issues a terminal token. If projectId is provided, verifies that the
- * user owns the project and that the workspace is ready, then includes
- * workspaceId and projectId in the token claims.
+ * user owns the project, that Supabase says the workspace is ready, AND
+ * that the workspace still exists on the terminal server. If the terminal
+ * server lost the workspace (restart, ephemeral storage), resets the
+ * Supabase workspace status so the client can re-provision.
  */
 export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
@@ -29,6 +32,41 @@ export async function GET(request: NextRequest) {
     if (projectId) {
       try {
         const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+
+        // Supabase says the workspace is ready, but the terminal server is
+        // the source of truth for whether the workspace actually exists.
+        // Verify before issuing the token — if the terminal server lost the
+        // workspace (restart, ephemeral /tmp storage), reset Supabase so the
+        // client's self-heal flow can re-provision.
+        try {
+          const ws = await getWorkspaceInternal(workspaceId, userId);
+          if (!ws) {
+            await updateProjectWorkspace(projectId, userId, {
+              workspaceStatus: "not_prepared",
+              workspaceError: "Workspace lost on terminal server — needs re-provisioning",
+            });
+            return NextResponse.json(
+              {
+                code: "WORKSPACE_NOT_READY",
+                error: "Workspace was lost on the terminal server. Re-preparing...",
+                detail: "Workspace not found on terminal server",
+              },
+              { status: 409, headers: { "Cache-Control": "no-store" } },
+            );
+          }
+        } catch {
+          // Terminal server unreachable — fail soft with WORKSPACE_NOT_READY
+          // so the client can retry. Don't issue a token we can't validate.
+          return NextResponse.json(
+            {
+              code: "WORKSPACE_NOT_READY",
+              error: "Terminal server unreachable. Retrying...",
+              detail: "Could not verify workspace on terminal server",
+            },
+            { status: 409, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
         return NextResponse.json(
           createTerminalToken(userId, { workspaceId, projectId }),
           { headers: { "Cache-Control": "no-store" } },
