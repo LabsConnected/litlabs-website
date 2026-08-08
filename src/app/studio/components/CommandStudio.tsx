@@ -8,7 +8,6 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
-import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
@@ -119,9 +118,7 @@ function AgentVoiceSync() {
 export default function CommandStudio() {
   return (
     <VoiceSessionProvider>
-      <MusicPlayerProvider>
-        <CommandStudioContent />
-      </MusicPlayerProvider>
+      <CommandStudioContent />
     </VoiceSessionProvider>
   );
 }

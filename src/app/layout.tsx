@@ -7,6 +7,7 @@ import { WalletProvider } from "@/context/WalletContext";
 import { VisualProvider } from "@/context/VisualContext";
 import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
+import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import LayoutShell from "@/components/LayoutShell";
 import {
   DEFAULT_DESCRIPTION,
@@ -112,7 +113,9 @@ export default function RootLayout({
           <VisualProvider>
             <MediaHubProvider>
               <YouTubePlayerProvider>
-                <LayoutShell>{children}</LayoutShell>
+                <MusicPlayerProvider>
+                  <LayoutShell>{children}</LayoutShell>
+                </MusicPlayerProvider>
               </YouTubePlayerProvider>
             </MediaHubProvider>
           </VisualProvider>

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHmac } from "crypto";
 import { verifyWebhookSignature } from "../src/lib/github-app";
 

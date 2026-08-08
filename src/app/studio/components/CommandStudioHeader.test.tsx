@@ -47,9 +47,10 @@ vi.mock("../stores/useStudioModelStore", () => ({
   MODELS: [{ id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" }],
 }));
 
-// Mock Clerk UserButton
+// Mock Clerk UserButton + useAuth (StudioProjectPicker → useConfiguredAuth → useAuth)
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <div data-testid="user-button" />,
+  useAuth: () => ({ userId: "test-user-id", isLoaded: true, isSignedIn: true }),
 }));
 
 // Mock ModelPicker — it uses useTheme which requires ThemeProvider

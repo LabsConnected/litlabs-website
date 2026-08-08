@@ -31,6 +31,9 @@ import {
   ChevronUp,
   ImageIcon,
   MoreVertical,
+  Maximize2,
+  Copy,
+  Eraser,
 } from "lucide-react";
 import { MediaProviderId, ProviderSelection } from "@/lib/media";
 import { GENERATION_PRESETS } from "@/lib/visual-packs/generation-presets";
@@ -258,8 +261,8 @@ const ASPECT_OPTIONS = [
     height: 1344,
     icon: "▮",
   },
-  { label: "4:3", value: "4:3" as const, width: 1024, height: 768, icon: "▭" },
-  { label: "3:4", value: "3:4" as const, width: 768, height: 1024, icon: "▯" },
+  { label: "4:5", value: "4:5" as const, width: 1024, height: 1280, icon: "▯" },
+  { label: "3:2", value: "3:2" as const, width: 1152, height: 768, icon: "▭" },
 ];
 
 const PROVIDER_OPTIONS = [
@@ -345,6 +348,17 @@ const PROVIDER_OPTIONS = [
   },
 ];
 
+const LITT_QUICK_ACTIONS = [
+  { label: "Make Cinematic", promptSuffix: ", cinematic lighting, film grain, dramatic atmosphere, anamorphic lens flare" },
+  { label: "More Realistic", promptSuffix: ", photorealistic, ultra detailed, professional photography, 8k, sharp focus" },
+  { label: "Change Background", promptSuffix: ", with a new background: lush tropical garden, soft bokeh, natural lighting" },
+  { label: "Fix Hands", promptSuffix: ", correct hand anatomy, detailed fingers, natural pose" },
+  { label: "Remove Object", promptSuffix: ", remove distracting objects, clean composition, minimalist background" },
+  { label: "Upscale 4K", promptSuffix: ", 4k upscale, ultra high resolution, enhanced details, crisp edges" },
+  { label: "Create Variations", promptSuffix: ", alternative composition, different angle, same subject and mood" },
+  { label: "Add Text", promptSuffix: ", with elegant typography overlay, bold sans-serif title text" },
+];
+
 /* ─── Component ───────────────────────────────────────────────────────── */
 
 /** LiTT robot mascot SVG — illustrated robot with glowing eyes, antenna, chest light. */
@@ -417,12 +431,13 @@ export default function ImageTool() {
   /* ── Provider / format state ── */
   const [providerId, setProviderId] = useState<ProviderSelection>("auto-free");
   const [aspectRatio, setAspectRatio] = useState<
-    "1:1" | "4:3" | "3:4" | "16:9" | "9:16"
+    "1:1" | "4:5" | "3:2" | "16:9" | "9:16"
   >("1:1");
   const [imageSize, setImageSize] = useState<"1K" | "2K">("1K");
   const [seed, setSeed] = useState<number>(0);
   const [batchSize, setBatchSize] = useState<1 | 2 | 4>(1);
   const [negativePromptOpen, setNegativePromptOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   /* ── Advanced generation controls ── */
   const [guidanceScale, setGuidanceScale] = useState<number>(7.5);
@@ -674,7 +689,7 @@ export default function ImageTool() {
       if (!raw) return;
       const draft = JSON.parse(raw) as { prompt?: string; aspectRatio?: string; style?: string; referenceImage?: string | null };
       if (draft.prompt) setPrompt(draft.prompt);
-      if (["1:1", "4:3", "3:4", "16:9", "9:16"].includes(draft.aspectRatio || "")) setAspectRatio(draft.aspectRatio as typeof aspectRatio);
+      if (["1:1", "4:5", "3:2", "16:9", "9:16"].includes(draft.aspectRatio || "")) setAspectRatio(draft.aspectRatio as typeof aspectRatio);
       if (draft.style && draft.style !== "None" && draft.style !== "LiTLabs brand") setSelectedStyle(draft.style);
       if (draft.style === "LiTLabs brand") setSelectedStyle("Cyberpunk neon noir");
       if (draft.referenceImage) setReferenceImage(draft.referenceImage);
@@ -821,6 +836,13 @@ export default function ImageTool() {
     addLog("info", "Prompt enhanced");
   }, [prompt, addLog]);
 
+  const surpriseMe = useCallback(() => {
+    const random = PROMPT_PRESETS[Math.floor(Math.random() * PROMPT_PRESETS.length)];
+    setPrompt(random);
+    setError(null);
+    addLog("info", "Surprise prompt loaded");
+  }, [addLog]);
+
   const handleFileUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -829,6 +851,22 @@ export default function ImageTool() {
       reader.onload = (ev) => {
         setReferenceImage(ev.target?.result as string);
         addLog("info", `Reference loaded: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    },
+    [addLog],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setReferenceImage(ev.target?.result as string);
+        addLog("info", `Reference dropped: ${file.name}`);
       };
       reader.readAsDataURL(file);
     },
@@ -1126,6 +1164,22 @@ export default function ImageTool() {
     }
   }, []);
 
+  const handleQuickAction = useCallback(
+    (suffix: string) => {
+      setPrompt((prev) => prev + suffix);
+      addLog("info", `LiTT quick action applied`);
+    },
+    [addLog],
+  );
+
+  const handleUseAsReference = useCallback(
+    (url: string) => {
+      setReferenceImage(url);
+      addLog("info", "Image set as reference");
+    },
+    [addLog],
+  );
+
   const handleClaimBonus = useCallback(async () => {
     setClaiming(true);
     setError(null);
@@ -1389,14 +1443,24 @@ export default function ImageTool() {
                 data-testid="image-prompt-input"
               />
               <div className="flex items-center justify-between">
-                <button
-                  onClick={enhancePrompt}
-                  disabled={!prompt.trim() || isWorking}
-                  className="flex items-center gap-1 h-6 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
-                  style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
-                >
-                  <Zap size={9} /> Enhance
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={surpriseMe}
+                    disabled={isWorking}
+                    className="flex items-center gap-1 h-6 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
+                  >
+                    <Sparkles size={9} /> Surprise
+                  </button>
+                  <button
+                    onClick={enhancePrompt}
+                    disabled={!prompt.trim() || isWorking}
+                    className="flex items-center gap-1 h-6 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
+                  >
+                    <Zap size={9} /> Enhance
+                  </button>
+                </div>
                 <span className="text-[9px]" style={{ color: prompt.length > 900 ? "#e3b341" : T.textMuted + "60" }}>
                   {prompt.length} / 1000
                 </span>
@@ -1564,7 +1628,7 @@ export default function ImageTool() {
                 {isWorking ? (
                   <><Loader2 size={15} className="animate-spin" /> Forging...</>
                 ) : (
-                  <><Wand2 size={15} /> Generate{batchSize > 1 ? ` ${batchSize}×` : ""}</>
+                  <><Sparkles size={16} /> Generate{batchSize > 1 ? ` ${batchSize}×` : ""}</>
                 )}
               </button>
               {error && (
@@ -1742,17 +1806,30 @@ export default function ImageTool() {
                   >
                     Prompt
                   </label>
-                  <button
-                    onClick={enhancePrompt}
-                    disabled={!prompt.trim() || isWorking}
-                    className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
-                    style={{
-                      borderColor: T.accentColor + "40",
-                      color: T.accentColor,
-                    }}
-                  >
-                    <Zap size={8} /> Enhance
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={surpriseMe}
+                      disabled={isWorking}
+                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                      style={{
+                        borderColor: T.accentColor + "40",
+                        color: T.accentColor,
+                      }}
+                    >
+                      <Sparkles size={8} /> Surprise Me
+                    </button>
+                    <button
+                      onClick={enhancePrompt}
+                      disabled={!prompt.trim() || isWorking}
+                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                      style={{
+                        borderColor: T.accentColor + "40",
+                        color: T.accentColor,
+                      }}
+                    >
+                      <Zap size={8} /> Enhance
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   value={prompt}
@@ -1819,6 +1896,8 @@ export default function ImageTool() {
               <div
                 className="rounded-lg border overflow-hidden"
                 style={sectionBox}
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
               >
                 <div className="px-3 py-2 flex items-center justify-between">
                   <span
@@ -1871,7 +1950,7 @@ export default function ImageTool() {
                       color: T.textMuted,
                     }}
                   >
-                    <Upload size={14} /> Upload
+                    <Upload size={14} /> Upload or drag & drop
                   </button>
                 )}
               </div>
@@ -1995,48 +2074,58 @@ export default function ImageTool() {
           {/* ── STYLE TAB ── */}
           {activeTab === "style" && (
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 md:px-3 pb-4 space-y-3">
-              {/* Remix mode */}
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={sectionBox}
-              >
+              {/* Visual style cards — thumbnail grid */}
+              <div className="rounded-lg border overflow-hidden" style={sectionBox}>
                 <div className="px-3 py-2">
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: T.textMuted }}
-                  >
-                    Remix Mode
+                  <span className="text-[10px] font-bold" style={{ color: T.textMuted }}>
+                    Style Presets
                   </span>
-                  <p
-                    className="text-[9px] mt-0.5 opacity-60"
-                    style={{ color: T.textMuted }}
-                  >
-                    How to use the reference image
+                  <p className="text-[9px] mt-0.5 opacity-60" style={{ color: T.textMuted }}>
+                    Tap a visual style to apply
                   </p>
                 </div>
-                <div className="px-3 pb-3 grid grid-cols-2 gap-1.5">
-                  {REMIX_MODES.map((mode) => {
-                    const Icon = mode.icon;
-                    const active = remixMode === mode.id;
+                <div className="px-3 pb-3 grid grid-cols-3 gap-1.5">
+                  {VISUAL_STYLE_CARDS.map((card) => {
+                    const isSelected = selectedStyle === card.prompt;
                     return (
                       <button
-                        key={mode.id}
-                        onClick={() => setRemixMode(mode.id)}
+                        key={card.label}
+                        onClick={() => { setSelectedStyle(card.prompt); addLog("info", `Style: ${card.label}`); }}
                         disabled={isWorking}
-                        className="p-2.5 text-left rounded-md border transition-all hover:scale-[1.01] disabled:opacity-40"
-                        style={pill(active)}
+                        className="relative aspect-[3/2] rounded-md overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
+                        style={{
+                          borderColor: isSelected ? T.accentColor : T.borderColor + "40",
+                          boxShadow: isSelected ? `0 0 12px ${T.accentColor}40` : "none",
+                        }}
                       >
-                        <div className="flex items-center gap-1.5 font-bold text-[10px] mb-0.5">
-                          <Icon size={10} /> {mode.label}
-                        </div>
-                        <div className="text-[9px] opacity-60">{mode.desc}</div>
+                        <div className="absolute inset-0" style={{ background: card.fallback }} />
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={card.url}
+                          alt={card.label}
+                          className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
+                          onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                        <span className="absolute bottom-1 left-1.5 text-[8px] font-bold text-white drop-shadow leading-tight">
+                          {card.label}
+                        </span>
+                        {isSelected && (
+                          <div className="absolute top-1 right-1 grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: T.accentColor }}>
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </div>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Style presets */}
+              {/* More style presets — text pills */}
               <div
                 className="rounded-lg border overflow-hidden"
                 style={sectionBox}
@@ -2046,7 +2135,7 @@ export default function ImageTool() {
                     className="text-[10px] font-bold"
                     style={{ color: T.textMuted }}
                   >
-                    Style Presets
+                    More Styles
                   </span>
                   {selectedStyle && (
                     <button
@@ -2084,6 +2173,47 @@ export default function ImageTool() {
                       {style}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Remix mode */}
+              <div
+                className="rounded-lg border overflow-hidden"
+                style={sectionBox}
+              >
+                <div className="px-3 py-2">
+                  <span
+                    className="text-[10px] font-bold"
+                    style={{ color: T.textMuted }}
+                  >
+                    Remix Mode
+                  </span>
+                  <p
+                    className="text-[9px] mt-0.5 opacity-60"
+                    style={{ color: T.textMuted }}
+                  >
+                    How to use the reference image
+                  </p>
+                </div>
+                <div className="px-3 pb-3 grid grid-cols-2 gap-1.5">
+                  {REMIX_MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    const active = remixMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        onClick={() => setRemixMode(mode.id)}
+                        disabled={isWorking}
+                        className="p-2 text-left rounded-md border transition-all hover:scale-[1.01] disabled:opacity-40"
+                        style={pill(active)}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-[10px] mb-0.5">
+                          <Icon size={10} /> {mode.label}
+                        </div>
+                        <div className="text-[9px] opacity-60">{mode.desc}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2503,343 +2633,221 @@ export default function ImageTool() {
                 </div>
               )}
 
-              {/* Quality Preset */}
+              {/* Advanced settings drawer */}
               <div
                 className="rounded-lg border overflow-hidden"
                 style={sectionBox}
               >
-                <div className="px-3 py-2">
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: T.textMuted }}
-                  >
-                    Quality Preset
-                  </span>
-                  <p
-                    className="text-[9px] mt-0.5 opacity-60"
-                    style={{ color: T.textMuted }}
-                  >
-                    Steps & guidance pre-configured
-                  </p>
-                </div>
-                <div className="px-3 pb-3 grid grid-cols-2 gap-1.5">
-                  {QUALITY_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      onClick={() => {
-                        setQualityPreset(preset.id);
-                        setInferenceSteps(preset.steps);
-                        setGuidanceScale(preset.cfg);
-                      }}
-                      disabled={isWorking}
-                      className="p-2 text-left rounded-md border transition-all hover:scale-[1.01] disabled:opacity-40"
-                      style={pill(qualityPreset === preset.id)}
-                    >
-                      <div className="font-bold text-[10px]">
-                        {preset.label}
-                      </div>
-                      <div className="text-[9px] opacity-60">{preset.desc}</div>
-                      <div className="text-[8px] opacity-40 mt-0.5">
-                        {preset.steps} steps · CFG {preset.cfg}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Guidance Scale */}
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={sectionBox}
-              >
-                <div className="px-3 py-2 flex items-center justify-between">
-                  <div>
-                    <span
-                      className="text-[10px] font-bold"
-                      style={{ color: T.textMuted }}
-                    >
-                      Guidance Scale (CFG)
-                    </span>
-                    <p
-                      className="text-[9px] mt-0.5 opacity-60"
-                      style={{ color: T.textMuted }}
-                    >
-                      Adherence to prompt vs creativity
-                    </p>
-                  </div>
-                  <span
-                    className="text-[11px] font-bold px-2 py-0.5 rounded"
-                    style={{
-                      backgroundColor: T.accentColor + "20",
-                      color: T.accentColor,
-                    }}
-                  >
-                    {guidanceScale.toFixed(1)}
-                  </span>
-                </div>
-                <div className="px-3 pb-3">
-                  <input
-                    type="range"
-                    min={1}
-                    max={15}
-                    step={0.5}
-                    value={guidanceScale}
-                    onChange={(e) =>
-                      setGuidanceScale(parseFloat(e.target.value))
-                    }
-                    disabled={isWorking}
-                    aria-label="Guidance scale (CFG)"
-                    title="Guidance scale (CFG)"
-                    aria-valuemin={1}
-                    aria-valuemax={15}
-                    aria-valuenow={guidanceScale}
-                    className="w-full accent-current cursor-pointer"
-                    style={{ accentColor: T.accentColor }}
-                  />
-                  <div
-                    className="flex justify-between text-[8px] mt-1"
-                    style={{ color: T.textMuted }}
-                  >
-                    <span>Creative (1)</span>
-                    <span>Balanced (7.5)</span>
-                    <span>Strict (15)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Inference Steps */}
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={sectionBox}
-              >
-                <div className="px-3 py-2 flex items-center justify-between">
-                  <div>
-                    <span
-                      className="text-[10px] font-bold"
-                      style={{ color: T.textMuted }}
-                    >
-                      Inference Steps
-                    </span>
-                    <p
-                      className="text-[9px] mt-0.5 opacity-60"
-                      style={{ color: T.textMuted }}
-                    >
-                      More steps = more detail, slower
-                    </p>
-                  </div>
-                  <span
-                    className="text-[11px] font-bold px-2 py-0.5 rounded"
-                    style={{
-                      backgroundColor: T.accentColor + "20",
-                      color: T.accentColor,
-                    }}
-                  >
-                    {inferenceSteps}
-                  </span>
-                </div>
-                <div className="px-3 pb-3">
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={inferenceSteps}
-                    onChange={(e) =>
-                      setInferenceSteps(parseInt(e.target.value))
-                    }
-                    disabled={isWorking}
-                    aria-label="Inference steps"
-                    title="Inference steps"
-                    aria-valuemin={10}
-                    aria-valuemax={100}
-                    aria-valuenow={inferenceSteps}
-                    className="w-full accent-current cursor-pointer"
-                    style={{ accentColor: T.accentColor }}
-                  />
-                  <div
-                    className="flex justify-between text-[8px] mt-1"
-                    style={{ color: T.textMuted }}
-                  >
-                    <span>Fast (10)</span>
-                    <span>Draft (20)</span>
-                    <span>Quality (50)</span>
-                    <span>Extreme (100)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Sampling Method */}
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={sectionBox}
-              >
-                <div className="px-3 py-2">
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: T.textMuted }}
-                  >
-                    Sampling Method
-                  </span>
-                  <p
-                    className="text-[9px] mt-0.5 opacity-60"
-                    style={{ color: T.textMuted }}
-                  >
-                    Algorithm for denoising (provider support varies)
-                  </p>
-                </div>
-                <div className="px-3 pb-3 space-y-1">
-                  {SAMPLER_OPTIONS.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSampler(s.id)}
-                      disabled={isWorking}
-                      className="w-full flex items-center justify-between px-2.5 py-2 rounded-md border text-left transition-all hover:scale-[1.005] disabled:opacity-40"
-                      style={pill(sampler === s.id)}
-                    >
-                      <div>
-                        <div className="text-[11px] font-bold">{s.label}</div>
-                        <div className="text-[9px] opacity-50">{s.desc}</div>
-                      </div>
-                      {sampler === s.id && (
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: T.accentColor }}
-                        />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Img2Img Strength (when using reference) */}
-              {referenceImage && (
-                <div
-                  className="rounded-lg border overflow-hidden"
-                  style={sectionBox}
+                <button
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-[10px] font-bold"
+                  style={{ color: T.textMuted }}
                 >
-                  <div className="px-3 py-2 flex items-center justify-between">
-                    <div>
-                      <span
-                        className="text-[10px] font-bold"
-                        style={{ color: T.textMuted }}
-                      >
-                        Img2Img Strength
-                      </span>
-                      <p
-                        className="text-[9px] mt-0.5 opacity-60"
-                        style={{ color: T.textMuted }}
-                      >
-                        How much to deviate from reference
-                      </p>
-                    </div>
-                    <span
-                      className="text-[11px] font-bold px-2 py-0.5 rounded"
-                      style={{
-                        backgroundColor: T.accentColor + "20",
-                        color: T.accentColor,
-                      }}
-                    >
-                      {Math.round(strength * 100)}%
-                    </span>
-                  </div>
-                  <div className="px-3 pb-3">
-                    <input
-                      type="range"
-                      min={0.1}
-                      max={1}
-                      step={0.05}
-                      value={strength}
-                      onChange={(e) => setStrength(parseFloat(e.target.value))}
-                      disabled={isWorking}
-                      aria-label="Img2Img strength"
-                      title="Img2Img strength"
-                      aria-valuemin={0.1}
-                      aria-valuemax={1}
-                      aria-valuenow={strength}
-                      className="w-full accent-current cursor-pointer"
-                      style={{ accentColor: T.accentColor }}
-                    />
-                    <div
-                      className="flex justify-between text-[8px] mt-1"
-                      style={{ color: T.textMuted }}
-                    >
-                      <span>Subtle (10%)</span>
-                      <span>Balanced (50%)</span>
-                      <span>Strong (75%)</span>
-                      <span>Creative (100%)</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Seed */}
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={sectionBox}
-              >
-                <div className="px-3 py-2 flex items-center justify-between">
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: T.textMuted }}
-                  >
-                    Seed
+                  <span className="flex items-center gap-1.5">
+                    <Layers size={11} style={{ color: T.accentColor }} />
+                    Advanced
                   </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSeedLocked(!seedLocked)}
-                      className="text-[9px] px-2 py-0.5 rounded border transition-all"
-                      style={{
-                        borderColor: seedLocked
-                          ? T.accentColor
-                          : T.borderColor + "60",
-                        color: seedLocked ? T.accentColor : T.textMuted,
-                        backgroundColor: seedLocked
-                          ? T.accentColor + "15"
-                          : "transparent",
-                      }}
-                    >
-                      {seedLocked ? "Locked" : "Random"}
-                    </button>
-                    <button
-                      onClick={() =>
-                        setSeed(Math.floor(Math.random() * 2147483647))
-                      }
-                      disabled={isWorking || seedLocked}
-                      className="text-[9px] px-2 py-0.5 rounded border transition-all hover:opacity-80 disabled:opacity-40"
-                      style={{
-                        borderColor: T.borderColor + "60",
-                        color: T.accentColor,
-                      }}
-                    >
-                      🎲 Randomize
-                    </button>
+                  {advancedOpen ? (
+                    <ChevronUp size={11} />
+                  ) : (
+                    <ChevronDown size={11} />
+                  )}
+                </button>
+                {advancedOpen && (
+                  <div className="px-3 pb-3 space-y-3">
+                    {/* Quality Preset */}
+                    <div>
+                      <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                        Quality Preset
+                      </span>
+                      <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                        {QUALITY_PRESETS.map((preset) => (
+                          <button
+                            key={preset.id}
+                            onClick={() => {
+                              setQualityPreset(preset.id);
+                              setInferenceSteps(preset.steps);
+                              setGuidanceScale(preset.cfg);
+                            }}
+                            disabled={isWorking}
+                            className="p-2 text-left rounded-md border transition-all hover:scale-[1.01] disabled:opacity-40"
+                            style={pill(qualityPreset === preset.id)}
+                          >
+                            <div className="font-bold text-[10px]">
+                              {preset.label}
+                            </div>
+                            <div className="text-[9px] opacity-60">{preset.desc}</div>
+                            <div className="text-[8px] opacity-40 mt-0.5">
+                              {preset.steps} steps · CFG {preset.cfg}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Guidance Scale */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                          Guidance (CFG)
+                        </span>
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor: T.accentColor + "20",
+                            color: T.accentColor,
+                          }}
+                        >
+                          {guidanceScale.toFixed(1)}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={15}
+                        step={0.5}
+                        value={guidanceScale}
+                        onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
+                        disabled={isWorking}
+                        aria-label="Guidance scale (CFG)"
+                        title="Guidance scale (CFG)"
+                        className="w-full accent-current cursor-pointer mt-1.5"
+                        style={{ accentColor: T.accentColor }}
+                      />
+                    </div>
+
+                    {/* Inference Steps */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                          Steps
+                        </span>
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor: T.accentColor + "20",
+                            color: T.accentColor,
+                          }}
+                        >
+                          {inferenceSteps}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={10}
+                        max={100}
+                        step={5}
+                        value={inferenceSteps}
+                        onChange={(e) => setInferenceSteps(parseInt(e.target.value))}
+                        disabled={isWorking}
+                        aria-label="Inference steps"
+                        title="Inference steps"
+                        className="w-full accent-current cursor-pointer mt-1.5"
+                        style={{ accentColor: T.accentColor }}
+                      />
+                    </div>
+
+                    {/* Sampling Method */}
+                    <div>
+                      <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                        Sampler
+                      </span>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {SAMPLER_OPTIONS.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => setSampler(s.id)}
+                            disabled={isWorking}
+                            className="px-2 py-1 text-[9px] font-bold rounded border transition-all disabled:opacity-40"
+                            style={pill(sampler === s.id)}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Img2Img Strength (when using reference) */}
+                    {referenceImage && (
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                            Img2Img Strength
+                          </span>
+                          <span
+                            className="text-[10px] font-bold px-2 py-0.5 rounded"
+                            style={{
+                              backgroundColor: T.accentColor + "20",
+                              color: T.accentColor,
+                            }}
+                          >
+                            {Math.round(strength * 100)}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={strength}
+                          onChange={(e) => setStrength(parseFloat(e.target.value))}
+                          disabled={isWorking}
+                          aria-label="Img2Img strength"
+                          title="Img2Img strength"
+                          className="w-full accent-current cursor-pointer mt-1.5"
+                          style={{ accentColor: T.accentColor }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Seed */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold" style={{ color: T.textMuted }}>
+                          Seed
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setSeedLocked(!seedLocked)}
+                            className="text-[8px] px-1.5 py-0.5 rounded border transition-all"
+                            style={{
+                              borderColor: seedLocked ? T.accentColor : T.borderColor + "60",
+                              color: seedLocked ? T.accentColor : T.textMuted,
+                              backgroundColor: seedLocked ? T.accentColor + "15" : "transparent",
+                            }}
+                          >
+                            {seedLocked ? "Locked" : "Random"}
+                          </button>
+                          <button
+                            onClick={() => setSeed(Math.floor(Math.random() * 2147483647))}
+                            disabled={isWorking || seedLocked}
+                            className="text-[8px] px-1.5 py-0.5 rounded border transition-all hover:opacity-80 disabled:opacity-40"
+                            style={{ borderColor: T.borderColor + "60", color: T.accentColor }}
+                          >
+                            🎲
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        value={seed}
+                        onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
+                        min={0}
+                        max={2147483647}
+                        disabled={isWorking}
+                        aria-label="Seed"
+                        title="Seed for reproducible generation"
+                        placeholder="0"
+                        className="w-full px-2.5 py-1.5 text-[10px] rounded-md outline-none disabled:opacity-40 mt-1.5"
+                        style={{
+                          backgroundColor: T.bgColor,
+                          border: `1px solid ${T.borderColor}40`,
+                          color: T.textColor,
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="px-3 pb-3">
-                  <input
-                    type="number"
-                    value={seed}
-                    onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-                    min={0}
-                    max={2147483647}
-                    disabled={isWorking}
-                    aria-label="Seed for reproducible generation"
-                    title="Seed for reproducible generation"
-                    placeholder="0"
-                    className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40"
-                    style={{
-                      backgroundColor: T.bgColor,
-                      border: `1px solid ${T.borderColor}40`,
-                      color: T.textColor,
-                    }}
-                  />
-                  <p
-                    className="text-[9px] mt-1.5 opacity-50"
-                    style={{ color: T.textMuted }}
-                  >
-                    Same seed + settings = reproducible results
-                  </p>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -2865,7 +2873,7 @@ export default function ImageTool() {
                 </>
               ) : (
                 <>
-                  <Wand2 size={15} /> Generate{" "}
+                  <Sparkles size={16} /> Generate{" "}
                   {batchSize > 1 ? `${batchSize}×` : ""}
                 </>
               )}
@@ -3118,38 +3126,66 @@ export default function ImageTool() {
                       {/* Hover action overlay — bottom bar with quick actions */}
                       {imageHovered && !imgError && (
                         <div
-                          className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1.5 p-3"
+                          className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-3"
                           style={{
-                            background: "linear-gradient(to top, rgba(8,6,15,.82) 0%, rgba(8,6,15,.4) 60%, transparent 100%)",
+                            background: "linear-gradient(to top, rgba(8,6,15,.88) 0%, rgba(8,6,15,.5) 60%, transparent 100%)",
                           }}
                         >
-                          <span className="mr-auto text-[10px] text-white/70 line-clamp-1 max-w-[50%]">
-                            {currentResult.prompt}
-                          </span>
-                          {[
-                            { label: "Download", icon: Download, onClick: () => handleDownload(currentResult.fileUrl!, currentResult.prompt) },
-                            { label: "Edit", icon: Wand2, onClick: () => { setPrompt(currentResult.prompt); } },
-                            { label: "Variation", icon: RefreshCw, onClick: handleGenerate },
-                            { label: "Canvas", icon: Layers, onClick: () => window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: currentResult.fileUrl } })) },
-                            { label: "Wallpaper", icon: Palette, onClick: () => window.dispatchEvent(new CustomEvent("studio:set-wallpaper", { detail: { url: currentResult.fileUrl } })) },
-                          ].map((action) => (
-                            <button
-                              key={action.label}
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); action.onClick(); }}
-                              className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/15"
-                              style={{
-                                backgroundColor: "rgba(255,255,255,.09)",
-                                border: "1px solid rgba(255,255,255,.12)",
-                                color: "rgba(255,255,255,.8)",
-                              }}
-                              aria-label={action.label}
-                              title={action.label}
-                            >
-                              <action.icon size={10} className="pointer-events-none" />
-                              <span className="hidden sm:inline">{action.label}</span>
-                            </button>
-                          ))}
+                          {/* LiTT quick actions row */}
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-white/40 mr-1">LiTT</span>
+                            {LITT_QUICK_ACTIONS.slice(0, 4).map((action) => (
+                              <button
+                                key={action.label}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleQuickAction(action.promptSuffix); }}
+                                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold transition hover:bg-white/20"
+                                style={{
+                                  backgroundColor: "rgba(168,85,247,.15)",
+                                  border: "1px solid rgba(168,85,247,.25)",
+                                  color: "rgba(200,150,255,.95)",
+                                }}
+                                aria-label={action.label}
+                                title={action.label}
+                              >
+                                <Sparkles size={8} className="pointer-events-none" />
+                                {action.label}
+                              </button>
+                            ))}
+                          </div>
+                          {/* Main action buttons row */}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="mr-auto text-[10px] text-white/70 line-clamp-1 max-w-[40%]">
+                              {currentResult.prompt}
+                            </span>
+                            {[
+                              { label: "Download", icon: Download, onClick: () => handleDownload(currentResult.fileUrl!, currentResult.prompt) },
+                              { label: "Edit", icon: Wand2, onClick: () => { setPrompt(currentResult.prompt); } },
+                              { label: "Variations", icon: Copy, onClick: handleGenerate },
+                              { label: "Upscale", icon: Maximize2, onClick: () => handleQuickAction(", 4k upscale, ultra high resolution, enhanced details") },
+                              { label: "Remove BG", icon: Eraser, onClick: () => handleQuickAction(", remove background, transparent background, isolated subject") },
+                              { label: "Use as Ref", icon: Layers, onClick: () => handleUseAsReference(currentResult.fileUrl!) },
+                              { label: "Canvas", icon: Palette, onClick: () => window.dispatchEvent(new CustomEvent("canvas:add-image", { detail: { url: currentResult.fileUrl } })) },
+                              { label: "Delete", icon: Trash2, onClick: () => deleteGeneration(currentResult.id) },
+                            ].map((action) => (
+                              <button
+                                key={action.label}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+                                className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/20"
+                                style={{
+                                  backgroundColor: action.label === "Delete" ? "rgba(248,81,73,.12)" : "rgba(255,255,255,.09)",
+                                  border: action.label === "Delete" ? "1px solid rgba(248,81,73,.2)" : "1px solid rgba(255,255,255,.12)",
+                                  color: action.label === "Delete" ? "rgba(248,81,73,.9)" : "rgba(255,255,255,.8)",
+                                }}
+                                aria-label={action.label}
+                                title={action.label}
+                              >
+                                <action.icon size={10} className="pointer-events-none" />
+                                <span className="hidden sm:inline">{action.label}</span>
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3305,6 +3341,32 @@ export default function ImageTool() {
                         >
                           ✨ Abstract 3D
                         </button>
+                      </div>
+                    </div>
+
+                    {/* LiTT quick actions */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                        <Sparkles size={10} style={{ color: T.accentColor }} />
+                        <span>LiTT Quick Actions</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {LITT_QUICK_ACTIONS.map((action) => (
+                          <button
+                            key={action.label}
+                            onClick={() => handleQuickAction(action.promptSuffix)}
+                            disabled={isWorking || !prompt.trim()}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded-full border transition-all hover:scale-105 disabled:opacity-30"
+                            style={{
+                              borderColor: T.accentColor + "30",
+                              color: T.accentColor,
+                              backgroundColor: T.accentColor + "08",
+                            }}
+                          >
+                            <Sparkles size={8} />
+                            {action.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
