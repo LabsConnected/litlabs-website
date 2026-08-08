@@ -43,6 +43,10 @@ export interface ConnectionCapabilities {
   terminalStatus: TerminalStatus;
   terminalSessionId: string | null;
   terminalError: string | null;
+  /** Specific failure stage from the terminal store — for LiTTAI diagnostics. */
+  terminalFailureStage: string | null;
+  /** Verified cwd from PTY session — only set when PTY is truly ready. */
+  terminalCwd: string | null;
   /** Voice transport connected (TTS-ready). Client-derived from VoiceSessionContext. */
   voiceTransportConnected: boolean;
   /** Microphone currently capturing audio. Client-derived from VoiceSessionContext. */
@@ -70,6 +74,8 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   terminalStatus: "disconnected",
   terminalSessionId: null,
   terminalError: null,
+  terminalFailureStage: null,
+  terminalCwd: null,
   voiceTransportConnected: false,
   voiceMicrophoneOn: false,
   voiceHealth: {
@@ -92,6 +98,8 @@ export function useConnectionSummary() {
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
+  const terminalFailureStage = useTerminalStore((s) => s.failureStage);
+  const terminalCwd = useTerminalStore((s) => s.cwd);
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
   const { getToken } = useClerkAuth();
   const searchParams = useSearchParams();
@@ -190,17 +198,28 @@ export function useConnectionSummary() {
 
       // Use client-side terminal store as primary source of truth for PTY status
       // Only fall back to server-side if client hasn't connected yet
-      if (terminalStatus === "connected") {
+      // Terminal is only "available" when the store says connected AND
+      // a verified cwd exists (set by session:ready, not by socket connect).
+      if (terminalStatus === "connected" && terminalCwd) {
         next.terminalStatus = "connected";
         next.terminalSessionId = terminalSessionId;
         next.terminalExecution = "available";
+        next.terminalCwd = terminalCwd;
+        next.terminalFailureStage = null;
+      } else if (terminalStatus === "connected" && !terminalCwd) {
+        // Store says connected but no cwd — PTY not truly ready yet
+        next.terminalStatus = "connecting";
+        next.terminalExecution = "connecting";
+        next.terminalFailureStage = "pty_creation_failed";
       } else if (terminalStatus === "connecting") {
         next.terminalStatus = "connecting";
         next.terminalExecution = "connecting";
-      } else if (terminalStatus === "error") {
-        next.terminalStatus = "error";
+        next.terminalFailureStage = terminalFailureStage;
+      } else if (terminalStatus === "error" || terminalStatus === "auth_failed" || terminalStatus === "pty_failed" || terminalStatus === "unavailable") {
+        next.terminalStatus = terminalStatus;
         next.terminalError = terminalError;
         next.terminalExecution = "error";
+        next.terminalFailureStage = terminalFailureStage;
       } else {
         // Client says disconnected — check if server is at least alive
         if (termRes.status === "fulfilled" && termRes.value.ok) {
@@ -250,7 +269,7 @@ export function useConnectionSummary() {
     } finally {
       setLoading(false);
     }
-  }, [terminalStatus, terminalSessionId, terminalError, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType]);
+  }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType]);
 
   useEffect(() => {
     void refresh();

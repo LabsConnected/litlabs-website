@@ -58,6 +58,12 @@ export function parseRuntimeContextHint(value: unknown): Partial<RawCapabilities
     terminalSessionId: typeof input.terminalSessionId === "string" && input.terminalSessionId.length <= 200
       ? input.terminalSessionId
       : undefined,
+    terminalFailureStage: typeof input.terminalFailureStage === "string" && input.terminalFailureStage.length <= 100
+      ? input.terminalFailureStage
+      : undefined,
+    terminalCwd: typeof input.terminalCwd === "string" && input.terminalCwd.length <= 500
+      ? input.terminalCwd
+      : undefined,
     voiceTransportConnected: input.voiceTransportConnected === true,
     voiceMicrophoneOn: input.voiceMicrophoneOn === true,
     voiceInputState: isValue(VOICE_INPUT_STATES, input.voiceInputState) ? input.voiceInputState : undefined,

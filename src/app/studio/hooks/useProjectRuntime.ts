@@ -44,6 +44,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
   // Client-side terminal store — source of truth for WebSocket connection
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
+  const terminalCwd = useTerminalStore((s) => s.cwd);
 
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
@@ -83,8 +84,9 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
       // Merge server workspace state with client terminal state
       setState((prev) => {
         const workspaceReady = serverState.workspaceProvisioned && serverState.workspaceStatus === "ready";
+        // Terminal is only connected when PTY session is verified with cwd
         const terminalConnected =
-          terminalStatus === "connected" && Boolean(terminalSessionId);
+          terminalStatus === "connected" && Boolean(terminalSessionId) && Boolean(terminalCwd);
 
         let phase: RuntimePhase = serverState.phase;
         if (workspaceReady && !terminalConnected) {
@@ -120,7 +122,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId]);
+  }, [authLoaded, isSignedIn, getToken, explicitProjectId, terminalStatus, terminalSessionId, terminalCwd]);
 
   // Initial resolve + polling
   useEffect(() => {
@@ -146,7 +148,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
 
       const workspaceReady = prev.workspaceProvisioned && prev.workspaceStatus === "ready";
       const terminalConnected =
-        terminalStatus === "connected" && Boolean(terminalSessionId);
+        terminalStatus === "connected" && Boolean(terminalSessionId) && Boolean(terminalCwd);
 
       let phase: RuntimePhase = prev.phase;
       if (workspaceReady && !terminalConnected) {
@@ -168,7 +170,7 @@ export function useProjectRuntime(): UseProjectRuntimeResult {
         writeApprovalRequired: true, // policy — not derived from connection
       };
     });
-  }, [terminalStatus, terminalSessionId]);
+  }, [terminalStatus, terminalSessionId, terminalCwd]);
 
   return { state, loading, error, refresh };
 }

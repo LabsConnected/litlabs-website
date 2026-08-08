@@ -45,7 +45,7 @@ describe("translateCapabilities — workspace-aware status", () => {
       terminalStatus: "disconnected",
     };
     const result = translateCapabilities(caps);
-    expect(result.contextBlock).toContain("Terminal: Project terminal is not connected.");
+    expect(result.contextBlock).toContain("Terminal: Project terminal is not connected");
     expect(result.githubState).toContain("Repository connected and ready");
     // Terminal and repo are reported separately
     expect(result.terminalState).toContain("not connected");

@@ -188,6 +188,8 @@ export function useCanonicalConversation({
     terminalExecution: capabilities.terminalExecution,
     terminalStatus: capabilities.terminalStatus,
     terminalSessionId: capabilities.terminalSessionId,
+    terminalFailureStage: capabilities.terminalFailureStage,
+    terminalCwd: capabilities.terminalCwd,
     voiceTransportConnected,
     voiceInputState,
     voiceMicrophoneOn: voiceInputState === "listening",
