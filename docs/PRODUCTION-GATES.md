@@ -34,7 +34,7 @@
 | Terminal connection timeout | ✅ VERIFIED | 10s timeout implemented |
 | Terminal auto-reconnect | ✅ VERIFIED | Retries with fresh token |
 | Workspace prepare polling | ✅ VERIFIED | 30 attempts x 2s = 60s max |
-| Error tracking (Sentry) | 🔴 BROKEN | Not configured |
+| Error tracking (Sentry) | ✅ FIXED | `@sentry/nextjs` installed, config files created, error boundaries report to Sentry |
 | Performance monitoring | 🟡 NEEDS TEST | `@vercel/speed-insights` installed |
 | Uptime monitoring | 🔴 BROKEN | No external monitoring |
 | Log aggregation | 🔴 BROKEN | Railway logs only |
@@ -58,7 +58,7 @@
 | Read/write/delete permissions | ✅ VERIFIED | Server validates paths |
 | Stripe webhook signature | 🟡 NEEDS TEST | Code exists |
 | Clerk webhook verification | 🟡 NEEDS TEST | Code exists |
-| GitHub webhook verification | 🔴 BROKEN | Not implemented |
+| GitHub webhook verification | ✅ VERIFIED | `verifyWebhookSignature()` uses HMAC-SHA256 + `timingSafeEqual` |
 
 ---
 

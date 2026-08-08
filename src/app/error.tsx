@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 
 export default function Error({
   error,
@@ -11,8 +12,8 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log in all environments so Vercel logs capture client-side errors
     console.error("App Error:", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (
