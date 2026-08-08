@@ -10,29 +10,33 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
-import {
-  handleProjectScan,
-  handleFilesList,
-  handleFilesRead,
-  handleFilesWrite,
-  handleGitStatus,
-  handleTerminalExecute,
-  handleProjectHealth,
-} from "./tool-handlers";
+
+type ToolHandler = (inputs: Record<string, unknown>) => Promise<unknown>;
+
+const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
+  "project.scan": async () => (await import("./tool-handlers")).handleProjectScan,
+  "files.list": async () => (await import("./tool-handlers")).handleFilesList,
+  "files.read": async () => (await import("./tool-handlers")).handleFilesRead,
+  "files.write": async () => (await import("./tool-handlers")).handleFilesWrite,
+  "git.status": async () => (await import("./tool-handlers")).handleGitStatus,
+  "terminal.execute": async () => (await import("./tool-handlers")).handleTerminalExecute,
+  "project.health": async () => (await import("./tool-handlers")).handleProjectHealth,
+};
 
 // ─── Registry ───────────────────────────────────────────────────
 
 class ToolRegistry {
   private tools = new Map<string, LiTTToolDefinition>();
-  private handlers = new Map<string, (inputs: Record<string, unknown>) => Promise<unknown>>();
+  private handlers = new Map<string, (() => Promise<(inputs: Record<string, unknown>) => Promise<unknown>>) | ((inputs: Record<string, unknown>) => Promise<unknown>)>();
   private listeners = new Set<(id: string, enabled: boolean) => void>();
 
   /**
    * Register a tool definition and optional handler.
+   * Handler can be a direct function or a lazy loader that returns the handler.
    */
   register(
     tool: LiTTToolDefinition,
-    handler?: (inputs: Record<string, unknown>) => Promise<unknown>,
+    handler?: ((inputs: Record<string, unknown>) => Promise<unknown>) | (() => Promise<(inputs: Record<string, unknown>) => Promise<unknown>>),
   ): void {
     this.tools.set(tool.id, tool);
     if (handler) {
@@ -186,12 +190,16 @@ class ToolRegistry {
     }
 
     // Execute
-    const handler = this.handlers.get(id);
-    if (!handler) {
+    const handlerEntry = this.handlers.get(id);
+    if (!handlerEntry) {
       return { ok: false, error: `Tool "${id}" has no handler registered` };
     }
 
     try {
+      // Resolve lazy handler if needed
+      const handler = typeof handlerEntry === "function" && handlerEntry.length === 0
+        ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>) => Promise<unknown>>)()
+        : handlerEntry as (inputs: Record<string, unknown>) => Promise<unknown>;
       const result = await handler(inputs);
       return { ok: true, result };
     } catch (err) {
@@ -300,7 +308,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
-      handler: handleProjectScan,
+      handler: lazyHandlers["project.scan"],
     },
     {
       tool: {
@@ -521,7 +529,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
-      handler: handleFilesList,
+      handler: lazyHandlers["files.list"],
     },
     {
       tool: {
@@ -542,7 +550,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
-      handler: handleFilesRead,
+      handler: lazyHandlers["files.read"],
     },
     // ─── Mutation tools (require approval) ────────────────────
     {
@@ -584,7 +592,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: true,
       },
-      handler: handleFilesWrite,
+      handler: lazyHandlers["files.write"],
     },
     {
       tool: {
@@ -772,7 +780,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: true,
       },
-      handler: handleTerminalExecute,
+      handler: lazyHandlers["terminal.execute"],
     },
     // ─── Git Status (read-only, auto-approved) ──────────────────
     {
@@ -794,7 +802,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
-      handler: handleGitStatus,
+      handler: lazyHandlers["git.status"],
     },
     // ─── Project Health (read-only, auto-approved) ──────────────
     {
@@ -816,7 +824,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'read',
         enabled: true,
       },
-      handler: handleProjectHealth,
+      handler: lazyHandlers["project.health"],
     },
   ];
 
