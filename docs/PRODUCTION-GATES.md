@@ -1,7 +1,7 @@
 # 🎯 LiTTree LabStudios — Production Launch Gates
 
 **Last Updated:** 2026-08-08  
-**Status:** 🟡 IN PROGRESS — P0 gates being tested  
+**Status:** 🟡 IN PROGRESS — P0/P1/P2 fixes applied, testing needed  
 **Owner:** LiTTree Team  
 
 ---
@@ -25,7 +25,7 @@
 | `npx tsc --noEmit` passes | 🟡 NEEDS TEST | Times out on Windows; CI runs on Ubuntu |
 | `pnpm lint` passes | ✅ VERIFIED | CI green |
 | `pnpm test` passes | ✅ VERIFIED | 700 tests pass |
-| No TypeScript errors | 🟡 NEEDS TEST | 1 `useMemo<string>` fix applied; full check unverified |
+| No TypeScript errors | 🟡 NEEDS TEST | `useMemo<string>` fix applied; full check unverified |
 
 ### Authentication
 
@@ -98,11 +98,11 @@
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| `error.tsx` in routes | � FIXED | 57 error boundaries added to all routes |
-| `loading.tsx` in routes | � FIXED | 58 loading states added to all routes |
+| `error.tsx` in routes | 🔵 FIXED | 57 error boundaries added to all routes |
+| `loading.tsx` in routes | 🔵 FIXED | 58 loading states added to all routes |
 | API error responses | ✅ VERIFIED | All routes return proper HTTP codes |
 | User-friendly error messages | 🟡 NEEDS TEST | Some exist, not comprehensive |
-| Graceful degradation | � FIXED | Error boundaries + loading states in all routes |
+| Graceful degradation | 🔵 FIXED | Error boundaries + loading states in all routes |
 
 ### Retries & Timeouts
 
@@ -112,13 +112,13 @@
 | Terminal auto-reconnect | ✅ VERIFIED | On auth failure, retries with fresh token |
 | Workspace prepare polling | ✅ VERIFIED | 30 attempts × 2s = 60s max |
 | API retry logic | 🟡 NEEDS TEST | Some routes have retries |
-| Exponential backoff | 🔴 BROKEN | Not implemented |
+| Exponential backoff | 🔵 FIXED | `src/lib/backoff.ts` utility created |
 
 ### Loading States
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Route-level loading | � FIXED | 58 `loading.tsx` files added |
+| Route-level loading | 🔵 FIXED | 58 `loading.tsx` files added |
 | Button loading spinners | ✅ VERIFIED | Common pattern |
 | Skeleton screens | 🟡 NEEDS TEST | Some exist |
 | Optimistic updates | 🟡 NEEDS TEST | Some UI patterns exist |
@@ -138,7 +138,7 @@
 | Requirement | Status | Notes |
 |-------------|--------|-------|
 | API rate limiting | ✅ VERIFIED | Supabase-backed rate limiter exists |
-| Terminal WebSocket rate limiting | 🔴 BROKEN | No rate limiting on Socket.IO |
+| Terminal WebSocket rate limiting | 🔵 FIXED | 60 inputs per 10s per socket |
 | Auth brute-force protection | 🟡 NEEDS TEST | Clerk handles |
 | IP-based restrictions | 🔴 BROKEN | Not implemented |
 
@@ -187,9 +187,9 @@
 | Requirement | Status | Notes |
 |-------------|--------|-------|
 | Block dangerous commands | ✅ VERIFIED | `security.ts` blocks `rm -rf /`, `mkfs`, etc. |
-| Block network tools | 🔴 BROKEN | `curl`, `wget` not blocked |
-| Block shell escapes | 🔴 BROKEN | `$(...)`, backticks not blocked |
-| Audit log of commands | 🔴 BROKEN | No command logging |
+| Block network tools | 🔵 FIXED | `curl`, `wget`, `nc`, `netcat` now blocked |
+| Block shell escapes | 🔵 FIXED | `$(...)`, backticks now blocked |
+| Audit log of commands | 🔵 FIXED | `auditCommand()` logs all commands, `/internal/audit-log` endpoint |
 
 ---
 
@@ -212,7 +212,7 @@
 | ARIA labels | 🟡 NEEDS TEST | Some exist |
 | Keyboard navigation | 🟡 NEEDS TEST | `Ctrl+Shift+A` exists |
 | Focus management | 🔴 BROKEN | Not implemented |
-| Skip links | 🔴 BROKEN | Not implemented |
+| Skip links | 🔵 FIXED | Skip to main content link added to root layout |
 | Color contrast | 🟡 NEEDS TEST | Theme system exists |
 
 ### UI Polish
@@ -222,7 +222,7 @@
 | No broken buttons | 🟡 NEEDS TEST | Visual inspection needed |
 | No dead links | 🟡 NEEDS TEST | Sitemap exists |
 | Consistent spacing | 🟡 NEEDS TEST | Tailwind system |
-| Loading skeletons | 🔴 BROKEN | No `loading.tsx` |
+| Loading skeletons | 🔵 FIXED | `loading.tsx` in all routes |
 | Error messages | 🟡 NEEDS TEST | Some exist |
 
 ---
@@ -324,13 +324,15 @@
 - [x] **Error boundaries:** `error.tsx` in all routes ✅
 - [x] **Loading states:** `loading.tsx` in all routes ✅
 - [ ] **Monitoring:** Sentry configured
-- [ ] **Rate limiting:** Terminal WebSocket protected
-- [ ] **Retries:** Exponential backoff on API calls
+- [x] **Rate limiting:** Terminal WebSocket protected ✅
+- [x] **Retries:** Exponential backoff utility created ✅
 
 ### Before Launch (P2)
 
 - [ ] **Security audit:** Terminal isolation verified
-- [ ] **Command blocking:** Network tools blocked
+- [x] **Command blocking:** Network tools blocked ✅
+- [x] **Command blocking:** Shell escapes blocked ✅
+- [x] **Audit logging:** Command audit log implemented ✅
 - [ ] **Secrets:** No leaks in client bundle
 - [ ] **Webhooks:** Stripe signature verified
 
@@ -338,6 +340,7 @@
 
 - [ ] **Mobile:** Test on iOS/Android
 - [ ] **Accessibility:** Screen reader test
+- [x] **Skip links:** Added to root layout ✅
 - [ ] **SEO:** All meta tags present
 - [ ] **Analytics:** Vercel Analytics working
 - [ ] **Legal:** Policies reviewed by lawyer
@@ -360,9 +363,9 @@
 5. **Test Stripe** — purchase, webhook, credits
 6. **Fix workspace persistence** — mount Railway volume
 7. **Fix terminal isolation** — Docker or sandbox
-8. **Add error boundaries** — `error.tsx` everywhere
-9. **Add loading states** — `loading.tsx` everywhere
-10. **Add Sentry** — error tracking
+8. **Add Sentry** — error tracking
+9. **Add focus management** — accessibility
+10. **Add IP-based restrictions** — security
 
 ---
 
@@ -370,8 +373,8 @@
 
 1. 🔴 **Workspace persistence** — Lost on Railway restart
 2. 🔴 **Terminal isolation** — Host PTY mode in production
-3. � **Error boundaries** — 57 error.tsx files added to all routes
-4. � **Loading states** — 58 loading.tsx files added to all routes
+3. 🔵 **Error boundaries** — 57 error.tsx files added to all routes
+4. 🔵 **Loading states** — 58 loading.tsx files added to all routes
 5. 🔴 **Sentry** — Not configured
 6. 🔴 **Build verification** — Times out on Windows, need CI verification
 7. 🔴 **TypeScript verification** — Times out on Windows, need CI verification
@@ -390,13 +393,12 @@
 - `terminal-server/workspace/WorkspaceManager.ts` — Git clone
 
 ### P1 Error Handling
-- Add `src/app/studio/error.tsx`
-- Add `src/app/studio/loading.tsx`
-- Add `src/app/dashboard/error.tsx`
-- Add `src/app/dashboard/loading.tsx`
+- `src/components/route-error.tsx` — Shared error boundary component
+- `src/components/route-loading.tsx` — Shared loading component
+- `src/lib/backoff.ts` — Exponential backoff utility
 
 ### P2 Security
-- `terminal-server/security.ts` — Command blocking
+- `terminal-server/security.ts` — Command blocking + audit logging
 - `terminal-server/auth.ts` — JWT verification
 - `src/lib/terminal-auth.ts` — Token issuance
 

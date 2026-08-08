@@ -21,7 +21,7 @@ import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
-import { isBlockedCommand } from "./security";
+import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleLiTTCodeCommand } from "./litt-code";
 import { bearerToken, verifyTerminalToken } from "./auth";
@@ -246,6 +246,12 @@ app.get("/health", async (_req, res) => {
   });
 });
 
+// Audit log endpoint (service-to-service only)
+app.get("/internal/audit-log", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const limit = Math.min(Number(req.query?.limit) || 100, 1000);
+  res.json({ entries: getAuditLog(limit) });
+});
+
 // ─── Internal workspace endpoints (service-to-service) ─────────
 // These are only callable by the Next.js server using the shared
 // internal service key. They are NOT callable from the browser.
@@ -403,9 +409,12 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
 
   // Block dangerous commands
   if (isBlockedCommand(command)) {
+    auditCommand(userId, workspaceId, command, true);
     res.status(403).json({ error: "Blocked unsafe command" });
     return;
   }
+
+  auditCommand(userId, workspaceId, command, false);
 
   const { execFile } = await import("child_process");
   const startTime = Date.now();
@@ -830,11 +839,28 @@ io.on("connection", (socket) => {
   socket.on("terminal:input", (data: string) => {
     if (typeof data !== "string") return;
 
+    const userId = socket.data.userId || "unknown";
+
+    // Rate limiting: max 60 inputs per 10s per socket
+    const now = Date.now();
+    const window = 10_000;
+    if (!(socket as any).__rateBuckets) (socket as any).__rateBuckets = [];
+    const buckets = (socket as any).__rateBuckets as number[];
+    const recent = buckets.filter((t) => now - t < window);
+    recent.push(now);
+    (socket as any).__rateBuckets = recent;
+    if (recent.length > 60) {
+      socket.emit("terminal:output", "\r\n\x1b[33m⚠ Rate limit: too many commands. Slow down.\x1b[0m\r\n");
+      return;
+    }
+
     if (isBlockedCommand(data)) {
+      auditCommand(userId, sessionId, data, true);
       socket.emit("terminal:output", "\r\n\x1b[31m⛔ Blocked unsafe command.\x1b[0m\r\n");
       return;
     }
 
+    auditCommand(userId, sessionId, data, false);
     ptyProcess.write(data);
   });
 
