@@ -65,7 +65,7 @@ NEXT_PUBLIC_TERMINAL_WS_URL=http://localhost:4001
 # Terminal server
 TERMINAL_SERVER_PORT=4001
 TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
-TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
+TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
 TERMINAL_USE_DOCKER=false
 
 # Docker sandbox
@@ -85,7 +85,50 @@ For production:
 NEXT_PUBLIC_TERMINAL_WS_URL=https://your-terminal-server.com
 TERMINAL_ALLOWED_ORIGIN=https://litlabs.net
 TERMINAL_USE_DOCKER=true
+TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
 ```
+
+## Terminal isolation options
+
+The terminal server supports three isolation modes. Choose one before launch:
+
+| Mode | Env | Isolation | Where it works |
+|------|-----|-----------|----------------|
+| Host PTY | `TERMINAL_USE_DOCKER=false` | None. Commands run on the host shell. | Railway default, local dev |
+| Docker | `TERMINAL_USE_DOCKER=true` | Container + resource limits + read-only rootfs | Self-hosted VM, Render, Fly.io |
+| Sandbox provider | future flag | Ephemeral VM/sandbox per session | E2B, Fly Machines, CodeSandbox |
+
+### Current production recommendation
+
+Railway does **not** provide a Docker daemon inside the container. The safest current production path is:
+
+1. Keep `TERMINAL_USE_DOCKER=false`
+2. Mount a Railway persistent volume at `/data/littree-workspaces`
+3. Keep command blocking + audit logging enabled
+4. Treat the terminal server as a multi-tenant shared host until sandbox provider integration is added
+
+If you need stronger isolation, move the terminal server to a provider that exposes a Docker daemon or a sandbox runtime.
+
+## Workspace persistence
+
+Cloned repositories are stored under `TERMINAL_WORKSPACE_ROOT`. Without a persistent volume, workspaces are lost on every Railway restart.
+
+### Local (`docker-compose.yml`)
+
+A named volume is already configured:
+
+```yaml
+volumes:
+  littree-workspaces:/data/littree-workspaces
+```
+
+### Railway
+
+1. In the Railway dashboard, create a **Volume** for the terminal service.
+2. Mount it at `/data/littree-workspaces`.
+3. Set `TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces`.
+
+If you do not mount a volume, the server logs a startup warning and workspaces will be ephemeral.
 
 ## Deploy the terminal server
 
