@@ -83,12 +83,17 @@ export default function StudioPreviewPanel({
         throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview status failed (${response.status})`);
       }
       const next = statusFromPayload(payload, workspaceStatus);
-      setState(next.state);
+      setState((prevState) => {
+        // Only reload iframe when transitioning from non-ready to ready
+        if (next.state === "ready" && prevState !== "ready" && prevState !== "stale") {
+          setFrameKey((value) => value + 1);
+        }
+        return next.state;
+      });
       setPreviewUrl(next.url);
       setError(next.error);
       setFramework(typeof payload.framework === "string" ? payload.framework : null);
       setDevCommand(typeof payload.developmentCommand === "string" ? payload.developmentCommand : null);
-      if (next.state === "ready") setFrameKey((value) => value + 1);
     } catch (loadError) {
       setState("offline");
       setError(loadError instanceof Error ? loadError.message : "Preview status is unavailable");
@@ -221,7 +226,7 @@ export default function StudioPreviewPanel({
                 borderRadius: deviceMode === "desktop" ? "0" : "8px",
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
-              sandbox="allow-scripts allow-forms allow-modals"
+              sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
             />
           </div>
         ) : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "preparing" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "preparing"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}

@@ -129,6 +129,7 @@ export function CodeWorkspace({
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
@@ -276,10 +277,15 @@ export function CodeWorkspace({
   const mutate = useCallback(async (action: MutationAction, body: Record<string, unknown>) => {
     if (!projectId) throw new Error("No project selected");
     if (!writeAccess) throw new Error("Workspace writes are unavailable");
-    await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
-      method: "POST",
-      body: JSON.stringify({ action, ...body }),
-    });
+    setMutating(true);
+    try {
+      await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
+        method: "POST",
+        body: JSON.stringify({ action, ...body }),
+      });
+    } finally {
+      setMutating(false);
+    }
   }, [projectId, requestJson, writeAccess]);
 
   // Dialog submit (create file/folder, rename)
@@ -304,23 +310,54 @@ export function CodeWorkspace({
         const path = normalizePath(dialog.sourcePath);
         const newPath = joinPath(parentPath(path), dialog.value);
         await mutate("rename", { path, newPath });
+        // Clear cached entries for old path and its children
+        setEntries((prev) => {
+          const next: Record<string, FileEntry[]> = {};
+          for (const key of Object.keys(prev)) {
+            if (key === path || key.startsWith(`${path}/`)) continue;
+            next[key] = prev[key];
+          }
+          return next;
+        });
         await loadDirectory(parentPath(path), true);
-        if (activeTab === path) {
-          setActiveTab(newPath);
-          setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, path: newPath } : t));
-        }
+        // Update open tabs that match the renamed path or are inside it
+        const prefix = `${path}/`;
+        setOpenTabs((prev) => prev.map((t) => {
+          if (t.path === path) return { ...t, path: newPath };
+          if (t.path.startsWith(prefix)) return { ...t, path: `${newPath}/${t.path.slice(prefix.length)}` };
+          return t;
+        }));
+        setActiveTab((current) => {
+          if (current === path) return newPath;
+          if (current?.startsWith(prefix)) return `${newPath}/${current.slice(prefix.length)}`;
+          return current;
+        });
         setDialog(null);
         window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path: newPath } }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "File operation failed");
     }
-  }, [dialog, mutate, loadDirectory, activeTab, projectId]);
+  }, [dialog, mutate, loadDirectory, projectId]);
 
   // Close tab
   const closeTab = useCallback((path: string) => {
-    setOpenTabs((prev) => prev.filter((t) => t.path !== path));
-    setActiveTab((prev) => prev === path ? null : prev);
+    setOpenTabs((prev) => {
+      const idx = prev.findIndex((t) => t.path === path);
+      if (idx === -1) return prev;
+      const tab = prev[idx];
+      if (tab.content !== tab.original) {
+        if (!window.confirm(`Close ${path}? Unsaved changes will be lost.`)) return prev;
+      }
+      const remaining = prev.filter((t) => t.path !== path);
+      setActiveTab((current) => {
+        if (current !== path) return current;
+        if (remaining.length === 0) return null;
+        const newIdx = Math.min(idx, remaining.length - 1);
+        return remaining[newIdx].path;
+      });
+      return remaining;
+    });
   }, []);
 
   // Delete entry
@@ -330,14 +367,23 @@ export function CodeWorkspace({
     try {
       await mutate("delete", { path: normalizePath(entry.path) });
       await loadDirectory(parentPath(entry.path), true);
-      if (activeTab === entry.path || activeTab?.startsWith(`${entry.path}/`)) {
-        closeTab(entry.path);
-      }
+      // Close all open tabs for the deleted file, or all files inside a deleted folder
+      const prefix = `${entry.path}/`;
+      setOpenTabs((prev) => {
+        const remaining = prev.filter((t) => t.path !== entry.path && !t.path.startsWith(prefix));
+        setActiveTab((current) => {
+          if (current === entry.path || current?.startsWith(prefix)) {
+            return remaining.length > 0 ? remaining[remaining.length - 1].path : null;
+          }
+          return current;
+        });
+        return remaining;
+      });
       window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path: entry.path } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
     }
-  }, [mutate, loadDirectory, activeTab, closeTab, projectId]);
+  }, [mutate, loadDirectory, projectId]);
 
   // Update tab content
   const updateTabContent = useCallback((path: string, content: string) => {
@@ -355,17 +401,21 @@ export function CodeWorkspace({
     if (!entries[path]) void loadDirectory(path);
   }, [entries, loadDirectory]);
 
-  // Keyboard: Ctrl+S to save
+  // Keyboard: Ctrl+S to save, Ctrl+W to close tab
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s" && activeTab) {
         e.preventDefault();
         void saveFile(activeTab);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === "w" && activeTab) {
+        e.preventDefault();
+        closeTab(activeTab);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeTab, saveFile]);
+  }, [activeTab, saveFile, closeTab]);
 
   // Listen for external file change events (e.g. from Canvas or chat)
   useEffect(() => {
@@ -373,7 +423,10 @@ export function CodeWorkspace({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.projectId === projectId) {
-        void loadDirectory(".", true);
+        const changedPath = typeof detail.path === "string" ? detail.path : ".";
+        void loadDirectory(parentPath(changedPath), true);
+        // Also reload root to catch top-level changes
+        if (changedPath !== ".") void loadDirectory(".", true);
         setPreviewRefreshKey((k) => k + 1);
       }
     };
@@ -508,6 +561,11 @@ export function CodeWorkspace({
           {preparing && (
             <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }}>
               <Loader2 size={11} className="animate-spin" /> Preparing workspace…
+            </div>
+          )}
+          {mutating && (
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(155,77,255,0.2)", color: "#9b4dff" }}>
+              <Loader2 size={11} className="animate-spin" /> Working…
             </div>
           )}
           <FileTree
