@@ -38,7 +38,12 @@
     "voice:dev": "node voice-bridge/server.js",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\" \"pnpm daemon:dev\"",
     "diagnose:connections": "tsx scripts/diagnose-connections.ts",
-    "audit:product-truth": "tsx scripts/audit-product-truth.ts"
+    "sync:vapi-tools": "tsx scripts/sync-vapi-tools.ts",
+    "audit:product-truth": "tsx scripts/audit-product-truth.ts",
+    "mobile:check": "pnpm --filter @litt/companion check",
+    "mobile:start": "pnpm --filter @litt/companion start",
+    "mobile:build": "pnpm --filter @litt/companion build:android",
+    "mobile:doctor": "pnpm --filter @litt/companion doctor"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",
