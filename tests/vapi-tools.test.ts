@@ -8,6 +8,7 @@ import {
   argsOf,
   serializeToolResult,
   authorizeVapiRequest,
+  authDiagnostic,
   ownerClerkId,
   packageManagerCommand,
   CHECK_IDS,
@@ -231,6 +232,65 @@ describe("authorizeVapiRequest", () => {
   it("rejects when token is too short", () => {
     process.env.LITTLABS_VAPI_TOOL_TOKEN = "short";
     expect(authorizeVapiRequest("Bearer short")).toBe(false);
+  });
+
+  it("accepts a raw token without Bearer prefix", () => {
+    expect(authorizeVapiRequest(TOKEN)).toBe(true);
+  });
+
+  it("rejects a wrong raw token without Bearer prefix", () => {
+    expect(authorizeVapiRequest("wrong-token-value-here")).toBe(false);
+  });
+});
+
+describe("authDiagnostic", () => {
+  const TOKEN = "test-token-0123456789-abcdef";
+
+  beforeEach(() => {
+    process.env.LITTLABS_VAPI_TOOL_TOKEN = TOKEN;
+  });
+
+  afterEach(() => {
+    delete process.env.LITTLABS_VAPI_TOOL_TOKEN;
+  });
+
+  it("reports correct diagnostics for a valid Bearer token", () => {
+    const diag = authDiagnostic(`Bearer ${TOKEN}`);
+    expect(diag.authHeaderPresent).toBe(true);
+    expect(diag.bearerPrefixPresent).toBe(true);
+    expect(diag.credentialMatched).toBe(true);
+    expect(diag.expectedTokenConfigured).toBe(true);
+  });
+
+  it("reports correct diagnostics for a valid raw token", () => {
+    const diag = authDiagnostic(TOKEN);
+    expect(diag.authHeaderPresent).toBe(true);
+    expect(diag.bearerPrefixPresent).toBe(false);
+    expect(diag.credentialMatched).toBe(true);
+    expect(diag.expectedTokenConfigured).toBe(true);
+  });
+
+  it("reports correct diagnostics for a wrong token", () => {
+    const diag = authDiagnostic("Bearer wrong-token-value-here");
+    expect(diag.authHeaderPresent).toBe(true);
+    expect(diag.bearerPrefixPresent).toBe(true);
+    expect(diag.credentialMatched).toBe(false);
+    expect(diag.expectedTokenConfigured).toBe(true);
+  });
+
+  it("reports correct diagnostics for missing header", () => {
+    const diag = authDiagnostic("");
+    expect(diag.authHeaderPresent).toBe(false);
+    expect(diag.bearerPrefixPresent).toBe(false);
+    expect(diag.credentialMatched).toBe(false);
+    expect(diag.expectedTokenConfigured).toBe(true);
+  });
+
+  it("reports expectedTokenConfigured=false when env var is unset", () => {
+    delete process.env.LITTLABS_VAPI_TOOL_TOKEN;
+    const diag = authDiagnostic(`Bearer ${TOKEN}`);
+    expect(diag.expectedTokenConfigured).toBe(false);
+    expect(diag.credentialMatched).toBe(false);
   });
 });
 

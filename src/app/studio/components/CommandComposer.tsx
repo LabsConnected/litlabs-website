@@ -70,9 +70,9 @@ interface CommandComposerProps {
   onToggleLive?: () => void;
   liveActive?: boolean;
   contextLine?: ComposerContextLine;
-  /** V2 execution mode selector */
-  executionMode?: "auto" | "act";
-  onExecutionModeChange?: (mode: "auto" | "act") => void;
+  /** Execution mode selector: plan (read-only), act (approval for mutations), auto (autonomous) */
+  executionMode?: "plan" | "act" | "auto";
+  onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
 }
 
 export default function CommandComposer({
@@ -87,7 +87,7 @@ export default function CommandComposer({
   onToggleLive,
   liveActive = false,
   contextLine,
-  executionMode = "auto",
+  executionMode = "act",
   onExecutionModeChange,
 }: CommandComposerProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
@@ -347,33 +347,50 @@ export default function CommandComposer({
           </div>
         )}
 
-        {/* AUTO / ACT execution mode selector */}
+        {/* PLAN / ACT / AUTO execution mode selector */}
         {onExecutionModeChange && (
-          <div className="flex shrink-0 items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
-            <button
-              type="button"
-              onClick={() => onExecutionModeChange("auto")}
-              className="rounded px-2 py-0.5 text-[10px] font-bold transition"
-              style={{
-                backgroundColor: executionMode === "auto" ? "rgba(114,242,56,0.12)" : "transparent",
-                color: executionMode === "auto" ? "#72f238" : "var(--text-muted)",
-              }}
-              title="AUTO: Safe workspace actions run automatically"
-            >
-              AUTO
-            </button>
-            <button
-              type="button"
-              onClick={() => onExecutionModeChange("act")}
-              className="rounded px-2 py-0.5 text-[10px] font-bold transition"
-              style={{
-                backgroundColor: executionMode === "act" ? "rgba(155,77,255,0.12)" : "transparent",
-                color: executionMode === "act" ? "#9b4dff" : "var(--text-muted)",
-              }}
-              title="ACT: Actions requiring approval pause before execution"
-            >
-              ACT
-            </button>
+          <div
+            className="flex shrink-0 items-center gap-0.5 rounded-md p-0.5"
+            style={{ backgroundColor: "rgba(255,255,255,0.04)" }}
+            role="radiogroup"
+            aria-label="Execution mode"
+          >
+            {(["plan", "act", "auto"] as const).map((mode) => {
+              const isActive = executionMode === mode;
+              const colors: Record<typeof mode, { bg: string; fg: string }> = {
+                plan: { bg: "rgba(59,130,246,0.12)", fg: "#3b82f6" },
+                act: { bg: "rgba(155,77,255,0.12)", fg: "#9b4dff" },
+                auto: { bg: "rgba(114,242,56,0.12)", fg: "#72f238" },
+              };
+              const labels: Record<typeof mode, string> = {
+                plan: "PLAN",
+                act: "ACT",
+                auto: "AUTO",
+              };
+              const tooltips: Record<typeof mode, string> = {
+                plan: "Inspect and plan without making changes",
+                act: "Make changes and run commands",
+                auto: "Work autonomously until the task is complete",
+              };
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={isActive}
+                  aria-label={labels[mode]}
+                  title={tooltips[mode]}
+                  onClick={() => onExecutionModeChange(mode)}
+                  className="rounded px-2 py-0.5 text-[10px] font-bold transition"
+                  style={{
+                    backgroundColor: isActive ? colors[mode].bg : "transparent",
+                    color: isActive ? colors[mode].fg : "var(--text-muted)",
+                  }}
+                >
+                  {labels[mode]}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

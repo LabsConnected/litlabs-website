@@ -902,7 +902,7 @@ export function useInworldSession(
             type: "conversation.item.create",
             item: {
               type: "message",
-              role: "user",
+              role: "assistant",
               content: [{ type: "text", text: chunk }],
             },
           }));

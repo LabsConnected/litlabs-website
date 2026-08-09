@@ -140,7 +140,6 @@ async function handler(
   }
 
   if (!version.stripe_price_id.startsWith("price_")) {
-    console.error("[marketplace/checkout] Invalid Stripe Price ID for agent version", version.id);
     return serverError();
   }
 
@@ -173,7 +172,6 @@ async function handler(
   );
 
   if (orderError || !orderResult) {
-    console.error("[marketplace/checkout] create_pending_agent_order RPC failed", orderError?.message);
     return serverError();
   }
 
@@ -182,7 +180,6 @@ async function handler(
   // 9. Build Stripe Checkout session parameters.
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeKey) {
-    console.error("[marketplace/checkout] STRIPE_SECRET_KEY not configured");
     return serverError();
   }
 
@@ -237,12 +234,10 @@ async function handler(
       body: params.toString(),
     });
   } catch {
-    console.error("[marketplace/checkout] Stripe request failed");
     return stripeFailure();
   }
 
   if (!stripeResponse.ok) {
-    console.error("[marketplace/checkout] Stripe returned non-2xx", stripeResponse.status);
     return stripeFailure();
   }
 

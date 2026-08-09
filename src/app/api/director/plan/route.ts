@@ -62,18 +62,12 @@ export async function POST(request: NextRequest) {
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          console.error(`Intake rejected step ${step.agentSlug}:`, errText);
           enqueuedTasks.push({ id: undefined, taskId: undefined });
         } else {
           const saved = await res.json();
           enqueuedTasks.push(saved);
         }
-      } catch (networkError) {
-        console.error(
-          `❌ Network error enqueuing ${step.agentSlug}:`,
-          networkError,
-        );
+      } catch {
         enqueuedTasks.push({ id: undefined, taskId: undefined });
       }
     }

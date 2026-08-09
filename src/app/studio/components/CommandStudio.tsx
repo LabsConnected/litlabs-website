@@ -43,6 +43,8 @@ import type { StudioTool } from "./StudioSidebar";
 // ChatTool is NOT mounted here — the conversation controller
 // (useStudioConversation) + StudioTranscript + CommandComposer replace it.
 const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
+const VisualCanvasBuilder = dynamic(() => import("./canvas/builder/VisualCanvasBuilder").then((m) => m.VisualCanvasBuilder), { ssr: false });
+const CodeWorkspace = dynamic(() => import("./code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -518,6 +520,7 @@ function CommandStudioContent() {
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
+  const isCode = destination === "studio" && studioMode === "code";
 
   // Primary workspace tabs — always visible: Chat | Canvas | Code | Preview | Files
   // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
@@ -692,8 +695,18 @@ function CommandStudioContent() {
                     onConnectRepo={handleConnectRepo}
                   />
                 ) : isCanvas ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <CanvasPanel pendingAction={pendingCanvasAction} onActionExecuted={() => setPendingCanvasAction(null)} />
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <VisualCanvasBuilder />
+                  </div>
+                ) : isCode ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <CodeWorkspace
+                      projectId={capabilities.projectId}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
+                      writeAccess={capabilities.writeAccess ?? true}
+                    />
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">

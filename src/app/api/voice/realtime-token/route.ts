@@ -78,7 +78,6 @@ export async function POST(req: NextRequest) {
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
-      console.error("[realtime-token] OpenAI error:", tokenRes.status, errBody);
       return NextResponse.json(
         { error: `OpenAI Realtime token request failed: ${tokenRes.status}` },
         { status: 502 },
@@ -96,7 +95,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ token, model });
   } catch (err) {
-    console.error("[realtime-token] error:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal error" },
       { status: 500 },

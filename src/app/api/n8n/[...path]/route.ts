@@ -64,14 +64,12 @@ async function handleBridge(
 ) {
   // ── Validate configuration ──
   if (!BRIDGE_SECRET) {
-    console.error("[n8n-bridge] LITT_N8N_BRIDGE_SECRET is not set");
     return NextResponse.json(
       { error: "Bridge not configured" },
       { status: 503 },
     );
   }
   if (!N8N_WEBHOOK_URL) {
-    console.error("[n8n-bridge] N8N_WEBHOOK_URL is not set");
     return NextResponse.json(
       { error: "Bridge not configured" },
       { status: 503 },
@@ -135,7 +133,6 @@ async function handleBridge(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[n8n-bridge] forward failed", { webhookPath, message });
     return NextResponse.json(
       { error: "Failed to reach n8n", detail: message },
       { status: 502 },

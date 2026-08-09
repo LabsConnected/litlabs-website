@@ -35,10 +35,7 @@ async function handler(req: NextRequest) {
         .eq("user_id", userId);
 
       if (instErr) {
-        console.error("[capabilities] github_installations query error:", {
-          code: instErr.code,
-          message: instErr.message,
-        });
+        // Non-fatal capability probe error — leave githubInstalled as false
       }
 
       githubInstalled = !!(installations && installations.length > 0);

@@ -86,6 +86,9 @@ const WEBHOOK_PATHS: readonly string[] = [
   "/api/gitlab/webhook",
   "/api/webhook/agent-action",
   "/api/stripe/webhook",
+  "/api/vapi/tools",
+  "/api/vapi/events",
+  "/api/vapi/turn",
 ];
 
 /** Paths that skip bot detection (health checks + metrics scrape). */

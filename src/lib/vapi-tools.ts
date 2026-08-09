@@ -167,21 +167,58 @@ export function serializeToolResult(result: ToolResult): string {
 // ─── Auth ───────────────────────────────────────────────────────
 
 /**
- * Verify the Bearer token against LITTLABS_VAPI_TOOL_TOKEN using a
- * timing-safe comparison. Returns false if the token is missing,
- * too short, or does not match.
+ * Verify the Authorization header against LITTLABS_VAPI_TOOL_TOKEN using a
+ * timing-safe comparison. Accepts both `Bearer <token>` and raw `<token>`
+ * formats so Vapi's credential system works regardless of whether it
+ * prepends the Bearer prefix.
+ *
+ * Returns false if the token is missing, too short, or does not match.
  */
 export function authorizeVapiRequest(authHeader: string): boolean {
   const expected = process.env.LITTLABS_VAPI_TOOL_TOKEN;
   if (!expected || expected.length < 16) return false;
-  if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) return false;
-  const presented = authHeader.slice(7).trim();
+  if (!authHeader) return false;
+
+  let presented: string;
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    presented = authHeader.slice(7).trim();
+  } else {
+    presented = authHeader.trim();
+  }
+
   if (!presented || presented.length !== expected.length) return false;
   try {
     return timingSafeEqual(Buffer.from(presented), Buffer.from(expected));
   } catch {
     return false;
   }
+}
+
+/**
+ * Diagnostic info for auth failures — never includes the secret itself.
+ * Used for safe logging in the route handler when authorization fails.
+ */
+export interface AuthDiagnostic {
+  authHeaderPresent: boolean;
+  bearerPrefixPresent: boolean;
+  credentialMatched: boolean;
+  expectedTokenConfigured: boolean;
+}
+
+/**
+ * Produce safe diagnostic info about an auth attempt without exposing the
+ * secret. The route handler logs this on 401 responses.
+ */
+export function authDiagnostic(authHeader: string): AuthDiagnostic {
+  const expected = process.env.LITTLABS_VAPI_TOOL_TOKEN;
+  const headerPresent = !!authHeader;
+  const bearerPrefix = headerPresent && authHeader.toLowerCase().startsWith("bearer ");
+  return {
+    authHeaderPresent: headerPresent,
+    bearerPrefixPresent: bearerPrefix,
+    credentialMatched: authorizeVapiRequest(authHeader),
+    expectedTokenConfigured: !!expected && expected.length >= 16,
+  };
 }
 
 export function ownerClerkId(): string | null {

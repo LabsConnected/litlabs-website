@@ -238,8 +238,8 @@ export async function POST(req: NextRequest) {
         }
         myaiosContext += `\n\nUse the myaios tool with operation "search_project_knowledge" to find specific facts about the project.`;
       }
-    } catch (err) {
-      console.error("[elevenlabs-init] Project knowledge failed:", err);
+    } catch {
+      // Non-fatal project knowledge failure — continue without knowledge enrichment
     }
   }
 
@@ -270,7 +270,7 @@ export async function POST(req: NextRequest) {
     ? `Hey ${firstName}, LiTT here — what can I help with?`
     : "Hey, LiTT here — what can I help with?";
 
-  console.log(`[elevenlabs-init] Resolved: ${displayName || "unknown"}, project: ${projectName || "none"}, myaios: ${myaiosContext ? "loaded" : "none"}`);
+
 
   // Step 6: Return dynamic variables + first message override
   // These flow into:

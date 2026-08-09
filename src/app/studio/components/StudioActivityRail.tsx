@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ChevronDown,
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { ChatMessage } from "../stores/useStudioAgentStore";
 import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
+import { useActivityStore, type PersistedActivityEvent } from "../stores/useActivityStore";
 
 type EventSource = "litt" | "spark" | "user" | "system";
 type EventCategory = "message" | "mission" | "voice" | "error" | "build" | "deploy" | "agent";
@@ -121,10 +122,14 @@ export default function StudioActivityRail({
   const [clearedNotice, setClearedNotice] = useState(false);
   const [sessionStart] = useState<number>(() => Date.now());
 
+  // Persisted events from localStorage (survives refresh/navigation)
+  const persistedEvents = useActivityStore((s) => s.events);
+  const addPersistedEvent = useActivityStore((s) => s.addEvent);
+
   // Derive activity events from conversation messages.
   // The full `messages` array is the persistent system log and is never
   // mutated here — only the visible projection below can be cleared.
-  const events = useMemo<ActivityEvent[]>(() => {
+  const liveEvents = useMemo<ActivityEvent[]>(() => {
     const result: ActivityEvent[] = [];
     const recent = messages.slice(-8);
     for (const msg of recent) {
@@ -162,6 +167,44 @@ export default function StudioActivityRail({
     }
     return result.reverse();
   }, [messages]);
+
+  // Sync completed live events into persisted store (skip pending/streaming)
+  useEffect(() => {
+    for (const ev of liveEvents) {
+      if (ev.status === "pending") continue;
+      addPersistedEvent({
+        id: ev.id,
+        type: ev.type as PersistedActivityEvent["type"],
+        source: ev.source as PersistedActivityEvent["source"],
+        category: ev.category,
+        label: ev.label,
+        detail: ev.detail,
+        timestamp: ev.timestamp,
+        status: ev.status,
+      });
+    }
+  }, [liveEvents, addPersistedEvent]);
+
+  // Merge persisted events with live events (live takes priority for dedup)
+  const events = useMemo<ActivityEvent[]>(() => {
+    const liveIds = new Set(liveEvents.map((e) => e.id));
+    const persisted: ActivityEvent[] = persistedEvents
+      .filter((e) => !liveIds.has(e.id))
+      .map((e) => ({
+        id: e.id,
+        type: e.type as ActivityEvent["type"],
+        source: e.source as EventSource,
+        category: e.category as EventCategory,
+        label: e.label,
+        detail: e.detail,
+        timestamp: e.timestamp,
+        status: e.status,
+      }));
+    // Combine and sort by timestamp descending
+    return [...liveEvents, ...persisted]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 30);
+  }, [liveEvents, persistedEvents]);
 
   // Visible projection — applies clear/archive/filter/search/scope/retention.
   const visibleEvents = useMemo(() => {

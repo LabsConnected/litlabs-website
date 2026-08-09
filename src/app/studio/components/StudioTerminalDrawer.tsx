@@ -21,7 +21,10 @@ type TerminalSessionState = "not_started" | "connecting" | "connected" | "discon
 export default function StudioTerminalDrawer({ projectId, repositoryName, branch }: StudioTerminalDrawerProps) {
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceState>("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [terminalSession, setTerminalSession] = useState<TerminalSessionState>("not_started");
+  const [terminalSession, setTerminalSession] = useState<TerminalSessionState>(() => {
+    if (typeof window === "undefined") return "not_started";
+    return localStorage.getItem("litt:terminalAutoStart") === "1" ? "connecting" : "not_started";
+  });
 
   // Auto-prepare workspace when projectId is available
   useEffect(() => {
@@ -41,6 +44,10 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
         if (cancelled) return;
         if (res.ok) {
           setWorkspaceStatus("ready");
+          // Auto-start terminal if previously connected
+          if (typeof window !== "undefined" && localStorage.getItem("litt:terminalAutoStart") === "1") {
+            setTerminalSession("connecting");
+          }
         } else {
           const data = await res.json().catch(() => ({}));
           setWorkspaceStatus("error");
@@ -164,7 +171,10 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
             projectId={projectId}
             repositoryName={repositoryName}
             branch={branch}
-            onConnectionChange={(connected) => setTerminalSession(connected ? "connected" : "disconnected")}
+            onConnectionChange={(connected) => {
+              setTerminalSession(connected ? "connected" : "disconnected");
+              try { localStorage.setItem("litt:terminalAutoStart", connected ? "1" : "0"); } catch {}
+            }}
           />
         ) : workspaceStatus === "ready" && terminalSession === "not_started" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -178,7 +188,10 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
             </div>
             <button
               type="button"
-              onClick={() => setTerminalSession("connecting")}
+              onClick={() => {
+                try { localStorage.setItem("litt:terminalAutoStart", "1"); } catch {}
+                setTerminalSession("connecting");
+              }}
               className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold transition"
               style={{
                 backgroundColor: "rgba(114,242,56,0.1)",

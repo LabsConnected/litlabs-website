@@ -534,7 +534,7 @@ export default function ImageTool() {
   const [activeTab, setActiveTab] = useState<"prompt" | "style" | "settings">(
     "prompt",
   );
-  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
 
@@ -1224,23 +1224,23 @@ export default function ImageTool() {
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
+      style={{ backgroundColor: "var(--glass-bg-0)", color: "var(--glass-text-1)" }}
     >
       {/* ── Top chrome ──────────────────────────────────────────────── */}
       <header
-        className="shrink-0 flex items-center justify-between px-4 h-11 gap-3"
+        className="shrink-0 flex items-center justify-between px-4 h-11 gap-3 glass-toolbar"
         style={{
-          borderBottom: `1px solid ${T.borderColor}20`,
-          backgroundColor: T.boxBg + "80",
+          borderBottom: "1px solid var(--glass-border)",
+          borderRadius: 0,
         }}
       >
         {/* Left: title + workspace tabs */}
         <div className="flex items-center gap-3 min-w-0 overflow-hidden">
           <div className="flex items-center gap-1.5 shrink-0">
-            <Sparkles size={13} style={{ color: T.accentColor }} />
+            <Sparkles size={13} style={{ color: "var(--glass-purple)" }} />
             <span
               className="text-[11px] font-black uppercase tracking-widest"
-              style={{ color: T.headerColor }}
+              style={{ color: "var(--glass-text-1)" }}
             >
               Image Studio
             </span>
@@ -1364,9 +1364,9 @@ export default function ImageTool() {
           <div
             className="hidden md:flex items-center gap-1 h-6 px-2 rounded border text-[10px] font-bold"
             style={{
-              borderColor: T.borderColor + "40",
-              color: T.accentColor,
-              backgroundColor: T.accentColor + "08",
+              borderColor: "var(--glass-border-green)",
+              color: "var(--glass-green)",
+              backgroundColor: "var(--glass-green-soft)",
             }}
           >
             <Coins size={10} /> {coinBalance ?? "—"}
@@ -1376,9 +1376,9 @@ export default function ImageTool() {
             disabled={claiming}
             className="hidden md:flex h-6 px-2 items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
             style={{
-              borderColor: T.accentColor + "60",
-              color: T.accentColor,
-              backgroundColor: T.accentColor + "12",
+              borderColor: "var(--glass-border-purple)",
+              color: "var(--glass-purple)",
+              backgroundColor: "var(--glass-purple-soft)",
             }}
             title="Claim daily bonus"
           >
@@ -1766,37 +1766,41 @@ export default function ImageTool() {
 
         {/* ── LEFT PANEL: Controls (desktop only) ─────────────────── */}
         <div
-          className="hidden md:flex shrink-0 flex-col overflow-hidden"
+          className="hidden md:flex shrink-0 flex-col overflow-hidden glass-panel"
           style={{
             "--left-panel-width": `${leftWidth}px`,
-            borderRight: `1px solid ${T.borderColor}18`,
-            backgroundColor: T.boxBg,
-            backdropFilter: "blur(20px)",
+            borderRight: "1px solid var(--glass-border)",
+            borderRadius: 0,
             width: `${leftWidth}px`,
           } as CSSProperties}
         >
 
-          {/* Tab nav */}
-          <div className="flex shrink-0 gap-1.5 px-4 md:px-3 pt-2 md:pt-3 pb-3 md:pb-2">
-            {(["prompt", "style", "settings"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className="flex-1 h-11 md:h-7 rounded-xl md:rounded text-[10px] font-bold uppercase tracking-wide border transition-all"
-                style={pill(activeTab === tab)}
-              >
-                {tab === "prompt"
-                  ? "Prompt"
-                  : tab === "style"
-                    ? "Style"
-                    : "Settings"}
-              </button>
-            ))}
+          {/* Tab nav — segmented control */}
+          <div className="flex shrink-0 gap-0.5 px-3 pt-3 pb-2">
+            <div className="flex w-full items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+              {(["prompt", "style", "settings"] as const).map((tab) => {
+                const isActive = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className="flex-1 h-7 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all"
+                    style={{
+                      backgroundColor: isActive ? "var(--glass-purple-soft)" : "transparent",
+                      border: isActive ? "1px solid var(--glass-border-purple)" : "1px solid transparent",
+                      color: isActive ? "var(--glass-purple)" : "var(--glass-text-2)",
+                    }}
+                  >
+                    {tab === "prompt" ? "Prompt" : tab === "style" ? "Style" : "Settings"}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* ── PROMPT TAB ── */}
           {activeTab === "prompt" && (
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 md:px-3 pb-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-24 space-y-3">
               {/* Main prompt */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -2073,7 +2077,7 @@ export default function ImageTool() {
 
           {/* ── STYLE TAB ── */}
           {activeTab === "style" && (
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 md:px-3 pb-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-24 space-y-3">
               {/* Visual style cards — thumbnail grid */}
               <div className="rounded-lg border overflow-hidden" style={sectionBox}>
                 <div className="px-3 py-2">
@@ -2092,10 +2096,11 @@ export default function ImageTool() {
                         key={card.label}
                         onClick={() => { setSelectedStyle(card.prompt); addLog("info", `Style: ${card.label}`); }}
                         disabled={isWorking}
-                        className="relative aspect-[3/2] rounded-md overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
+                        className="relative aspect-[16/10] rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
                         style={{
-                          borderColor: isSelected ? T.accentColor : T.borderColor + "40",
-                          boxShadow: isSelected ? `0 0 12px ${T.accentColor}40` : "none",
+                          borderColor: isSelected ? "var(--glass-border-purple)" : "var(--glass-border)",
+                          boxShadow: isSelected ? "0 0 12px rgba(139,92,246,0.25)" : "none",
+                          backgroundColor: "rgba(20,15,30,0.82)",
                         }}
                       >
                         <div className="absolute inset-0" style={{ background: card.fallback }} />
@@ -2103,9 +2108,13 @@ export default function ImageTool() {
                         <img
                           src={card.url}
                           alt={card.label}
-                          className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
+                          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 opacity-0"
                           onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          onError={(e) => {
+                            const img = e.currentTarget as HTMLImageElement;
+                            img.style.display = "none";
+                            img.parentElement?.classList.add("style-card-error");
+                          }}
                           loading="lazy"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
@@ -2113,8 +2122,8 @@ export default function ImageTool() {
                           {card.label}
                         </span>
                         {isSelected && (
-                          <div className="absolute top-1 right-1 grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: T.accentColor }}>
-                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <div className="absolute top-1 right-1 grid h-4 w-4 place-items-center rounded-full" style={{ backgroundColor: "var(--glass-purple)" }}>
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
                           </div>
@@ -2475,7 +2484,7 @@ export default function ImageTool() {
 
           {/* ── SETTINGS TAB ── */}
           {activeTab === "settings" && (
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 md:px-3 pb-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-24 space-y-3">
               {/* Provider */}
               <div
                 className="rounded-lg border overflow-hidden"
@@ -2853,17 +2862,17 @@ export default function ImageTool() {
           )}
 
           {/* ── Generate button — always visible ── */}
-          <div className="shrink-0 px-4 md:px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-3 md:pt-1 space-y-2 border-t md:border-t-0" style={{ borderColor: T.borderColor + "24", backgroundColor: T.boxBg }}>
+          <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-3 pt-2 space-y-2 border-t" style={{ borderColor: "var(--glass-border)", backgroundColor: "var(--glass-surface-3)" }}>
             <button
               onClick={handleGenerate}
               disabled={!promptValid || !canAfford || isWorking}
-              className="w-full h-13 md:h-11 rounded-2xl md:rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 background: isWorking
-                  ? T.accentColor + "60"
-                  : `linear-gradient(135deg, ${T.accentColor} 0%, ${T.headerColor} 100%)`,
-                color: T.bgColor,
-                boxShadow: isWorking ? "none" : `0 0 24px ${T.accentColor}40`,
+                  ? "rgba(139,92,246,0.4)"
+                  : "linear-gradient(135deg, var(--glass-green) 0%, rgba(139,92,246,0.9) 100%)",
+                color: "#07050d",
+                boxShadow: isWorking ? "none" : "0 0 24px rgba(156,255,59,0.2)",
               }}
               data-testid="generate-image-button"
             >
@@ -2933,8 +2942,8 @@ export default function ImageTool() {
             <div className="flex-1 flex flex-col min-w-0">
               {/* Preview header */}
               <div
-                className="shrink-0 flex items-center justify-between px-4 h-9"
-                style={{ borderBottom: `1px solid ${T.borderColor}15` }}
+                className="shrink-0 flex items-center justify-between px-4 h-9 glass-toolbar"
+                style={{ borderBottom: "1px solid var(--glass-border)", borderRadius: 0 }}
               >
                 <div
                   className="flex items-center gap-2 text-[10px]"
@@ -3079,7 +3088,9 @@ export default function ImageTool() {
               {/* Canvas */}
               <div
                 className="flex-1 flex items-center justify-center relative overflow-hidden"
-                style={{ backgroundColor: T.bgColor }}
+                style={{
+                  background: "radial-gradient(circle at 50% 35%, rgba(139,92,246,0.09), transparent 40%), var(--glass-bg-0)",
+                }}
               >
                 {currentResult?.fileUrl ? (
                   <>
@@ -3133,7 +3144,7 @@ export default function ImageTool() {
                         >
                           {/* LiTT quick actions row */}
                           <div className="flex flex-wrap items-center gap-1">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-white/40 mr-1">LiTT</span>
+                            <span className="text-[9px] font-bold uppercase tracking-wider mr-1" style={{ color: "var(--glass-text-3)" }}>LiTT</span>
                             {LITT_QUICK_ACTIONS.slice(0, 4).map((action) => (
                               <button
                                 key={action.label}
@@ -3141,9 +3152,9 @@ export default function ImageTool() {
                                 onClick={(e) => { e.stopPropagation(); handleQuickAction(action.promptSuffix); }}
                                 className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold transition hover:bg-white/20"
                                 style={{
-                                  backgroundColor: "rgba(168,85,247,.15)",
-                                  border: "1px solid rgba(168,85,247,.25)",
-                                  color: "rgba(200,150,255,.95)",
+                                  backgroundColor: "rgba(139,92,246,.18)",
+                                  border: "1px solid rgba(139,92,246,.35)",
+                                  color: "rgba(200,160,255,.95)",
                                 }}
                                 aria-label={action.label}
                                 title={action.label}
@@ -3309,192 +3320,48 @@ export default function ImageTool() {
                     </div>
                   </div>
                 ) : (
-                  <div className="w-full h-full overflow-y-auto p-4 space-y-5">
-                    {/* LiTT robot mascot empty state */}
-                    <div className="flex flex-col items-center justify-center py-6 select-none">
-                      <LiTTRobotMascot size={96} color={T.accentColor} />
-                      <h2 className="mt-4 text-lg font-black" style={{ color: T.textColor }}>
+                  <div className="w-full h-full flex items-center justify-center p-6">
+                    <div className="flex flex-col items-center justify-center max-w-md text-center select-none">
+                      <div
+                        className="grid h-20 w-20 place-items-center rounded-full mb-5"
+                        style={{
+                          background: "radial-gradient(circle, var(--glass-purple-soft), transparent 70%)",
+                          border: "1px solid var(--glass-border-purple)",
+                        }}
+                      >
+                        <Sparkles size={32} style={{ color: "var(--glass-purple)" }} />
+                      </div>
+                      <h2 className="text-xl font-black" style={{ color: "var(--glass-text-1)" }}>
                         Create your first image
                       </h2>
-                      <p className="mt-1 text-[11px] text-center max-w-xs" style={{ color: T.textMuted }}>
+                      <p className="mt-2 text-[12px] leading-relaxed" style={{ color: "var(--glass-text-2)" }}>
                         Describe what you want to see, pick a style, and let LiTT forge it into reality.
                       </p>
-                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          onClick={() => { setPrompt("A breathtaking cyberpunk cityscape at dusk, neon reflections in rain-soaked streets, cinematic lighting"); }}
-                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
-                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
-                        >
-                          🌆 Cyberpunk city
-                        </button>
-                        <button
-                          onClick={() => { setPrompt("A serene Japanese garden with cherry blossoms, soft morning light, photorealistic"); }}
-                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
-                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
-                        >
-                          🌸 Garden scene
-                        </button>
-                        <button
-                          onClick={() => { setPrompt("Abstract 3D render, flowing iridescent shapes, octane render, vibrant colors, 8k"); }}
-                          className="px-3 py-2 text-[10px] font-bold rounded-lg transition-all hover:scale-105"
-                          style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
-                        >
-                          ✨ Abstract 3D
-                        </button>
+                      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                        {[
+                          { label: "🌆 Cyberpunk city", prompt: "A breathtaking cyberpunk cityscape at dusk, neon reflections in rain-soaked streets, cinematic lighting" },
+                          { label: "🌸 Garden scene", prompt: "A serene Japanese garden with cherry blossoms, soft morning light, photorealistic" },
+                          { label: "✨ Abstract 3D", prompt: "Abstract 3D render, flowing iridescent shapes, octane render, vibrant colors, 8k" },
+                        ].map((chip) => (
+                          <button
+                            key={chip.label}
+                            onClick={() => { setPrompt(chip.prompt); setActiveTab("prompt"); }}
+                            className="glass-button-secondary px-3 py-2 text-[10px] font-bold rounded-lg"
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-
-                    {/* LiTT quick actions */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                        <Sparkles size={10} style={{ color: T.accentColor }} />
-                        <span>LiTT Quick Actions</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-1.5">
                         {LITT_QUICK_ACTIONS.map((action) => (
                           <button
                             key={action.label}
                             onClick={() => handleQuickAction(action.promptSuffix)}
                             disabled={isWorking || !prompt.trim()}
-                            className="flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded-full border transition-all hover:scale-105 disabled:opacity-30"
-                            style={{
-                              borderColor: T.accentColor + "30",
-                              color: T.accentColor,
-                              backgroundColor: T.accentColor + "08",
-                            }}
+                            className="glass-button-secondary px-2.5 py-1.5 text-[9px] font-bold rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
                           >
-                            <Sparkles size={8} />
+                            <Sparkles size={8} className="inline mr-1" />
                             {action.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Visual style cards — top 6 with image backgrounds */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                        <Palette size={10} />
-                        <span>Visual Styles</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {VISUAL_STYLE_CARDS.map((card) => {
-                          const isSelected = selectedStyle === card.prompt;
-                          return (
-                            <button
-                              key={card.label}
-                              onClick={() => { setSelectedStyle(card.prompt); addLog("info", `Style: ${card.label}`); }}
-                              disabled={isWorking}
-                              className="relative aspect-[3/2] rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
-                              style={{
-                                borderColor: isSelected ? T.accentColor : T.borderColor + "40",
-                                boxShadow: isSelected ? `0 0 12px ${T.accentColor}40` : "none",
-                              }}
-                            >
-                              <div className="absolute inset-0" style={{ background: card.fallback }} />
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={card.url}
-                                alt={card.label}
-                                className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
-                                onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
-                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                                loading="lazy"
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                              <span className="absolute bottom-1.5 left-2 text-[10px] font-bold text-white drop-shadow">
-                                {card.label}
-                              </span>
-                              {isSelected && (
-                                <div className="absolute top-1.5 right-1.5 grid h-5 w-5 place-items-center rounded-full" style={{ backgroundColor: T.accentColor }}>
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="20 6 9 17 4 12" />
-                                  </svg>
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Inspiration grid — real photos */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                        <Sparkles size={10} />
-                        <span>Inspiration</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {INSPIRATION_IMAGES.map((img) => (
-                          <button
-                            key={img.label}
-                            onClick={() => { setPrompt(img.prompt); }}
-                            disabled={isWorking}
-                            className="relative aspect-square rounded-lg overflow-hidden border transition-all hover:scale-[1.03] disabled:opacity-40 group"
-                            style={{ borderColor: T.borderColor + "40" }}
-                          >
-                            <div className="absolute inset-0" style={{ background: img.fallback }} />
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={img.url}
-                              alt={img.label}
-                              className="absolute inset-0 w-full h-full object-cover transition-opacity opacity-0 group-hover:opacity-100"
-                              onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "1"; }}
-                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                              loading="lazy"
-                            />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-1.5">
-                              <span className="text-[9px] font-bold text-white drop-shadow">{img.label}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Recent generations */}
-                    {history.length > 0 && (
-                      <div>
-                        <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                          <History size={10} />
-                          <span>Recent</span>
-                        </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                          {history.slice(0, 8).map((g) => (
-                            <GenerationHistoryCard
-                              key={g.id}
-                              generation={g}
-                              isSelected={currentResult?.id === g.id}
-                              onSelect={(gen) => setCurrentResult(gen as Generation)}
-                              onDelete={deleteGeneration}
-                              accentColor={T.accentColor}
-                              borderColor={T.borderColor}
-                              bgColor={T.bgColor}
-                              textMuted={T.textMuted}
-                              testId="canvas-left-recent-card"
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Remaining style chips */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-                        <Palette size={10} />
-                        <span>More Styles</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {STYLE_PRESETS.slice(6, 14).map((style) => (
-                          <button
-                            key={style}
-                            onClick={() => { setPrompt(prompt ? `${prompt}, ${style}` : style); }}
-                            className="px-2.5 py-1 text-[9px] font-bold rounded-full border transition-all hover:scale-105"
-                            style={{
-                              borderColor: T.borderColor + "60",
-                              color: T.textMuted,
-                              backgroundColor: T.bgColor,
-                            }}
-                          >
-                            {style}
                           </button>
                         ))}
                       </div>
@@ -3530,22 +3397,23 @@ export default function ImageTool() {
               />
             </div>
 
-            {/* History sidebar (right) */}
+            {/* History sidebar (right) — collapses to 44px rail when empty */}
             <div
-              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-10000 ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
+              className={`shrink-0 flex flex-col transition-all duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-10000 ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
               style={{
-                width: rightWidth,
-                borderLeft: `1px solid ${T.borderColor}15`,
-                backgroundColor: T.boxBg + "30",
-                backdropFilter: "blur(20px)",
+                width: history.length === 0 && !historyOpen ? 44 : rightWidth,
+                borderLeft: `1px solid var(--glass-border)`,
+                backgroundColor: "var(--glass-surface-1)",
+                backdropFilter: "var(--glass-blur)",
+                WebkitBackdropFilter: "var(--glass-blur)",
               }}
             >
               <button
                 onClick={() => setHistoryOpen((v) => !v)}
                 className="shrink-0 flex items-center justify-between px-3 h-9 text-[10px] font-bold uppercase tracking-widest"
                 style={{
-                  borderBottom: `1px solid ${T.borderColor}15`,
-                  color: T.textMuted,
+                  borderBottom: `1px solid var(--glass-border)`,
+                  color: "var(--glass-text-2)",
                 }}
               >
                 <div className="flex items-center gap-1.5">
@@ -3641,12 +3509,12 @@ export default function ImageTool() {
                 </div>
               </button>
 
-              {historyOpen && (
+              {historyOpen ? (
                 <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-1.5 content-start">
                   {history.length === 0 ? (
                     <div
-                      className="col-span-2 py-8 text-center text-[10px] opacity-40"
-                      style={{ color: T.textMuted }}
+                      className="col-span-2 py-8 text-center text-[10px]"
+                      style={{ color: "var(--glass-text-3)" }}
                     >
                       No history yet
                     </div>
@@ -3667,6 +3535,15 @@ export default function ImageTool() {
                     ))
                   )}
                 </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-start pt-3 gap-2">
+                  <History size={14} style={{ color: "var(--glass-text-3)" }} />
+                  {history.length > 0 && (
+                    <span className="text-[9px] font-bold" style={{ color: "var(--glass-text-3)" }}>
+                      {history.length}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -3674,10 +3551,10 @@ export default function ImageTool() {
           {/* ── Generation Log (bottom) ── */}
           {showLogs && (
             <div
-              className="shrink-0 border-t"
+              className="shrink-0 border-t glass-toolbar"
               style={{
-                borderColor: T.borderColor + "20",
-                backgroundColor: T.bgColor,
+                borderColor: "var(--glass-border)",
+                borderRadius: 0,
                 fontFamily: "monospace",
                 height: "140px",
               }}

@@ -172,7 +172,7 @@ export default function LiTTPresence({
   return (
     <div
       ref={shellRef}
-      className={`litt-presence-shell relative grid place-items-center overflow-hidden rounded-[28px] ${animationClass}`}
+      className={`litt-presence-shell relative grid place-items-center overflow-visible rounded-[28px] ${animationClass}`}
       data-state={state}
       onPointerMove={handlePointerMove}
       onPointerEnter={handlePointerMove}
@@ -210,19 +210,19 @@ export default function LiTTPresence({
         }}
         aria-hidden
       />
-      {/* Green platform glow underneath */}
+      {/* Green platform glow underneath — pulsing */}
       <div
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full"
+        className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full litt-ring-pulse"
         style={{
           width: "70%",
-          height: 8,
-          background: `radial-gradient(ellipse, ${colors.glow}, transparent 70%)`,
-          filter: "blur(4px)",
+          height: 12,
+          background: `radial-gradient(ellipse, ${colors.glow}, transparent 72%)`,
+          filter: "blur(5px)",
         }}
         aria-hidden
       />
       <div
-        className="litt-presence-figure relative grid place-items-center"
+        className="litt-presence-figure relative grid place-items-center litt-float"
         style={{ width: dims.w, height: dims.h }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -232,7 +232,7 @@ export default function LiTTPresence({
           width={dims.w}
           height={dims.h}
           className="object-contain p-2.5"
-          style={{ filter: `drop-shadow(0 0 20px ${colors.glow})` }}
+          style={{ filter: `drop-shadow(0 20px 30px rgba(0,0,0,0.45)) drop-shadow(0 0 25px ${colors.glow})` }}
         />
         <span
           className="litt-eye-blink pointer-events-none absolute left-1/2 top-[36%] h-[7%] w-[30%] -translate-x-1/2 rounded-full bg-[#0b0f14]/70 blur-[0.5px]"

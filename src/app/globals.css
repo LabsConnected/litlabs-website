@@ -103,6 +103,45 @@
   --studio-anim-fast: 120ms;
   --studio-anim-normal: 200ms;
   --studio-anim-slow: 300ms;
+
+  /* ============================================================
+     LiTTree Glass OS — Unified design tokens
+     Premium dark glass system with controlled neon accents
+     ============================================================ */
+  --glass-bg-0: #07050d;
+  --glass-bg-1: #0d0817;
+
+  --glass-surface-1: rgba(18, 13, 29, 0.72);
+  --glass-surface-2: rgba(26, 18, 42, 0.62);
+  --glass-surface-3: rgba(32, 22, 52, 0.78);
+
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-border-highlight: rgba(255, 255, 255, 0.14);
+  --glass-border-purple: rgba(139, 92, 246, 0.32);
+  --glass-border-green: rgba(156, 255, 59, 0.32);
+
+  --glass-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
+  --glass-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glass-shadow-hover: 0 16px 45px rgba(0, 0, 0, 0.32), 0 0 28px rgba(139, 92, 246, 0.08);
+
+  --glass-blur: blur(18px) saturate(140%);
+
+  --glass-radius-sm: 10px;
+  --glass-radius-md: 16px;
+  --glass-radius-lg: 22px;
+  --glass-radius-xl: 28px;
+
+  --glass-purple: #8b5cf6;
+  --glass-purple-soft: rgba(139, 92, 246, 0.18);
+  --glass-green: #9cff3b;
+  --glass-green-soft: rgba(156, 255, 59, 0.15);
+
+  --glass-text-1: #f7f5fb;
+  --glass-text-2: #aaa3b8;
+  --glass-text-3: #736d80;
+
+  --glass-transition: 180ms ease;
+  --glass-transition-fast: 120ms ease;
 }
 
 /* ============================================
@@ -177,6 +216,140 @@
 .studio-playing-bars span:nth-child(2) { animation-delay: 150ms; height: 100%; }
 .studio-playing-bars span:nth-child(3) { animation-delay: 300ms; height: 70%; }
 .studio-playing-bars span:nth-child(4) { animation-delay: 450ms; height: 90%; }
+
+/* ============================================
+   LiTTree Glass OS — Utility Classes
+   ============================================ */
+.glass-panel {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)),
+    var(--glass-surface-1);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-inset), var(--glass-shadow);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: var(--glass-radius-lg);
+}
+
+.glass-card {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008)),
+    var(--glass-surface-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-md);
+  transition: transform var(--glass-transition), border-color var(--glass-transition), box-shadow var(--glass-transition);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--glass-border-purple);
+  box-shadow: var(--glass-shadow-inset), var(--glass-shadow-hover);
+}
+
+.glass-card-flat {
+  background: var(--glass-surface-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-md);
+}
+
+.glass-toolbar {
+  background: var(--glass-surface-3);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.glass-button-primary {
+  background: linear-gradient(135deg, rgba(156,255,59,0.18), rgba(156,255,59,0.08));
+  border: 1px solid var(--glass-border-green);
+  color: var(--glass-green);
+  border-radius: var(--glass-radius-sm);
+  transition: all var(--glass-transition-fast);
+}
+
+.glass-button-primary:hover {
+  background: linear-gradient(135deg, rgba(156,255,59,0.28), rgba(156,255,59,0.14));
+  box-shadow: 0 0 16px rgba(156,255,59,0.15);
+}
+
+.glass-button-secondary {
+  background: var(--glass-surface-2);
+  border: 1px solid var(--glass-border);
+  color: var(--glass-text-1);
+  border-radius: var(--glass-radius-sm);
+  transition: all var(--glass-transition-fast);
+}
+
+.glass-button-secondary:hover {
+  border-color: var(--glass-border-purple);
+  background: var(--glass-purple-soft);
+}
+
+.glass-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface-2);
+  color: var(--glass-text-2);
+  white-space: nowrap;
+}
+
+.glass-status-pill.active {
+  border-color: var(--glass-border-green);
+  color: var(--glass-green);
+}
+
+.glass-section-header {
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--glass-text-3);
+}
+
+.style-card-error::after {
+  content: "Preview unavailable";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--glass-text-3);
+  background: rgba(20, 15, 30, 0.9);
+}
+
+/* LiTT float animation */
+@keyframes litt-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+
+@keyframes litt-ring-pulse {
+  0%, 100% { transform: scale(0.9); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+.litt-float {
+  animation: litt-float 4s ease-in-out infinite;
+}
+
+.litt-ring-pulse {
+  animation: litt-ring-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .litt-float,
+  .litt-ring-pulse {
+    animation: none;
+  }
+}
 
 @theme inline {
   --color-background: var(--bg-color);

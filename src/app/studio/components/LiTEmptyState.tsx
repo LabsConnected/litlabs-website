@@ -274,8 +274,8 @@ export default function LiTEmptyState({
 
 
       <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-5">
-      {/* Active character — clean transparent art, no framed black bars. */}
-      <div className="relative mb-3 grid min-h-[160px] place-items-center">
+      {/* LiTT — floating mascot centerpiece with glow ring */}
+      <div className="relative mb-2 grid min-h-[200px] place-items-center" style={{ overflow: "visible" }}>
         {activeAgentId === "litt" ? (
           <LiTTPresence state="idle" variant="empty-state" size="xl" />
         ) : (
@@ -292,12 +292,10 @@ export default function LiTEmptyState({
           </div>
         )}
         <span
-          className="absolute -bottom-2 rounded-full border px-3 py-0.5 text-[9.5px] font-black uppercase tracking-[.18em]"
+          className="glass-status-pill active absolute -bottom-2"
           style={{
-            borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.45)" : "rgba(114,242,56,.45)",
-            backgroundColor: "#0D0916",
-            color: activeAgentId === "spark" ? "var(--spark-primary)" : "var(--litt-primary)",
-            boxShadow: activeAgentId === "spark" ? "0 0 12px rgba(244,114,182,.2)" : "0 0 12px rgba(114,242,56,.2)",
+            borderColor: activeAgentId === "spark" ? "rgba(244,114,182,.45)" : "var(--glass-border-green)",
+            color: activeAgentId === "spark" ? "var(--spark-primary)" : "var(--glass-green)",
           }}
         >
           {activeAgentId === "spark" ? "Spark · Creative" : "LiTT · Operating"}
@@ -330,21 +328,12 @@ export default function LiTEmptyState({
             ? `Your ${projectName ?? "workspace"} is connected. LiTT can inspect files, edit code, run checks, and prepare deployment.`
             : "LiTT is ready to start from zero, or pick up a connected workspace the moment you attach one."}
         </p>
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em]">
-          {[
-            `${STUDIO_AGENTS.length} agents ready`,
-            `${connectedProviderCount} AI providers`,
-            voiceReady ? "Voice live" : "Voice offline",
-            hasProject ? "Project linked" : "No project linked",
-          ].map((item) => (
-            <span
-              key={item}
-              className="rounded-full border px-3 py-1"
-              style={{ borderColor: "var(--studio-border-strong)", color: "var(--text-secondary)" }}
-            >
-              {item}
-            </span>
-          ))}
+        {/* Compact status pills */}
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+          <span className="glass-status-pill active">● {STUDIO_AGENTS.length} agents</span>
+          <span className="glass-status-pill active">● {connectedProviderCount} AI</span>
+          <span className={`glass-status-pill ${voiceReady ? "active" : ""}`}>{voiceReady ? "● Voice" : "○ Voice"}</span>
+          <span className={`glass-status-pill ${hasProject ? "active" : ""}`}>{hasProject ? "● Project" : "○ No project"}</span>
         </div>
       </div>
 
@@ -361,11 +350,9 @@ export default function LiTEmptyState({
                 key={action.label}
                 type="button"
                 onClick={() => onPickAction?.(action.prompt)}
-                className="flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-bold transition hover:-translate-y-0.5 hover:border-[rgba(114,242,56,0.3)]"
+                className="glass-card flex min-h-11 shrink-0 items-center gap-2 px-3 py-2 text-[11px] font-bold transition hover:-translate-y-0.5"
                 style={{
-                  borderColor: "var(--studio-border-strong)",
-                  backgroundColor: "var(--studio-card)",
-                  color: "var(--text-primary)",
+                  color: "var(--glass-text-1)",
                 }}
               >
                 <Icon size={13} style={{ color: "var(--litt-primary)" }} />
@@ -377,22 +364,15 @@ export default function LiTEmptyState({
       </div>
 
       <div className="grid w-full gap-4 lg:grid-cols-[1.1fr_.9fr]">
-        <section
-          className="rounded-[24px] border p-4 sm:p-5"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
-        >
+        <section className="glass-panel p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-                Recent projects
-              </div>
-              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+              <div className="glass-section-header">Recent projects</div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--glass-text-1)" }}>
                 Continue where you left off
               </h2>
             </div>
-            <span className="rounded-full border px-2.5 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(114,242,56,0.18)", color: "var(--litt-primary)" }}>
-              OS mode
-            </span>
+            <span className="glass-status-pill active">OS mode</span>
           </div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -422,22 +402,15 @@ export default function LiTEmptyState({
           </div>
         </section>
 
-        <section
-          className="rounded-[24px] border p-4 sm:p-5"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
-        >
+        <section className="glass-panel p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-                Live workspace
-              </div>
-              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+              <div className="glass-section-header">Live workspace</div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--glass-text-1)" }}>
                 LiTT is awake
               </h2>
             </div>
-            <span className="rounded-full border px-2.5 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(34,211,238,0.18)", color: "#65f4ff" }}>
-              {hasProject ? "Connected" : "Standby"}
-            </span>
+            <span className={`glass-status-pill ${hasProject ? "active" : ""}`}>{hasProject ? "Connected" : "Standby"}</span>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">
@@ -467,16 +440,11 @@ export default function LiTEmptyState({
       </div>
 
       <div className="grid w-full gap-4 xl:grid-cols-[1.25fr_.85fr]">
-        <section
-          className="rounded-[24px] border p-4 sm:p-5"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
-        >
+        <section className="glass-panel p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-                Recent chats
-              </div>
-              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+              <div className="glass-section-header">Recent chats</div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--glass-text-1)" }}>
                 Keep the conversation moving
               </h2>
             </div>
@@ -484,16 +452,11 @@ export default function LiTEmptyState({
           <StudioActivityTimeline />
         </section>
 
-        <section
-          className="rounded-[24px] border p-4 sm:p-5"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,16,24,0.9)" }}
-        >
+        <section className="glass-panel p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
-                Recent files
-              </div>
-              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--text-primary)" }}>
+              <div className="glass-section-header">Recent files</div>
+              <h2 className="mt-1 text-lg font-black" style={{ color: "var(--glass-text-1)" }}>
                 Start from the right place
               </h2>
             </div>

@@ -575,6 +575,9 @@ export async function POST(req: NextRequest) {
   // ── Auth ──
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
   if (!authorizeVapiRequest(authHeader)) {
+    // Auth diagnostic data is intentionally not logged here to avoid
+    // leaking auth-attempt metadata into server output. The 401 response
+    // is the observable signal; Vapi retries with the configured credential.
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

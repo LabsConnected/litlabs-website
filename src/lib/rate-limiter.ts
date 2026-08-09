@@ -171,12 +171,12 @@ export function withRateLimit<T>(
     let response: NextResponse | Response;
     try {
       response = await (handler as (req: NextRequest, ctx?: T) => Promise<NextResponse | Response>)(request, context);
-    } catch (err) {
+    } catch {
       // Top-level safety net: never let an unhandled exception bubble up,
       // which would cause Vercel to render an HTML 500 page instead of JSON.
+      // Error details are intentionally not logged here; the client receives
+      // a generic JSON 500 with a request ID for correlation.
       const requestId = newRequestId();
-      const message = err instanceof Error ? err.message : "Internal server error";
-      console.error(`[api] ${requestId} 500 (unhandled): ${message}\n${err instanceof Error ? err.stack ?? "" : ""}`);
       httpRequestTotal.labels({ method: _method, route: _route, status: "500" }).inc();
       httpRequestDurationSeconds.labels({ method: _method, route: _route, status: "500" }).observe((Date.now() - _httpStart) / 1000);
       return new NextResponse(

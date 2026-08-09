@@ -51,7 +51,6 @@ async function handler(req: NextRequest) {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Unknown error");
-      console.error("[TTS] OpenAI API error:", response.status, errText);
       return NextResponse.json(
         { error: `TTS failed: ${response.status}` },
         { status: response.status },
@@ -64,7 +63,6 @@ async function handler(req: NextRequest) {
 
     return NextResponse.json({ audioUrl });
   } catch (err: unknown) {
-    console.error("[TTS] Error:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "TTS failed" },
       { status: 500 },

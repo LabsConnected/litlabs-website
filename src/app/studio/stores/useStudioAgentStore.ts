@@ -84,22 +84,26 @@ interface StudioAgentStore {
   activeAgentMode: AgentMode;
   /** Private agent instance ID (user_agents.id) when a marketplace agent is selected. */
   activeAgentInstanceId: string | null;
-  /** V2 execution mode: "auto" auto-approves safe ops, "act" requires approval for mutations. */
-  executionMode: "auto" | "act";
+  /** Execution mode: "plan" read-only, "act" mutations require approval, "auto" auto-approves safe ops. */
+  executionMode: "plan" | "act" | "auto";
   setActiveAgent: (id: AgentId) => void;
   /** Set the active agent mode — only affects future messages. */
   setActiveAgentMode: (mode: AgentMode) => void;
   /** Select a marketplace agent instance by its private user_agents.id. */
   setActiveAgentInstance: (instanceId: string | null, fallbackSlug?: AgentId) => void;
-  /** Set the V2 execution mode (auto/act). */
-  setExecutionMode: (mode: "auto" | "act") => void;
+  /** Set the execution mode (plan/act/auto). */
+  setExecutionMode: (mode: "plan" | "act" | "auto") => void;
 }
 
 export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
   activeAgentId: "litt",
   activeAgentMode: "standard",
   activeAgentInstanceId: null,
-  executionMode: "auto",
+  executionMode: (() => {
+    if (typeof window === "undefined") return "act";
+    const stored = localStorage.getItem("litt:executionMode");
+    return stored === "plan" || stored === "act" || stored === "auto" ? stored : "act";
+  })(),
 
   setActiveAgent: (activeAgentId) => set({
     activeAgentId,
@@ -123,5 +127,10 @@ export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
       activeAgentMode: "standard",
     }),
 
-  setExecutionMode: (executionMode) => set({ executionMode }),
+  setExecutionMode: (executionMode) => {
+    if (typeof window !== "undefined") {
+      try { localStorage.setItem("litt:executionMode", executionMode); } catch {}
+    }
+    set({ executionMode });
+  },
 }));
