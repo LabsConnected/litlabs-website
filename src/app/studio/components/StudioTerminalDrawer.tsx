@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlertCircle, RotateCcw } from "lucide-react";
-import LiTTPresence from "./LiTTPresence";
+import { AlertCircle, RotateCcw, Play } from "lucide-react";
 
 const TerminalPanel = dynamic(
   () => import("@/components/litt-terminal/TerminalPanel").then((m) => m.TerminalPanel),
@@ -16,17 +15,13 @@ interface StudioTerminalDrawerProps {
   branch?: string | null;
 }
 
-/**
- * StudioTerminalDrawer — clean PTY terminal for the Studio drawer.
- *
- * Replaces the old AgentsTerminalTool (Control Tower) which mixed
- * AI chat, provider picker, agent picker, topology, and logs.
- * This component renders ONLY a real PTY terminal with a compact
- * header showing project status.
- */
+type WorkspaceState = "idle" | "preparing" | "ready" | "error";
+type TerminalSessionState = "not_started" | "connecting" | "connected" | "disconnected" | "error";
+
 export default function StudioTerminalDrawer({ projectId, repositoryName, branch }: StudioTerminalDrawerProps) {
-  const [workspaceStatus, setWorkspaceStatus] = useState<"idle" | "preparing" | "ready" | "error">("idle");
+  const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceState>("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [terminalSession, setTerminalSession] = useState<TerminalSessionState>("not_started");
 
   // Auto-prepare workspace when projectId is available
   useEffect(() => {
@@ -62,118 +57,150 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
     return () => { cancelled = true; };
   }, [projectId]);
 
+  const handleRetry = () => {
+    if (!projectId) return;
+    setWorkspaceStatus("preparing");
+    setWorkspaceError(null);
+    void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.workspaceStatus === "ready") {
+            setWorkspaceStatus("ready");
+          } else if (data.workspaceStatus === "provisioning") {
+            setWorkspaceStatus("preparing");
+          } else {
+            setWorkspaceStatus("error");
+            setWorkspaceError(data.error ?? "Workspace preparation failed");
+          }
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setWorkspaceStatus("error");
+          setWorkspaceError(data.error ?? `Preparation failed (${res.status})`);
+        }
+      })
+      .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Network error during retry"); });
+  };
+
   if (!projectId) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-8 text-center">
-        <AlertCircle size={24} className="opacity-40" style={{ color: "var(--text-muted)" }} />
-        <p className="text-[12px] font-medium" style={{ color: "var(--text-muted)" }}>
+        <AlertCircle size={20} className="opacity-40" style={{ color: "var(--text-muted)" }} />
+        <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
           No project selected. Choose or create a project to use the terminal.
         </p>
       </div>
     );
   }
 
+  const wsColor = workspaceStatus === "ready" ? "#72f238" : workspaceStatus === "preparing" ? "#e3b341" : workspaceStatus === "error" ? "#ef4444" : "rgba(255,255,255,0.2)";
+  const wsLabel = workspaceStatus === "preparing" ? "Workspace provisioning…" : workspaceStatus === "ready" ? "Workspace ready" : workspaceStatus === "error" ? "Workspace error" : "Idle";
+  const termColor = terminalSession === "connected" ? "#72f238" : terminalSession === "connecting" ? "#e3b341" : terminalSession === "error" ? "#ef4444" : "rgba(255,255,255,0.2)";
+  const termLabel = terminalSession === "connected" ? "Connected" : terminalSession === "connecting" ? "Connecting…" : terminalSession === "error" ? "Error" : "Not started";
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Compact header */}
+      {/* Compact context bar — single line, 32px */}
       <div
-        className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
-        style={{
-          borderColor: "var(--studio-border)",
-          backgroundColor: "var(--studio-surface)",
-        }}
+        className="flex shrink-0 items-center gap-2 border-b px-2"
+        style={{ height: 32, borderColor: "var(--studio-border)", backgroundColor: "rgba(255,255,255,0.02)" }}
       >
-        {/* LiTT compact terminal avatar */}
-        <LiTTPresence
-          state={workspaceStatus === "ready" ? "idle" : workspaceStatus === "preparing" ? "working" : workspaceStatus === "error" ? "error" : "idle"}
-          variant="terminal"
-          size="sm"
-        />
-
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-            Terminal
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{
-                backgroundColor:
-                  workspaceStatus === "ready" ? "#72f238" :
-                  workspaceStatus === "preparing" ? "#e3b341" :
-                  workspaceStatus === "error" ? "#ef4444" :
-                  "rgba(255,255,255,0.2)",
-              }}
-            />
-            <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
-              {workspaceStatus === "preparing" ? "Preparing workspace…" :
-               workspaceStatus === "ready" ? "Workspace ready" :
-               workspaceStatus === "error" ? "Preparation failed" :
-               "Connecting…"}
-            </span>
-          </div>
-        </div>
-
-        {/* Restart button */}
+        {repositoryName && (
+          <span className="truncate text-[10px] font-medium" style={{ color: "var(--text-secondary)", maxWidth: 200 }} title={repositoryName}>
+            {repositoryName}
+          </span>
+        )}
+        {branch && (
+          <>
+            <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+            <span className="shrink-0 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>{branch}</span>
+          </>
+        )}
+        <div className="flex-1" />
+        {/* Workspace status */}
+        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: wsColor }} />
+          {wsLabel}
+        </span>
+        {/* Terminal session status — separate from workspace */}
+        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: termColor }} />
+          {termLabel}
+        </span>
         <button
           type="button"
-          onClick={() => {
-            setWorkspaceStatus("preparing");
-            setWorkspaceError(null);
-            void fetch(`/api/studio-projects/${projectId}/workspace/prepare`, { method: "POST" })
-              .then(async (res) => {
-                if (res.ok) {
-                  const data = await res.json().catch(() => ({}));
-                  if (data.workspaceStatus === "ready") {
-                    setWorkspaceStatus("ready");
-                  } else if (data.workspaceStatus === "provisioning") {
-                    setWorkspaceStatus("preparing");
-                  } else {
-                    setWorkspaceStatus("error");
-                    setWorkspaceError(data.error ?? "Workspace preparation failed");
-                  }
-                } else {
-                  const data = await res.json().catch(() => ({}));
-                  setWorkspaceStatus("error");
-                  setWorkspaceError(data.error ?? `Preparation failed (${res.status})`);
-                }
-              })
-              .catch(() => { setWorkspaceStatus("error"); setWorkspaceError("Network error during retry"); });
-          }}
-          className="grid h-7 w-7 place-items-center rounded-lg hover:bg-white/8"
+          onClick={handleRetry}
+          className="grid h-5 w-5 place-items-center rounded transition hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
           aria-label="Restart workspace"
           title="Restart workspace"
         >
-          <RotateCcw size={13} />
+          <RotateCcw size={11} />
         </button>
       </div>
 
-      {/* Workspace error */}
+      {/* Workspace error inline */}
       {workspaceError && (
         <div
-          className="flex shrink-0 items-center gap-2 px-3 py-2 text-[11px]"
-          style={{
-            backgroundColor: "rgba(239,68,68,0.08)",
-            color: "#fca5a5",
-          }}
+          className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-[10px]"
+          style={{ backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}
         >
-          <AlertCircle size={12} className="shrink-0" />
-          <span className="flex-1">{workspaceError}</span>
+          <AlertCircle size={11} className="shrink-0" />
+          <span className="flex-1 truncate">{workspaceError}</span>
           <button
             type="button"
-            onClick={() => { setWorkspaceError(null); setWorkspaceStatus("preparing"); }}
-            className="rounded px-2 py-0.5 text-[10px] font-bold hover:bg-red-500/10"
+            onClick={handleRetry}
+            className="rounded px-1.5 py-0.5 text-[9px] font-bold hover:bg-red-500/10"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Terminal PTY — only render when workspace is ready or preparing */}
+      {/* Terminal content area */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {(workspaceStatus === "ready" || workspaceStatus === "preparing") && (
-          <TerminalPanel projectId={projectId} repositoryName={repositoryName} branch={branch} />
+        {workspaceStatus === "ready" && terminalSession !== "not_started" ? (
+          <TerminalPanel
+            projectId={projectId}
+            repositoryName={repositoryName}
+            branch={branch}
+            onConnectionChange={(connected) => setTerminalSession(connected ? "connected" : "disconnected")}
+          />
+        ) : workspaceStatus === "ready" && terminalSession === "not_started" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <div className="text-center">
+              <p className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
+                Terminal session not started
+              </p>
+              <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+                Workspace is ready. Click to start a PTY session.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTerminalSession("connecting")}
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold transition"
+              style={{
+                backgroundColor: "rgba(114,242,56,0.1)",
+                color: "#72f238",
+                border: "1px solid rgba(114,242,56,0.2)",
+              }}
+            >
+              <Play size={12} />
+              Start Terminal
+            </button>
+          </div>
+        ) : workspaceStatus === "preparing" ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
+              <span className="h-2 w-2 animate-pulse rounded-full" style={{ backgroundColor: "#e3b341" }} />
+              Connecting to workspace…
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Terminal unavailable
+          </div>
         )}
       </div>
     </div>

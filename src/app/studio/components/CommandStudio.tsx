@@ -137,6 +137,8 @@ function CommandStudioContent() {
   const projectReady = Boolean(capabilities.projectId);
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
+  const executionMode = useStudioAgentStore((s) => s.executionMode);
+  const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
   // Look up health by provider first, then fall back to apiProvider
   // (e.g. "Auto" models route to "gemini" under the hood).
   const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
@@ -846,6 +848,8 @@ function CommandStudioContent() {
                 onToggleLive={() => setLivePanelOpen((v) => !v)}
                 liveActive={livePanelOpen && liveSession.isLive}
                 contextLine={contextLine}
+                executionMode={executionMode}
+                onExecutionModeChange={setExecutionMode}
               />
             )}
 

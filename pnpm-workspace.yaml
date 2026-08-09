@@ -4,3 +4,4 @@ packages:
   - "voice-server"
   - "cli"
   - "packages/litt-agent-core"
+  - "packages/litt-companion"

@@ -1,16 +1,13 @@
 /**
- * LiTT Agent Loop — the brain-to-hands connection.
+ * LiTT Agent Loop V1 — pre-LLM auto-inspection phase.
  *
- * Before calling the LLM, this module:
- * 1. Detects whether the user's message is an engineering/project request
- * 2. Auto-runs safe read-only tools (project.scan, git.status, files.read, etc.)
- * 3. Injects the real tool results into the prompt as context
- * 4. Returns the enriched prompt for the LLM to reason over
+ * This is the original agent loop that runs safe read-only tools before
+ * the LLM call, injecting real data into the prompt. It's used by the
+ * messages route for all chat requests.
  *
- * This is NOT a function-calling loop (the LLM providers in this codebase
- * don't support native function calling). Instead, it's a pre-LLM
- * auto-inspection phase that gives LiTT real data to reason over,
- * so he doesn't ask stupid questions the repo can answer.
+ * For workspace-aware multi-step tool calling (with native structured
+ * tool calls, loop detection, checkpoints, and build-fix), see
+ * agent-loop-v2.ts which uses WorkspaceTransport.
  *
  * The approval model:
  * - Read-only tools (scan, git status, file reads, health checks) → auto-run

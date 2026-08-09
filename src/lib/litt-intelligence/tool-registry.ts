@@ -11,9 +11,10 @@
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
 
-type ToolHandler = (inputs: Record<string, unknown>) => Promise<unknown>;
+type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
 
 const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
+  // V1 handlers (legacy — still used by agent-loop.ts pre-LLM phase)
   "project.scan": async () => (await import("./tool-handlers")).handleProjectScan,
   "files.list": async () => (await import("./tool-handlers")).handleFilesList,
   "files.read": async () => (await import("./tool-handlers")).handleFilesRead,
@@ -21,6 +22,21 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "git.status": async () => (await import("./tool-handlers")).handleGitStatus,
   "terminal.execute": async () => (await import("./tool-handlers")).handleTerminalExecute,
   "project.health": async () => (await import("./tool-handlers")).handleProjectHealth,
+  // V2 workspace-aware handlers (used by agent-loop-v2.ts)
+  // V2 handlers accept an optional transport param; the agent loop binds it at call time.
+  "files.delete": async () => (await import("./tool-handlers-v2")).handleFilesDelete as ToolHandler,
+  "files.mkdir": async () => (await import("./tool-handlers-v2")).handleFilesMkdir as ToolHandler,
+  "files.rename": async () => (await import("./tool-handlers-v2")).handleFilesRename as ToolHandler,
+  "search_code": async () => (await import("./tool-handlers-v2")).handleSearchCode as ToolHandler,
+  "git.diff": async () => (await import("./tool-handlers-v2")).handleGitDiff as ToolHandler,
+  "git.log": async () => (await import("./tool-handlers-v2")).handleGitLog as ToolHandler,
+  "git.commit": async () => (await import("./tool-handlers-v2")).handleGitCommit as ToolHandler,
+  "apply_patch": async () => (await import("./tool-handlers-v2")).handleApplyPatch as ToolHandler,
+  "build.run": async () => (await import("./tool-handlers-v2")).handleBuildRun as ToolHandler,
+  "test.run": async () => (await import("./tool-handlers-v2")).handleTestRun as ToolHandler,
+  "typecheck.run": async () => (await import("./tool-handlers-v2")).handleTypecheckRun as ToolHandler,
+  "lint.run": async () => (await import("./tool-handlers-v2")).handleLintRun as ToolHandler,
+  "package.info": async () => (await import("./tool-handlers-v2")).handlePackageInfo as ToolHandler,
 };
 
 // ─── Registry ───────────────────────────────────────────────────
@@ -142,6 +158,7 @@ class ToolRegistry {
   /**
    * Execute a tool by ID with validated inputs.
    * Checks: enabled, capabilities, approval, schema validation.
+   * @param options.transport — optional WorkspaceTransport passed to V2 handlers
    */
   async execute(
     id: string,
@@ -149,6 +166,7 @@ class ToolRegistry {
     options: {
       hasApproval?: boolean;
       availableCapabilities?: string[];
+      transport?: unknown;
     } = {},
   ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
     const tool = this.tools.get(id);
@@ -198,9 +216,9 @@ class ToolRegistry {
     try {
       // Resolve lazy handler if needed
       const handler = typeof handlerEntry === "function" && handlerEntry.length === 0
-        ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>) => Promise<unknown>>)()
-        : handlerEntry as (inputs: Record<string, unknown>) => Promise<unknown>;
-      const result = await handler(inputs);
+        ? await (handlerEntry as () => Promise<(inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>>)()
+        : handlerEntry as (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
+      const result = await handler(inputs, options.transport);
       return { ok: true, result };
     } catch (err) {
       return {
@@ -825,6 +843,293 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["project.health"],
+    },
+    // ─── New workspace-aware tools (V2) ────────────────────────
+    // File delete (mutation, requires approval)
+    {
+      tool: {
+        id: "files.delete",
+        name: "Delete File",
+        description: "Delete a file from the project workspace",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["files.delete"],
+    },
+    // File mkdir (mutation, requires approval)
+    {
+      tool: {
+        id: "files.mkdir",
+        name: "Create Directory",
+        description: "Create a new directory in the project workspace",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["files.mkdir"],
+    },
+    // File rename (mutation, requires approval)
+    {
+      tool: {
+        id: "files.rename",
+        name: "Rename/Move File",
+        description: "Rename or move a file within the project workspace",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, newPath: { type: "string" } }, required: ["path", "newPath"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["files.rename"],
+    },
+    // Search code (read-only)
+    {
+      tool: {
+        id: "search_code",
+        name: "Search Code",
+        description: "Search the project codebase using ripgrep. Returns matching file paths, line numbers, and content.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { query: { type: "string" }, glob: { type: "string" }, maxResults: { type: "number" } }, required: ["query"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["search_code"],
+    },
+    // Git diff (read-only)
+    {
+      tool: {
+        id: "git.diff",
+        name: "Git Diff",
+        description: "Show git diff for the project. Can show staged or unstaged changes, optionally for a specific path.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { staged: { type: "boolean" }, path: { type: "string" } }, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["git.diff"],
+    },
+    // Git log (read-only)
+    {
+      tool: {
+        id: "git.log",
+        name: "Git Log",
+        description: "Show recent git commits with SHA, author, date, and message.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { maxCount: { type: "number" } }, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["git.log"],
+    },
+    // Git commit (mutation, requires approval)
+    {
+      tool: {
+        id: "git.commit",
+        name: "Git Commit",
+        description: "Stage files and create a git commit in the project workspace.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { message: { type: "string" }, files: { type: "array", items: { type: "string" } } }, required: ["message"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["git:write"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["git.commit"],
+    },
+    // Apply patch (mutation, requires approval)
+    {
+      tool: {
+        id: "apply_patch",
+        name: "Apply Patch",
+        description: "Apply targeted search-and-replace patches to an existing file in the project workspace.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { path: { type: "string" }, patches: { type: "array", items: { type: "object", properties: { search: { type: "string" }, replace: { type: "string" } } } } }, required: ["path", "patches"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["files:write"],
+        risk: "high",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: 'workspace-write',
+        enabled: true,
+      },
+      handler: lazyHandlers["apply_patch"],
+    },
+    // Build run (read-only — just executes a build check)
+    {
+      tool: {
+        id: "build.run",
+        name: "Run Build",
+        description: "Discover the project's package manager and run the build script. Returns exit code and output.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["build.run"],
+    },
+    // Test run (read-only)
+    {
+      tool: {
+        id: "test.run",
+        name: "Run Tests",
+        description: "Discover the project's package manager and run the test script. Returns exit code and output.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["test.run"],
+    },
+    // Typecheck run (read-only)
+    {
+      tool: {
+        id: "typecheck.run",
+        name: "Run Typecheck",
+        description: "Discover the project's package manager and run the typecheck script (or tsc --noEmit). Returns exit code and output.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 120000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["typecheck.run"],
+    },
+    // Lint run (read-only)
+    {
+      tool: {
+        id: "lint.run",
+        name: "Run Lint",
+        description: "Discover the project's package manager and run the lint script. Returns exit code and output.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 60000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["lint.run"],
+    },
+    // Package info (read-only)
+    {
+      tool: {
+        id: "package.info",
+        name: "Package Info",
+        description: "Discover the project's package manager, available scripts, and which checks (build/test/typecheck/lint) are configured.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["project:read"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["package.info"],
     },
   ];
 

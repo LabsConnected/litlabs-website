@@ -450,6 +450,16 @@ export function buildRuntimeContextBlock(ctx: RuntimeContextSnapshot): string {
     "Agent:",
     `  Mode: ${ctx.activeAgentMode}`,
     `  Slug: ${ctx.activeAgentSlug}`,
+    "",
+    "Mobile Application:",
+    "  Path: packages/litt-companion",
+    "  Framework: Expo React Native (SDK 57, RN 0.86)",
+    "  Router: Expo Router",
+    "  Primary platform: Android",
+    "  Backend: https://litlabs.net",
+    "  Validation command: pnpm mobile:check",
+    "  Config: packages/litt-companion/litt-mobile.config.json",
+    "  Instructions: packages/litt-companion/LITT_MOBILE.md",
   ];
 
   if (ctx.recentHealthResults.length > 0) {

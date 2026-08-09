@@ -70,6 +70,9 @@ interface CommandComposerProps {
   onToggleLive?: () => void;
   liveActive?: boolean;
   contextLine?: ComposerContextLine;
+  /** V2 execution mode selector */
+  executionMode?: "auto" | "act";
+  onExecutionModeChange?: (mode: "auto" | "act") => void;
 }
 
 export default function CommandComposer({
@@ -84,6 +87,8 @@ export default function CommandComposer({
   onToggleLive,
   liveActive = false,
   contextLine,
+  executionMode = "auto",
+  onExecutionModeChange,
 }: CommandComposerProps) {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
@@ -327,25 +332,51 @@ export default function CommandComposer({
         backdropFilter: "blur(12px)",
       }}
     >
-      {/* Context line: repository · branch · permission mode */}
-      {contextLine && (contextLine.repo || contextLine.branch || contextLine.permissionMode) && (
-        <div
-          className="flex min-w-0 items-center gap-1.5 px-1 text-[10px] font-medium"
-          style={{ color: "var(--text-muted)" }}
-        >
-          {contextLine.repo && <span className="truncate">{contextLine.repo}</span>}
-          {contextLine.repo && contextLine.branch && (
-            <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-          )}
-          {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
-          {contextLine.branch && contextLine.permissionMode && (
-            <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-          )}
-          {contextLine.permissionMode && (
-            <span className="shrink-0">{contextLine.permissionMode}</span>
-          )}
-        </div>
-      )}
+      {/* Context line: repository · branch · AUTO/ACT toggle */}
+      <div className="flex min-w-0 items-center gap-2 px-1">
+        {contextLine && (contextLine.repo || contextLine.branch) && (
+          <div
+            className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {contextLine.repo && <span className="truncate max-w-[200px]">{contextLine.repo}</span>}
+            {contextLine.repo && contextLine.branch && (
+              <span style={{ color: "var(--studio-border-strong)" }}>·</span>
+            )}
+            {contextLine.branch && <span className="shrink-0">{contextLine.branch}</span>}
+          </div>
+        )}
+
+        {/* AUTO / ACT execution mode selector */}
+        {onExecutionModeChange && (
+          <div className="flex shrink-0 items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+            <button
+              type="button"
+              onClick={() => onExecutionModeChange("auto")}
+              className="rounded px-2 py-0.5 text-[10px] font-bold transition"
+              style={{
+                backgroundColor: executionMode === "auto" ? "rgba(114,242,56,0.12)" : "transparent",
+                color: executionMode === "auto" ? "#72f238" : "var(--text-muted)",
+              }}
+              title="AUTO: Safe workspace actions run automatically"
+            >
+              AUTO
+            </button>
+            <button
+              type="button"
+              onClick={() => onExecutionModeChange("act")}
+              className="rounded px-2 py-0.5 text-[10px] font-bold transition"
+              style={{
+                backgroundColor: executionMode === "act" ? "rgba(155,77,255,0.12)" : "transparent",
+                color: executionMode === "act" ? "#9b4dff" : "var(--text-muted)",
+              }}
+              title="ACT: Actions requiring approval pause before execution"
+            >
+              ACT
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Attachment previews — universal system */}
       <AttachmentPreviewStrip

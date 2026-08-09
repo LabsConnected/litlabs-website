@@ -6,11 +6,6 @@ vi.mock("@/components/litt-terminal/TerminalPanel", () => ({
   TerminalPanel: () => <div data-testid="terminal-panel" />,
 }));
 
-// Mock LiTTPresence
-vi.mock("@/app/studio/components/LiTTPresence", () => ({
-  default: () => <div data-testid="litt-presence" />,
-}));
-
 import StudioTerminalDrawer from "@/app/studio/components/StudioTerminalDrawer";
 
 describe("StudioTerminalDrawer", () => {
@@ -23,18 +18,13 @@ describe("StudioTerminalDrawer", () => {
     expect(screen.getByText(/No project selected/i)).toBeDefined();
   });
 
-  it("renders terminal header when projectId is provided", () => {
+  it("renders workspace provisioning status when projectId is provided", () => {
     render(<StudioTerminalDrawer projectId="proj-1" />);
-    expect(screen.getByText("Terminal")).toBeDefined();
+    expect(screen.getByText(/Workspace provisioning/i)).toBeDefined();
   });
 
-  it("renders LiTTPresence avatar in header", () => {
+  it("shows terminal session not started initially", () => {
     render(<StudioTerminalDrawer projectId="proj-1" />);
-    expect(screen.getByTestId("litt-presence")).toBeDefined();
-  });
-
-  it("shows workspace preparing status initially", () => {
-    render(<StudioTerminalDrawer projectId="proj-1" />);
-    expect(screen.getByText(/Preparing workspace/i)).toBeDefined();
+    expect(screen.getByText(/Not started/i)).toBeDefined();
   });
 });

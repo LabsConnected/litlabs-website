@@ -104,6 +104,10 @@ Available commands:
 - create-agent <name>: explain how to create an agent
 - add-feature <name>: explain how to add a feature
 - explain <command>: explain a shell command
+- mobile:check: typecheck + Expo export for the LiTT Companion app
+- mobile:start: start the Expo dev server
+- mobile:build: EAS Android build
+- mobile:doctor: run expo-doctor
 
 Be concise. If the command is unclear, list the available commands.
 `;

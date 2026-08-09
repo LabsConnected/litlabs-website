@@ -23,7 +23,7 @@ export interface ChatMessage {
   id?: string;
   role: "user" | "assistant";
   content: string;
-  status?: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  status?: "pending" | "streaming" | "completed" | "failed" | "cancelled" | "awaiting_approval";
   agentSlug?: string | null;
   /** Agent mode that produced this message. Preserved across mode switches. */
   agentMode?: AgentMode | null;
@@ -84,17 +84,22 @@ interface StudioAgentStore {
   activeAgentMode: AgentMode;
   /** Private agent instance ID (user_agents.id) when a marketplace agent is selected. */
   activeAgentInstanceId: string | null;
+  /** V2 execution mode: "auto" auto-approves safe ops, "act" requires approval for mutations. */
+  executionMode: "auto" | "act";
   setActiveAgent: (id: AgentId) => void;
   /** Set the active agent mode — only affects future messages. */
   setActiveAgentMode: (mode: AgentMode) => void;
   /** Select a marketplace agent instance by its private user_agents.id. */
   setActiveAgentInstance: (instanceId: string | null, fallbackSlug?: AgentId) => void;
+  /** Set the V2 execution mode (auto/act). */
+  setExecutionMode: (mode: "auto" | "act") => void;
 }
 
 export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
   activeAgentId: "litt",
   activeAgentMode: "standard",
   activeAgentInstanceId: null,
+  executionMode: "auto",
 
   setActiveAgent: (activeAgentId) => set({
     activeAgentId,
@@ -117,4 +122,6 @@ export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
       // Marketplace agents always run in standard mode
       activeAgentMode: "standard",
     }),
+
+  setExecutionMode: (executionMode) => set({ executionMode }),
 }));

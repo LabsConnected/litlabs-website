@@ -17,6 +17,9 @@ export interface LogContext {
   intent?: string;
   confidence?: number;
   tool?: string;
+  v2?: boolean;
+  stepsUsed?: number;
+  toolCalls?: number;
 }
 
 export function studioLog(message: string, ctx: LogContext = {}): void {

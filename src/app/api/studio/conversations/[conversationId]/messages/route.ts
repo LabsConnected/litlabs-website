@@ -24,6 +24,14 @@ import {
   HISTORY_LIMIT,
 } from "@/lib/litt-runtime";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
+import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
+import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import {
+  buildCanonicalRuntimeContext,
+  buildRuntimeContextBlock,
+  type ClientRuntimeHint,
+} from "@/lib/litt-intelligence/canonical-runtime-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -65,6 +73,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const expectedRevision = body.expectedRevision;
   const requestedAgentSlug = body.requestedAgentSlug;
   const agentInstanceId = body.agentInstanceId;
+  const executionMode = typeof body.executionMode === "string" && ["plan", "act", "auto"].includes(body.executionMode)
+    ? (body.executionMode as "plan" | "act" | "auto")
+    : undefined;
 
   if (typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -187,6 +198,25 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  // 5.5. Build canonical runtime context — the ONE authoritative source
+  // of runtime state for LiTT. Merges server-side workspace verification
+  // with client-side terminal PTY status. The LLM must never guess.
+  const clientHint: ClientRuntimeHint = {
+    terminalStatus: runtimeContext.terminalStatus,
+    terminalSessionId: runtimeContext.terminalSessionId,
+    terminalCwd: runtimeContext.terminalCwd,
+    workspaceStatus: runtimeContext.workspaceStatus,
+    voiceTransportConnected: runtimeContext.voiceTransportConnected,
+    cameraActive: runtimeContext.cameraActive,
+  };
+  const canonicalCtx = await buildCanonicalRuntimeContext(
+    userId,
+    conversation.projectId,
+    clientHint,
+    { executionMode },
+  );
+  const runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
+
   // 6. Load prior completed messages from DB (excluding the just-inserted user message)
   const allMessages = await listMessages(conversation.id, userId);
   const priorMessages = allMessages.filter((m) => m.id !== userMessage.id);
@@ -221,6 +251,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     memoryContext,
     runtimeContextHint: runtimeContext,
     agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
+    workspaceExecutionAvailable: canonicalCtx.workspaceExecutionAvailable,
   });
 
   const built = buildPrompt(runCtx, {
@@ -229,14 +260,56 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
   }, runtimeAgent);
 
-  const prompt = built.fullPrompt;
+  const prompt = built.fullPrompt + "\n\n" + runtimeContextBlock;
   const agentDisplayName = built.agentDisplayName;
 
-  // 10.5. Run the LiTT Agent Loop — auto-inspect the repository before the LLM call.
-  // This gives LiTT real data (project scan, git status, file contents, health checks)
-  // so he can answer engineering questions with facts instead of asking the user to check.
-  const agentLoopResult = await runAgentLoop(message, conversation.projectId ?? "", prompt);
-  const finalPrompt = agentLoopResult.enrichedPrompt;
+  // 10.5. Agent Loop — V2 when workspace execution is available, V1 fallback otherwise.
+  //
+  // V2 is the full multi-step tool-calling loop with native structured tool calls,
+  // loop detection, checkpoints, and build-fix. It produces the final assistant
+  // response directly — no second LLM call is needed.
+  //
+  // V1 is the pre-LLM auto-inspection phase. It only enriches the prompt with
+  // read-only tool results, then a normal LLM completion runs. This is the
+  // fallback when no executable workspace is available.
+  //
+  // TEMPORARY FALLBACK: V1 is used when workspaceExecutionAvailable is false.
+  // This fallback is marked for eventual removal once all chat paths require
+  // a verified workspace.
+
+  const useV2 = canonicalCtx.workspaceExecutionAvailable && !!conversation.projectId;
+
+  let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
+  let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
+  let finalPrompt = prompt;
+
+  if (useV2) {
+    // Create workspace transport for V2 tool execution
+    let transport;
+    try {
+      transport = await createWorkspaceTransport(conversation.projectId!, userId);
+    } catch (_err) {
+      // Transport creation failed (workspace not provisioned, DB error, etc.)
+      // Fall back to V1
+      v1Result = await runAgentLoop(message, conversation.projectId ?? "", prompt);
+      finalPrompt = v1Result.enrichedPrompt;
+    }
+
+    if (transport) {
+      const v2Config: Partial<AgentLoopConfig> = {
+        systemPrompt: prompt,
+        executionMode: canonicalCtx.executionMode,
+        enableBuildFix: true,
+        model: typeof body.model === "string" ? body.model : undefined,
+      };
+
+      v2Result = await runAgentLoopV2(message, transport, v2Config);
+    }
+  } else {
+    // V1 fallback — no executable workspace, read-only inspection only
+    v1Result = await runAgentLoop(message, conversation.projectId ?? "", prompt);
+    finalPrompt = v1Result.enrichedPrompt;
+  }
 
   // 11. Insert pending assistant message
   const { message: assistantMessage } = await insertMessage({
@@ -309,92 +382,217 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       let assistantText = "";
       let reasoningText = "";
       try {
-        // Stream tool execution events to the client so the UI can show
-        // "LiTT is scanning the project..." etc.
-        if (agentLoopResult.ranTools) {
-          for (const exec of agentLoopResult.toolExecutions) {
+        if (v2Result) {
+          // ── V2 path: stream progress events, then emit finalText ──
+          // V2 already did all LLM calls with tool calling. Its finalText
+          // IS the assistant response. No second LLM call.
+
+          // Stream sanitized progress events (never chain-of-thought)
+          for (const evt of v2Result.events) {
+            if (evt.type === "tool_start") {
+              controller.enqueue(event({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary }));
+            } else if (evt.type === "tool_result") {
+              controller.enqueue(event({
+                type: "tool_execution",
+                toolId: evt.toolId,
+                success: evt.success,
+                summary: evt.summary,
+              }));
+            } else if (evt.type === "approval_required") {
+              controller.enqueue(event({
+                type: "approval_required",
+                toolId: evt.toolId,
+                reason: evt.reason,
+              }));
+            } else if (evt.type === "checkpoint") {
+              controller.enqueue(event({ type: "checkpoint", label: evt.label, gitSha: evt.gitSha }));
+            } else if (evt.type === "build_start") {
+              controller.enqueue(event({ type: "build_start", check: evt.check }));
+            } else if (evt.type === "build_result") {
+              controller.enqueue(event({ type: "build_result", check: evt.check, passed: evt.passed }));
+            } else if (evt.type === "phase") {
+              controller.enqueue(event({ type: "phase", phase: evt.phase, step: evt.step }));
+            }
+          }
+
+          // Stream the final text as a single chunk
+          assistantText = v2Result.finalText;
+          controller.enqueue(event({ type: "text", text: assistantText }));
+
+          // If V2 paused for approval, persist the paused state and flag it
+          let pausedRunId: string | undefined;
+          if (v2Result.pendingApproval) {
+            try {
+              const pausedRun = await createPausedRun({
+                userId,
+                conversationId: conversation.id,
+                projectId: conversation.projectId ?? "",
+                workspaceId: canonicalCtx.workspaceId ?? "",
+                toolId: v2Result.pendingApproval.toolId,
+                toolCallId: v2Result.pendingApproval.toolCallId,
+                inputs: v2Result.pendingApproval.inputs,
+                reason: v2Result.pendingApproval.reason,
+                pausedMessages: v2Result.pendingApproval.pausedMessages,
+                executionMode: canonicalCtx.executionMode,
+                systemPrompt: prompt,
+                checkpointId: v2Result.checkpoint?.checkpointId ?? null,
+              });
+              pausedRunId = pausedRun.id;
+            } catch {
+              // If persistence fails, still send the approval event without a resume ID
+            }
+
             controller.enqueue(event({
-              type: "tool_execution",
-              toolId: exec.toolId,
-              success: exec.success,
-              summary: exec.summary,
+              type: "pending_approval",
+              toolId: v2Result.pendingApproval.toolId,
+              reason: v2Result.pendingApproval.reason,
+              inputs: v2Result.pendingApproval.inputs,
+              pausedRunId,
             }));
           }
-        }
 
-        const r = await streamText(
-          finalPrompt,
-          (chunk) => {
-            assistantText += chunk;
-            controller.enqueue(event({ type: "text", text: chunk }));
-          },
-          {
-            task: "chat",
-            provider: category === "auto" ? undefined : provider,
-            category,
-            maxTokens: 2048,
-            modelOverride,
-          },
-          undefined,
-          (reasoning) => {
-            reasoningText += reasoning;
-            controller.enqueue(event({ type: "reasoning", text: reasoning }));
-          },
-        );
+          await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+          if (agentRunId) {
+            const actualCredits = runtimeAgent
+              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+              : 0;
+            void settleRun(agentRunId, {
+              inputTokens: Math.ceil(finalPrompt.length / 4),
+              outputTokens: Math.ceil(assistantText.length / 4),
+              actualCredits,
+              status: "completed",
+            }, reservedCredits);
+          }
 
-        await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
-        if (agentRunId) {
-          const actualCredits = runtimeAgent
-            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
-            : 0;
-          void settleRun(agentRunId, {
-            inputTokens: Math.ceil(finalPrompt.length / 4),
-            outputTokens: Math.ceil(assistantText.length / 4),
-            actualCredits,
-            status: "completed",
-          }, reservedCredits);
-        }
+          void persistMemory(
+            `User: ${message}\n${agentDisplayName}: ${assistantText}`,
+            userId,
+            conversation.projectId,
+            {
+              agentSlug,
+              agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+              memoryNamespace: runtimeAgent?.memoryNamespace,
+              conversationId: conversation.id,
+              memoryType: "conversation_summary",
+            },
+          );
 
-        void persistMemory(
-          `User: ${message}\n${agentDisplayName}: ${assistantText}`,
-          userId,
-          conversation.projectId,
-          {
-            agentSlug,
-            agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
-            memoryNamespace: runtimeAgent?.memoryNamespace,
+          studioLog("message:sent", {
             conversationId: conversation.id,
-            memoryType: "conversation_summary",
-          },
-        );
+            projectId: conversation.projectId,
+            userId,
+            agentSlug,
+            agentInstanceId: runtimeAgent?.agentInstanceId || null,
+            provider: "openrouter-v2",
+            latencyMs: v2Result.totalDurationMs,
+            revisionBefore: conversation.revision,
+            revisionAfter: newRevision,
+            v2: true,
+            stepsUsed: v2Result.stepsUsed,
+            toolCalls: v2Result.toolCalls.length,
+          });
 
-        studioLog("message:sent", {
-          conversationId: conversation.id,
-          projectId: conversation.projectId,
-          userId,
-          agentSlug,
-          agentInstanceId: runtimeAgent?.agentInstanceId || null,
-          provider: r.provider,
-          latencyMs: r.latencyMs,
-          revisionBefore: conversation.revision,
-          revisionAfter: newRevision,
-          memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
-        });
+          controller.enqueue(event({
+            type: "done",
+            userMessage,
+            assistantMessage: {
+              ...assistantMessage,
+              content: assistantText,
+              status: "completed",
+            },
+            revision: newRevision,
+            provider: "openrouter-v2",
+            latencyMs: v2Result.totalDurationMs,
+            v2: true,
+            pendingApproval: v2Result.pendingApproval ?? undefined,
+          }));
+        } else {
+          // ── V1 fallback path: stream tool results, then run LLM ──
+          if (v1Result?.ranTools) {
+            for (const exec of v1Result.toolExecutions) {
+              controller.enqueue(event({
+                type: "tool_execution",
+                toolId: exec.toolId,
+                success: exec.success,
+                summary: exec.summary,
+              }));
+            }
+          }
 
-        controller.enqueue(event({
-          type: "done",
-          userMessage,
-          assistantMessage: {
-            ...assistantMessage,
-            content: assistantText,
-            reasoning: reasoningText || undefined,
-            status: "completed",
-          },
-          revision: newRevision,
-          provider: r.provider,
-          model: r.model,
-          latencyMs: r.latencyMs,
-        }));
+          const r = await streamText(
+            finalPrompt,
+            (chunk) => {
+              assistantText += chunk;
+              controller.enqueue(event({ type: "text", text: chunk }));
+            },
+            {
+              task: "chat",
+              provider: category === "auto" ? undefined : provider,
+              category,
+              maxTokens: 2048,
+              modelOverride,
+            },
+            undefined,
+            (reasoning) => {
+              reasoningText += reasoning;
+              controller.enqueue(event({ type: "reasoning", text: reasoning }));
+            },
+          );
+
+          await updateMessageStatus(assistantMessage.id, userId, "completed", assistantText);
+          if (agentRunId) {
+            const actualCredits = runtimeAgent
+              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
+              : 0;
+            void settleRun(agentRunId, {
+              inputTokens: Math.ceil(finalPrompt.length / 4),
+              outputTokens: Math.ceil(assistantText.length / 4),
+              actualCredits,
+              status: "completed",
+            }, reservedCredits);
+          }
+
+          void persistMemory(
+            `User: ${message}\n${agentDisplayName}: ${assistantText}`,
+            userId,
+            conversation.projectId,
+            {
+              agentSlug,
+              agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+              memoryNamespace: runtimeAgent?.memoryNamespace,
+              conversationId: conversation.id,
+              memoryType: "conversation_summary",
+            },
+          );
+
+          studioLog("message:sent", {
+            conversationId: conversation.id,
+            projectId: conversation.projectId,
+            userId,
+            agentSlug,
+            agentInstanceId: runtimeAgent?.agentInstanceId || null,
+            provider: r.provider,
+            latencyMs: r.latencyMs,
+            revisionBefore: conversation.revision,
+            revisionAfter: newRevision,
+            v2: false,
+          });
+
+          controller.enqueue(event({
+            type: "done",
+            userMessage,
+            assistantMessage: {
+              ...assistantMessage,
+              content: assistantText,
+              reasoning: reasoningText || undefined,
+              status: "completed",
+            },
+            revision: newRevision,
+            provider: r.provider,
+            model: r.model,
+            latencyMs: r.latencyMs,
+          }));
+        }
       } catch (err) {
         await updateMessageStatus(assistantMessage.id, userId, "failed");
         if (agentRunId) {

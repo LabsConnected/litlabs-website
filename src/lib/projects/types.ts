@@ -20,7 +20,7 @@ export type WorkspaceStatus =
 export type RuntimeStatus = "stopped" | "starting" | "ready" | "failed";
 
 /** Template identifiers for blank project creation. */
-export type ProjectTemplateId = "blank-static" | "nextjs" | "react-vite";
+export type ProjectTemplateId = "blank-static" | "nextjs" | "react-vite" | "expo-react-native";
 
 export interface CanonicalProject {
   id: string;

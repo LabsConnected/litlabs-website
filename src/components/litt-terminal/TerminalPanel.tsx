@@ -105,6 +105,64 @@ export const TerminalPanel = forwardRef<
     termRef.current = term;
     fitAddonRef.current = fit;
 
+    // Clipboard-friendly key handling:
+    //   Ctrl+V              → paste from clipboard
+    //   Ctrl+C (selected)   → copy selection, then clear it
+    //   Ctrl+C (no select)  → fall through to shell as SIGINT
+    //   Ctrl+Shift+C / +V   → copy / paste (terminal-native shortcuts)
+    // All other keys (Ctrl+A, Ctrl+L, etc.) pass through unchanged.
+    //
+    // CRITICAL: we call event.preventDefault() on every intercepted key.
+    // Returning false only tells xterm to skip its own keydown processing —
+    // it does NOT stop the browser from firing a native paste/copy event on
+    // xterm's hidden textarea. Without preventDefault the browser pastes
+    // AND our manual term.paste() pastes → duplicated input
+    // (e.g. "npm run buildnpm run build").
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+
+      const key = event.key.toLowerCase();
+
+      // Ctrl+V = paste (Windows-style). Don't also trigger on Ctrl+Shift+V
+      // so we don't double-paste — let the Shift variant fall through below.
+      if (event.ctrlKey && !event.shiftKey && key === "v") {
+        event.preventDefault();
+        navigator.clipboard.readText().then((text) => term.paste(text)).catch(() => {});
+        return false;
+      }
+
+      // Ctrl+Shift+V = paste (terminal-native)
+      if (event.ctrlKey && event.shiftKey && key === "v") {
+        event.preventDefault();
+        navigator.clipboard.readText().then((text) => term.paste(text)).catch(() => {});
+        return false;
+      }
+
+      // Ctrl+C: copy if text is selected, otherwise SIGINT to shell
+      if (event.ctrlKey && !event.shiftKey && key === "c") {
+        if (term.hasSelection()) {
+          event.preventDefault();
+          navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+          term.clearSelection();
+          return false;
+        }
+        return true; // let Ctrl+C reach the PTY as SIGINT
+      }
+
+      // Ctrl+Shift+C = copy (terminal-native)
+      if (event.ctrlKey && event.shiftKey && key === "c") {
+        if (term.hasSelection()) {
+          event.preventDefault();
+          navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+          term.clearSelection();
+          return false;
+        }
+        return true;
+      }
+
+      return true;
+    });
+
     term.writeln("\x1b[1;32m🔥 LiTT Terminal\x1b[0m");
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");

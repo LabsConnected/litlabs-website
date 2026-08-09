@@ -69,6 +69,16 @@ export const PROJECT_TEMPLATES: Record<
     buildCommand: "pnpm build",
     testCommand: "pnpm test",
   },
+  "expo-react-native": {
+    label: "Expo + React Native (Android-first)",
+    description: "Expo SDK 57 + React Native 0.86 + Expo Router. Android priority, iOS later.",
+    framework: "expo",
+    packageManager: "pnpm",
+    installCommand: "pnpm install",
+    developmentCommand: "pnpm --filter @litt/companion start",
+    buildCommand: "pnpm --filter @litt/companion check",
+    testCommand: "pnpm --filter @litt/companion typecheck",
+  },
 };
 
 function slugify(name: string): string {

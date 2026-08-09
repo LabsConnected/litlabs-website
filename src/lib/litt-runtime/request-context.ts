@@ -237,8 +237,10 @@ export function buildRunContextFromStudio(args: {
   memoryContext: string;
   runtimeContextHint?: Partial<RawCapabilities>;
   agentInstanceId?: string;
+  /** Server-side workspace execution availability from canonical runtime context. */
+  workspaceExecutionAvailable?: boolean;
 }): ResolvedRunContext {
-  const { userId, clerkId, studioCtx, history, memoryContext, runtimeContextHint, agentInstanceId } = args;
+  const { userId, clerkId, studioCtx, history, memoryContext, runtimeContextHint, agentInstanceId, workspaceExecutionAvailable } = args;
   const hint = runtimeContextHint ?? {};
 
   const capabilities: RawCapabilities = {
@@ -248,6 +250,7 @@ export function buildRunContextFromStudio(args: {
     activeBranch: hint.activeBranch ?? studioCtx.activeBranch ?? undefined,
     writeAccess: hint.writeAccess,
     workspaceStatus: hint.workspaceStatus,
+    workspaceExecutionAvailable: workspaceExecutionAvailable ?? hint.workspaceExecutionAvailable,
     selectedModelLabel: hint.selectedModelLabel,
     terminalExecution: hint.terminalExecution ?? (studioCtx.capabilities.terminalConnected ? "available" : "unavailable"),
     terminalStatus: hint.terminalStatus,

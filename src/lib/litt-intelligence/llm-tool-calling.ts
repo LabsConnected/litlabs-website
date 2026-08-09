@@ -1,0 +1,248 @@
+/**
+ * LLM Tool Calling — native structured tool/function calling.
+ *
+ * Autonomous mutations require native structured tool calling.
+ * Models without reliable tool calling are limited to conversation/PLAN
+ * or routed to a capable provider.
+ *
+ * This module:
+ *   1. Converts LiTT tool definitions to OpenAI-compatible function-calling format
+ *   2. Calls OpenRouter with tools enabled (non-streaming for tool-call rounds)
+ *   3. Parses tool_calls from the response
+ *   4. Formats tool results for feeding back to the LLM
+ *
+ * No text-parsed fake tool calls. If the model doesn't return structured
+ * tool_calls, there are no tool calls.
+ */
+
+import "server-only";
+
+import { SITE_URL } from "@/lib/siteConfig";
+
+// ─── Types ────────────────────────────────────────────────────────
+
+export interface ToolDefinition {
+  id: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface ToolCallRequest {
+  toolCallId: string;
+  toolId: string;
+  inputs: Record<string, unknown>;
+}
+
+export interface ToolCallResult {
+  toolCallId: string;
+  toolId: string;
+  result: unknown;
+  success: boolean;
+  error?: string;
+}
+
+export interface LLMToolCallResponse {
+  text: string;
+  toolCalls: ToolCallRequest[];
+  finishReason: string;
+  model: string;
+}
+
+// ─── OpenRouter tool format ───────────────────────────────────────
+
+interface OpenRouterTool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+interface OpenRouterMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+}
+
+export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.id.replace(/\./g, "_"),
+      description: tool.description,
+      parameters: tool.inputSchema,
+    },
+  }));
+}
+
+export function toToolDefinitionId(openRouterName: string): string {
+  return openRouterName.replace(/_/g, ".");
+}
+
+// ─── Call LLM with tools ──────────────────────────────────────────
+
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+function getOpenRouterKey(): string {
+  return process.env.OPENROUTER_API_KEY ?? "";
+}
+
+/**
+ * Call OpenRouter with native tool calling support.
+ * Non-streaming — used for tool-call rounds in the agent loop.
+ *
+ * If the model returns tool_calls, they are parsed and returned.
+ * If the model returns text only (no tool_calls), toolCalls is empty.
+ * We NEVER parse text to extract fake tool calls.
+ */
+export async function callLLMWithTools(
+  systemPrompt: string,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  tools: ToolDefinition[],
+  options?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    toolChoice?: "auto" | "required" | "none";
+  },
+): Promise<LLMToolCallResponse> {
+  const key = getOpenRouterKey();
+  if (!key) throw new Error("OPENROUTER_API_KEY not set");
+
+  const model = options?.model ?? "google/gemini-2.5-flash";
+  const openRouterTools = toOpenRouterTools(tools);
+
+  const body: Record<string, unknown> = {
+    model,
+    stream: false,
+    messages: [
+      { role: "system", content: systemPrompt } as OpenRouterMessage,
+      ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
+    ],
+    temperature: options?.temperature ?? 0.1,
+  };
+
+  if (options?.maxTokens) body.max_tokens = options.maxTokens;
+  if (openRouterTools.length > 0) {
+    body.tools = openRouterTools;
+    body.tool_choice = options?.toolChoice ?? "auto";
+  }
+
+  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      "HTTP-Referer": SITE_URL,
+      "X-Title": "LiTT",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`OpenRouter tool-call failed (${res.status}): ${txt.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const choice = data.choices?.[0];
+  if (!choice) {
+    return { text: "", toolCalls: [], finishReason: "empty", model: data.model ?? model };
+  }
+
+  const text: string = choice.message?.content ?? "";
+  const rawToolCalls = choice.message?.tool_calls ?? [];
+  const finishReason: string = choice.finish_reason ?? "stop";
+
+  const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw: {
+    id: string;
+    function: { name: string; arguments: string };
+  }) => {
+    let inputs: Record<string, unknown> = {};
+    try {
+      inputs = JSON.parse(raw.function.arguments);
+    } catch {
+      inputs = {};
+    }
+    return {
+      toolCallId: raw.id,
+      toolId: toToolDefinitionId(raw.function.name),
+      inputs,
+    };
+  });
+
+  return {
+    text,
+    toolCalls,
+    finishReason,
+    model: data.model ?? model,
+  };
+}
+
+// ─── Format tool results for LLM ──────────────────────────────────
+
+export function buildToolResultMessage(
+  result: ToolCallResult,
+): OpenRouterMessage {
+  const content = result.success
+    ? JSON.stringify(result.result).slice(0, 10_000)
+    : `Error: ${result.error ?? "Unknown error"}`;
+
+  return {
+    role: "tool",
+    tool_call_id: result.toolCallId,
+    content,
+  };
+}
+
+export function buildAssistantToolCallMessage(
+  toolCalls: ToolCallRequest[],
+  text: string,
+): OpenRouterMessage {
+  return {
+    role: "assistant",
+    content: text,
+    tool_calls: toolCalls.map((tc) => ({
+      id: tc.toolCallId,
+      type: "function" as const,
+      function: {
+        name: tc.toolId.replace(/\./g, "_"),
+        arguments: JSON.stringify(tc.inputs),
+      },
+    })),
+  };
+}
+
+/**
+ * Convert tool result to a human-readable summary for progress events.
+ */
+export function summarizeToolResult(toolId: string, result: unknown): string {
+  if (typeof result === "string") return result.slice(0, 200);
+  if (result && typeof result === "object") {
+    const obj = result as Record<string, unknown>;
+    if ("entries" in obj && Array.isArray(obj.entries)) {
+      return `${obj.entries.length} entries`;
+    }
+    if ("content" in obj) {
+      const content = String(obj.content);
+      return `${content.length} chars`;
+    }
+    if ("diff" in obj) {
+      const diff = String(obj.diff);
+      return `${diff.split("\n").length} diff lines`;
+    }
+    if ("exitCode" in obj) {
+      return `exit ${obj.exitCode}`;
+    }
+    if ("saved" in obj) return obj.saved ? "saved" : "not saved";
+    if ("deleted" in obj) return obj.deleted ? "deleted" : "not deleted";
+  }
+  return JSON.stringify(result).slice(0, 200);
+}

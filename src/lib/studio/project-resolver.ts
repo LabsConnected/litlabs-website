@@ -192,6 +192,15 @@ export function buildProjectContextBlock(ctx: ResolvedStudioContext): string {
 
   lines.push(`  Agent: ${ctx.activeAgentSlug}`);
   lines.push(`  Capabilities: ${ctx.capabilities.connectionSummary}`);
+  lines.push("");
+  lines.push("MOBILE APPLICATION (this repo also contains a mobile app):");
+  lines.push("  Path: packages/litt-companion");
+  lines.push("  Framework: Expo React Native (SDK 57, RN 0.86)");
+  lines.push("  Router: Expo Router");
+  lines.push("  Primary platform: Android");
+  lines.push("  Backend: https://litlabs.net");
+  lines.push("  Validation command: pnpm mobile:check");
+  lines.push("  Instructions: packages/litt-companion/LITT_MOBILE.md");
 
   return lines.join("\n");
 }

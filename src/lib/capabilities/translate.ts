@@ -17,6 +17,10 @@ export interface RawCapabilities {
   writeAccess?: boolean;
   /** Workspace preparation status (e.g. "ready", "preparing", "provisioning"). */
   workspaceStatus?: string;
+  /** Server-side workspace execution is available (verifyProjectWorkspace passed).
+   *  When true, LiTT can read, write, and execute commands in the workspace
+   *  via V2 tools — even if no browser PTY session is open. */
+  workspaceExecutionAvailable?: boolean;
   /** Human-readable label of the selected LLM model. */
   selectedModelLabel?: string;
   terminalExecution?: string;
@@ -131,6 +135,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
     terminalState = `Project terminal is unavailable (error).${stageMsg}`;
     terminalAction =
       "If the user asks about running commands, report the specific failure stage above. Do NOT offer to \"connect\" or \"fix\" the terminal — the system handles reconnection automatically. Say: \"The terminal encountered an error. The system will attempt to reconnect automatically. You can also click Retry in the terminal panel.\"";
+  } else if (caps.workspaceExecutionAvailable) {
+    // V2 workspace execution is available even without a browser PTY session.
+    // LiTT can read, write, and execute commands via workspace tools.
+    terminalState = `Workspace execution is available — LiTT can read files, write files, and run commands in the workspace. Terminal UI session not opened (open the Terminal drawer to start a PTY session).`;
+    terminalAction = "";
   } else {
     const stageMsg = termFailureStage
       ? ` Failure stage: ${termFailureStage.replace(/_/g, " ")}.`
@@ -293,11 +302,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- Never claim full repository access based only on an account connection. Distinguish: GitHub connected, repository selected, repository readable, and writes permitted.");
   parts.push("- When asked about repository status, report the exact repository name and branch if available. Example: 'Connected to owner/repo on branch main. Repository read access is available. Writes require approval. Terminal status: disconnected.'");
   parts.push("- Never guess terminal, voice, preview, or deployment status. Only report what the connection state above explicitly says.");
-  parts.push("- The terminal is ONLY connected when the state says \"connected and ready\" with a verified cwd. If it says \"connecting\", \"error\", or \"not connected\", the terminal is NOT available for command execution.");
+  parts.push("- The terminal PTY is ONLY connected when the state says \"connected and ready\" with a verified cwd. However, workspace execution (file read/write, command execution via V2 tools) is a SEPARATE capability — if workspace execution is available, you CAN read files, write files, and run commands even without an active PTY session.");
   parts.push("- NEVER offer to \"connect the terminal\", \"set up the terminal\", or \"fix the terminal connection\". The terminal connection is managed automatically by the system. You cannot initiate or repair terminal connections.");
   parts.push("- NEVER say \"I'll connect it\" or \"Let me set that up\" regarding the terminal. The system auto-provisions workspaces and auto-connects PTY sessions.");
   parts.push("- If the terminal is not connected, report the failure stage if available (e.g. \"workspace not provisioned\", \"socket unavailable\", \"auth failed\"). Do NOT claim you can resolve it.");
-  parts.push("- If the user asks you to run a command and the terminal is not connected, say: \"The terminal is not available right now. [Failure stage]. The system is attempting to reconnect automatically. You can check the Terminal panel for status or click Retry.\"");
+  parts.push("- If the user asks you to run a command and workspace execution is available, USE the workspace tools to execute the command. Do NOT say the terminal is not available. Only say the terminal is not available if workspace execution is also not available.");
   parts.push("- If voice is configured and the token service is healthy, voice is AVAILABLE even if the transport is not connected yet. Say \"voice is available\" not \"voice is disconnected\".");
   parts.push("- If voice configuration is unknown, say: Voice status is still being checked. Do not claim voice is working or unavailable.");
   parts.push("- NEVER say \"Yes, I can hear you\" or \"I can hear you\" merely because a text transcript arrived. Hearing is a real-time microphone state, not a transcript event.");
@@ -311,7 +320,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- If the user asks 'can you see through the camera', answer based on the Camera state above. If camera is active, say yes and explain they can capture a frame for you to analyze. If camera is not open, tell them to open the Camera tool.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
   parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
-  parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Report voice, GitHub, and terminal SEPARATELY. Example: 'Chat and Inworld voice are available. GitHub and the terminal are not connected, so build tools are currently unavailable.' Do NOT group voice with GitHub or terminal.");
+  parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. If workspace execution is available, say 'Workspace execution is available — I can read files, write files, and run commands.' Report voice, GitHub, and terminal SEPARATELY. Do NOT group voice with GitHub or terminal.");
   parts.push("- If the user wants to see raw diagnostics, they can open the Diagnostics view. Do not dump raw fields in normal conversation.");
 
   return {

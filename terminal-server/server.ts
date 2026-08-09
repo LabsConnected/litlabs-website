@@ -24,6 +24,7 @@ import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleLiTTCodeCommand } from "./litt-code";
+import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
   prepareWorkspace,
@@ -881,6 +882,18 @@ io.on("connection", (socket) => {
 
     socket.on("litt-code:command", async (input: string) => {
     if (typeof input !== "string") return;
+
+    // Mobile commands (litt mobile:check, mobile:start, etc.) are dispatched
+    // directly to the PTY as real shell commands — no LLM round-trip.
+    const mobileCmd = dispatchMobileCommand(input);
+    if (mobileCmd) {
+      const userId = socket.data.userId || "unknown";
+      auditCommand(userId, sessionId, mobileCmd.shellCommand, false);
+      socket.emit("terminal:output", `\r\n\x1b[36m📱 ${mobileCmd.label}\x1b[0m\r\n`);
+      ptyProcess.write(mobileCmd.shellCommand + "\r");
+      return;
+    }
+
     socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
     try {
       const reply = await handleLiTTCodeCommand(input);

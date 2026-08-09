@@ -206,19 +206,6 @@ export default function CommandStudioHeader({
         </span>
       )}
 
-      {/* DEMO badge — indicates demo/test environment */}
-      <span
-        className="hidden sm:inline shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider"
-        style={{
-          backgroundColor: "rgba(168,85,247,0.15)",
-          color: "#c084fc",
-          border: "1px solid rgba(168,85,247,0.3)",
-        }}
-        title="Demo environment"
-      >
-        DEMO
-      </span>
-
       {/* Workspace Status popover trigger — absorbs all permanent chips */}
       <button
         ref={statusTriggerRef}

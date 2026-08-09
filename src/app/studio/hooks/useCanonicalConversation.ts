@@ -33,6 +33,7 @@ export interface SendResult {
   persisted: boolean;
   reply?: string;
   errorKind?: SendErrorKind;
+  pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
 }
 
 const ACTIVE_PROJECT_KEY_PREFIX = "litt:active-project-id";
@@ -152,6 +153,7 @@ export function useCanonicalConversation({
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const activeAgentMode = useStudioAgentStore((s) => s.activeAgentMode);
   const activeAgentInstanceId = useStudioAgentStore((s) => s.activeAgentInstanceId);
+  const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
 
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -681,6 +683,7 @@ export function useCanonicalConversation({
             expectedRevision: revision,
             requestedAgentSlug: activeAgentId,
             agentMode: activeAgentMode,
+            executionMode,
             agentInstanceId: activeAgentInstanceId || undefined,
             provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
             category: isAutoBest ? "auto" : selectedModel.category,
@@ -862,6 +865,8 @@ export function useCanonicalConversation({
         let reasoningText = "";
         let donePayload: Record<string, unknown> | null = null;
         let errorPayload: { message?: string; partialText?: string } | null = null;
+        let pendingApprovalState: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null = null;
+        const toolActivity: Array<{ toolId: string; success?: boolean; summary: string }> = [];
 
         const flushUpdate = () => {
           getStore().updateMessage(activeConversationId, optimisticAssistantId, {
@@ -889,6 +894,18 @@ export function useCanonicalConversation({
                 message?: string;
                 partialText?: string;
                 detail?: { message?: string; partialText?: string };
+                toolId?: string;
+                success?: boolean;
+                summary?: string;
+                reason?: string;
+                pausedRunId?: string;
+                inputs?: Record<string, unknown>;
+                label?: string;
+                gitSha?: string;
+                check?: string;
+                passed?: boolean;
+                phase?: string;
+                step?: number;
               };
               if (evt.type === "text" && typeof evt.text === "string") {
                 assistantText += evt.text;
@@ -896,6 +913,32 @@ export function useCanonicalConversation({
               } else if (evt.type === "reasoning" && typeof evt.text === "string") {
                 reasoningText += evt.text;
                 flushUpdate();
+              } else if (evt.type === "tool_execution" && evt.toolId) {
+                toolActivity.push({
+                  toolId: evt.toolId,
+                  success: evt.success,
+                  summary: evt.summary ?? "",
+                });
+              } else if (evt.type === "pending_approval" && evt.toolId) {
+                pendingApprovalState = {
+                  toolId: evt.toolId,
+                  reason: evt.reason ?? "Approval required",
+                  pausedRunId: evt.pausedRunId,
+                  inputs: evt.inputs,
+                };
+              } else if (evt.type === "checkpoint" && evt.label) {
+                toolActivity.push({
+                  toolId: "checkpoint",
+                  summary: `Checkpoint: ${evt.label} (${evt.gitSha ?? ""})`,
+                });
+              } else if (evt.type === "build_start" && evt.check) {
+                toolActivity.push({ toolId: evt.check, summary: `Running ${evt.check}...` });
+              } else if (evt.type === "build_result" && evt.check) {
+                toolActivity.push({
+                  toolId: evt.check,
+                  success: evt.passed,
+                  summary: `${evt.check}: ${evt.passed ? "passed" : "failed"}`,
+                });
               } else if (evt.type === "done") {
                 donePayload = evt as unknown as Record<string, unknown>;
               } else if (evt.type === "error") {
@@ -949,19 +992,22 @@ export function useCanonicalConversation({
             id: assistantMsg.id,
             content: assistantMsg.content,
             reasoning: reasoningText || undefined,
-            status: "completed",
+            status: pendingApprovalState ? "awaiting_approval" : "completed",
             createdAt: assistantMsg.createdAt,
-            // CRITICAL: Update agent identity from the server response.
-            // This ensures the message identity always matches the backend run,
-            // not the composer state at the time the optimistic message was created.
             agentSlug: assistantMsg.agentSlug ?? activeAgentId as AgentSlug,
             agentMode: assistantMsg.agentMode ?? activeAgentMode,
+            pendingApproval: pendingApprovalState ?? undefined,
+            toolActivity: toolActivity.length > 0 ? toolActivity : undefined,
           });
 
           s3.setRevision((donePayload.revision as number) ?? expectedRevision + 1);
 
           if (donePayload.usedFallbackModel) {
             setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${donePayload.usedFallbackModel}.`);
+          }
+
+          if (pendingApprovalState) {
+            return { accepted: true, persisted: true, reply: assistantMsg.content, pendingApproval: pendingApprovalState };
           }
 
           return { accepted: true, persisted: true, reply: assistantMsg.content };
@@ -1017,7 +1063,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
+    [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
   );
 
   // Regenerate — calls canonical regenerate API

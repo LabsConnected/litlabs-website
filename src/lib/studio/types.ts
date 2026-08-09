@@ -18,7 +18,7 @@ export type AgentMode = "standard" | "builder" | "research" | "spark";
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
-export type MessageStatus = "pending" | "streaming" | "completed" | "failed" | "cancelled";
+export type MessageStatus = "pending" | "streaming" | "completed" | "failed" | "cancelled" | "awaiting_approval";
 
 export type MemoryType =
   | "user_preference"
@@ -64,6 +64,10 @@ export interface ConversationMessage {
   clientRequestId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** V2: Pending approval state when LiTT pauses for ACT-mode approval */
+  pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
+  /** V2: Tool activity log for progress display */
+  toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }> | null;
 }
 
 export interface ResolvedStudioContext {

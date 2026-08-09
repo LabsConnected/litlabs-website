@@ -10,12 +10,16 @@ export interface ChatMessage {
   agentSlug: AgentSlug | null;
   /** Agent mode that produced this message. Preserved across mode switches. */
   agentMode: AgentMode | null;
-  status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  status: "pending" | "streaming" | "completed" | "failed" | "cancelled" | "awaiting_approval";
   createdAt: string;
   parentMessageId: string | null;
   regenerationOfMessageId: string | null;
   /** Provider reasoning/thinking trace (client-side only, not persisted). */
   reasoning?: string;
+  /** V2: Pending approval state when LiTT pauses for ACT-mode approval */
+  pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
+  /** V2: Tool activity log for progress display */
+  toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }> | null;
 }
 
 // Zustand selectors are backed by useSyncExternalStore. Returning a fresh []
