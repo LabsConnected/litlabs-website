@@ -51,7 +51,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
       // Only intercept explicit "open the files panel" requests.
       // Questions about files/structure go to the LLM which now has
       // real file listing and reading from the agent loop.
-      /^(open|show|view|go to)\b.*\b(files?|file tree|file explorer)\b/i,
+      /^(open|show|view|go to|read)\b.*\b(files?|file tree|file explorer|component file)\b/i,
     ],
   },
   {
@@ -84,7 +84,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
       // Only intercept explicit "open the health panel" requests.
       // General health/lint/test questions go to the LLM which now has
       // real auto-inspection data from the agent loop.
-      /^(open|show|view|go to)\b.*\b(project health|quality checks?|health panel)\b/i,
+      /^(open|show|view|go to|run)\b.*\b(project health|quality checks?|health panel|health checks?)\b/i,
     ],
   },
   {
@@ -127,10 +127,9 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "run_command",
-    // Removed — run_command intent now goes to the LLM. The server-side
-    // agent loop and terminal.execute tool handle real command execution.
-    // Keeping the intent type for backwards compat but no patterns trigger it.
-    patterns: [],
+    patterns: [
+      /^run\b\s+\S/i,
+    ],
   },
   {
     intent: "generate_image",

@@ -167,12 +167,11 @@ export default function CommandStudioHeader({
 
   return (
     <header
-      className="flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap border-b px-3 sm:px-4"
+      className="glass-shell flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap border-b px-3 sm:px-4"
       style={{
         height: "var(--studio-header-h)",
-        backgroundColor: "var(--studio-surface)",
-        borderColor: "var(--studio-border)",
-        backdropFilter: "blur(12px)",
+        backgroundColor: "var(--glass-1)",
+        borderColor: "var(--border-soft)",
       }}
       data-testid="studio-header"
     >
@@ -194,11 +193,9 @@ export default function CommandStudioHeader({
           shown inside the project picker to avoid duplicate indicators */}
       {branch && repoConnected && (
         <span
-          className="hidden lg:inline shrink-0 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-bold"
+          className="glass-chip hidden lg:inline shrink-0 whitespace-nowrap px-2 py-0.5 text-[11px] font-bold"
           style={{
-            borderColor: "var(--studio-border)",
-            color: "var(--text-secondary)",
-            backgroundColor: "var(--studio-surface)",
+            color: "var(--text-soft)",
           }}
           title={`Branch: ${branch}`}
         >
@@ -211,11 +208,9 @@ export default function CommandStudioHeader({
         ref={statusTriggerRef}
         type="button"
         onClick={() => setStatusOpen((v) => !v)}
-        className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        className="glass-chip flex shrink-0 items-center gap-1.5 px-2 py-1 text-[12px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
-          borderColor: "var(--studio-border)",
-          color: "var(--text-secondary)",
-          backgroundColor: "var(--studio-surface)",
+          color: "var(--text-soft)",
         }}
         aria-label="Workspace status"
         aria-expanded={Boolean(statusOpen)}

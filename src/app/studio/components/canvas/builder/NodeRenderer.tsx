@@ -1,18 +1,9 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import {
-  Type,
-  Heading,
-  MousePointerClick,
   Image as ImageIcon,
-  CreditCard,
-  TextCursorInput,
-  FormInput,
-  Columns3,
   MoveVertical,
-  Square,
-  LayoutTemplate,
 } from "lucide-react";
 import type { CanvasNode, NodeStyles } from "./types";
 
@@ -58,6 +49,8 @@ function stylesToCSS(styles: NodeStyles): React.CSSProperties {
   if (styles.visible === false) css.display = "none";
   if (styles.minHeight) css.minHeight = styles.minHeight;
   if (styles.minWidth) css.minWidth = styles.minWidth;
+  if (styles.flex) css.flex = styles.flex;
+  if (styles.maxWidth) css.maxWidth = styles.maxWidth;
   return css;
 }
 
@@ -67,11 +60,29 @@ interface NodeRendererProps {
   onSelect: (id: string, e: React.MouseEvent) => void;
   onDragStart: (id: string, e: React.DragEvent) => void;
   onDragEnd: () => void;
+  onInlineEdit?: (nodeId: string, text: string) => void;
   children?: React.ReactNode;
 }
 
-function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, children }: NodeRendererProps) {
+function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, onInlineEdit, children }: NodeRendererProps) {
   const css = stylesToCSS(node.styles);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(node.props.text ?? "");
+  const editRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (isEditing && editRef.current) {
+      editRef.current.focus();
+      const range = document.createRange();
+      range.selectNodeContents(editRef.current);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [isEditing]);
+
+  const canEdit = (node.type === "heading" || node.type === "text" || node.type === "button") && onInlineEdit;
+
   const baseStyle: React.CSSProperties = {
     ...css,
     position: "relative",
@@ -88,9 +99,50 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
   };
 
   const handleDragStart = (e: React.DragEvent) => {
+    if (isEditing) { e.preventDefault(); return; }
     e.stopPropagation();
     onDragStart(node.id, e);
   };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (!canEdit) return;
+    e.stopPropagation();
+    setEditText(node.props.text ?? "");
+    setIsEditing(true);
+  };
+
+  const finishEditing = () => {
+    setIsEditing(false);
+    if (onInlineEdit && editText !== (node.props.text ?? "")) {
+      onInlineEdit(node.id, editText);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      finishEditing();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setIsEditing(false);
+    }
+  };
+
+  const selectionHandles = isSelected && !isEditing ? (
+    <>
+      {[
+        { top: -4, left: -4, cursor: "nwse-resize" },
+        { top: -4, right: -4, cursor: "nesw-resize" },
+        { bottom: -4, left: -4, cursor: "nesw-resize" },
+        { bottom: -4, right: -4, cursor: "nwse-resize" },
+      ].map((pos, i) => (
+        <div key={i} style={{ position: "absolute", width: 8, height: 8, borderRadius: 2, backgroundColor: "#9b4dff", border: "1.5px solid #fff", ...pos, cursor: pos.cursor }} />
+      ))}
+      <div style={{ position: "absolute", top: -20, left: -2, fontSize: 8, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", backgroundColor: "#9b4dff", padding: "1px 6px", borderRadius: 3, pointerEvents: "none", whiteSpace: "nowrap" }}>
+        {node.type}
+      </div>
+    </>
+  ) : null;
 
   // Render based on type
   switch (node.type) {
@@ -115,23 +167,31 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
               Drop components here
             </div>
           )}
+          {selectionHandles}
         </div>
       );
 
     case "heading": {
       const level = node.props.level ?? 2;
-      const Tag = (`h${level}` as keyof React.JSX.IntrinsicElements);
+      const Tag = `h${level}` as "h2";
       return (
         <Tag
+          ref={editRef as React.RefObject<HTMLHeadingElement>}
           style={baseStyle}
           onClick={handleSelect}
-          draggable
+          onDoubleClick={handleDoubleClick}
+          draggable={!isEditing}
           onDragStart={handleDragStart}
           onDragEnd={onDragEnd}
           data-node-id={node.id}
           data-node-type={node.type}
+          contentEditable={isEditing}
+          suppressContentEditableWarning
+          onBlur={finishEditing}
+          onKeyDown={handleKeyDown}
         >
-          {node.props.text || "Heading"}
+          {isEditing ? editText : (node.props.text || "Heading")}
+          {selectionHandles}
         </Tag>
       );
     }
@@ -139,15 +199,22 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
     case "text":
       return (
         <p
+          ref={editRef as React.RefObject<HTMLParagraphElement>}
           style={baseStyle}
           onClick={handleSelect}
-          draggable
+          onDoubleClick={handleDoubleClick}
+          draggable={!isEditing}
           onDragStart={handleDragStart}
           onDragEnd={onDragEnd}
           data-node-id={node.id}
           data-node-type={node.type}
+          contentEditable={isEditing}
+          suppressContentEditableWarning
+          onBlur={finishEditing}
+          onKeyDown={handleKeyDown}
         >
-          {node.props.text || "Text content"}
+          {isEditing ? editText : (node.props.text || "Text content")}
+          {selectionHandles}
         </p>
       );
 
@@ -155,15 +222,31 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
       return (
         <button
           type="button"
-          style={{ ...baseStyle, border: "none", cursor: "pointer" }}
+          style={{ ...baseStyle, border: "none", cursor: isEditing ? "text" : "pointer" }}
           onClick={handleSelect}
-          draggable
+          onDoubleClick={handleDoubleClick}
+          draggable={!isEditing}
           onDragStart={handleDragStart}
           onDragEnd={onDragEnd}
           data-node-id={node.id}
           data-node-type={node.type}
         >
-          {node.props.text || "Button"}
+          {isEditing ? (
+            <input
+              ref={editRef as React.RefObject<HTMLInputElement>}
+              type="text"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onBlur={finishEditing}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: "transparent", border: "none", outline: "none", color: "inherit", font: "inherit", textAlign: "inherit", width: "100%" }}
+              autoFocus
+            />
+          ) : (
+            node.props.text || "Button"
+          )}
+          {selectionHandles}
         </button>
       );
 
@@ -186,6 +269,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
               <ImageIcon size={24} opacity={0.4} />
             </div>
           )}
+          {selectionHandles}
         </div>
       );
 
@@ -215,6 +299,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           data-node-type={node.type}
         >
           <MoveVertical size={14} opacity={0.2} />
+          {selectionHandles}
         </div>
       );
 
@@ -222,6 +307,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
       return (
         <div style={baseStyle} onClick={handleSelect} data-node-id={node.id}>
           {node.type}
+          {selectionHandles}
         </div>
       );
   }

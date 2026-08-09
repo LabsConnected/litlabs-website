@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useCallback, useState } from "react";
+import { Sparkles, Plus } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { NodeRenderer } from "./NodeRenderer";
-import type { CanvasNode, NodeType } from "./types";
-import { createNode, PALETTE_ITEMS } from "./types";
+import type { NodeType } from "./types";
+import { createNode, PALETTE_ITEMS, SECTION_TEMPLATES, BREAKPOINT_WIDTHS } from "./types";
 
 function canHaveChildren(type: NodeType): boolean {
   return PALETTE_ITEMS.find((p) => p.type === type)?.canHaveChildren ?? false;
@@ -21,10 +22,15 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
   const addNodeObject = useCanvasBuilderStore((s) => s.addNodeObject);
   const moveNode = useCanvasBuilderStore((s) => s.moveNode);
   const dragSource = useCanvasBuilderStore((s) => s.dragSource);
+  const updateNodeProps = useCanvasBuilderStore((s) => s.updateNodeProps);
 
   const handleSelect = useCallback((id: string, e: React.MouseEvent) => {
     selectNode(id);
   }, [selectNode]);
+
+  const handleInlineEdit = useCallback((nodeId: string, text: string) => {
+    updateNodeProps(nodeId, { text });
+  }, [updateNodeProps]);
 
   const handleDragStart = useCallback((id: string, e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = "move";
@@ -144,6 +150,7 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
         onSelect={handleSelect}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onInlineEdit={handleInlineEdit}
       >
         {node.children.length > 0 && (
           <div style={{ display: "flex", flexDirection: node.styles.flexDirection ?? "column", gap: node.styles.gap ?? 0 }}>
@@ -166,6 +173,10 @@ export function CanvasStage() {
   const dragSource = useCanvasBuilderStore((s) => s.dragSource);
   const dropTargetId = useCanvasBuilderStore((s) => s.dropTargetId);
   const dropPosition = useCanvasBuilderStore((s) => s.dropPosition);
+  const zoom = useCanvasBuilderStore((s) => s.zoom);
+  const breakpoint = useCanvasBuilderStore((s) => s.breakpoint);
+  const previewMode = useCanvasBuilderStore((s) => s.previewMode);
+  const addSectionTemplate = useCanvasBuilderStore((s) => s.addSectionTemplate);
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragOverStage, setDragOverStage] = useState(false);
 
@@ -254,6 +265,8 @@ export function CanvasStage() {
   };
 
   const rootId = document.rootNodeIds[0];
+  const isEmpty = document.nodes[rootId]?.children.length === 0;
+  const bpWidth = BREAKPOINT_WIDTHS[breakpoint];
 
   return (
     <div
@@ -269,18 +282,54 @@ export function CanvasStage() {
       onDragLeave={handleStageDragLeave}
       onDrop={handleCombinedDrop}
     >
-      <div style={{ minHeight: "100%", padding: "24px", maxWidth: 900, margin: "0 auto" }}>
+      <div
+        style={{
+          minHeight: "100%",
+          padding: "24px",
+          margin: "0 auto",
+          width: previewMode ? `${bpWidth}px` : "100%",
+          maxWidth: previewMode ? `${bpWidth}px` : undefined,
+          transform: `scale(${zoom / 100})`,
+          transformOrigin: "top center",
+          transition: "width 0.2s ease",
+        }}
+      >
         {rootId && <TreeNodeView nodeId={rootId} />}
       </div>
 
-      {document.nodes[rootId]?.children.length === 0 && (
+      {isEmpty && (
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
           style={{ top: 64 }}
         >
-          <div className="text-center" style={{ color: "var(--text-muted)" }}>
-            <div className="text-[13px] font-bold mb-1">Drop components here</div>
-            <div className="text-[11px]">Drag from the left panel or drop image files</div>
+          <div className="text-center" style={{ color: "var(--glass-text-2)" }}>
+            <div
+              className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full"
+              style={{
+                background: "radial-gradient(circle, var(--glass-purple-soft), transparent 70%)",
+                border: "1px solid var(--glass-border-purple)",
+              }}
+            >
+              <Sparkles size={28} style={{ color: "var(--glass-purple)" }} />
+            </div>
+            <div className="text-[15px] font-black mb-1" style={{ color: "var(--glass-text-1)" }}>
+              Build visually with LiTT
+            </div>
+            <div className="text-[11px] mb-4">
+              Drag a component here or start with a ready-made section
+            </div>
+            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2">
+              {SECTION_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => addSectionTemplate(tpl, rootId)}
+                  className="glass-button-secondary px-3 py-2 text-[10px] font-bold rounded-lg"
+                >
+                  <Plus size={10} className="inline mr-1" />
+                  {tpl.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

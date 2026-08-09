@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from "react";
 import { ComponentPalette } from "./ComponentPalette";
 import { CanvasStage } from "./CanvasStage";
+import { CanvasToolbar } from "./CanvasToolbar";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { useCanvasBuilderStore } from "./store";
 
@@ -17,6 +18,9 @@ export function VisualCanvasBuilder() {
   const redo = useCanvasBuilderStore((s) => s.redo);
   const selectNode = useCanvasBuilderStore((s) => s.selectNode);
   const document = useCanvasBuilderStore((s) => s.document);
+  const nudgeNode = useCanvasBuilderStore((s) => s.nudgeNode);
+  const tool = useCanvasBuilderStore((s) => s.tool);
+  const setTool = useCanvasBuilderStore((s) => s.setTool);
 
   // Load persisted document on mount
   useEffect(() => {
@@ -59,8 +63,24 @@ export function VisualCanvasBuilder() {
     } else if (e.key === "Escape") {
       e.preventDefault();
       selectNode(null);
+    } else if (e.key === "v" && !cmd) {
+      setTool("select");
+    } else if (e.key === "h" && !cmd) {
+      setTool("pan");
+    } else if (e.key === "ArrowUp" && selectedNodeId) {
+      e.preventDefault();
+      nudgeNode(selectedNodeId, 0, e.shiftKey ? -10 : -1);
+    } else if (e.key === "ArrowDown" && selectedNodeId) {
+      e.preventDefault();
+      nudgeNode(selectedNodeId, 0, e.shiftKey ? 10 : 1);
+    } else if (e.key === "ArrowLeft" && selectedNodeId) {
+      e.preventDefault();
+      nudgeNode(selectedNodeId, e.shiftKey ? -10 : -1, 0);
+    } else if (e.key === "ArrowRight" && selectedNodeId) {
+      e.preventDefault();
+      nudgeNode(selectedNodeId, e.shiftKey ? 10 : 1, 0);
     }
-  }, [selectedNodeId, removeNode, copyNode, pasteNode, duplicateNode, undo, redo, selectNode, document.rootNodeIds]);
+  }, [selectedNodeId, removeNode, copyNode, pasteNode, duplicateNode, undo, redo, selectNode, document.rootNodeIds, nudgeNode, tool, setTool]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -68,18 +88,23 @@ export function VisualCanvasBuilder() {
   }, [handleKeyDown]);
 
   return (
-    <div className="flex h-full w-full overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
-      {/* Left: Component Palette */}
-      <div className="shrink-0" style={{ width: 180 }}>
-        <ComponentPalette />
-      </div>
+    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+      {/* Top toolbar */}
+      <CanvasToolbar />
 
-      {/* Center: Canvas Stage */}
-      <CanvasStage />
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: Component Palette */}
+        <div className="shrink-0" style={{ width: 200 }}>
+          <ComponentPalette />
+        </div>
 
-      {/* Right: Properties Panel */}
-      <div className="shrink-0" style={{ width: 260 }}>
-        <PropertiesPanel />
+        {/* Center: Canvas Stage */}
+        <CanvasStage />
+
+        {/* Right: Properties Panel */}
+        <div className="shrink-0" style={{ width: 280 }}>
+          <PropertiesPanel />
+        </div>
       </div>
     </div>
   );

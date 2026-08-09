@@ -50,6 +50,7 @@ const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
 const MusicTool = dynamic(() => import("../tools/MusicTool"), { ssr: false });
 const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false });
+const StudioPreviewPanel = dynamic(() => import("./StudioPreviewPanel"), { ssr: false });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const DesignCanvas = dynamic(() => import("../tools/DesignCanvas"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
@@ -84,7 +85,6 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType<Record<str
   audio: AudioTool,
   music: MusicTool,
   build: BuilderTool,
-  code: CanvasTool,
   agents: AgentTool,
   assets: GalleryTool,
   plugins: PluginsTool,
@@ -501,7 +501,7 @@ function CommandStudioContent() {
     if (destination === "studio") {
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
-      if (studioMode === "preview") return "build";
+      if (studioMode === "preview") return "code";
       // Work mode: dynamic surface state, not initial URL
       return workSurface === "builder" ? "build" : null;
     }
@@ -521,6 +521,7 @@ function CommandStudioContent() {
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
   const isCode = destination === "studio" && studioMode === "code";
+  const isPreview = destination === "studio" && studioMode === "preview";
 
   // Primary workspace tabs — always visible: Chat | Canvas | Code | Preview | Files
   // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
@@ -549,9 +550,9 @@ function CommandStudioContent() {
         className="studio-shell flex h-dvh w-full flex-col overflow-hidden"
         data-layout={theme.layoutStyle}
         style={{
-          backgroundColor: "transparent",
-          color: "var(--text-primary)",
-          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(155,77,255,0.08), transparent)",
+          backgroundColor: "var(--bg-main)",
+          color: "var(--text-main)",
+          backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139,92,246,0.06), transparent)",
         }}
       >
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
@@ -584,11 +585,11 @@ function CommandStudioContent() {
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
             <div
-              className="flex shrink-0 items-center gap-0.5 border-b px-2"
+              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
                 height: 36,
-                backgroundColor: "var(--studio-surface)",
-                borderColor: "var(--studio-border)",
+                backgroundColor: "var(--glass-1)",
+                borderColor: "var(--border-soft)",
               }}
             >
               {primaryTabs.map((t) => {
@@ -615,10 +616,10 @@ function CommandStudioContent() {
                         setDestination(t.destination);
                       }
                     }}
-                    className="relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all"
+                    className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
-                      color: isActive ? "var(--text-primary)" : "var(--text-muted)",
-                      backgroundColor: isActive ? "rgba(155,77,255,0.12)" : "transparent",
+                      color: isActive ? "var(--text-main)" : "var(--text-dim)",
+                      backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
                     }}
                     aria-label={t.label}
                   >
@@ -627,8 +628,8 @@ function CommandStudioContent() {
                       <span
                         className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
                         style={{
-                          background: "linear-gradient(90deg, var(--spark-primary), var(--violet-accent))",
-                          boxShadow: "0 0 6px var(--spark-primary)",
+                          background: "var(--purple)",
+                          boxShadow: "0 0 6px rgba(139,92,246,0.5)",
                         }}
                         aria-hidden
                       />
@@ -641,11 +642,11 @@ function CommandStudioContent() {
             {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
             {destination === "create" && (
               <div
-                className="flex shrink-0 items-center gap-0.5 border-b px-2"
+                className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
                 style={{
                   height: 32,
-                  backgroundColor: "var(--studio-surface)",
-                  borderColor: "var(--studio-border)",
+                  backgroundColor: "var(--glass-1)",
+                  borderColor: "var(--border-soft)",
                 }}
               >
                 {createTabs.map((t) => {
@@ -656,10 +657,10 @@ function CommandStudioContent() {
                       key={t.id}
                       type="button"
                       onClick={() => setCreateMode(t.id)}
-                      className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all"
+                      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                       style={{
-                        color: isActive ? "var(--spark-primary)" : "var(--text-muted)",
-                        backgroundColor: isActive ? "rgba(168,85,247,0.1)" : "transparent",
+                        color: isActive ? "var(--purple)" : "var(--text-dim)",
+                        backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
                       }}
                       aria-label={t.label}
                     >
@@ -706,6 +707,16 @@ function CommandStudioContent() {
                       branch={capabilities.activeBranch}
                       workspaceStatus={capabilities.workspaceStatus ?? null}
                       writeAccess={capabilities.writeAccess ?? true}
+                    />
+                  </div>
+                ) : isPreview ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioPreviewPanel
+                      projectId={capabilities.projectId}
+                      projectName={capabilities.projectName}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
                     />
                   </div>
                 ) : WorkspaceComponent ? (
@@ -998,7 +1009,7 @@ function StudioUnavailableSurface({
           ].map((tool) => (
             <a
               key={tool.label}
-              href={`?tool=${tool.dest === "studio" ? (tool.mode === "work" ? "chat" : tool.mode === "code" ? "code" : "build") : tool.mode}`}
+              href={`?tool=${tool.dest === "studio" ? (tool.mode === "work" ? "chat" : "code") : tool.mode}`}
               className="block rounded-lg border p-3 transition hover:opacity-80"
               style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}
             >

@@ -325,11 +325,10 @@ export default function CommandComposer({
   return (
     <div
       data-testid="studio-command-composer"
-      className="relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
+      className="glass-shell relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
       style={{
-        backgroundColor: "var(--studio-surface)",
-        borderColor: "var(--studio-border)",
-        backdropFilter: "blur(12px)",
+        backgroundColor: "var(--glass-1)",
+        borderColor: "var(--border-soft)",
       }}
     >
       {/* Context line: repository · branch · AUTO/ACT toggle */}
@@ -350,17 +349,16 @@ export default function CommandComposer({
         {/* PLAN / ACT / AUTO execution mode selector */}
         {onExecutionModeChange && (
           <div
-            className="flex shrink-0 items-center gap-0.5 rounded-md p-0.5"
-            style={{ backgroundColor: "rgba(255,255,255,0.04)" }}
+            className="glass-chip flex shrink-0 items-center gap-0.5 p-0.5"
             role="radiogroup"
             aria-label="Execution mode"
           >
             {(["plan", "act", "auto"] as const).map((mode) => {
               const isActive = executionMode === mode;
               const colors: Record<typeof mode, { bg: string; fg: string }> = {
-                plan: { bg: "rgba(59,130,246,0.12)", fg: "#3b82f6" },
-                act: { bg: "rgba(155,77,255,0.12)", fg: "#9b4dff" },
-                auto: { bg: "rgba(114,242,56,0.12)", fg: "#72f238" },
+                plan: { bg: "rgba(59,130,246,0.15)", fg: "#3b82f6" },
+                act: { bg: "var(--purple-soft)", fg: "var(--purple)" },
+                auto: { bg: "var(--green-soft)", fg: "var(--green)" },
               };
               const labels: Record<typeof mode, string> = {
                 plan: "PLAN",
@@ -436,15 +434,13 @@ export default function CommandComposer({
 
       {/* Input row — capped at composer max width, centered */}
       <div
-        className={`relative flex items-end gap-1.5 rounded-2xl border px-2 py-2 transition-all focus-within:border-purple-400/40 ${dragOver ? "border-purple-400/60 bg-purple-500/5" : ""}`}
+        className={`glass-panel relative flex items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
         style={{
-          borderColor: dragOver ? "rgba(168,85,247,0.4)" : "var(--studio-border-strong)",
-          backgroundColor: dragOver ? "rgba(168,85,247,0.04)" : "var(--studio-card)",
-          boxShadow: "var(--studio-glow-purple-soft)",
+          borderColor: dragOver ? "var(--glass-border-purple)" : "var(--border-soft)",
+          backgroundColor: dragOver ? "var(--purple-soft)" : "var(--glass-2)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
-          backdropFilter: "blur(8px)",
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

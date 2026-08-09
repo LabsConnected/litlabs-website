@@ -303,7 +303,8 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       id: "terminal.execute",
       name: "Terminal Execute",
       description: "Executes shell commands. Read-only commands (git status, ls, cat, tsc, lint, tests) run automatically. Mutation commands require approval.",
-      available: true,
+      available: ctx.terminalConnected,
+      unavailableReason: !ctx.terminalConnected ? "Terminal is disconnected" : undefined,
     },
     {
       id: "git.status",
@@ -344,6 +345,17 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       description: "Writes files to the project workspace (requires approval)",
       available: ctx.projectId !== null,
       unavailableReason: ctx.projectId === null ? "No active project selected" : undefined,
+    },
+    {
+      id: "workspace.write",
+      name: "Workspace Write",
+      description: "Writes files to the project workspace (requires approval)",
+      available: ctx.workspaceReady && ctx.terminalConnected,
+      unavailableReason: !ctx.workspaceReady
+        ? `Workspace is ${ctx.workspaceStatus}`
+        : !ctx.terminalConnected
+          ? "Terminal is disconnected"
+          : undefined,
     },
     {
       id: "weather.current",
@@ -540,8 +552,19 @@ export function explainUnavailableTool(toolId: string, ctx: RuntimeContextSnapsh
   switch (toolId) {
     case "terminal.execute":
     case "terminal.status":
-      // terminal.execute is now always available via server-side exec
+      if (!ctx.terminalConnected) {
+        return "The terminal is disconnected. Please connect the terminal to execute commands.";
+      }
       return "Terminal execution is available. Read-only commands run automatically; mutation commands require approval.";
+
+    case "workspace.write":
+      if (!ctx.workspaceReady) {
+        return `The workspace is ${ctx.workspaceStatus}. Wait for workspace provisioning to complete.`;
+      }
+      if (!ctx.terminalConnected) {
+        return "The terminal is disconnected. Connect the terminal to write to the workspace.";
+      }
+      return `Tool '${toolId}' is not available.`;
 
     case "repository.info":
       if (!ctx.repositoryConnected) {

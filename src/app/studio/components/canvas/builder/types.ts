@@ -52,6 +52,8 @@ export interface NodeStyles {
   visible?: boolean;
   minHeight?: string;
   minWidth?: string;
+  maxWidth?: string;
+  flex?: string;
 }
 
 export interface NodeProps {
@@ -77,6 +79,9 @@ export interface CanvasNode {
   metadata: {
     createdAt: number;
     updatedAt: number;
+    name?: string;
+    locked?: boolean;
+    hidden?: boolean;
   };
 }
 
@@ -263,3 +268,150 @@ export function createEmptyDocument(projectId?: string | null, conversationId?: 
     updatedAt: now,
   };
 }
+
+export type Breakpoint = "desktop" | "tablet" | "mobile";
+
+export const BREAKPOINT_WIDTHS: Record<Breakpoint, number> = {
+  desktop: 1280,
+  tablet: 768,
+  mobile: 375,
+};
+
+export interface SectionTemplate {
+  id: string;
+  label: string;
+  icon: string;
+  build: () => { node: CanvasNode; children: CanvasNode[] };
+}
+
+export const SECTION_TEMPLATES: SectionTemplate[] = [
+  {
+    id: "hero",
+    label: "Hero",
+    icon: "Sparkles",
+    build: () => {
+      const now = Date.now();
+      const section = createNode("section");
+      section.styles = { ...section.styles, padding: "80px 48px", display: "flex", flexDirection: "column", gap: 24, alignItems: "center", justifyContent: "center", minHeight: "400px", backgroundColor: "rgba(139,92,246,0.05)" };
+      const heading = createNode("heading");
+      heading.props = { text: "Build Something Amazing", level: 1 };
+      heading.styles = { fontSize: 48, fontWeight: "800", textAlign: "center", color: "var(--text-primary)" };
+      const text = createNode("text");
+      text.props = { text: "Your vision, powered by LiTTree. Start building your dream project today." };
+      text.styles = { fontSize: 16, textAlign: "center", color: "var(--text-secondary)", maxWidth: "500px" };
+      const btn = createNode("button");
+      btn.props = { text: "Get Started", href: "#" };
+      btn.styles = { padding: "12px 32px", borderRadius: 10, backgroundColor: "#9b4dff", color: "#fff", fontSize: 16, fontWeight: "700" };
+      section.children = [heading.id, text.id, btn.id];
+      heading.parentId = section.id;
+      text.parentId = section.id;
+      btn.parentId = section.id;
+      return { node: section, children: [heading, text, btn] };
+    },
+  },
+  {
+    id: "features",
+    label: "Features",
+    icon: "Grid3x3",
+    build: () => {
+      const now = Date.now();
+      const section = createNode("section");
+      section.styles = { ...section.styles, padding: "64px 48px", display: "flex", flexDirection: "column", gap: 32 };
+      const heading = createNode("heading");
+      heading.props = { text: "Features", level: 2 };
+      heading.styles = { fontSize: 32, fontWeight: "700", textAlign: "center", color: "var(--text-primary)" };
+      const columns = createNode("columns");
+      columns.props = { columns: 3 };
+      columns.styles = { display: "flex", flexDirection: "row", gap: 24 };
+      const cards: CanvasNode[] = [];
+      for (let i = 0; i < 3; i++) {
+        const card = createNode("card");
+        card.styles = { padding: "24px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", gap: 12, borderWidth: 1, borderColor: "var(--studio-border-strong)", borderStyle: "solid", flex: "1" };
+        const cardHeading = createNode("heading");
+        cardHeading.props = { text: ["Fast", "Secure", "Scalable"][i], level: 3 };
+        cardHeading.styles = { fontSize: 18, fontWeight: "700", color: "var(--text-primary)" };
+        const cardText = createNode("text");
+        cardText.props = { text: ["Lightning quick performance", "Enterprise-grade security", "Grows with your needs"][i] };
+        cardText.styles = { fontSize: 13, color: "var(--text-secondary)" };
+        card.children = [cardHeading.id, cardText.id];
+        cardHeading.parentId = card.id;
+        cardText.parentId = card.id;
+        cards.push(card, cardHeading, cardText);
+      }
+      const cardNodes = cards.filter((c) => c.type === "card");
+      columns.children = cardNodes.map((c) => c.id);
+      cardNodes.forEach((c) => { c.parentId = columns.id; });
+      section.children = [heading.id, columns.id];
+      heading.parentId = section.id;
+      columns.parentId = section.id;
+      return { node: section, children: [heading, columns, ...cards] };
+    },
+  },
+  {
+    id: "cta",
+    label: "CTA",
+    icon: "Megaphone",
+    build: () => {
+      const section = createNode("section");
+      section.styles = { ...section.styles, padding: "64px 48px", display: "flex", flexDirection: "column", gap: 24, alignItems: "center", backgroundColor: "rgba(139,92,246,0.08)", borderRadius: 16 };
+      const heading = createNode("heading");
+      heading.props = { text: "Ready to Start?", level: 2 };
+      heading.styles = { fontSize: 32, fontWeight: "700", textAlign: "center", color: "var(--text-primary)" };
+      const btn = createNode("button");
+      btn.props = { text: "Launch Project", href: "#" };
+      btn.styles = { padding: "14px 36px", borderRadius: 10, backgroundColor: "#9b4dff", color: "#fff", fontSize: 16, fontWeight: "700" };
+      section.children = [heading.id, btn.id];
+      heading.parentId = section.id;
+      btn.parentId = section.id;
+      return { node: section, children: [heading, btn] };
+    },
+  },
+  {
+    id: "pricing",
+    label: "Pricing",
+    icon: "Tag",
+    build: () => {
+      const section = createNode("section");
+      section.styles = { ...section.styles, padding: "64px 48px", display: "flex", flexDirection: "column", gap: 32 };
+      const heading = createNode("heading");
+      heading.props = { text: "Pricing", level: 2 };
+      heading.styles = { fontSize: 32, fontWeight: "700", textAlign: "center", color: "var(--text-primary)" };
+      const columns = createNode("columns");
+      columns.props = { columns: 3 };
+      columns.styles = { display: "flex", flexDirection: "row", gap: 24 };
+      const allChildren: CanvasNode[] = [heading, columns];
+      const plans = [
+        { name: "Starter", price: "$0", desc: "Perfect for trying out" },
+        { name: "Pro", price: "$29", desc: "For growing projects" },
+        { name: "Enterprise", price: "$99", desc: "Unlimited everything" },
+      ];
+      const cardNodes: CanvasNode[] = [];
+      for (const plan of plans) {
+        const card = createNode("card");
+        card.styles = { padding: "28px", borderRadius: 16, backgroundColor: "rgba(255,255,255,0.05)", display: "flex", flexDirection: "column", gap: 12, borderWidth: 1, borderColor: "var(--studio-border-strong)", borderStyle: "solid", flex: "1" };
+        const h = createNode("heading");
+        h.props = { text: plan.name, level: 3 };
+        h.styles = { fontSize: 20, fontWeight: "700", color: "var(--text-primary)" };
+        const price = createNode("heading");
+        price.props = { text: plan.price, level: 3 };
+        price.styles = { fontSize: 36, fontWeight: "800", color: "#9b4dff" };
+        const desc = createNode("text");
+        desc.props = { text: plan.desc };
+        desc.styles = { fontSize: 13, color: "var(--text-secondary)" };
+        const btn = createNode("button");
+        btn.props = { text: "Choose", href: "#" };
+        btn.styles = { padding: "10px 20px", borderRadius: 8, backgroundColor: "#9b4dff", color: "#fff", fontSize: 14, fontWeight: "600", textAlign: "center" };
+        card.children = [h.id, price.id, desc.id, btn.id];
+        h.parentId = card.id; price.parentId = card.id; desc.parentId = card.id; btn.parentId = card.id;
+        cardNodes.push(card);
+        allChildren.push(h, price, desc, btn);
+      }
+      columns.children = cardNodes.map((c) => c.id);
+      cardNodes.forEach((c) => { c.parentId = columns.id; });
+      section.children = [heading.id, columns.id];
+      heading.parentId = section.id;
+      columns.parentId = section.id;
+      return { node: section, children: allChildren };
+    },
+  },
+];

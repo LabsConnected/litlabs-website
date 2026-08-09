@@ -607,15 +607,14 @@ export default function StudioInspector({
       className={
         isSheet
           ? "flex flex-col w-full max-h-[80vh]"
-          : "hidden xl:flex flex-col w-70 shrink-0 border-l h-full"
+          : "glass-panel hidden xl:flex flex-col w-70 shrink-0 border-l h-full"
       }
       style={
         isSheet
           ? {}
           : {
-              backgroundColor: T.boxBg + "70",
-              borderColor: T.borderColor + "20",
-              backdropFilter: "blur(14px) saturate(180%)",
+              backgroundColor: "var(--glass-2)",
+              borderColor: "var(--border-soft)",
             }
       }
     >

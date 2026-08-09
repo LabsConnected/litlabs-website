@@ -106,39 +106,73 @@
 
   /* ============================================================
      LiTTree Glass OS — Unified design tokens
-     Premium dark glass system with controlled neon accents
+     Dark solid base + selective glass panels + purple AI glow
+     3 surface levels: shell (mild), panel (medium), chip (light)
      ============================================================ */
-  --glass-bg-0: #07050d;
-  --glass-bg-1: #0d0817;
 
-  --glass-surface-1: rgba(18, 13, 29, 0.72);
-  --glass-surface-2: rgba(26, 18, 42, 0.62);
-  --glass-surface-3: rgba(32, 22, 52, 0.78);
+  /* Solid base backgrounds — the app is mostly solid, not glass */
+  --bg-main: #07050d;
+  --bg-elevated: #0d0917;
+  --bg-solid: rgba(14, 10, 22, 0.96);
 
-  --glass-border: rgba(255, 255, 255, 0.09);
-  --glass-border-highlight: rgba(255, 255, 255, 0.14);
-  --glass-border-purple: rgba(139, 92, 246, 0.32);
-  --glass-border-green: rgba(156, 255, 59, 0.32);
+  /* Glass surfaces — applied selectively to important panels only */
+  --glass-1: rgba(20, 14, 34, 0.68);   /* shell: header, sidebar, bottom bar */
+  --glass-2: rgba(26, 18, 42, 0.72);   /* panel: chat, files, properties */
+  --glass-3: rgba(34, 24, 54, 0.78);   /* chip: quick actions, status, toggles */
 
-  --glass-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
-  --glass-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --glass-shadow-hover: 0 16px 45px rgba(0, 0, 0, 0.32), 0 0 28px rgba(139, 92, 246, 0.08);
+  /* Backward-compatible aliases */
+  --glass-bg-0: var(--bg-main);
+  --glass-bg-1: var(--bg-elevated);
+  --glass-surface-1: var(--glass-1);
+  --glass-surface-2: var(--glass-2);
+  --glass-surface-3: var(--glass-3);
 
-  --glass-blur: blur(18px) saturate(140%);
+  /* Borders — thin, subtle */
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --glass-border: var(--border-soft);
+  --glass-border-highlight: var(--border-strong);
+  --glass-border-purple: rgba(139, 92, 246, 0.35);
+  --glass-border-green: rgba(158, 255, 71, 0.32);
 
-  --glass-radius-sm: 10px;
-  --glass-radius-md: 16px;
-  --glass-radius-lg: 22px;
-  --glass-radius-xl: 28px;
+  /* Shadows — soft, not heavy */
+  --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.25);
+  --shadow-deep: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --glass-shadow: var(--shadow-soft);
+  --glass-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-shadow-hover: 0 14px 36px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(139, 92, 246, 0.12);
 
-  --glass-purple: #8b5cf6;
-  --glass-purple-soft: rgba(139, 92, 246, 0.18);
-  --glass-green: #9cff3b;
-  --glass-green-soft: rgba(156, 255, 59, 0.15);
+  /* Blur — low blur, not heavy */
+  --glass-blur: blur(16px) saturate(135%);
+  --glass-blur-light: blur(12px) saturate(130%);
 
-  --glass-text-1: #f7f5fb;
-  --glass-text-2: #aaa3b8;
-  --glass-text-3: #736d80;
+  /* Radii — consistent system */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+  --glass-radius-sm: var(--radius-sm);
+  --glass-radius-md: var(--radius-md);
+  --glass-radius-lg: var(--radius-lg);
+  --glass-radius-xl: var(--radius-xl);
+
+  /* Accent colors — purple = AI/nav, green = active/success */
+  --purple: #8b5cf6;
+  --purple-soft: rgba(139, 92, 246, 0.18);
+  --green: #9eff47;
+  --green-soft: rgba(158, 255, 71, 0.18);
+  --glass-purple: var(--purple);
+  --glass-purple-soft: var(--purple-soft);
+  --glass-green: var(--green);
+  --glass-green-soft: var(--green-soft);
+
+  /* Text — 3 levels */
+  --text-main: #f5f3fb;
+  --text-soft: #a8a2b8;
+  --text-dim: #7d7690;
+  --glass-text-1: var(--text-main);
+  --glass-text-2: var(--text-soft);
+  --glass-text-3: var(--text-dim);
 
   --glass-transition: 180ms ease;
   --glass-transition-fast: 120ms ease;
@@ -219,24 +253,64 @@
 
 /* ============================================
    LiTTree Glass OS — Utility Classes
+   3 surface levels: shell, panel, chip
+   Use selectively — NOT everything should be glass
    ============================================ */
+
+/* Surface 1 — App shell: header, sidebar, bottom bar */
+.glass-shell {
+  background: rgba(15, 10, 24, 0.72);
+  border: 1px solid var(--border-soft);
+  backdrop-filter: blur(16px) saturate(135%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+}
+
+/* Surface 2 — Main panels: chat, files, properties, canvas sidebars */
 .glass-panel {
   background:
-    linear-gradient(135deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)),
-    var(--glass-surface-1);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-inset), var(--glass-shadow);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border-radius: var(--glass-radius-lg);
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)),
+    var(--glass-2);
+  border: 1px solid var(--border-soft);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 36px rgba(0,0,0,0.28);
+  border-radius: var(--radius-lg);
 }
+
+/* Surface 3 — Utility cards: quick actions, status, chips, toggles */
+.glass-chip {
+  background: rgba(28, 20, 44, 0.7);
+  border: 1px solid var(--border-soft);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  border-radius: var(--radius-sm);
+}
+
+/* Active state — purple glow border for selected/active items */
+.glass-active {
+  border-color: rgba(139, 92, 246, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 0 0 1px rgba(139,92,246,0.18),
+    0 10px 30px rgba(139,92,246,0.12);
+}
+
+/* Solid panel — for readability-critical content (code, preview, terminal, logs) */
+.glass-solid {
+  background: var(--bg-solid);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+/* ── Backward-compatible aliases ── */
 
 .glass-card {
   background:
     linear-gradient(135deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008)),
-    var(--glass-surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--glass-radius-md);
+    var(--glass-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
   transition: transform var(--glass-transition), border-color var(--glass-transition), box-shadow var(--glass-transition);
 }
 
@@ -247,42 +321,42 @@
 }
 
 .glass-card-flat {
-  background: var(--glass-surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--glass-radius-md);
+  background: var(--glass-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
 }
 
 .glass-toolbar {
-  background: var(--glass-surface-3);
-  border: 1px solid var(--glass-border);
+  background: var(--glass-3);
+  border: 1px solid var(--border-soft);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .glass-button-primary {
-  background: linear-gradient(135deg, rgba(156,255,59,0.18), rgba(156,255,59,0.08));
+  background: linear-gradient(135deg, rgba(158,255,71,0.18), rgba(158,255,71,0.08));
   border: 1px solid var(--glass-border-green);
-  color: var(--glass-green);
-  border-radius: var(--glass-radius-sm);
+  color: var(--green);
+  border-radius: var(--radius-sm);
   transition: all var(--glass-transition-fast);
 }
 
 .glass-button-primary:hover {
-  background: linear-gradient(135deg, rgba(156,255,59,0.28), rgba(156,255,59,0.14));
-  box-shadow: 0 0 16px rgba(156,255,59,0.15);
+  background: linear-gradient(135deg, rgba(158,255,71,0.28), rgba(158,255,71,0.14));
+  box-shadow: 0 0 16px rgba(158,255,71,0.15);
 }
 
 .glass-button-secondary {
-  background: var(--glass-surface-2);
-  border: 1px solid var(--glass-border);
-  color: var(--glass-text-1);
-  border-radius: var(--glass-radius-sm);
+  background: var(--glass-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-main);
+  border-radius: var(--radius-sm);
   transition: all var(--glass-transition-fast);
 }
 
 .glass-button-secondary:hover {
   border-color: var(--glass-border-purple);
-  background: var(--glass-purple-soft);
+  background: var(--purple-soft);
 }
 
 .glass-status-pill {
@@ -293,15 +367,15 @@
   border-radius: 100px;
   font-size: 10px;
   font-weight: 700;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-surface-2);
-  color: var(--glass-text-2);
+  border: 1px solid var(--border-soft);
+  background: var(--glass-2);
+  color: var(--text-soft);
   white-space: nowrap;
 }
 
 .glass-status-pill.active {
   border-color: var(--glass-border-green);
-  color: var(--glass-green);
+  color: var(--green);
 }
 
 .glass-section-header {
@@ -309,7 +383,7 @@
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: var(--glass-text-3);
+  color: var(--text-dim);
 }
 
 .style-card-error::after {

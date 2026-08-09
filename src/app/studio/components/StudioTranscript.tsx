@@ -337,7 +337,7 @@ export default function StudioTranscript({
     <div
       ref={scrollRef}
       className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
-      style={{ color: "var(--text-primary)" }}
+      style={{ color: "var(--text-main)" }}
     >
       <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4" style={{ maxWidth: "var(--studio-composer-max-w)" }}>
         {messages.map((message, index) => {
@@ -427,15 +427,18 @@ export default function StudioTranscript({
                     wordBreak: "break-word",
                     borderColor: isFailed
                       ? "rgba(239,68,68,0.3)"
-                      : isUser ? "rgba(249,115,22,0.25)" : `${agentColor}26`,
+                      : isUser ? "var(--border-strong)" : "var(--border-soft)",
                     background: isFailed
                       ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
                       : isUser
-                        ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
+                        ? "var(--glass-3)"
                         : isStreaming
                           ? `linear-gradient(135deg, ${agentColor}14, rgba(255,255,255,0.03))`
-                          : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
-                    color: isUser ? "#fff" : "var(--text-primary)",
+                          : "var(--glass-2)",
+                    color: isUser ? "var(--text-main)" : "var(--text-main)",
+                    backdropFilter: "blur(12px) saturate(130%)",
+                    WebkitBackdropFilter: "blur(12px) saturate(130%)",
+                    boxShadow: "var(--shadow-soft)",
                   }}
                   aria-busy={showThinkingPlaceholder}
                 >

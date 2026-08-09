@@ -110,10 +110,10 @@ function RailButton({
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 hover:bg-white/8"
+      className={`group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 hover:bg-white/8 ${active ? "glass-active" : ""}`}
       style={{
-        color: active ? T.accentColor : "rgba(255,255,255,0.5)",
-        backgroundColor: active ? `${T.accentColor}15` : "transparent",
+        color: active ? "var(--purple)" : "rgba(255,255,255,0.5)",
+        backgroundColor: active ? "var(--purple-soft)" : "transparent",
       }}
       title={tool.label}
       aria-label={tool.label}
@@ -122,15 +122,15 @@ function RailButton({
         <span
           className="absolute -left-1 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full"
           style={{
-            backgroundColor: T.accentColor,
-            boxShadow: `0 0 8px ${T.accentColor}`,
+            backgroundColor: "var(--purple)",
+            boxShadow: "0 0 8px var(--purple)",
           }}
         />
       )}
       <Icon
         size={18}
         strokeWidth={active ? 2.2 : 1.7}
-        style={active ? { filter: `drop-shadow(0 0 4px ${T.accentColor}60)` } : undefined}
+        style={active ? { filter: "drop-shadow(0 0 4px rgba(139,92,246,0.4))" } : undefined}
         className="pointer-events-none transition-transform duration-200 group-hover:scale-110"
       />
       {/* Tooltip label on hover */}
@@ -168,10 +168,10 @@ export default function StudioSidebar({
           DESKTOP Tool Rail — 72px icon-only, hidden on mobile
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden md:flex h-full w-16 shrink-0 flex-col items-center border-r py-2"
+        className="glass-shell hidden md:flex h-full w-16 shrink-0 flex-col items-center border-r py-2"
         style={{
-          backgroundColor: "rgba(8,9,13,0.96)",
-          borderRight: "1px solid rgba(255,255,255,0.06)",
+          backgroundColor: "var(--glass-1)",
+          borderRight: "1px solid var(--border-soft)",
         }}
       >
         {/* Logo */}

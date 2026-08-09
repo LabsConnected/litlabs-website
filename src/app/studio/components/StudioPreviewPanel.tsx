@@ -17,6 +17,9 @@ interface PreviewPayload {
   runtimeStatus?: unknown;
   previewUrl?: unknown;
   runtimeError?: unknown;
+  framework?: unknown;
+  developmentCommand?: unknown;
+  packageManager?: unknown;
 }
 
 function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | null): { state: PreviewState; url: string | null; error: string | null } {
@@ -52,6 +55,8 @@ export default function StudioPreviewPanel({
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
+  const [framework, setFramework] = useState<string | null>(null);
+  const [devCommand, setDevCommand] = useState<string | null>(null);
 
   const authHeaders = useCallback(async (): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -81,6 +86,8 @@ export default function StudioPreviewPanel({
       setState(next.state);
       setPreviewUrl(next.url);
       setError(next.error);
+      setFramework(typeof payload.framework === "string" ? payload.framework : null);
+      setDevCommand(typeof payload.developmentCommand === "string" ? payload.developmentCommand : null);
       if (next.state === "ready") setFrameKey((value) => value + 1);
     } catch (loadError) {
       setState("offline");
@@ -92,9 +99,31 @@ export default function StudioPreviewPanel({
     void loadStatus();
   }, [loadStatus]);
 
+  // Refresh when refreshKey prop changes (used by CodeWorkspace split view)
   useEffect(() => {
     if (refreshKey > 0) void loadStatus(true);
   }, [loadStatus, refreshKey]);
+
+  // Listen for file change events from CodeWorkspace or other sources.
+  // This covers the standalone Preview tab which doesn't receive refreshKey.
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === projectId) {
+        void loadStatus(true);
+      }
+    };
+    window.addEventListener("studio:files-changed", handler);
+    return () => window.removeEventListener("studio:files-changed", handler);
+  }, [projectId, loadStatus]);
+
+  // Auto-poll while preparing or starting
+  useEffect(() => {
+    if (state !== "preparing" && state !== "loading") return;
+    const interval = setInterval(() => void loadStatus(true), 3000);
+    return () => clearInterval(interval);
+  }, [state, loadStatus]);
 
   const preparePreview = async () => {
     if (!projectId) return;
@@ -128,7 +157,14 @@ export default function StudioPreviewPanel({
       <div className="flex shrink-0 items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
         <Eye size={14} className="shrink-0" style={{ color: "var(--litt-primary)" }} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>{projectName ?? "Project preview"}</span>
+            {framework && (
+              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "rgba(139,92,246,0.12)", color: "#9b4dff" }}>
+                {framework}
+              </span>
+            )}
+          </div>
           <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }}>{repositoryName ?? "No repository"} · {branch ?? "Branch unavailable"}</div>
         </div>
         {/* Device mode selector */}
@@ -158,6 +194,11 @@ export default function StudioPreviewPanel({
           </div>
         )}
         <button type="button" onClick={() => void loadStatus(true)} disabled={state === "loading" || state === "preparing"} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh preview status" title="Refresh preview status"><RefreshCw size={13} className={state === "stale" ? "animate-spin" : ""} /></button>
+        {(state === "ready" || state === "stale" || state === "failed") && (
+          <button type="button" onClick={() => void preparePreview()} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8" aria-label="Restart preview" title="Restart preview runtime">
+            <RotateCcw size={13} />
+          </button>
+        )}
         {(state === "ready" || state === "stale") && (
           <button type="button" onClick={() => setMaximized((v) => !v)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8" aria-label={maximized ? "Exit fullscreen" : "Maximize preview"} title={maximized ? "Exit fullscreen" : "Maximize"}>
             {maximized ? <span className="text-[14px]">⤓</span> : <span className="text-[14px]">⤢</span>}
@@ -184,7 +225,7 @@ export default function StudioPreviewPanel({
             />
           </div>
         ) : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "preparing" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "preparing"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}
-        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}{label}</span>{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
+        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}{label}{devCommand && <span style={{ color: "var(--text-muted)" }}> · {devCommand}</span>}</span>{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
       </div>
     </div>
   );

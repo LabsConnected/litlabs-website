@@ -24,6 +24,9 @@ export async function GET(
     runtimeStatus: project.runtimeStatus,
     previewUrl: project.previewUrl,
     runtimeError: project.runtimeError,
+    framework: project.framework,
+    developmentCommand: project.developmentCommand,
+    packageManager: project.packageManager,
   });
 }
 

@@ -8,6 +8,8 @@ import {
   type NodeProps,
   type NodeStyles,
   type CanvasHistoryEntry,
+  type Breakpoint,
+  type SectionTemplate,
   createNode,
   createEmptyDocument,
   PALETTE_ITEMS,
@@ -25,6 +27,11 @@ interface CanvasBuilderStore {
   dragSource: { type: NodeType; fromPalette: boolean; nodeId?: string } | null;
   dropTargetId: string | null;
   dropPosition: "before" | "after" | "inside" | null;
+  zoom: number;
+  breakpoint: Breakpoint;
+  tool: "select" | "pan";
+  previewMode: boolean;
+  leftPanelTab: "components" | "layers";
 
   // Actions
   loadDocument: () => void;
@@ -37,6 +44,7 @@ interface CanvasBuilderStore {
   moveNode: (nodeId: string, newParentId: string, index?: number) => void;
   updateNodeProps: (nodeId: string, props: Partial<NodeProps>) => void;
   updateNodeStyles: (nodeId: string, styles: Partial<NodeStyles>) => void;
+  updateNodeMetadata: (nodeId: string, metadata: Partial<CanvasNode["metadata"]>) => void;
   duplicateNode: (nodeId: string) => void;
   copyNode: (nodeId: string) => void;
   pasteNode: (parentId: string) => void;
@@ -47,6 +55,14 @@ interface CanvasBuilderStore {
   getSelectedNode: () => CanvasNode | null;
   getNode: (nodeId: string) => CanvasNode | null;
   getChildren: (nodeId: string) => CanvasNode[];
+  setZoom: (zoom: number) => void;
+  setBreakpoint: (bp: Breakpoint) => void;
+  setTool: (tool: "select" | "pan") => void;
+  setPreviewMode: (preview: boolean) => void;
+  setLeftPanelTab: (tab: "components" | "layers") => void;
+  addSectionTemplate: (template: SectionTemplate, parentId: string) => void;
+  nudgeNode: (nodeId: string, dx: number, dy: number) => void;
+  getNodePath: (nodeId: string) => CanvasNode[];
 }
 
 function saveToStorage(doc: CanvasDocument) {
@@ -105,6 +121,11 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   dragSource: null,
   dropTargetId: null,
   dropPosition: null,
+  zoom: 100,
+  breakpoint: "desktop",
+  tool: "select",
+  previewMode: false,
+  leftPanelTab: "components",
 
   loadDocument: () => {
     const stored = loadFromStorage();
@@ -287,6 +308,24 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     saveToStorage(newDoc);
   },
 
+  updateNodeMetadata: (nodeId, metadata) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const updatedNode: CanvasNode = {
+      ...node,
+      metadata: { ...node.metadata, ...metadata, updatedAt: Date.now() },
+    };
+    const newDoc: CanvasDocument = {
+      ...doc,
+      nodes: { ...doc.nodes, [nodeId]: updatedNode },
+      version: doc.version + 1,
+      updatedAt: Date.now(),
+    };
+    set({ document: newDoc });
+    saveToStorage(newDoc);
+  },
+
   duplicateNode: (nodeId) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
@@ -368,6 +407,75 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     const node = doc.nodes[nodeId];
     if (!node) return [];
     return node.children.map((id) => doc.nodes[id]).filter(Boolean);
+  },
+
+  setZoom: (zoom) => set({ zoom: Math.max(25, Math.min(200, zoom)) }),
+  setBreakpoint: (bp) => set({ breakpoint: bp }),
+  setTool: (tool) => set({ tool }),
+  setPreviewMode: (preview) => set({ previewMode: preview }),
+  setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
+
+  addSectionTemplate: (template, parentId) => {
+    const { node: section, children } = template.build();
+    const doc = get().document;
+    const parent = doc.nodes[parentId];
+    if (!parent) return;
+    const allNewNodes: Record<string, CanvasNode> = { [section.id]: section };
+    for (const child of children) {
+      allNewNodes[child.id] = child;
+    }
+    const updatedParent: CanvasNode = {
+      ...parent,
+      children: [...parent.children, section.id],
+      metadata: { ...parent.metadata, updatedAt: Date.now() },
+    };
+    const newDoc: CanvasDocument = {
+      ...doc,
+      nodes: { ...doc.nodes, ...allNewNodes, [parentId]: updatedParent },
+      version: doc.version + 1,
+      updatedAt: Date.now(),
+    };
+    pushHistory(set, get, newDoc, `Add ${template.label} section`);
+    set({ document: newDoc, selectedNodeId: section.id });
+    saveToStorage(newDoc);
+  },
+
+  nudgeNode: (nodeId, dx, dy) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const currentMarginTop = node.styles.marginTop ?? 0;
+    const currentMarginLeft = node.styles.marginLeft ?? 0;
+    const updatedNode: CanvasNode = {
+      ...node,
+      styles: {
+        ...node.styles,
+        marginTop: currentMarginTop + dy,
+        marginLeft: currentMarginLeft + dx,
+      },
+      metadata: { ...node.metadata, updatedAt: Date.now() },
+    };
+    const newDoc: CanvasDocument = {
+      ...doc,
+      nodes: { ...doc.nodes, [nodeId]: updatedNode },
+      version: doc.version + 1,
+      updatedAt: Date.now(),
+    };
+    set({ document: newDoc });
+    saveToStorage(newDoc);
+  },
+
+  getNodePath: (nodeId) => {
+    const doc = get().document;
+    const path: CanvasNode[] = [];
+    let currentId: string | null = nodeId;
+    while (currentId) {
+      const n: CanvasNode | undefined = doc.nodes[currentId];
+      if (!n) break;
+      path.unshift(n);
+      currentId = n.parentId;
+    }
+    return path;
   },
 }));
 

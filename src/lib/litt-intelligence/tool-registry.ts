@@ -297,7 +297,7 @@ const MUTATION_APPROVAL: ApprovalPolicy = {
   neverAllow: false,
 };
 
-const _NEVER_ALLOW_APPROVAL: ApprovalPolicy = {
+const NEVER_ALLOW_APPROVAL: ApprovalPolicy = {
   required: true,
   autoApproveReadOnly: false,
   requireExplicitForMutations: true,
@@ -778,7 +778,7 @@ export function registerInternalTools(): void {
         enabled: true,
       },
     },
-    // ─── Terminal (enabled with safe read-only allowlist) ────────
+    // ─── Terminal (disabled by default — enable when terminal connects) ────────
     {
       tool: {
         id: "terminal.execute",
@@ -791,12 +791,12 @@ export function registerInternalTools(): void {
         requiredCapabilities: [],
         requiredPermissions: ["terminal:execute"],
         risk: "medium",
-        approvalPolicy: MUTATION_APPROVAL,
+        approvalPolicy: NEVER_ALLOW_APPROVAL,
         timeoutMs: 30000,
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false,
       },
       handler: lazyHandlers["terminal.execute"],
     },

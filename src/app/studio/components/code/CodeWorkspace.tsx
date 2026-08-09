@@ -7,14 +7,17 @@ import {
   ChevronRight,
   FileText,
   Folder,
+  FolderPlus,
   Loader2,
+  Pencil,
+  Plus,
   RefreshCw,
   Save,
+  Trash2,
   X,
   Code2,
   Eye,
   Columns2,
-  Terminal,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import StudioPreviewPanel from "../StudioPreviewPanel";
@@ -32,6 +35,52 @@ interface FileEntry {
 }
 
 type ViewMode = "code" | "split" | "preview";
+
+type DialogState =
+  | { kind: "file" | "folder"; directory: string; value: string }
+  | { kind: "rename"; sourcePath: string; value: string }
+  | null;
+
+type MutationAction = "write" | "delete" | "mkdir" | "rename";
+
+const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string; color: string; label: string }> = {
+  M: { bg: "rgba(227,179,65,0.15)", color: "#e3b341", label: "Modified" },
+  A: { bg: "rgba(114,242,56,0.15)", color: "#72f238", label: "Added" },
+  D: { bg: "rgba(239,68,68,0.15)", color: "#ef4444", label: "Deleted" },
+  U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
+  C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
+};
+
+function normalizePath(value: string): string {
+  const path = value.replace(/\\/g, "/").trim();
+  if (!path || path === ".") return ".";
+  if (path.startsWith("/") || path.includes("\0")) throw new Error("Invalid workspace path");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.some((segment) => segment === ".." || segment === ".")) {
+    throw new Error("Parent paths are not allowed");
+  }
+  return segments.join("/");
+}
+
+function parentPath(path: string): string {
+  const normalized = normalizePath(path);
+  const slash = normalized.lastIndexOf("/");
+  return slash === -1 ? "." : normalized.slice(0, slash);
+}
+
+function baseName(path: string): string {
+  const normalized = normalizePath(path);
+  return normalized.split("/").pop() ?? normalized;
+}
+
+function joinPath(directory: string, name: string): string {
+  const cleanName = name.trim();
+  if (!cleanName || cleanName === "." || cleanName === ".." || /[\\/\0]/.test(cleanName)) {
+    throw new Error("Use a single valid file or folder name");
+  }
+  const base = directory === "." ? "" : normalizePath(directory);
+  return base ? `${base}/${cleanName}` : cleanName;
+}
 
 const TEXT_EXTENSIONS = new Set([
   "astro", "css", "csv", "env", "html", "jsx", "json", "md", "mdx",
@@ -79,9 +128,11 @@ export function CodeWorkspace({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+  const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
 
   const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
@@ -104,12 +155,13 @@ export function CodeWorkspace({
   }, [authHeaders]);
 
   // Load directory
-  const loadDirectory = useCallback(async (dir: string) => {
+  const loadDirectory = useCallback(async (dir: string, silent = false) => {
     if (!projectId) return;
-    setLoading(true);
+    const safeDir = normalizePath(dir);
+    if (!silent) setLoading(true);
     setError(null);
     try {
-      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(dir)}`);
+      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDir)}`);
       if (!payload || !Array.isArray(payload.entries)) throw new Error("Malformed response");
       const items: FileEntry[] = payload.entries
         .filter((e: unknown) => e && typeof e === "object" && typeof (e as FileEntry).name === "string")
@@ -119,17 +171,45 @@ export function CodeWorkspace({
             name: raw.name,
             type: raw.type,
             size: raw.size,
-            path: dir === "." ? raw.name : `${dir}/${raw.name}`,
+            gitStatus: raw.gitStatus,
+            path: safeDir === "." ? raw.name : `${safeDir}/${raw.name}`,
           };
         })
         .sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-      setEntries((prev) => ({ ...prev, [dir]: items }));
+      setEntries((prev) => ({ ...prev, [safeDir]: items }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load files");
+      const msg = err instanceof Error ? err.message : "Failed to load files";
+      if ((msg.includes("Workspace not found") || msg.includes("Workspace not provisioned") || msg.includes("Workspace not ready")) && !preparing) {
+        setPreparing(true);
+        try {
+          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
+          if (prepPayload && prepPayload.workspaceStatus === "ready") {
+            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDir)}`);
+            if (retryPayload && Array.isArray(retryPayload.entries)) {
+              const retryItems: FileEntry[] = retryPayload.entries
+                .filter((e: unknown) => e && typeof e === "object" && typeof (e as FileEntry).name === "string")
+                .map((e: unknown) => {
+                  const raw = e as FileEntry;
+                  return { name: raw.name, type: raw.type, size: raw.size, gitStatus: raw.gitStatus, path: safeDir === "." ? raw.name : `${safeDir}/${raw.name}` };
+                })
+                .sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
+              setEntries((prev) => ({ ...prev, [safeDir]: retryItems }));
+              return;
+            }
+          }
+          setError(typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed");
+        } catch {
+          setError("Workspace was lost and could not be re-prepared automatically");
+        } finally {
+          setPreparing(false);
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson]);
+  }, [projectId, requestJson, preparing]);
 
   // Load root on mount
   useEffect(() => {
@@ -181,22 +261,83 @@ export function CodeWorkspace({
         method: "POST",
         body: JSON.stringify({ action: "write", path, content: tab.content }),
       });
-      // Mark as saved
       setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, original: t.content } : t));
-      // Refresh preview
+      void loadDirectory(parentPath(path), true);
       setPreviewRefreshKey((k) => k + 1);
+      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save file");
     } finally {
       setSaving(false);
     }
-  }, [projectId, requestJson, writeAccess, openTabs]);
+  }, [projectId, requestJson, writeAccess, openTabs, loadDirectory]);
+
+  // Generic mutation helper
+  const mutate = useCallback(async (action: MutationAction, body: Record<string, unknown>) => {
+    if (!projectId) throw new Error("No project selected");
+    if (!writeAccess) throw new Error("Workspace writes are unavailable");
+    await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files`, {
+      method: "POST",
+      body: JSON.stringify({ action, ...body }),
+    });
+  }, [projectId, requestJson, writeAccess]);
+
+  // Dialog submit (create file/folder, rename)
+  const submitDialog = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dialog) return;
+    setError(null);
+    try {
+      if (dialog.kind === "file") {
+        const path = joinPath(dialog.directory, dialog.value);
+        await mutate("write", { path, content: "" });
+        await loadDirectory(dialog.directory, true);
+        setDialog(null);
+        window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }));
+      } else if (dialog.kind === "folder") {
+        const path = joinPath(dialog.directory, dialog.value);
+        await mutate("mkdir", { path });
+        await loadDirectory(dialog.directory, true);
+        setDialog(null);
+        window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }));
+      } else if (dialog.kind === "rename") {
+        const path = normalizePath(dialog.sourcePath);
+        const newPath = joinPath(parentPath(path), dialog.value);
+        await mutate("rename", { path, newPath });
+        await loadDirectory(parentPath(path), true);
+        if (activeTab === path) {
+          setActiveTab(newPath);
+          setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, path: newPath } : t));
+        }
+        setDialog(null);
+        window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path: newPath } }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "File operation failed");
+    }
+  }, [dialog, mutate, loadDirectory, activeTab, projectId]);
 
   // Close tab
   const closeTab = useCallback((path: string) => {
     setOpenTabs((prev) => prev.filter((t) => t.path !== path));
     setActiveTab((prev) => prev === path ? null : prev);
   }, []);
+
+  // Delete entry
+  const deleteEntry = useCallback(async (entry: FileEntry) => {
+    if (!window.confirm(`Delete ${entry.path}? This cannot be undone.`)) return;
+    setError(null);
+    try {
+      await mutate("delete", { path: normalizePath(entry.path) });
+      await loadDirectory(parentPath(entry.path), true);
+      if (activeTab === entry.path || activeTab?.startsWith(`${entry.path}/`)) {
+        closeTab(entry.path);
+      }
+      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path: entry.path } }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  }, [mutate, loadDirectory, activeTab, closeTab, projectId]);
 
   // Update tab content
   const updateTabContent = useCallback((path: string, content: string) => {
@@ -225,6 +366,20 @@ export function CodeWorkspace({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [activeTab, saveFile]);
+
+  // Listen for external file change events (e.g. from Canvas or chat)
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === projectId) {
+        void loadDirectory(".", true);
+        setPreviewRefreshKey((k) => k + 1);
+      }
+    };
+    window.addEventListener("studio:files-changed", handler);
+    return () => window.removeEventListener("studio:files-changed", handler);
+  }, [projectId, loadDirectory]);
 
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;
@@ -296,22 +451,76 @@ export function CodeWorkspace({
         >
           <div className="sticky top-0 z-10 flex items-center justify-between px-2.5 py-2" style={{ backgroundColor: "var(--studio-surface)", borderBottom: "1px solid var(--studio-border)" }}>
             <span className="text-[10px] font-black uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Files</span>
-            <button
-              type="button"
-              onClick={() => projectId && void loadDirectory(".")}
-              className="rounded p-0.5 transition hover:bg-white/8"
-              style={{ color: "var(--text-muted)" }}
-              title="Refresh"
-            >
-              <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setDialog({ kind: "file", directory: ".", value: "" })}
+                disabled={!writeAccess}
+                className="rounded p-0.5 transition hover:bg-white/8 disabled:opacity-30"
+                style={{ color: "var(--text-muted)" }}
+                title="New file"
+              >
+                <Plus size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setDialog({ kind: "folder", directory: ".", value: "" })}
+                disabled={!writeAccess}
+                className="rounded p-0.5 transition hover:bg-white/8 disabled:opacity-30"
+                style={{ color: "var(--text-muted)" }}
+                title="New folder"
+              >
+                <FolderPlus size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={() => projectId && void loadDirectory(".")}
+                className="rounded p-0.5 transition hover:bg-white/8"
+                style={{ color: "var(--text-muted)" }}
+                title="Refresh"
+              >
+                <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+              </button>
+            </div>
           </div>
+          {/* Dialog: create file/folder or rename */}
+          {dialog && (
+            <form onSubmit={submitDialog} className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}>
+              <span className="min-w-0 truncate text-[9px]" style={{ color: "var(--text-muted)" }}>
+                {dialog.kind === "rename" ? `Rename ${baseName(dialog.sourcePath)}` : dialog.kind === "folder" ? "New folder" : "New file"}
+              </span>
+              <input
+                autoFocus
+                value={dialog.value}
+                onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
+                className="min-w-0 flex-1 rounded border bg-transparent px-1.5 py-1 text-[10px] outline-none"
+                style={{ borderColor: "var(--studio-border)", color: "var(--text-primary)" }}
+                aria-label="Name"
+              />
+              <button type="submit" className="rounded p-1" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }} aria-label="Confirm">
+                <Save size={10} />
+              </button>
+              <button type="button" onClick={() => setDialog(null)} className="rounded p-1 hover:bg-white/8" style={{ color: "var(--text-muted)" }} aria-label="Cancel">
+                <X size={10} />
+              </button>
+            </form>
+          )}
+          {preparing && (
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }}>
+              <Loader2 size={11} className="animate-spin" /> Preparing workspace…
+            </div>
+          )}
           <FileTree
             entries={entries}
             expanded={expanded}
             activePath={activeTab}
             onToggle={toggleFolder}
             onOpen={openFile}
+            onRename={(path, name) => setDialog({ kind: "rename", sourcePath: path, value: name })}
+            onDelete={deleteEntry}
+            onCreateFile={(dir) => setDialog({ kind: "file", directory: dir, value: "" })}
+            onCreateFolder={(dir) => setDialog({ kind: "folder", directory: dir, value: "" })}
+            writeAccess={writeAccess}
             loading={loading}
           />
         </div>
@@ -369,6 +578,39 @@ export function CodeWorkspace({
                   </button>
                 )}
               </div>
+
+              {/* Breadcrumb + quick actions */}
+              {activeTabData && (
+                <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}>
+                  <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-[10px]" style={{ color: "var(--text-muted)" }}>
+                    {activeTabData.path.split("/").map((seg, i, arr) => (
+                      <span key={i} className="flex items-center gap-0.5 shrink-0">
+                        {i > 0 && <span style={{ color: "var(--studio-border-strong)" }}>/</span>}
+                        <span style={{ color: i === arr.length - 1 ? "var(--text-primary)" : "var(--text-muted)", fontWeight: i === arr.length - 1 ? 700 : 400 }}>{seg}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {[
+                      { label: "Explain", prompt: `Explain what ${activeTabData.path} does` },
+                      { label: "Fix", prompt: `Find and fix bugs in ${activeTabData.path}` },
+                      { label: "Refactor", prompt: `Refactor ${activeTabData.path} for clarity` },
+                      { label: "Ask LiTT", prompt: `Review ${activeTabData.path}` },
+                    ].map((action) => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        onClick={() => window.dispatchEvent(new CustomEvent("studio:quick-action", { detail: { prompt: action.prompt } }))}
+                        className="rounded px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+                        style={{ color: "var(--text-muted)" }}
+                        title={action.prompt}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Monaco Editor */}
               <div className="min-h-0 flex-1">
@@ -439,6 +681,11 @@ function FileTree({
   activePath,
   onToggle,
   onOpen,
+  onRename,
+  onDelete,
+  onCreateFile,
+  onCreateFolder,
+  writeAccess,
   loading,
 }: {
   entries: Record<string, FileEntry[]>;
@@ -446,6 +693,11 @@ function FileTree({
   activePath: string | null;
   onToggle: (path: string) => void;
   onOpen: (path: string) => void;
+  onRename: (path: string, name: string) => void;
+  onDelete: (entry: FileEntry) => void;
+  onCreateFile: (dir: string) => void;
+  onCreateFolder: (dir: string) => void;
+  writeAccess: boolean;
   loading: boolean;
 }) {
   function renderDir(dir: string, depth: number): React.ReactNode {
@@ -455,36 +707,52 @@ function FileTree({
       const isExpanded = expanded.has(item.path);
       const isActive = activePath === item.path;
       const indent = depth * 12 + 8;
+      const name = item.name;
 
       if (item.type === "folder") {
         return (
           <div key={item.path}>
-            <button
-              type="button"
-              onClick={() => onToggle(item.path)}
-              className="flex w-full items-center gap-1 py-1 pr-2 text-left transition hover:bg-white/4"
-              style={{ paddingLeft: indent, color: "var(--text-secondary)" }}
-            >
-              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              <Folder size={12} style={{ color: "var(--text-muted)" }} />
-              <span className="truncate text-[11px] font-medium">{item.name}</span>
-            </button>
+            <div className="group flex items-center" style={{ paddingLeft: indent }}>
+              <button
+                type="button"
+                onClick={() => onToggle(item.path)}
+                className="flex flex-1 items-center gap-1 py-1 pr-1 text-left transition hover:bg-white/4"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <Folder size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="truncate text-[11px] font-medium">{name}</span>
+                {item.gitStatus && <GitBadge status={item.gitStatus} />}
+              </button>
+              <div className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+                <button type="button" onClick={() => onCreateFile(item.path)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-white/10 disabled:opacity-30" title={`New file in ${name}`}><Plus size={10} /></button>
+                <button type="button" onClick={() => onCreateFolder(item.path)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-white/10 disabled:opacity-30" title={`New folder in ${name}`}><FolderPlus size={10} /></button>
+                <button type="button" onClick={() => onRename(item.path, name)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-white/10 disabled:opacity-30" title="Rename"><Pencil size={10} /></button>
+                <button type="button" onClick={() => onDelete(item)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-red-500/10 disabled:opacity-30" title="Delete"><Trash2 size={10} /></button>
+              </div>
+            </div>
             {isExpanded && renderDir(item.path, depth + 1)}
           </div>
         );
       }
 
       return (
-        <button
-          key={item.path}
-          type="button"
-          onClick={() => onOpen(item.path)}
-          className="flex w-full items-center gap-1 py-1 pr-2 text-left transition hover:bg-white/4"
-          style={{ paddingLeft: indent + 16, color: isActive ? "#9b4dff" : "var(--text-secondary)" }}
-        >
-          <FileText size={11} style={{ color: isActive ? "#9b4dff" : "var(--text-muted)" }} />
-          <span className="truncate text-[11px] font-medium" style={{ fontWeight: isActive ? 700 : 400 }}>{item.name}</span>
-        </button>
+        <div key={item.path} className="group flex items-center" style={{ paddingLeft: indent + 16 }}>
+          <button
+            type="button"
+            onClick={() => onOpen(item.path)}
+            className="flex flex-1 items-center gap-1 py-1 pr-1 text-left transition hover:bg-white/4"
+            style={{ color: isActive ? "#9b4dff" : "var(--text-secondary)" }}
+          >
+            <FileText size={11} style={{ color: isActive ? "#9b4dff" : "var(--text-muted)" }} />
+            <span className="truncate text-[11px]" style={{ fontWeight: isActive ? 700 : 400 }}>{name}</span>
+            {item.gitStatus && <GitBadge status={item.gitStatus} />}
+          </button>
+          <div className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+            <button type="button" onClick={() => onRename(item.path, name)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-white/10 disabled:opacity-30" title="Rename"><Pencil size={10} /></button>
+            <button type="button" onClick={() => onDelete(item)} disabled={!writeAccess} className="rounded p-0.5 hover:bg-red-500/10 disabled:opacity-30" title="Delete"><Trash2 size={10} /></button>
+          </div>
+        </div>
       );
     });
   }
@@ -498,4 +766,17 @@ function FileTree({
   }
 
   return <div className="py-1">{renderDir(".", 0)}</div>;
+}
+
+function GitBadge({ status }: { status: NonNullable<FileEntry["gitStatus"]> }) {
+  const colors = GIT_BADGE_COLORS[status];
+  return (
+    <span
+      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded text-[7px] font-black"
+      style={{ backgroundColor: colors.bg, color: colors.color }}
+      title={colors.label}
+    >
+      {status}
+    </span>
+  );
 }

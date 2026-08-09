@@ -132,8 +132,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(destinationToLegacyTool("studio", "code")).toBe("code");
     });
 
-    it("Studio/Preview writes ?tool=build", () => {
-      expect(destinationToLegacyTool("studio", "preview")).toBe("build");
+    it("Studio/Preview writes ?tool=code (shares code workspace URL)", () => {
+      expect(destinationToLegacyTool("studio", "preview")).toBe("code");
     });
 
     it("More/camera writes ?tool=camera (not ?tool=plugins)", () => {

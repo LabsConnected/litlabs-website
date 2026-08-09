@@ -105,7 +105,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("studio", "work")).toBe("chat");
       expect(destinationToLegacyTool("studio", "code")).toBe("code");
       expect(destinationToLegacyTool("studio", "files")).toBe("canvas");
-      expect(destinationToLegacyTool("studio", "preview")).toBe("build");
+      expect(destinationToLegacyTool("studio", "preview")).toBe("code");
     });
 
     it("round-trips Create destinations back to legacy tools", () => {

@@ -137,7 +137,7 @@ export function destinationToLegacyTool(
       if (mode === "code") return "code";
       if (mode === "files") return "canvas";
       if (mode === "design") return "design";
-      if (mode === "preview") return "build";
+      if (mode === "preview") return "code";
       return "chat";
     case "create":
       if (mode === "video") return "video";
