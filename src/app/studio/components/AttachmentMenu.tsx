@@ -254,6 +254,12 @@ export default function AttachmentMenu({
         style={{
           ...style,
           width: showLinkInput ? 280 : 240,
+          maxHeight: "80vh",
+          overflowY: "auto",
+          backgroundColor: "rgba(13, 9, 22, 0.95)",
+          borderColor: "var(--studio-border-strong, rgba(155, 77, 255, 0.2))",
+          backdropFilter: "blur(16px)",
+          boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)",
         }}
         className="rounded-xl border p-1.5 shadow-2xl"
         data-testid="attachment-menu"

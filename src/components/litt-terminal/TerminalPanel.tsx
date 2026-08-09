@@ -28,6 +28,7 @@ interface TerminalPanelProps {
   onCommand?: (cmd: string) => void;
   onConnectionChange?: (connected: boolean) => void;
   onTerminalOutput?: (output: string) => void;
+  visible?: boolean;
 }
 
 export interface TerminalPanelHandle {
@@ -39,7 +40,7 @@ export const TerminalPanel = forwardRef<
   TerminalPanelHandle,
   TerminalPanelProps
 >(function TerminalPanel(
-  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput },
+  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput, visible },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -539,6 +540,22 @@ export const TerminalPanel = forwardRef<
     onTerminalOutput,
   ]);
 
+  useEffect(() => {
+    if ((visible || fullScreen) && termRef.current && fitAddonRef.current) {
+      // Delay slightly to allow the DOM transition/display update to complete
+      const timer = setTimeout(() => {
+        try {
+          fitAddonRef.current?.fit();
+          socketRef.current?.emit("terminal:resize", {
+            cols: termRef.current?.cols ?? 80,
+            rows: termRef.current?.rows ?? 24,
+          });
+        } catch { /* noop */ }
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, fullScreen]);
+
   useImperativeHandle(ref, () => ({
     insertCommand: (cmd: string) => {
       const term = termRef.current;
@@ -606,7 +623,7 @@ export const TerminalPanel = forwardRef<
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className={`flex h-full flex-col ${fullScreen ? "fixed inset-0 z-[10000] h-screen w-screen bg-[#0d0916] p-4" : ""}`}>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="min-w-0 flex-1 text-sm">
           {/* Connection state — only "connected" when PTY is verified */}
@@ -765,10 +782,41 @@ export const TerminalPanel = forwardRef<
         </div>
       </div>
 
-      <div
-        ref={containerRef}
-        className={`flex-1 overflow-hidden p-3 ${fullScreen ? "fixed inset-0 z-[10000] h-screen w-screen bg-black" : ""}`}
-      />
+      <div className="relative flex-1 overflow-hidden mt-2">
+        <div className="relative h-full w-full overflow-hidden rounded-xl border border-purple-500/20 terminal-glow">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes terminal-pulse {
+              0% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
+              50% { box-shadow: 0 0 22px rgba(168, 85, 247, 0.35); border-color: rgba(168, 85, 247, 0.45); }
+              100% { box-shadow: 0 0 10px rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.2); }
+            }
+            @keyframes crt-flicker {
+              0% { opacity: 0.992; }
+              50% { opacity: 1; }
+              100% { opacity: 0.988; }
+            }
+            .crt-scanlines {
+              position: absolute;
+              inset: 0;
+              pointer-events: none;
+              background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.12) 50%
+              );
+              background-size: 100% 3px;
+              z-index: 10;
+            }
+            .terminal-glow {
+              animation: terminal-pulse 3s infinite alternate, crt-flicker 0.25s infinite;
+            }
+          `}} />
+          <div className="crt-scanlines" />
+          <div
+            ref={containerRef}
+            className="h-full w-full p-3 bg-black"
+          />
+        </div>
+      </div>
     </div>
   );
 });

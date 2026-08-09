@@ -440,69 +440,68 @@ export function StudioDrawer({
         </button>
       </div>
 
-      {open && (
+      <div
+        className="shrink-0 flex-col border-t"
+        style={{
+          display: open ? "flex" : "none",
+          backgroundColor: "var(--studio-surface)",
+          borderColor: "var(--studio-border)",
+          height: drawerHeight,
+        }}
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerUp}
+      >
+        {/* Drag-to-resize grip — drag up to enlarge, down to shrink */}
         <div
-          className="flex shrink-0 flex-col border-t"
-          style={{
-            backgroundColor: "var(--studio-surface)",
-            borderColor: "var(--studio-border)",
-            height: drawerHeight,
+          data-resize-grip="true"
+          className="group flex shrink-0 cursor-row-resize items-center justify-center border-b py-1 transition hover:bg-white/5"
+          style={{ borderColor: "var(--studio-border)", touchAction: "none" }}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Drag to resize panel"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h + 32)); }
+            if (e.key === "ArrowDown") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h - 32)); }
           }}
-          onPointerDown={onHandlePointerDown}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerUp}
         >
-          {/* Drag-to-resize grip — drag up to enlarge, down to shrink */}
           <div
             data-resize-grip="true"
-            className="group flex shrink-0 cursor-row-resize items-center justify-center border-b py-1 transition hover:bg-white/5"
-            style={{ borderColor: "var(--studio-border)", touchAction: "none" }}
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Drag to resize panel"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowUp") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h + 32)); }
-              if (e.key === "ArrowDown") { e.preventDefault(); setDrawerHeight((h) => clampHeight(h - 32)); }
-            }}
-          >
-            <div
-              data-resize-grip="true"
-              className="h-1 w-10 rounded-full bg-white/15 transition group-hover:bg-white/30 group-active:bg-[var(--litt-primary)]"
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-0.5 border-b px-1.5" style={{ borderColor: "var(--studio-border)" }}>
-            {DRAWER_TABS.map((t) => {
-              const Icon = t.icon;
-              const isActive = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onTabChange(t.id)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold transition"
-                  style={{
-                    color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                    borderBottom: isActive ? "2px solid var(--litt-primary)" : "2px solid transparent",
-                  }}
-                  aria-label={t.label}
-                >
-                  <Icon size={12} className="pointer-events-none" />
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {children ?? (
-              <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {activeTab === "terminal" ? "Terminal not connected" : activeTab === "media" ? "Media not loaded" : "No activity yet"}
-              </div>
-            )}
-          </div>
+            className="h-1 w-10 rounded-full bg-white/15 transition group-hover:bg-white/30 group-active:bg-[var(--litt-primary)]"
+          />
         </div>
-      )}
+        <div className="flex shrink-0 items-center gap-0.5 border-b px-1.5" style={{ borderColor: "var(--studio-border)" }}>
+          {DRAWER_TABS.map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onTabChange(t.id)}
+                className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold transition"
+                style={{
+                  color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
+                  borderBottom: isActive ? "2px solid var(--litt-primary)" : "2px solid transparent",
+                }}
+                aria-label={t.label}
+              >
+                <Icon size={12} className="pointer-events-none" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {children ?? (
+            <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {activeTab === "terminal" ? "Terminal not connected" : activeTab === "media" ? "Media not loaded" : "No activity yet"}
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 }

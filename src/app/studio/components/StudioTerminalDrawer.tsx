@@ -14,6 +14,7 @@ interface StudioTerminalDrawerProps {
   projectId: string | null;
   repositoryName?: string | null;
   branch?: string | null;
+  visible?: boolean;
 }
 
 /**
@@ -24,7 +25,7 @@ interface StudioTerminalDrawerProps {
  * This component renders ONLY a real PTY terminal with a compact
  * header showing project status.
  */
-export default function StudioTerminalDrawer({ projectId, repositoryName, branch }: StudioTerminalDrawerProps) {
+export default function StudioTerminalDrawer({ projectId, repositoryName, branch, visible }: StudioTerminalDrawerProps) {
   const [workspaceStatus, setWorkspaceStatus] = useState<"idle" | "preparing" | "ready" | "error">("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
@@ -173,7 +174,7 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
       {/* Terminal PTY — only render when workspace is ready or preparing */}
       <div className="min-h-0 flex-1 overflow-hidden">
         {(workspaceStatus === "ready" || workspaceStatus === "preparing") && (
-          <TerminalPanel projectId={projectId} repositoryName={repositoryName} branch={branch} />
+          <TerminalPanel projectId={projectId} repositoryName={repositoryName} branch={branch} visible={visible} />
         )}
       </div>
     </div>
