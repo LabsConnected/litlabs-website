@@ -866,11 +866,19 @@ function CommandStudioContent() {
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
             >
-              {drawerTab === "terminal" ? (
-                <StudioTerminalDrawer projectId={capabilities.projectId} repositoryName={capabilities.repositoryName} branch={capabilities.activeBranch ?? capabilities.defaultBranch} />
-              ) : drawerTab === "media" ? (
-                <MediaUtilityDock />
-              ) : (
+              {/* Keep the terminal mounted in the background to handle auto-connect and keep PTY alive */}
+              <div style={{ display: drawerTab === "terminal" ? "block" : "none", height: "100%" }}>
+                <StudioTerminalDrawer
+                  projectId={capabilities.projectId}
+                  repositoryName={capabilities.repositoryName}
+                  branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                  visible={drawerOpen && drawerTab === "terminal"}
+                />
+              </div>
+
+              {/* Render others conditionally since they don't have background workers */}
+              {drawerOpen && drawerTab === "media" && <MediaUtilityDock />}
+              {drawerOpen && drawerTab === "activity" && (
                 <StudioActivityPanel
                   messages={conversation.messages}
                   busy={conversation.busy}

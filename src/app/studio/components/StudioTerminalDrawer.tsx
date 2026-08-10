@@ -13,12 +13,13 @@ interface StudioTerminalDrawerProps {
   projectId: string | null;
   repositoryName?: string | null;
   branch?: string | null;
+  visible?: boolean;
 }
 
 type WorkspaceState = "idle" | "preparing" | "ready" | "error";
 type TerminalSessionState = "not_started" | "connecting" | "connected" | "disconnected" | "error";
 
-export default function StudioTerminalDrawer({ projectId, repositoryName, branch }: StudioTerminalDrawerProps) {
+export default function StudioTerminalDrawer({ projectId, repositoryName, branch, visible }: StudioTerminalDrawerProps) {
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceState>("idle");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSessionState>(() => {
@@ -171,6 +172,7 @@ export default function StudioTerminalDrawer({ projectId, repositoryName, branch
             projectId={projectId}
             repositoryName={repositoryName}
             branch={branch}
+            visible={visible}
             onConnectionChange={(connected) => {
               setTerminalSession(connected ? "connected" : "disconnected");
               try { localStorage.setItem("litt:terminalAutoStart", connected ? "1" : "0"); } catch {}

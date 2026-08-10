@@ -64,7 +64,7 @@ async function handler(req: NextRequest) {
 
     const health = await response.json();
 
-    if (!health.ok) {
+    if (health.status !== "ok" && !health.ok) {
       return NextResponse.json({
         ...baseCapability,
         status: "error",

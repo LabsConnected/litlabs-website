@@ -81,6 +81,11 @@ export async function POST(
     }
   }
 
+  // Recover stale provisioning locks before checking status.
+  // If a previous serverless invocation crashed after claiming the lock,
+  // the row stays `provisioning` forever without this recovery step.
+  await recoverStaleProvisioning(projectId, userId);
+
   // Ensure the project exists as a canonical studio_projects row before
   // we try to lock or update it. Legacy projects are migrated here explicitly.
   let canonical: CanonicalProject;
@@ -97,11 +102,6 @@ export async function POST(
       { status: 500 },
     );
   }
-
-  // Recover stale provisioning locks before checking status.
-  // If a previous serverless invocation crashed after claiming the lock,
-  // the row stays `provisioning` forever without this recovery step.
-  await recoverStaleProvisioning(projectId, userId);
 
   // If already provisioning, tell the client to poll
   if (canonical.workspaceStatus === "provisioning") {
