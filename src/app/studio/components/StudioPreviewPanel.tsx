@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Eye, Loader2, Monitor, RefreshCw, RotateCcw, Smartphone, Tablet } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
-type PreviewState = "loading" | "not_prepared" | "preparing" | "ready" | "stale" | "offline" | "failed";
+type PreviewState = "loading" | "not_prepared" | "starting" | "ready" | "stale" | "offline" | "failed" | "restarting";
 type DeviceMode = "desktop" | "tablet" | "mobile";
 
 const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: string }> = {
@@ -20,6 +20,8 @@ interface PreviewPayload {
   framework?: unknown;
   developmentCommand?: unknown;
   packageManager?: unknown;
+  logs?: unknown;
+  port?: unknown;
 }
 
 function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | null): { state: PreviewState; url: string | null; error: string | null } {
@@ -27,8 +29,11 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   const url = typeof payload.previewUrl === "string" && payload.previewUrl ? payload.previewUrl : null;
   const error = typeof payload.runtimeError === "string" && payload.runtimeError ? payload.runtimeError : null;
   if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null };
-  if (["starting", "preparing", "provisioning"].includes(runtimeStatus) || ["preparing", "provisioning"].includes(workspaceStatus ?? "")) return { state: "preparing", url, error };
-  if (runtimeStatus === "failed" || workspaceStatus === "failed" || workspaceStatus === "error") return { state: "failed", url, error: error ?? "Preview infrastructure reported a failure" };
+  if (runtimeStatus === "starting") return { state: "starting", url, error };
+  if (runtimeStatus === "restarting") return { state: "restarting", url, error };
+  if (runtimeStatus === "failed") return { state: "failed", url, error: error ?? "Preview dev server crashed or failed to start" };
+  if (["preparing", "provisioning"].includes(workspaceStatus ?? "")) return { state: "starting", url, error };
+  if (workspaceStatus === "failed" || workspaceStatus === "error") return { state: "failed", url, error: error ?? "Workspace preparation failed" };
   if (workspaceStatus !== "ready") return { state: "not_prepared", url, error };
   return { state: "offline", url, error };
 }
@@ -57,6 +62,9 @@ export default function StudioPreviewPanel({
   const [maximized, setMaximized] = useState(false);
   const [framework, setFramework] = useState<string | null>(null);
   const [devCommand, setDevCommand] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [iframeFailed, setIframeFailed] = useState(false);
 
   const authHeaders = useCallback(async (): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -72,6 +80,7 @@ export default function StudioPreviewPanel({
     }
     if (stale) setState((current) => current === "ready" ? "stale" : current);
     else setState("loading");
+    setIframeFailed(false);
     try {
       const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
         cache: "no-store",
@@ -94,6 +103,7 @@ export default function StudioPreviewPanel({
       setError(next.error);
       setFramework(typeof payload.framework === "string" ? payload.framework : null);
       setDevCommand(typeof payload.developmentCommand === "string" ? payload.developmentCommand : null);
+      setLogs(Array.isArray(payload.logs) ? payload.logs as string[] : []);
     } catch (loadError) {
       setState("offline");
       setError(loadError instanceof Error ? loadError.message : "Preview status is unavailable");
@@ -123,17 +133,18 @@ export default function StudioPreviewPanel({
     return () => window.removeEventListener("studio:files-changed", handler);
   }, [projectId, loadStatus]);
 
-  // Auto-poll while preparing or starting
+  // Auto-poll while starting, restarting, or loading
   useEffect(() => {
-    if (state !== "preparing" && state !== "loading") return;
+    if (state !== "starting" && state !== "restarting" && state !== "loading") return;
     const interval = setInterval(() => void loadStatus(true), 3000);
     return () => clearInterval(interval);
   }, [state, loadStatus]);
 
   const preparePreview = async () => {
     if (!projectId) return;
-    setState("preparing");
+    setState("starting");
     setError(null);
+    setIframeFailed(false);
     try {
       const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
         method: "POST",
@@ -154,8 +165,8 @@ export default function StudioPreviewPanel({
   };
 
   const displayUrl = previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
-  const label = state === "loading" ? "Checking preview status…" : state === "preparing" ? "Preparing preview…" : state === "ready" ? "Preview ready" : state === "stale" ? "Preview may be stale" : state === "not_prepared" ? "Preview not started" : state === "failed" ? "Preview failed" : "Preview unavailable";
-  const detail = state === "not_prepared" ? "The workspace needs preparation before a preview can start." : state === "offline" ? "The project preview endpoint is not currently available." : state === "stale" ? "A file changed. Refreshing the project preview status." : error ?? "The preview surface reports only real project runtime state.";
+  const label = state === "loading" ? "Checking preview status…" : state === "starting" ? "Starting dev server…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (iframeFailed ? "Preview failed to load" : "Preview ready") : state === "stale" ? "Preview may be stale" : state === "not_prepared" ? "Preview not started" : state === "failed" ? "Preview crashed" : "Preview unavailable";
+  const detail = state === "not_prepared" ? "The workspace needs preparation before a preview can start." : state === "offline" ? "The project preview endpoint is not currently available." : state === "starting" ? "Waiting for the dev server to respond…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed. Refreshing the project preview status." : error ?? "The preview surface reports only real project runtime state.";
 
   return (
     <div className={`flex flex-col gap-2 ${maximized ? "fixed inset-0 z-[300] p-3" : "h-full min-h-0"}`} data-testid="studio-preview-panel">
@@ -198,7 +209,7 @@ export default function StudioPreviewPanel({
             ))}
           </div>
         )}
-        <button type="button" onClick={() => void loadStatus(true)} disabled={state === "loading" || state === "preparing"} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh preview status" title="Refresh preview status"><RefreshCw size={13} className={state === "stale" ? "animate-spin" : ""} /></button>
+        <button type="button" onClick={() => void loadStatus(true)} disabled={state === "loading" || state === "starting" || state === "restarting"} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8 disabled:opacity-40" aria-label="Refresh preview status" title="Refresh preview status"><RefreshCw size={13} className={state === "stale" ? "animate-spin" : ""} /></button>
         {(state === "ready" || state === "stale" || state === "failed") && (
           <button type="button" onClick={() => void preparePreview()} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-white/8" aria-label="Restart preview" title="Restart preview runtime">
             <RotateCcw size={13} />
@@ -227,10 +238,19 @@ export default function StudioPreviewPanel({
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
               sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+              onLoad={() => setIframeFailed(false)}
+              onError={() => setIframeFailed(true)}
             />
           </div>
-        ) : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "preparing" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "preparing"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}
-        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}{label}{devCommand && <span style={{ color: "var(--text-muted)" }}> · {devCommand}</span>}</span>{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
+        ) : <div className="flex min-h-[260px] flex-1 flex-col items-center justify-center gap-3 px-5 text-center"><div className="grid h-11 w-11 place-items-center rounded-xl" style={{ backgroundColor: "rgba(114,242,56,0.08)", color: "var(--litt-primary)" }}>{state === "loading" || state === "starting" || state === "restarting" ? <Loader2 size={19} className="animate-spin" /> : <Eye size={19} />}</div><div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</div><div className="max-w-[250px] text-[10px] leading-4" style={{ color: "var(--text-muted)" }}>{detail}</div>{["not_prepared", "offline", "failed"].includes(state) && <button type="button" onClick={() => void preparePreview()} disabled={!projectId || state === "starting" || state === "restarting"} className="flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold disabled:opacity-40" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}><RotateCcw size={12} /> Prepare preview</button>}</div>}
+        {(state === "ready" || state === "stale") && <div className="flex shrink-0 items-center gap-2 border-t px-2 py-1.5" style={{ borderColor: "var(--studio-border)" }}><span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>{deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}{label}{devCommand && <span style={{ color: "var(--text-muted)" }}> · {devCommand}</span>}</span>{logs.length > 0 && <button type="button" onClick={() => setLogsOpen((v) => !v)} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}>Logs</button>}{previewUrl && <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")} className="flex min-h-10 items-center gap-1 rounded-md px-2 text-[9px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}><ExternalLink size={11} /> Open</button>}</div>}
+        {logsOpen && logs.length > 0 && (
+          <div className="max-h-32 shrink-0 overflow-auto border-t px-2 py-1.5 font-mono text-[9px] leading-3" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(0,0,0,0.15)", color: "var(--text-muted)" }}>
+            {logs.slice(-50).map((line, i) => (
+              <div key={i} className="truncate">{line}</div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

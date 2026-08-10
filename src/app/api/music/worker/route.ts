@@ -23,10 +23,18 @@ export const maxDuration = 300;
  * In development with no secret configured, the endpoint is open.
  */
 async function handler(req: NextRequest) {
+  // Security: allow either MUSIC_WORKER_SECRET or Vercel's CRON_SECRET.
+  // Vercel cron automatically sends x-vercel-cron-auth-token header.
   const workerSecret = process.env.MUSIC_WORKER_SECRET;
-  if (workerSecret) {
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (workerSecret || cronSecret) {
     const provided = req.headers.get("x-worker-secret");
-    if (provided !== workerSecret) {
+    const cronProvided = req.headers.get("x-vercel-cron-auth-token");
+    const authorized =
+      (workerSecret && provided === workerSecret) ||
+      (cronSecret && cronProvided === cronSecret);
+    if (!authorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }

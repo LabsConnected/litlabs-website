@@ -327,8 +327,9 @@ export default function CommandComposer({
       data-testid="studio-command-composer"
       className="glass-shell relative flex w-full min-w-0 flex-col gap-1.5 border-t px-2.5 py-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2"
       style={{
-        backgroundColor: "var(--glass-1)",
-        borderColor: "var(--border-soft)",
+        backgroundColor: "rgba(13,9,22,0.88)",
+        borderColor: "rgba(155,77,255,0.12)",
+        boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
       }}
     >
       {/* Context line: repository · branch · AUTO/ACT toggle */}
@@ -436,11 +437,12 @@ export default function CommandComposer({
       <div
         className={`glass-panel relative flex items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
         style={{
-          borderColor: dragOver ? "var(--glass-border-purple)" : "var(--border-soft)",
-          backgroundColor: dragOver ? "var(--purple-soft)" : "var(--glass-2)",
+          borderColor: dragOver ? "rgba(168,85,247,0.5)" : "rgba(155,77,255,0.15)",
+          backgroundColor: dragOver ? "rgba(168,85,247,0.08)" : "rgba(20,15,31,0.72)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.3)",
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -503,6 +505,7 @@ export default function CommandComposer({
             }}
             attachmentCount={attachments.length}
             anchorRect={attachAnchorRect}
+            triggerRef={attachTriggerRef}
           />
         )}
         {/* Hidden file input for fallback / project file */}
@@ -1009,7 +1012,13 @@ function AgentPopover({
   }, [onClose]);
 
   const left = Math.min(rect.left, window.innerWidth - 270);
-  const top = rect.top - 280 > 0 ? rect.top - 280 : rect.bottom + 6;
+  // Anchor above the trigger with 8px gap; fall below if not enough room
+  const popoverHeight = 260;
+  const gap = 8;
+  const roomAbove = rect.top - gap;
+  const top = roomAbove >= popoverHeight
+    ? rect.top - popoverHeight - gap
+    : rect.bottom + gap;
 
   return (
     <div
@@ -1124,7 +1133,13 @@ function ModelPopover({
   }, [onClose]);
 
   const left = Math.min(rect.left, window.innerWidth - 300);
-  const top = rect.top - 360 > 0 ? rect.top - 360 : rect.bottom + 6;
+  // Anchor above the trigger with 8px gap; fall below if not enough room
+  const popoverHeight = 350;
+  const gap = 8;
+  const roomAbove = rect.top - gap;
+  const top = roomAbove >= popoverHeight
+    ? rect.top - popoverHeight - gap
+    : rect.bottom + gap;
 
   return (
     <div

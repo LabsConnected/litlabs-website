@@ -719,8 +719,8 @@ function CommandStudioContent() {
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
                 height: 36,
-                backgroundColor: "var(--glass-1)",
-                borderColor: "var(--border-soft)",
+                backgroundColor: "rgba(13,9,22,0.85)",
+                borderColor: "rgba(155,77,255,0.1)",
               }}
             >
               {primaryTabs.map((t) => {
@@ -775,9 +775,9 @@ function CommandStudioContent() {
               <div
                 className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
                 style={{
-                  height: 32,
-                  backgroundColor: "var(--glass-1)",
-                  borderColor: "var(--border-soft)",
+                  height: 36,
+                  backgroundColor: "rgba(13,9,22,0.85)",
+                  borderColor: "rgba(155,77,255,0.1)",
                 }}
               >
                 {createTabs.map((t) => {
@@ -1217,7 +1217,13 @@ function StudioWorkSurface({
   // show a minimal spinner so users don't see the welcome screen flash.
   const isEmpty = messages.length === 0 && !loading;
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+    <div
+      className="relative flex h-full min-h-0 flex-col overflow-hidden"
+      style={{
+        background: "linear-gradient(180deg, var(--studio-surface) 0%, rgba(13,9,22,0.96) 100%)",
+      }}
+      data-studio-surface
+    >
       {fallbackNotice && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[10px] font-bold"

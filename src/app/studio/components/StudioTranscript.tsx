@@ -427,18 +427,22 @@ export default function StudioTranscript({
                     wordBreak: "break-word",
                     borderColor: isFailed
                       ? "rgba(239,68,68,0.3)"
-                      : isUser ? "var(--border-strong)" : "var(--border-soft)",
+                      : isUser ? "rgba(155,77,255,0.2)" : "rgba(155,77,255,0.12)",
                     background: isFailed
                       ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
                       : isUser
-                        ? "var(--glass-3)"
+                        ? "rgba(20,15,31,0.72)"
                         : isStreaming
                           ? `linear-gradient(135deg, ${agentColor}14, rgba(255,255,255,0.03))`
-                          : "var(--glass-2)",
+                          : "rgba(20,15,31,0.6)",
                     color: isUser ? "var(--text-main)" : "var(--text-main)",
                     backdropFilter: "blur(12px) saturate(130%)",
                     WebkitBackdropFilter: "blur(12px) saturate(130%)",
-                    boxShadow: "var(--shadow-soft)",
+                    boxShadow: isFailed
+                      ? "0 4px 16px rgba(239,68,68,0.1)"
+                      : isUser
+                        ? "0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)"
+                        : `0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.03), 0 0 12px rgba(155,77,255,0.04)`,
                   }}
                   aria-busy={showThinkingPlaceholder}
                 >

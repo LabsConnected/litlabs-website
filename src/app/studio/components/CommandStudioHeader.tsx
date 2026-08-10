@@ -146,32 +146,39 @@ export default function CommandStudioHeader({
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
-  // Truthful aggregate status — calculated from actual capabilities,
-  // never from provider count alone. "Workspace ready" requires a
-  // project (repo OR terminal) AND an AI provider.
+  // Truthful aggregate status — calculated from actual capabilities AND
+  // the real workspace readiness state. "Workspace available" requires
+  // the selected project's workspace to be verified ready (projectReady),
+  // not merely that repo/terminal capabilities exist.
   const hasProject = repoConnected || ptyAvailable;
-  const statusColor = hasProject && hasAi
+  const workspaceReady = Boolean(projectReady);
+  const statusColor = workspaceReady && hasAi
     ? "var(--litt-primary)"
-    : hasProject
+    : workspaceReady
       ? "#e3b341"
-      : hasAi
-        ? "var(--litt-primary)"
-        : "var(--text-muted)";
-  const statusLabel = hasProject && hasAi
+      : hasProject && hasAi
+        ? "#e3b341"
+        : hasAi
+          ? "var(--litt-primary)"
+          : "var(--text-muted)";
+  const statusLabel = workspaceReady && hasAi
     ? "Workspace available"
-    : hasProject
+    : workspaceReady
       ? "AI setup required"
-      : hasAi
-        ? "Chat ready"
-        : "Chat unavailable";
+      : hasProject && hasAi
+        ? "Preparing workspace…"
+        : hasAi
+          ? "Chat ready"
+          : "Chat unavailable";
 
   return (
     <header
       className="glass-shell flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap border-b px-3 sm:px-4"
       style={{
         height: "var(--studio-header-h)",
-        backgroundColor: "var(--glass-1)",
-        borderColor: "var(--border-soft)",
+        backgroundColor: "rgba(13,9,22,0.88)",
+        borderColor: "rgba(155,77,255,0.12)",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(155,77,255,0.04)",
       }}
       data-testid="studio-header"
     >

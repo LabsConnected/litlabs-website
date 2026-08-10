@@ -33,6 +33,15 @@ import {
   listWorkspaces,
   type WorkspaceDescriptor,
 } from "./workspace/WorkspaceManager";
+import {
+  startPreview,
+  stopPreview,
+  restartPreview,
+  getPreviewStatus,
+  getPreviewLogs,
+  verifyPreviewHealth,
+  type PreviewStatus,
+} from "./preview/PreviewManager";
 
 // ─── Service-to-service auth ───────────────────────────────────
 // Internal endpoints (under /internal/*) use a shared secret via
@@ -125,21 +134,6 @@ if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
       "PTY sessions will run directly on the host with no container isolation. " +
       "This is acceptable for Railway deployments but less secure than Docker mode. " +
       "Set TERMINAL_USE_DOCKER=true and provide a Docker daemon for full isolation.",
-  );
-}
-
-// Warn if workspace root is the ephemeral default in production — cloned
-// repositories and the workspace registry (.workspaces.json) will be lost
-// on every container restart. Operators should mount a persistent volume
-// and set TERMINAL_WORKSPACE_ROOT to that path.
-if (
-  process.env.NODE_ENV === "production" &&
-  (!process.env.TERMINAL_WORKSPACE_ROOT || WORKSPACE_ROOT.startsWith("/tmp"))
-) {
-  console.warn(
-    "[Terminal] WARNING: TERMINAL_WORKSPACE_ROOT is not set or points to /tmp. " +
-      "Workspaces will be lost on restart. Mount a persistent volume and set " +
-      "TERMINAL_WORKSPACE_ROOT to the mounted path (e.g. /data/littree-workspaces).",
   );
 }
 
@@ -465,6 +459,248 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
   // Pipe stdin to the child process if provided (e.g. for `git commit --file=-`)
   if (stdinInput !== undefined && child.stdin) {
     child.stdin.end(stdinInput);
+  }
+});
+
+// ─── Internal Preview Endpoints ────────────────────────────────────
+// These endpoints manage preview runtimes (dev servers) on the terminal
+// server. The browser never calls these directly — Next.js calls them
+// using TERMINAL_INTERNAL_SERVICE_KEY.
+
+/**
+ * POST /internal/workspace/:workspaceId/preview/start
+ * Start a preview dev server for the workspace.
+ */
+app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.body?.userId || "");
+  const framework = req.body?.framework ? String(req.body.framework) : undefined;
+  const command = req.body?.command ? String(req.body.command) : undefined;
+  const packageManager = req.body?.packageManager ? String(req.body.packageManager) : undefined;
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId" });
+    return;
+  }
+
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.userId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  if (!ws.ready) {
+    res.status(409).json({ error: "Workspace not ready" });
+    return;
+  }
+
+  try {
+    const runtime = await startPreview({ workspaceId, userId, framework, command, packageManager });
+    res.json({
+      workspaceId: runtime.workspaceId,
+      status: runtime.status,
+      port: runtime.port,
+      framework: runtime.framework,
+      command: runtime.command,
+      startedAt: runtime.startedAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /internal/workspace/:workspaceId/preview/status
+ * Get the current preview runtime status, with a live health check.
+ */
+app.get("/internal/workspace/:workspaceId/preview/status", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.query.userId || "");
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId query parameter" });
+    return;
+  }
+
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.userId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  // If runtime says ready, verify with a live health probe
+  const status = getPreviewStatus(workspaceId);
+  if (status.status === "ready") {
+    const healthy = await verifyPreviewHealth(workspaceId);
+    if (!healthy) {
+      // Process died — return the updated status
+      const updated = getPreviewStatus(workspaceId);
+      res.json(updated);
+      return;
+    }
+  }
+
+  res.json(status);
+});
+
+/**
+ * POST /internal/workspace/:workspaceId/preview/stop
+ * Stop the preview dev server.
+ */
+app.post("/internal/workspace/:workspaceId/preview/stop", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.body?.userId || "");
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId" });
+    return;
+  }
+
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.userId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  stopPreview(workspaceId);
+  res.json({ workspaceId, status: "stopped" });
+});
+
+/**
+ * POST /internal/workspace/:workspaceId/preview/restart
+ * Restart the preview dev server.
+ */
+app.post("/internal/workspace/:workspaceId/preview/restart", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.body?.userId || "");
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId" });
+    return;
+  }
+
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.userId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  try {
+    const runtime = await restartPreview(workspaceId);
+    res.json({
+      workspaceId: runtime.workspaceId,
+      status: runtime.status,
+      port: runtime.port,
+      framework: runtime.framework,
+      command: runtime.command,
+      startedAt: runtime.startedAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /internal/workspace/:workspaceId/preview/logs
+ * Get recent preview stdout/stderr logs.
+ */
+app.get("/internal/workspace/:workspaceId/preview/logs", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+  const userId = String(req.query.userId || "");
+  const lines = Math.min(Number(req.query.lines) || 100, 500);
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId query parameter" });
+    return;
+  }
+
+  const ws = getWorkspace(workspaceId);
+  if (!ws) {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (ws.userId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const logs = getPreviewLogs(workspaceId, lines);
+  res.json({ workspaceId, logs });
+});
+
+/**
+ * GET /preview/:workspaceId/*
+ * Public preview proxy — proxies HTTP requests to the workspace's
+ * dev server running on localhost:<port>. This is how the browser
+ * accesses the running application.
+ *
+ * Access is protected by a preview token query parameter.
+ */
+app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response) => {
+  const workspaceId = req.params.workspaceId;
+
+  // Verify preview token
+  const previewToken = String(req.query.token || req.headers["x-preview-token"] || "");
+  const expectedToken = process.env.PREVIEW_ACCESS_TOKEN ?? "";
+
+  if (expectedToken && previewToken !== expectedToken) {
+    res.status(401).json({ error: "Invalid preview token" });
+    return;
+  }
+
+  const status = getPreviewStatus(workspaceId);
+  if (status.status !== "ready" || !status.port) {
+    res.status(503).json({
+      error: "Preview not ready",
+      status: status.status,
+    });
+    return;
+  }
+
+  // Proxy the request to localhost:<port>
+  const targetUrl = `http://127.0.0.1:${status.port}${req.url.replace(/^\/preview\/[^/]+/, "")}`;
+  try {
+    const proxyResp = await fetch(targetUrl, {
+      method: req.method,
+      headers: {
+        ...req.headers as Record<string, string>,
+        host: `127.0.0.1:${status.port}`,
+      },
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : (req as any),
+      redirect: "manual",
+    });
+
+    // Forward status, headers, and body
+    res.status(proxyResp.status);
+    proxyResp.headers.forEach((value, key) => {
+      // Skip transfer-encoding header as express handles it
+      if (key.toLowerCase() !== "transfer-encoding") {
+        res.setHeader(key, value);
+      }
+    });
+
+    const body = await proxyResp.arrayBuffer();
+    res.send(Buffer.from(body));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: "Preview proxy error", detail: message });
   }
 });
 

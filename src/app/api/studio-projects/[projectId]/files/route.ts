@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace, getProject, updateProjectWorkspace } from "@/lib/projects/project-repository";
-import { getWorkspaceInternal, prepareWorkspaceInternal } from "@/lib/terminal-internal-client";
+import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
-import { getInstallationToken } from "@/lib/github-app";
+import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
 
 /**
  * Project-bound file operations.
@@ -40,60 +39,20 @@ export async function GET(
     try {
       verified = await verifyProjectWorkspace(projectId, userId);
     } catch (verifyErr) {
-      // Workspace might be stale (terminal server restarted).
-      // Try to auto-re-prepare before giving up.
       const code = (verifyErr as { code?: string }).code;
       if (code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY") {
-        // Check if the workspace still exists on the terminal server
-        const project = await getProject(projectId, userId);
-        if (project && project.workspaceId) {
-          const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
-          if (!ws) {
-            // Workspace was lost — reset and re-prepare
-            await updateProjectWorkspace(projectId, userId, {
-              workspaceId: null,
-              workspaceStatus: "not_prepared",
-              workspaceRoot: null,
-              workspaceError: null,
-            });
-
-            // Re-prepare
-            if (project.sourceType === "github" && project.githubInstallationId && project.githubOwner && project.githubRepo) {
-              const githubToken = await getInstallationToken(project.githubInstallationId);
-              const result = await prepareWorkspaceInternal({
-                sourceType: "github",
-                userId,
-                projectId,
-                installationId: project.githubInstallationId,
-                owner: project.githubOwner,
-                repo: project.githubRepo,
-                branch: project.githubBranch ?? "main",
-                commitSha: project.latestCommitSha,
-                githubToken,
-              });
-              await updateProjectWorkspace(projectId, userId, {
-                workspaceId: result.workspaceId,
-                workspaceStatus: "ready",
-                workspaceRoot: result.root,
-                workspaceError: null,
-              });
-              // Retry verification
-              verified = await verifyProjectWorkspace(projectId, userId);
-            } else {
-              throw verifyErr;
-            }
+        // Stale workspace — try auto-recovery via shared helper
+        try {
+          // Get current workspace ID from DB
+          const { getProject } = await import("@/lib/projects/project-repository");
+          const project = await getProject(projectId, userId);
+          if (project?.workspaceId) {
+            await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
+            verified = await verifyProjectWorkspace(projectId, userId);
           } else {
-            // Workspace exists but isn't marked ready — update status
-            await updateProjectWorkspace(projectId, userId, {
-              workspaceStatus: ws.ready ? "ready" : "preparing",
-            });
-            if (ws.ready) {
-              verified = await verifyProjectWorkspace(projectId, userId);
-            } else {
-              throw verifyErr;
-            }
+            throw verifyErr;
           }
-        } else {
+        } catch {
           throw verifyErr;
         }
       } else {
@@ -105,7 +64,7 @@ export async function GET(
     const path = request.nextUrl.searchParams.get("path") || ".";
     const { token } = createTerminalToken(userId);
 
-    const resp = await fetch(
+    let resp = await fetch(
       `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
       {
         headers: {
@@ -115,9 +74,32 @@ export async function GET(
       },
     );
 
+    // Stale workspace recovery: if the terminal server says the workspace
+    // doesn't exist (even though DB says ready), re-provision and retry once.
+    if (resp.status === 404) {
+      try {
+        const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+        if (recovered.reprepared) {
+          const newToken = createTerminalToken(userId);
+          resp = await fetch(
+            `${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${newToken.token}`,
+                "X-Workspace-Id": recovered.workspaceId,
+              },
+            },
+          );
+        }
+      } catch (recoveryErr) {
+        const msg = recoveryErr instanceof Error ? recoveryErr.message : "Workspace recovery failed";
+        return NextResponse.json({ error: msg }, { status: 503 });
+      }
+    }
+
     if (!resp.ok) {
       const text = await resp.text().catch(() => "Unknown error");
-      return NextResponse.json({ error: text }, { status: resp.status });
+      return NextResponse.json({ error: normalizeFileError(text) }, { status: resp.status });
     }
 
     return NextResponse.json(await resp.json());
@@ -172,18 +154,41 @@ export async function POST(
   }
 
   try {
-    const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
-    const { token } = createTerminalToken(userId);
+    let { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+    let token = createTerminalToken(userId);
 
-    const resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
+    let resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token.token}`,
         "X-Workspace-Id": workspaceId,
       },
       body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content }),
     });
+
+    // Stale workspace recovery for POST operations
+    if (resp.status === 404) {
+      try {
+        const recovered = await ensureWorkspaceAlive(projectId, userId, workspaceId);
+        if (recovered.reprepared) {
+          workspaceId = recovered.workspaceId;
+          token = createTerminalToken(userId);
+          resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token.token}`,
+              "X-Workspace-Id": workspaceId,
+            },
+            body: JSON.stringify({ path, newPath: action === "rename" ? newPath : undefined, content: body.content }),
+          });
+        }
+      } catch (recoveryErr) {
+        const msg = recoveryErr instanceof Error ? recoveryErr.message : "Workspace recovery failed";
+        return NextResponse.json({ error: msg }, { status: 503 });
+      }
+    }
 
     const ok = resp.ok;
 
@@ -204,7 +209,7 @@ export async function POST(
 
     if (!ok) {
       const text = await resp.text().catch(() => "Unknown error");
-      return NextResponse.json({ error: text }, { status: resp.status });
+      return NextResponse.json({ error: normalizeFileError(text) }, { status: resp.status });
     }
 
     return NextResponse.json(await resp.json());

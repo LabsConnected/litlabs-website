@@ -76,6 +76,8 @@ export interface AttachmentMenuProps {
   onProjectFile: () => void;
   attachmentCount: number;
   anchorRect: DOMRect | null;
+  /** Ref to the trigger button so outside-click can exclude it */
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 export default function AttachmentMenu({
@@ -90,6 +92,7 @@ export default function AttachmentMenu({
   onProjectFile,
   attachmentCount,
   anchorRect,
+  triggerRef,
 }: AttachmentMenuProps) {
   const [linkInput, setLinkInput] = useState("");
   const [showLinkInput, setShowLinkInput] = useState(false);
@@ -106,11 +109,16 @@ export default function AttachmentMenu({
     onClose();
   }, [onClose]);
 
-  // Close on outside click
+  // Close on outside click — excludes the trigger button to prevent
+  // the mousedown-close + click-reopen race.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        // Don't close if the click was on the trigger button itself —
+        // the trigger's onClick will handle toggling.
+        if (triggerRef?.current && triggerRef.current.contains(target)) return;
         handleClose();
       }
     };
@@ -122,6 +130,16 @@ export default function AttachmentMenu({
       clearTimeout(timer);
       document.removeEventListener("mousedown", handler);
     };
+  }, [open, handleClose, triggerRef]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
   }, [open, handleClose]);
 
   // Focus link input when shown

@@ -4,6 +4,7 @@
 export type GenerationStatus =
   | "idle"
   | "queued"
+  | "claimed"
   | "preparing"
   | "generating"
   | "processing"

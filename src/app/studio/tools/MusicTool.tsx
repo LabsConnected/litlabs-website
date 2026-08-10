@@ -404,7 +404,7 @@ export default function MusicTool() {
     }
   }, [status, refresh]);
 
-  const isBusy = isGenerating || ["queued", "preparing", "generating", "processing"].includes(status);
+  const isBusy = isGenerating || ["queued", "claimed", "preparing", "generating", "processing"].includes(status);
 
   // ── Style helpers ──────────────────────────────────────────────
   const labelStyle: CSSProperties = {

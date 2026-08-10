@@ -19,12 +19,14 @@ interface GenerationState {
   error: string | null;
   lbcCharged: number;
   lbcRefunded: boolean;
+  cancelRequestedAt: string | null;
   tracks: GenerationTrackPreview[];
 }
 
 const PROGRESS_MAP: Record<GenerationStatus, number> = {
   idle: 0,
   queued: 5,
+  claimed: 10,
   preparing: 15,
   generating: 50,
   processing: 80,
@@ -53,6 +55,7 @@ export function useMusicGeneration() {
     error: null,
     lbcCharged: 0,
     lbcRefunded: false,
+    cancelRequestedAt: null,
     tracks: [],
   });
   const [isGenerating, setIsGenerating] = useState(false);
@@ -94,13 +97,17 @@ export function useMusicGeneration() {
           lbcCharged: data.lbcCharged ?? prev.lbcCharged,
           lbcRefunded: data.lbcRefunded ?? prev.lbcRefunded,
           tracks: data.tracks ?? prev.tracks,
+          cancelRequestedAt: data.cancelRequestedAt ?? null,
         }));
 
-        // Stale-job detection: if the job has been queued for >30s without
-        // progress, trigger the worker endpoint to resume processing.
+        // Stale-job detection: if the job has been in a non-terminal state
+        // for >30s without progress, trigger the worker endpoint to resume.
         // This handles the case where the original serverless function was
-        // frozen/killed after returning 202.
-        if (status === "queued") {
+        // frozen/killed after returning 202. We check both 'queued' AND
+        // 'preparing'/'generating'/'processing' because the void processGeneration
+        // may have started but been killed mid-execution.
+        const activeStaleStates = ["queued", "preparing", "generating", "processing"];
+        if (activeStaleStates.includes(status)) {
           if (queuedSinceRef.current === null) {
             queuedSinceRef.current = Date.now();
           } else if (
@@ -141,6 +148,7 @@ export function useMusicGeneration() {
         error: null,
         lbcCharged: 0,
         lbcRefunded: false,
+        cancelRequestedAt: null,
         tracks: [],
       });
 
@@ -201,8 +209,10 @@ export function useMusicGeneration() {
 
     setIsCancelling(true);
     // Show "Cancelling..." state but do NOT mark as cancelled yet —
-    // wait for backend confirmation.
-    setState((prev) => ({ ...prev, status: "cancelled", progress: 0 }));
+    // wait for backend confirmation. The comment below originally said
+    // not to mark cancelled, but the very next line DID set status to
+    // "cancelled". This is now fixed — we keep the current status
+    // and only show the "Cancelling..." UI via isCancelling.
 
     try {
       const res = await fetch(

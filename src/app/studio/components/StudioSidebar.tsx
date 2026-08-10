@@ -168,8 +168,9 @@ export default function StudioSidebar({
       <aside
         className="glass-shell hidden md:flex h-full w-16 shrink-0 flex-col items-center border-r py-2"
         style={{
-          backgroundColor: "var(--glass-1)",
-          borderRight: "1px solid var(--border-soft)",
+          backgroundColor: "rgba(13,9,22,0.88)",
+          borderRight: "1px solid rgba(155,77,255,0.12)",
+          boxShadow: "inset -1px 0 0 rgba(155,77,255,0.04)",
         }}
       >
         {/* Logo */}

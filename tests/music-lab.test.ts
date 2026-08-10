@@ -41,8 +41,16 @@ describe("Music Lab P0.1 — UI lock fix", () => {
 
   it("Controls are not disabled on fresh page load (isBusy is false initially)", () => {
     const content = read("src/app/studio/tools/MusicTool.tsx");
-    // The isBusy check must not include "idle"
-    expect(content).toContain('["queued", "preparing", "generating", "processing"]');
+    // The isBusy check must not include "idle" — it should only list active states.
+    // "claimed" was added alongside the durable job recovery work (P0.2) and is a
+    // legitimate active state, so we assert against the full active-states set.
+    const isBusyMatch = content.match(/\["queued"[^\]]*\]\.includes\(status\)/);
+    expect(isBusyMatch).toBeTruthy();
+    expect(isBusyMatch![0]).not.toContain("idle");
+    expect(isBusyMatch![0]).toContain("queued");
+    expect(isBusyMatch![0]).toContain("preparing");
+    expect(isBusyMatch![0]).toContain("generating");
+    expect(isBusyMatch![0]).toContain("processing");
     // Generate button disabled condition uses isBusy
     expect(content).toMatch(/disabled=\{isBusy/);
   });

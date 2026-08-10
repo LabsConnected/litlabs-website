@@ -89,6 +89,7 @@ export interface GenerationStatusView {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  cancelRequestedAt: string | null;
   tracks: Array<Pick<MusicTrack, "id" | "title" | "versionLabel" | "duration" | "visibility">>;
 }
 
@@ -228,16 +229,12 @@ export async function createGeneration(
       .eq("id", generationId);
   }
 
-  // 8. Kick off processing. Do NOT await — the route returns 202 immediately.
-  void processGeneration({
-    generationId,
-    clerkId,
-    userId,
-    input,
-    blueprint,
-  }).catch(async (err) => {
-    await failGeneration(generationId, clerkId, errMessage(err));
-  });
+  // 8. Do NOT kick off processing here. The durable worker
+  //    (/api/music/worker, triggered by Vercel Cron every 2 minutes)
+  //    will pick up the queued job and process it. This avoids the
+  //    serverless background-job problem where `void processGeneration()`
+  //    can be frozen/killed after the HTTP response returns.
+  //    The client also triggers the worker when it detects a stale job.
 
   return {
     generationId,
@@ -261,7 +258,7 @@ export async function getGenerationStatus(
   const { data, error } = await admin
     .from("music_generations")
     .select(
-      "id, status, provider, provider_job_id, failure_reason, lbc_charged, lbc_refunded, created_at, started_at, completed_at",
+      "id, status, provider, provider_job_id, failure_reason, lbc_charged, lbc_refunded, created_at, started_at, completed_at, cancel_requested_at",
     )
     .eq("id", generationId)
     .eq("user_id", userId)
@@ -286,6 +283,7 @@ export async function getGenerationStatus(
     createdAt: data.created_at as string,
     startedAt: (data.started_at as string) || null,
     completedAt: (data.completed_at as string) || null,
+    cancelRequestedAt: (data.cancel_requested_at as string) || null,
     tracks: (tracks ?? []).map((t) => ({
       id: t.id as string,
       title: t.title as string,
@@ -315,35 +313,127 @@ export async function cancelGeneration(
   if (gen.status === "completed") throw new Error("Cannot cancel a completed generation");
   if (gen.status === "cancelled") return { success: true, refunded: gen.lbc_refunded };
 
-  // Best-effort provider cancel.
-  if (gen.provider_job_id) {
+  // 1. Mark cancellation requested — processGeneration checks this guard.
+  //    Do NOT set status to "cancelled" yet; the worker may still be running.
+  await admin
+    .from("music_generations")
+    .update({ cancel_requested_at: new Date().toISOString() })
+    .eq("id", generationId);
+
+  // 2. Cancel ALL provider jobs from music_provider_jobs (not just
+  //    music_generations.provider_job_id, which may be null).
+  const { data: providerJobs } = await admin
+    .from("music_provider_jobs")
+    .select("provider_job_id, provider")
+    .eq("generation_id", generationId)
+    .not("provider_job_id", "is", null);
+
+  for (const pj of providerJobs ?? []) {
+    try {
+      const provider = createProvider(pj.provider as never);
+      await provider.cancel(pj.provider_job_id as string);
+    } catch {
+      // Best-effort — provider may not support cancel or job may be done.
+    }
+  }
+
+  // 3. Also try the legacy provider_job_id field if it exists.
+  if (gen.provider_job_id && !(providerJobs ?? []).some((p) => p.provider_job_id === gen.provider_job_id)) {
     try {
       const provider = createProvider(gen.provider as never);
       await provider.cancel(gen.provider_job_id);
     } catch {
-      // Swallow — we still refund + mark cancelled locally.
+      // Swallow — best effort.
     }
   }
 
+  // 4. Conditionally set status to "cancelled" ONLY if the generation
+  //    hasn't already reached a terminal state. This prevents a race
+  //    where processGeneration completes between steps 1 and 4.
+  const { data: updated, error: updateError } = await admin
+    .from("music_generations")
+    .update({
+      status: "cancelled",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", generationId)
+    .in("status", ["queued", "preparing", "generating", "processing"])
+    .is("cancel_requested_at", gen.cancel_requested_at ?? null)
+    .select("id, lbc_refunded")
+    .maybeSingle();
+
+  // If the conditional update didn't match (generation already terminal),
+  // don't refund — it already completed or failed.
+  if (updateError || !updated) {
+    // Re-check current status
+    const { data: current } = await admin
+      .from("music_generations")
+      .select("status, lbc_refunded")
+      .eq("id", generationId)
+      .maybeSingle();
+    if (current?.status === "cancelled") {
+      return { success: true, refunded: current.lbc_refunded as boolean };
+    }
+    // Generation completed before we could cancel — no refund.
+    return { success: false, refunded: false };
+  }
+
+  // 5. Refund LBC (idempotent — won't double-refund).
   const refunded = await refundLbc(
     clerkId,
     gen.idempotency_key as string,
     "Generation cancelled by user",
   );
 
+  // Record refund on the generation row.
   await admin
     .from("music_generations")
-    .update({
-      status: "cancelled",
-      lbc_refunded: refunded,
-      completed_at: new Date().toISOString(),
-    })
+    .update({ lbc_refunded: refunded })
     .eq("id", generationId);
 
   return { success: true, refunded };
 }
 
 // ── internals ──────────────────────────────────────────────────────────────
+
+/**
+ * Check if a cancellation has been requested for a generation.
+ * Used by processGeneration to bail out early when the user cancels.
+ */
+async function isCancellationRequested(generationId: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return false;
+  const { data } = await admin
+    .from("music_generations")
+    .select("cancel_requested_at, status")
+    .eq("id", generationId)
+    .maybeSingle();
+  if (!data) return false;
+  if (data.status === "cancelled") return true;
+  return data.cancel_requested_at != null;
+}
+
+/**
+ * Conditionally update a generation's status, but ONLY if it hasn't been
+ * cancelled. This prevents a late worker from overwriting "cancelled" with
+ * "completed", "failed", or any other status.
+ */
+async function safeUpdateStatus(
+  generationId: string,
+  update: Record<string, unknown>,
+): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return false;
+  const { data, error } = await admin
+    .from("music_generations")
+    .update(update)
+    .eq("id", generationId)
+    .neq("status", "cancelled")
+    .is("cancel_requested_at", null)
+    .select("id")
+    .maybeSingle();
+  return !error && !!data;
+}
 
 export interface ProcessArgs {
   generationId: string;
@@ -359,10 +449,21 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
   if (!admin) throw new Error("Database is not configured");
   const provider = getActiveProvider();
 
+  // Guard: check cancellation before starting.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
+
   await admin
     .from("music_generations")
     .update({ status: "preparing", started_at: new Date().toISOString() })
-    .eq("id", generationId);
+    .eq("id", generationId)
+    .neq("status", "cancelled");
+
+  // Guard: check cancellation after status update.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
 
   // Generate VERSIONS_PER_GENERATION versions in parallel.
   const versionResults = await Promise.all(
@@ -370,6 +471,11 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
       runOneVersion(provider, input, blueprint, i),
     ),
   );
+
+  // Guard: check cancellation after provider generation.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
 
   // If any version failed, fail the whole generation + refund.
   const failed = versionResults.find((v) => v.status === "failed" || v.error);
@@ -391,11 +497,21 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
     }
   }
 
+  // Guard: check cancellation before polling.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
+
   // Poll async jobs to completion (mock + mureka). ElevenLabs returns completed
   // with audioUrl directly (supportsAsyncPolling = false).
   const finalized = await Promise.all(
-    versionResults.map((v) => finalizeVersion(provider, v, input.durationSeconds)),
+    versionResults.map((v) => finalizeVersion(provider, v, input.durationSeconds, generationId)),
   );
+
+  // Guard: check cancellation after polling.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
 
   const finalizeFailed = finalized.find((f) => !f.audioBytes && !f.audioUrl);
   if (finalizeFailed) {
@@ -404,12 +520,19 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
   }
 
   // Store audio + create tracks.
-  await admin
-    .from("music_generations")
-    .update({ status: "processing" })
-    .eq("id", generationId);
+  // Use safeUpdateStatus so we don't overwrite "cancelled".
+  const statusUpdated = await safeUpdateStatus(generationId, { status: "processing" });
+  if (!statusUpdated) {
+    // Generation was cancelled while we were polling — abort.
+    return;
+  }
 
   for (let i = 0; i < finalized.length; i++) {
+    // Guard: check cancellation before each R2 upload + track insert.
+    if (await isCancellationRequested(generationId)) {
+      return;
+    }
+
     const f = finalized[i];
     const versionLabel = `Version ${String.fromCharCode(65 + i)}`; // A, B
 
@@ -435,6 +558,11 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
         title: i === 0 ? blueprint.title : `${blueprint.title} (${versionLabel})`,
       };
 
+      // Guard: check cancellation before inserting track.
+      if (await isCancellationRequested(generationId)) {
+        return;
+      }
+
       await admin.from("music_tracks").insert({
         user_id: userId,
         generation_id: generationId,
@@ -456,13 +584,16 @@ export async function processGeneration(args: ProcessArgs): Promise<void> {
     }
   }
 
-  await admin
-    .from("music_generations")
-    .update({
-      status: "completed",
-      completed_at: new Date().toISOString(),
-    })
-    .eq("id", generationId);
+  // Final guard: check cancellation before marking completed.
+  if (await isCancellationRequested(generationId)) {
+    return;
+  }
+
+  // Use safeUpdateStatus so cancelled can NEVER be overwritten by completed.
+  await safeUpdateStatus(generationId, {
+    status: "completed",
+    completed_at: new Date().toISOString(),
+  });
 }
 
 interface VersionRun {
@@ -514,6 +645,7 @@ async function finalizeVersion(
   provider: MusicProvider,
   run: VersionRun,
   fallbackDuration: number,
+  generationId?: string,
 ): Promise<FinalizedVersion> {
   // Direct audio (ElevenLabs streaming).
   if (run.status === "completed" && run.audioUrl) {
@@ -525,6 +657,12 @@ async function finalizeVersion(
     const maxPolls = 120; // 10 min at 5s
     for (let i = 0; i < maxPolls; i++) {
       await sleep(5000);
+
+      // Check cancellation during polling.
+      if (generationId && await isCancellationRequested(generationId)) {
+        return { audioBytes: null, error: "Generation cancelled" };
+      }
+
       const status = await provider.getStatus(run.providerJobId);
       if (status.status === "completed") {
         return { audioBytes: null, audioUrl: status.audioUrl, duration: status.duration ?? fallbackDuration };
@@ -550,8 +688,20 @@ async function failGeneration(
   const admin = getSupabaseAdmin();
   if (!admin) return;
 
-  const refunded = await refundLbc(clerkId, await getIdempotencyKey(generationId), reason);
+  // Don't refund if the generation was cancelled — cancellation has its own refund path.
+  const { data: gen } = await admin
+    .from("music_generations")
+    .select("status, cancel_requested_at")
+    .eq("id", generationId)
+    .maybeSingle();
 
+  if (gen?.status === "cancelled") return;
+
+  const refunded = gen?.cancel_requested_at
+    ? false // Cancellation was requested — refund will happen via cancelGeneration path.
+    : await refundLbc(clerkId, await getIdempotencyKey(generationId), reason);
+
+  // Conditional update: don't overwrite cancelled.
   await admin
     .from("music_generations")
     .update({
@@ -560,7 +710,8 @@ async function failGeneration(
       lbc_refunded: refunded,
       completed_at: new Date().toISOString(),
     })
-    .eq("id", generationId);
+    .eq("id", generationId)
+    .neq("status", "cancelled");
 }
 
 async function getIdempotencyKey(generationId: string): Promise<string> {
@@ -764,6 +915,12 @@ export async function deleteTrack(trackId: string, userId: string): Promise<bool
 const STALE_THRESHOLD_MINUTES = 5;
 
 /**
+ * Worker lease duration: a claimed job must complete within this time
+ * or its lease expires and another worker can reclaim it.
+ */
+const WORKER_LEASE_MINUTES = 10;
+
+/**
  * Find and reclaim stale generations — jobs that are in a non-terminal
  * state but haven't been updated recently. This handles the case where
  * a serverless function was frozen/killed mid-processing.
@@ -780,17 +937,28 @@ export async function claimStaleGenerations(): Promise<string[]> {
   const cutoff = new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60_000).toISOString();
 
   // Atomically claim stale jobs by setting status to "queued"
-  // Only claim jobs in active states that haven't been updated recently
+  // Only claim jobs in active states that haven't been updated recently.
+  // Use COALESCE(updated_at, created_at) as fallback for rows where
+  // updated_at might not have been backfilled yet.
   const { data, error } = await admin
     .from("music_generations")
-    .update({ status: "queued", started_at: null })
-    .in("status", ["preparing", "generating", "processing"])
-    .lt("updated_at", cutoff)
+    .update({ status: "queued", started_at: null, worker_lease_expires_at: null })
+    .in("status", ["preparing", "generating", "processing", "claimed"])
+    .or(`updated_at.lt.${cutoff},updated_at.is.null`)
     .select("id");
 
-  if (error || !data) return [];
+  if (error) {
+    // Log the error instead of silently returning [] — this was the
+    // root cause of recovery appearing to work but doing nothing.
+    console.error("[music:recovery] claimStaleGenerations query failed:", error.message);
+    return [];
+  }
 
-  return data.map((row) => row.id as string);
+  if (!data || data.length === 0) return [];
+
+  const ids = data.map((row) => row.id as string);
+  console.info(`[music:recovery] Claimed ${ids.length} stale generation(s): ${ids.join(", ")}`);
+  return ids;
 }
 
 /**
@@ -881,15 +1049,23 @@ export async function processPendingGenerations(): Promise<{
     }
   }
 
-  // 2. Process queued jobs
-  const { data: queued } = await admin
+  // 2. Atomically claim queued jobs (set status → claimed + lease).
+  //    This prevents two workers from processing the same job.
+  const leaseExpiresAt = new Date(Date.now() + WORKER_LEASE_MINUTES * 60_000).toISOString();
+  const { data: claimed, error: claimError } = await admin
     .from("music_generations")
-    .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key")
+    .update({ status: "claimed", worker_lease_expires_at: leaseExpiresAt })
     .eq("status", "queued")
     .order("created_at", { ascending: true })
-    .limit(5);
+    .limit(5)
+    .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key");
 
-  for (const gen of queued ?? []) {
+  if (claimError) {
+    errors.push(`Claim query failed: ${claimError.message}`);
+    return { processed, recovered, errors };
+  }
+
+  for (const gen of claimed ?? []) {
     try {
       const { data: user } = await admin
         .from("users")
