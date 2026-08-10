@@ -45,13 +45,14 @@ function makeKernelResult(overrides: Partial<KernelResult["decision"]> = {}): Ke
       sourceTypes: ["conversation"],
       conversationId: "",
       memoryIds: [],
+      connectorIds: [],
     },
     execution: {
       skillIds: [],
       capabilityIds: [],
       modelProfileId: "default",
       toolIds: [],
-      budget: { minimumQuality: 0, maxSteps: 1, maxTokens: 2048 },
+      budget: { maximumCostCents: 0, maximumLatencyMs: 30000, minimumQuality: 0, maximumToolCalls: 5, maximumAgents: 3, maximumReflectionPasses: 1 },
     },
     planning: { required: false, specialistRoles: [], parallelAllowed: false },
     governance: { risk: "low", approvalRequired: false, reflection: "light" },
@@ -244,8 +245,9 @@ describe("prompt-builder", () => {
     const ctx = makeCtx({ isAnonymousCompanion: true, isAuthenticated: false, userId: null, clerkId: null, history: [{ role: "user", content: "what is this site" }] });
     const req: LiTTRunRequest = { message: "what can you do" };
     const built = buildPrompt(ctx, req, null);
-    expect(built.systemPrompt).toContain("You are NOT in Studio");
-    expect(built.systemPrompt).toContain("cannot edit files");
+    expect(built.systemPrompt).toContain("Public Demo Mode");
+    expect(built.systemPrompt).toContain("NO access to private projects");
+    expect(built.systemPrompt).toContain("Never claim you performed an action");
     expect(built.fullPrompt).toContain("User: what can you do");
     expect(built.fullPrompt).toContain("what is this site");
     expect(built.projectBlock).toBeNull();
@@ -298,5 +300,154 @@ describe("detectActions", () => {
   it("returns an array even with no matches", () => {
     const actions = detectActions("hello there", "general kenobi", null);
     expect(Array.isArray(actions)).toBe(true);
+  });
+});
+
+// ─── anonymous companion contract ──────────────────────────────────
+
+describe("anonymous companion contract", () => {
+  it("anonymous companion context has no project, no memory, no tools, no capabilities", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      isDev: false,
+      userId: null,
+      clerkId: null,
+      projectId: null,
+      projectName: null,
+      conversationId: null,
+      project: null,
+      capabilities: {},
+      kernelCapabilities: [],
+      memoryContext: "",
+      mode: "companion",
+    });
+    expect(ctx.userId).toBeNull();
+    expect(ctx.clerkId).toBeNull();
+    expect(ctx.projectId).toBeNull();
+    expect(ctx.project).toBeNull();
+    expect(ctx.conversationId).toBeNull();
+    expect(ctx.memoryContext).toBe("");
+    expect(ctx.kernelCapabilities).toEqual([]);
+    expect(ctx.capabilities).toEqual({});
+    expect(ctx.isAnonymousCompanion).toBe(true);
+    expect(ctx.isAuthenticated).toBe(false);
+  });
+
+  it("anonymous companion prompt includes Public Demo Mode and guardrails", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      userId: null,
+      clerkId: null,
+    });
+    const req: LiTTRunRequest = { message: "I want to start a clothing brand" };
+    const built = buildPrompt(ctx, req, null);
+    expect(built.systemPrompt).toContain("Public Demo Mode");
+    expect(built.systemPrompt).toContain("NO access to private projects");
+    expect(built.systemPrompt).toContain("Never claim you performed an action");
+    expect(built.systemPrompt).toContain("Never claim a file, project or deployment exists");
+    expect(built.systemPrompt).toContain("Do not become an unlimited general-purpose anonymous chatbot");
+  });
+
+  it("anonymous companion prompt includes page context when provided", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      userId: null,
+      clerkId: null,
+    });
+    const req: LiTTRunRequest = {
+      message: "what is this page",
+      pageContext: { surface: "global_companion", pageTitle: "Home", route: "/", authenticated: false },
+    };
+    const built = buildPrompt(ctx, req, null);
+    expect(built.systemPrompt).toContain("Page: Home");
+    expect(built.systemPrompt).toContain("Route: /");
+    expect(built.systemPrompt).toContain("User is not signed in");
+  });
+
+  it("anonymous companion has no project block and no memory context", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      userId: null,
+      clerkId: null,
+    });
+    const req: LiTTRunRequest = { message: "help" };
+    const built = buildPrompt(ctx, req, null);
+    expect(built.projectBlock).toBeNull();
+    expect(built.memoryContext).toBe("");
+  });
+
+  it("anonymous companion kernel decision has no tools and limited tokens", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      userId: null,
+      clerkId: null,
+    });
+    const req: LiTTRunRequest = { message: "help" };
+    const built = buildPrompt(ctx, req, null);
+    expect(built.kernelResult.decision.execution.toolIds).toEqual([]);
+    expect(built.kernelResult.decision.execution.capabilityIds).toEqual([]);
+    // Anonymous companion has a limited budget: no tool calls, 1 agent, 0 reflection passes
+    expect(built.kernelResult.decision.execution.budget.maximumToolCalls).toBe(0);
+    expect(built.kernelResult.decision.execution.budget.maximumAgents).toBeLessThanOrEqual(1);
+    expect(built.kernelResult.decision.execution.budget.maximumReflectionPasses).toBe(0);
+  });
+
+  it("tool planner does not advertise tools to anonymous companion", () => {
+    const kr = makeKernelResult({
+      routing: { mode: "build", domains: [], requiresProject: true, requiresCurrentInformation: false, requiresPrivateData: false, requiresExecution: true },
+    });
+    const plan = buildToolPlan(kr, makeCtx({ isAnonymousCompanion: true, isAuthenticated: false }));
+    expect(plan.advertisedToolIds).toEqual([]);
+  });
+
+  it("tool planner advertises tools to authenticated users", () => {
+    const kr = makeKernelResult({
+      routing: { mode: "build", domains: [], requiresProject: true, requiresCurrentInformation: false, requiresPrivateData: false, requiresExecution: true },
+    });
+    const plan = buildToolPlan(kr, makeCtx({ isAnonymousCompanion: false, isAuthenticated: true }));
+    expect(plan.advertisedToolIds.length).toBeGreaterThan(0);
+  });
+
+  it("anonymous companion history is bounded by HISTORY_LIMIT", () => {
+    const longHistory = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `msg ${i}`,
+    }));
+    const ctx = makeCtx({
+      isAnonymousCompanion: true,
+      isAuthenticated: false,
+      userId: null,
+      clerkId: null,
+      history: longHistory.slice(-12), // HISTORY_LIMIT = 12
+    });
+    const req: LiTTRunRequest = { message: "test" };
+    const built = buildPrompt(ctx, req, null);
+    // History should be included but bounded
+    expect(built.fullPrompt).toContain("msg 8");
+    expect(built.fullPrompt).not.toContain("msg 0");
+  });
+
+  it("authenticated companion still works with normal prompt (not anonymous)", () => {
+    const ctx = makeCtx({
+      isAnonymousCompanion: false,
+      isAuthenticated: true,
+      userId: "user_123",
+      clerkId: "clerk_123",
+    });
+    const req: LiTTRunRequest = {
+      message: "help",
+      pageContext: { surface: "global_companion", pageTitle: "Home", route: "/", authenticated: true },
+    };
+    const built = buildPrompt(ctx, req, null);
+    // Authenticated companion should NOT get the anonymous prompt
+    expect(built.systemPrompt).not.toContain("Public Demo Mode");
+    // But should get the page context block
+    expect(built.systemPrompt).toContain("global companion");
+    expect(built.systemPrompt).toContain("Page: Home");
   });
 });

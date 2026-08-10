@@ -11,7 +11,7 @@ import {
 } from "@/lib/studio/conversation-service";
 import { resolveAgent, isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { buildStudioContext } from "@/lib/studio/project-resolver";
-import { recallMemories, persistMemory, formatMemoryContext } from "@/lib/studio/memory-service";
+import { recallMemories, persistMemory, formatMemoryContext, harvestUserPreferences } from "@/lib/studio/memory-service";
 import { studioLog } from "@/lib/studio/logger";
 import type { AgentSlug } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
@@ -238,6 +238,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const turnResolution = resolveTurn(message, history);
   const resolvedMessage = turnResolution.resolved;
 
+  // 7.5.5. Harvest user preferences (non-blocking, best-effort).
+  // Extracts name, city, timezone from natural conversation. Dedupe is handled
+  // by persistMemory's dedupe_key — no duplicate writes for the same info.
+  if (conversation.projectId) {
+    void harvestUserPreferences(resolvedMessage, userId, conversation.projectId, {
+      agentSlug,
+      conversationId: conversation.id,
+    });
+  }
+
   // 7.6. Real-time tool execution (weather, web search, etc.)
   // Runs BEFORE the agent loop. If a tool fires, the live result is returned
   // directly and the LLM is never called — LiTT must never guess real-time data.
@@ -334,6 +344,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     agentSlug,
     agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
     memoryNamespace: runtimeAgent?.memoryNamespace,
+    conversationId: conversation.id,
     limit: 5,
   });
   const memoryContext = formatMemoryContext(memories);
@@ -376,7 +387,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // This fallback is marked for eventual removal once all chat paths require
   // a verified workspace.
 
-  const useV2 = canonicalCtx.workspaceExecutionAvailable && !!conversation.projectId;
+  const useV2 = canonicalCtx.workspaceExecutionAvailable
+    && !!conversation.projectId
+    && !!built.kernelResult.decision.routing.requiresExecution;
 
   let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
   let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
@@ -396,10 +409,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
     if (transport) {
       const v2Config: Partial<AgentLoopConfig> = {
-        systemPrompt: prompt,
+        systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
         executionMode: canonicalCtx.executionMode,
         enableBuildFix: true,
         model: typeof body.model === "string" ? body.model : undefined,
+        evalMetadata: {
+          agentSlug,
+          agentMode: "v2-execution",
+          conversationId: conversation.id,
+          userId,
+          projectId: conversation.projectId ?? undefined,
+        },
       };
 
       v2Result = await runAgentLoopV2(resolvedMessage, transport, v2Config);
@@ -533,7 +553,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 reason: v2Result.pendingApproval.reason,
                 pausedMessages: v2Result.pendingApproval.pausedMessages,
                 executionMode: canonicalCtx.executionMode,
-                systemPrompt: prompt,
+                systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
                 checkpointId: v2Result.checkpoint?.checkpointId ?? null,
               });
               pausedRunId = pausedRun.id;
@@ -630,6 +650,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               category,
               maxTokens: 2048,
               modelOverride,
+              evalMetadata: {
+                agentSlug,
+                agentMode: "v1-conversation",
+                conversationId: conversation.id,
+                userId,
+                projectId: conversation.projectId ?? undefined,
+              },
             },
             undefined,
             (reasoning) => {

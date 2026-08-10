@@ -24,7 +24,7 @@
 import type { NextRequest, NextResponse } from "next/server";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
-import { persistMemory } from "@/lib/studio/memory-service";
+import { persistMemory, harvestUserPreferences } from "@/lib/studio/memory-service";
 import type { AgentSlug } from "@/lib/studio/types";
 import { resolveRequestContext } from "./request-context";
 import { buildPrompt, sanitizeOutput } from "./prompt-builder";
@@ -136,6 +136,12 @@ export async function runLiTT(options: RunLiTTOptions): Promise<{
   const verifiedText = verified.text;
 
   persistRunMemory(ctx, options.req, runtimeAgent, verifiedText);
+  if (ctx.userId && ctx.project) {
+    void harvestUserPreferences(options.req.message, ctx.userId, ctx.project.projectId, {
+      agentSlug: (options.req.agentSlug ?? "litt") as AgentSlug,
+      conversationId: ctx.conversationId ?? undefined,
+    });
+  }
   auditRun({
     userId: ctx.userId,
     conversationId: ctx.conversationId,
@@ -212,6 +218,12 @@ export async function runLiTTStream(options: RunLiTTOptions): Promise<Response> 
 
         const verified = verifyResult(assistantText);
         persistRunMemory(ctx, req, runtimeAgent, verified.text);
+        if (ctx.userId && ctx.project) {
+          void harvestUserPreferences(req.message, ctx.userId, ctx.project.projectId, {
+            agentSlug: (req.agentSlug ?? "litt") as AgentSlug,
+            conversationId: ctx.conversationId ?? undefined,
+          });
+        }
         auditRun({
           userId: ctx.userId,
           conversationId: ctx.conversationId,

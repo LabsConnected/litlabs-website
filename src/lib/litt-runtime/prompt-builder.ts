@@ -64,14 +64,40 @@ function buildAnonymousCompanionPrompt(
     .map((entry) => (entry.role === "user" ? `User: ${entry.content}` : `${agentDisplayName}: ${entry.content}`))
     .join("\n");
 
+  const pageContextBlock = buildPageContextBlock(req.pageContext);
+
   const systemPrompt = [
-    "You are LiTT, the LiTTree LabStudios companion.",
-    "You are NOT in Studio. You cannot edit files, run commands, access projects,",
-    "or use any tools. You can answer questions, explain features, navigate, and",
-    "suggest actions. If the user needs deep work (files, code, terminal, canvas,",
-    "deployments), suggest they sign in and open Studio.",
-    "Keep responses concise and helpful. Do not claim capabilities you do not have.",
-  ].join("\n");
+    "You are LiTT, the AI guide and builder behind LiTTree LabStudios.",
+    "You are currently operating in Public Demo Mode for a visitor who is not signed in.",
+    "",
+    "Your job is to let them genuinely experience LiTT's intelligence and understand what LiTTree can do.",
+    "",
+    "Talk naturally. Understand their idea. Ask useful questions when necessary.",
+    "Explain how you would turn ideas into projects, media, brands, apps, games, music, websites or other work inside LiTTree.",
+    "",
+    "You may explain, brainstorm, recommend, demonstrate workflows and create hypothetical plans.",
+    "You can answer questions about LiTTree LabStudios, Studio, Create/media capabilities, Music, Images, Video, Games, Marketplace, Gallery/Discover, projects, agents, pricing and free signup.",
+    "You can understand the page the visitor is currently viewing and recommend the correct LiTTree surface.",
+    "You can remember the short in-browser conversation during this session.",
+    "You can explain how you would approach an idea and demonstrate how a request would flow through LiTTree.",
+    "You can encourage opening Studio when execution is required.",
+    "",
+    "You have NO access to private projects, repositories, files, persistent memory, terminals, deployments, connected providers or write tools in Public Demo Mode.",
+    "Never claim you performed an action you could not perform.",
+    "Never claim a file, project or deployment exists when it does not.",
+    "Never silently unlock Studio capabilities.",
+    "",
+    "When execution is required, explain what you would do and offer Studio as the next step.",
+    "Do not interrupt every conversation with signup prompts — let them experience LiTT first.",
+    "",
+    "Stay primarily focused on LiTTree LabStudios, its capabilities and how it could help the visitor.",
+    "Do not become an unlimited general-purpose anonymous chatbot.",
+    "",
+    "Keep responses useful, conversational and reasonably concise.",
+    pageContextBlock,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const fullPrompt = [
     systemPrompt,
@@ -84,42 +110,51 @@ function buildAnonymousCompanionPrompt(
     .filter((line) => line !== undefined)
     .join("\n");
 
-  // Anonymous companion has no Kernel decision; synthesize an ok=true shell.
-  const shellDecision = {
-    ok: true as const,
+  // Anonymous companion has no Kernel decision; synthesize an ok=true shell
+  // that matches the KernelResult type exactly — no unsafe casts.
+  const shellDecision: KernelResult = {
+    ok: true,
     decision: {
       requestId: `anon_${Date.now()}`,
       createdAt: new Date().toISOString(),
       routing: {
-        mode: "companion" as const,
-        domains: [] as string[],
+        mode: "learn",
+        domains: [],
         requiresProject: false,
         requiresCurrentInformation: false,
         requiresPrivateData: false,
         requiresExecution: false,
       },
       epistemics: {
-        expectedTruthClasses: ["opinion"] as const,
+        expectedTruthClasses: ["opinion"],
         minimumConfidence: 0,
         verificationRequired: false,
       },
       context: {
-        sourceTypes: ["conversation"] as const,
+        sourceTypes: ["conversation"],
         conversationId: "",
-        memoryIds: [] as string[],
+        memoryIds: [],
+        connectorIds: [],
       },
       execution: {
-        skillIds: [] as string[],
-        capabilityIds: [] as string[],
+        skillIds: [],
+        capabilityIds: [],
         modelProfileId: "companion",
-        toolIds: [] as string[],
-        budget: { minimumQuality: 0, maxSteps: 1, maxTokens: 1024 },
+        toolIds: [],
+        budget: {
+          maximumCostCents: 0,
+          maximumLatencyMs: 10000,
+          minimumQuality: 0,
+          maximumToolCalls: 0,
+          maximumAgents: 1,
+          maximumReflectionPasses: 0,
+        },
       },
-      planning: { required: false, specialistRoles: [] as string[], parallelAllowed: false },
-      governance: { risk: "low" as const, approvalRequired: false, reflection: "light" as const },
+      planning: { required: false, specialistRoles: [], parallelAllowed: false },
+      governance: { risk: "low", approvalRequired: false, reflection: "light" },
     },
     systemPrompt,
-  } as unknown as KernelResult;
+  };
 
   return {
     systemPrompt,
@@ -187,9 +222,16 @@ export function buildPrompt(
   const translated = translateCapabilities(ctx.capabilities);
   const pageContextBlock = buildPageContextBlock(req.pageContext);
 
+  // Compose the identity/governance block:
+  // - Built-in agents: Kernel governance + built-in agent personality (BOTH)
+  // - Marketplace agents: Kernel governance + marketplace agent prompt (BOTH)
+  // Never either/or — the Kernel governance must always be present.
+  const identityBlock = runtimeAgent?.systemPrompt
+    ? `${kernelSystemPrompt}\n\n${runtimeAgent.systemPrompt}`
+    : `${kernelSystemPrompt}\n\n${builtinAgent?.systemPrompt ?? ""}`;
+
   const systemPrompt = [
-    // Marketplace agent version prompt takes precedence; else Kernel prompt.
-    runtimeAgent?.systemPrompt || kernelSystemPrompt,
+    identityBlock,
     projectBlock,
     ctx.conversationId ? `CURRENT CONVERSATION: ${ctx.conversationId}` : null,
     translated.contextBlock,

@@ -161,6 +161,7 @@ export async function resolveRequestContext(
     const memories = await recallMemories(req.message, userId, project.projectId, {
       agentSlug,
       agentInstanceId: req.agentInstanceId,
+      conversationId: conversationId ?? undefined,
       limit: 5,
     });
     memoryContext = formatMemoryContext(memories);

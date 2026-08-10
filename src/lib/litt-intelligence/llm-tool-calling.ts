@@ -18,6 +18,7 @@
 import "server-only";
 
 import { SITE_URL } from "@/lib/siteConfig";
+import { logLLMCall, type LLMCallMetadata } from "@/lib/evals/braintrust";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -110,6 +111,7 @@ export async function callLLMWithTools(
     temperature?: number;
     maxTokens?: number;
     toolChoice?: "auto" | "required" | "none";
+    evalMetadata?: LLMCallMetadata;
   },
 ): Promise<LLMToolCallResponse> {
   const key = getOpenRouterKey();
@@ -125,7 +127,7 @@ export async function callLLMWithTools(
       { role: "system", content: systemPrompt } as OpenRouterMessage,
       ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
     ],
-    temperature: options?.temperature ?? 0.1,
+    temperature: options?.temperature ?? 0.15,
   };
 
   if (options?.maxTokens) body.max_tokens = options.maxTokens;
@@ -134,6 +136,7 @@ export async function callLLMWithTools(
     body.tool_choice = options?.toolChoice ?? "auto";
   }
 
+  const t0 = Date.now();
   const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
     method: "POST",
     headers: {
@@ -178,12 +181,25 @@ export async function callLLMWithTools(
     };
   });
 
-  return {
+  const result: LLMToolCallResponse = {
     text,
     toolCalls,
     finishReason,
     model: data.model ?? model,
   };
+
+  logLLMCall({
+    prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+    systemPrompt,
+    output: text,
+    provider: "openrouter",
+    model: result.model,
+    latencyMs: Date.now() - t0,
+    failover: [],
+    metadata: options?.evalMetadata ?? {},
+  });
+
+  return result;
 }
 
 // ─── Format tool results for LLM ──────────────────────────────────

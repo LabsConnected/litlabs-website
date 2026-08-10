@@ -44,7 +44,8 @@
     "mobile:check": "pnpm --filter @litt/companion check",
     "mobile:start": "pnpm --filter @litt/companion start",
     "mobile:build": "pnpm --filter @litt/companion build:android",
-    "mobile:doctor": "pnpm --filter @litt/companion doctor"
+    "mobile:doctor": "pnpm --filter @litt/companion doctor",
+    "litt:doctor": "tsx scripts/litt-doctor.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",

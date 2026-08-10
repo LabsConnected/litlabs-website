@@ -19,6 +19,7 @@ import type { WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, type ToolDefinition, type ToolCallResult } from "./llm-tool-calling";
+import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { toolRegistry } from "./tool-registry";
 import type { LiTTToolDefinition } from "./types";
@@ -34,6 +35,7 @@ export interface AgentLoopConfig {
   model?: string;
   systemPrompt: string;
   enableBuildFix: boolean;
+  evalMetadata?: LLMCallMetadata;
 }
 
 export const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
@@ -202,8 +204,9 @@ export async function runAgentLoopV2(
         toolDefs,
         {
           model: cfg.model,
-          temperature: 0.1,
+          temperature: 0.15,
           maxTokens: 4096,
+          evalMetadata: cfg.evalMetadata,
         },
       );
     } catch (err) {
@@ -661,8 +664,9 @@ export async function resumeAgentLoopV2(
         toolDefs,
         {
           model: cfg.model,
-          temperature: 0.1,
+          temperature: 0.15,
           maxTokens: 4096,
+          evalMetadata: cfg.evalMetadata,
         },
       );
     } catch (err) {
