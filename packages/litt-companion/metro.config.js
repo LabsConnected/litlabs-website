@@ -1,4 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { getDefaultConfig } = require("expo/metro-config");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
 
 // Monorepo support — let Metro resolve packages from the workspace root

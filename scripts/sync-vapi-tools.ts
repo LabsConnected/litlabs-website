@@ -106,7 +106,7 @@ async function vapiFetch(
   urlPath: string,
   method: string,
   body?: unknown,
-): Promise<any> {
+): Promise<Record<string, unknown> | null> {
   const res = await fetch(`${VAPI_BASE}${urlPath}`, {
     method,
     headers: {
@@ -116,7 +116,7 @@ async function vapiFetch(
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  let json: any = null;
+  let json: Record<string, unknown> | null = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
@@ -130,13 +130,13 @@ async function vapiFetch(
 }
 
 /** List all tools in the org. Vapi's /tool endpoint supports `limit` (max 100) but not `offset`. */
-async function listAllTools(): Promise<any[]> {
+async function listAllTools(): Promise<Record<string, unknown>[]> {
   const batch = await vapiFetch(`/tool?limit=100`, "GET");
   return Array.isArray(batch) ? batch : [];
 }
 
 /** Find an existing tool by its function name. Returns the tool object or null. */
-function findToolByName(tools: any[], name: string): any | null {
+function findToolByName(tools: Record<string, unknown>[], name: string): Record<string, unknown> | null {
   return (
     tools.find(
       (t) => t?.function?.name === name || t?.name === name,
@@ -146,20 +146,21 @@ function findToolByName(tools: any[], name: string): any | null {
 
 /** Create or update a tool. Returns the tool object (with id). */
 async function upsertTool(
-  existing: any | null,
+  existing: Record<string, unknown> | null,
   payload: VapiToolPayload,
 ): Promise<{ id: string; created: boolean }> {
   if (existing?.id) {
-    await vapiFetch(`/tool/${existing.id}`, "PATCH", payload);
-    return { id: existing.id, created: false };
+    const id = String(existing.id);
+    await vapiFetch(`/tool/${id}`, "PATCH", payload);
+    return { id, created: false };
   }
   const created = await vapiFetch(`/tool`, "POST", payload);
   if (!created?.id) throw new Error("Vapi created a tool but returned no id.");
-  return { id: created.id, created: true };
+  return { id: String(created.id), created: true };
 }
 
 /** Get the current assistant config. */
-async function getAssistant(id: string): Promise<any> {
+async function getAssistant(id: string): Promise<Record<string, unknown> | null> {
   return vapiFetch(`/assistant/${id}`, "GET");
 }
 

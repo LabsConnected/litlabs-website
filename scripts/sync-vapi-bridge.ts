@@ -61,7 +61,7 @@ const DRY_RUN = process.argv.includes("--dry-run");
 
 // ─── Vapi API helpers ───────────────────────────────────────────
 
-async function vapiFetch(urlPath: string, method: string, body?: unknown): Promise<any> {
+async function vapiFetch(urlPath: string, method: string, body?: unknown): Promise<Record<string, unknown> | null> {
   const res = await fetch(`${VAPI_BASE}${urlPath}`, {
     method,
     headers: {
@@ -71,7 +71,7 @@ async function vapiFetch(urlPath: string, method: string, body?: unknown): Promi
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  let json: any = null;
+  let json: Record<string, unknown> | null = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
