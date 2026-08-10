@@ -9,6 +9,7 @@ import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
 import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import LayoutShell from "@/components/LayoutShell";
+import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_OG_IMAGE,
@@ -212,11 +213,13 @@ export default function RootLayout({
             }}
           >
             <ClerkAuthContextProvider clerkAvailable={true}>
+              <AuthorityJsonLd />
               {shell}
             </ClerkAuthContextProvider>
           </ClerkProvider>
         ) : (
           <ClerkAuthContextProvider clerkAvailable={false}>
+            <AuthorityJsonLd />
             {shell}
           </ClerkAuthContextProvider>
         )}

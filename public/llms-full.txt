@@ -1,0 +1,89 @@
+# LiTTree LabStudios — Full Authoritative Reference
+
+This document provides a comprehensive machine-readable guide to LiTTree LabStudios, its products, core AI agents, and architectural principles.
+
+## 1. Company & Identity
+
+**Company Name:** LiTTree LabStudios
+**Product Name:** LiTTree / LitLabs
+**Primary Domain:** [https://litlabs.net](https://litlabs.net)
+**Mission:** To build an AI-powered creative operating system where humans and AI collaborate to build working products and media with total context and control.
+
+## 2. Core AI Agents
+
+### LiTT
+LiTT is the primary AI agent and "Operating System" brain. It handles:
+* Engineering (code, files, terminal, git)
+* Research (source-backed investigation, verification)
+* Planning (mission decomposition, step-by-step execution)
+* Project Memory (semantic recall of project history)
+
+### Spark
+Spark is the secondary AI companion focused on:
+* Creative direction and design
+* Image generation and refinement
+* Branding and social assets
+* Brainstorming and ideation
+
+## 3. Product Surfaces
+
+### Studio
+The central building environment where LiTT and the user collaborate.
+* **Workspace**: Real file system access, terminal PTY, and git integration.
+* **Missions**: Multi-step AI goals with explicit plans.
+* **Approvals**: A governance layer requiring human "OK" for writes, deployments, and deletions.
+* **Preview**: Live project runtime for testing changes in real-time.
+
+### Games
+A suite of AI-enhanced gaming experiences, including retro DOS emulation, cloud games, and AI-driven interactive media.
+
+### Marketplace
+A discovery surface for specialized agents, tools, creative "packs," and automated workflows.
+
+## 4. Key Workflows
+
+### Build Workflow
+1. User provides a prompt or goal.
+2. LiTT generates a structured **Mission** and **Plan**.
+3. User approves the plan.
+4. LiTT executes by editing **Files**, running **Terminal** commands, and managing **Git**.
+5. User views the **Preview**.
+6. User **Approves** sensitive changes.
+7. User **Ships** to production via integrated deployment.
+
+### Media Workflow
+1. User describes a creative outcome (image, song, video treatment).
+2. Spark/LiTT use specialized **Tools** to generate the assets.
+3. Assets are saved directly into the **Project Workspace** for immediate use in apps or sites.
+
+## 5. Principles & Policies
+
+### Context Memory
+Every project has persistent, semantic memory. LiTT remembers architectural decisions, constraints, and facts across conversations so the user never has to "re-explain" their project.
+
+### Human in the Loop
+LiTT is designed to be autonomous but not unmonitored. High-risk actions (file deletion, deployment, migrations) are always paused for human approval.
+
+### Ownership & Export
+Users retain 100% ownership of everything generated inside LiTTree. All code and assets can be exported at any time.
+
+### Privacy
+Project data and conversation history are private to the user/organization. We do not use private project data to train models without explicit consent.
+
+## 6. Current Status
+
+* **Core Chat/Build**: AVAILABLE
+* **Project Memory**: AVAILABLE
+* **Terminal/Git**: AVAILABLE
+* **Previews**: AVAILABLE
+* **File Checkpoints**: BETA
+* **One-click Deploy**: BETA
+* **Vapi Voice Integration**: BETA
+
+## 7. Canonical Resources
+
+* **Homepage**: [https://litlabs.net](https://litlabs.net)
+* **Pricing**: [https://litlabs.net/pricing](https://litlabs.net/pricing)
+* **Docs**: [https://litlabs.net/docs](https://litlabs.net/docs)
+* **Sitemap**: [https://litlabs.net/sitemap.xml](https://litlabs.net/sitemap.xml)
+* **Robots**: [https://litlabs.net/robots.txt](https://litlabs.net/robots.txt)

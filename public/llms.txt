@@ -1,0 +1,28 @@
+# LiTTree LabStudios
+
+> LiTTree LabStudios builds LiTTree, an AI creative platform centered around LiTT that helps people turn ideas into working products and creative media while preserving project context and keeping users in control of important actions.
+
+## Product
+
+* [Homepage](https://litlabs.net)
+* [Studio](https://litlabs.net/studio) — Unified AI workspace for code, creation, and deployment.
+* [Pricing](https://litlabs.net/pricing) — Compare plans for creators, builders, and founders.
+* [Games](https://litlabs.net/games) — AI-powered retro, DOS, and cloud experiences.
+* [Marketplace](https://litlabs.net/marketplace) — Discover agents, tools, and creative workflows.
+
+## Company
+
+* [About](https://litlabs.net/about) — Who we are and what we're building.
+* [Privacy](https://litlabs.net/privacy) — Our principles on your data and privacy.
+* [Terms](https://litlabs.net/terms) — Service rules and ownership.
+
+## Core concepts
+
+* **LiTT**: The core AI engineering and execution brain.
+* **Spark**: The creative AI companion for design and ideation.
+* **Studio**: The primary work surface where AI building happens.
+* **Projects**: Persistent workspaces with deep context and memory.
+* **Creation/Media**: AI-powered production of images, audio, music, and video.
+* **Project Memory/Context**: Long-term semantic recall of project decisions and facts.
+* **Human Approval**: Mandatory human confirmation for sensitive or destructive actions.
+* **Ownership**: Users retain full ownership and can export their work at any time.

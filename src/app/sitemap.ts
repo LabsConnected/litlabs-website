@@ -9,9 +9,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      url: absoluteUrl("/about"),
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
       url: absoluteUrl("/marketplace"),
       changeFrequency: "daily",
       priority: 0.8,
+    },
+    {
+      url: absoluteUrl("/games"),
+      changeFrequency: "weekly",
+      priority: 0.7,
     },
     // /gallery removed — obsolete Artifact Museum page retired
     {

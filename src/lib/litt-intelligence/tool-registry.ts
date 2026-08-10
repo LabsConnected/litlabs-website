@@ -38,6 +38,67 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "typecheck.run": async () => (await import("./tool-handlers-v2")).handleTypecheckRun as ToolHandler,
   "lint.run": async () => (await import("./tool-handlers-v2")).handleLintRun as ToolHandler,
   "package.info": async () => (await import("./tool-handlers-v2")).handlePackageInfo as ToolHandler,
+  // Browser Agent Mode handlers (lazy-loaded, session-scoped)
+  "browser.navigate": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.navigate"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.snapshot": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.snapshot"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.screenshot": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.screenshot"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.click": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.click"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.type": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.type"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.select": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.select"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.scroll": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.scroll"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.press": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.press"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.wait": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.wait"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.extract": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.extract"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.upload": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.upload"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.back": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.back"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.forward": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.forward"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.reload": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.reload"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  "browser.close": async () => {
+    const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.close"];
+    return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
 };
 
 // ─── Registry ───────────────────────────────────────────────────
@@ -1132,6 +1193,463 @@ export function registerInternalTools(): void {
         enabled: true,
       },
       handler: lazyHandlers["package.info"],
+    },
+    // ─── Browser Agent Mode tools ─────────────────────────────
+    // Read-only browser tools (auto-approved)
+    {
+      tool: {
+        id: "browser.navigate",
+        name: "Browser Navigate",
+        description: "Navigate the browser session to a URL. Returns updated page state (URL, title, screenshot).",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            url: { type: "string" },
+            waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
+          },
+          required: ["sessionId", "userId", "url"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 30000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.navigate"],
+    },
+    {
+      tool: {
+        id: "browser.snapshot",
+        name: "Browser Snapshot",
+        description: "Capture accessibility tree and visible text content from the current page. Returns structured page state for LiTT to understand the UI.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.snapshot"],
+    },
+    {
+      tool: {
+        id: "browser.screenshot",
+        name: "Browser Screenshot",
+        description: "Capture a screenshot of the current page. Returns base64 PNG image and page state.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.screenshot"],
+    },
+    {
+      tool: {
+        id: "browser.extract",
+        name: "Browser Extract",
+        description: "Extract structured data from the current page using a natural language instruction and optional schema.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            instruction: { type: "string" },
+            schema: { type: "object" },
+          },
+          required: ["sessionId", "userId", "instruction"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 30000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.extract"],
+    },
+    {
+      tool: {
+        id: "browser.wait",
+        name: "Browser Wait",
+        description: "Wait for a condition: selector to appear, navigation to complete, or a timeout.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            selector: { type: "string" },
+            timeoutMs: { type: "number" },
+            waitFor: { type: "string", enum: ["selector", "navigation", "timeout"] },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 30000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.wait"],
+    },
+    {
+      tool: {
+        id: "browser.back",
+        name: "Browser Back",
+        description: "Navigate back in browser history. Returns updated page state.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.back"],
+    },
+    {
+      tool: {
+        id: "browser.forward",
+        name: "Browser Forward",
+        description: "Navigate forward in browser history. Returns updated page state.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.forward"],
+    },
+    {
+      tool: {
+        id: "browser.reload",
+        name: "Browser Reload",
+        description: "Reload the current page. Returns updated page state.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: "read",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.reload"],
+    },
+    // Mutation browser tools (require approval in ACT mode)
+    {
+      tool: {
+        id: "browser.click",
+        name: "Browser Click",
+        description: "Click an element on the page. Uses selector priority: DOM selector > accessibility attributes > text matching > coordinates.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            selector: { type: "string" },
+            role: { type: "string" },
+            ariaLabel: { type: "string" },
+            testId: { type: "string" },
+            text: { type: "string" },
+            x: { type: "number" },
+            y: { type: "number" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "medium",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.click"],
+    },
+    {
+      tool: {
+        id: "browser.type",
+        name: "Browser Type",
+        description: "Type text into an input field. Uses selector priority chain to locate the field.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            selector: { type: "string" },
+            role: { type: "string" },
+            ariaLabel: { type: "string" },
+            testId: { type: "string" },
+            text: { type: "string" },
+            value: { type: "string" },
+            clear: { type: "boolean" },
+          },
+          required: ["sessionId", "userId", "value"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "medium",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.type"],
+    },
+    {
+      tool: {
+        id: "browser.select",
+        name: "Browser Select",
+        description: "Select an option from a <select> dropdown element.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            selector: { type: "string" },
+            testId: { type: "string" },
+            ariaLabel: { type: "string" },
+            value: { type: "string" },
+            label: { type: "string" },
+          },
+          required: ["sessionId", "userId", "value"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "medium",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 15000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.select"],
+    },
+    {
+      tool: {
+        id: "browser.scroll",
+        name: "Browser Scroll",
+        description: "Scroll the page or a specific element in a direction by a specified amount.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            direction: { type: "string", enum: ["up", "down", "left", "right"] },
+            amount: { type: "number" },
+            selector: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.scroll"],
+    },
+    {
+      tool: {
+        id: "browser.press",
+        name: "Browser Press Key",
+        description: "Press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown).",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            key: { type: "string" },
+          },
+          required: ["sessionId", "userId", "key"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: true,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.press"],
+    },
+    {
+      tool: {
+        id: "browser.upload",
+        name: "Browser Upload File",
+        description: "Upload a file to a file input element on the page.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+            selector: { type: "string" },
+            testId: { type: "string" },
+            ariaLabel: { type: "string" },
+            filePath: { type: "string" },
+          },
+          required: ["sessionId", "userId", "filePath"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "medium",
+        approvalPolicy: MUTATION_APPROVAL,
+        timeoutMs: 30000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "workspace-write",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.upload"],
+    },
+    {
+      tool: {
+        id: "browser.close",
+        name: "Browser Close Session",
+        description: "Close the browser session and release all resources.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            userId: { type: "string" },
+          },
+          required: ["sessionId", "userId"],
+        },
+        outputSchema: { type: "object" },
+        requiredCapabilities: [],
+        requiredPermissions: ["browser:control"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 10000,
+        idempotent: false,
+        readOnly: false,
+        permissionLevel: "draft",
+        enabled: true,
+      },
+      handler: lazyHandlers["browser.close"],
     },
   ];
 
