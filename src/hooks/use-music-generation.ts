@@ -23,6 +23,7 @@ interface GenerationState {
 }
 
 const PROGRESS_MAP: Record<GenerationStatus, number> = {
+  idle: 0,
   queued: 5,
   preparing: 15,
   generating: 50,
@@ -47,7 +48,7 @@ export interface StartParams {
 export function useMusicGeneration() {
   const [state, setState] = useState<GenerationState>({
     generationId: null,
-    status: "queued",
+    status: "idle",
     progress: 0,
     error: null,
     lbcCharged: 0,
@@ -56,6 +57,8 @@ export function useMusicGeneration() {
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const queuedSinceRef = useRef<number | null>(null);
+  const workerTriggeredRef = useRef(false);
 
   const clearPoll = useCallback(() => {
     if (pollRef.current) {
@@ -93,9 +96,30 @@ export function useMusicGeneration() {
           tracks: data.tracks ?? prev.tracks,
         }));
 
+        // Stale-job detection: if the job has been queued for >30s without
+        // progress, trigger the worker endpoint to resume processing.
+        // This handles the case where the original serverless function was
+        // frozen/killed after returning 202.
+        if (status === "queued") {
+          if (queuedSinceRef.current === null) {
+            queuedSinceRef.current = Date.now();
+          } else if (
+            Date.now() - queuedSinceRef.current > 30_000 &&
+            !workerTriggeredRef.current
+          ) {
+            workerTriggeredRef.current = true;
+            void fetch("/api/music/worker", { method: "POST" }).catch(() => {});
+          }
+        } else {
+          queuedSinceRef.current = null;
+          workerTriggeredRef.current = false;
+        }
+
         if (TERMINAL.includes(status)) {
           clearPoll();
           setIsGenerating(false);
+          queuedSinceRef.current = null;
+          workerTriggeredRef.current = false;
         }
       } catch {
         // network error — keep polling, don't surface noise
@@ -108,6 +132,8 @@ export function useMusicGeneration() {
     async (params: StartParams) => {
       clearPoll();
       setIsGenerating(true);
+      queuedSinceRef.current = null;
+      workerTriggeredRef.current = false;
       setState({
         generationId: null,
         status: "queued",
@@ -167,23 +193,48 @@ export function useMusicGeneration() {
     [clearPoll, pollStatus],
   );
 
+  const [isCancelling, setIsCancelling] = useState(false);
+
   const cancelGeneration = useCallback(async () => {
-    setState((prev) => {
-      if (!prev.generationId) return prev;
-      void fetch(
-        `/api/music/generations/${prev.generationId}/cancel`,
-        { method: "POST", credentials: "include" },
-      ).catch(() => {});
-      return { ...prev, status: "cancelled", progress: 0 };
-    });
-    clearPoll();
-    setIsGenerating(false);
+    const genId = state.generationId;
+    if (!genId) return;
+
+    setIsCancelling(true);
+    // Show "Cancelling..." state but do NOT mark as cancelled yet —
+    // wait for backend confirmation.
+    setState((prev) => ({ ...prev, status: "cancelled", progress: 0 }));
+
     try {
-      sessionStorage.removeItem("littree:music:active-generation");
+      const res = await fetch(
+        `/api/music/generations/${genId}/cancel`,
+        { method: "POST", credentials: "include" },
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        clearPoll();
+        setIsGenerating(false);
+        setState((prev) => ({
+          ...prev,
+          status: "cancelled",
+          lbcRefunded: data.refunded ?? false,
+        }));
+      } else {
+        // Backend rejected cancel — revert to previous status by re-polling
+        await pollStatus(genId);
+      }
     } catch {
-      // ignore
+      // Network error — re-poll to get actual status
+      await pollStatus(genId);
+    } finally {
+      setIsCancelling(false);
+      try {
+        sessionStorage.removeItem("littree:music:active-generation");
+      } catch {
+        // ignore
+      }
     }
-  }, [clearPoll]);
+  }, [state.generationId, clearPoll, pollStatus]);
 
   // ── Persistent recovery: resume polling an active generation after refresh ──
   useEffect(() => {
@@ -223,6 +274,7 @@ export function useMusicGeneration() {
   return {
     ...state,
     isGenerating,
+    isCancelling,
     startGeneration,
     cancelGeneration,
   };

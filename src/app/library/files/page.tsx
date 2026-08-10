@@ -97,11 +97,11 @@ export default function LibraryFilesPage() {
             <Upload size={16} /> Upload
           </Link>
           <Link
-            href="/gallery"
+            href="/showcase"
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
             style={{ borderColor: T.borderColor + "40", color: T.textColor }}
           >
-            <ImageIcon size={16} /> Gallery
+            <ImageIcon size={16} /> Showcase
           </Link>
         </div>
 

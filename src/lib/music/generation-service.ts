@@ -45,6 +45,7 @@
 import "server-only";
 
 import type {
+  CompositionPlan,
   GenerateSongInput,
   GenerationStatus,
   MusicBlueprint,
@@ -56,6 +57,7 @@ import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { uploadAudio, getSignedAudioUrl, getPublicAudioUrl, deleteAudio } from "@/lib/r2";
 import { getActiveProvider, createProvider } from "./providers/factory";
 import { fetchWithTimeout } from "./providers/http";
+import { buildCompositionPlanFromBlueprint } from "./providers/elevenlabs";
 import type { MusicProvider } from "./providers";
 import { checkPromptSafety, checkExplicitContent } from "./safety-filter";
 
@@ -343,7 +345,7 @@ export async function cancelGeneration(
 
 // ── internals ──────────────────────────────────────────────────────────────
 
-interface ProcessArgs {
+export interface ProcessArgs {
   generationId: string;
   clerkId: string;
   userId: string;
@@ -351,7 +353,7 @@ interface ProcessArgs {
   blueprint: MusicBlueprint;
 }
 
-async function processGeneration(args: ProcessArgs): Promise<void> {
+export async function processGeneration(args: ProcessArgs): Promise<void> {
   const { generationId, userId, input, blueprint } = args;
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("Database is not configured");
@@ -483,7 +485,15 @@ async function runOneVersion(
     ...input,
     energy: input.energy ? Math.max(1, Math.min(10, input.energy + (index === 0 ? 0 : 1))) : input.energy,
   };
-  const result = await provider.generateSong({ ...variedInput, blueprint });
+
+  // Build a composition plan for full-length songs when the provider supports
+  // it (ElevenLabs Music v2). Quick Create / concept mode stays in prompt mode.
+  let compositionPlan: CompositionPlan | undefined = input.compositionPlan;
+  if (!compositionPlan && provider.name === "elevenlabs" && input.durationSeconds > 30) {
+    compositionPlan = buildCompositionPlanFromBlueprint(blueprint, input.lyrics);
+  }
+
+  const result = await provider.generateSong({ ...variedInput, blueprint, compositionPlan });
   return {
     providerJobId: result.providerJobId,
     providerSongId: result.providerSongId,
@@ -743,4 +753,180 @@ export async function deleteTrack(trackId: string, userId: string): Promise<bool
 
   await admin.from("music_tracks").delete().eq("id", trackId);
   return true;
+}
+
+// ── Stale-job recovery ────────────────────────────────────────────────────
+
+/**
+ * Stale threshold: a generation that has been in a non-terminal state
+ * for more than this many minutes is considered stuck.
+ */
+const STALE_THRESHOLD_MINUTES = 5;
+
+/**
+ * Find and reclaim stale generations — jobs that are in a non-terminal
+ * state but haven't been updated recently. This handles the case where
+ * a serverless function was frozen/killed mid-processing.
+ *
+ * Uses an atomic status update (WHERE status IN active states AND
+ * updated_at < threshold) to claim the job, preventing double-processing.
+ *
+ * Returns the claimed generation IDs so the caller can re-process them.
+ */
+export async function claimStaleGenerations(): Promise<string[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return [];
+
+  const cutoff = new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60_000).toISOString();
+
+  // Atomically claim stale jobs by setting status to "queued"
+  // Only claim jobs in active states that haven't been updated recently
+  const { data, error } = await admin
+    .from("music_generations")
+    .update({ status: "queued", started_at: null })
+    .in("status", ["preparing", "generating", "processing"])
+    .lt("updated_at", cutoff)
+    .select("id");
+
+  if (error || !data) return [];
+
+  return data.map((row) => row.id as string);
+}
+
+/**
+ * Re-process a generation by its ID. Used by the recovery worker
+ * to resume a job that was claimed from the stale queue.
+ *
+ * Returns true if the generation was found and re-processed.
+ */
+export async function resumeGeneration(
+  generationId: string,
+): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Database is not configured");
+
+  const { data: gen } = await admin
+    .from("music_generations")
+    .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key, lbc_charged")
+    .eq("id", generationId)
+    .maybeSingle();
+
+  if (!gen) return false;
+
+  // Reconstruct the input and blueprint from the stored generation
+  const { data: user } = await admin
+    .from("users")
+    .select("clerk_id")
+    .eq("id", gen.user_id as string)
+    .maybeSingle();
+
+  if (!user?.clerk_id) return false;
+
+  const blueprint = gen.structured_blueprint as MusicBlueprint;
+  const input: GenerateSongInput = {
+    prompt: (gen.original_prompt as string) || "",
+    instrumental: blueprint?.instrumental ?? false,
+    durationSeconds: (gen.requested_duration as number) ?? 30,
+    vocalType: blueprint?.vocals?.type,
+    explicit: blueprint?.explicit,
+    lyrics: blueprint?.lyrics,
+    energy: blueprint?.vocals?.intensity,
+    idempotencyKey: (gen.idempotency_key as string) || generationId,
+  };
+
+  // Re-run processing
+  try {
+    await processGeneration({
+      generationId,
+      clerkId: user.clerk_id as string,
+      userId: gen.user_id as string,
+      input,
+      blueprint,
+    });
+    return true;
+  } catch (err) {
+    await failGeneration(generationId, user.clerk_id as string, errMessage(err));
+    return false;
+  }
+}
+
+/**
+ * Process all pending/queued generations. Called by the worker endpoint.
+ * This is the durable execution path — instead of relying on
+ * `void processGeneration()` after the HTTP response, the worker
+ * endpoint processes generations synchronously.
+ *
+ * Also claims and recovers stale jobs.
+ */
+export async function processPendingGenerations(): Promise<{
+  processed: number;
+  recovered: number;
+  errors: string[];
+}> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Database is not configured");
+
+  const errors: string[] = [];
+  let processed = 0;
+  let recovered = 0;
+
+  // 1. Claim and recover stale jobs
+  const staleIds = await claimStaleGenerations();
+  for (const id of staleIds) {
+    try {
+      await resumeGeneration(id);
+      recovered++;
+    } catch (err) {
+      errors.push(`Recovery failed for ${id}: ${errMessage(err)}`);
+    }
+  }
+
+  // 2. Process queued jobs
+  const { data: queued } = await admin
+    .from("music_generations")
+    .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key")
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(5);
+
+  for (const gen of queued ?? []) {
+    try {
+      const { data: user } = await admin
+        .from("users")
+        .select("clerk_id")
+        .eq("id", gen.user_id as string)
+        .maybeSingle();
+
+      if (!user?.clerk_id) {
+        errors.push(`No clerk_id for user ${gen.user_id}`);
+        continue;
+      }
+
+      const blueprint = gen.structured_blueprint as MusicBlueprint;
+      const input: GenerateSongInput = {
+        prompt: (gen.original_prompt as string) || "",
+        instrumental: blueprint?.instrumental ?? false,
+        durationSeconds: (gen.requested_duration as number) ?? 30,
+        vocalType: blueprint?.vocals?.type,
+        explicit: blueprint?.explicit,
+        lyrics: blueprint?.lyrics,
+        energy: blueprint?.vocals?.intensity,
+        idempotencyKey: (gen.idempotency_key as string) || gen.id,
+      };
+
+      await processGeneration({
+        generationId: gen.id as string,
+        clerkId: user.clerk_id as string,
+        userId: gen.user_id as string,
+        input,
+        blueprint,
+      });
+      processed++;
+    } catch (err) {
+      errors.push(`Processing failed for ${gen.id}: ${errMessage(err)}`);
+      // failGeneration is called inside processGeneration's catch handler
+    }
+  }
+
+  return { processed, recovered, errors };
 }

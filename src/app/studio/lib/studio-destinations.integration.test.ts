@@ -58,10 +58,10 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.openDrawer).toBe("terminal");
     });
 
-    it("?tool=workflows → More / Mission Forge", () => {
+    it("?tool=workflows → Missions / Forge", () => {
       const r = mapLegacyToolToDestination("workflows");
-      expect(r.destination).toBe("more");
-      expect(r.mode).toBe("workflows");
+      expect(r.destination).toBe("missions");
+      expect(r.mode).toBe("forge");
     });
 
     it("?tool=image → Create / Image", () => {
@@ -96,14 +96,16 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("agents").destination).toBe("agents");
     });
 
-    it("plugins/camera/screen/space/clibridge/workflows → More with matching mode", () => {
+    it("plugins/clibridge → More with matching mode; camera/screen/space/workflows routed elsewhere", () => {
       expect(mapLegacyToolToDestination("plugins").destination).toBe("more");
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
-      expect(mapLegacyToolToDestination("camera").mode).toBe("camera");
-      expect(mapLegacyToolToDestination("screen").mode).toBe("screen");
-      expect(mapLegacyToolToDestination("space").mode).toBe("space");
+      expect(mapLegacyToolToDestination("camera").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("space").destination).toBe("create");
+      expect(mapLegacyToolToDestination("space").mode).toBe("environment");
+      expect(mapLegacyToolToDestination("clibridge").destination).toBe("more");
       expect(mapLegacyToolToDestination("clibridge").mode).toBe("clibridge");
-      expect(mapLegacyToolToDestination("workflows").mode).toBe("workflows");
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("missions");
     });
   });
 
@@ -136,17 +138,12 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(destinationToLegacyTool("studio", "preview")).toBe("code");
     });
 
-    it("More/camera writes ?tool=camera (not ?tool=plugins)", () => {
-      expect(destinationToLegacyTool("more", "camera")).toBe("camera");
-      expect(destinationToLegacyTool("more", "camera")).not.toBe("plugins");
+    it("Create/environment writes ?tool=space", () => {
+      expect(destinationToLegacyTool("create", "environment")).toBe("space");
     });
 
-    it("More/screen writes ?tool=screen", () => {
-      expect(destinationToLegacyTool("more", "screen")).toBe("screen");
-    });
-
-    it("More/space writes ?tool=space", () => {
-      expect(destinationToLegacyTool("more", "space")).toBe("space");
+    it("Missions writes ?tool=workflows", () => {
+      expect(destinationToLegacyTool("missions")).toBe("workflows");
     });
 
     it("More/clibridge writes ?tool=clibridge", () => {
@@ -159,8 +156,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("terminal").openDrawer).toBe("terminal");
     });
 
-    it("workflows mapping goes to more destination", () => {
-      expect(mapLegacyToolToDestination("workflows").destination).toBe("more");
+    it("workflows mapping goes to missions destination", () => {
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("missions");
     });
 
     it("chat mapping does NOT open drawer or inspector", () => {

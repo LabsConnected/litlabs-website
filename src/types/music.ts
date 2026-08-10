@@ -2,6 +2,7 @@
 // Music Lab types. `userId` is the internal public.users.id UUID (not clerk_id).
 
 export type GenerationStatus =
+  | "idle"
   | "queued"
   | "preparing"
   | "generating"
@@ -47,6 +48,7 @@ export interface GenerateSongInput {
   style?: string;
   energy?: number;
   idempotencyKey: string;
+  compositionPlan?: CompositionPlan;
 }
 
 /** Shape returned by a provider after kicking off a generation. */
@@ -115,4 +117,22 @@ export interface SoundDna {
   likedInstruments: string[];
   rejectedInstruments: string[];
   previousPrompts: string[];
+}
+
+// ── ElevenLabs Music v2 Composition Plan types ─────────────────────────────
+
+export type ContextAdherence = "low" | "medium" | "high";
+
+export interface CompositionChunk {
+  text: string;
+  duration_ms: number;
+  positive_styles: string[];
+  negative_styles?: string[];
+  context_adherence?: ContextAdherence;
+}
+
+export interface CompositionPlan {
+  chunks: CompositionChunk[];
+  positive_global_styles: string[];
+  negative_global_styles: string[];
 }

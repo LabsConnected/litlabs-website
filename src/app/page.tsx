@@ -30,19 +30,22 @@ const homeSchema = {
       "@id": `${SITE_URL}/#organization`,
       name: SITE_NAME,
       alternateName: [
+        "LitLabs",
+        "Lit Labs",
         "LiTTree",
         "LiTTree Labs",
         "LiTTree LabStudio",
-        "LitLabs",
-        "Lit Labs",
         "LiTT Labs",
         "litlabs.net",
       ],
       url: SITE_URL,
-      // TODO: add sameAs with real profile URLs (X, GitHub, YouTube, LinkedIn,
-      // Instagram) once available. sameAs is the single strongest entity-
-      // disambiguation signal for a brand Google does not yet recognize.
-      // Omit the property entirely until then — an empty array is worse than absent.
+      sameAs: [
+        "https://github.com/LabsConnected",
+        "https://www.youtube.com/@LiTTreeLabStudios",
+        "https://www.linkedin.com/company/litlabs",
+        "https://x.com/LitLabsNet",
+        "https://www.instagram.com/litlabsnet",
+      ],
       logo: {
         "@type": "ImageObject",
         url: absoluteUrl("/icon-512.png"),
@@ -57,6 +60,13 @@ const homeSchema = {
       "@id": `${SITE_URL}/#website`,
       url: SITE_URL,
       name: SITE_NAME,
+      alternateName: [
+        "LitLabs",
+        "Lit Labs",
+        "LiTTree",
+        "LiTTree Labs",
+        "litlabs.net",
+      ],
       description: DEFAULT_DESCRIPTION,
       publisher: {
         "@id": `${SITE_URL}/#organization`,

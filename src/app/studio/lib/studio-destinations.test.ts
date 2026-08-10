@@ -48,10 +48,10 @@ describe("studio-destinations", () => {
       expect(result.openDrawer).toBe("terminal");
     });
 
-    it("maps workflows to More / Mission Forge", () => {
+    it("maps workflows to Missions / Forge", () => {
       const result = mapLegacyToolToDestination("workflows");
-      expect(result.destination).toBe("more");
-      expect(result.mode).toBe("workflows");
+      expect(result.destination).toBe("missions");
+      expect(result.mode).toBe("forge");
     });
 
     it("maps image/video/audio to Create with correct modes", () => {
@@ -77,20 +77,29 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("agents").destination).toBe("agents");
     });
 
+    it("maps camera to Studio (capture action, not a destination)", () => {
+      expect(mapLegacyToolToDestination("camera").destination).toBe("studio");
+    });
+
+    it("maps screen to Studio (capture action, not a destination)", () => {
+      expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
+    });
+
+    it("maps space to Create / Environment", () => {
+      const result = mapLegacyToolToDestination("space");
+      expect(result.destination).toBe("create");
+      expect(result.mode).toBe("environment");
+    });
+
     it("maps more tools to More with correct modes", () => {
       expect(mapLegacyToolToDestination("plugins").destination).toBe("more");
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
-      expect(mapLegacyToolToDestination("camera").destination).toBe("more");
-      expect(mapLegacyToolToDestination("camera").mode).toBe("camera");
-      expect(mapLegacyToolToDestination("screen").destination).toBe("more");
-      expect(mapLegacyToolToDestination("space").destination).toBe("more");
       expect(mapLegacyToolToDestination("clibridge").destination).toBe("more");
     });
 
-    it("maps pipeline (legacy) to workflows", () => {
-      // The StudioOS component normalizes "pipeline" -> "workflows" before
-      // calling this function, but the adapter should still handle it.
-      expect(mapLegacyToolToDestination("workflows").destination).toBe("more");
+    it("maps pipeline (legacy) to Missions/Forge", () => {
+      expect(mapLegacyToolToDestination("workflows").destination).toBe("missions");
+      expect(mapLegacyToolToDestination("pipeline").destination).toBe("missions");
     });
 
     it("falls back to Studio/Work for unknown tools", () => {
@@ -113,6 +122,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("create", "video")).toBe("video");
       expect(destinationToLegacyTool("create", "audio")).toBe("audio");
       expect(destinationToLegacyTool("create", "music")).toBe("music");
+      expect(destinationToLegacyTool("create", "environment")).toBe("space");
     });
 
     it("round-trips Assets and Agents", () => {
@@ -120,20 +130,19 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("agents")).toBe("agents");
     });
 
+    it("round-trips Missions destination to workflows", () => {
+      expect(destinationToLegacyTool("missions")).toBe("workflows");
+    });
+
     it("round-trips More destinations back to legacy tools", () => {
       expect(destinationToLegacyTool("more", "plugins")).toBe("plugins");
-      expect(destinationToLegacyTool("more", "camera")).toBe("camera");
-      expect(destinationToLegacyTool("more", "screen")).toBe("screen");
-      expect(destinationToLegacyTool("more", "space")).toBe("space");
       expect(destinationToLegacyTool("more", "clibridge")).toBe("clibridge");
-      expect(destinationToLegacyTool("more", "terminal")).toBe("terminal");
-      expect(destinationToLegacyTool("more", "workflows")).toBe("workflows");
     });
   });
 
   describe("DESTINATION_LABELS", () => {
-    it("provides labels for all 5 destinations", () => {
-      const destinations: StudioDestination[] = ["studio", "create", "assets", "agents", "more"];
+    it("provides labels for all 6 destinations", () => {
+      const destinations: StudioDestination[] = ["studio", "create", "assets", "agents", "missions", "more"];
       destinations.forEach((d) => {
         expect(DESTINATION_LABELS[d]).toBeTruthy();
         expect(typeof DESTINATION_LABELS[d]).toBe("string");
@@ -145,6 +154,7 @@ describe("studio-destinations", () => {
       expect(DESTINATION_LABELS.create).toBe("Create");
       expect(DESTINATION_LABELS.assets).toBe("Assets");
       expect(DESTINATION_LABELS.agents).toBe("Agents");
+      expect(DESTINATION_LABELS.missions).toBe("Missions");
       expect(DESTINATION_LABELS.more).toBe("More");
     });
   });

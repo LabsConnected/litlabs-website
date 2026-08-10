@@ -124,6 +124,7 @@ export class LiTTRealtimeSessionController {
   private frameCanvas: HTMLCanvasElement | null = null;
   private frameCtx: CanvasRenderingContext2D | null = null;
   private frameInterval: ReturnType<typeof setInterval> | null = null;
+  private frameVideoElement: HTMLVideoElement | null = null;
   private framesSent = 0;
 
   // Reconnection
@@ -131,9 +132,26 @@ export class LiTTRealtimeSessionController {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isIntentionalClose = false;
 
+  // Ephemeral token expiration (P0.10)
+  private tokenExpiresAt: number | null = null;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Transcripts
   private currentUserTranscript = "";
   private currentAssistantTranscript = "";
+  // P0.2: Track last raw transcription chunks to suppress duplicate delivery
+  private lastInputTranscriptChunk = "";
+  private lastOutputTranscriptChunk = "";
+  // P0.2: Turn guard — prevents out-of-order generationComplete from
+  // finalizing transcripts that belong to a new turn
+  private currentTurnId = 0;
+  // P0.2: Track pending tool call IDs for cancellation dedup
+  private pendingToolCallIds = new Set<string>();
+
+  // P0.19: Observability — session timing and structured events
+  private sessionStartTime: number | null = null;
+  private firstAudioReceivedAt: number | null = null;
+  private lastEventTimestamp: number | null = null;
 
   // Facing mode
   private facingMode: "user" | "environment" = "user";
@@ -209,6 +227,21 @@ export class LiTTRealtimeSessionController {
   private emitError(kind: LiveSessionErrorKind, message: string, retryable: boolean) {
     const error: LiveSessionError = { kind, message, retryable };
     this.emit({ type: "error", error });
+    this.logEvent("live_error", { kind, message, retryable });
+  }
+
+  // P0.19: Structured event logging for observability
+  private logEvent(event: string, data?: Record<string, unknown>) {
+    const timestamp = Date.now();
+    this.lastEventTimestamp = timestamp;
+    const log: { event: string; timestamp: number; sessionId?: string; state?: string;[key: string]: unknown } = {
+      event,
+      timestamp,
+      sessionId: this.sessionStartTime ? `live_${this.sessionStartTime}` : undefined,
+      state: this.state,
+      ...data,
+    };
+    this.emit({ type: "activityLog", log });
   }
 
   // -------------------------------------------------------------------------
@@ -234,6 +267,15 @@ export class LiTTRealtimeSessionController {
     this.config.systemInstruction = buildSystemInstruction(context);
     this.isIntentionalClose = false;
     this.reconnectAttempts = 0;
+    this.sessionStartTime = Date.now();
+    this.firstAudioReceivedAt = null;
+    this.logEvent("live_session_started", {
+      userId: context.userId,
+      projectId: context.projectId,
+      camera: wantCamera,
+      microphone: wantMic,
+      screen: wantScreen,
+    });
 
     this.setState("requesting_permission");
 
@@ -368,11 +410,12 @@ export class LiTTRealtimeSessionController {
     this.setState("connecting");
     this.updateIndicators({ littAudio: "connecting", littVision: "connecting" });
 
-    // 1. Get API key from server
-    let apiKey: string;
+    // 1. Get ephemeral token from server (permanent key never leaves server)
+    let ephemeralToken: string;
     let model: string;
+    let tokenExpiresAt: number;
     try {
-      const res = await fetch("/api/live/token", {
+      const res = await fetch("/api/live/session-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -384,18 +427,20 @@ export class LiTTRealtimeSessionController {
         this.setState("failed");
         return;
       }
-      const data = await res.json() as { apiKey: string; model: string };
-      apiKey = data.apiKey;
+      const data = await res.json() as { token: string; model: string; expiresAt: string };
+      ephemeralToken = data.token;
       model = data.model;
+      tokenExpiresAt = new Date(data.expiresAt).getTime();
     } catch (err) {
       this.emitError("token_request_failed", `Network error: ${(err as Error).message}`, true);
       this.setState("failed");
       return;
     }
 
-    // 2. Create GoogleGenAI client with the server-provided key
+    // 2. Create GoogleGenAI client with the ephemeral token (v1alpha required)
     try {
-      this.ai = new GoogleGenAI({ apiKey });
+      this.ai = new GoogleGenAI({ apiKey: ephemeralToken, apiVersion: "v1alpha" });
+      this.tokenExpiresAt = tokenExpiresAt;
     } catch (err) {
       this.emitError("websocket_rejected", `Failed to create AI client: ${(err as Error).message}`, false);
       this.setState("failed");
@@ -403,6 +448,15 @@ export class LiTTRealtimeSessionController {
     }
 
     // 3. Connect to Live API
+    // P0.9: Connection timeout — don't leave user on "Connecting…" forever
+    this.connectionTimer = setTimeout(() => {
+      if (this.state === "connecting" || this.state === "reconnecting") {
+        this.emitError("connection_timeout", "Connection timed out. Please retry.", true);
+        this.setState("failed");
+        this.updateIndicators({ littAudio: "error", littVision: "error" });
+      }
+    }, 15_000);
+
     try {
       this.session = await this.ai.live.connect({
         model,
@@ -417,6 +471,10 @@ export class LiTTRealtimeSessionController {
         },
         callbacks: {
           onopen: () => {
+            if (this.connectionTimer) {
+              clearTimeout(this.connectionTimer);
+              this.connectionTimer = null;
+            }
             this.reconnectAttempts = 0;
             // Start sending audio and video
             this.startAudioCapture();
@@ -433,6 +491,10 @@ export class LiTTRealtimeSessionController {
         },
       });
     } catch (err) {
+      if (this.connectionTimer) {
+        clearTimeout(this.connectionTimer);
+        this.connectionTimer = null;
+      }
       const msg = (err as Error).message || "unknown";
       if (msg.includes("quota") || msg.includes("429")) {
         this.emitError("quota_exceeded", "Gemini API quota exceeded. Please try again later.", true);
@@ -475,22 +537,48 @@ export class LiTTRealtimeSessionController {
       if (this.micStream) {
         this.updateIndicators({ littAudio: "connected" });
         if (this.state === "connecting" || this.state === "reconnecting") {
-          this.setState(this.cameraStream || this.screenStream ? "live_audio" : "live_audio");
+          // P0.2 fix: correctly set live_audio_and_vision when vision is active
+          const hasVision = !!(this.cameraStream || this.screenStream);
+          this.setState(hasVision ? "live_audio_and_vision" : "live_audio");
         }
       }
+      this.logEvent("live_connected", {
+        reconnect: this.reconnectAttempts > 0,
+        attempt: this.reconnectAttempts,
+      });
       return;
     }
 
     // Tool call — forward to LiTT orchestrator
     if (msg.toolCall?.functionCalls) {
       for (const fc of msg.toolCall.functionCalls) {
+        // P0.2: Suppress duplicate tool call IDs
+        if (this.pendingToolCallIds.has(fc.id)) continue;
+        this.pendingToolCallIds.add(fc.id);
         const call: LiveToolCall = {
           id: fc.id,
           name: fc.name,
           args: fc.args || {},
         };
         this.emit({ type: "toolCall", call });
+        this.logEvent("live_tool_called", { toolName: fc.name, toolCallId: fc.id });
       }
+      return;
+    }
+
+    // P0.2: Tool call cancellation — clean up pending IDs and notify
+    if (msg.toolCallCancellation) {
+      // The cancellation may include IDs or cancel all pending calls
+      const cancelMsg = msg.toolCallCancellation as { ids?: string[] };
+      if (cancelMsg.ids && Array.isArray(cancelMsg.ids)) {
+        for (const id of cancelMsg.ids) {
+          this.pendingToolCallIds.delete(id);
+        }
+      } else {
+        // Cancel all pending tool calls
+        this.pendingToolCallIds.clear();
+      }
+      this.emit({ type: "turnComplete" });
       return;
     }
 
@@ -502,6 +590,7 @@ export class LiTTRealtimeSessionController {
     if (content.interrupted) {
       this.stopPlayback();
       this.emit({ type: "interrupted" });
+      this.logEvent("live_interrupted");
       // Reset assistant transcript on interruption
       if (this.currentAssistantTranscript) {
         this.emit({
@@ -519,31 +608,43 @@ export class LiTTRealtimeSessionController {
     }
 
     // Input transcript (user speech → text)
+    // P0.2: The Gemini Live API sends cumulative transcription text.
+    // We replace (not append) to avoid duplication from re-delivered chunks.
     if (content.inputTranscription?.text) {
-      this.currentUserTranscript += content.inputTranscription.text;
-      this.emit({
-        type: "userTranscript",
-        transcript: {
-          role: "user",
-          text: this.currentUserTranscript,
-          isFinal: false,
-          timestamp: Date.now(),
-        },
-      });
+      const chunk = content.inputTranscription.text;
+      // Suppress exact duplicate chunks (re-delivery during reconnect)
+      if (chunk !== this.lastInputTranscriptChunk) {
+        this.lastInputTranscriptChunk = chunk;
+        this.currentUserTranscript = chunk; // Replace, not append
+        this.emit({
+          type: "userTranscript",
+          transcript: {
+            role: "user",
+            text: this.currentUserTranscript,
+            isFinal: false,
+            timestamp: Date.now(),
+          },
+        });
+      }
     }
 
     // Output transcript (LiTT speech → text)
+    // P0.2: Same deduplication as input transcript
     if (content.outputTranscription?.text) {
-      this.currentAssistantTranscript += content.outputTranscription.text;
-      this.emit({
-        type: "assistantTranscript",
-        transcript: {
-          role: "assistant",
-          text: this.currentAssistantTranscript,
-          isFinal: false,
-          timestamp: Date.now(),
-        },
-      });
+      const chunk = content.outputTranscription.text;
+      if (chunk !== this.lastOutputTranscriptChunk) {
+        this.lastOutputTranscriptChunk = chunk;
+        this.currentAssistantTranscript = chunk; // Replace, not append
+        this.emit({
+          type: "assistantTranscript",
+          transcript: {
+            role: "assistant",
+            text: this.currentAssistantTranscript,
+            isFinal: false,
+            timestamp: Date.now(),
+          },
+        });
+      }
     }
 
     // Audio output (PCM16 data)
@@ -551,6 +652,13 @@ export class LiTTRealtimeSessionController {
     if (parts) {
       for (const part of parts) {
         if (part.inlineData?.data) {
+          // P0.19: Track latency to first audio
+          if (!this.firstAudioReceivedAt && this.sessionStartTime) {
+            this.firstAudioReceivedAt = Date.now();
+            this.logEvent("live_first_audio", {
+              latencyMs: this.firstAudioReceivedAt - this.sessionStartTime,
+            });
+          }
           // Decode base64 → ArrayBuffer
           const binary = atob(part.inlineData.data);
           const buf = new ArrayBuffer(binary.length);
@@ -566,32 +674,48 @@ export class LiTTRealtimeSessionController {
 
     // Turn complete
     if (content.generationComplete) {
-      // Finalize transcripts
-      if (this.currentUserTranscript) {
+      // P0.2: Increment turn ID to guard against out-of-order events
+      const turnId = ++this.currentTurnId;
+
+      // Finalize transcripts (capture locally to avoid race with next turn)
+      const userText = this.currentUserTranscript;
+      const assistantText = this.currentAssistantTranscript;
+
+      if (userText) {
         this.emit({
           type: "userTranscript",
           transcript: {
             role: "user",
-            text: this.currentUserTranscript,
+            text: userText,
             isFinal: true,
             timestamp: Date.now(),
           },
         });
-        this.currentUserTranscript = "";
       }
-      if (this.currentAssistantTranscript) {
+      if (assistantText) {
         this.emit({
           type: "assistantTranscript",
           transcript: {
             role: "assistant",
-            text: this.currentAssistantTranscript,
+            text: assistantText,
             isFinal: true,
             timestamp: Date.now(),
           },
         });
-        this.currentAssistantTranscript = "";
       }
-      this.emit({ type: "turnComplete" });
+
+      // Clear transcripts and dedup state for the next turn
+      this.currentUserTranscript = "";
+      this.currentAssistantTranscript = "";
+      this.lastInputTranscriptChunk = "";
+      this.lastOutputTranscriptChunk = "";
+      this.pendingToolCallIds.clear();
+
+      // P0.2: Only emit turnComplete if this is still the current turn
+      // (prevents stale generationComplete from a previous turn)
+      if (turnId === this.currentTurnId) {
+        this.emit({ type: "turnComplete" });
+      }
     }
   }
 
@@ -762,6 +886,7 @@ export class LiTTRealtimeSessionController {
     sampleVideo.muted = true;
     sampleVideo.playsInline = true;
     void sampleVideo.play().catch(() => {});
+    this.frameVideoElement = sampleVideo;
 
     this.frameInterval = setInterval(() => {
       if (!this.session || this.isIntentionalClose) return;
@@ -811,6 +936,11 @@ export class LiTTRealtimeSessionController {
       clearInterval(this.frameInterval);
       this.frameInterval = null;
     }
+    // P0.17/P0.18: Clean up the hidden video element used for frame sampling
+    if (this.frameVideoElement) {
+      this.frameVideoElement.srcObject = null;
+      this.frameVideoElement = null;
+    }
     this.updateIndicators({ frameStream: "inactive", littVision: "disconnected" });
   }
 
@@ -832,6 +962,8 @@ export class LiTTRealtimeSessionController {
     } else {
       this.emitError("network_interrupted", `Connection closed (${code}): ${reason}`, true);
     }
+
+    this.logEvent("live_connection_failed", { code, reason, attempt: this.reconnectAttempts });
 
     this.updateIndicators({ littAudio: "disconnected", littVision: "disconnected" });
 
@@ -855,7 +987,25 @@ export class LiTTRealtimeSessionController {
     this.stopPlayback();
     this.session = null;
 
-    // Reconnect to Gemini Live
+    // P0.2: Reset transcript and dedup state from previous session
+    this.currentUserTranscript = "";
+    this.currentAssistantTranscript = "";
+    this.lastInputTranscriptChunk = "";
+    this.lastOutputTranscriptChunk = "";
+    this.pendingToolCallIds.clear();
+    this.currentTurnId = 0;
+
+    // P0.10: If the ephemeral token has expired (or is about to expire),
+    // connectToGeminiLive will fetch a fresh one. The token is single-use,
+    // so we always need a new one for reconnection.
+    const now = Date.now();
+    if (this.tokenExpiresAt && now >= this.tokenExpiresAt - 5000) {
+      // Token expired or expiring soon — will request a new one
+      this.logEvent("live_token_expired", { expiredAt: this.tokenExpiresAt });
+      this.tokenExpiresAt = null;
+    }
+
+    // Reconnect to Gemini Live (fetches a fresh ephemeral token)
     await this.connectToGeminiLive();
   }
 
@@ -966,6 +1116,8 @@ export class LiTTRealtimeSessionController {
       this.session.sendToolResponse({
         functionResponses: [{ id, name, response }],
       });
+      // P0.16: Clean up pending tool call ID after response is sent
+      this.pendingToolCallIds.delete(id);
     } catch {
       // Session may be closing
     }
@@ -982,6 +1134,10 @@ export class LiTTRealtimeSessionController {
         // ignore
       }
     }
+    // P0.2: Clear dedup state so next turn starts fresh
+    this.currentAssistantTranscript = "";
+    this.lastOutputTranscriptChunk = "";
+    this.pendingToolCallIds.clear();
     this.emit({ type: "interrupted" });
   }
 
@@ -1030,11 +1186,32 @@ export class LiTTRealtimeSessionController {
   end(): void {
     this.isIntentionalClose = true;
 
+    // P0.19: Log session end with duration
+    if (this.sessionStartTime) {
+      this.logEvent("live_session_ended", {
+        durationMs: Date.now() - this.sessionStartTime,
+        firstAudioLatencyMs: this.firstAudioReceivedAt
+          ? this.firstAudioReceivedAt - this.sessionStartTime
+          : null,
+      });
+      this.sessionStartTime = null;
+      this.firstAudioReceivedAt = null;
+    }
+
     // Clear reconnect timer
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+
+    // Clear connection timeout timer
+    if (this.connectionTimer) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
+    }
+
+    // Clear token expiration
+    this.tokenExpiresAt = null;
 
     // Stop frame sampling
     this.stopFrameSampling();
@@ -1088,6 +1265,10 @@ export class LiTTRealtimeSessionController {
     // Clear transcripts
     this.currentUserTranscript = "";
     this.currentAssistantTranscript = "";
+    this.lastInputTranscriptChunk = "";
+    this.lastOutputTranscriptChunk = "";
+    this.currentTurnId = 0;
+    this.pendingToolCallIds.clear();
     this.framesSent = 0;
   }
 }

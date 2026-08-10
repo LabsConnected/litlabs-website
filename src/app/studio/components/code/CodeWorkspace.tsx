@@ -18,9 +18,11 @@ import {
   Code2,
   Eye,
   Columns2,
+  Monitor,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import StudioPreviewPanel from "../StudioPreviewPanel";
+import { StudioFilePreview } from "../StudioFilePreview";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), { ssr: false });
 
@@ -34,7 +36,7 @@ interface FileEntry {
   gitStatus?: "M" | "A" | "D" | "U" | "C";
 }
 
-type ViewMode = "code" | "split" | "preview";
+type ViewMode = "code" | "split" | "file-preview" | "app-preview";
 
 type DialogState =
   | { kind: "file" | "folder"; directory: string; value: string }
@@ -83,7 +85,7 @@ function joinPath(directory: string, name: string): string {
 }
 
 const TEXT_EXTENSIONS = new Set([
-  "astro", "css", "csv", "env", "html", "jsx", "json", "md", "mdx",
+  "astro", "css", "csv", "env", "html", "js", "jsx", "json", "md", "mdx",
   "mjs", "scss", "sh", "sql", "svg", "toml", "ts", "tsx", "txt", "yaml", "yml",
 ]);
 
@@ -132,6 +134,7 @@ export function CodeWorkspace({
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [selectedFileInfo, setSelectedFileInfo] = useState<{ path: string; size: number | null } | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
@@ -221,17 +224,33 @@ export function CodeWorkspace({
     if (projectId) void loadDirectory(".");
   }, [projectId, loadDirectory]);
 
+  // Find a file entry by path to get metadata (size, etc.)
+  const findFileEntry = useCallback((targetPath: string): FileEntry | null => {
+    for (const dir of Object.values(entries)) {
+      const found = dir.find((e) => e.path === targetPath);
+      if (found) return found;
+    }
+    return null;
+  }, [entries]);
+
   // Open file
   const openFile = useCallback(async (path: string) => {
     if (!projectId) return;
+    // Update selection info immediately (for file preview)
+    const fileEntry = findFileEntry(path);
+    setSelectedFileInfo({ path, size: fileEntry?.size ?? null });
+    // Binary files: don't open in editor, but update selection for file preview
     if (!isTextFile(path)) {
-      setError(`Cannot open binary file: ${path}`);
+      setActiveTab(null);
+      setFileLoading(false);
+      setError(null);
       return;
     }
     // Check if already open
     const existing = openTabs.find((t) => t.path === path);
     if (existing) {
       setActiveTab(path);
+      setFileLoading(false);
       return;
     }
     setFileLoading(true);
@@ -249,7 +268,7 @@ export function CodeWorkspace({
     } finally {
       setFileLoading(false);
     }
-  }, [projectId, requestJson, openTabs]);
+  }, [projectId, requestJson, openTabs, findFileEntry]);
 
   // Save file
   const saveFile = useCallback(async (path: string) => {
@@ -463,7 +482,8 @@ export function CodeWorkspace({
           {([
             { id: "code" as ViewMode, icon: Code2, label: "Code" },
             { id: "split" as ViewMode, icon: Columns2, label: "Split" },
-            { id: "preview" as ViewMode, icon: Eye, label: "Preview" },
+            { id: "file-preview" as ViewMode, icon: Eye, label: "File" },
+            { id: "app-preview" as ViewMode, icon: Monitor, label: "App" },
           ]).map((mode) => {
             const Icon = mode.icon;
             const isActive = viewMode === mode.id;
@@ -585,7 +605,7 @@ export function CodeWorkspace({
 
         {/* Center: Editor + Preview */}
         <div className="flex min-w-0 flex-1">
-          {/* Editor */}
+          {/* Editor — shown in code and split modes */}
           {(viewMode === "code" || viewMode === "split") && (
             <div className="flex min-w-0 flex-1 flex-col" style={viewMode === "split" ? { borderRight: "1px solid var(--studio-border)" } : {}}>
               {/* Tabs */}
@@ -712,8 +732,25 @@ export function CodeWorkspace({
             </div>
           )}
 
-          {/* Preview */}
-          {(viewMode === "preview" || viewMode === "split") && (
+          {/* File Preview — shown in split and file-preview modes */}
+          {(viewMode === "split" || viewMode === "file-preview") && (
+            <div className="flex min-w-0 flex-1 flex-col">
+              <StudioFilePreview
+                projectId={projectId}
+                selection={{
+                  path: selectedFileInfo?.path ?? activeTab,
+                  content: activeTabData?.content ?? (selectedFileInfo && !isTextFile(selectedFileInfo.path) ? null : null),
+                  size: selectedFileInfo?.size ?? null,
+                  loading: fileLoading,
+                  error: null,
+                  dirty: activeTabData ? activeTabData.content !== activeTabData.original : false,
+                }}
+              />
+            </div>
+          )}
+
+          {/* App Preview — shown in app-preview mode */}
+          {viewMode === "app-preview" && (
             <div className="flex min-w-0 flex-1 flex-col">
               <StudioPreviewPanel
                 projectId={projectId}

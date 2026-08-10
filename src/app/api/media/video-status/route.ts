@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
+import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -16,12 +17,30 @@ export async function POST(req: NextRequest) {
     );
 
   try {
-    const { operationName, cost = 0, model = "veo" } = await req.json();
+    const { operationName } = await req.json();
     if (!operationName)
       return NextResponse.json(
         { error: "Missing operationName" },
         { status: 400 },
       );
+
+    // ── Server-authoritative cost resolution ──────────────────────
+    // Never trust client-supplied cost — resolve from the job store.
+    const job = findJobByOperationId(operationName);
+    if (!job) {
+      return NextResponse.json(
+        { error: "Video job not found. Cost must be resolved server-side." },
+        { status: 404 },
+      );
+    }
+
+    // Verify the job belongs to the authenticated user
+    if (job.userId !== userId) {
+      return NextResponse.json(
+        { error: "Video job does not belong to this user." },
+        { status: 403 },
+      );
+    }
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const op = new GenerateVideosOperation();
@@ -36,20 +55,28 @@ export async function POST(req: NextRequest) {
     }
 
     // If the operation failed (done but no video), refund the user
-    if (updated.done && !videoUri && cost > 0) {
-      await adjustWalletBalance({
-        clerkId: userId,
-        amount: cost,
-        type: "refund",
-        reason: `Video refund: ${model} operation failed (no video output)`,
-        idempotencyKey: `video_refund_${operationName}`,
-      });
+    // using the server-authoritative cost from the job store.
+    let refunded = false;
+    if (updated.done && !videoUri) {
+      // Idempotent refund — can only happen once per job
+      const canRefund = markVideoJobRefunded(job.jobId);
+      if (canRefund && job.cost > 0) {
+        await adjustWalletBalance({
+          clerkId: userId,
+          amount: job.cost,
+          type: "refund",
+          reason: `Video refund: ${job.model} operation failed (no video output)`,
+          idempotencyKey: `video_refund_${operationName}`,
+        });
+        refunded = true;
+      }
     }
 
     return NextResponse.json({
       done: updated.done,
       videoUri,
-      refunded: updated.done && !videoUri && cost > 0,
+      refunded,
+      cost: job.cost,
     });
   } catch (err: unknown) {
     return NextResponse.json(

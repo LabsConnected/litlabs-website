@@ -103,6 +103,7 @@ export default function MusicTool() {
     lbcRefunded,
     tracks: genTracks,
     isGenerating,
+    isCancelling,
     startGeneration,
     cancelGeneration,
   } = useMusicGeneration();
@@ -260,15 +261,42 @@ export default function MusicTool() {
     setProducerMessages((m) => [...m, { role: "litt", text: `Editing lyrics for "${track.title}". Write your new words below, then regenerate.` }]);
   }, []);
 
-  const handleImprovePrompt = useCallback(() => {
+  const [isEnhancing, setIsEnhancing] = useState(false);
+
+  const handleImprovePrompt = useCallback(async () => {
     if (!prompt.trim()) {
       setPrompt("A soulful late-night R&B track with warm keys, deep bass, intimate vocals and a huge final chorus at 92 BPM");
       return;
     }
-    // Lightweight local enhancement — appends production cues.
-    const enhancers = [" with polished mix", ", radio-ready master", " and a memorable hook", " featuring dynamic arrangement"];
-    const pick = enhancers[Math.floor(Math.random() * enhancers.length)];
-    setPrompt((p) => (p.length > 480 ? p : p + pick));
+    setIsEnhancing(true);
+    try {
+      const res = await fetch("/api/music/enhance-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ prompt }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enhanced) {
+          setPrompt(data.enhanced);
+          // Auto-fill style fields if provided
+          if (data.genre || data.subgenre) {
+            const styles = [data.genre, data.subgenre].filter(Boolean).join(", ");
+            if (styles) setStyles(styles);
+          }
+          if (data.tempo) {
+            const bpmMatch = data.tempo.match(/(\d+)/);
+            if (bpmMatch) setBpm(Number(bpmMatch[1]));
+          }
+          if (data.key && data.key !== "auto") setMusicalKey(data.key);
+        }
+      }
+    } catch {
+      // silent fail — keep original prompt
+    } finally {
+      setIsEnhancing(false);
+    }
   }, [prompt]);
 
   const handleSurprise = useCallback(() => {
@@ -276,64 +304,98 @@ export default function MusicTool() {
     setPrompt(pick);
   }, []);
 
-  const handleProducerSend = useCallback(() => {
+  const [isProducerLoading, setIsProducerLoading] = useState(false);
+
+  const handleProducerSend = useCallback(async () => {
     const text = producerInput.trim();
     if (!text) return;
     setProducerMessages((m) => [...m, { role: "user", text }]);
     setProducerInput("");
-    // Lightweight canned producer responses keyed off intent words.
-    const lower = text.toLowerCase();
-    let reply = "Got it. I'll shape the prompt around that — hit GENERATE and I'll refine from the result.";
-    if (/(harder|aggressive|bang|808|trap)/.test(lower)) {
-      reply = "I'll push the energy up, add distorted 808s, tighten the hats and make the drop hit harder. Try energy 8-10 and mood 'Aggressive'.";
-      setEnergy(9);
-      setMood("Aggressive");
-    } else if (/(catchy|hook|melod|pop|radio)/.test(lower)) {
-      reply = "I'll tighten the hook, raise the BPM slightly, simplify the bass and give the chorus more contrast. Try mood 'Happy' and a strong top-line.";
-      setEnergy(7);
-      setMood("Happy");
-    } else if (/(emotion|sad|cry|feeling|heart)/.test(lower)) {
-      reply = "I'll pull the energy back, open up the arrangement, and let the vocal breathe. Try mood 'Sad', energy 3-4, and a minor key.";
-      setEnergy(4);
-      setMood("Sad");
-    } else if (/(chill|lofi|study|calm|relax)/.test(lower)) {
-      reply = "I'll go lo-fi: vinyl warmth, sleepy drums, soft Rhodes. Try mood 'Chill', energy 3, BPM 70-85.";
-      setEnergy(3);
-      setMood("Chill");
-      setBpm(78);
-    } else if (/(epic|cinematic|orchestral|trailer)/.test(lower)) {
-      reply = "I'll build a cinematic score: taiko drums, choir swells, heroic climax. Try mood 'Epic', energy 8, full duration.";
-      setEnergy(8);
-      setMood("Epic");
-      setDuration("full");
-    }
-    setProducerMessages((m) => [...m, { role: "litt", text: reply }]);
-  }, [producerInput]);
+    setIsProducerLoading(true);
 
-  const applyProducerTransform = useCallback((kind: "harder" | "catchier" | "emotional" | "variation") => {
-    setProducerMessages((m) => [
-      ...m,
-      { role: "user", text: kind === "harder" ? "Make it harder" : kind === "catchier" ? "Make it catchier" : kind === "emotional" ? "Make it more emotional" : "Generate a variation" },
-    ]);
-    let reply = "";
+    try {
+      const res = await fetch("/api/music/producer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          prompt: text,
+          currentSettings: { mood, bpm, energy, instrumental, vocalType, styles, negativeStyles },
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        // Apply structured changes
+        if (data.bpm) setBpm(data.bpm);
+        if (data.energy) setEnergy(data.energy);
+        if (data.key && data.key !== "auto") setMusicalKey(data.key);
+        if (data.styles?.length) setStyles(data.styles.join(", "));
+        if (data.avoidStyles?.length) setNegativeStyles(data.avoidStyles.join(", "));
+        if (data.vocalDirection && !instrumental) {
+          setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || data.vocalDirection }]);
+        } else {
+          setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || "Got it — I've updated the settings. Hit Generate to hear it." }]);
+        }
+        if (data.enhancedPrompt) {
+          setPrompt(data.enhancedPrompt);
+        }
+      } else {
+        setProducerMessages((m) => [...m, { role: "litt", text: "I couldn't process that right now. Try rephrasing or hit Generate with your current settings." }]);
+      }
+    } catch {
+      setProducerMessages((m) => [...m, { role: "litt", text: "Connection issue — try again in a moment." }]);
+    } finally {
+      setIsProducerLoading(false);
+    }
+  }, [producerInput, mood, bpm, energy, instrumental, vocalType, styles, negativeStyles]);
+
+  const applyProducerTransform = useCallback(async (kind: "harder" | "catchier" | "emotional" | "variation") => {
+    const userText = kind === "harder" ? "Make it harder" : kind === "catchier" ? "Make it catchier" : kind === "emotional" ? "Make it more emotional" : "Generate a variation";
+    setProducerMessages((m) => [...m, { role: "user", text: userText }]);
+    setIsProducerLoading(true);
+
+    // Apply quick local changes for immediate feedback
     if (kind === "harder") {
       setEnergy((e) => Math.min(10, e + 2));
       setMood("Aggressive");
-      reply = "Tightened the low end, pushed energy up, set mood to Aggressive. Generate to hear it.";
     } else if (kind === "catchier") {
       setEnergy((e) => Math.max(4, Math.min(8, e + 1)));
       setMood("Happy");
-      reply = "Simplified the arrangement for a stronger hook, raised energy slightly. Generate to hear it.";
     } else if (kind === "emotional") {
       setEnergy((e) => Math.max(2, e - 2));
       setMood("Sad");
-      reply = "Pulled energy back, opened the arrangement, mood set to Sad. Generate to hear it.";
     } else {
       setWeirdness((w) => Math.min(100, w + 15));
-      reply = "Raised creative variation for a fresh take on the same idea. Generate to hear it.";
     }
-    setProducerMessages((m) => [...m, { role: "litt", text: reply }]);
-  }, []);
+
+    try {
+      const res = await fetch("/api/music/producer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          prompt: userText,
+          currentSettings: { mood, bpm, energy, instrumental, vocalType, styles, negativeStyles },
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.bpm) setBpm(data.bpm);
+        if (data.energy) setEnergy(data.energy);
+        if (data.styles?.length) setStyles(data.styles.join(", "));
+        if (data.enhancedPrompt) setPrompt(data.enhancedPrompt);
+        setProducerMessages((m) => [...m, { role: "litt", text: data.producerNote || "Updated — generate to hear the change." }]);
+      } else {
+        setProducerMessages((m) => [...m, { role: "litt", text: "Updated settings locally. Generate to hear it." }]);
+      }
+    } catch {
+      setProducerMessages((m) => [...m, { role: "litt", text: "Updated settings locally. Generate to hear it." }]);
+    } finally {
+      setIsProducerLoading(false);
+    }
+  }, [mood, bpm, energy, instrumental, vocalType, styles, negativeStyles]);
 
   // Refresh vault when generation completes.
   useEffect(() => {
@@ -580,8 +642,8 @@ export default function MusicTool() {
 
                   {/* Prompt chips */}
                   <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                    <button onClick={handleImprovePrompt} style={chipBtn} disabled={isBusy}>
-                      <Sparkles size={11} /> Improve Prompt
+                    <button onClick={handleImprovePrompt} style={chipBtn} disabled={isBusy || isEnhancing}>
+                      {isEnhancing ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} {isEnhancing ? "Enhancing…" : "Improve Prompt"}
                     </button>
                     <button onClick={handleSurprise} style={chipBtn} disabled={isBusy}>
                       <Wand2 size={11} /> Surprise Me
@@ -810,8 +872,9 @@ export default function MusicTool() {
                       {!isBusy && <span style={{ opacity: 0.7, fontSize: 12 }}>{cost} LBC</span>}
                     </button>
                     {isBusy && (
-                      <button onClick={handleCancel} style={{ ...chipBtn, borderColor: "#ef4444", color: "#ef4444" }}>
-                        <X size={12} /> Cancel
+                      <button onClick={handleCancel} disabled={isCancelling} style={{ ...chipBtn, borderColor: "#ef4444", color: "#ef4444", opacity: isCancelling ? 0.6 : 1 }}>
+                        {isCancelling ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                        {isCancelling ? "Cancelling…" : "Cancel"}
                       </button>
                     )}
                   </div>
@@ -820,11 +883,21 @@ export default function MusicTool() {
                   {isBusy && (
                     <div style={{ marginTop: 12 }}>
                       <div style={{ height: 4, background: "var(--studio-border)", borderRadius: 2, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${accent}, ${accent})`, transition: "width 0.5s ease" }} />
+                        {progress > 0 ? (
+                          <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${accent}, ${accent})`, transition: "width 0.5s ease" }} />
+                        ) : (
+                          <div style={{ height: "100%", width: "40%", background: `linear-gradient(90deg, transparent, ${accent}, transparent)`, animation: "music-progress-indeterminate 1.5s ease-in-out infinite" }} />
+                        )}
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-                        <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "capitalize" }}>{status}…</span>
-                        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{progress}%</span>
+                        <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "capitalize" }}>
+                          {status === "queued" ? "Queued — waiting for producer" :
+                           status === "preparing" ? "Preparing — building blueprint" :
+                           status === "generating" ? "Writing — composing your track" :
+                           status === "processing" ? "Rendering — saving audio" :
+                           `${status}…`}
+                        </span>
+                        {progress > 0 && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{progress}%</span>}
                       </div>
                     </div>
                   )}
@@ -1007,8 +1080,8 @@ export default function MusicTool() {
           ]).map((b) => {
             const Icon = b.icon;
             return (
-              <button key={b.id} onClick={() => applyProducerTransform(b.id)} style={{ ...chipBtn, fontSize: 10, padding: "5px 9px" }}>
-                <Icon size={10} />
+              <button key={b.id} onClick={() => applyProducerTransform(b.id)} disabled={isProducerLoading} style={{ ...chipBtn, fontSize: 10, padding: "5px 9px", opacity: isProducerLoading ? 0.6 : 1 }}>
+                {isProducerLoading ? <Loader2 size={10} className="animate-spin" /> : <Icon size={10} />}
                 {b.label}
               </button>
             );
@@ -1024,8 +1097,8 @@ export default function MusicTool() {
             placeholder="Make this beat catchier…"
             style={{ ...inputStyle, fontSize: 12 }}
           />
-          <button onClick={handleProducerSend} style={{ background: `${accent}18`, border: `1px solid ${accent}30`, color: accent, borderRadius: 8, padding: "0 10px", cursor: "pointer", display: "grid", placeItems: "center" }} aria-label="Send to producer">
-            <Send size={14} />
+          <button onClick={handleProducerSend} disabled={isProducerLoading} style={{ background: `${accent}18`, border: `1px solid ${accent}30`, color: accent, borderRadius: 8, padding: "0 10px", cursor: "pointer", display: "grid", placeItems: "center", opacity: isProducerLoading ? 0.6 : 1 }} aria-label="Send to producer">
+            {isProducerLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           </button>
         </div>
       </aside>

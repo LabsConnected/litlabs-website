@@ -94,7 +94,8 @@ export type LiveSessionEvent =
   | { type: "toolCall"; call: LiveToolCall }
   | { type: "error"; error: LiveSessionError }
   | { type: "turnComplete" }
-  | { type: "interrupted" };
+  | { type: "interrupted" }
+  | { type: "activityLog"; log: { event: string; timestamp: number; sessionId?: string; state?: string;[key: string]: unknown } };
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -110,9 +111,11 @@ export type LiveSessionErrorKind =
   | "model_unavailable"
   | "quota_exceeded"
   | "session_expired"
+  | "realtime_token_expired"
   | "network_interrupted"
   | "audio_playback_blocked"
   | "vision_frames_stopped"
+  | "connection_timeout"
   | "unknown";
 
 export interface LiveSessionError {
@@ -146,8 +149,18 @@ export interface LiTTLiveConfig {
   voiceName?: string;
 }
 
+/**
+ * The canonical Gemini Live model ID.
+ *
+ * `gemini-live-2.5-flash-preview` was shut down on December 9, 2025.
+ * All Live code must reference this constant — never scatter raw model IDs.
+ *
+ * @see https://ai.google.dev/gemini-api/docs/deprecations
+ */
+export const LIVE_MODEL_ID = "gemini-3.1-flash-live-preview";
+
 export const DEFAULT_LIVE_CONFIG: Omit<LiTTLiveConfig, "systemInstruction"> = {
-  model: "gemini-live-2.5-flash-preview",
+  model: LIVE_MODEL_ID,
   frameRate: 1,
   frameWidth: 768,
   jpegQuality: 0.7,
@@ -171,4 +184,24 @@ export interface LiTTLiveSessionContext {
   recentSummary?: string;
   currentTool?: string;
   approvedTools?: string[];
+  /** Canonical conversation ID — Live continues the same conversation */
+  conversationId?: string;
+  /** Active agent slug — Live uses the same agent as typed chat */
+  agentSlug?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Live transcript persistence (P0.4 — no double LLM response)
+// ---------------------------------------------------------------------------
+
+/**
+ * A finalized Live turn pair — user speech + assistant response.
+ * Persisted to the canonical conversation WITHOUT invoking another LLM call.
+ */
+export interface LiveTurnPair {
+  userText: string;
+  assistantText: string;
+  liveTurnId: string;
+  liveSessionId?: string;
+  timestamp: number;
 }

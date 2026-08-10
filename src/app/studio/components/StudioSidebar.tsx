@@ -74,24 +74,21 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
+  { id: "music", label: "Music", icon: Music, shortcut: "4" },
   { id: "agents", label: "AI Team", icon: Bot, shortcut: "5" },
-  { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
+  { id: "workflows", label: "Missions", icon: Network, shortcut: "7" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
-  { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },
-  { id: "camera", label: "Camera", icon: Camera, shortcut: "M" },
 ];
 
 /* ── Secondary tools (in More Tools drawer) ──────────────────────── */
 const MORE_TOOLS: ToolItem[] = [
-  { id: "screen", label: "Screen", icon: MonitorUp, shortcut: "S" },
-  { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
-  { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
+  { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
   { id: "loops", label: "Loops", icon: Repeat, shortcut: "L" },
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "canvas", "image", "build", "agents"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "canvas", "image", "workflows", "agents"];
 
 /* ── Desktop Tool Rail (72px, expands on hover) ──────────────────── */
 function RailButton({

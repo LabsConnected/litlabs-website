@@ -12,29 +12,33 @@
 
 import type { StudioTool } from "../components/StudioSidebar";
 
-/** The five top-level navigation destinations. */
+/** The six top-level navigation destinations. */
 export type StudioDestination =
   | "studio"
   | "create"
   | "assets"
   | "agents"
+  | "missions"
   | "more";
 
 /** Internal workspace modes inside the Studio destination. */
 export type StudioMode = "work" | "preview" | "code" | "files" | "design";
 
 /** Internal tabs inside the Create destination. */
-export type CreateMode = "image" | "video" | "audio" | "music";
+export type CreateMode = "image" | "video" | "audio" | "music" | "environment";
 
 /** Internal tabs inside the More destination. */
 export type MoreMode =
   | "plugins"
-  | "camera"
-  | "screen"
-  | "space"
-  | "clibridge"
-  | "terminal"
-  | "workflows";
+  | "clibridge";
+
+/** Internal modes inside the Missions destination. */
+export type MissionMode =
+  | "overview"
+  | "forge"
+  | "runs"
+  | "schedules"
+  | "templates";
 
 /** Internal tabs inside the right inspector. */
 export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
@@ -47,7 +51,7 @@ export interface DestinationState {
   /** Legacy tool id that maps into this destination, if any. */
   legacyTool?: StudioTool;
   /** Internal mode for the active destination. */
-  mode?: StudioMode | CreateMode | MoreMode;
+  mode?: StudioMode | CreateMode | MoreMode | MissionMode;
   /** Optional command carried over from a legacy route (e.g. `/build ...`). */
   command?: string;
   /** Open the bottom drawer on this tab (e.g. terminal legacy URL). */
@@ -108,13 +112,22 @@ export function mapLegacyToolToDestination(
     case "agents":
       return { destination: "agents", legacyTool: "agents" };
 
-    // More — secondary tools
-    case "plugins":
+    // Camera → Studio + camera action (capture, not a destination)
     case "camera":
+      return { destination: "studio", legacyTool: "camera", mode: "work" };
+    // Screen → Studio + screen action (capture, not a destination)
     case "screen":
+      return { destination: "studio", legacyTool: "screen", mode: "work" };
+    // Space → Create / Environment (skybox generator)
     case "space":
-    case "clibridge":
+      return { destination: "create", legacyTool: "space", mode: "environment" as CreateMode };
+    // Mission Forge → Missions destination
     case "workflows":
+    case "pipeline":
+      return { destination: "missions", legacyTool: "workflows", mode: "forge" as MissionMode };
+    // More — secondary tools only
+    case "plugins":
+    case "clibridge":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
 
     // Unknown / default → Studio
@@ -143,18 +156,16 @@ export function destinationToLegacyTool(
       if (mode === "video") return "video";
       if (mode === "audio") return "audio";
       if (mode === "music") return "music";
+      if (mode === "environment") return "space";
       return "image";
     case "assets":
       return "assets";
     case "agents":
       return "agents";
+    case "missions":
+      return "workflows";
     case "more":
-      if (mode === "camera") return "camera";
-      if (mode === "screen") return "screen";
-      if (mode === "space") return "space";
       if (mode === "clibridge") return "clibridge";
-      if (mode === "terminal") return "terminal";
-      if (mode === "workflows") return "workflows";
       return "plugins";
   }
 }
@@ -164,5 +175,6 @@ export const DESTINATION_LABELS: Record<StudioDestination, string> = {
   create: "Create",
   assets: "Assets",
   agents: "Agents",
+  missions: "Missions",
   more: "More",
 };

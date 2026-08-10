@@ -1,5 +1,11 @@
 # Terminal Pipeline — Known Follow-Ups
 
+## Socket.IO Test Port Collision (RESOLVED)
+
+`terminal-socketio-integration.test.ts` and `terminal-server-smoke.test.ts`
+both used port 4099, causing a timeout when run in parallel. Integration test
+moved to port 4098. Full suite now passes: 112 files, 1,688 tests, 0 failures.
+
 ## Stale Provisioning Lock Recovery (DONE)
 
 `claimProvisioningLock()` in `src/lib/projects/project-repository.ts` transitions

@@ -95,7 +95,7 @@ function createExpiredToken(userId: string): string {
 // ── Test server setup ───────────────────────────────────────────
 let httpServer: Server;
 let ioServer: IOServer;
-const TEST_PORT = 4099;
+const TEST_PORT = 4098;
 const TEST_USER_ID = "test-user-integration";
 
 beforeAll(() => {
@@ -133,10 +133,11 @@ beforeAll(() => {
     });
   });
 
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
+    httpServer.once("error", (err) => reject(err));
     httpServer.listen(TEST_PORT, () => resolve());
   });
-});
+}, 15000);
 
 afterAll(() => {
   return new Promise<void>((resolve) => {

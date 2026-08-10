@@ -67,6 +67,33 @@ const STATE_COLORS: Record<LiveSessionState, string> = {
   ended: "#6b7280",
 };
 
+/**
+ * Derive a truthful sub-state from the session state + transcript content.
+ * - "listening" — user is speaking (userTranscript present, no assistant response yet)
+ * - "thinking" — turn complete from user, waiting for assistant response
+ * - "speaking" — assistant is responding (assistantTranscript present)
+ * - "connected" — live but idle
+ */
+function getLiveSubState(
+  state: LiveSessionState,
+  userTranscript: string,
+  assistantTranscript: string,
+): "connected" | "listening" | "thinking" | "speaking" {
+  if (state !== "live_audio" && state !== "live_vision" && state !== "live_audio_and_vision") {
+    return "connected";
+  }
+  if (assistantTranscript) return "speaking";
+  if (userTranscript) return "listening";
+  return "connected";
+}
+
+const SUB_STATE_LABELS: Record<string, string> = {
+  connected: "Listening…",
+  listening: "Listening…",
+  thinking: "Thinking…",
+  speaking: "Speaking…",
+};
+
 export default function LiveVoiceOverlay({
   session,
   context,
@@ -121,6 +148,8 @@ export default function LiveVoiceOverlay({
   const isMuted = indicators.microphone === "muted";
   const cameraOn = indicators.cameraPreview === "active";
   const screenOn = indicators.screen === "active";
+  const subState = getLiveSubState(state, userTranscript, assistantTranscript);
+  const statusLabel = isLive ? SUB_STATE_LABELS[subState] : STATE_LABELS[state];
 
   return (
     <div
@@ -191,7 +220,7 @@ export default function LiveVoiceOverlay({
         {/* Status text */}
         <div className="text-center">
           <p className="text-xl font-black" style={{ color }}>
-            {STATE_LABELS[state]}
+            {statusLabel}
           </p>
           {isConnecting && (
             <p className="mt-1 text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
@@ -278,7 +307,7 @@ export default function LiveVoiceOverlay({
         </button>
 
         {/* Interrupt (while LiTT is speaking) */}
-        {state === "live_audio_and_vision" && assistantTranscript && (
+        {isLive && assistantTranscript && (
           <button
             type="button"
             onClick={interrupt}

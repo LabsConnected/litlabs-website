@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import dynamic from "next/dynamic";
-import { Image as ImageIcon, Clapperboard, AudioLines, Music } from "lucide-react";
+import {
+  Image as ImageIcon,
+  Clapperboard,
+  AudioLines,
+  Music,
+  Globe,
+} from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -14,6 +20,7 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
+import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
@@ -34,6 +41,7 @@ import {
   type StudioMode,
   type CreateMode,
   type MoreMode,
+  type MissionMode,
   type InspectorTab,
   type DrawerTab,
 } from "../lib/studio-destinations";
@@ -159,6 +167,7 @@ function CommandStudioContent() {
   const [studioMode, setStudioMode] = useState<StudioMode>((initial.mode as StudioMode) ?? "work");
   const [createMode, setCreateMode] = useState<CreateMode>((initial.mode as CreateMode) ?? "image");
   const [moreMode, setMoreMode] = useState<MoreMode>((initial.mode as MoreMode) ?? "plugins");
+  const [missionMode, setMissionMode] = useState<MissionMode>((initial.mode as MissionMode) ?? "overview");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
   // Dynamic Work surface — not derived from initial.legacyTool after init.
@@ -251,13 +260,6 @@ function CommandStudioContent() {
   }, []);
 
   const handleSelectMoreMode = useCallback((mode: MoreMode) => {
-    if (mode === "terminal") {
-      setDestination("studio");
-      setStudioMode("work");
-      setDrawerOpen(true);
-      setDrawerTab("terminal");
-      return;
-    }
     setDestination("more");
     setMoreMode(mode);
   }, []);
@@ -281,6 +283,7 @@ function CommandStudioContent() {
       setWorkSurface(tool === "build" ? "builder" : "conversation");
     }
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
+    if (mapped.destination === "missions") setMissionMode((mapped.mode as MissionMode) ?? "overview");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
       const terminalNeedsExplicitConnect =
@@ -474,6 +477,13 @@ function CommandStudioContent() {
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
   }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
 
+  // P0.13: Select a conversation from the empty state's Recent Chats section.
+  const handleSelectConversation = useCallback((conversationId: string) => {
+    const store = useConversationStore.getState();
+    store.selectConversation(conversationId);
+    void conversation.loadMessages(conversationId);
+  }, [conversation]);
+
   // ── LiTT Live session context (must be after contextLine) ──
   const liveContext = useMemo<LiTTLiveSessionContext>(() => ({
     userId: userId ?? "unknown",
@@ -484,15 +494,104 @@ function CommandStudioContent() {
     branch: capabilities.activeBranch || contextLine.branch,
     currentTool: destination === "studio" ? studioMode : destination === "create" ? createMode : destination,
     approvedTools: capabilities.writeAccess ? ["terminal", "files"] : [],
-  }), [userId, profile, appUser, capabilities, contextLine, destination, studioMode, createMode]);
+    conversationId: conversation.selectedConversationId ?? undefined,
+    agentSlug: conversation.activeAgentId as string | undefined,
+  }), [userId, profile, appUser, capabilities, contextLine, destination, studioMode, createMode, conversation.selectedConversationId, conversation.activeAgentId]);
 
-  // Sync Live transcripts into canonical conversation
-  const handleLiveTranscript = useCallback((role: "user" | "assistant", text: string) => {
+  // Sync Live transcripts into canonical conversation (P0.4 fix)
+  // Instead of calling conversation.send() (which triggers a second LLM call),
+  // we accumulate user+assistant transcripts and persist them directly.
+  const liveTurnAccumulator = useRef<{ userText: string; assistantText: string }>({
+    userText: "",
+    assistantText: "",
+  });
+
+  const handleLiveTranscript = useCallback(async (role: "user" | "assistant", text: string) => {
     if (!text.trim()) return;
+
+    // Accumulate the turn parts
     if (role === "user") {
-      void conversation.send(text).catch(() => {});
+      liveTurnAccumulator.current.userText = text.trim();
+    } else {
+      liveTurnAccumulator.current.assistantText = text.trim();
     }
-  }, [conversation]);
+
+    // Only persist when we have BOTH user and assistant text
+    const { userText, assistantText } = liveTurnAccumulator.current;
+    if (!userText || !assistantText) return;
+
+    // Reset accumulator
+    liveTurnAccumulator.current = { userText: "", assistantText: "" };
+
+    // Get the active conversation ID
+    const convId = conversation.selectedConversationId;
+    if (!convId) return;
+
+    // Add messages to the local store immediately (optimistic)
+    const liveTurnId = `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const timestamp = new Date().toISOString();
+    const store = useConversationStore.getState();
+    store.addMessage(convId, {
+      id: `live_user_${liveTurnId}`,
+      role: "user",
+      content: userText,
+      agentSlug: null,
+      agentMode: null,
+      status: "completed",
+      createdAt: timestamp,
+      parentMessageId: null,
+      regenerationOfMessageId: null,
+    });
+    store.addMessage(convId, {
+      id: `live_assistant_${liveTurnId}`,
+      role: "assistant",
+      content: assistantText,
+      agentSlug: (liveContext.agentSlug ?? "litt") as import("@/lib/studio/types").AgentSlug,
+      agentMode: "standard",
+      status: "completed",
+      createdAt: timestamp,
+      parentMessageId: null,
+      regenerationOfMessageId: null,
+    });
+
+    // Persist to server (no LLM call — direct message storage)
+    try {
+      const token = await getToken?.();
+      const res = await fetch(`/api/studio/conversations/${convId}/live-transcript`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          userText,
+          assistantText,
+          liveTurnId,
+          timestamp: Date.now(),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as {
+          userMessage: { id: string; createdAt: string };
+          assistantMessage: { id: string; createdAt: string };
+          revision: number;
+        };
+        // Replace optimistic IDs with server IDs
+        store.updateMessage(convId, `live_user_${liveTurnId}`, {
+          id: data.userMessage.id,
+          createdAt: data.userMessage.createdAt,
+        });
+        store.updateMessage(convId, `live_assistant_${liveTurnId}`, {
+          id: data.assistantMessage.id,
+          createdAt: data.assistantMessage.createdAt,
+        });
+        store.setRevision(data.revision);
+      }
+    } catch {
+      // Non-fatal — messages are already in the local store
+    }
+  }, [conversation.selectedConversationId, liveContext.agentSlug, getToken]);
 
   // Resolve the legacy tool to render for the active destination/mode.
   // Studio/Work renders the conversation (transcript + composer) unless
@@ -509,10 +608,12 @@ function CommandStudioContent() {
       if (createMode === "video") return "video";
       if (createMode === "audio") return "audio";
       if (createMode === "music") return "music";
+      if (createMode === "environment") return "space";
       return "image";
     }
     if (destination === "assets") return "assets";
     if (destination === "agents") return "agents";
+    if (destination === "missions") return "workflows";
     if (destination === "more") return moreMode as StudioTool;
     return null;
   }, [destination, studioMode, createMode, moreMode, workSurface]);
@@ -534,12 +635,13 @@ function CommandStudioContent() {
     { id: "files", label: "Files", destination: "studio", mode: "code", isFilesInspector: true },
   ];
 
-  // Create secondary tabs — visible only when Create is active
+    // Create secondary tabs — visible only when Create is active
   const createTabs: { id: CreateMode; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
     { id: "image", label: "Image", icon: ImageIcon },
     { id: "video", label: "Video", icon: Clapperboard },
     { id: "audio", label: "Audio", icon: AudioLines },
     { id: "music", label: "Music", icon: Music },
+    { id: "environment", label: "360° Env", icon: Globe },
   ];
 
   return (
@@ -679,11 +781,13 @@ function CommandStudioContent() {
                   <StudioWorkSurface
                     messages={conversation.messages}
                     busy={conversation.busy}
+                    loading={conversation.loading}
                     activeAgentId={conversation.activeAgentId}
                     fallbackNotice={conversation.fallbackNotice}
                     onRouteToolAction={handleRouteTool}
                     onRegenerateAction={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
+                    onSelectConversation={handleSelectConversation}
                     hasProject={projectReady}
                     projectName={capabilities.projectName}
                     sourceType={capabilities.sourceType}
@@ -744,7 +848,7 @@ function CommandStudioContent() {
                   modelHealth,
                   activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
                   destination,
-                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "more" ? moreMode : "overview",
+                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "missions" ? missionMode : destination === "more" ? moreMode : "overview",
                   messages: conversation.messages,
                   busy: conversation.busy,
                   workspaceRevision,
@@ -1033,11 +1137,13 @@ function StudioUnavailableSurface({
 function StudioWorkSurface({
   messages,
   busy,
+  loading,
   activeAgentId,
   fallbackNotice,
   onRouteToolAction,
   onRegenerateAction,
   onEmptyAction,
+  onSelectConversation,
   hasProject,
   projectName,
   sourceType,
@@ -1051,11 +1157,13 @@ function StudioWorkSurface({
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   busy: boolean;
+  loading: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
   fallbackNotice: string | null;
   onRouteToolAction: (tool: StudioTool, command?: string) => void;
   onRegenerateAction: () => void;
   onEmptyAction: (prompt: string) => void;
+  onSelectConversation?: (conversationId: string) => void;
   hasProject: boolean;
   projectName: string | null;
   sourceType: "github" | "blank" | "template" | "upload" | null;
@@ -1067,7 +1175,10 @@ function StudioWorkSurface({
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
-  const isEmpty = messages.length === 0;
+  // P0.14-15: Only show empty state when messages are truly empty AND
+  // conversations have finished loading from the server. During loading,
+  // show a minimal spinner so users don't see the welcome screen flash.
+  const isEmpty = messages.length === 0 && !loading;
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       {fallbackNotice && (
@@ -1098,6 +1209,15 @@ function StudioWorkSurface({
             onPickAction={onEmptyAction}
             onStartBlankAction={onStartBlank}
             onConnectRepoAction={onConnectRepo}
+            onSelectConversation={onSelectConversation}
+          />
+        </div>
+      ) : loading && messages.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <div
+            className="h-6 w-6 animate-spin rounded-full border-2 border-t-transparent"
+            style={{ borderColor: "var(--litt-primary)", borderTopColor: "transparent" }}
+            aria-label="Loading conversations"
           />
         </div>
       ) : (

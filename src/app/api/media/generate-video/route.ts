@@ -4,10 +4,10 @@ import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
+import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
+import { createVideoJob } from "@/lib/video-jobs";
 
 // ── Route configuration ──────────────────────────────────────────
-// Video generation is long-running; needs headroom beyond the default
-// 10s function timeout, otherwise Vercel returns an HTML 504 page.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,14 +27,54 @@ async function handler(req: NextRequest) {
       resolution = "720p",
       imageBytes,
       mimeType,
-      model = "veo-3.1-fast-generate-preview",
+      model: clientModel = "veo",
       imageUrl, // public HTTPS URL for Alibaba i2v
-      duration = 5,
-      cost = 5,
     } = body;
+    let duration = body.duration ?? 5;
+
+    // ── Server-authoritative model resolution ──────────────────────
+    // Resolve the model from our registry — never trust client cost.
+    const videoModel = getVideoModel(clientModel);
+    if (!videoModel || !videoModel.available) {
+      return NextResponse.json(
+        { error: `Video model "${clientModel}" is not available.` },
+        { status: 400 },
+      );
+    }
+    const cost = getVideoModelPricing(videoModel.id);
+    const model = videoModel.apiModel;
+    const isHappyHorse = videoModel.id === "happyhorse";
+
+    // ── Validate capabilities ──────────────────────────────────────
+    const caps = videoModel.capabilities;
+
+    // Validate aspect ratio
+    if (!caps.aspectRatios.includes(aspectRatio)) {
+      return NextResponse.json(
+        { error: `Aspect ratio ${aspectRatio} is not supported by ${videoModel.label}.` },
+        { status: 400 },
+      );
+    }
+
+    // Validate resolution
+    if (!caps.resolutions.includes(resolution)) {
+      return NextResponse.json(
+        { error: `Resolution ${resolution} is not supported by ${videoModel.label}.` },
+        { status: 400 },
+      );
+    }
+
+    // Validate duration if the model supports it
+    if (caps.durations.length > 0 && !caps.durations.includes(Number(duration))) {
+      // Clamp to nearest supported duration instead of rejecting
+      const nearest = caps.durations.reduce((prev, curr) =>
+        Math.abs(curr - Number(duration)) < Math.abs(prev - Number(duration)) ? curr : prev,
+      );
+      duration = nearest;
+    }
 
     // ── Alibaba HappyHorse path (image-to-video) ──────────────────────
-    if (model.startsWith("happyhorse")) {
+    if (isHappyHorse) {
       if (!isAlibabaConfigured())
         return NextResponse.json(
           { error: "Alibaba video not configured. Set ALIBABA_DASHSCOPE_API_KEY and ALIBABA_MODELSTUDIO_WORKSPACE_ID." },
@@ -56,7 +96,7 @@ async function handler(req: NextRequest) {
         clerkId: userId,
         amount: -cost,
         type: "spend",
-        reason: `Video: ${model} — Alibaba i2v`,
+        reason: `Video: ${videoModel.label} — Alibaba i2v`,
         idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
       });
 
@@ -76,6 +116,21 @@ async function handler(req: NextRequest) {
           duration: Math.min(Math.max(Number(duration) || 5, 3), 15),
         });
 
+        // Store job for server-authoritative refund tracking
+        const jobId = `alibaba_${result.taskId}`;
+        createVideoJob({
+          jobId,
+          userId,
+          provider: "alibaba",
+          providerOperationId: result.taskId,
+          model: videoModel.id,
+          cost,
+          status: "pending",
+          createdAt: Date.now(),
+          charged: true,
+          refunded: false,
+        });
+
         return NextResponse.json({
           provider: "alibaba",
           taskId: result.taskId,
@@ -89,7 +144,7 @@ async function handler(req: NextRequest) {
           clerkId: userId,
           amount: cost,
           type: "refund",
-          reason: `Video refund: ${model} submission failed`,
+          reason: `Video refund: ${videoModel.label} submission failed`,
           idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
         });
         throw submitErr;
@@ -120,7 +175,7 @@ async function handler(req: NextRequest) {
       clerkId: userId,
       amount: -cost,
       type: "spend",
-      reason: `Video: ${model} — Veo generation`,
+      reason: `Video: ${videoModel.label} — Veo generation`,
       idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
     });
 
@@ -134,11 +189,16 @@ async function handler(req: NextRequest) {
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-      const config = {
+      const config: Record<string, unknown> = {
         numberOfVideos: 1,
         resolution: resolution === "1080p" ? "1080p" : "720p",
         aspectRatio: aspectRatio || "16:9",
       };
+
+      // Send duration to Veo if the model supports it
+      if (caps.durations.length > 0) {
+        config.durationSeconds = Number(duration);
+      }
 
       const payload: {
         model: string;
@@ -146,7 +206,9 @@ async function handler(req: NextRequest) {
         config: typeof config;
         image?: { imageBytes: string; mimeType: string };
       } = { model, prompt: prompt.trim(), config };
-      if (imageBytes) {
+
+      // Send reference image to Veo if provided and supported
+      if (imageBytes && caps.supportsReferenceImage) {
         payload.image = { imageBytes, mimeType: mimeType || "image/png" };
       }
 
@@ -156,6 +218,21 @@ async function handler(req: NextRequest) {
           "Video generation failed to return an operation identifier.",
         );
       }
+
+      // Store job for server-authoritative refund tracking
+      const jobId = `veo_${operation.name}`;
+      createVideoJob({
+        jobId,
+        userId,
+        provider: "veo",
+        providerOperationId: operation.name,
+        model: videoModel.id,
+        cost,
+        status: "pending",
+        createdAt: Date.now(),
+        charged: true,
+        refunded: false,
+      });
 
       return NextResponse.json({
         provider: "veo",
@@ -169,7 +246,7 @@ async function handler(req: NextRequest) {
         clerkId: userId,
         amount: cost,
         type: "refund",
-        reason: `Video refund: ${model} generation failed`,
+        reason: `Video refund: ${videoModel.label} generation failed`,
         idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
       });
       throw genErr;

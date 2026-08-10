@@ -13,12 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "daily",
       priority: 0.8,
     },
-    {
-      url: absoluteUrl("/gallery"),
-      changeFrequency: "daily",
-      priority: 0.8,
-    },
-    // /discover removed — community features disabled for v1
+    // /gallery removed — obsolete Artifact Museum page retired
     {
       url: absoluteUrl("/pricing"),
       changeFrequency: "monthly",

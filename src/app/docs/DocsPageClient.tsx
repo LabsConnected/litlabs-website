@@ -35,7 +35,7 @@ const DOC_SECTIONS = [
     icon: GalleryVerticalEnd,
     title: "Save Output",
     body: "Keep generated work in the gallery, reuse it in your profile, and prepare it for community sharing.",
-    href: "/gallery",
+    href: "/showcase",
   },
 ];
 

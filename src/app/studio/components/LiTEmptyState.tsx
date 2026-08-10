@@ -20,7 +20,7 @@ import {
   Video,
 } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
-import StudioActivityTimeline from "./StudioActivityTimeline";
+import RecentConversations from "./RecentConversations";
 import { STUDIO_AGENTS } from "../stores/useStudioAgentStore";
 import type { AgentId } from "../stores/useStudioAgentStore";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
@@ -237,6 +237,7 @@ export default function LiTEmptyState({
   onPickAction,
   onConnectRepoAction,
   onStartBlankAction,
+  onSelectConversation,
   capabilities,
   modelHealth,
   modelLabel,
@@ -252,6 +253,7 @@ export default function LiTEmptyState({
   onPickAction?: (prompt: string) => void;
   onConnectRepoAction?: () => void;
   onStartBlankAction?: () => void;
+  onSelectConversation?: (conversationId: string) => void;
   /** Live workspace capabilities. When omitted, the briefing panel is skipped. */
   capabilities?: ConnectionCapabilities;
   modelHealth?: ProviderHealth;
@@ -449,7 +451,7 @@ export default function LiTEmptyState({
               </h2>
             </div>
           </div>
-          <StudioActivityTimeline />
+          <RecentConversations onSelect={onSelectConversation} />
         </section>
 
         <section className="glass-panel p-4 sm:p-5">

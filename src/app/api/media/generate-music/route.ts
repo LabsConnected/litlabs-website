@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
+import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI, Modality } from "@google/genai";
 
@@ -22,8 +22,9 @@ async function handler(req: NextRequest) {
       { status: 500 },
     );
 
-  const wallet = await getUserWallet(userId);
-  if (wallet.balance < COST) {
+  // Check balance using canonical ledger
+  const balances = await getCreditBalances(userId);
+  if (balances.total < COST) {
     return NextResponse.json(
       { error: `Need ${COST} LiTTBits` },
       { status: 402 },
@@ -58,21 +59,27 @@ async function handler(req: NextRequest) {
     });
 
     // Lyria can return both audio and text (lyrics) parts.
-    // Find the audio part — don't assume the first part is audio.
     const allParts = response.candidates?.[0]?.content?.parts ?? [];
     const audioPart = allParts.find((p) => p.inlineData?.data);
     if (!audioPart?.inlineData?.data) {
       throw new Error("Music generation returned empty audio.");
     }
 
-    // Lyria Clip output is MP3, not WAV.
     const audioMime = audioPart.inlineData.mimeType || "audio/mp3";
-    const newBalance = await updateWalletBalance(userId, -COST);
+
+    // Atomic debit via canonical ledger
+    const reservation = await adjustWalletBalance({
+      clerkId: userId,
+      amount: -COST,
+      type: "spend",
+      reason: `Music: model=${model}`,
+      idempotencyKey: `music_${userId}_${Date.now()}`,
+    });
 
     return NextResponse.json({
       audioBase64: `data:${audioMime};base64,${audioPart.inlineData.data}`,
       cost: COST,
-      balance: newBalance,
+      balance: reservation.balance,
     });
   } catch (err: unknown) {
     return NextResponse.json(

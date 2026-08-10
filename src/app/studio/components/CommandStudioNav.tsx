@@ -10,13 +10,12 @@ import {
   Bot,
   MoreHorizontal,
   Puzzle,
-  Camera,
-  MonitorUp,
-  Rocket,
-  Terminal,
   Network,
+  Terminal,
   X,
   Home,
+  Settings as SettingsIcon,
+  Plug,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import type {
@@ -35,17 +34,13 @@ const NAV_ITEMS: NavItem[] = [
   { id: "create", label: "Create", icon: Shapes },
   { id: "assets", label: "Assets", icon: FolderOpen },
   { id: "agents", label: "Agents", icon: Bot },
+  { id: "missions", label: "Missions", icon: Network },
   { id: "more", label: "More", icon: MoreHorizontal },
 ];
 
-const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle }[] = [
-  { id: "plugins", label: "Plugins", icon: Puzzle },
-  { id: "camera", label: "Camera", icon: Camera },
-  { id: "screen", label: "Screen", icon: MonitorUp },
-  { id: "space", label: "Space", icon: Rocket },
-  { id: "clibridge", label: "CLI Bridge", icon: Terminal },
-  { id: "terminal", label: "Terminal", icon: Terminal },
-  { id: "workflows", label: "Mission Forge", icon: Network },
+const MORE_MODES: { id: MoreMode; label: string; icon: typeof Puzzle; group: string }[] = [
+  { id: "plugins", label: "Plugins", icon: Puzzle, group: "Extensions" },
+  { id: "clibridge", label: "CLI Bridge", icon: Terminal, group: "Developer" },
 ];
 
 /**
@@ -240,6 +235,17 @@ export default function CommandStudioNav({
                 </button>
               );
             })}
+
+            {/* System links */}
+            <div className="my-1 h-px" style={{ backgroundColor: "var(--studio-border)" }} />
+            <a href="/settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+              <SettingsIcon size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
+              <span className="text-xs font-bold">Settings</span>
+            </a>
+            <a href="/settings/connections" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-white/5" style={{ color: "var(--text-secondary)" }}>
+              <Plug size={16} strokeWidth={1.7} className="pointer-events-none shrink-0" />
+              <span className="text-xs font-bold">Connections</span>
+            </a>
           </div>
         </div>
       )}

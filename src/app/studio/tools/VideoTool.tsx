@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useTheme } from "@/context/ThemeContext";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useWallet } from "@/context/WalletContext";
 import { VIDEO_MODELS } from "@/lib/studio-models";
 import {
@@ -12,32 +12,30 @@ import {
   AlertTriangle,
   Loader2,
   History,
-  Clock,
   Sparkles,
   ImagePlus,
   X,
   Lightbulb,
   Eye,
-  ArrowRight,
+  ChevronDown,
+  RotateCcw,
 } from "lucide-react";
 import { apiFetch, readApiResponse, type ApiJson } from "@/lib/api-response";
 
-const PROMPT_PRESETS = [
-  "A cyberpunk street market at night, neon signs flickering, people walking in rain, cinematic slow motion",
-  "Space station orbiting a gas giant, ships docking, Earth visible in distance, epic sci-fi",
-  "Ancient temple crumbling, dust and debris, dramatic sunlight beams, Indiana Jones style",
-  "Underwater coral reef, tropical fish swimming, sunlight filtering through water, serene",
-];
+/* ─── Types ──────────────────────────────────────────────────────────── */
 
-const STORAGE_KEY = "litlabs-studio-video-history";
-const MAX_HISTORY = 8;
+type CreationMode = "quick" | "animate" | "director";
+
+type GenStatus = "idle" | "uploading" | "analyzing" | "queued" | "generating" | "finalizing" | "complete" | "failed";
 
 interface VideoGen {
   id: string;
   prompt: string;
   model: string;
   duration: number;
-  status: "idle" | "generating" | "succeeded" | "failed";
+  aspectRatio: string;
+  resolution: string;
+  status: GenStatus;
   videoUrl?: string;
   error?: string;
   createdAt: number;
@@ -51,24 +49,148 @@ interface VideoIdea {
   vibe: string;
 }
 
+/* ─── Constants ──────────────────────────────────────────────────────── */
+
+const STORAGE_KEY = "litlabs-studio-video-history";
+const MAX_HISTORY = 8;
+
+const CAMERA_OPTIONS = ["Static", "Push In", "Pull Out", "Pan Left", "Pan Right", "Tilt Up", "Orbit", "Tracking", "Handheld", "Drone"];
+const MOTION_OPTIONS = ["Still", "Subtle", "Smooth", "Energetic", "Fast", "Slow Motion"];
+const LOOK_OPTIONS = ["Cinematic", "Photoreal", "Commercial", "Moody", "Dreamlike", "Retro", "Anime"];
+const COMPOSITION_OPTIONS = ["Wide", "Medium", "Close-up", "Macro", "Low Angle", "High Angle", "POV"];
+
+const AVAILABLE_MODELS = VIDEO_MODELS.filter((m) => m.available);
+const UNAVAILABLE_MODELS = VIDEO_MODELS.filter((m) => !m.available);
+
+/* ─── Helpers ────────────────────────────────────────────────────────── */
+
+function composeEnhancedPrompt(
+  base: string,
+  camera: string[],
+  motion: string,
+  look: string,
+  composition: string[],
+): string {
+  const parts: string[] = [base.trim()];
+
+  const cameraStr = camera.filter((c) => c !== "Static").join(", ");
+  if (cameraStr) parts.push(`${cameraStr.toLowerCase()} camera movement`);
+
+  const compStr = composition.join(", ");
+  if (compStr) parts.push(compStr.toLowerCase());
+
+  if (motion && motion !== "Still") parts.push(motion.toLowerCase());
+  if (look) parts.push(`${look.toLowerCase()} style`);
+
+  return parts.join(", ");
+}
+
+function buildShotSuffix(camera: string[], motion: string, look: string, composition: string[]): string {
+  const parts: string[] = [];
+  const cameraStr = camera.filter((c) => c !== "Static").join(", ");
+  if (cameraStr) parts.push(cameraStr.toLowerCase());
+  if (composition.length) parts.push(composition.join(", ").toLowerCase());
+  if (motion && motion !== "Still") parts.push(motion.toLowerCase());
+  if (look) parts.push(look.toLowerCase());
+  return parts.length ? `, ${parts.join(", ")}` : "";
+}
+
+/* ─── Entrance animation wrapper ─────────────────────────────────────── */
+
+function Entrance({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+  const reduce = useReducedMotion();
+  if (reduce) return <>{children}</>;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay, ease: [0.25, 0.1, 0.25, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/* ─── Chip selector ──────────────────────────────────────────────────── */
+
+function ChipRow({
+  label,
+  options,
+  selected,
+  onToggle,
+  accentColor,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onToggle: (val: string) => void;
+  accentColor: string;
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((opt) => {
+          const isSelected = selected.includes(opt);
+          return (
+            <button
+              key={opt}
+              onClick={() => onToggle(opt)}
+              className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.04] active:scale-95 ${
+                isSelected ? "scale-[1.02]" : ""
+              }`}
+              style={{
+                borderColor: isSelected ? `${accentColor}80` : "rgba(255,255,255,0.08)",
+                background: isSelected ? `${accentColor}18` : "rgba(255,255,255,0.03)",
+                color: isSelected ? accentColor : "rgba(255,255,255,0.55)",
+                minHeight: 32,
+              }}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main Component ─────────────────────────────────────────────────── */
+
 export default function VideoTool() {
-  const { resolvedColors: T } = useTheme();
+  const [mode, setMode] = useState<CreationMode>("quick");
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("veo");
+  const [originalPrompt, setOriginalPrompt] = useState("");
+  const [enhancedPrompt, setEnhancedPrompt] = useState<string | null>(null);
+  const [showEnhanced, setShowEnhanced] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+
+  const [modelId, setModelId] = useState("veo");
   const [duration, setDuration] = useState(4);
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
-  const [motionStyle, setMotionStyle] = useState("Cinematic");
+
+  const [camera, setCamera] = useState<string[]>([]);
+  const [motionStyle, setMotionStyle] = useState("Smooth");
+  const [look, setLook] = useState("Cinematic");
+  const [composition, setComposition] = useState<string[]>([]);
+
   const [isGenerating, setIsGenerating] = useState(false);
+  const [genStatus, setGenStatus] = useState<GenStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<VideoGen | null>(null);
+
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+  const [uploadedImageBase64, setUploadedImageBase64] = useState<string | null>(null);
+  const [uploadedMimeType, setUploadedMimeType] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [ideas, setIdeas] = useState<VideoIdea[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [ideaError, setIdeaError] = useState<string | null>(null);
-  const isHappyHorse = model === "happyhorse";
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   const [history, setHistory] = useState<VideoGen[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -78,37 +200,70 @@ export default function VideoTool() {
       return [];
     }
   });
-  // Use WalletContext
-  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
 
-  const cost = VIDEO_MODELS.find((m) => m.id === model)?.cost || 5;
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
+  const abortRef = useRef<AbortController | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  const videoModel = useMemo(() => VIDEO_MODELS.find((m) => m.id === modelId)!, [modelId]);
+  const caps = videoModel.capabilities;
+  const cost = videoModel.cost;
   const canAfford = coinBalance === null || coinBalance >= cost;
 
+  // Auto-switch model when mode changes
   useEffect(() => {
-    refreshWallet();
-  }, [refreshWallet]);
+    if (mode === "animate" && modelId !== "happyhorse") {
+      setModelId("happyhorse");
+    } else if (mode === "quick" && modelId !== "veo") {
+      setModelId("veo");
+    }
+  }, [mode, modelId]);
 
+  // Clamp duration to supported values when model changes
+  useEffect(() => {
+    if (caps.durations.length > 0 && !caps.durations.includes(duration)) {
+      setDuration(caps.durations[0]);
+    }
+  }, [caps, duration]);
+
+  // Clamp aspect ratio and resolution
+  useEffect(() => {
+    if (!caps.aspectRatios.includes(aspectRatio)) setAspectRatio(caps.aspectRatios[0]);
+    if (!caps.resolutions.includes(resolution)) setResolution(caps.resolutions[0]);
+  }, [caps, aspectRatio, resolution]);
+
+  useEffect(() => { refreshWallet(); }, [refreshWallet]);
+
+  useEffect(() => {
+    if (history.length > 0)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY)));
+  }, [history]);
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      if (uploadedImagePreview) URL.revokeObjectURL(uploadedImagePreview);
+      if (abortRef.current) abortRef.current.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restore draft from sessionStorage
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("litlabs:video:draft");
       if (!raw) return;
-      const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string; style?: string };
+      const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string };
       if (draft.prompt) setPrompt(draft.prompt);
       if (draft.duration) setDuration(draft.duration);
       if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
       if (draft.resolution) setResolution(draft.resolution);
-      if (draft.style) setMotionStyle(draft.style);
       sessionStorage.removeItem("litlabs:video:draft");
-    } catch { /* ignore invalid drafts */ }
+    } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    if (history.length > 0)
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(history.slice(0, MAX_HISTORY)),
-      );
-  }, [history]);
+  /* ─── Image upload ────────────────────────────────────────────────── */
 
   const fetchIdeas = useCallback(async (url: string) => {
     setIsAnalyzing(true);
@@ -133,6 +288,17 @@ export default function VideoTool() {
     try {
       const preview = URL.createObjectURL(file);
       setUploadedImagePreview(preview);
+
+      // Read as base64 for Veo reference image support
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(",")[1];
+        setUploadedImageBase64(base64);
+        setUploadedMimeType(file.type);
+      };
+      reader.readAsDataURL(file);
+
       const form = new FormData();
       form.append("file", file);
       const data = await apiFetch<ApiJson>("/api/upload", { method: "POST", body: form });
@@ -141,190 +307,208 @@ export default function VideoTool() {
         throw new Error("Upload succeeded but no public URL returned. Supabase Storage may not be configured.");
       }
       setUploadedImageUrl(uploadUrl);
-      // Auto-trigger LiTT's idea analysis the moment the photo is live
       fetchIdeas(uploadUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed");
       setUploadedImagePreview(null);
       setUploadedImageUrl(null);
+      setUploadedImageBase64(null);
     } finally {
       setIsUploading(false);
     }
   }, [fetchIdeas]);
 
   const handleRemoveImage = () => {
+    if (uploadedImagePreview) URL.revokeObjectURL(uploadedImagePreview);
     setUploadedImageUrl(null);
     setUploadedImagePreview(null);
+    setUploadedImageBase64(null);
+    setUploadedMimeType(null);
     setIdeas([]);
     setIdeaError(null);
   };
 
   const applyIdea = (idea: VideoIdea) => {
     setPrompt(idea.prompt);
+    setOriginalPrompt(idea.prompt);
+    setEnhancedPrompt(null);
+    setShowEnhanced(false);
     if (idea.motion) setMotionStyle(idea.motion);
     setError(null);
   };
 
+  /* ─── Prompt enhancement ──────────────────────────────────────────── */
+
+  const handleEnhance = useCallback(async () => {
+    if (!prompt.trim()) return;
+    setIsEnhancing(true);
+    setOriginalPrompt(prompt.trim());
+    try {
+      const data = await apiFetch<ApiJson>("/api/media/suggest-video-ideas", {
+        method: "POST",
+        body: JSON.stringify({ prompt: prompt.trim(), mode: "enhance" }),
+      });
+      const ideas = Array.isArray(data.ideas) ? (data.ideas as VideoIdea[]) : [];
+      const enhanced = (data.enhancedPrompt as string) || ideas[0]?.prompt || null;
+      if (enhanced) {
+        setEnhancedPrompt(enhanced);
+        setShowEnhanced(true);
+      }
+    } catch {
+      // Fallback: compose locally
+      const local = composeEnhancedPrompt(prompt, camera, motionStyle, look, composition);
+      setEnhancedPrompt(local);
+      setShowEnhanced(true);
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, [prompt, camera, motionStyle, look, composition]);
+
+  /* ─── Chip toggles ────────────────────────────────────────────────── */
+
+  const toggleCamera = (val: string) => {
+    setCamera((prev) => prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val]);
+  };
+  const toggleComposition = (val: string) => {
+    setComposition((prev) => prev.includes(val) ? prev.filter((v) => v !== val) : [val]);
+  };
+
+  /* ─── Generate ────────────────────────────────────────────────────── */
+
+  const finalPrompt = useMemo(() => {
+    const base = showEnhanced && enhancedPrompt ? enhancedPrompt : prompt.trim();
+    if (mode === "director" || mode === "quick") {
+      return `${base}${buildShotSuffix(camera, motionStyle, look, composition)}`;
+    }
+    return base;
+  }, [prompt, enhancedPrompt, showEnhanced, mode, camera, motionStyle, look, composition]);
+
   const handleGenerate = useCallback(async () => {
-    if (isHappyHorse && !uploadedImageUrl) {
+    if (videoModel.id === "happyhorse" && !uploadedImageUrl) {
       setError("Upload a first-frame image for HappyHorse image-to-video.");
       return;
     }
-    if (!prompt.trim() || prompt.trim().length < 3) {
+    if (!finalPrompt.trim() || finalPrompt.trim().length < 3) {
       setError("Prompt must be at least 3 characters.");
       return;
     }
     if (!canAfford) {
-      setError(`Need ${cost} AI credits.`);
+      setError(`Need ${cost} LiTTBits.`);
       return;
     }
     setError(null);
     setIsGenerating(true);
+    setGenStatus("queued");
     const id = `vid_${Date.now()}`;
     const gen: VideoGen = {
-      id,
-      prompt: prompt.trim(),
-      model,
-      duration,
-      status: "generating",
-      createdAt: Date.now(),
-      cost,
+      id, prompt: finalPrompt.trim(), model: videoModel.id, duration,
+      aspectRatio, resolution, status: "generating", createdAt: Date.now(), cost,
     };
     setCurrent(gen);
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
 
+    // AbortController for polling cancellation
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
-      // ── Branch: Alibaba HappyHorse vs Google Veo ───────────────────
-      const isAlibaba = isHappyHorse;
-      const apiModel = isAlibaba ? "happyhorse-1.1-i2v" : "veo-3.1-fast-generate-preview";
+      const isAlibaba = videoModel.id === "happyhorse";
 
       const data = await apiFetch<ApiJson>("/api/media/generate-video", {
         method: "POST",
         body: JSON.stringify(
           isAlibaba
-            ? {
-                prompt: prompt.trim(),
-                model: apiModel,
-                imageUrl: uploadedImageUrl,
-                resolution,
-                duration,
-                cost,
-              }
+            ? { prompt: finalPrompt.trim(), model: videoModel.id, imageUrl: uploadedImageUrl, resolution, duration }
             : {
-                prompt: `${prompt.trim()}, ${motionStyle} motion`,
-                model: apiModel,
+                prompt: finalPrompt.trim(),
+                model: videoModel.id,
                 aspectRatio,
                 resolution,
-                cost,
+                duration,
+                ...(uploadedImageBase64 && caps.supportsReferenceImage
+                  ? { imageBytes: uploadedImageBase64, mimeType: uploadedMimeType || "image/png" }
+                  : {}),
               },
         ),
       });
 
-      // ── Polling: different endpoints for Alibaba vs Veo ────────────
+      setGenStatus("generating");
+
       const taskId = data.taskId as string | undefined;
       const operationName = data.operationName as string | undefined;
 
-      if (isAlibaba && !taskId) {
-        throw new Error("Alibaba task started but no task ID returned.");
-      }
-      if (!isAlibaba && !operationName) {
-        throw new Error("Video generation started but no operation ID returned.");
-      }
+      if (isAlibaba && !taskId) throw new Error("Alibaba task started but no task ID returned.");
+      if (!isAlibaba && !operationName) throw new Error("Video generation started but no operation ID returned.");
 
       const pollStart = Date.now();
-      const POLL_TIMEOUT = isAlibaba ? 300_000 : 120_000; // 5 min for Alibaba, 2 min for Veo
+      const POLL_TIMEOUT = isAlibaba ? 300_000 : 120_000;
       const POLL_INTERVAL = isAlibaba ? 15_000 : 5_000;
       const pollEndpoint = isAlibaba ? "/api/media/alibaba-status" : "/api/media/video-status";
       const pollBodyKey = isAlibaba ? "taskId" : "operationName";
       const pollBodyValue = isAlibaba ? taskId : operationName;
       const videoUrlKey = isAlibaba ? "videoUrl" : "videoUri";
 
-      while (Date.now() - pollStart < POLL_TIMEOUT) {
+      while (Date.now() - pollStart < POLL_TIMEOUT && !ac.signal.aborted) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 
         const statusRes = await fetch(pollEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            [pollBodyKey]: pollBodyValue,
-            cost,
-            model: apiModel,
-          }),
+          body: JSON.stringify({ [pollBodyKey]: pollBodyValue }),
+          signal: ac.signal,
         });
         const statusData = await readApiResponse<ApiJson>(statusRes);
+
         if (statusData.done && statusData[videoUrlKey]) {
+          setGenStatus("finalizing");
           let videoUrl: string;
           if (isAlibaba) {
-            // Alibaba: URL is already a public R2 URL (saved server-side)
             videoUrl = statusData[videoUrlKey] as string;
           } else {
-            // Veo: download the blob and create an object URL
-            const videoRes = await fetch(statusData[videoUrlKey] as string);
+            const videoRes = await fetch(statusData[videoUrlKey] as string, { signal: ac.signal });
             if (!videoRes.ok) throw new Error("Failed to download generated video.");
             const blob = await videoRes.blob();
             videoUrl = URL.createObjectURL(blob);
+            if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+            objectUrlRef.current = videoUrl;
           }
 
-          setCurrent((prev) =>
-            prev?.id === id ? { ...prev, status: "succeeded", videoUrl } : prev,
-          );
-          setHistory((prev) =>
-            prev.map((g) =>
-              g.id === id ? { ...g, status: "succeeded", videoUrl } : g,
-            ),
-          );
-
-          // NOTE: The backend already charges LiTTBits in /api/media/generate-video.
-          // Do NOT charge again here — that was the double-billing bug.
+          setGenStatus("complete");
+          setCurrent((prev) => prev?.id === id ? { ...prev, status: "complete", videoUrl } : prev);
+          setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "complete", videoUrl } : g));
           refreshWallet().catch(() => {});
           break;
         }
         if (statusData.done && !statusData[videoUrlKey]) {
-          throw new Error((statusData.error as string) || "Video generation completed but no video URL returned.");
+          throw new Error((statusData.error as string) || "Generation completed but no video URL returned.");
         }
       }
 
-      if (Date.now() - pollStart >= POLL_TIMEOUT) {
-        // Request refund for timed-out video
+      if (Date.now() - pollStart >= POLL_TIMEOUT && !ac.signal.aborted) {
+        // Try to get a refund via status endpoint
         await fetch(pollEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            [pollBodyKey]: pollBodyValue,
-            cost,
-            model: apiModel,
-          }),
+          body: JSON.stringify({ [pollBodyKey]: pollBodyValue }),
+          signal: ac.signal,
         }).catch(() => {});
-        throw new Error(`Video generation timed out after ${POLL_TIMEOUT / 1000} seconds.`);
+        throw new Error(`Generation timed out after ${POLL_TIMEOUT / 1000}s. Credits refunded if applicable.`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Video generation failed");
-      // Refresh wallet in case a refund was processed
+      if (ac.signal.aborted) return; // unmount/navigation
+      const msg = err instanceof Error ? err.message : "Video generation failed";
+      setError(msg);
+      setGenStatus("failed");
       refreshWallet().catch(() => {});
-      setCurrent((prev) =>
-        prev?.id === id
-          ? {
-              ...prev,
-              status: "failed",
-              error: err instanceof Error ? err.message : "failed",
-            }
-          : prev,
-      );
-      setHistory((prev) =>
-        prev.map((g) =>
-          g.id === id
-            ? {
-                ...g,
-                status: "failed",
-                error: err instanceof Error ? err.message : "failed",
-              }
-            : g,
-        ),
-      );
+      setCurrent((prev) => prev?.id === id ? { ...prev, status: "failed", error: msg } : prev);
+      setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "failed", error: msg } : g));
     } finally {
       setIsGenerating(false);
+      abortRef.current = null;
     }
-  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, cost, canAfford, refreshWallet, isHappyHorse, uploadedImageUrl]);
+  }, [videoModel, finalPrompt, uploadedImageUrl, uploadedImageBase64, uploadedMimeType, caps, duration, aspectRatio, resolution, cost, canAfford, refreshWallet]);
+
+  /* ─── Actions ─────────────────────────────────────────────────────── */
 
   const handleDownload = useCallback((url: string) => {
     const a = document.createElement("a");
@@ -336,590 +520,421 @@ export default function VideoTool() {
     document.body.removeChild(a);
   }, []);
 
+  const handleRemix = () => {
+    if (!current) return;
+    setPrompt(current.prompt);
+    setModelId(current.model);
+    setDuration(current.duration);
+    setAspectRatio(current.aspectRatio);
+    setResolution(current.resolution);
+    setGenStatus("idle");
+    setCurrent(null);
+  };
+
   const handleClear = () => {
     setHistory([]);
     localStorage.removeItem(STORAGE_KEY);
   };
 
-  return (
-    <div className="p-4 space-y-4 w-full">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Film size={14} style={{ color: T.accentColor }} />
-          <span
-            className="text-xs font-bold uppercase tracking-widest"
-            style={{ color: T.textMuted }}
-          >
-            Video Generator
-          </span>
-        </div>
-        <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold border"
-          style={{
-            borderColor: T.borderColor,
-            color: T.accentColor,
-            backgroundColor: T.boxBg,
-          }}
-        >
-          <Sparkles size={10} /> {coinBalance ?? "—"} credits
-        </div>
-      </div>
+  /* ─── Derived ─────────────────────────────────────────────────────── */
 
-      <div className="grid lg:grid-cols-5 gap-4">
-        {/* LEFT: Controls */}
-        <div className="lg:col-span-2 space-y-3">
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
-              style={{ color: T.textMuted }}
-            >
-              Scene Description
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => {
-                setPrompt(e.target.value);
-                setError(null);
-              }}
-              aria-label="Video scene description"
-              title="Video scene description"
-              placeholder="A dramatic sunset over a cyberpunk city..."
-              rows={4}
-              disabled={isGenerating}
-              className="w-full px-3 py-2 text-sm rounded outline-none resize-none disabled:opacity-50"
-              style={{
-                backgroundColor: T.bgColor,
-                border: `1px solid ${T.borderColor}`,
-                color: T.textColor,
-              }}
-            />
-            <div
-              className="text-right text-[10px] mt-1"
-              style={{ color: T.textMuted }}
-            >
-              {prompt.length} chars
+  const showReferenceImage = caps.supportsReferenceImage || videoModel.id === "happyhorse";
+  const referenceLabel = videoModel.id === "happyhorse" ? "First Frame (required)" : "Reference Image (optional)";
+  const showDuration = caps.durations.length > 0;
+
+  /* ─── Render ──────────────────────────────────────────────────────── */
+
+  return (
+    <div className="w-full space-y-4 p-4" style={{ background: "#050508", minHeight: "100%" }}>
+      {/* Header */}
+      <Entrance delay={0}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)" }}>
+              <Film size={18} style={{ color: "#A970FF" }} />
+            </div>
+            <div>
+              <div className="text-sm font-black tracking-tight text-white">LiTT Video Lab</div>
+              <div className="text-[10px] text-white/40">Turn an idea or image into motion</div>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(114,242,56,0.3)", background: "rgba(114,242,56,0.08)", color: "#72F238" }}>
+              {coinBalance ?? "—"} BITS
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,255,255,0.08)", color: genStatus === "generating" ? "#F97316" : "#72F238" }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: genStatus === "generating" ? "#F97316" : "#72F238" }} />
+              {genStatus === "generating" ? "RENDERING" : genStatus === "complete" ? "READY" : "READY"}
+            </span>
+          </div>
+        </div>
+      </Entrance>
 
-          {/* Image upload — first frame for HappyHorse, reference photo for Veo */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-2"
-              style={{ color: T.textMuted }}
+      {/* Mode tabs */}
+      <Entrance delay={0.05}>
+        <div className="flex gap-2">
+          {([
+            { id: "quick", label: "Quick Create", desc: "Text → Video" },
+            { id: "animate", label: "Animate Image", desc: "Image → Video" },
+            { id: "director", label: "Director", desc: "Full control" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setMode(tab.id)}
+              className="flex flex-col items-start rounded-xl border px-4 py-2.5 transition-all hover:scale-[1.02] active:scale-95"
+              style={{
+                borderColor: mode === tab.id ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
+                background: mode === tab.id ? "rgba(139,92,246,0.12)" : "rgba(255,255,255,0.02)",
+              }}
             >
-              <Eye size={11} style={{ color: T.accentColor }} />
-              {isHappyHorse ? "First Frame Image (required)" : "Reference Photo (optional)"}
-            </label>
-            {uploadedImagePreview ? (
-              <div className="relative rounded-lg overflow-hidden">
-                {/* blob: URLs are not optimisable by next/image — keep <img> */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={uploadedImagePreview}
-                  alt={isHappyHorse ? "First frame" : "Reference photo"}
-                  className="w-full max-h-48 object-contain rounded"
-                />
-                <button
-                  onClick={handleRemoveImage}
-                  disabled={isGenerating || isUploading || isAnalyzing}
-                  className="absolute top-2 right-2 p-1 rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+              <span className="text-xs font-black" style={{ color: mode === tab.id ? "#A970FF" : "rgba(255,255,255,0.6)" }}>{tab.label}</span>
+              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.35)" }}>{tab.desc}</span>
+            </button>
+          ))}
+        </div>
+      </Entrance>
+
+      {/* Video Stage */}
+      <Entrance delay={0.1}>
+        <div className="relative overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.08)", background: "#080710" }}>
+          {/* Ambient bloom */}
+          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(139,92,246,0.08) 0%, transparent 70%)" }} />
+          {/* Film grain */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.02] mix-blend-overlay" style={{
+            backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+          }} />
+
+          <div className="relative aspect-video flex items-center justify-center" style={{ minHeight: 280 }}>
+            {current?.videoUrl ? (
+              <video src={current.videoUrl} controls autoPlay loop className="h-full w-full object-contain" style={{ maxHeight: 420 }} />
+            ) : genStatus === "generating" || genStatus === "queued" || genStatus === "finalizing" ? (
+              <div className="flex flex-col items-center gap-4">
+                {/* Render shimmer */}
+                <motion.div
+                  className="h-1 w-48 overflow-hidden rounded-full"
+                  style={{ background: "rgba(255,255,255,0.06)" }}
                 >
-                  <X size={14} />
-                </button>
-                {uploadedImageUrl && !isAnalyzing && (
-                  <div
-                    className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/80 text-white"
-                  >
-                    Ready
-                  </div>
-                )}
-                {isAnalyzing && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm gap-2">
-                    <div className="relative w-12 h-12">
-                      <div
-                        className="absolute inset-0 rounded-full border-2 animate-ping"
-                        style={{ borderColor: T.accentColor, opacity: 0.5 }}
-                      />
-                      <div
-                        className="absolute inset-0 flex items-center justify-center"
-                        style={{ color: T.accentColor }}
-                      >
-                        <Eye size={18} />
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-bold" style={{ color: T.accentColor }}>
-                      LiTT is studying your photo...
-                    </span>
-                  </div>
-                )}
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ background: "linear-gradient(90deg, transparent, rgba(139,92,246,0.8), transparent)" }}
+                    animate={{ x: ["-100%", "100%"] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  />
+                </motion.div>
+                <div className="text-sm font-black uppercase tracking-[.2em] text-white/60">Generating your shot</div>
+                <div className="text-[10px] text-white/30">{videoModel.label} · {genStatus === "queued" ? "Queued" : genStatus === "finalizing" ? "Finalizing" : "Rendering"}</div>
+              </div>
+            ) : uploadedImagePreview && mode === "animate" ? (
+              <div className="relative h-full w-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={uploadedImagePreview} alt="First frame" className="h-full w-full object-contain" />
+                <div className="absolute bottom-3 left-3 rounded-lg border px-2.5 py-1 text-[10px] font-bold backdrop-blur-sm" style={{ borderColor: "rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.6)", color: "rgba(255,255,255,0.7)" }}>
+                  First frame ready
+                </div>
               </div>
             ) : (
-              <label
-                className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all hover:scale-[1.01]"
-                style={{
-                  borderColor: T.borderColor,
-                  backgroundColor: T.bgColor,
-                }}
-              >
-                {isUploading ? (
-                  <Loader2 size={20} className="animate-spin" style={{ color: T.accentColor }} />
-                ) : (
-                  <ImagePlus size={20} style={{ color: T.textMuted }} />
-                )}
-                <span className="text-[10px]" style={{ color: T.textMuted }}>
-                  {isUploading ? "Uploading..." : "Click to upload JPEG, PNG, or WebP"}
-                </span>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  disabled={isUploading || isGenerating}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleImageUpload(file);
-                  }}
-                />
-              </label>
+              <div className="text-center">
+                <Film size={40} className="mx-auto opacity-20" style={{ color: "#A970FF" }} />
+                <p className="mt-3 text-sm text-white/40">Your video will appear here</p>
+                <p className="mt-1 text-[10px] text-white/20">{videoModel.label} · {aspectRatio} · {resolution}</p>
+              </div>
             )}
-            <div
-              className="text-[9px] mt-1.5"
-              style={{ color: T.textMuted }}
-            >
-              {isHappyHorse
-                ? "HappyHorse generates a video starting from this image. LiTT will also suggest ideas."
-                : "Upload a photo and LiTT will instantly suggest video ideas based on what's in it."}
-            </div>
           </div>
 
-          {/* LiTT's AI idea suggestions — appears after photo analysis */}
-          {uploadedImageUrl && (isAnalyzing || ideas.length > 0 || ideaError) && (
-            <div
-              className="border rounded-lg p-3 space-y-2"
-              style={{
-                borderColor: T.accentColor + "40",
-                backgroundColor: T.accentColor + "08",
-              }}
+          {/* Result actions */}
+          {current?.videoUrl && (
+            <div className="flex items-center gap-2 border-t px-4 py-2.5" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}>
+              <button onClick={() => { const v = document.querySelector("video"); v?.play(); }} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+                <RefreshCw size={11} /> Replay
+              </button>
+              <button onClick={() => handleDownload(current.videoUrl!)} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+                <Download size={11} /> Download
+              </button>
+              <button onClick={handleRemix} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:scale-105" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }}>
+                <RotateCcw size={11} /> Remix
+              </button>
+              <div className="ml-auto flex items-center gap-3 text-[9px] text-white/30">
+                <span>{videoModel.label}</span>
+                <span>{aspectRatio}</span>
+                <span>{resolution}</span>
+                <span>{cost} BITS</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </Entrance>
+
+      {/* Prompt Composer */}
+      <Entrance delay={0.15}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.6)", backdropFilter: "blur(12px)" }}>
+          <div className="flex items-center gap-2">
+            <Sparkles size={14} style={{ color: "#A970FF" }} />
+            <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">Describe your shot</span>
+          </div>
+
+          {showEnhanced && enhancedPrompt ? (
+            <div className="mt-3 space-y-2">
+              <div className="flex gap-2">
+                <button onClick={() => setShowEnhanced(false)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}>Original</button>
+                <button onClick={() => setShowEnhanced(true)} className="rounded-full border px-3 py-1 text-[10px] font-bold" style={{ borderColor: "rgba(139,92,246,0.4)", background: "rgba(139,92,246,0.12)", color: "#A970FF" }}>Enhanced</button>
+              </div>
+              <div className="rounded-xl border p-3 text-sm leading-relaxed" style={{ borderColor: "rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.05)", color: "rgba(255,255,255,0.85)" }}>
+                {showEnhanced ? enhancedPrompt : originalPrompt}
+              </div>
+              {showEnhanced && (
+                <button onClick={() => { setPrompt(enhancedPrompt); setShowEnhanced(false); }} className="text-[10px] font-bold text-white/40 transition hover:text-white/70">
+                  Use enhanced prompt →
+                </button>
+              )}
+            </div>
+          ) : (
+            <textarea
+              value={prompt}
+              onChange={(e) => { setPrompt(e.target.value); setError(null); }}
+              placeholder="A futuristic LiTT robot walking through a rain-soaked city at night..."
+              rows={3}
+              disabled={isGenerating}
+              className="mt-3 w-full resize-none rounded-xl border bg-transparent px-3 py-2.5 text-sm outline-none disabled:opacity-50"
+              style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.9)", background: "rgba(255,255,255,0.02)" }}
+            />
+          )}
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={handleEnhance}
+              disabled={!prompt.trim() || isEnhancing || isGenerating}
+              className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[11px] font-bold transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
+              style={{ borderColor: "rgba(139,92,246,0.3)", background: "rgba(139,92,246,0.08)", color: "#A970FF", minHeight: 40 }}
             >
-              <div className="flex items-center gap-1.5">
-                <Lightbulb size={12} style={{ color: T.accentColor }} />
-                <span
-                  className="text-[10px] font-black uppercase tracking-widest"
-                  style={{ color: T.accentColor }}
-                >
-                  LiTT&rsquo;s Ideas
-                </span>
-                {ideas.length > 0 && (
-                  <span className="text-[9px] opacity-50 ml-auto">{ideas.length} suggestions</span>
-                )}
+              {isEnhancing ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+              Enhance with LiTT
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={!prompt.trim() || !canAfford || isGenerating}
+              className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition hover:scale-[1.02] active:scale-95 disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg, #8B5CF6, #A970FF)", color: "#fff", boxShadow: "0 0 24px rgba(139,92,246,0.3)", minHeight: 40 }}
+            >
+              {isGenerating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Sparkles size={14} /> Generate · {cost} BITS</>}
+            </button>
+          </div>
+
+          {error && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#ef4444" }}>
+              <AlertTriangle size={12} />
+              <span>{error}</span>
+              {(error.includes("timed out") || error.includes("failed")) && (
+                <button onClick={handleGenerate} className="ml-auto rounded-lg px-2 py-0.5 text-[9px] font-bold transition hover:opacity-80" style={{ background: "rgba(239,68,68,0.2)" }}>Retry</button>
+              )}
+            </div>
+          )}
+        </div>
+      </Entrance>
+
+      {/* Shot Controls — Director mode only */}
+      {mode === "director" && (
+        <Entrance delay={0.2}>
+          <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+            <ChipRow label="Camera" options={CAMERA_OPTIONS} selected={camera} onToggle={toggleCamera} accentColor="#A970FF" />
+            <ChipRow label="Motion" options={MOTION_OPTIONS} selected={[motionStyle]} onToggle={(v) => setMotionStyle(v)} accentColor="#22D3EE" />
+            <ChipRow label="Look" options={LOOK_OPTIONS} selected={[look]} onToggle={(v) => setLook(v)} accentColor="#72F238" />
+            <ChipRow label="Composition" options={COMPOSITION_OPTIONS} selected={composition} onToggle={toggleComposition} accentColor="#F97316" />
+          </div>
+        </Entrance>
+      )}
+
+      {/* Source + Advanced */}
+      <Entrance delay={0.25}>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Source / First Frame */}
+          {showReferenceImage && (
+            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+              <div className="flex items-center gap-2">
+                <Eye size={13} style={{ color: "#22D3EE" }} />
+                <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">{referenceLabel}</span>
               </div>
 
-              {ideaError && (
-                <div
-                  className="text-[10px] px-2 py-1.5 rounded border"
-                  style={{
-                    borderColor: "#f8514940",
-                    color: "#f85149",
-                    backgroundColor: "#f8514910",
-                  }}
-                >
-                  {ideaError}
+              {uploadedImagePreview ? (
+                <div className="relative mt-3 overflow-hidden rounded-xl">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={uploadedImagePreview} alt="Reference" className="w-full max-h-48 object-contain rounded-lg" />
+                  <button onClick={handleRemoveImage} disabled={isGenerating || isUploading || isAnalyzing} className="absolute right-2 top-2 rounded-lg bg-black/60 p-1.5 text-white transition hover:bg-black/80 disabled:opacity-50">
+                    <X size={14} />
+                  </button>
+                  {uploadedImageUrl && !isAnalyzing && (
+                    <div className="absolute bottom-2 left-2 rounded px-2 py-0.5 text-[9px] font-bold" style={{ background: "rgba(114,242,56,0.8)", color: "#000" }}>Ready</div>
+                  )}
+                  {isAnalyzing && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm">
+                      <Loader2 size={20} className="animate-spin" style={{ color: "#A970FF" }} />
+                      <span className="text-[10px] font-bold" style={{ color: "#A970FF" }}>LiTT is studying your image...</span>
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 transition-all hover:scale-[1.01]" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)" }}>
+                  {isUploading ? <Loader2 size={20} className="animate-spin" style={{ color: "#A970FF" }} /> : <ImagePlus size={20} className="text-white/30" />}
+                  <span className="text-[10px] text-white/40">{isUploading ? "Uploading..." : "Drop first frame or click to upload"}</span>
+                  <span className="text-[9px] text-white/20">JPEG, PNG, or WebP</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={isUploading || isGenerating} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }} />
+                </label>
               )}
 
-              {isAnalyzing && ideas.length === 0 && !ideaError && (
-                <div className="space-y-1.5">
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className="h-10 rounded animate-pulse"
-                      style={{ backgroundColor: T.accentColor + "10" }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {ideas.length > 0 && (
-                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                  {ideas.map((idea, i) => (
-                    <button
-                      key={i}
-                      onClick={() => applyIdea(idea)}
-                      disabled={isGenerating}
-                      className="w-full text-left p-2.5 rounded-lg border transition-all hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100 group"
-                      style={{
-                        borderColor: T.borderColor,
-                        backgroundColor: T.bgColor,
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span
-                              className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider"
-                              style={{
-                                backgroundColor: T.accentColor + "20",
-                                color: T.accentColor,
-                              }}
-                            >
-                              {idea.vibe}
-                            </span>
-                            <span
-                              className="text-[9px] font-bold"
-                              style={{ color: T.textMuted }}
-                            >
-                              {idea.motion}
-                            </span>
-                          </div>
-                          <div
-                            className="text-[11px] font-bold mb-0.5"
-                            style={{ color: T.textColor }}
-                          >
-                            {idea.title}
-                          </div>
-                          <div
-                            className="text-[10px] leading-relaxed line-clamp-2"
-                            style={{ color: T.textMuted }}
-                          >
-                            {idea.prompt}
-                          </div>
-                        </div>
-                        <ArrowRight
-                          size={12}
-                          className="shrink-0 mt-1 opacity-30 group-hover:opacity-100 transition-opacity"
-                          style={{ color: T.accentColor }}
-                        />
+              {/* LiTT suggestions */}
+              {uploadedImageUrl && ideas.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Lightbulb size={11} style={{ color: "#A970FF" }} />
+                    <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: "#A970FF" }}>Suggested Shots</span>
+                  </div>
+                  {ideas.slice(0, 3).map((idea, i) => (
+                    <button key={i} onClick={() => applyIdea(idea)} disabled={isGenerating} className="w-full rounded-lg border p-2.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
+                      <div className="flex items-center gap-1.5">
+                        <span className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase" style={{ background: "rgba(139,92,246,0.2)", color: "#A970FF" }}>{idea.vibe}</span>
+                        <span className="text-[9px] text-white/40">{idea.motion}</span>
                       </div>
+                      <div className="mt-1 text-[11px] font-bold text-white/80">{idea.title}</div>
+                      <div className="mt-0.5 line-clamp-2 text-[10px] text-white/40">{idea.prompt}</div>
                     </button>
                   ))}
                 </div>
               )}
-
-              {ideas.length > 0 && (
-                <div
-                  className="text-[9px] pt-1 border-t"
-                  style={{ color: T.textMuted, borderColor: T.borderColor }}
-                >
-                  Click any idea to load it into the scene description
-                </div>
+              {ideaError && (
+                <div className="mt-2 rounded-lg border px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", color: "#ef4444", background: "rgba(239,68,68,0.05)" }}>{ideaError}</div>
               )}
             </div>
           )}
 
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="block text-[10px] uppercase tracking-widest mb-2"
-              style={{ color: T.textMuted }}
-            >
-              Model
-            </label>
-            <div className="space-y-1.5">
-              {VIDEO_MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => m.available && setModel(m.id)}
-                  disabled={isGenerating || !m.available}
-                  title={m.available ? undefined : `${m.label} is not yet available — server-side integration pending`}
-                  className="w-full p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                  style={{
-                    backgroundColor:
-                      model === m.id ? T.accentColor + "20" : T.bgColor,
-                    borderColor: model === m.id ? T.accentColor : T.borderColor,
-                    color: model === m.id ? T.accentColor : T.textColor,
-                  }}
-                >
-                  <div className="font-bold flex items-center justify-between">
-                    <span>{m.label}</span>
-                    <span className="flex items-center gap-1 text-[9px] opacity-60">
-                      {m.available ? m.provider : <span style={{ color: "#fb7185" }}>Coming soon</span>}
-                    </span>
-                  </div>
-                  <div className="text-[9px] opacity-60 mt-0.5">
-                    {m.desc} · {m.cost} 🪙
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Advanced */}
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+            <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex w-full items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/50">Advanced</span>
+              <ChevronDown size={14} className="text-white/40 transition-transform" style={{ transform: showAdvanced ? "rotate(180deg)" : "none" }} />
+            </button>
 
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
-              style={{ color: T.textMuted }}
-            >
-              Duration
-            </label>
-            <input
-              type="range"
-              min={isHappyHorse ? 3 : 2}
-              max={isHappyHorse ? 15 : 8}
-              step={1}
-              value={duration}
-              onChange={(e) => setDuration(parseInt(e.target.value))}
-              disabled={isGenerating}
-              aria-label="Video duration in seconds"
-              title="Video duration in seconds"
-              aria-valuemin={2}
-              aria-valuemax={8}
-              aria-valuenow={duration}
-              className="w-full"
-            />
-            <div
-              className="flex items-center justify-between text-[10px] mt-1"
-              style={{ color: T.textMuted }}
-            >
-              <span>
-                <Clock size={10} className="inline mr-1" />
-                {duration}s
-              </span>
-              <span>2s — 8s</span>
-            </div>
-          </div>
-
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
-              style={{ color: T.textMuted }}
-            >
-              Quick Starters
-            </label>
-            <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-              {PROMPT_PRESETS.map((p, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setPrompt(p);
-                    setError(null);
-                  }}
-                  disabled={isGenerating}
-                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:opacity-80 disabled:opacity-50 line-clamp-2"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                  }}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            disabled={!prompt.trim() || !canAfford || isGenerating}
-            className="w-full py-3 rounded-lg font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-40 transition-all hover:scale-[1.01]"
-            style={{
-              background: `linear-gradient(135deg, ${T.accentColor} 0%, ${T.headerColor} 100%)`,
-              color: T.bgColor,
-              boxShadow: `0 0 20px ${T.accentColor}30`,
-            }}
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 size={16} className="animate-spin" /> Generating...
-              </>
-            ) : (
-              <>
-                <Wand2 size={16} /> Generate ({cost} 🪙)
-              </>
-            )}
-          </button>
-
-          {error && (
-            <div
-              className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border"
-              style={{
-                borderColor: "#f85149",
-                color: "#f85149",
-                backgroundColor: "#f8514910",
-              }}
-            >
-              <AlertTriangle size={12} />
-              <span>{error}</span>
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT: Preview + History */}
-        <div className="lg:col-span-3 space-y-3">
-          <div
-            className="border-2 rounded-lg overflow-hidden"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="px-3 py-1.5 border-b flex items-center justify-between"
-              style={{ borderColor: T.borderColor, backgroundColor: T.bgColor }}
-            >
-              <span
-                className="text-[10px] uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Preview
-              </span>
-              {current?.status === "succeeded" && (
-                <span className="text-[10px]" style={{ color: "#56d364" }}>
-                  ● Ready
-                </span>
-              )}
-              {isGenerating && (
-                <span
-                  className="text-[10px] flex items-center gap-1"
-                  style={{ color: T.accentColor }}
-                >
-                  <Loader2 size={10} className="animate-spin" /> Working...
-                </span>
-              )}
-            </div>
-            <div
-              className="aspect-video relative flex items-center justify-center"
-              style={{ backgroundColor: T.bgColor }}
-            >
-              {current?.videoUrl ? (
-                <video
-                  src={current.videoUrl}
-                  controls
-                  className="w-full h-full object-cover"
-                  style={{ maxHeight: "360px" }}
-                />
-              ) : isGenerating ? (
-                <div className="text-center">
-                  <div className="relative w-20 h-20 mx-auto mb-3">
-                    <div
-                      className="absolute inset-0 rounded-full border-2 animate-ping"
-                      style={{ borderColor: T.accentColor, opacity: 0.4 }}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center text-2xl">
-                      🎬
-                    </div>
-                  </div>
-                  <p className="text-sm opacity-70">Generating video...</p>
-                  <p className="text-[10px] opacity-50 mt-1">
-                    This can take 30-120 seconds
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center px-6">
-                  <div className="text-4xl mb-2 opacity-30">🎬</div>
-                  <p className="text-sm opacity-60">
-                    Your video will appear here
-                  </p>
-                </div>
-              )}
-            </div>
-            {current?.videoUrl && (
-              <div
-                className="px-3 py-2 border-t flex items-center gap-2"
-                style={{
-                  borderColor: T.borderColor,
-                  backgroundColor: T.bgColor,
-                }}
-              >
-                <button
-                  onClick={() => handleDownload(current.videoUrl!)}
-                  className="px-2.5 py-1 text-[10px] font-bold rounded border flex items-center gap-1"
-                  style={{ borderColor: T.borderColor, color: T.textColor }}
-                >
-                  <Download size={10} /> Download
-                </button>
-                <button
-                  onClick={handleGenerate}
-                  className="px-2.5 py-1 text-[10px] font-bold rounded border flex items-center gap-1"
-                  style={{ borderColor: T.borderColor, color: T.textColor }}
-                >
-                  <RefreshCw size={10} /> Regen
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div
-            className="border rounded-lg"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="px-3 py-2 border-b flex items-center justify-between"
-              style={{ borderColor: T.borderColor }}
-            >
-              <div
-                className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                <History size={10} /> Recent ({history.length})
-              </div>
-              {history.length > 0 && (
-                <button
-                  onClick={handleClear}
-                  className="text-[9px] opacity-60 hover:opacity-100"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            {history.length === 0 ? (
-              <div className="p-6 text-center text-xs opacity-50">
-                No videos yet.
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 p-2">
-                {history.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => setCurrent(g)}
-                    className="relative aspect-video border rounded overflow-hidden hover:scale-[1.02] transition-transform"
-                    style={{
-                      borderColor: T.borderColor,
-                      backgroundColor: T.bgColor,
-                    }}
-                  >
-                    {g.videoUrl ? (
-                      <video
-                        src={g.videoUrl}
-                        className="w-full h-full object-cover"
-                        muted
-                      />
-                    ) : g.status === "failed" ? (
-                      <div className="w-full h-full flex items-center justify-center text-lg">
-                        ⚠️
-                      </div>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Loader2
-                          size={14}
-                          className="animate-spin opacity-50"
-                        />
+            {showAdvanced && (
+              <div className="mt-4 space-y-4">
+                {/* Model selection */}
+                <div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Model</div>
+                  <div className="space-y-1.5">
+                    {AVAILABLE_MODELS.map((m) => (
+                      <button key={m.id} onClick={() => setModelId(m.id)} disabled={isGenerating} className="w-full rounded-lg border p-2.5 text-left text-[11px] transition-all hover:scale-[1.01] disabled:opacity-50" style={{
+                        borderColor: modelId === m.id ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.06)",
+                        background: modelId === m.id ? "rgba(139,92,246,0.12)" : "rgba(255,255,255,0.02)",
+                        color: modelId === m.id ? "#A970FF" : "rgba(255,255,255,0.7)",
+                      }}>
+                        <div className="flex items-center justify-between font-bold">
+                          <span>{m.label}</span>
+                          <span className="text-[9px] opacity-60">{m.cost} BITS</span>
+                        </div>
+                        <div className="mt-0.5 text-[9px] opacity-50">{m.desc}</div>
+                      </button>
+                    ))}
+                    {UNAVAILABLE_MODELS.length > 0 && (
+                      <div className="pt-2">
+                        <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-white/20">Coming later</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {UNAVAILABLE_MODELS.map((m) => (
+                            <span key={m.id} className="rounded-full border px-2.5 py-1 text-[9px] font-bold opacity-40" style={{ borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.3)" }}>
+                              {m.label}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
-                    <div
-                      className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 text-[8px] truncate"
-                      style={{
-                        backgroundColor: "rgba(0,0,0,0.7)",
-                        color: "white",
-                      }}
-                    >
-                      {g.model}
+                  </div>
+                </div>
+
+                {/* Aspect ratio */}
+                <div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Aspect Ratio</div>
+                  <div className="flex gap-1.5">
+                    {caps.aspectRatios.map((ar) => (
+                      <button key={ar} onClick={() => setAspectRatio(ar)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
+                        borderColor: aspectRatio === ar ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
+                        background: aspectRatio === ar ? "rgba(139,92,246,0.12)" : "transparent",
+                        color: aspectRatio === ar ? "#A970FF" : "rgba(255,255,255,0.5)",
+                      }}>{ar}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Resolution */}
+                <div>
+                  <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Resolution</div>
+                  <div className="flex gap-1.5">
+                    {caps.resolutions.map((res) => (
+                      <button key={res} onClick={() => setResolution(res)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
+                        borderColor: resolution === res ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
+                        background: resolution === res ? "rgba(139,92,246,0.12)" : "transparent",
+                        color: resolution === res ? "#A970FF" : "rgba(255,255,255,0.5)",
+                      }}>{res}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Duration — only when supported */}
+                {showDuration && (
+                  <div>
+                    <div className="mb-2 text-[10px] font-black uppercase tracking-[.16em] text-white/40">Duration</div>
+                    <div className="flex gap-1.5">
+                      {caps.durations.map((d) => (
+                        <button key={d} onClick={() => setDuration(d)} disabled={isGenerating} className="rounded-lg border px-3 py-1.5 text-[11px] font-bold transition hover:scale-105 disabled:opacity-50" style={{
+                          borderColor: duration === d ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)",
+                          background: duration === d ? "rgba(139,92,246,0.12)" : "transparent",
+                          color: duration === d ? "#A970FF" : "rgba(255,255,255,0.5)",
+                        }}>{d}s</button>
+                      ))}
                     </div>
-                  </button>
-                ))}
+                  </div>
+                )}
+
+                {/* Estimate */}
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5" style={{ borderColor: "rgba(139,92,246,0.2)", background: "rgba(139,92,246,0.05)" }}>
+                  <span className="text-[10px] text-white/50">Estimated cost</span>
+                  <span className="text-sm font-black" style={{ color: "#A970FF" }}>{cost} BITS</span>
+                </div>
               </div>
             )}
           </div>
         </div>
-      </div>
+      </Entrance>
+
+      {/* History filmstrip */}
+      <Entrance delay={0.3}>
+        <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(10,9,18,0.5)", backdropFilter: "blur(12px)" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <History size={11} className="text-white/40" />
+              <span className="text-[10px] font-black uppercase tracking-[.16em] text-white/40">Recent</span>
+            </div>
+            {history.length > 0 && (
+              <button onClick={handleClear} className="text-[9px] text-white/30 transition hover:text-white/60">Clear</button>
+            )}
+          </div>
+          {history.length === 0 ? (
+            <div className="py-6 text-center text-[11px] text-white/25">No videos yet</div>
+          ) : (
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+              {history.map((g) => (
+                <button key={g.id} onClick={() => setCurrent(g)} className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-lg border transition-all hover:scale-[1.04]" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.3)" }}>
+                  {g.videoUrl ? (
+                    <video src={g.videoUrl} className="h-full w-full object-cover" muted />
+                  ) : g.status === "failed" ? (
+                    <div className="flex h-full w-full items-center justify-center"><AlertTriangle size={16} className="text-red-400/60" /></div>
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center"><Loader2 size={14} className="animate-spin text-white/30" /></div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 truncate px-1.5 py-0.5 text-[8px] font-bold" style={{ background: "rgba(0,0,0,0.7)", color: "rgba(255,255,255,0.6)" }}>
+                    {g.model} · {new Date(g.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Entrance>
     </div>
   );
 }

@@ -150,14 +150,75 @@ export type MediaModel = {
   available: boolean;
 };
 
-export const VIDEO_MODELS: MediaModel[] = [
-  { id: "veo",         label: "Veo",         provider: "Google",     desc: "High-quality cinematic",     cost: 5, available: true  },
-  { id: "happyhorse",  label: "HappyHorse",  provider: "Alibaba",    desc: "Image-to-video, smooth motion", cost: 3, available: true  },
-  { id: "wan",         label: "Wan",         provider: "Alibaba",    desc: "Fast general purpose",       cost: 3, available: false },
-  { id: "wan-pro",     label: "Wan Pro",     provider: "Alibaba",    desc: "Enhanced quality",           cost: 4, available: false },
-  { id: "seedance-pro",label: "Seedance Pro",provider: "ByteDance",  desc: "Motion mastery",             cost: 4, available: false },
-  { id: "ltx-2",       label: "LTX-2",       provider: "Lightricks", desc: "Realistic scenes",           cost: 3, available: false },
+export type VideoModelCapabilities = {
+  textToVideo: boolean;
+  imageToVideo: boolean;
+  aspectRatios: string[];
+  resolutions: string[];
+  durations: number[];
+  supportsAudio: boolean;
+  supportsReferenceImage: boolean;
+};
+
+export type VideoModel = MediaModel & {
+  capabilities: VideoModelCapabilities;
+  /** Canonical model ID sent to the provider API. */
+  apiModel: string;
+};
+
+export const VIDEO_MODELS: VideoModel[] = [
+  {
+    id: "veo", label: "Veo", provider: "Google", desc: "High-quality cinematic", cost: 5, available: true,
+    apiModel: "veo-3.1-fast-generate-preview",
+    capabilities: {
+      textToVideo: true, imageToVideo: true, aspectRatios: ["16:9", "9:16", "1:1"],
+      resolutions: ["720p", "1080p"], durations: [4, 6, 8], supportsAudio: false, supportsReferenceImage: true,
+    },
+  },
+  {
+    id: "happyhorse", label: "HappyHorse", provider: "Alibaba", desc: "Image-to-video, smooth motion", cost: 3, available: true,
+    apiModel: "happyhorse-1.1-i2v",
+    capabilities: {
+      textToVideo: false, imageToVideo: true, aspectRatios: ["16:9", "9:16", "1:1"],
+      resolutions: ["720p", "1080p"], durations: [3, 5, 10, 15], supportsAudio: false, supportsReferenceImage: false,
+    },
+  },
+  { id: "wan", label: "Wan", provider: "Alibaba", desc: "Fast general purpose", cost: 3, available: false,
+    apiModel: "wan-2.1",
+    capabilities: { textToVideo: true, imageToVideo: false, aspectRatios: ["16:9"], resolutions: ["720p"], durations: [5], supportsAudio: false, supportsReferenceImage: false },
+  },
+  { id: "wan-pro", label: "Wan Pro", provider: "Alibaba", desc: "Enhanced quality", cost: 4, available: false,
+    apiModel: "wan-2.1-pro",
+    capabilities: { textToVideo: true, imageToVideo: false, aspectRatios: ["16:9"], resolutions: ["720p"], durations: [5], supportsAudio: false, supportsReferenceImage: false },
+  },
+  { id: "seedance-pro", label: "Seedance Pro", provider: "ByteDance", desc: "Motion mastery", cost: 4, available: false,
+    apiModel: "seedance-pro",
+    capabilities: { textToVideo: true, imageToVideo: false, aspectRatios: ["16:9"], resolutions: ["720p"], durations: [5], supportsAudio: false, supportsReferenceImage: false },
+  },
+  { id: "ltx-2", label: "LTX-2", provider: "Lightricks", desc: "Realistic scenes", cost: 3, available: false,
+    apiModel: "ltx-2",
+    capabilities: { textToVideo: true, imageToVideo: false, aspectRatios: ["16:9"], resolutions: ["720p"], durations: [5], supportsAudio: false, supportsReferenceImage: false },
+  },
 ];
+
+/**
+ * Server-authoritative video model pricing resolver.
+ * Never trust client-supplied cost — always resolve from this registry.
+ */
+export function getVideoModel(modelId: string): VideoModel | undefined {
+  return VIDEO_MODELS.find((m) => m.id === modelId || m.apiModel === modelId);
+}
+
+export function getVideoModelPricing(modelId: string): number {
+  const model = getVideoModel(modelId);
+  if (!model) throw new Error(`Unknown video model: ${modelId}`);
+  if (!model.available) throw new Error(`Video model ${model.label} is not available`);
+  return model.cost;
+}
+
+export function getVideoModelCapabilities(modelId: string): VideoModelCapabilities | undefined {
+  return getVideoModel(modelId)?.capabilities;
+}
 
 export const MUSIC_MODELS = [
   { id: "lyria-3-clip-preview", label: "Lyria", provider: "Google", desc: "Full music generation", cost: 3 },

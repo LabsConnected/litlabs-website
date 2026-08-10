@@ -1260,6 +1260,7 @@ export function useCanonicalConversation({
     clearSendError: () => setSendError(null),
     requiresReauth,
     clearRequiresReauth: () => setRequiresReauth(false),
+    loadMessages,
   };
 }
 

@@ -19,7 +19,6 @@ const COLS: Array<{
     links: [
       { label: "Docs", href: "/docs" },
       { label: "API", href: "/docs" },
-      { label: "Templates", href: "/gallery" },
       { label: "Showcase", href: "/showcase" },
     ],
   },

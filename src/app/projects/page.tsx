@@ -43,7 +43,7 @@ const QUICK_ACTIONS = [
   {
     label: "Review artifacts",
     description: "Find images, previews, and saved outputs in one place.",
-    href: "/gallery",
+    href: "/library",
     icon: Image,
   },
 ];

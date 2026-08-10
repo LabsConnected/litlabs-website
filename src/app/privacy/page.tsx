@@ -29,13 +29,7 @@ export default function PrivacyPage() {
             🛡️ Privacy Policy
           </div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            DRAFT — OWNER/LEGAL REVIEW REQUIRED · Last Updated: August 4, 2026
-          </p>
-          <p className="mt-3 text-[10px] opacity-80 rounded-md border border-amber-400/30 bg-amber-400/5 p-3">
-            <strong>DRAFT NOTICE:</strong> This Privacy Policy is a draft
-            prepared from an actual data-flow audit of the LiTTree LabStudios
-            codebase. It has not been approved as final legal copy. Do not
-            publish until reviewed and approved by the owner and legal counsel.
+            Last Updated: August 10, 2026
           </p>
         </div>
 
