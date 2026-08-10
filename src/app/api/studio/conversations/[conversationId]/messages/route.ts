@@ -33,6 +33,8 @@ import {
   buildRuntimeContextBlock,
   type ClientRuntimeHint,
 } from "@/lib/litt-intelligence/canonical-runtime-context";
+import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
+import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -235,6 +237,97 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // Expands "it", "that", "same thing", "why", etc. into self-contained messages.
   const turnResolution = resolveTurn(message, history);
   const resolvedMessage = turnResolution.resolved;
+
+  // 7.6. Real-time tool execution (weather, web search, etc.)
+  // Runs BEFORE the agent loop. If a tool fires, the live result is returned
+  // directly and the LLM is never called — LiTT must never guess real-time data.
+  const toolResult = await detectAndExecuteTool(userId, resolvedMessage, {
+    headers: req.headers,
+    history,
+  });
+
+  if (toolResult.executed) {
+    // Insert assistant message with the tool result
+    const { message: toolAssistantMessage } = await insertMessage({
+      conversationId: conversation.id,
+      ownerId: userId,
+      projectId: conversation.projectId,
+      role: "assistant",
+      agentSlug,
+      agentInstanceId: runtimeAgent?.agentInstanceId || null,
+      content: toolResult.text,
+      status: "completed",
+      parentMessageId: userMessage.id,
+    });
+
+    if (!toolAssistantMessage) {
+      return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
+    }
+
+    // Persist memory for tool results too
+    void persistMemory(
+      `User: ${message}\nLiTT: ${toolResult.text}`,
+      userId,
+      conversation.projectId,
+      {
+        agentSlug,
+        agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
+        memoryNamespace: runtimeAgent?.memoryNamespace,
+        conversationId: conversation.id,
+        memoryType: "conversation_summary",
+      },
+    );
+
+    studioLog("message:sent", {
+      conversationId: conversation.id,
+      projectId: conversation.projectId,
+      userId,
+      agentSlug,
+      agentInstanceId: runtimeAgent?.agentInstanceId || null,
+      provider: toolResult.metadata.provider,
+      latencyMs: 0,
+      revisionBefore: conversation.revision,
+      revisionAfter: newRevision,
+      tool: toolResult.toolId,
+    });
+
+    // Stream the tool result through the same SSE protocol the frontend consumes
+    const toolEncoder = new TextEncoder();
+    const toolEvent = (payload: Record<string, unknown>) =>
+      toolEncoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+    const toolStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(toolEvent({ type: "text", text: toolResult.text }));
+        controller.enqueue(toolEvent({
+          type: "tool_execution",
+          toolId: toolResult.toolId,
+          success: true,
+          metadata: toolResult.metadata,
+        }));
+        controller.enqueue(toolEvent({
+          type: "done",
+          userMessage,
+          assistantMessage: {
+            ...toolAssistantMessage,
+            content: toolResult.text,
+            status: "completed",
+          },
+          revision: newRevision,
+          toolMetadata: toolResult.metadata,
+        }));
+        controller.enqueue(toolEncoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    return new Response(toolStream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
+  }
 
   // 8. Recall project-scoped memories
   const memories = await recallMemories(message, userId, conversation.projectId, {

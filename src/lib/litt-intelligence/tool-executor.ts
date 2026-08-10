@@ -14,15 +14,75 @@
  */
 
 import "server-only";
-import { getUserContext } from "./user-context";
+import { getUserContext, hasLocation } from "./user-context";
+import type { UserContext } from "./user-context";
 import {
   fetchWeatherForUser,
   type WeatherToolResponse,
 } from "./weather-tool";
+import type { ConversationTurn } from "./turn-resolver";
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
 export type ToolId = "weather" | "none";
+
+/* ── Explicit location extraction ──────────────────────────────── */
+
+const NON_CITY_WORDS = new Set([
+  "the", "this", "that", "my", "your", "our", "a", "an",
+  "morning", "afternoon", "evening", "night", "day", "week", "month", "year",
+  "forecast", "weather", "general", "particular", "future", "past",
+  "summer", "winter", "spring", "fall", "autumn",
+  "today", "tomorrow", "yesterday",
+  "celsius", "fahrenheit",
+  "here", "there", "everywhere",
+]);
+
+/**
+ * Extracts an explicit city name from a weather-related message.
+ * Matches patterns like "weather in Grand Haven", "temperature in Detroit", etc.
+ */
+export function extractExplicitLocation(message: string): string | null {
+  const lower = message.toLowerCase();
+  if (!WEATHER_KEYWORDS.some((kw) => lower.includes(kw))) return null;
+
+  const patterns = [
+    /\b(?:weather|temperature|forecast|rain|snow|wind|humidity|umbrella)\b[^.!?]*?\b(?:in|for|at|near)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i,
+    /\b(?:how hot|how cold|is it hot|is it cold|is it raining|is it snowing)\b[^.!?]*?\b(?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i,
+    /\b(?:what's|whats|what is)\s+(?:the\s+)?weather\b[^.!?]*?\b(?:in|like in|for|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) {
+      const city = match[1].trim();
+      const firstWord = city.split(/\s+/)[0].toLowerCase();
+      // Filter out non-city words — check both the full capture and the first word
+      if (!NON_CITY_WORDS.has(city.toLowerCase()) && !NON_CITY_WORDS.has(firstWord)) {
+        return city;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts a location from conversation history by scanning prior
+ * user messages for explicit city mentions in weather context.
+ * Used for follow-ups like "What about tomorrow?" after "weather in Grand Haven".
+ */
+function extractLocationFromHistory(history: ConversationTurn[]): string | null {
+  const recent = history.slice(-6);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const turn = recent[i];
+    if (turn.role === "user") {
+      const loc = extractExplicitLocation(turn.content);
+      if (loc) return loc;
+    }
+  }
+  return null;
+}
 
 export interface ToolMetadata {
   tool: ToolId;
@@ -84,10 +144,46 @@ export function detectWeatherIntent(message: string): "current" | "hourly" | "da
 /**
  * Detects any tool intent from the message.
  * Returns the tool id + refined intent, or null if no tool matches.
+ * When history is provided, also detects weather follow-ups like
+ * "What about tomorrow?" after a weather-related turn.
  */
-export function detectToolIntent(message: string): { tool: ToolId; weatherType?: "current" | "hourly" | "daily" } | null {
+export function detectToolIntent(
+  message: string,
+  history?: ConversationTurn[],
+): { tool: ToolId; weatherType?: "current" | "hourly" | "daily" } | null {
   const weatherType = detectWeatherIntent(message);
   if (weatherType) return { tool: "weather", weatherType };
+
+  // Check for weather follow-up with temporal keywords (no explicit weather word)
+  if (history && history.length > 0) {
+    const lower = message.toLowerCase();
+    const isTemporalFollowup =
+      /\b(tomorrow|today|this week|next week|hourly|rest of the day|next few hours|forecast)\b/i.test(lower) &&
+      !WEATHER_KEYWORDS.some((kw) => lower.includes(kw));
+
+    if (isTemporalFollowup) {
+      const recent = history.slice(-6);
+      const hasWeatherContext = recent.some(
+        (t) => t.role === "user" && WEATHER_KEYWORDS.some((kw) => t.content.toLowerCase().includes(kw)),
+      );
+
+      if (hasWeatherContext) {
+        const type =
+          lower.includes("tomorrow") ||
+          lower.includes("this week") ||
+          lower.includes("next week") ||
+          lower.includes("forecast")
+            ? "daily"
+            : lower.includes("hourly") ||
+                lower.includes("next few hours") ||
+                lower.includes("rest of the day")
+              ? "hourly"
+              : "current";
+        return { tool: "weather", weatherType: type };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -104,9 +200,9 @@ export function detectToolIntent(message: string): { tool: ToolId; weatherType?:
 export async function detectAndExecuteTool(
   userId: string,
   message: string,
-  options?: { clientIp?: string; headers?: Headers },
+  options?: { clientIp?: string; headers?: Headers; history?: ConversationTurn[] },
 ): Promise<ToolExecutionResult> {
-  const intent = detectToolIntent(message);
+  const intent = detectToolIntent(message, options?.history);
   if (!intent) {
     return {
       executed: false,
@@ -117,7 +213,7 @@ export async function detectAndExecuteTool(
   }
 
   if (intent.tool === "weather") {
-    return executeWeatherTool(userId, message, intent.weatherType ?? "current", options?.headers);
+    return executeWeatherTool(userId, message, intent.weatherType ?? "current", options?.headers, options?.history);
   }
 
   return {
@@ -140,12 +236,49 @@ async function executeWeatherTool(
   message: string,
   type: "current" | "hourly" | "daily",
   headers?: Headers,
+  history?: ConversationTurn[],
 ): Promise<ToolExecutionResult> {
+  // 1. Try to extract explicit location from the message
+  const explicitCity = extractExplicitLocation(message);
+
+  // 2. Try to extract location from conversation history (for follow-ups)
+  const historyCity = explicitCity ? null : extractLocationFromHistory(history ?? []);
+
+  // 3. Load user context (saved location, Vercel geo, capabilities)
   const ctx = await getUserContext(userId, {
     capabilities: ["weather.current", "weather.hourly", "weather.daily"],
     headers,
   });
 
+  // 4. Override location if explicit or history city found (this request only)
+  const overrideCity = explicitCity ?? historyCity;
+  if (overrideCity) {
+    ctx.location = {
+      city: overrideCity,
+      region: null,
+      country: null,
+      latitude: null,
+      longitude: null,
+      source: "confirmed",
+    };
+  }
+
+  // 5. If still no location, ask conversationally (not a settings error)
+  if (!hasLocation(ctx)) {
+    return {
+      executed: true,
+      toolId: "weather",
+      text: "Sure — what city should I check?",
+      metadata: {
+        tool: "weather",
+        provider: "open_meteo",
+        realtime: true,
+        location: null,
+      },
+    };
+  }
+
+  // 6. Fetch weather via the existing tool
   const result = await fetchWeatherForUser(ctx, { type });
 
   // Resolve the location name for metadata

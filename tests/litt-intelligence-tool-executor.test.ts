@@ -17,8 +17,10 @@ import {
   detectWeatherIntent,
   detectToolIntent,
   detectAndExecuteTool,
+  extractExplicitLocation,
 } from "@/lib/litt-intelligence/tool-executor";
 import type { UserContext } from "@/lib/litt-intelligence/user-context";
+import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 // Mock getUserContext so we can control the user's location/capabilities
 vi.mock("@/lib/litt-intelligence/user-context", () => ({
@@ -245,5 +247,186 @@ describe("LiTT Tool Executor — detectAndExecuteTool", () => {
       realtime: true,
       location: "New York",
     });
+  });
+});
+
+describe("LiTT Tool Executor — Explicit Location Extraction", () => {
+  it("extracts city from 'weather in Grand Haven'", () => {
+    expect(extractExplicitLocation("What's the weather in Grand Haven?")).toBe("Grand Haven");
+  });
+
+  it("extracts city from 'temperature in Detroit'", () => {
+    expect(extractExplicitLocation("What's the temperature in Detroit?")).toBe("Detroit");
+  });
+
+  it("extracts city from 'is it raining in Chicago'", () => {
+    expect(extractExplicitLocation("Is it raining in Chicago?")).toBe("Chicago");
+  });
+
+  it("extracts two-word city names", () => {
+    expect(extractExplicitLocation("Weather in Grand Haven please")).toBe("Grand Haven");
+  });
+
+  it("returns null for non-weather messages", () => {
+    expect(extractExplicitLocation("Build a website in React")).toBeNull();
+  });
+
+  it("filters out non-city words like 'the morning'", () => {
+    expect(extractExplicitLocation("What's the weather in the morning?")).toBeNull();
+  });
+});
+
+describe("LiTT Tool Executor — Explicit City Override", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses explicit city instead of saved city", async () => {
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx());
+    // Geocode call for "Detroit"
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [{ name: "Detroit", latitude: 42.33, longitude: -83.05, country: "US", admin1: "MI" }],
+      }),
+    });
+    // Weather call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockCurrentWeatherResponse(28, 1),
+    });
+
+    const result = await detectAndExecuteTool("user_test1", "What's the weather in Detroit?");
+    expect(result.executed).toBe(true);
+    expect(result.metadata.location).toBe("Detroit");
+    expect(result.text).toContain("Detroit");
+    // Should NOT use the saved city "New York"
+    expect(result.text).not.toContain("New York");
+  });
+});
+
+describe("LiTT Tool Executor — Conversational Follow-ups", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("detects weather follow-up 'What about tomorrow?' with history", async () => {
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx());
+    // Geocode for "Grand Haven" (from history)
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [{ name: "Grand Haven", latitude: 43.06, longitude: -86.23, country: "US", admin1: "MI" }],
+      }),
+    });
+    // Daily forecast call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        daily: {
+          time: ["2026-08-10", "2026-08-11"],
+          weather_code: [1, 2],
+          temperature_2m_max: [28, 30],
+          temperature_2m_min: [18, 20],
+          precipitation_sum: [0, 0.5],
+          precipitation_probability_max: [10, 60],
+          wind_speed_10m_max: [15, 20],
+          sunrise: ["06:00", "06:01"],
+          sunset: ["20:00", "19:59"],
+        },
+      }),
+    });
+
+    const history: ConversationTurn[] = [
+      { role: "user", content: "What's the weather in Grand Haven?" },
+      { role: "assistant", content: "Weather for Grand Haven: Clear sky, 82°F" },
+    ];
+
+    const result = await detectAndExecuteTool("user_test1", "What about tomorrow?", { history });
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("weather");
+    expect(result.metadata.location).toBe("Grand Haven");
+  });
+
+  it("does not treat 'What about tomorrow?' as weather without history", async () => {
+    const result = await detectAndExecuteTool("user_test1", "What about tomorrow?");
+    expect(result.executed).toBe(false);
+  });
+});
+
+describe("LiTT Tool Executor — Missing Location (Conversational Fallback)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("asks 'what city?' conversationally when no location available", async () => {
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx({
+      location: {
+        city: null,
+        region: null,
+        country: null,
+        latitude: null,
+        longitude: null,
+        source: "none",
+      },
+    }));
+
+    const result = await detectAndExecuteTool("user_test1", "Can you tell me the weather?");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("weather");
+    expect(result.text).toContain("what city");
+    expect(result.text.toLowerCase()).not.toContain("settings");
+    expect(result.text.toLowerCase()).not.toContain("unavailable");
+    expect(result.text.toLowerCase()).not.toContain("real-time");
+  });
+});
+
+describe("LiTT Tool Executor — Daily/Hourly Routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes 'forecast' to daily", async () => {
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx());
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        daily: {
+          time: ["2026-08-10"],
+          weather_code: [1],
+          temperature_2m_max: [28],
+          temperature_2m_min: [18],
+          precipitation_sum: [0],
+          precipitation_probability_max: [10],
+          wind_speed_10m_max: [15],
+          sunrise: ["06:00"],
+          sunset: ["20:00"],
+        },
+      }),
+    });
+
+    const result = await detectAndExecuteTool("user_test1", "What's the forecast for this week?");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("weather");
+  });
+
+  it("routes 'next few hours' to hourly", async () => {
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx());
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        hourly: {
+          time: ["2026-08-10T10:00", "2026-08-10T11:00"],
+          temperature_2m: [25, 26],
+          precipitation_probability: [10, 20],
+          weather_code: [1, 2],
+          wind_speed_10m: [12, 14],
+        },
+      }),
+    });
+
+    const result = await detectAndExecuteTool("user_test1", "Will it rain in the next few hours?");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("weather");
   });
 });
