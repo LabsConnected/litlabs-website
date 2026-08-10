@@ -361,6 +361,51 @@ export async function updateWalletBalance(
 
   let targetBalance = amount;
   if (!absolute) {
+    // For deductions (negative amount), use optimistic locking to prevent
+    // race conditions. Read current balance, compute new balance, then
+    // update only if the current balance hasn't changed since we read it.
+    // If 0 rows are updated, retry once.
+    if (amount < 0) {
+      const deductionAmount = Math.abs(amount);
+      const maxRetries = 2;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const { data: wallet } = await db
+          .from("wallets")
+          .select("balance")
+          .eq("user_id", user.id)
+          .single();
+
+        const currentBalance = wallet?.balance ?? 0;
+        if (currentBalance < deductionAmount) {
+          throw new Error("Insufficient balance");
+        }
+
+        const newBalance = currentBalance + amount; // amount is negative
+        const { data: updated, error: updateError, count } = await db
+          .from("wallets")
+          .update({
+            balance: newBalance,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id)
+          .eq("balance", currentBalance) // Optimistic lock: only update if balance hasn't changed
+          .select()
+          .single();
+
+        if (updateError || count === 0) {
+          // Concurrent modification — retry if we have attempts left
+          if (attempt < maxRetries - 1) continue;
+          throw new Error("Failed to update wallet: concurrent modification detected");
+        }
+
+        return updated as Wallet;
+      }
+      // Unreachable, but TypeScript needs it
+      throw new Error("Failed to update wallet: retry exhausted");
+    }
+
+    // For credits (positive amount), read-then-write is acceptable
     const { data: wallet } = await db
       .from("wallets")
       .select("balance")
