@@ -130,7 +130,6 @@ export function CodeWorkspace({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [preparing, setPreparing] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -138,6 +137,9 @@ export function CodeWorkspace({
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
+  // Track the current project ID so we only reset state on actual project change,
+  // not on callback identity changes or preparation status toggles.
+  const projectIdRef = useRef<string | null>(null);
 
   const authHeaders = useCallback(async (json = false): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -158,7 +160,9 @@ export function CodeWorkspace({
     return payload;
   }, [authHeaders]);
 
-  // Load directory
+  // Load directory — does NOT attempt workspace recovery.
+  // The server files endpoint is the single recovery authority.
+  // Client only displays loading/recovering/failed states.
   const loadDirectory = useCallback(async (dir: string, silent = false) => {
     if (!projectId) return;
     const safeDir = normalizePath(dir);
@@ -183,44 +187,27 @@ export function CodeWorkspace({
       setEntries((prev) => ({ ...prev, [safeDir]: items }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load files";
-      if ((msg.includes("Workspace not found") || msg.includes("Workspace not provisioned") || msg.includes("Workspace not ready")) && !preparing) {
-        setPreparing(true);
-        try {
-          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-          if (prepPayload && prepPayload.workspaceStatus === "ready") {
-            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDir)}`);
-            if (retryPayload && Array.isArray(retryPayload.entries)) {
-              const retryItems: FileEntry[] = retryPayload.entries
-                .filter((e: unknown) => e && typeof e === "object" && typeof (e as FileEntry).name === "string")
-                .map((e: unknown) => {
-                  const raw = e as FileEntry;
-                  return { name: raw.name, type: raw.type, size: raw.size, gitStatus: raw.gitStatus, path: safeDir === "." ? raw.name : `${safeDir}/${raw.name}` };
-                })
-                .sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-              setEntries((prev) => ({ ...prev, [safeDir]: retryItems }));
-              return;
-            }
-          }
-          setError(typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed");
-        } catch {
-          setError("Workspace was lost and could not be re-prepared automatically");
-        } finally {
-          setPreparing(false);
-        }
-      } else {
-        setError(msg);
-      }
+      // Display the server error honestly — do NOT attempt client-side recovery.
+      // The server workspace/files layer handles recovery and returns meaningful errors.
+      setError(msg);
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, preparing]);
+  }, [projectId, requestJson]);
 
-  // Load root on mount
+  // Reset state ONLY when the actual project identity changes.
+  // Uses a ref to compare — callback identity changes, preparation status
+  // changes, or directory refreshes must NOT trigger a reset.
   useEffect(() => {
-    setEntries({});
-    setExpanded(new Set(["."]));
-    setOpenTabs([]);
-    setActiveTab(null);
+    const projectChanged = projectIdRef.current !== projectId;
+    if (projectChanged) {
+      projectIdRef.current = projectId;
+      setEntries({});
+      setExpanded(new Set(["."]));
+      setOpenTabs([]);
+      setActiveTab(null);
+      setError(null);
+    }
     if (projectId) void loadDirectory(".");
   }, [projectId, loadDirectory]);
 
@@ -515,7 +502,18 @@ export function CodeWorkspace({
         </div>
       )}
 
-      {/* Main content area */}
+      {/* No project empty state */}
+      {!projectId && (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <FileText size={32} opacity={0.2} style={{ color: "var(--text-muted)" }} />
+            <p className="text-[12px] font-medium" style={{ color: "var(--text-muted)" }}>Select or create a project to start coding</p>
+          </div>
+        </div>
+      )}
+
+      {/* Main content area — only render when we have a project */}
+      {projectId && (
       <div className="flex min-h-0 flex-1">
         {/* Left: File Explorer */}
         <div
@@ -578,9 +576,21 @@ export function CodeWorkspace({
               </button>
             </form>
           )}
-          {preparing && (
+          {(workspaceStatus === "provisioning" || workspaceStatus === "preparing" || workspaceStatus === "not_prepared") && (
             <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }}>
               <Loader2 size={11} className="animate-spin" /> Preparing workspace…
+            </div>
+          )}
+          {(workspaceStatus === "failed" || workspaceStatus === "error") && (
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#fca5a5" }}>
+              <span>Workspace recovery failed</span>
+              <button
+                type="button"
+                onClick={() => projectId && void loadDirectory(".")}
+                className="ml-1 rounded px-1.5 py-0.5 text-[9px] font-bold underline hover:bg-white/8"
+              >
+                Retry
+              </button>
             </div>
           )}
           {mutating && (
@@ -763,7 +773,8 @@ export function CodeWorkspace({
             </div>
           )}
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -134,8 +134,9 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(destinationToLegacyTool("studio", "code")).toBe("code");
     });
 
-    it("Studio/Preview writes ?tool=code (shares code workspace URL)", () => {
-      expect(destinationToLegacyTool("studio", "preview")).toBe("code");
+    it("Studio/Preview writes ?tool=preview (distinct from code)", () => {
+      expect(destinationToLegacyTool("studio", "preview")).toBe("preview");
+      expect(destinationToLegacyTool("studio", "preview")).not.toBe("code");
     });
 
     it("Create/environment writes ?tool=space", () => {

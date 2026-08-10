@@ -40,6 +40,12 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("code").mode).toBe("code");
     });
 
+    it("maps preview to Studio/Preview", () => {
+      expect(mapLegacyToolToDestination("preview").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("preview").mode).toBe("preview");
+      expect(mapLegacyToolToDestination("preview").legacyTool).toBe("preview");
+    });
+
     it("maps terminal to Studio/Work with drawer open on Terminal", () => {
       const result = mapLegacyToolToDestination("terminal", "ls -la");
       expect(result.destination).toBe("studio");
@@ -114,7 +120,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("studio", "work")).toBe("chat");
       expect(destinationToLegacyTool("studio", "code")).toBe("code");
       expect(destinationToLegacyTool("studio", "files")).toBe("canvas");
-      expect(destinationToLegacyTool("studio", "preview")).toBe("code");
+      expect(destinationToLegacyTool("studio", "preview")).toBe("preview");
     });
 
     it("round-trips Create destinations back to legacy tools", () => {

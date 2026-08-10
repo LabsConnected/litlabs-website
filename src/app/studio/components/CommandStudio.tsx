@@ -179,6 +179,35 @@ function CommandStudioContent() {
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
 
+  // ── URL → State synchronization (browser back/forward) ───────────
+  // When the URL changes (back/forward navigation), update React state
+  // to match. Only updates when the canonical value actually changed,
+  // preventing update loops with the state→URL effect below.
+  useEffect(() => {
+    const fromUrl = searchParams.get("tool");
+    const mapped = mapLegacyToolToDestination(
+      fromUrl === "pipeline" ? "workflows" : fromUrl,
+      searchParams.get("mission") ?? undefined,
+    );
+    setDestination((cur) => (cur === mapped.destination ? cur : mapped.destination));
+    if (mapped.destination === "studio") {
+      const newMode = (mapped.mode as StudioMode) ?? "work";
+      setStudioMode((cur) => (cur === newMode ? cur : newMode));
+    }
+    if (mapped.destination === "create") {
+      const newMode = (mapped.mode as CreateMode) ?? "image";
+      setCreateMode((cur) => (cur === newMode ? cur : newMode));
+    }
+    if (mapped.destination === "more") {
+      const newMode = (mapped.mode as MoreMode) ?? "plugins";
+      setMoreMode((cur) => (cur === newMode ? cur : newMode));
+    }
+    if (mapped.destination === "missions") {
+      const newMode = (mapped.mode as MissionMode) ?? "overview";
+      setMissionMode((cur) => (cur === newMode ? cur : newMode));
+    }
+  }, [searchParams]);
+
   // ── Unified side panel manager ────────────────────────────────────
   // Only ONE side panel may be open at a time. Opening one closes the
   // others. The canvas immediately reclaims width when a panel closes.
@@ -600,7 +629,7 @@ function CommandStudioContent() {
     if (destination === "studio") {
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
-      if (studioMode === "preview") return "code";
+      if (studioMode === "preview") return "preview";
       // Work mode: dynamic surface state, not initial URL
       return workSurface === "builder" ? "build" : null;
     }
@@ -1121,7 +1150,7 @@ function StudioUnavailableSurface({
           ].map((tool) => (
             <a
               key={tool.label}
-              href={`?tool=${tool.dest === "studio" ? (tool.mode === "work" ? "chat" : "code") : tool.mode}`}
+              href={`?tool=${tool.dest === "studio" ? (tool.mode === "work" ? "chat" : tool.mode === "preview" ? "preview" : "code") : tool.mode}`}
               className="block rounded-lg border p-3 transition hover:opacity-80"
               style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}
             >

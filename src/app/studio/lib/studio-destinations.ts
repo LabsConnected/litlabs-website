@@ -83,6 +83,9 @@ export function mapLegacyToolToDestination(
     // Studio / Code — the code surface
     case "code":
       return { destination: "studio", legacyTool: "code", mode: "code" };
+    // Studio / Preview — the app preview surface
+    case "preview":
+      return { destination: "studio", legacyTool: "preview", mode: "preview" };
     // Studio / Work but rendering the Builder adapter (not ChatTool)
     case "build":
       return { destination: "studio", legacyTool: "build", mode: "work", command };
@@ -150,7 +153,7 @@ export function destinationToLegacyTool(
       if (mode === "code") return "code";
       if (mode === "files") return "canvas";
       if (mode === "design") return "design";
-      if (mode === "preview") return "code";
+      if (mode === "preview") return "preview";
       return "chat";
     case "create":
       if (mode === "video") return "video";

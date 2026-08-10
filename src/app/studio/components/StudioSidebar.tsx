@@ -55,7 +55,8 @@ export type StudioTool =
   | "workflows"
   | "space"
   | "clibridge"
-  | "loops";
+  | "loops"
+  | "preview";
 
 type ToolItem = {
   id: StudioTool;
