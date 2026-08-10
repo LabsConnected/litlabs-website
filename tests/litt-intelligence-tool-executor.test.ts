@@ -18,6 +18,8 @@ import {
   detectToolIntent,
   detectAndExecuteTool,
   extractExplicitLocation,
+  detectWebSearchIntent,
+  extractSearchQuery,
 } from "@/lib/litt-intelligence/tool-executor";
 import type { UserContext } from "@/lib/litt-intelligence/user-context";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
@@ -428,5 +430,114 @@ describe("LiTT Tool Executor — Daily/Hourly Routing", () => {
     const result = await detectAndExecuteTool("user_test1", "Will it rain in the next few hours?");
     expect(result.executed).toBe(true);
     expect(result.toolId).toBe("weather");
+  });
+});
+
+describe("LiTT Tool Executor — Web Search Intent Detection", () => {
+  it("detects 'search for' intent", () => {
+    expect(detectWebSearchIntent("Search for the best React frameworks")).toBe(true);
+  });
+
+  it("detects 'google' intent", () => {
+    expect(detectWebSearchIntent("Google the latest AI news")).toBe(true);
+  });
+
+  it("detects 'look up' intent", () => {
+    expect(detectWebSearchIntent("Look up the stock price of Apple")).toBe(true);
+  });
+
+  it("detects 'latest news' intent", () => {
+    expect(detectWebSearchIntent("What's the latest news on AI?")).toBe(true);
+  });
+
+  it("does NOT fire for weather queries", () => {
+    expect(detectWebSearchIntent("What's the weather like?")).toBe(false);
+  });
+
+  it("does NOT fire for coding questions", () => {
+    expect(detectWebSearchIntent("How do I fix a bug in my React component?")).toBe(false);
+  });
+
+  it("does NOT fire for general chat", () => {
+    expect(detectWebSearchIntent("Write me a poem about cats")).toBe(false);
+  });
+
+  it("extracts query from 'search for'", () => {
+    expect(extractSearchQuery("Search for the best pizza in Chicago")).toBe("the best pizza in Chicago");
+  });
+
+  it("extracts query from 'google'", () => {
+    expect(extractSearchQuery("Google the latest AI news")).toBe("the latest AI news");
+  });
+
+  it("extracts query from 'what happened' pattern", () => {
+    expect(extractSearchQuery("What happened in the world today?")).toBe("in the world today?");
+  });
+
+  it("detectToolIntent returns web_search for search messages", () => {
+    const intent = detectToolIntent("Search for the best React frameworks");
+    expect(intent).toEqual({ tool: "web_search" });
+  });
+});
+
+describe("LiTT Tool Executor — Web Search Execution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns executed=false when BRAVE_SEARCH_API_KEY is not set", async () => {
+    const result = await detectAndExecuteTool("user_test1", "Search for the best pizza");
+    expect(result.executed).toBe(false);
+    expect(result.toolId).toBe("none");
+  });
+
+  it("executes web search when API key is configured", async () => {
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx({
+      capabilities: { "web.search": "ready" },
+    }));
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        web: {
+          results: [
+            { title: "Best Pizza in Chicago", url: "https://example.com/pizza", description: "Top 10 pizza places" },
+          ],
+        },
+      }),
+    });
+
+    const result = await detectAndExecuteTool("user_test1", "Search for the best pizza in Chicago");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("web_search");
+    expect(result.metadata.tool).toBe("web_search");
+    expect(result.metadata.provider).toBe("brave_search");
+    expect(result.metadata.realtime).toBe(true);
+    expect(result.text).toContain("Best Pizza in Chicago");
+
+    delete process.env.BRAVE_SEARCH_API_KEY;
+  });
+
+  it("returns honest error when Brave API fails", async () => {
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+
+    vi.mocked(getUserContext).mockResolvedValue(makeCtx({
+      capabilities: { "web.search": "ready" },
+    }));
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    });
+
+    const result = await detectAndExecuteTool("user_test1", "Search for something");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("web_search");
+    expect(result.text.toLowerCase()).toMatch(/fail|error/);
+
+    delete process.env.BRAVE_SEARCH_API_KEY;
   });
 });
