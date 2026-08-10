@@ -27,6 +27,7 @@ import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
+import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
   buildRuntimeContextBlock,
@@ -230,6 +231,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       content: m.content,
     }));
 
+  // 7.5. Resolve ambiguous references in the user message using conversation history.
+  // Expands "it", "that", "same thing", "why", etc. into self-contained messages.
+  const turnResolution = resolveTurn(message, history);
+  const resolvedMessage = turnResolution.resolved;
+
   // 8. Recall project-scoped memories
   const memories = await recallMemories(message, userId, conversation.projectId, {
     agentSlug,
@@ -255,7 +261,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   });
 
   const built = buildPrompt(runCtx, {
-    message,
+    message: resolvedMessage,
     agentSlug,
     agentInstanceId: runtimeAgent?.agentInstanceId ?? undefined,
   }, runtimeAgent);
@@ -291,7 +297,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     } catch (_err) {
       // Transport creation failed (workspace not provisioned, DB error, etc.)
       // Fall back to V1
-      v1Result = await runAgentLoop(message, conversation.projectId ?? "", prompt);
+      v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
       finalPrompt = v1Result.enrichedPrompt;
     }
 
@@ -303,11 +309,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         model: typeof body.model === "string" ? body.model : undefined,
       };
 
-      v2Result = await runAgentLoopV2(message, transport, v2Config);
+      v2Result = await runAgentLoopV2(resolvedMessage, transport, v2Config);
     }
   } else {
     // V1 fallback — no executable workspace, read-only inspection only
-    v1Result = await runAgentLoop(message, conversation.projectId ?? "", prompt);
+    v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
     finalPrompt = v1Result.enrichedPrompt;
   }
 

@@ -22,6 +22,7 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "git.status": async () => (await import("./tool-handlers")).handleGitStatus,
   "terminal.execute": async () => (await import("./tool-handlers")).handleTerminalExecute,
   "project.health": async () => (await import("./tool-handlers")).handleProjectHealth,
+  "image.generate": async () => (await import("./tool-handlers")).handleImageGenerate,
   // V2 workspace-aware handlers (used by agent-loop-v2.ts)
   // V2 handlers accept an optional transport param; the agent loop binds it at call time.
   "files.delete": async () => (await import("./tool-handlers-v2")).handleFilesDelete as ToolHandler,
@@ -345,7 +346,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -365,7 +366,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -385,7 +386,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -405,7 +406,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -425,7 +426,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -445,7 +446,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -465,7 +466,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -485,7 +486,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -505,7 +506,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -525,7 +526,7 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -590,6 +591,7 @@ export function registerInternalTools(): void {
         permissionLevel: 'workspace-write',
         enabled: true,
       },
+      handler: lazyHandlers["image.generate"],
     },
     {
       tool: {
@@ -629,7 +631,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -649,7 +651,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -669,7 +671,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -689,7 +691,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -709,7 +711,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     {
@@ -729,14 +731,14 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     // ─── Web Intelligence (Browserbase-powered unified web capability) ──
     {
       tool: {
         id: "web.intelligence",
-        name: "Web Intelligence",
+        name: "Web Intelligence (disabled — no handler)",
         description:
           "Unified web capability: search, fetch, research, browse, observe, act, extract, verify, compare, monitor, screenshot, and PDF. " +
           "Uses Browserbase as the execution layer with smart escalation (cache → search → fetch → browser). " +
@@ -775,7 +777,7 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: true,
+        enabled: false, // No handler implemented
       },
     },
     // ─── Terminal (disabled by default — enable when terminal connects) ────────

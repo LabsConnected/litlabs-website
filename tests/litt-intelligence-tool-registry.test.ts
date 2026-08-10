@@ -115,16 +115,54 @@ describe("LiTT Intelligence — Tool Registry", () => {
   });
 
   it("execute fails for missing capability", async () => {
-    const result = await toolRegistry.execute("web.search", { query: "test" }, {
+    toolRegistry.clear();
+    toolRegistry.register({
+      id: "test.cap.tool",
+      name: "Test Cap Tool",
+      description: "Test",
+      source: "internal",
+      version: "1.0.0",
+      inputSchema: { type: "object", properties: { x: { type: "string" } }, required: ["x"] },
+      outputSchema: { type: "object" },
+      requiredCapabilities: ["test_cap"],
+      requiredPermissions: ["test:run"],
+      risk: "low",
+      permissionLevel: "read",
+      approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
+      timeoutMs: 5000,
+      idempotent: true,
+      readOnly: true,
+      enabled: true,
+    });
+    const result = await toolRegistry.execute("test.cap.tool", { x: "hello" }, {
       availableCapabilities: [],
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("web_search");
+    if (!result.ok) expect(result.error).toContain("test_cap");
   });
 
   it("execute fails for missing handler", async () => {
-    const result = await toolRegistry.execute("web.search", { query: "test" }, {
-      availableCapabilities: ["web_search"],
+    toolRegistry.clear();
+    toolRegistry.register({
+      id: "test.nohandler.tool",
+      name: "Test No Handler Tool",
+      description: "Test",
+      source: "internal",
+      version: "1.0.0",
+      inputSchema: { type: "object", properties: { x: { type: "string" } }, required: ["x"] },
+      outputSchema: { type: "object" },
+      requiredCapabilities: ["test_cap"],
+      requiredPermissions: ["test:run"],
+      risk: "low",
+      permissionLevel: "read",
+      approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
+      timeoutMs: 5000,
+      idempotent: true,
+      readOnly: true,
+      enabled: true,
+    });
+    const result = await toolRegistry.execute("test.nohandler.tool", { x: "hello" }, {
+      availableCapabilities: ["test_cap"],
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("no handler");
@@ -163,18 +201,56 @@ describe("LiTT Intelligence — Tool Registry", () => {
   // ─── canExecute ───────────────────────────────────────────────
 
   it("canExecute returns true for enabled read-only tool", () => {
-    const result = toolRegistry.canExecute("web.search", {
-      availableCapabilities: ["web_search"],
+    toolRegistry.clear();
+    toolRegistry.register({
+      id: "test.read.tool",
+      name: "Test Read Tool",
+      description: "Test",
+      source: "internal",
+      version: "1.0.0",
+      inputSchema: { type: "object", properties: { x: { type: "string" } }, required: ["x"] },
+      outputSchema: { type: "object" },
+      requiredCapabilities: ["test_cap"],
+      requiredPermissions: ["test:run"],
+      risk: "low",
+      permissionLevel: "read",
+      approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
+      timeoutMs: 5000,
+      idempotent: true,
+      readOnly: true,
+      enabled: true,
+    });
+    const result = toolRegistry.canExecute("test.read.tool", {
+      availableCapabilities: ["test_cap"],
     });
     expect(result.can).toBe(true);
   });
 
   it("canExecute returns false for missing capability", () => {
-    const result = toolRegistry.canExecute("web.search", {
+    toolRegistry.clear();
+    toolRegistry.register({
+      id: "test.cap.check.tool",
+      name: "Test Cap Check Tool",
+      description: "Test",
+      source: "internal",
+      version: "1.0.0",
+      inputSchema: { type: "object", properties: { x: { type: "string" } }, required: ["x"] },
+      outputSchema: { type: "object" },
+      requiredCapabilities: ["test_cap"],
+      requiredPermissions: ["test:run"],
+      risk: "low",
+      permissionLevel: "read",
+      approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
+      timeoutMs: 5000,
+      idempotent: true,
+      readOnly: true,
+      enabled: true,
+    });
+    const result = toolRegistry.canExecute("test.cap.check.tool", {
       availableCapabilities: [],
     });
     expect(result.can).toBe(false);
-    expect(result.reason).toContain("web_search");
+    expect(result.reason).toContain("test_cap");
   });
 
   it("canExecute returns false for mutation without approval", () => {

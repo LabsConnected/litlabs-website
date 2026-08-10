@@ -225,11 +225,7 @@ function buildIntentResult(
         message: "Opening Terminal to run that command.",
       };
     case "generate_image":
-      return {
-        intent,
-        tool: "image",
-        message: "Opening the image generator.",
-      };
+      return { intent, message: "" };
     case "generate_code":
       return { intent, message: "" };
     default:

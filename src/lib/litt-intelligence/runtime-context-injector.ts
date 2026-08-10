@@ -367,19 +367,21 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       id: "web.search",
       name: "Web Search",
       description: "Searches the web for current information",
-      available: true,
+      available: false,
+      unavailableReason: "No handler implemented",
     },
     {
       id: "image.generate",
       name: "Image Generation",
       description: "Generates images from text descriptions",
-      available: true,
+      available: true, // Handler will be wired in next step
     },
     {
       id: "audio.generate",
       name: "Audio Generation",
       description: "Generates audio/music from text descriptions",
-      available: true,
+      available: false,
+      unavailableReason: "No handler implemented",
     },
   ];
 
