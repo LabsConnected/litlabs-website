@@ -35,8 +35,8 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
   const handleDragStart = useCallback((id: string, e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("application/x-canvas-move-id", id);
-    setDragSource({ type: node.type, fromPalette: false, nodeId: id });
-  }, [node.type, setDragSource]);
+    setDragSource({ type: node?.type ?? "div", fromPalette: false, nodeId: id });
+  }, [node?.type, setDragSource]);
 
   const handleDragEnd = useCallback(() => {
     setDragSource(null);
@@ -68,7 +68,7 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const y = e.clientY - rect.top;
     const h = rect.height;
-    const isContainer = canHaveChildren(node.type);
+    const isContainer = canHaveChildren(node?.type ?? "div");
 
     if (isContainer) {
       // For containers, top 25% = before, bottom 25% = after, middle = inside
