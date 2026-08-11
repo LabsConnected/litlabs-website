@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Check, ArrowRight, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { MarketingFrame } from "@/components/ProductPageFrame";
 
 type OfferData = {
   id: string;
@@ -62,7 +63,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
       {/* Hero */}
       <section className="relative overflow-hidden px-5 pt-32 pb-16 lg:px-10">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#a8ff2f]/5 to-transparent" />
-        <div className="mx-auto max-w-4xl text-center">
+        <MarketingFrame className="text-center">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/30 bg-[#a8ff2f]/5 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-[#a8ff2f]">
             <Sparkles size={12} /> Hire LiTTree LabStudios
           </div>
@@ -81,12 +82,12 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
               Talk to us first
             </a>
           </div>
-        </div>
+        </MarketingFrame>
       </section>
 
       {/* Service Offers */}
       <section id="offers" className="px-5 py-16 lg:px-10">
-        <div className="mx-auto max-w-6xl">
+        <MarketingFrame>
           <h2 className="mb-2 text-2xl font-black">Productized services</h2>
           <p className="mb-10 text-sm text-white/50">
             Clear scope. Clear price. No surprises. Pick the one that fits.
@@ -183,12 +184,12 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
               ))}
             </div>
           </div>
-        </div>
+        </MarketingFrame>
       </section>
 
       {/* Lead Capture / Inquiry Form */}
       <section id="inquiry" className="px-5 py-16 lg:px-10">
-        <div className="mx-auto max-w-2xl">
+        <MarketingFrame>
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8">
             <h2 className="text-2xl font-black">Not sure which fits?</h2>
             <p className="mt-2 text-sm text-white/50">
@@ -266,7 +267,7 @@ export default function HireClient({ offers }: { offers: OfferData[] }) {
               </form>
             )}
           </div>
-        </div>
+        </MarketingFrame>
       </section>
     </div>
   );

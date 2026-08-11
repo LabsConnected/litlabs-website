@@ -9,6 +9,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
+import { ProductFrame } from "@/components/ProductPageFrame";
 import {
   Wallet,
   Coins,
@@ -72,7 +73,7 @@ function WalletContent() {
       subtitle="AI credits balance and usage"
       icon={<Wallet size={28} />}
     >
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      <ProductFrame className="py-6 space-y-6">
         {/* Balance hero */}
         <div className="rounded-2xl border p-6 md:p-8" style={cardStyle}>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -222,7 +223,7 @@ function WalletContent() {
             )}
           </div>
         )}
-      </div>
+      </ProductFrame>
     </PageShell>
   );
 }

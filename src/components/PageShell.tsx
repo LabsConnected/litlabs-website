@@ -1,13 +1,16 @@
 "use client";
 
-import { ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { type PageFrameVariant, VARIANT_MAX_WIDTH } from "@/components/ProductPageFrame";
 
 interface PageShellProps {
   title?: string;
   subtitle?: string;
   icon?: ReactNode;
   className?: string;
+  /** Page sizing variant. Defaults to "product" (1500px). */
+  frameVariant?: PageFrameVariant;
   children: ReactNode;
 }
 
@@ -16,6 +19,7 @@ export default function PageShell({
   subtitle,
   icon,
   className = "",
+  frameVariant = "product",
   children,
 }: PageShellProps) {
   const { resolvedColors: T } = useTheme();
@@ -44,7 +48,7 @@ export default function PageShell({
             boxShadow: "0 18px 60px rgba(0,0,0,.18)",
           }}
         >
-          <div className="mx-auto flex max-w-7xl items-center gap-4">
+          <div className={`mx-auto flex ${VARIANT_MAX_WIDTH[frameVariant]} items-center gap-4 px-4 sm:px-6 lg:px-8`}>
             {icon ? (
               <span
                 className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border text-xl sm:h-14 sm:w-14"

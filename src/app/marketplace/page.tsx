@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSearchParams } from "next/navigation";
+import { ProductFrame } from "@/components/ProductPageFrame";
 import {
   Check,
   ArrowRight,
@@ -331,7 +332,7 @@ function MarketplaceInner() {
 
       {/* === HEADER === */}
       <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
-        <div className="mx-auto max-w-6xl">
+        <ProductFrame>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>Marketplace</h1>
             <span className="rounded-md border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-300">Beta</span>
@@ -378,12 +379,12 @@ function MarketplaceInner() {
               Beta Access
             </button>
           </div>
-        </div>
+        </ProductFrame>
       </div>
 
       {/* === TAB BAR === */}
       <div className="border-b border-white/10 px-4 sm:px-6">
-        <div className="mx-auto flex max-w-6xl gap-2">
+        <ProductFrame className="flex gap-2">
           <button
             onClick={() => setActiveTab("marketplace")}
             className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
@@ -400,12 +401,12 @@ function MarketplaceInner() {
           >
             Beta Access
           </button>
-        </div>
+        </ProductFrame>
       </div>
 
       {/* === MARKETPLACE TAB === */}
       {activeTab === "marketplace" && (
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <ProductFrame className="py-6">
           {/* Filters + Search + Sort */}
           <div className="mb-6 space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -570,12 +571,12 @@ function MarketplaceInner() {
               </div>
             )}
           </div>
-        </div>
+        </ProductFrame>
       )}
 
       {/* === BETA TAB === */}
       {activeTab === "beta" && (
-        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <ProductFrame className="py-8">
           {/* Beta status */}
           <div className="rounded-2xl border border-amber-400/20 bg-linear-to-br from-amber-400/6 to-transparent p-6">
             <div className="flex items-center gap-3">
@@ -696,7 +697,7 @@ function MarketplaceInner() {
               </a>
             </div>
           </div>
-        </div>
+        </ProductFrame>
       )}
     </div>
   );

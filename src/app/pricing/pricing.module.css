@@ -169,7 +169,7 @@
 .protectionSection,
 .faqSection,
 .finalCta {
-  width: min(1180px, 100%);
+  width: min(1400px, 100%);
   margin-inline: auto;
 }
 
@@ -772,7 +772,7 @@
 }
 
 .errorBanner {
-  width: min(1180px, 100%);
+  width: min(1400px, 100%);
   margin: 1rem auto 0;
   padding: 0.85rem 1rem;
   border: 1px solid rgba(248, 113, 113, 0.4);
