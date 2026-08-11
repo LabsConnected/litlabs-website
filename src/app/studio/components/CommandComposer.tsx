@@ -18,15 +18,8 @@ import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
-import {
-  useStudioAgentStore,
-  AGENT_META,
-  STUDIO_AGENTS,
-  type AgentId,
-} from "../stores/useStudioAgentStore";
 import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
-import { useUserPlan } from "../hooks/useUserPlan";
-import { ChevronDown, Check, Lock } from "lucide-react";
+import { ChevronDown, Check } from "lucide-react";
 import Link from "next/link";
 import { useStudioAttachments } from "../hooks/useStudioAttachments";
 import AttachmentMenu from "./AttachmentMenu";
@@ -65,7 +58,7 @@ interface CommandComposerProps {
   onCancel?: () => void;
   busy?: boolean;
   disabled?: boolean;
-  onAgentChange?: (agentId: import("../stores/useStudioAgentStore").AgentId) => void;
+
   onToggleCamera?: () => void;
   onToggleLive?: () => void;
   liveActive?: boolean;
@@ -82,7 +75,6 @@ export default function CommandComposer({
   onCancel,
   busy = false,
   disabled = false,
-  onAgentChange,
   onToggleCamera,
   onToggleLive,
   liveActive = false,
@@ -90,14 +82,10 @@ export default function CommandComposer({
   executionMode = "act",
   onExecutionModeChange,
 }: CommandComposerProps) {
-  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
-  const agentMeta = AGENT_META[activeAgentId];
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
 
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [recorderMode, setRecorderMode] = useState<"audio" | "video" | "screen" | null>(null);
   const [attachAnchorRect, setAttachAnchorRect] = useState<DOMRect | null>(null);
@@ -107,10 +95,8 @@ export default function CommandComposer({
   const [ttsPopoverOpen, setTtsPopoverOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const agentTriggerRef = useRef<HTMLButtonElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const attachTriggerRef = useRef<HTMLButtonElement>(null);
-  const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
   const [modelRect, setModelRect] = useState<DOMRect | null>(null);
 
   // Universal attachment system
@@ -238,19 +224,6 @@ export default function CommandComposer({
     }
   }, [addFiles]);
 
-  // Position agent popover on open.
-  useEffect(() => {
-    if (!agentOpen) return;
-    if (agentTriggerRef.current) setAgentRect(agentTriggerRef.current.getBoundingClientRect());
-    const update = () => agentTriggerRef.current && setAgentRect(agentTriggerRef.current.getBoundingClientRect());
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [agentOpen]);
-
   // Position model popover on open.
   useEffect(() => {
     if (!modelOpen) return;
@@ -319,8 +292,6 @@ export default function CommandComposer({
     }
   })();
   const MicIcon = micState.icon;
-
-  const agentAccent = agentMeta.color;
 
   return (
     <div
@@ -522,40 +493,6 @@ export default function CommandComposer({
           }}
         />
 
-        {/* Agent selector — icon only on mobile, full on desktop */}
-        <button
-          ref={agentTriggerRef}
-          type="button"
-          onClick={() => setAgentOpen((v) => !v)}
-          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-white/5"
-          style={{
-            borderColor: "var(--studio-border-strong)",
-            color: agentAccent,
-          }}
-          aria-label="Select agent"
-          title={agentMeta.displayName}
-          aria-expanded={Boolean(agentOpen)}
-          data-testid="agent-trigger"
-        >
-          <span
-            className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-black"
-            style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
-          >
-            {agentMeta.displayName[0]}
-          </span>
-          <span className="hidden sm:inline text-[11px] font-bold">{agentMeta.displayName}</span>
-        </button>
-        {agentOpen && agentRect &&
-          createPortal(
-            <AgentPopover
-              rect={agentRect}
-              activeId={activeAgentId}
-              onSelect={(id) => { if (onAgentChange) { onAgentChange(id); } else { setActiveAgent(id); } setAgentOpen(false); }}
-              onClose={() => setAgentOpen(false)}
-            />,
-            document.body,
-          )}
-
         {/* Model picker — interactive button + popover */}
         <button
           ref={modelTriggerRef}
@@ -606,7 +543,7 @@ export default function CommandComposer({
           placeholder={
             (voiceState === "listening" || voiceState === "user_speaking") && interimTranscript
               ? interimTranscript
-              : agentMeta.placeholder
+              : "Ask LiTT anything…"
           }
           className="min-w-0 flex-1 resize-none bg-transparent py-2.5 outline-none"
           style={{
@@ -987,106 +924,6 @@ function TtsPopover({
 }
 
 /* ── Agent selector popover ────────────────────────────────────── */
-function AgentPopover({
-  rect,
-  activeId,
-  onSelect,
-  onClose,
-}: {
-  rect: DOMRect;
-  activeId: AgentId;
-  onSelect: (id: AgentId) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const { hasAccess, loading } = useUserPlan();
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const left = Math.min(rect.left, window.innerWidth - 270);
-  // Anchor above the trigger with 8px gap; fall below if not enough room
-  const popoverHeight = 260;
-  const gap = 8;
-  const roomAbove = rect.top - gap;
-  const top = roomAbove >= popoverHeight
-    ? rect.top - popoverHeight - gap
-    : rect.bottom + gap;
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Select agent"
-      className="fixed z-[200] w-64 max-h-[260px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
-    >
-      <div
-        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)", backgroundColor: "var(--studio-elevated)" }}
-      >
-        AI Team
-      </div>
-      {STUDIO_AGENTS.map((meta) => {
-        const accent = meta.color;
-        const isActive = activeId === meta.id;
-        const unlocked = loading || hasAccess(meta.minimumPlan);
-        return (
-          <div key={meta.id}>
-            <button
-              type="button"
-              disabled={!unlocked}
-              onClick={() => unlocked && onSelect(meta.id)}
-              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
-            >
-              <span
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[11px] font-black"
-                style={{ backgroundColor: `${accent}20`, color: accent }}
-              >
-                {unlocked ? meta.displayName[0] : <Lock size={11} />}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
-                  {meta.displayName}
-                </div>
-                <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
-                  {unlocked ? meta.role : `Requires ${planLabel(meta.minimumPlan)}`}
-                </div>
-              </div>
-              {isActive && unlocked && (
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
-              )}
-            </button>
-            {!unlocked && (
-              <Link
-                href={`/pricing?upgrade=${meta.minimumPlan}`}
-                onClick={onClose}
-                className="flex items-center gap-1 px-3 pb-2 pl-[3.25rem] text-[10px] font-bold transition hover:opacity-80"
-                style={{ color: accent }}
-              >
-                Upgrade to {planLabel(meta.minimumPlan)} →
-              </Link>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function planLabel(plan: string): string {
   switch (plan) {
     case "creator_beta": return "Creator Beta";

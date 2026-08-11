@@ -482,7 +482,31 @@ export class LiTTRealtimeSessionController {
           },
           onmessage: (msg) => this.handleServerMessage(msg),
           onerror: (e) => {
-            this.emitError("websocket_rejected", `WebSocket error: ${e.message || "unknown"}`, true);
+            // The SDK often passes a generic/empty error object. Surface a
+            // helpful, actionable message instead of "WebSocket error: unknown".
+            const rawMessage = e && typeof e === "object" ? (e as { message?: string; code?: number | string }).message : undefined;
+            const code = e && typeof e === "object" ? (e as { code?: number | string }).code : undefined;
+            let message = rawMessage || String(e || "");
+            let kind: LiveSessionErrorKind = "websocket_rejected";
+            let retryable = true;
+
+            if (!message || message === "unknown" || message === "[object Object]") {
+              message = "Gemini Live connection failed. This usually means the API key does not have Live API access, the model is unavailable in your region, or the ephemeral token was rejected.";
+            }
+            if (message.toLowerCase().includes("unauthorized") || message.toLowerCase().includes("authentication") || code === 401 || code === 403) {
+              kind = "websocket_rejected";
+              message = "Gemini Live authentication failed. The API key may be invalid, revoked, or missing Live API access.";
+              retryable = false;
+            } else if (message.toLowerCase().includes("quota") || message.toLowerCase().includes("429") || code === 429) {
+              kind = "quota_exceeded";
+              message = "Gemini Live quota exceeded. Please try again later.";
+            } else if (message.toLowerCase().includes("not found") || message.toLowerCase().includes("model") || code === 404) {
+              kind = "model_unavailable";
+              message = "The requested Gemini Live model is not available.";
+              retryable = false;
+            }
+
+            this.emitError(kind, message, retryable);
             this.updateIndicators({ littAudio: "error", littVision: "error" });
           },
           onclose: (e) => {
@@ -495,17 +519,37 @@ export class LiTTRealtimeSessionController {
         clearTimeout(this.connectionTimer);
         this.connectionTimer = null;
       }
-      const msg = (err as Error).message || "unknown";
-      if (msg.includes("quota") || msg.includes("429")) {
+      const { message: rawMsg, code } = this.extractErrorMessage(err);
+      const msg = rawMsg || "unknown";
+      if (code === 401 || code === 403 || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("authentication")) {
+        this.emitError("websocket_rejected", "Gemini Live authentication failed. The API key may be invalid, revoked, or missing Live API access.", false);
+      } else if (msg.includes("quota") || msg.includes("429") || code === 429) {
         this.emitError("quota_exceeded", "Gemini API quota exceeded. Please try again later.", true);
-      } else if (msg.includes("model") || msg.includes("not found")) {
+      } else if (msg.includes("model") || msg.includes("not found") || code === 404) {
         this.emitError("model_unavailable", `Model ${model} is not available. ${msg}`, false);
+      } else if (msg.includes("api key") || msg.includes("apikey")) {
+        this.emitError("websocket_rejected", "Gemini Live API key rejected. Check that your key has Live API access and has not been revoked.", false);
       } else {
         this.emitError("websocket_rejected", `Failed to connect: ${msg}`, true);
       }
       this.setState("failed");
       this.updateIndicators({ littAudio: "error", littVision: "error" });
     }
+  }
+
+  /** Extract a human-readable message from any SDK error object. */
+  private extractErrorMessage(err: unknown): { message: string; code?: number } {
+    if (!err) return { message: "unknown" };
+    if (err instanceof Error) {
+      return { message: err.message };
+    }
+    if (typeof err === "object") {
+      const obj = err as { message?: string; error?: { message?: string }; code?: number; status?: number };
+      const message = obj.message || obj.error?.message || JSON.stringify(err);
+      const code = typeof obj.code === "number" ? obj.code : typeof obj.status === "number" ? obj.status : undefined;
+      return { message: message || "unknown", code };
+    }
+    return { message: String(err) };
   }
 
   // -------------------------------------------------------------------------
