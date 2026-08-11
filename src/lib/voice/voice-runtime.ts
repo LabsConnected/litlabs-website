@@ -194,6 +194,8 @@ export async function runLiTTForVoice(args: {
     .join("\n");
 
   const voiceFull = [
+    voiceSystem,
+    "",
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
     `User: ${args.message}`,
     "",
