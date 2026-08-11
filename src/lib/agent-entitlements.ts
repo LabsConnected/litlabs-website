@@ -24,6 +24,7 @@ import "server-only";
 import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 import { getAgentDefinition } from "@/lib/agent-registry";
 import { hasPlanAccess, type PlanId } from "@/config/plans";
+import { isOwnerClerkId, getActiveSimulation, simulationToPlanId, type SimulatedPlan } from "@/lib/owner";
 
 /** Subscription statuses that grant plan-based agent access. */
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
@@ -130,6 +131,22 @@ export async function resolveAgentEntitlement(
     // entitlements (checked below) but not plan-based access.
     plan = "starter";
     subscriptionStatus = sub.status;
+  }
+
+  // 3b. Owner test-mode simulation override.
+  // If the user is the platform owner and has an active simulation,
+  // override the effective plan for the plan-based access check.
+  // This never modifies the real subscription — it only affects
+  // entitlement resolution for the current request.
+  if (isOwnerClerkId(clerkId)) {
+    const simulation: SimulatedPlan | null = await getActiveSimulation();
+    if (simulation && simulation !== "owner" && simulation !== "zero_bits") {
+      plan = simulationToPlanId(simulation);
+    } else if (!simulation || simulation === "owner") {
+      // Owner with no simulation → full access (Pro Builder level)
+      plan = "pro_builder_beta";
+    }
+    // "zero_bits" keeps owner plan access but balance is handled separately
   }
 
   // 4. Check plan-based access first.

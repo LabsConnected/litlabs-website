@@ -9,7 +9,9 @@ import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
 import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import LayoutShell from "@/components/LayoutShell";
+import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
+import { GhlAffiliateScript, GhlAffiliateSignupTracker } from "@/components/GhlAffiliateTracker";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_OG_IMAGE,
@@ -116,6 +118,7 @@ export default function RootLayout({
               <YouTubePlayerProvider>
                 <MusicPlayerProvider>
                   <LayoutShell>{children}</LayoutShell>
+                  <OwnerTestModeIndicator />
                 </MusicPlayerProvider>
               </YouTubePlayerProvider>
             </MediaHubProvider>
@@ -140,6 +143,7 @@ export default function RootLayout({
         style={{ backgroundColor: "#03050b" }}
         suppressHydrationWarning
       >
+        <GhlAffiliateScript />
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-slate-950"
@@ -213,6 +217,7 @@ export default function RootLayout({
             }}
           >
             <ClerkAuthContextProvider clerkAvailable={true}>
+              <GhlAffiliateSignupTracker />
               <AuthorityJsonLd />
               {shell}
             </ClerkAuthContextProvider>
