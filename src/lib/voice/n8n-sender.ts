@@ -18,11 +18,17 @@ import type { CallPayload } from "./call-payload-types";
 
 const N8N_VOICE_WEBHOOK_URL = process.env.N8N_VOICE_WEBHOOK_URL;
 const N8N_VOICE_WEBHOOK_TOKEN = process.env.N8N_VOICE_WEBHOOK_TOKEN;
+const CF_ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID;
+const CF_ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
 
 /**
  * Send a call payload to n8n's webhook.
  * Returns true on success, false on failure.
  * Never throws — caller doesn't need to handle errors.
+ *
+ * If n8n is behind Cloudflare Access, the CF Access service token
+ * headers (CF-Access-Client-Id / CF-Access-Client-Secret) are sent
+ * to authenticate the request through the Access policy.
  */
 export async function sendCallToN8n(payload: CallPayload): Promise<boolean> {
   if (!N8N_VOICE_WEBHOOK_URL) {
@@ -34,6 +40,12 @@ export async function sendCallToN8n(payload: CallPayload): Promise<boolean> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
+
+    // Cloudflare Access service token (required when n8n is behind Access)
+    if (CF_ACCESS_CLIENT_ID && CF_ACCESS_CLIENT_SECRET) {
+      headers["CF-Access-Client-Id"] = CF_ACCESS_CLIENT_ID;
+      headers["CF-Access-Client-Secret"] = CF_ACCESS_CLIENT_SECRET;
+    }
 
     // Optional auth token if configured
     if (N8N_VOICE_WEBHOOK_TOKEN) {
