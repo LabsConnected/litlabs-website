@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/rate-limiter";
 import {
   startVoiceSession,
   endVoiceSession,
+  getVoiceSession,
   normalizePhone,
 } from "@/lib/voice/voice-session-service";
 
@@ -102,6 +103,52 @@ export async function POST(req: NextRequest) {
               }
             : undefined,
         });
+
+        // Send normalized call payload to GoHighLevel (async, non-blocking)
+        const customer = call?.customer as Record<string, unknown> | undefined;
+        const callerPhone = (customer?.number as string) ?? "";
+        const transcript = typeof artifact?.transcript === "string"
+          ? artifact.transcript
+          : Array.isArray(artifact?.messages)
+            ? (artifact.messages as Array<{ role?: string; content?: string }>)
+                .map((m) => `${m.role ?? "unknown"}: ${m.content ?? ""}`)
+                .join("\n")
+            : "";
+        const startedAt = (call?.startedAt as string) ?? new Date(Date.now() - (artifact?.durationMs as number ?? 0)).toISOString();
+        const endedAt = (call?.endedAt as string) ?? new Date().toISOString();
+        const durationMs = (artifact?.durationMs as number) ?? 0;
+        const callStatus = (call?.status as string) ?? "ended";
+
+        void (async () => {
+          try {
+            const { buildGHLCallPayload } = await import("@/lib/voice/ghl-payload-builder");
+            const { sendCallToGHL } = await import("@/lib/voice/ghl-sender");
+
+            // Try to get session data for user/project context
+            const session = await getVoiceSession("vapi", callId);
+            const payload = await buildGHLCallPayload({
+              callId,
+              to: "+13239165462",
+              from: callerPhone,
+              callerName: session?.callerName ?? null,
+              startedAt,
+              endedAt,
+              durationMs,
+              status: callStatus,
+              transcript,
+              isKnownUser: Boolean(session?.userId),
+              userId: session?.userId ?? null,
+              projectId: session?.projectId ?? null,
+              projectName: null,
+              conversationId: session?.conversationId ?? null,
+            });
+
+            await sendCallToGHL(payload);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[GHL] end-of-call integration failed: ${msg}`);
+          }
+        })();
       }
       return NextResponse.json({ ok: true });
     }
