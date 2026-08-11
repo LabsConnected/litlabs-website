@@ -10,9 +10,10 @@ export type SelectedModel = {
   cost: "free" | "paid" | "hybrid";
   speed: "fast" | "medium" | "slow";
   icon: string;
+  description?: string;
   apiModel?: string;
   apiProvider?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced";
 };
 
 export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
@@ -26,6 +27,7 @@ export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
   cost: m.cost,
   speed: m.speed,
   icon: m.icon,
+  description: m.description,
   apiModel: m.apiModel,
   apiProvider: m.apiProvider,
   category: m.category,
@@ -59,6 +61,7 @@ function toSelectedModel(m: StudioModel): SelectedModel {
     cost: m.cost,
     speed: m.speed,
     icon: m.icon,
+    description: m.description,
     apiModel: m.apiModel,
     apiProvider: m.apiProvider,
     category: m.category,

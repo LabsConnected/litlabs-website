@@ -12,7 +12,7 @@ export type GenerationStatus =
   | "failed"
   | "cancelled";
 
-export type MusicProviderName = "elevenlabs" | "mureka" | "mock";
+export type MusicProviderName = "elevenlabs" | "mureka" | "lyria" | "mock";
 
 export type TrackVisibility = "private" | "unlisted" | "public";
 

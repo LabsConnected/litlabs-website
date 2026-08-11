@@ -104,6 +104,25 @@ CREATE TABLE IF NOT EXISTS public.agent_runs (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- `agent_runs` was introduced by an older migration with a smaller schema.
+-- CREATE TABLE IF NOT EXISTS does not evolve that existing table, so add the
+-- execution/billing columns explicitly before creating indexes or functions.
+ALTER TABLE public.agent_runs
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS agent_instance_id UUID REFERENCES public.user_agents(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS agent_version_id UUID REFERENCES public.agent_versions(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS conversation_id TEXT,
+  ADD COLUMN IF NOT EXISTS message_id TEXT,
+  ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+  ADD COLUMN IF NOT EXISTS model TEXT,
+  ADD COLUMN IF NOT EXISTS provider TEXT,
+  ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS credits_charged INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS error TEXT,
+  ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_agent_runs_user ON public.agent_runs(user_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_instance ON public.agent_runs(agent_instance_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_idempotency ON public.agent_runs(idempotency_key);
@@ -206,4 +225,3 @@ BEGIN
   WHERE id = v_user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-

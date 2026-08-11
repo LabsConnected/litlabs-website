@@ -31,7 +31,7 @@ interface CanvasBuilderStore {
   breakpoint: Breakpoint;
   tool: "select" | "pan";
   previewMode: boolean;
-  leftPanelTab: "components" | "layers";
+  leftPanelTab: "build" | "blocks" | "components" | "assets" | "layers";
 
   // Actions
   loadDocument: () => void;
@@ -59,7 +59,7 @@ interface CanvasBuilderStore {
   setBreakpoint: (bp: Breakpoint) => void;
   setTool: (tool: "select" | "pan") => void;
   setPreviewMode: (preview: boolean) => void;
-  setLeftPanelTab: (tab: "components" | "layers") => void;
+  setLeftPanelTab: (tab: "build" | "blocks" | "components" | "assets" | "layers") => void;
   addSectionTemplate: (template: SectionTemplate, parentId: string) => void;
   nudgeNode: (nodeId: string, dx: number, dy: number) => void;
   getNodePath: (nodeId: string) => CanvasNode[];

@@ -738,6 +738,7 @@ function planCoversAgent(plan: PlanId, agent: AgentDefinition): boolean {
     creator_beta: 1,
     founder: 1,
     pro_builder_beta: 2,
+    owner: 999,
   };
   return rank[plan] >= rank[agent.minimumPlan];
 }
