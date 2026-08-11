@@ -40,6 +40,7 @@
     "diagnose:connections": "tsx scripts/diagnose-connections.ts",
     "sync:vapi-tools": "tsx scripts/sync-vapi-tools.ts",
     "sync:vapi-bridge": "tsx scripts/sync-vapi-bridge.ts",
+    "test:ghl-payload": "tsx scripts/test-ghl-payload.ts",
     "audit:product-truth": "tsx scripts/audit-product-truth.ts",
     "mobile:check": "pnpm --filter @litt/companion check",
     "mobile:start": "pnpm --filter @litt/companion start",
