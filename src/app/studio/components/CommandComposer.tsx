@@ -1097,15 +1097,6 @@ function planLabel(plan: string): string {
 }
 
 /* ── Model selector popover ────────────────────────────────────── */
-const MODEL_CATEGORIES: { id: NonNullable<SelectedModel["category"]>; label: string }[] = [
-  { id: "auto", label: "Auto" },
-  { id: "free", label: "Free" },
-  { id: "fast", label: "Fast" },
-  { id: "code", label: "Code" },
-  { id: "creative", label: "Creative" },
-  { id: "vision", label: "Vision" },
-  { id: "byok", label: "BYOK" },
-];
 
 function ModelPopover({
   rect,
@@ -1121,6 +1112,9 @@ function ModelPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [search, setSearch] = useState("");
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -1132,30 +1126,89 @@ function ModelPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 300);
-  // Anchor above the trigger with 8px gap; fall below if not enough room
-  const popoverHeight = 350;
+  const popoverWidth = 360;
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  const left = isMobile
+    ? Math.max(8, window.innerWidth / 2 - popoverWidth / 2)
+    : Math.min(rect.left, window.innerWidth - popoverWidth - 8);
+  const popoverHeight = Math.min(420, window.innerHeight * 0.6);
   const gap = 8;
   const roomAbove = rect.top - gap;
   const top = roomAbove >= popoverHeight
     ? rect.top - popoverHeight - gap
     : rect.bottom + gap;
 
+  const littModels = MODELS.filter((m) => m.category === "litt-alias");
+  const byokModels = MODELS.filter((m) => m.category === "byok");
+  const advancedModels = MODELS.filter((m) => m.category === "advanced");
+
+  const filteredAdvanced = search
+    ? advancedModels.filter((m) =>
+        m.label.toLowerCase().includes(search.toLowerCase()) ||
+        m.provider.toLowerCase().includes(search.toLowerCase()),
+      )
+    : advancedModels;
+
+  function renderModelButton(m: SelectedModel) {
+    const isActive = selectedId === m.id;
+    const health = providerHealth[m.provider] ?? "available";
+    const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
+    return (
+      <button
+        key={m.id}
+        type="button"
+        onClick={() => onSelect(m)}
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-white/5"
+        style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+      >
+        <span className="text-base shrink-0">{m.icon}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</span>
+            {m.id === "litt-auto" && (
+              <span
+                className="rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider"
+                style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+              >
+                Recommended
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+            {m.description ?? m.bitsLabel ?? m.provider}
+          </div>
+        </div>
+        {m.bitsLabel && (
+          <span className="shrink-0 text-[9px] font-bold" style={{ color: "var(--text-muted)" }}>
+            {m.bitsLabel}
+          </span>
+        )}
+        {m.category === "advanced" && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
+        )}
+        {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+      </button>
+    );
+  }
+
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label="Select model"
-      className="fixed z-[200] max-h-[350px] w-72 overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
+      className="fixed z-[200] overflow-hidden rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
       style={{
         left,
         top,
+        width: isMobile ? "calc(100vw - 16px)" : `${popoverWidth}px`,
+        maxHeight: `${popoverHeight}px`,
         backgroundColor: "var(--studio-elevated)",
         borderColor: "var(--studio-border-strong)",
       }}
     >
+      {/* Header */}
       <div
-        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        className="sticky top-0 z-10 px-3 py-2.5 text-[10px] font-black uppercase tracking-[0.18em]"
         style={{
           color: "var(--text-secondary)",
           borderBottom: "1px solid var(--studio-border)",
@@ -1164,50 +1217,70 @@ function ModelPopover({
       >
         Model
       </div>
-      {MODEL_CATEGORIES.map((cat) => {
-        const models = MODELS.filter((m) => m.category === cat.id);
-        if (models.length === 0) return null;
-        return (
-          <div key={cat.id}>
-            <div
-              className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {cat.label}
-            </div>
-            {models.map((m) => {
-              const isActive = selectedId === m.id;
-              const health = providerHealth[m.provider] ?? "available";
-              const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onSelect(m)}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-                  style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
-                >
-                  <span className="text-base shrink-0">{m.icon}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-                    <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
-                      <span>{m.provider}</span>
-                      <span>·</span>
-                      <span style={{ color: m.cost === "free" ? "#72f238" : m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
-                        {m.cost === "free" ? "FREE" : m.cost === "paid" ? "PAID" : "AUTO"}
-                      </span>
-                      <span>·</span>
-                      <span>{m.speed}</span>
-                    </div>
-                  </div>
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
-                  {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-                </button>
-              );
-            })}
+
+      <div className="overflow-y-auto" style={{ maxHeight: `${popoverHeight - 40}px` }}>
+        {/* LiTT Models */}
+        {littModels.map(renderModelButton)}
+
+        {/* Divider */}
+        <div className="my-1 mx-3 border-t" style={{ borderColor: "var(--studio-border)" }} />
+
+        {/* BYOK Section */}
+        <div
+          className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Bring Your Own Key
+        </div>
+        {byokModels.map(renderModelButton)}
+
+        {/* Advanced Providers (collapsible) */}
+        <div className="my-1 mx-3 border-t" style={{ borderColor: "var(--studio-border)" }} />
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex w-full items-center justify-between px-3 py-2 text-left transition hover:bg-white/5"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+            Advanced providers
+          </span>
+          <ChevronDown
+            size={12}
+            className="transition-transform"
+            style={{
+              color: "var(--text-muted)",
+              transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          />
+        </button>
+
+        {showAdvanced && (
+          <div>
+            {advancedModels.length > 3 && (
+              <div className="px-3 pb-1.5">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search providers..."
+                  className="w-full rounded-lg border px-2.5 py-1.5 text-[11px] outline-none"
+                  style={{
+                    borderColor: "var(--studio-border)",
+                    backgroundColor: "var(--studio-bg)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+            )}
+            {filteredAdvanced.map(renderModelButton)}
+            {filteredAdvanced.length === 0 && (
+              <div className="px-3 py-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+                No providers match &quot;{search}&quot;
+              </div>
+            )}
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 }
