@@ -135,12 +135,12 @@ export async function POST(req: NextRequest) {
 
         void (async () => {
           try {
-            const { buildGHLCallPayload } = await import("@/lib/voice/ghl-payload-builder");
-            const { sendCallToGHL } = await import("@/lib/voice/ghl-sender");
+            const { buildCallPayload } = await import("@/lib/voice/ghl-payload-builder");
+            const { sendCallToN8n } = await import("@/lib/voice/n8n-sender");
 
             // Try to get session data for user/project context
             const session = await getVoiceSession("vapi", callId);
-            const payload = await buildGHLCallPayload({
+            const payload = await buildCallPayload({
               callId,
               to: process.env.LITTLABS_BUSINESS_PHONE ?? "+13239165462",
               from: callerPhone,
@@ -157,10 +157,10 @@ export async function POST(req: NextRequest) {
               conversationId: session?.conversationId ?? null,
             });
 
-            await sendCallToGHL(payload);
+            await sendCallToN8n(payload);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[GHL] end-of-call integration failed: ${msg}`);
+            console.error(`[n8n] end-of-call orchestration failed: ${msg}`);
           }
         })();
       }
