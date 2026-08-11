@@ -82,6 +82,8 @@ build_output*.txt
 build-output*.txt
 build-final.txt
 build_final.txt
+build-log*.txt
+build_log*.txt
 vitest.stubs/
 
 # Log files (covers *.log, scan-cody-*.log, .codex-*.log, etc.)
