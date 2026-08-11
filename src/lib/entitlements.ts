@@ -104,6 +104,7 @@ const ENTITLEMENTS_BY_PLAN: Record<PlanId, Entitlements> = {
   creator_beta: CREATOR_BETA_ENTITLEMENTS,
   pro_builder_beta: PRO_BUILDER_BETA_ENTITLEMENTS,
   founder: FOUNDER_ENTITLEMENTS,
+  owner: OWNER_ENTITLEMENTS,
 };
 
 export async function getUserPlan(clerkId: string): Promise<PlanDefinition> {

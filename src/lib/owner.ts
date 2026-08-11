@@ -105,7 +105,7 @@ export function simulationToPlanId(sim: SimulatedPlan): PlanId {
       return "pro_builder_beta";
     case "owner":
     case "zero_bits":
-      return "pro_builder_beta";
+      return "owner";
   }
 }
 
@@ -116,7 +116,7 @@ export function simulationToPlanId(sim: SimulatedPlan): PlanId {
  * effectively unlimited project limit. All features enabled.
  */
 export const OWNER_ENTITLEMENTS: Entitlements = {
-  planId: "pro_builder_beta",
+  planId: "owner",
   planName: "OWNER",
   activeProjectLimit: 999_999,
   monthlyCredits: OWNER_WALLET_TARGET,

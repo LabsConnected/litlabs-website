@@ -733,11 +733,13 @@ export function getAgentsForPlan(plan: PlanId): AgentDefinition[] {
 
 function planCoversAgent(plan: PlanId, agent: AgentDefinition): boolean {
   // Founder is Creator-level — does NOT unlock Pro-only agents.
+  // Owner has full access to all agents.
   const rank: Record<PlanId, number> = {
     starter: 0,
     creator_beta: 1,
     founder: 1,
     pro_builder_beta: 2,
+    owner: 999,
   };
   return rank[plan] >= rank[agent.minimumPlan];
 }
