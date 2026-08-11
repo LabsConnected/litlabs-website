@@ -38,22 +38,32 @@ export async function getCreditBalances(clerkId: string): Promise<CreditBalances
     .in("status", ["active", "trialing"])
     .maybeSingle();
   if (!subscription) {
-    const now = new Date();
-    const period = now.toISOString().slice(0, 7);
-    const expiresAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    const { error: grantError } = await admin.rpc("grant_credits", {
-      p_user_id: userId,
-      p_amount: 500,
-      p_category: "subscription_grant",
-      p_balance_bucket: "monthly",
-      p_description: `Starter monthly grant — ${period}`,
-      p_idempotency_key: `starter:${userId}:${period}`,
-      p_reference_type: "starter_plan",
-      p_reference_id: period,
-      p_expires_at: expiresAt.toISOString(),
-    });
-    if (grantError) {
-      throw new Error(`Starter credit grant failed: ${grantError.message}`);
+    // Starter plan: 500 BITS granted ONCE at account creation, not monthly.
+    // The idempotency key is user-scoped (no period) so the grant_credits
+    // RPC is a no-op on every subsequent call after the first successful one.
+    // We also pre-check the ledger to avoid an unnecessary RPC round-trip
+    // on the common path where the grant already exists.
+    const { data: existingGrant } = await admin
+      .from("credit_ledger")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("idempotency_key", `starter:${userId}`)
+      .limit(1)
+      .maybeSingle();
+    if (!existingGrant) {
+      const { error: grantError } = await admin.rpc("grant_credits", {
+        p_user_id: userId,
+        p_amount: 500,
+        p_category: "subscription_grant",
+        p_balance_bucket: "monthly",
+        p_description: "Starter one-time grant — 500 LiTTBits",
+        p_idempotency_key: `starter:${userId}`,
+        p_reference_type: "starter_plan",
+        p_reference_id: "one_time",
+      });
+      if (grantError) {
+        throw new Error(`Starter credit grant failed: ${grantError.message}`);
+      }
     }
   }
   const [{ data, error }, { data: daily }] = await Promise.all([
