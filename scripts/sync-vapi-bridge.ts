@@ -145,18 +145,19 @@ async function main() {
     },
   };
 
-  // Events webhook auth: prefer Vapi's recommended credential-based auth,
-  // fall back to legacy inline serverHeaders if no credential ID is configured.
+  // Events webhook auth: Vapi's current API uses `server: { url, credentialId }`
+  // (credential-based, recommended) or `server: { url, headers }` (inline).
+  // The old top-level `serverUrl` + `serverHeaders` fields are deprecated and
+  // rejected by the API with 400 "property serverHeaders should not exist".
   if (SERVER_CREDENTIAL_ID) {
     patch.server = { url: EVENTS_URL, credentialId: SERVER_CREDENTIAL_ID };
   } else {
-    patch.serverUrl = EVENTS_URL;
-    patch.serverHeaders = { Authorization: authHeader };
+    patch.server = { url: EVENTS_URL, headers: { Authorization: authHeader } };
   }
 
   if (DRY_RUN) {
     const safe = JSON.parse(JSON.stringify(patch));
-    if (safe.serverHeaders?.Authorization) safe.serverHeaders.Authorization = "Bearer <redacted>";
+    if (safe.server?.headers?.Authorization) safe.server.headers.Authorization = "Bearer <redacted>";
     if (safe.model?.headers?.Authorization) safe.model.headers.Authorization = "Bearer <redacted>";
     console.log("Dry run — would PATCH assistant with:\n");
     console.log(JSON.stringify(safe, null, 2));
@@ -167,8 +168,9 @@ async function main() {
   // Fetch current assistant to show what's changing
   const current = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "GET");
   console.log("Current assistant config:");
-  console.log(`  serverUrl       : ${current?.serverUrl ?? "(none)"}`);
+  console.log(`  server.url      : ${current?.server?.url ?? current?.serverUrl ?? "(none)"}`);
   console.log(`  server.credId   : ${current?.server?.credentialId ?? "(none)"}`);
+  console.log(`  server.auth     : ${current?.server?.headers?.Authorization ? "inline headers" : current?.server?.credentialId ? "credential" : "(none)"}`);
   console.log(`  model.provider  : ${current?.model?.provider ?? "(none)"}`);
   console.log(`  model.url       : ${current?.model?.url ?? "(none)"}`);
   console.log(`  model.toolIds   : ${current?.model?.toolIds?.length ?? 0} tool(s)`);
@@ -178,8 +180,9 @@ async function main() {
   const updated = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "PATCH", patch);
 
   console.log("\nDone. Assistant updated:");
-  console.log(`  serverUrl       : ${updated?.serverUrl ?? "(none)"}`);
+  console.log(`  server.url      : ${updated?.server?.url ?? "(none)"}`);
   console.log(`  server.credId   : ${updated?.server?.credentialId ?? "(none)"}`);
+  console.log(`  server.auth     : ${updated?.server?.headers?.Authorization ? "inline headers" : updated?.server?.credentialId ? "credential" : "(none)"}`);
   console.log(`  model.provider  : ${updated?.model?.provider ?? "custom-llm"}`);
   console.log(`  model.url       : ${updated?.model?.url ?? TURN_URL}`);
   console.log(`  model.toolIds   : ${updated?.model?.toolIds?.length ?? 0} tool(s)`);
