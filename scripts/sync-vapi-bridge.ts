@@ -24,7 +24,7 @@
  *   VAPI_SERVER_CREDENTIAL_ID — if set, uses Vapi's recommended
  *     `server: { url, credentialId }` auth for the events webhook
  *     (create a Bearer Token credential in the Vapi dashboard first).
- *     If not set, falls back to legacy `serverHeaders` inline auth.
+ *     If not set, falls back to inline `server: { url, headers }` auth.
  *
  * This script never prints secret values.
  */
@@ -108,7 +108,7 @@ async function main() {
   console.log(`  assistant id    : ${ASSISTANT_ID}`);
   console.log(`  events URL      : ${EVENTS_URL}`);
   console.log(`  turn URL        : ${TURN_URL}`);
-  console.log(`  events auth     : ${SERVER_CREDENTIAL_ID ? `credential ${SERVER_CREDENTIAL_ID}` : "inline serverHeaders"}`);
+  console.log(`  events auth     : ${SERVER_CREDENTIAL_ID ? `credential ${SERVER_CREDENTIAL_ID}` : "inline server.headers"}`);
   console.log(`  turn auth       : Bearer <redacted>`);
   console.log(`  dry run         : ${DRY_RUN ? "yes" : "no"}\n`);
 
