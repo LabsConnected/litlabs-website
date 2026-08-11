@@ -20,6 +20,10 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { SERVICE_OFFERS, type ServiceOfferId } from "@/config/service-offers";
+import {
+  buildGHLServiceInquiryPayload,
+  sendServiceInquiryToGHL,
+} from "@/lib/ghl/ghl-service-inquiry-sender";
 
 // ─── Zod schema ───────────────────────────────────────────────────────
 
@@ -128,7 +132,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const { error } = await admin
+    const { data: insertedRow, error } = await admin
       .from("service_inquiries")
       .insert(row)
       .select("id")
@@ -139,6 +143,25 @@ export async function POST(req: NextRequest) {
       // Don't leak DB errors to the client — return success to avoid
       // revealing table structure or column names
       return NextResponse.json({ success: true });
+    }
+
+    // Fire-and-forget GHL sync — never blocks the response.
+    // Supabase row is the source of truth; GHL is downstream.
+    if (insertedRow?.id) {
+      const ghlPayload = buildGHLServiceInquiryPayload({
+        inquiryId: insertedRow.id,
+        serviceId: data.serviceId,
+        serviceName,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        company: data.company,
+        message: data.message,
+        source: "hire_page",
+        referralCode: data.referralCode,
+      });
+      // Don't await — fire and forget so the user gets an instant response
+      void sendServiceInquiryToGHL(ghlPayload);
     }
 
     return NextResponse.json({ success: true });
