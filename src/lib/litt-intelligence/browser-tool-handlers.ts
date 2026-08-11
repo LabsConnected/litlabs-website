@@ -24,6 +24,10 @@ import {
   type BrowserActionResult,
 } from "./browser-session-manager";
 
+// Playwright-compatible page interface (Stagehand's Page type is narrower)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PlaywrightPage = any;
+
 // ─── Types ───────────────────────────────────────────────────────
 
 export interface BrowserToolContext {
@@ -142,7 +146,7 @@ export async function browserSnapshot(
     "browser.snapshot",
     _inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       // Get accessibility snapshot
@@ -240,7 +244,7 @@ export async function browserClick(
     "browser.click",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       // Coordinate fallback
@@ -261,7 +265,7 @@ export async function browserClick(
           const text = selector.slice(5);
           await stagehand.act(`Click the element with text "${text}"`);
         } else {
-          await page.click(selector, { timeout: 10000 });
+          await page.click(selector, { timeout: 10000 as number });
         }
       }
 
@@ -299,7 +303,7 @@ export async function browserType(
     "browser.type",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       const selector = resolveSelector(inputs);
@@ -318,7 +322,7 @@ export async function browserType(
         if (inputs.clear !== false) {
           await page.fill(selector, "").catch(() => {});
         }
-        await page.fill(selector, inputs.value, { timeout: 10000 });
+        await page.fill(selector, inputs.value, { timeout: 10000 as number });
       }
 
       const state = await getBrowserStateWithScreenshot(ctx.sessionId);
@@ -351,7 +355,7 @@ export async function browserSelect(
     "browser.select",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       const selector = resolveSelector(inputs);
@@ -367,7 +371,7 @@ export async function browserSelect(
         const text = selector.slice(5);
         await stagehand.act(`Find the select dropdown near "${text}" and select "${inputs.label ?? inputs.value}"`);
       } else {
-        await page.selectOption(selector, inputs.value, { timeout: 10000 });
+        await page.selectOption(selector, inputs.value, { timeout: 10000 as number });
       }
 
       const state = await getBrowserStateWithScreenshot(ctx.sessionId);
@@ -398,7 +402,7 @@ export async function browserScroll(
     "browser.scroll",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       const direction = inputs.direction ?? "down";
@@ -445,7 +449,7 @@ export async function browserPress(
     "browser.press",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       await page.keyboard.press(inputs.key);
@@ -479,13 +483,13 @@ export async function browserWait(
     "browser.wait",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       const timeout = inputs.timeoutMs ?? 5000;
 
       if (inputs.waitFor === "navigation" || !inputs.waitFor) {
-        await page.waitForLoadState("domcontentloaded", { timeout }).catch(() => {});
+        await page.waitForLoadState("domcontentloaded", { timeout: timeout as number }).catch(() => {});
       }
 
       if (inputs.selector && inputs.waitFor !== "timeout") {
@@ -523,9 +527,10 @@ export async function browserExtract(
     "browser.extract",
     inputs,
     async (stagehand) => {
-      const result = await stagehand.extract({
+      const result = await (stagehand as unknown as { extract: (opts: unknown) => Promise<unknown> }).extract({
         instruction: inputs.instruction,
-        schema: inputs.schema as { url?: string; title?: string; items?: unknown[] } | undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        schema: inputs.schema as any,
       });
 
       const state = await getBrowserState(ctx.sessionId);
@@ -557,7 +562,7 @@ export async function browserUpload(
     "browser.upload",
     inputs,
     async (stagehand) => {
-      const page = stagehand.context.pages()[0];
+      const page = stagehand.context.pages()[0] as PlaywrightPage;
       if (!page) return { success: false, error: "No page available", durationMs: 0 };
 
       const selector = resolveSelector(inputs);

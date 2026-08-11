@@ -217,7 +217,7 @@ test.describe("LiTT Brain Smoke Test", () => {
   test("Braintrust: both v1-conversation and v2-execution traces exist", async () => {
     const btApiKey = process.env.BT_API_KEY;
     if (!btApiKey) {
-      test.skip("BT_API_KEY not set — skipping Braintrust verification");
+      test.skip(true, "BT_API_KEY not set — skipping Braintrust verification");
       return;
     }
 
