@@ -17,7 +17,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -540,11 +540,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      {/* Desktop sidebar */}
-      <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
+      <Suspense fallback={<div className="hidden md:block" style={{ width: collapsed ? 72 : 256 }} />}>
+        <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      </Suspense>
 
-      {/* Mobile drawer (conditional) */}
-      <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
+      {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety */}
+      <Suspense fallback={null}>
+        <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
+      </Suspense>
 
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
