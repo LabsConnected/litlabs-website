@@ -4,7 +4,28 @@ import { memo, useState, useRef, useEffect } from "react";
 import {
   Image as ImageIcon,
   MoveVertical,
+  Star,
+  CircleUser,
+  Video,
+  Minus,
+  ChevronDown,
+  CheckSquare,
+  Square,
+  Link as LinkIcon,
+  type LucideIcon,
 } from "lucide-react";
+
+// Dynamic icon resolver for icon/badge nodes
+const LUCIDE_ICONS: Record<string, LucideIcon> = {
+  Star,
+  CircleUser,
+  Video,
+  Minus,
+  ChevronDown,
+  CheckSquare,
+  Square,
+  Link: LinkIcon,
+};
 import type { CanvasNode, NodeStyles } from "./types";
 
 function stylesToCSS(styles: NodeStyles): React.CSSProperties {
@@ -51,6 +72,8 @@ function stylesToCSS(styles: NodeStyles): React.CSSProperties {
   if (styles.minWidth) css.minWidth = styles.minWidth;
   if (styles.flex) css.flex = styles.flex;
   if (styles.maxWidth) css.maxWidth = styles.maxWidth;
+  if (styles.overflow) css.overflow = styles.overflow;
+  if (styles.borderBottom) css.borderBottom = styles.borderBottom;
   return css;
 }
 
@@ -65,9 +88,8 @@ interface NodeRendererProps {
 }
 
 function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, onInlineEdit, children }: NodeRendererProps) {
-  const css = stylesToCSS(node.styles);
   const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(node.props.text ?? "");
+  const [editText, setEditText] = useState(node?.props?.text ?? "");
   const editRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -80,6 +102,11 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
       sel?.addRange(range);
     }
   }, [isEditing]);
+
+  // Guard against malformed/undefined node from corrupted persisted state
+  if (!node || !node.type) return null;
+
+  const css = stylesToCSS(node.styles ?? {});
 
   const canEdit = (node.type === "heading" || node.type === "text" || node.type === "button") && onInlineEdit;
 
@@ -107,13 +134,13 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (!canEdit) return;
     e.stopPropagation();
-    setEditText(node.props.text ?? "");
+    setEditText(node.props?.text ?? "");
     setIsEditing(true);
   };
 
   const finishEditing = () => {
     setIsEditing(false);
-    if (onInlineEdit && editText !== (node.props.text ?? "")) {
+    if (onInlineEdit && editText !== (node.props?.text ?? "")) {
       onInlineEdit(node.id, editText);
     }
   };
@@ -162,7 +189,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           data-node-type={node.type}
         >
           {children}
-          {node.children.length === 0 && (
+          {(node.children?.length ?? 0) === 0 && (
             <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: 11, opacity: 0.5 }}>
               Drop components here
             </div>
@@ -172,7 +199,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
       );
 
     case "heading": {
-      const level = node.props.level ?? 2;
+      const level = node.props?.level ?? 2;
       const Tag = `h${level}` as "h2";
       return (
         <Tag
@@ -190,7 +217,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           onBlur={finishEditing}
           onKeyDown={handleKeyDown}
         >
-          {isEditing ? editText : (node.props.text || "Heading")}
+          {isEditing ? editText : (node.props?.text || "Heading")}
           {selectionHandles}
         </Tag>
       );
@@ -213,7 +240,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           onBlur={finishEditing}
           onKeyDown={handleKeyDown}
         >
-          {isEditing ? editText : (node.props.text || "Text content")}
+          {isEditing ? editText : (node.props?.text || "Text content")}
           {selectionHandles}
         </p>
       );
@@ -244,7 +271,7 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
               autoFocus
             />
           ) : (
-            node.props.text || "Button"
+            node.props?.text || "Button"
           )}
           {selectionHandles}
         </button>
@@ -261,9 +288,9 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           data-node-id={node.id}
           data-node-type={node.type}
         >
-          {node.props.src ? (
+          {node.props?.src ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={node.props.src} alt={node.props.alt ?? ""} style={{ width: "100%", height: "auto", borderRadius: node.styles.borderRadius ?? 8, display: "block" }} />
+            <img src={node.props.src} alt={node.props.alt ?? ""} style={{ width: "100%", height: "auto", borderRadius: node.styles?.borderRadius ?? 8, display: "block" }} />
           ) : (
             <div style={{ width: "100%", minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 8, color: "var(--text-muted)", fontSize: 11 }}>
               <ImageIcon size={24} opacity={0.4} />
@@ -277,9 +304,9 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
       return (
         <div style={baseStyle} onClick={handleSelect} data-node-id={node.id} data-node-type={node.type}>
           <input
-            type={node.props.inputType ?? "text"}
-            placeholder={node.props.placeholder ?? ""}
-            name={node.props.inputName ?? ""}
+            type={node.props?.inputType ?? "text"}
+            placeholder={node.props?.placeholder ?? ""}
+            name={node.props?.inputName ?? ""}
             style={{ width: "100%", padding: "10px 14px", borderRadius: 8, backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--studio-border-strong)", fontSize: 14, color: "var(--text-primary)", outline: "none" }}
             onClick={(e) => e.stopPropagation()}
             readOnly
@@ -301,6 +328,206 @@ function NodeRendererBase({ node, isSelected, onSelect, onDragStart, onDragEnd, 
           <MoveVertical size={14} opacity={0.2} />
           {selectionHandles}
         </div>
+      );
+
+    case "icon": {
+      const IconComp = LUCIDE_ICONS[node.props?.iconName ?? "Star"] ?? Star;
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          <IconComp size={node.styles?.fontSize ?? 24} />
+          {selectionHandles}
+        </div>
+      );
+    }
+
+    case "badge":
+      return (
+        <span style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          {node.props?.text || "Badge"}
+          {selectionHandles}
+        </span>
+      );
+
+    case "avatar":
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          {node.props?.avatarSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={node.props.avatarSrc} alt={node.props.avatarName ?? "Avatar"} style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
+          ) : (
+            <div style={{ width: "100%", height: "100%", borderRadius: "inherit", backgroundColor: "rgba(139,92,246,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <CircleUser size={20} style={{ color: "var(--glass-purple)" }} />
+            </div>
+          )}
+          {selectionHandles}
+        </div>
+      );
+
+    case "video":
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          {node.props?.videoSrc ? (
+            <video src={node.props.videoSrc} poster={node.props.videoPoster} controls style={{ width: "100%", borderRadius: "inherit" }} />
+          ) : (
+            <div style={{ width: "100%", minHeight: 160, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.3)", borderRadius: "inherit", color: "var(--text-muted)" }}>
+              <Video size={28} opacity={0.4} />
+            </div>
+          )}
+          {selectionHandles}
+        </div>
+      );
+
+    case "divider":
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          <hr style={{ border: "none", height: "1px", backgroundColor: node.styles?.backgroundColor ?? "var(--glass-border)", margin: 0 }} />
+          {selectionHandles}
+        </div>
+      );
+
+    case "tabs": {
+      const labels = node.props?.tabLabels ?? ["Tab 1", "Tab 2"];
+      const active = node.props?.activeTab ?? 0;
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          <div style={{ display: "flex", flexDirection: "row", gap: 4, borderBottom: "1px solid var(--glass-border)" }}>
+            {labels.map((label, i) => (
+              <div key={i} style={{ padding: "8px 16px", fontSize: 13, fontWeight: i === active ? 700 : 500, color: i === active ? "var(--glass-purple)" : "var(--text-muted)", borderBottom: i === active ? "2px solid var(--glass-purple)" : "2px solid transparent", cursor: "pointer" }}>
+                {label}
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "16px", fontSize: 14, color: "var(--text-secondary)" }}>
+            {labels[active]} content
+          </div>
+          {selectionHandles}
+        </div>
+      );
+    }
+
+    case "accordion": {
+      const items = node.props?.accordionItems ?? [];
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          {items.map((item, i) => (
+            <div key={i} style={{ borderRadius: 8, backgroundColor: "rgba(255,255,255,0.03)", borderWidth: 1, borderColor: "var(--glass-border)", borderStyle: "solid", overflow: "hidden" }}>
+              <div style={{ padding: "14px 16px", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                {item.title}
+                <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
+              </div>
+              <div style={{ padding: "0 16px 14px", fontSize: 13, color: "var(--text-secondary)" }}>
+                {item.content}
+              </div>
+            </div>
+          ))}
+          {selectionHandles}
+        </div>
+      );
+    }
+
+    case "navbar":
+    case "footer":
+      return (
+        <div
+          style={baseStyle}
+          onClick={handleSelect}
+          draggable
+          onDragStart={handleDragStart}
+          onDragEnd={onDragEnd}
+          data-node-id={node.id}
+          data-node-type={node.type}
+        >
+          {children}
+          {(node.children?.length ?? 0) === 0 && (
+            <div style={{ padding: "16px", textAlign: "center", color: "var(--text-muted)", fontSize: 11, opacity: 0.5 }}>
+              Drop content here
+            </div>
+          )}
+          {selectionHandles}
+        </div>
+      );
+
+    case "table": {
+      const headers = node.props?.tableHeaders ?? [];
+      const rows = node.props?.tableRows ?? [];
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                {headers.map((hdr, i) => (
+                  <th key={i} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>{hdr}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{ padding: "10px 14px", color: "var(--text-primary)" }}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {selectionHandles}
+        </div>
+      );
+    }
+
+    case "list": {
+      const items = node.props?.listItems ?? [];
+      return (
+        <div style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          <ul style={{ listStyle: "disc", paddingLeft: 20, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            {items.map((item, i) => (
+              <li key={i} style={{ color: "var(--text-secondary)" }}>{item}</li>
+            ))}
+          </ul>
+          {selectionHandles}
+        </div>
+      );
+    }
+
+    case "textarea":
+      return (
+        <div style={baseStyle} onClick={handleSelect} data-node-id={node.id} data-node-type={node.type}>
+          <textarea
+            placeholder={node.props?.placeholder ?? ""}
+            name={node.props?.inputName ?? ""}
+            rows={node.props?.rows ?? 4}
+            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--studio-border-strong)", fontSize: 14, color: "var(--text-primary)", outline: "none", resize: "vertical", fontFamily: "inherit" }}
+            onClick={(e) => e.stopPropagation()}
+            readOnly
+          />
+          {selectionHandles}
+        </div>
+      );
+
+    case "checkbox":
+      return (
+        <label style={baseStyle} onClick={handleSelect} draggable onDragStart={handleDragStart} onDragEnd={onDragEnd} data-node-id={node.id} data-node-type={node.type}>
+          {node.props?.checked ? <CheckSquare size={16} style={{ color: "var(--glass-purple)" }} /> : <Square size={16} style={{ color: "var(--text-muted)" }} />}
+          <span style={{ color: "var(--text-secondary)" }}>{node.props?.label ?? "Checkbox"}</span>
+          {selectionHandles}
+        </label>
+      );
+
+    case "link":
+      return (
+        <a
+          href={node.props?.href ?? "#"}
+          style={baseStyle}
+          onClick={(e) => { e.preventDefault(); handleSelect(e); }}
+          draggable
+          onDragStart={handleDragStart}
+          onDragEnd={onDragEnd}
+          data-node-id={node.id}
+          data-node-type={node.type}
+        >
+          {node.props?.text || "Link"}
+          {selectionHandles}
+        </a>
       );
 
     default:

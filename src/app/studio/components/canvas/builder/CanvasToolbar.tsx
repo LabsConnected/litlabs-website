@@ -13,6 +13,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Sparkles,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import type { Breakpoint } from "./types";
@@ -32,6 +33,7 @@ export function CanvasToolbar() {
   const setZoom = useCanvasBuilderStore((s) => s.setZoom);
   const saveDocument = useCanvasBuilderStore((s) => s.saveDocument);
   const document = useCanvasBuilderStore((s) => s.document);
+  const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
 
   const btnBase: React.CSSProperties = {
     display: "flex",
@@ -151,6 +153,22 @@ export function CanvasToolbar() {
       </div>
 
       <div className="flex-1" />
+
+      {/* Ask LiTT */}
+      <button
+        onClick={() => setRightPanelTab("litt")}
+        className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold transition"
+        style={{
+          backgroundColor: "var(--glass-purple-soft)",
+          border: "1px solid var(--glass-border-purple)",
+          color: "var(--glass-purple)",
+          cursor: "pointer",
+        }}
+        title="Ask LiTT to build, redesign, or improve"
+      >
+        <Sparkles size={12} />
+        Ask LiTT...
+      </button>
 
       {/* Save status */}
       <span style={{ fontSize: 9, fontWeight: 600, color: "var(--glass-text-3)" }}>

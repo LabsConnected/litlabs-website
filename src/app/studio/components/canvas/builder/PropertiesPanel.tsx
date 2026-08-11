@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings, Sparkles } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
+import { LiTTCopilotPanel } from "./LiTTCopilotPanel";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -44,6 +45,76 @@ const inputStyle: React.CSSProperties = {
 };
 
 export function PropertiesPanel() {
+  const rightPanelTab = useCanvasBuilderStore((s) => s.rightPanelTab);
+  const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
+
+  const tabBtn: React.CSSProperties = {
+    flex: 1,
+    height: 26,
+    borderRadius: 6,
+    border: "1px solid transparent",
+    backgroundColor: "transparent",
+    color: "var(--glass-text-3)",
+    fontSize: 9,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    transition: "all 0.12s ease",
+  };
+
+  const tabActive: React.CSSProperties = {
+    ...tabBtn,
+    backgroundColor: "var(--glass-purple-soft)",
+    borderColor: "var(--glass-border-purple)",
+    color: "var(--glass-purple)",
+  };
+
+  // Tab switcher at the top
+  const tabSwitcher = (
+    <div
+      className="flex shrink-0 items-center gap-0.5 p-1.5"
+      style={{ borderBottom: "1px solid var(--glass-border)" }}
+    >
+      <button
+        onClick={() => setRightPanelTab("properties")}
+        style={rightPanelTab === "properties" ? tabActive : tabBtn}
+      >
+        <Settings size={11} /> Properties
+      </button>
+      <button
+        onClick={() => setRightPanelTab("litt")}
+        style={rightPanelTab === "litt" ? tabActive : tabBtn}
+      >
+        <Sparkles size={11} /> LiTT
+      </button>
+    </div>
+  );
+
+  if (rightPanelTab === "litt") {
+    return (
+      <div className="flex h-full w-full flex-col">
+        {tabSwitcher}
+        <div className="flex-1 overflow-hidden">
+          <LiTTCopilotPanel />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {tabSwitcher}
+      <PropertiesPanelContent />
+    </>
+  );
+}
+
+function PropertiesPanelContent() {
   const selectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
   const node = useCanvasBuilderStore((s) => (s.selectedNodeId ? s.document.nodes[s.selectedNodeId] : null));
   const updateNodeProps = useCanvasBuilderStore((s) => s.updateNodeProps);
@@ -116,7 +187,7 @@ export function PropertiesPanel() {
                   cursor: "pointer",
                 }}
               >
-                {n.metadata.name || n.type}
+                {n.metadata?.name || n.type}
               </button>
               {i < arr.length - 1 && <span style={{ color: "var(--glass-text-3)" }}>/</span>}
             </span>

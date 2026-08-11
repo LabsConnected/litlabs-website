@@ -39,10 +39,10 @@ function LayerItem({ nodeId, depth }: { nodeId: string; depth: number }) {
   if (!node) return null;
 
   const isSelected = selectedNodeId === nodeId;
-  const hasChildren = node.children.length > 0;
-  const isLocked = node.metadata.locked;
-  const isHidden = node.metadata.hidden;
-  const displayName = node.metadata.name || node.type;
+  const hasChildren = (node.children?.length ?? 0) > 0;
+  const isLocked = node.metadata?.locked;
+  const isHidden = node.metadata?.hidden;
+  const displayName = node.metadata?.name || node.type;
 
   const iconBtn: React.CSSProperties = {
     display: "flex",
@@ -147,7 +147,7 @@ function LayerItem({ nodeId, depth }: { nodeId: string; depth: number }) {
       {/* Children */}
       {expanded && hasChildren && (
         <div>
-          {node.children.map((childId) => (
+          {(node.children?.length ?? 0) > 0 && node.children.map((childId) => (
             <LayerItem key={childId} nodeId={childId} depth={depth + 1} />
           ))}
         </div>

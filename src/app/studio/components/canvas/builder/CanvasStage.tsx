@@ -6,6 +6,7 @@ import { useCanvasBuilderStore } from "./store";
 import { NodeRenderer } from "./NodeRenderer";
 import type { NodeType } from "./types";
 import { createNode, PALETTE_ITEMS, SECTION_TEMPLATES, BREAKPOINT_WIDTHS } from "./types";
+import { EmptyCanvasGreeter } from "./EmptyCanvasGreeter";
 
 function canHaveChildren(type: NodeType): boolean {
   return PALETTE_ITEMS.find((p) => p.type === type)?.canHaveChildren ?? false;
@@ -106,9 +107,13 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
 
     if (dropPosition === "inside" && canHaveChildren(targetNode.type)) {
       parentId = targetNode.id;
-      index = targetNode.children.length;
+      index = targetNode.children?.length ?? 0;
     } else if (targetNode.parentId) {
       const parent = useCanvasBuilderStore.getState().document.nodes[targetNode.parentId];
+      if (!parent) {
+        setDropTarget(null, null);
+        return;
+      }
       parentId = parent.id;
       const idx = parent.children.indexOf(targetNode.id);
       index = dropPosition === "after" ? idx + 1 : idx;
@@ -152,8 +157,8 @@ function TreeNodeView({ nodeId }: { nodeId: string }) {
         onDragEnd={handleDragEnd}
         onInlineEdit={handleInlineEdit}
       >
-        {node.children.length > 0 && (
-          <div style={{ display: "flex", flexDirection: node.styles.flexDirection ?? "column", gap: node.styles.gap ?? 0 }}>
+        {(node.children?.length ?? 0) > 0 && (
+          <div style={{ display: "flex", flexDirection: node.styles?.flexDirection ?? "column", gap: node.styles?.gap ?? 0 }}>
             {node.children.map((childId) => (
               <TreeNodeView key={childId} nodeId={childId} />
             ))}
@@ -297,42 +302,7 @@ export function CanvasStage() {
         {rootId && <TreeNodeView nodeId={rootId} />}
       </div>
 
-      {isEmpty && (
-        <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={{ top: 64 }}
-        >
-          <div className="text-center" style={{ color: "var(--glass-text-2)" }}>
-            <div
-              className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full"
-              style={{
-                background: "radial-gradient(circle, var(--glass-purple-soft), transparent 70%)",
-                border: "1px solid var(--glass-border-purple)",
-              }}
-            >
-              <Sparkles size={28} style={{ color: "var(--glass-purple)" }} />
-            </div>
-            <div className="text-[15px] font-black mb-1" style={{ color: "var(--glass-text-1)" }}>
-              Build visually with LiTT
-            </div>
-            <div className="text-[11px] mb-4">
-              Drag a component here or start with a ready-made section
-            </div>
-            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2">
-              {SECTION_TEMPLATES.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  onClick={() => addSectionTemplate(tpl, rootId)}
-                  className="glass-button-secondary px-3 py-2 text-[10px] font-bold rounded-lg"
-                >
-                  <Plus size={10} className="inline mr-1" />
-                  {tpl.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {isEmpty && <EmptyCanvasGreeter />}
     </div>
   );
 }

@@ -31,7 +31,8 @@ interface CanvasBuilderStore {
   breakpoint: Breakpoint;
   tool: "select" | "pan";
   previewMode: boolean;
-  leftPanelTab: "components" | "layers";
+  leftPanelTab: "build" | "blocks" | "components" | "assets" | "layers";
+  rightPanelTab: "properties" | "litt";
 
   // Actions
   loadDocument: () => void;
@@ -59,7 +60,8 @@ interface CanvasBuilderStore {
   setBreakpoint: (bp: Breakpoint) => void;
   setTool: (tool: "select" | "pan") => void;
   setPreviewMode: (preview: boolean) => void;
-  setLeftPanelTab: (tab: "components" | "layers") => void;
+  setLeftPanelTab: (tab: "build" | "blocks" | "components" | "assets" | "layers") => void;
+  setRightPanelTab: (tab: "properties" | "litt") => void;
   addSectionTemplate: (template: SectionTemplate, parentId: string) => void;
   nudgeNode: (nodeId: string, dx: number, dy: number) => void;
   getNodePath: (nodeId: string) => CanvasNode[];
@@ -72,14 +74,61 @@ function saveToStorage(doc: CanvasDocument) {
   } catch {}
 }
 
+function isValidNodeType(type: unknown): type is NodeType {
+  return typeof type === "string" && PALETTE_ITEMS.some((p) => p.type === type);
+}
+
+function normalizeNode(raw: unknown): CanvasNode | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || !isValidNodeType(r.type)) return null;
+  const now = Date.now();
+  return {
+    id: r.id,
+    type: r.type,
+    parentId: typeof r.parentId === "string" ? r.parentId : null,
+    children: Array.isArray(r.children) ? r.children.filter((c): c is string => typeof c === "string") : [],
+    props: (r.props && typeof r.props === "object" ? r.props : {}) as CanvasNode["props"],
+    styles: (r.styles && typeof r.styles === "object" ? r.styles : {}) as CanvasNode["styles"],
+    metadata: (r.metadata && typeof r.metadata === "object" ? r.metadata : { createdAt: now, updatedAt: now }) as CanvasNode["metadata"],
+  };
+}
+
 function loadFromStorage(): CanvasDocument | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as CanvasDocument;
+    const parsed = JSON.parse(raw) as Partial<CanvasDocument>;
     if (!parsed.nodes || !parsed.rootNodeIds) return null;
-    return parsed;
+    if (!Array.isArray(parsed.rootNodeIds)) return null;
+
+    // Validate and normalize each node record
+    const normalizedNodes: Record<string, CanvasNode> = {};
+    for (const [id, rawNode] of Object.entries(parsed.nodes)) {
+      const normalized = normalizeNode(rawNode);
+      if (normalized) normalizedNodes[id] = normalized;
+    }
+
+    // Filter root IDs to only those that exist in nodes
+    const validRootIds = parsed.rootNodeIds.filter((id) => normalizedNodes[id]);
+    if (validRootIds.length === 0) return null;
+
+    // Repair: remove stale child references that point to non-existent nodes
+    for (const node of Object.values(normalizedNodes)) {
+      node.children = node.children.filter((childId) => normalizedNodes[childId]);
+    }
+
+    return {
+      id: typeof parsed.id === "string" ? parsed.id : `doc-${Date.now()}`,
+      projectId: parsed.projectId ?? null,
+      conversationId: parsed.conversationId ?? null,
+      route: parsed.route ?? "/",
+      nodes: normalizedNodes,
+      rootNodeIds: validRootIds,
+      version: typeof parsed.version === "number" ? parsed.version : 1,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
+    };
   } catch {
     return null;
   }
@@ -125,7 +174,8 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   breakpoint: "desktop",
   tool: "select",
   previewMode: false,
-  leftPanelTab: "components",
+  leftPanelTab: "build",
+  rightPanelTab: "properties",
 
   loadDocument: () => {
     const stored = loadFromStorage();
@@ -192,6 +242,8 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     collect(nodeId);
 
     const parent = doc.nodes[node.parentId];
+    if (!parent) return;
+
     const updatedParent: CanvasNode = {
       ...parent,
       children: parent.children.filter((c) => c !== nodeId),
@@ -228,6 +280,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     }
 
     const oldParent = doc.nodes[node.parentId];
+    if (!oldParent) return;
 
     // Remove from old parent
     const updatedOldParent: CanvasNode = {
@@ -414,6 +467,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   setTool: (tool) => set({ tool }),
   setPreviewMode: (preview) => set({ previewMode: preview }),
   setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
+  setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
 
   addSectionTemplate: (template, parentId) => {
     const { node: section, children } = template.build();
