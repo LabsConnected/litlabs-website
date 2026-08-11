@@ -3,8 +3,8 @@ import { auth } from "@/lib/auth";
 import { z } from "zod";
 import { getUserByClerkId } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { createGeneration } from "@/lib/music/generation-service";
-import { getConfiguredProviderName, isMockAllowed } from "@/lib/music/providers/factory";
+import { createGeneration, processPendingGenerations } from "@/lib/music/generation-service";
+import { getConfiguredProviderName, isMockAllowed, getProviderHealth } from "@/lib/music/providers/factory";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +47,19 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Mock gate — reject before any billing/DB work in production.
+  // Provider health gate — reject before any billing/DB work if the
+  // active provider has no credentials. This prevents charging users
+  // for generations that can never complete.
   const providerName = getConfiguredProviderName();
+  const health = getProviderHealth();
+  if (!health.healthy) {
+    console.info(`${TAG} 503 userId=${clerkId} reason=provider-unhealthy detail=${health.reason} dur=${Date.now() - start}ms`);
+    return NextResponse.json(
+      { error: "Music generation is not configured. Set MUSIC_PROVIDER and provider credentials." },
+      { status: 503 },
+    );
+  }
+  // Legacy mock gate (kept for explicitness).
   if (providerName === "mock" && !isMockAllowed()) {
     console.info(`${TAG} 503 userId=${clerkId} reason=mock-not-allowed dur=${Date.now() - start}ms`);
     return NextResponse.json(
@@ -93,6 +104,17 @@ async function handler(req: NextRequest) {
     console.info(
       `${TAG} ${result.replayed ? 200 : 202} userId=${clerkId} genId=${result.generationId} provider=${providerName} charged=${result.lbcCharged} replayed=${result.replayed} dur=${Date.now() - start}ms`,
     );
+
+    // P1: Kick the worker immediately so the generation starts within
+    // seconds instead of waiting up to 2 minutes for Vercel Cron.
+    // This is a server-side internal call — NOT a browser fetch.
+    // Cron remains as a recovery mechanism for stuck jobs only.
+    if (!result.replayed) {
+      void processPendingGenerations().catch((err) => {
+        console.error(`${TAG} immediate-kick failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
     return NextResponse.json(result, { status: result.replayed ? 200 : 202 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed";

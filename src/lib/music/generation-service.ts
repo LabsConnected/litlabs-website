@@ -922,24 +922,45 @@ const WORKER_LEASE_MINUTES = 10;
 
 /**
  * Find and reclaim stale generations — jobs that are in a non-terminal
- * state but haven't been updated recently. This handles the case where
- * a serverless function was frozen/killed mid-processing.
+ * state but haven't been updated recently or whose worker lease has
+ * expired. Uses the `reclaim_stale_music_generations` Postgres RPC
+ * (FOR UPDATE SKIP LOCKED) for transaction-safe recovery.
  *
- * Uses an atomic status update (WHERE status IN active states AND
- * updated_at < threshold) to claim the job, preventing double-processing.
- *
- * Returns the claimed generation IDs so the caller can re-process them.
+ * Returns the reclaimed generation IDs so the caller can re-process them.
  */
 export async function claimStaleGenerations(): Promise<string[]> {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
 
+  // Use the RPC for transaction-safe stale recovery.
+  const { data, error } = await admin.rpc("reclaim_stale_music_generations", {
+    p_stale_minutes: STALE_THRESHOLD_MINUTES,
+    p_lease_minutes: WORKER_LEASE_MINUTES,
+  });
+
+  if (error) {
+    // Fallback to the old query if the RPC isn't deployed yet.
+    console.warn("[music:recovery] RPC not available, falling back to query:", error.message);
+    return claimStaleGenerationsFallback();
+  }
+
+  if (!data || data.length === 0) return [];
+
+  const ids = (data as Array<{ id: string }>).map((row) => row.id);
+  console.info(`[music:recovery] Reclaimed ${ids.length} stale generation(s): ${ids.join(", ")}`);
+  return ids;
+}
+
+/**
+ * Fallback stale recovery using a plain UPDATE (no RPC).
+ * Used if the migration hasn't been applied yet.
+ */
+async function claimStaleGenerationsFallback(): Promise<string[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return [];
+
   const cutoff = new Date(Date.now() - STALE_THRESHOLD_MINUTES * 60_000).toISOString();
 
-  // Atomically claim stale jobs by setting status to "queued"
-  // Only claim jobs in active states that haven't been updated recently.
-  // Use COALESCE(updated_at, created_at) as fallback for rows where
-  // updated_at might not have been backfilled yet.
   const { data, error } = await admin
     .from("music_generations")
     .update({ status: "queued", started_at: null, worker_lease_expires_at: null })
@@ -948,17 +969,12 @@ export async function claimStaleGenerations(): Promise<string[]> {
     .select("id");
 
   if (error) {
-    // Log the error instead of silently returning [] — this was the
-    // root cause of recovery appearing to work but doing nothing.
-    console.error("[music:recovery] claimStaleGenerations query failed:", error.message);
+    console.error("[music:recovery] Fallback query failed:", error.message);
     return [];
   }
 
   if (!data || data.length === 0) return [];
-
-  const ids = data.map((row) => row.id as string);
-  console.info(`[music:recovery] Claimed ${ids.length} stale generation(s): ${ids.join(", ")}`);
-  return ids;
+  return data.map((row) => row.id as string);
 }
 
 /**
@@ -1049,23 +1065,55 @@ export async function processPendingGenerations(): Promise<{
     }
   }
 
-  // 2. Atomically claim queued jobs (set status → claimed + lease).
-  //    This prevents two workers from processing the same job.
-  const leaseExpiresAt = new Date(Date.now() + WORKER_LEASE_MINUTES * 60_000).toISOString();
-  const { data: claimed, error: claimError } = await admin
-    .from("music_generations")
-    .update({ status: "claimed", worker_lease_expires_at: leaseExpiresAt })
-    .eq("status", "queued")
-    .order("created_at", { ascending: true })
-    .limit(5)
-    .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key");
+  // 2. Atomically claim queued jobs via the `claim_music_generations` RPC.
+  //    Uses FOR UPDATE SKIP LOCKED so concurrent workers never grab the
+  //    same job. Falls back to UPDATE+LIMIT if the RPC isn't deployed.
+  const workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  let claimedRows: Array<{
+    id: string;
+    user_id: string;
+    original_prompt: string | null;
+    structured_blueprint: unknown;
+    requested_duration: number | null;
+    idempotency_key: string;
+  }> = [];
 
-  if (claimError) {
-    errors.push(`Claim query failed: ${claimError.message}`);
-    return { processed, recovered, errors };
+  const { data: rpcClaimed, error: rpcError } = await admin.rpc("claim_music_generations", {
+    p_worker_id: workerId,
+    p_batch_size: 5,
+    p_lease_minutes: WORKER_LEASE_MINUTES,
+  });
+
+  if (rpcError || !rpcClaimed || (rpcClaimed as unknown[]).length === 0) {
+    // Fallback: use the old UPDATE + ORDER + LIMIT pattern if the RPC
+    // isn't deployed yet (migration hasn't been applied).
+    const leaseExpiresAt = new Date(Date.now() + WORKER_LEASE_MINUTES * 60_000).toISOString();
+    const { data: fallbackClaimed, error: claimError } = await admin
+      .from("music_generations")
+      .update({ status: "claimed", worker_lease_expires_at: leaseExpiresAt })
+      .eq("status", "queued")
+      .order("created_at", { ascending: true })
+      .limit(5)
+      .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key");
+
+    if (claimError) {
+      errors.push(`Claim query failed: ${claimError.message}`);
+      return { processed, recovered, errors };
+    }
+    claimedRows = (fallbackClaimed ?? []) as typeof claimedRows;
+  } else {
+    // RPC returned IDs — fetch the full rows for processing.
+    const claimedIds = (rpcClaimed as Array<{ id: string }>).map((r) => r.id);
+    if (claimedIds.length > 0) {
+      const { data: fullRows } = await admin
+        .from("music_generations")
+        .select("id, user_id, original_prompt, structured_blueprint, requested_duration, idempotency_key")
+        .in("id", claimedIds);
+      claimedRows = (fullRows ?? []) as typeof claimedRows;
+    }
   }
 
-  for (const gen of claimed ?? []) {
+  for (const gen of claimedRows) {
     try {
       const { data: user } = await admin
         .from("users")

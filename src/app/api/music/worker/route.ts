@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { processPendingGenerations } from "@/lib/music/generation-service";
 
 export const runtime = "nodejs";
@@ -6,37 +7,78 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
+ * Timing-safe string comparison. Returns false if lengths differ.
+ */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify the request is authorized to invoke the worker.
+ *
+ * Accepts EITHER:
+ *   1. Vercel Cron:  Authorization: Bearer <CRON_SECRET>
+ *      (Vercel's documented mechanism — see vercel.com/docs/cron-jobs)
+ *   2. Internal worker: x-worker-secret: <MUSIC_WORKER_SECRET>
+ *
+ * In development with NO secrets configured, the endpoint is open.
+ */
+function isAuthorized(req: NextRequest): boolean {
+  const workerSecret = process.env.MUSIC_WORKER_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+
+  // No secrets configured → open (development only).
+  if (!workerSecret && !cronSecret) return true;
+
+  // Check internal worker secret (x-worker-secret header).
+  const providedWorker = req.headers.get("x-worker-secret");
+  if (workerSecret && providedWorker && safeEqual(providedWorker, workerSecret)) {
+    return true;
+  }
+
+  // Check Vercel cron secret (Authorization: Bearer <CRON_SECRET>).
+  // This is Vercel's documented auth mechanism for cron jobs.
+  if (cronSecret) {
+    const authHeader = req.headers.get("authorization") || "";
+    let presented = "";
+    if (authHeader.toLowerCase().startsWith("bearer ")) {
+      presented = authHeader.slice(7).trim();
+    }
+    if (presented && safeEqual(presented, cronSecret)) {
+      return true;
+    }
+    // Backward compat: some older Vercel projects sent x-vercel-cron-auth-token.
+    // Keep this as a fallback so a transition doesn't break production.
+    const legacyCron = req.headers.get("x-vercel-cron-auth-token");
+    if (legacyCron && safeEqual(legacyCron, cronSecret)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * POST /api/music/worker
  *
  * Durable worker endpoint that processes pending and stale music generations.
  *
- * This solves the serverless background-job problem: instead of relying on
- * `void processGeneration()` after the HTTP response (which can freeze on
- * Vercel), this endpoint is called to process queued jobs synchronously.
+ * Triggered by:
+ *   - Vercel Cron (vercel.json schedule) — Authorization: Bearer CRON_SECRET
+ *   - Internal server kick (after generation creation) — x-worker-secret
+ *   - Manual admin call
  *
- * Can be triggered by:
- *   - Vercel Cron (vercel.json schedule)
- *   - The client polling the status and detecting a stale job
- *   - A manual admin call
- *
- * Security: protected by a shared secret header (MUSIC_WORKER_SECRET).
+ * Security: protected by CRON_SECRET (Bearer) or MUSIC_WORKER_SECRET (x-worker-secret).
  * In development with no secret configured, the endpoint is open.
  */
 async function handler(req: NextRequest) {
-  // Security: allow either MUSIC_WORKER_SECRET or Vercel's CRON_SECRET.
-  // Vercel cron automatically sends x-vercel-cron-auth-token header.
-  const workerSecret = process.env.MUSIC_WORKER_SECRET;
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (workerSecret || cronSecret) {
-    const provided = req.headers.get("x-worker-secret");
-    const cronProvided = req.headers.get("x-vercel-cron-auth-token");
-    const authorized =
-      (workerSecret && provided === workerSecret) ||
-      (cronSecret && cronProvided === cronSecret);
-    if (!authorized) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {

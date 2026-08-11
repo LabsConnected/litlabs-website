@@ -101,11 +101,11 @@ export function useMusicGeneration() {
         }));
 
         // Stale-job detection: if the job has been in a non-terminal state
-        // for >30s without progress, trigger the worker endpoint to resume.
-        // This handles the case where the original serverless function was
-        // frozen/killed after returning 202. We check both 'queued' AND
-        // 'preparing'/'generating'/'processing' because the void processGeneration
-        // may have started but been killed mid-execution.
+        // for >30s without progress, kick the worker via the authenticated
+        // user-safe endpoint. This replaces the old direct /api/music/worker
+        // call that always got 401 because the browser can't send
+        // MUSIC_WORKER_SECRET. The kick endpoint is Clerk-authenticated and
+        // ownership-scoped — it triggers server-side processing safely.
         const activeStaleStates = ["queued", "preparing", "generating", "processing"];
         if (activeStaleStates.includes(status)) {
           if (queuedSinceRef.current === null) {
@@ -115,7 +115,13 @@ export function useMusicGeneration() {
             !workerTriggeredRef.current
           ) {
             workerTriggeredRef.current = true;
-            void fetch("/api/music/worker", { method: "POST" }).catch(() => {});
+            // Use the authenticated kick endpoint, NOT /api/music/worker.
+            // The kick endpoint verifies ownership and triggers processing
+            // server-side without exposing worker secrets to the browser.
+            void fetch(`/api/music/generations/${generationId}/kick`, {
+              method: "POST",
+              credentials: "include",
+            }).catch(() => {});
           }
         } else {
           queuedSinceRef.current = null;
