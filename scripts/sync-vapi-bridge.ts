@@ -108,10 +108,6 @@ async function main() {
   const patch = {
     // Server URL for call lifecycle events (status-update, end-of-call-report, assistant-request)
     serverUrl: EVENTS_URL,
-    // Auth header sent to both serverUrl and the Custom LLM
-    serverHeaders: {
-      Authorization: authHeader,
-    },
     // Custom LLM: Vapi sends transcripts to our /api/vapi/turn endpoint
     // and speaks the response via TTS
     model: {
@@ -125,6 +121,14 @@ async function main() {
       },
       // No tools — the LiTT Runtime handles all tool execution server-side
       toolIds: [],
+      // Minimal system message — the LiTT runtime injects full context per-call
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are LiTT, the AI assistant for LiTTree LabStudios. You handle voice calls and route them through the LiTT runtime.",
+        },
+      ],
     },
   };
 
