@@ -28,5 +28,6 @@ export interface MusicProvider {
 export { ElevenMusicProvider } from "./elevenlabs";
 export { MurekaMusicProvider } from "./mureka";
 export { MockMusicProvider } from "./mock";
+export { LyriaMusicProvider } from "./lyria";
 
 export type { GenerationStatus, MusicProviderName };
