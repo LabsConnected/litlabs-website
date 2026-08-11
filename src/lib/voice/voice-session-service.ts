@@ -82,7 +82,7 @@ async function resolveUserByPhone(phone: string): Promise<{
     .from("users")
     .select("clerk_id, display_name")
     .eq("phone", normalized)
-    .single();
+    .maybeSingle();
   if (error || !data?.clerk_id) return null;
   return { clerkId: data.clerk_id, displayName: data.display_name ?? null };
 }
@@ -93,7 +93,21 @@ async function resolveUserByPhone(phone: string): Promise<{
  */
 async function resolveActiveProject(userId: string): Promise<string | null> {
   try {
-    const project = await resolveCurrentProject({ userId });
+    if (!supabaseAdmin) {
+      const projects = await listProjects(userId);
+      return projects.projects[0]?.id ?? projects.legacyOnly[0]?.id ?? null;
+    }
+
+    const { data: activeRecord } = await supabaseAdmin
+      .from("user_active_project")
+      .select("project_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const project = await resolveCurrentProject({
+      userId,
+      explicitProjectId: activeRecord?.project_id ?? undefined,
+    });
     return project?.projectId ?? null;
   } catch {
     try {
