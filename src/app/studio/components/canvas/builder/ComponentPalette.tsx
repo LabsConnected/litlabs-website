@@ -1,10 +1,25 @@
 "use client";
 
+/**
+ * LeftPanel — the main left sidebar with 5 tabs:
+ *   Build | Blocks | Components | Assets | Layers
+ *
+ * - Build: full-page starter templates (landing page, dashboard, etc.)
+ * - Blocks: pre-built section blocks (hero, features, pricing, etc.)
+ * - Components: individual primitives (heading, button, image, etc.)
+ * - Assets: user's media library
+ * - Layers: document tree / layer list
+ */
+
 import {
-  LayoutTemplate,
+  Hammer,
+  Blocks,
+  Component,
+  FolderOpen,
+  Layers,
+  Type,
   Square,
   Heading,
-  Type,
   MousePointerClick,
   Image as ImageIcon,
   CreditCard,
@@ -12,15 +27,31 @@ import {
   FormInput,
   Columns3,
   MoveVertical,
-  Layers,
-  Component,
+  Star,
+  Tag,
+  CircleUser,
+  Video,
+  Minus,
+  PanelTop,
+  ChevronDown,
+  Menu,
+  PanelBottom,
+  Table,
+  List,
+  AlignLeft,
+  CheckSquare,
+  Link as LinkIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { PALETTE_ITEMS, type NodeType } from "./types";
 import { useCanvasBuilderStore } from "./store";
 import { LayersPanel } from "./LayersPanel";
+import { BuildPanel } from "./BuildPanel";
+import { BlocksPanel } from "./BlocksPanel";
+import { AssetsPanel } from "./AssetsPanel";
 
-const ICONS: Record<string, typeof Type> = {
-  LayoutTemplate,
+const ICONS: Record<string, LucideIcon> = {
+  LayoutTemplate: Square,
   Square,
   Heading,
   Type,
@@ -31,7 +62,29 @@ const ICONS: Record<string, typeof Type> = {
   FormInput,
   Columns3,
   MoveVertical,
+  Star,
+  Tag,
+  "CircleUser": CircleUser,
+  Video,
+  Minus,
+  "PanelTop": PanelTop,
+  ChevronDown,
+  Menu,
+  "PanelBottom": PanelBottom,
+  Table,
+  List,
+  "AlignLeft": AlignLeft,
+  "CheckSquare": CheckSquare,
+  Link: LinkIcon,
 };
+
+const TAB_CONFIG: { id: "build" | "blocks" | "components" | "assets" | "layers"; label: string; icon: LucideIcon }[] = [
+  { id: "build", label: "Build", icon: Hammer },
+  { id: "blocks", label: "Blocks", icon: Blocks },
+  { id: "components", label: "Components", icon: Component },
+  { id: "assets", label: "Assets", icon: FolderOpen },
+  { id: "layers", label: "Layers", icon: Layers },
+];
 
 const tabBtn: React.CSSProperties = {
   flex: 1,
@@ -40,15 +93,15 @@ const tabBtn: React.CSSProperties = {
   border: "1px solid transparent",
   backgroundColor: "transparent",
   color: "var(--glass-text-3)",
-  fontSize: 9,
+  fontSize: 8,
   fontWeight: 800,
   textTransform: "uppercase",
-  letterSpacing: "0.08em",
+  letterSpacing: "0.06em",
   cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 4,
+  gap: 3,
   transition: "all 0.12s ease",
 };
 
@@ -75,23 +128,28 @@ export function ComponentPalette() {
       className="flex h-full w-full flex-col glass-panel"
       style={{ borderRight: "1px solid var(--glass-border)", borderRadius: 0 }}
     >
-      {/* Tab switcher */}
+      {/* Tab switcher — 5 tabs */}
       <div className="flex shrink-0 items-center gap-0.5 p-1.5" style={{ borderBottom: "1px solid var(--glass-border)" }}>
-        <button
-          onClick={() => setLeftPanelTab("components")}
-          style={leftPanelTab === "components" ? tabActive : tabBtn}
-        >
-          <Component size={11} /> Components
-        </button>
-        <button
-          onClick={() => setLeftPanelTab("layers")}
-          style={leftPanelTab === "layers" ? tabActive : tabBtn}
-        >
-          <Layers size={11} /> Layers
-        </button>
+        {TAB_CONFIG.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setLeftPanelTab(tab.id)}
+              style={leftPanelTab === tab.id ? tabActive : tabBtn}
+            >
+              <Icon size={10} /> {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      {leftPanelTab === "components" ? (
+      {/* Tab content */}
+      {leftPanelTab === "build" && <BuildPanel />}
+
+      {leftPanelTab === "blocks" && <BlocksPanel />}
+
+      {leftPanelTab === "components" && (
         <div className="flex-1 overflow-y-auto p-2">
           <div className="grid grid-cols-2 gap-1.5">
             {PALETTE_ITEMS.map((item) => {
@@ -118,9 +176,11 @@ export function ComponentPalette() {
             })}
           </div>
         </div>
-      ) : (
-        <LayersPanel />
       )}
+
+      {leftPanelTab === "assets" && <AssetsPanel />}
+
+      {leftPanelTab === "layers" && <LayersPanel />}
     </div>
   );
 }

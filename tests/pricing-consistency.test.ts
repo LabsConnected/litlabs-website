@@ -42,15 +42,15 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.starter.monthlyCredits).toBe(500);
     });
 
-    it("Creator Beta is $7/month", () => {
+    it("Creator Beta is $15/month", () => {
       expect(PLANS.creator_beta.billingType).toBe("subscription");
-      expect(PLANS.creator_beta.monthlyPriceCents).toBe(700);
+      expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
       expect(PLANS.creator_beta.monthlyCredits).toBe(6000);
     });
 
-    it("Pro Builder Beta is $19/month", () => {
+    it("Pro Builder Beta is $39/month", () => {
       expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
-      expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(1900);
+      expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
       expect(PLANS.pro_builder_beta.monthlyCredits).toBe(20000);
     });
 
@@ -90,15 +90,15 @@ describe("Pricing contract — single source of truth", () => {
     });
 
     it("formatPrice renders dollar amounts", () => {
-      expect(formatPrice(700)).toBe("$7");
-      expect(formatPrice(1900)).toBe("$19");
+      expect(formatPrice(1500)).toBe("$15");
+      expect(formatPrice(3900)).toBe("$39");
       expect(formatPrice(14900)).toBe("$149");
     });
 
     it("formatPriceMonthly renders per-month", () => {
       expect(formatPriceMonthly(0)).toBe("Free");
-      expect(formatPriceMonthly(700)).toBe("$7/month");
-      expect(formatPriceMonthly(1900)).toBe("$19/month");
+      expect(formatPriceMonthly(1500)).toBe("$15/month");
+      expect(formatPriceMonthly(3900)).toBe("$39/month");
     });
   });
 

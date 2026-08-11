@@ -33,6 +33,7 @@ function Header() {
           <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
           <Link href="/games" className="transition hover:text-[#a8ff2f]">Games</Link>
           <Link href="/marketplace" className="transition hover:text-[#a8ff2f]">Marketplace</Link>
+          <Link href="/hire" className="transition hover:text-[#a8ff2f]">Hire Us</Link>
           <Link href="/pricing" className="transition hover:text-[#a8ff2f]">Pricing</Link>
         </nav>
         <div className="flex items-center gap-2">

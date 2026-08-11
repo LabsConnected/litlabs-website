@@ -88,8 +88,8 @@ const PERSIST_MSG_KEY = "litlabs:canvas:messages";
 const LITTREE_PRICING_CONTEXT = `
 LiTTree REAL pricing (use these exact values, not placeholders):
 - Starter: FREE, 500 AI credits (one-time), 1 active project, LiTT & Spark agents, code/image generation, public previews, community support
-- Creator Beta: $7/mo (was $15), 6,000 AI credits/mo, 5 active projects, research/writing/marketing skills, private projects, GitHub connection, voice mode, preview deployments
-- Pro Builder Beta: $19/mo (was $39), 20,000 AI credits/mo, 25 active projects, coding & analytics skills, terminal runtime, advanced coding models, diff review, Vercel deployment, Supabase integration, priority generation
+- Creator Beta: $15/mo (later $25), 6,000 AI credits/mo, 5 active projects, research/writing/marketing skills, private projects, GitHub connection, voice mode, preview deployments
+- Pro Builder Beta: $39/mo (later $49), 20,000 AI credits/mo, 25 active projects, coding & analytics skills, terminal runtime, advanced coding models, diff review, Vercel deployment, Supabase integration, priority generation
 - Founding Member: $149 one-time, permanent Creator-level access, founder badge (limited to 100)
 
 Design system: dark theme, purple primary (#9B4DFF), green accent (#4DFF62), cyan (#65F4FF), bg #08060F, surface #0D0916.

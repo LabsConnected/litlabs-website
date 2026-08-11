@@ -9,11 +9,13 @@ export type StudioModel = {
   apiModel?: string;
   apiProvider?: string;
   short?: string;
-  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias";
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced";
   /** True if this is a stable LiTT alias that routes to an underlying provider. */
   isLittAlias?: boolean;
   /** Description shown in the model picker tooltip. */
   description?: string;
+  /** BITS estimate label for display */
+  bitsLabel?: string;
 };
 
 /**
@@ -26,6 +28,21 @@ export type StudioModel = {
  */
 export const LITT_MODEL_ALIASES: StudioModel[] = [
   {
+    id: "litt-auto",
+    name: "LiTT Auto",
+    provider: "LiTT",
+    cost: "hybrid",
+    speed: "fast",
+    icon: "✨",
+    category: "litt-alias",
+    isLittAlias: true,
+    recommended: true,
+    description: "Best model for the task. Routes automatically.",
+    apiProvider: "gemini",
+    apiModel: "gemini-2.5-flash",
+    bitsLabel: "~1–5 BITS",
+  },
+  {
     id: "litt-fast",
     name: "LiTT Fast",
     provider: "LiTT",
@@ -34,10 +51,10 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     icon: "⚡",
     category: "litt-alias",
     isLittAlias: true,
-    recommended: true,
-    description: "Quick answers and simple tasks. Routes to the fastest available model.",
+    description: "Quick answers and simple tasks.",
     apiProvider: "groq",
     apiModel: "llama-3.3-70b-versatile",
+    bitsLabel: "Low BITS",
   },
   {
     id: "litt-balanced",
@@ -48,10 +65,10 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     icon: "⚖️",
     category: "litt-alias",
     isLittAlias: true,
-    recommended: true,
-    description: "General-purpose chat with good quality and speed.",
+    description: "Everyday work with good quality and speed.",
     apiProvider: "gemini",
     apiModel: "gemini-2.5-flash",
+    bitsLabel: "Standard BITS",
   },
   {
     id: "litt-reasoning",
@@ -65,6 +82,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Complex planning, analysis, and multi-step reasoning.",
     apiProvider: "openrouter-deepseek",
     apiModel: "deepseek/deepseek-chat:free",
+    bitsLabel: "Higher BITS",
   },
   {
     id: "litt-code",
@@ -75,9 +93,10 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     icon: "⌨️",
     category: "litt-alias",
     isLittAlias: true,
-    description: "Code generation, debugging, and technical work.",
+    description: "Development + debugging.",
     apiProvider: "openrouter-qwen",
     apiModel: "qwen/qwen-2.5-coder-32b-instruct:free",
+    bitsLabel: "Low BITS",
   },
   {
     id: "litt-research",
@@ -91,6 +110,7 @@ export const LITT_MODEL_ALIASES: StudioModel[] = [
     description: "Web research, summarization, and information gathering.",
     apiProvider: "gemini",
     apiModel: "gemini-2.5-flash",
+    bitsLabel: "Standard BITS",
   },
 ];
 
@@ -108,29 +128,19 @@ export const CHAT_MODELS: StudioModel[] = [
   // ── LiTT Aliases — stable branded names (shown first) ────────────
   ...LITT_MODEL_ALIASES,
 
-  // ── Auto Best — routes through the full chain ────────────────────
-  { id: "auto", name: "Auto Best", provider: "Auto", cost: "hybrid", speed: "fast", icon: "🧠", recommended: true, category: "auto", apiProvider: "gemini", apiModel: "gemini-2.5-flash" },
+  // ── BYOK — user-supplied keys ────────────────────────────────────
+  { id: "gpt-4o", name: "GPT-4o (BYOK)", provider: "openai", cost: "paid", speed: "fast", icon: "🔑", category: "byok", apiModel: "gpt-4o", description: "Provider bills you directly. No LiTT model markup.", bitsLabel: "No LiTTBits" },
+  { id: "claude-sonnet", name: "Claude Sonnet (BYOK)", provider: "anthropic", cost: "paid", speed: "medium", icon: "🔑", category: "byok", apiModel: "claude-sonnet-4-5", description: "Provider bills you directly. No LiTT model markup.", bitsLabel: "No LiTTBits" },
 
-  // Free AI — Gemini primary, OpenRouter free fallback
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "free", apiModel: "gemini-2.5-flash" },
-  { id: "openrouter-free", name: "OpenRouter Free", provider: "openrouter", cost: "free", speed: "medium", icon: "🎁", category: "free", apiProvider: "openrouter-free", apiModel: "openrouter/free" },
-  { id: "deepseek-free", name: "DeepSeek Chat", provider: "openrouter", cost: "free", speed: "medium", icon: "🐍", category: "free", apiProvider: "openrouter-deepseek", apiModel: "deepseek/deepseek-chat:free" },
-  { id: "llama-free", name: "Llama 3.3 70B", provider: "openrouter", cost: "free", speed: "medium", icon: "🦙", category: "free", apiProvider: "openrouter-llama", apiModel: "meta-llama/llama-3.3-70b-instruct:free" },
-
-  // Fast — Groq primary, Gemini Flash fallback
-  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", recommended: true, category: "fast", apiProvider: "groq", apiModel: "llama-3.3-70b-versatile" },
-
-  // Coding — Qwen3 Coder primary, Gemini fallback
-  { id: "qwen-coder", name: "Qwen3 Coder", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "code", apiProvider: "openrouter-qwen", apiModel: "qwen/qwen-2.5-coder-32b-instruct:free" },
-
-  // Creative — Gemini high temp
-  { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "creative", apiModel: "gemini-2.5-flash" },
-
-  // Vision — Gemini vision-capable
-  { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "vision", apiModel: "gemini-2.5-flash" },
-
-  // BYOK — user-supplied keys (only show models that have API keys configured)
-  { id: "gpt-4o", name: "GPT-4o (BYOK)", provider: "openai", cost: "paid", speed: "fast", icon: "🔮", category: "byok", apiModel: "gpt-4o" },
+  // ── Advanced Providers — raw provider models (collapsible) ───────
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini", cost: "free", speed: "fast", icon: "⚡", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
+  { id: "openrouter-free", name: "OpenRouter Free", provider: "openrouter", cost: "free", speed: "medium", icon: "🎁", category: "advanced", apiProvider: "openrouter-free", apiModel: "openrouter/free", bitsLabel: "Included" },
+  { id: "deepseek-free", name: "DeepSeek Chat", provider: "openrouter", cost: "free", speed: "medium", icon: "🐍", category: "advanced", apiProvider: "openrouter-deepseek", apiModel: "deepseek/deepseek-chat:free", bitsLabel: "Included" },
+  { id: "llama-free", name: "Llama 3.3 70B", provider: "openrouter", cost: "free", speed: "medium", icon: "🦙", category: "advanced", apiProvider: "openrouter-llama", apiModel: "meta-llama/llama-3.3-70b-instruct:free", bitsLabel: "Included" },
+  { id: "groq-llama-70b", name: "Groq Llama 70B", provider: "groq", cost: "free", speed: "fast", icon: "🚀", category: "advanced", apiProvider: "groq", apiModel: "llama-3.3-70b-versatile", bitsLabel: "Low BITS" },
+  { id: "qwen-coder", name: "Qwen3 Coder", provider: "openrouter", cost: "free", speed: "fast", icon: "⌨️", category: "advanced", apiProvider: "openrouter-qwen", apiModel: "qwen/qwen-2.5-coder-32b-instruct:free", bitsLabel: "Low BITS" },
+  { id: "gemini-creative", name: "Gemini Creative", provider: "gemini", cost: "free", speed: "fast", icon: "🎨", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
+  { id: "gemini-vision", name: "Gemini Vision", provider: "gemini", cost: "free", speed: "fast", icon: "👁️", category: "advanced", apiModel: "gemini-2.5-flash", bitsLabel: "Included" },
 ];
 
 export const CODE_MODELS: StudioModel[] = [
@@ -221,7 +231,38 @@ export function getVideoModelCapabilities(modelId: string): VideoModelCapabiliti
 }
 
 export const MUSIC_MODELS = [
-  { id: "lyria-3-clip-preview", label: "Lyria", provider: "Google", desc: "Full music generation", cost: 3 },
+  {
+    id: "lyria-3-clip-preview",
+    label: "LiTT Music Preview",
+    provider: "Google",
+    desc: "Quick 30-second music clips for inspiration",
+    cost: 4,
+    available: true,
+  },
+  {
+    id: "lyria-3-pro-preview",
+    label: "LiTT Music",
+    provider: "Google",
+    desc: "Full songs with vocals, lyrics, and song structure",
+    cost: 8,
+    available: true,
+  },
+  {
+    id: "eleven-music-v2",
+    label: "LiTT Music Studio",
+    provider: "ElevenLabs",
+    desc: "Premium creator workflow with section-by-section composition",
+    cost: 15,
+    available: !!process.env.ELEVENLABS_API_KEY,
+  },
+  {
+    id: "mureka",
+    label: "Mureka (Advanced)",
+    provider: "Mureka",
+    desc: "Alternative music generation engine",
+    cost: 5,
+    available: process.env.ENABLE_MUREKA === "true" && !!process.env.MUREKA_API_KEY,
+  },
 ];
 
 export const SPACE_MODEL = {

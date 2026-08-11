@@ -15,19 +15,19 @@ import {
 // (which requires Supabase and Stripe integration tests).
 
 describe("Stripe catalog — verified plan products", () => {
-  it("Creator Beta: $7/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(700);
+  it("Creator Beta: $15/month recurring", () => {
+    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(1500);
     expect(VERIFIED_STRIPE_PLANS.creator_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe("STRIPE_PRICE_CREATOR_BETA");
-    expect(PLANS.creator_beta.monthlyPriceCents).toBe(700);
+    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
     expect(PLANS.creator_beta.billingType).toBe("subscription");
   });
 
-  it("Pro Builder Beta: $19/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(1900);
+  it("Pro Builder Beta: $39/month recurring", () => {
+    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(3900);
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.envVar).toBe("STRIPE_PRICE_PRO_BUILDER_BETA");
-    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(1900);
+    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
     expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
   });
 
@@ -108,9 +108,9 @@ describe("Creator Beta entitlement contract", () => {
     expect(PLAN_CONTRACTS.creator_beta.creditGrantFrequency).toBe("per_billing_cycle");
   });
 
-  it("standard future price is $15/month", () => {
-    expect(PLANS.creator_beta.standardPriceCents).toBe(1500);
-    expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBe(1500);
+  it("standard future price is $25/month", () => {
+    expect(PLANS.creator_beta.standardPriceCents).toBe(2500);
+    expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBe(2500);
   });
 
   it("has 5 active project limit", () => {
@@ -130,9 +130,9 @@ describe("Pro Builder Beta entitlement contract", () => {
     expect(PLAN_CONTRACTS.pro_builder_beta.creditGrantFrequency).toBe("per_billing_cycle");
   });
 
-  it("standard future price is $39/month", () => {
-    expect(PLANS.pro_builder_beta.standardPriceCents).toBe(3900);
-    expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBe(3900);
+  it("standard future price is $49/month", () => {
+    expect(PLANS.pro_builder_beta.standardPriceCents).toBe(4900);
+    expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBe(4900);
   });
 
   it("has 25 active project limit", () => {
@@ -184,10 +184,20 @@ describe("Legacy Stripe products", () => {
   });
 
   it("legacy prices are NOT current plan prices", () => {
-    // $9.99, $39, $5, $19.99 — none match $7, $19, or $149
+    // Legacy: $9.99, $39, $5, $19.99
+    // Current: $15, $39, $149
+    // Note: Legacy Elite Membership ($39/mo) coincidentally matches Pro Builder Beta ($39/mo),
+    // but they are different products. The distinction is the product NAME, not just price.
+    const legacyNames = LEGACY_STRIPE_PRODUCTS.map((p) => p.name);
     const legacyPrices = LEGACY_STRIPE_PRODUCTS.map((p) => p.price);
-    expect(legacyPrices).not.toContain("$7/month");
-    expect(legacyPrices).not.toContain("$19/month");
+
+    // Legacy products must NOT have current plan names
+    expect(legacyNames.some((n) => n.includes("Creator Beta"))).toBe(false);
+    expect(legacyNames.some((n) => n.includes("Pro Builder Beta"))).toBe(false);
+    expect(legacyNames.some((n) => n.includes("Founding Member"))).toBe(false);
+
+    // $15 and $149 must not appear in legacy prices
+    expect(legacyPrices).not.toContain("$15/month");
     expect(legacyPrices).not.toContain("$149 one-time");
   });
 });

@@ -2,7 +2,8 @@ export type PlanId =
   | "starter"
   | "creator_beta"
   | "pro_builder_beta"
-  | "founder";
+  | "founder"
+  | "owner"; // Internal-only — not billable via Stripe, not shown in PLANS
 
 export type BillingType = "free" | "subscription" | "one_time";
 
@@ -53,9 +54,9 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Creator Beta",
     description: "Research, write, and market with AI agents",
     billingType: "subscription",
-    monthlyPriceCents: 700,
-    standardPriceCents: 1500,
-    default_price: 700,
+    monthlyPriceCents: 1500,
+    standardPriceCents: 2500,
+    default_price: 1500,
     stripePriceIdEnv: "STRIPE_PRICE_CREATOR_BETA",
     monthlyCredits: 6000,
     activeProjectLimit: 5,
@@ -79,9 +80,9 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Pro Builder Beta",
     description: "Build, debug, and deploy with full AI tooling",
     billingType: "subscription",
-    monthlyPriceCents: 1900,
-    standardPriceCents: 3900,
-    default_price: 1900,
+    monthlyPriceCents: 3900,
+    standardPriceCents: 4900,
+    default_price: 3900,
     stripePriceIdEnv: "STRIPE_PRICE_PRO_BUILDER_BETA",
     monthlyCredits: 20000,
     activeProjectLimit: 25,
@@ -121,9 +122,23 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     enabled: true,
     founderLimit: 100,
   },
+  owner: {
+    id: "owner",
+    name: "OWNER",
+    description: "Internal — platform owner. Not billable, not shown to customers.",
+    billingType: "free",
+    monthlyPriceCents: null,
+    standardPriceCents: null,
+    default_price: null,
+    monthlyCredits: 250_000,
+    activeProjectLimit: 999_999,
+    features: [],
+    beta: true,
+    enabled: false, // Not purchasable
+  },
 };
 
-export const PLAN_LIST = Object.values(PLANS);
+export const PLAN_LIST = Object.values(PLANS).filter((p) => p.enabled); // Excludes internal "owner" plan (enabled: false)
 
 /**
  * Plan rank — higher = more access. Used by the agent entitlement resolver
@@ -136,6 +151,7 @@ export const PLAN_RANK: Record<PlanId, number> = {
   creator_beta: 1,
   founder: 1,
   pro_builder_beta: 2,
+  owner: 999, // Internal — above all customer tiers
 };
 
 export function getPlanById(id: string): PlanDefinition | null {

@@ -613,8 +613,8 @@ function MarketplaceInner() {
             {/* Creator Beta */}
             <div className="rounded-2xl border-2 border-cyan-400/30 bg-cyan-400/5 p-5">
               <div className="text-xs font-black uppercase tracking-wider text-cyan-400">Creator Beta</div>
-              <div className="mt-1 text-2xl font-black text-white">$7/month</div>
-              <div className="text-[10px] text-white/40">Founder pricing · later $15</div>
+              <div className="mt-1 text-2xl font-black text-white">$15/month</div>
+              <div className="text-[10px] text-white/40">Beta pricing · later $25</div>
               <div className="mt-3 space-y-1">
                 {["5 active projects", "6,000 monthly AI credits", "GitHub connection", "Voice mode"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
@@ -630,8 +630,8 @@ function MarketplaceInner() {
             {/* Pro Builder Beta */}
             <div className="rounded-2xl border-2 border-violet-400/30 bg-violet-400/5 p-5">
               <div className="text-xs font-black uppercase tracking-wider text-violet-400">Pro Builder Beta</div>
-              <div className="mt-1 text-2xl font-black text-white">$19/month</div>
-              <div className="text-[10px] text-white/40">Founder pricing · later $39</div>
+              <div className="mt-1 text-2xl font-black text-white">$39/month</div>
+              <div className="text-[10px] text-white/40">Beta pricing · later $49</div>
               <div className="mt-3 space-y-1">
                 {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Vercel deployment"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">

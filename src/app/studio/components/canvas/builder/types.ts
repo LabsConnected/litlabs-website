@@ -17,7 +17,22 @@ export type NodeType =
   | "input"
   | "form"
   | "columns"
-  | "spacer";
+  | "spacer"
+  // ── New primitives ──
+  | "icon"
+  | "badge"
+  | "avatar"
+  | "video"
+  | "divider"
+  | "tabs"
+  | "accordion"
+  | "navbar"
+  | "footer"
+  | "table"
+  | "list"
+  | "textarea"
+  | "checkbox"
+  | "link";
 
 export interface NodeStyles {
   width?: string;
@@ -54,6 +69,27 @@ export interface NodeStyles {
   minWidth?: string;
   maxWidth?: string;
   flex?: string;
+  overflow?: string;
+  borderBottom?: string;
+  borderTop?: string;
+  borderLeft?: string;
+  borderRight?: string;
+  position?: string;
+  top?: string;
+  bottom?: string;
+  left?: string;
+  right?: string;
+  zIndex?: number;
+  cursor?: string;
+  objectFit?: string;
+  lineHeight?: string;
+  letterSpacing?: string;
+  textTransform?: string;
+  textOverflow?: string;
+  whiteSpace?: string;
+  gridTemplateColumns?: string;
+  gridGap?: string;
+  aspectRatio?: string;
 }
 
 export interface NodeProps {
@@ -67,6 +103,22 @@ export interface NodeProps {
   inputName?: string;
   columns?: number;
   assetId?: string;
+  // ── New props ──
+  iconName?: string;       // lucide icon name for icon/badge
+  badgeVariant?: "default" | "success" | "warning" | "error" | "info";
+  avatarSrc?: string;
+  avatarName?: string;
+  videoSrc?: string;
+  videoPoster?: string;
+  tabLabels?: string[];    // for tabs
+  activeTab?: number;
+  accordionItems?: { title: string; content: string }[];
+  tableHeaders?: string[];
+  tableRows?: string[][];
+  listItems?: string[];
+  rows?: number;           // textarea rows
+  checked?: boolean;       // checkbox
+  label?: string;          // checkbox/link label
 }
 
 export interface CanvasNode {
@@ -227,6 +279,162 @@ export const PALETTE_ITEMS: PaletteItem[] = [
     canHaveChildren: false,
     defaultProps: {},
     defaultStyles: { height: "32px" },
+  },
+  // ── New primitives ──
+  {
+    type: "icon",
+    label: "Icon",
+    icon: "Star",
+    canHaveChildren: false,
+    defaultProps: { iconName: "Star" },
+    defaultStyles: { fontSize: 24, color: "var(--glass-purple)", textAlign: "center" },
+  },
+  {
+    type: "badge",
+    label: "Badge",
+    icon: "Tag",
+    canHaveChildren: false,
+    defaultProps: { text: "New", badgeVariant: "default" },
+    defaultStyles: {
+      padding: "4px 10px",
+      borderRadius: 999,
+      backgroundColor: "var(--glass-purple-soft)",
+      color: "var(--glass-purple)",
+      fontSize: 11,
+      fontWeight: "700",
+      textAlign: "center",
+    },
+  },
+  {
+    type: "avatar",
+    label: "Avatar",
+    icon: "CircleUser",
+    canHaveChildren: false,
+    defaultProps: { avatarSrc: "", avatarName: "User" },
+    defaultStyles: { width: "40px", height: "40px", borderRadius: 999 },
+  },
+  {
+    type: "video",
+    label: "Video",
+    icon: "Video",
+    canHaveChildren: false,
+    defaultProps: { videoSrc: "", videoPoster: "" },
+    defaultStyles: { width: "100%", borderRadius: 12, backgroundColor: "rgba(0,0,0,0.3)" },
+  },
+  {
+    type: "divider",
+    label: "Divider",
+    icon: "Minus",
+    canHaveChildren: false,
+    defaultProps: {},
+    defaultStyles: { height: "1px", backgroundColor: "var(--glass-border)", margin: "16px 0" },
+  },
+  {
+    type: "tabs",
+    label: "Tabs",
+    icon: "PanelTop",
+    canHaveChildren: false,
+    defaultProps: { tabLabels: ["Tab 1", "Tab 2", "Tab 3"], activeTab: 0 },
+    defaultStyles: { display: "flex", flexDirection: "column", gap: 8 },
+  },
+  {
+    type: "accordion",
+    label: "Accordion",
+    icon: "ChevronDown",
+    canHaveChildren: false,
+    defaultProps: {
+      accordionItems: [
+        { title: "Section 1", content: "Content for section 1" },
+        { title: "Section 2", content: "Content for section 2" },
+      ],
+    },
+    defaultStyles: { display: "flex", flexDirection: "column", gap: 8 },
+  },
+  {
+    type: "navbar",
+    label: "Navbar",
+    icon: "Menu",
+    canHaveChildren: true,
+    defaultProps: {},
+    defaultStyles: {
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "12px 24px",
+      backgroundColor: "rgba(255,255,255,0.02)",
+      borderBottom: "1px solid var(--glass-border)",
+    },
+  },
+  {
+    type: "footer",
+    label: "Footer",
+    icon: "PanelBottom",
+    canHaveChildren: true,
+    defaultProps: {},
+    defaultStyles: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 16,
+      padding: "48px 24px",
+      backgroundColor: "rgba(0,0,0,0.2)",
+    },
+  },
+  {
+    type: "table",
+    label: "Table",
+    icon: "Table",
+    canHaveChildren: false,
+    defaultProps: {
+      tableHeaders: ["Name", "Status", "Date"],
+      tableRows: [
+        ["Item 1", "Active", "2025-01-01"],
+        ["Item 2", "Pending", "2025-01-02"],
+      ],
+    },
+    defaultStyles: { width: "100%", fontSize: 13 },
+  },
+  {
+    type: "list",
+    label: "List",
+    icon: "List",
+    canHaveChildren: false,
+    defaultProps: { listItems: ["First item", "Second item", "Third item"] },
+    defaultStyles: { display: "flex", flexDirection: "column", gap: 6, fontSize: 14 },
+  },
+  {
+    type: "textarea",
+    label: "Textarea",
+    icon: "AlignLeft",
+    canHaveChildren: false,
+    defaultProps: { placeholder: "Enter message...", rows: 4, inputName: "message" },
+    defaultStyles: {
+      padding: "10px 14px",
+      borderRadius: 8,
+      backgroundColor: "rgba(255,255,255,0.03)",
+      borderWidth: 1,
+      borderColor: "var(--studio-border-strong)",
+      borderStyle: "solid",
+      fontSize: 14,
+      color: "var(--text-primary)",
+      width: "100%",
+    },
+  },
+  {
+    type: "checkbox",
+    label: "Checkbox",
+    icon: "CheckSquare",
+    canHaveChildren: false,
+    defaultProps: { label: "I agree to the terms", checked: false },
+    defaultStyles: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, fontSize: 14 },
+  },
+  {
+    type: "link",
+    label: "Link",
+    icon: "Link",
+    canHaveChildren: false,
+    defaultProps: { text: "Click here", href: "#", label: "" },
+    defaultStyles: { color: "var(--glass-purple)", fontSize: 14, fontWeight: "500" },
   },
 ];
 
