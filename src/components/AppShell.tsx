@@ -74,7 +74,7 @@ function DesktopSidebar({
 
   return (
     <aside
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
+      className={`sticky top-0 z-20 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
         collapsed ? "w-[72px]" : "w-[256px]"
       }`}
       style={{

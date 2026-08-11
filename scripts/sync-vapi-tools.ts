@@ -214,6 +214,40 @@ async function main() {
 
   const authHeader = CREDENTIAL_ID ? undefined : `Bearer ${TOOL_TOKEN}`;
 
+  // ── Bridge-mode conflict guard ──
+  // If the assistant is currently in LiTT Bridge mode (custom-llm provider),
+  // attaching Vapi tool IDs is the WRONG architecture — the LiTT Runtime
+  // handles all tool execution server-side via /api/vapi/turn, and
+  // sync:vapi-bridge clears toolIds. Running this script would silently
+  // re-enable the old tool-based architecture and break the bridge.
+  if (attach && !dryRun) {
+    try {
+      const current = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "GET");
+      const provider = (current?.model as Record<string, unknown> | undefined)?.provider;
+      if (provider === "custom-llm") {
+        console.error(
+          `\n⚠️  BRIDGE MODE CONFLICT — aborting.\n` +
+            `Assistant ${ASSISTANT_ID} is currently in LiTT Bridge mode (model.provider = "custom-llm").\n` +
+            `Attaching Vapi tool IDs would break the bridge architecture — the LiTT Runtime\n` +
+            `handles all tool execution server-side via /api/vapi/turn.\n\n` +
+            `If you intentionally want to switch back to the tool-based architecture:\n` +
+            `  1. Run: pnpm sync:vapi-bridge --dry-run  (to see what bridge mode sets)\n` +
+            `  2. Reconfigure the assistant to use a standard model provider (e.g. openai)\n` +
+            `  3. Then re-run this script\n\n` +
+            `To override this guard (not recommended), set VAPI_ALLOW_TOOLS_ON_BRIDGE=1.\n`,
+        );
+        if (process.env.VAPI_ALLOW_TOOLS_ON_BRIDGE !== "1") {
+          process.exit(1);
+        }
+        console.warn("  (override via VAPI_ALLOW_TOOLS_ON_BRIDGE=1 — proceeding anyway)\n");
+      }
+    } catch (err) {
+      // If we can't fetch the assistant, warn but don't block —
+      // the tool push itself will fail with a clearer error if the ID is wrong.
+      console.warn(`  (could not check bridge mode: ${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
   console.log(`\nLiTT Vapi tool sync`);
   console.log(`  server url      : ${SERVER_URL}`);
   console.log(`  assistant id    : ${ASSISTANT_ID}`);

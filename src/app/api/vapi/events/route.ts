@@ -27,14 +27,20 @@ export const maxDuration = 30;
  *
  * Auth: Authorization: Bearer <LITTLABS_VAPI_TOOL_TOKEN>
  *
- * Vapi event format:
+ * Vapi event format (current — wrapped in `message` envelope):
  *   {
- *     type: "status-update" | "assistant-request" | "tool-call" | "end-of-call-report",
- *     call: { id, assistantId, ... },
- *     message: { ... },
- *     artifact?: { ... },
- *     timestamp: string
+ *     message: {
+ *       type: "status-update" | "assistant-request" | "tool-call" | "end-of-call-report",
+ *       call: { id, assistantId, status, customer, ... },
+ *       artifact?: { ... },
+ *       status?: string,         // for status-update, lives in message not call
+ *       endedReason?: string,    // for end-of-call-report
+ *       timestamp: string,
+ *     }
  *   }
+ *
+ * Backward compat: unwrapped { type, call, artifact } is also accepted
+ * so existing tests and older Vapi payloads keep working.
  */
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
@@ -64,13 +70,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const type = body.type as string | undefined;
-  const call = body.call as Record<string, unknown> | undefined;
+  // Vapi wraps server events in a `message` envelope. Accept both
+  // wrapped (current Vapi) and unwrapped (legacy/tests) payloads.
+  const message = (body.message as Record<string, unknown> | undefined) ?? body;
+  const type = message.type as string | undefined;
+  const call = message.call as Record<string, unknown> | undefined;
   const callId = call?.id as string | undefined;
+  const artifact = message.artifact as Record<string, unknown> | undefined;
 
   switch (type) {
     case "status-update": {
-      const status = (call?.status as string) ?? "unknown";
+      const status = (message.status as string) ?? (call?.status as string) ?? "unknown";
       if (status === "ringing" || status === "in-progress" || status === "queued") {
         const customer = call?.customer as Record<string, unknown> | undefined;
         const callerPhone = (customer?.number as string) ?? "";
@@ -83,7 +93,12 @@ export async function POST(req: NextRequest) {
           });
         }
       }
-      if (status === "ended" || status === "failed" || status === "no-answer" || status === "busy") {
+      if (status === "ended") {
+        // Vapi's documented statuses are: scheduled, queued, ringing,
+        // in-progress, forwarding, ended. Failed/no-answer/busy are
+        // endedReason values (on end-of-call-report), not status values.
+        // The end-of-call-report case below handles those with richer
+        // artifact data.
         if (callId) {
           await endVoiceSession("vapi", callId, { callStatus: status });
         }
@@ -93,7 +108,6 @@ export async function POST(req: NextRequest) {
 
     case "end-of-call-report": {
       if (callId) {
-        const artifact = body.artifact as Record<string, unknown> | undefined;
         await endVoiceSession("vapi", callId, {
           artifact: artifact
             ? {
@@ -110,8 +124,8 @@ export async function POST(req: NextRequest) {
         const transcript = typeof artifact?.transcript === "string"
           ? artifact.transcript
           : Array.isArray(artifact?.messages)
-            ? (artifact.messages as Array<{ role?: string; content?: string }>)
-                .map((m) => `${m.role ?? "unknown"}: ${m.content ?? ""}`)
+            ? (artifact.messages as Array<{ role?: string; message?: string; content?: string }>)
+                .map((m) => `${m.role ?? "unknown"}: ${m.message ?? m.content ?? ""}`)
                 .join("\n")
             : "";
         const startedAt = (call?.startedAt as string) ?? new Date(Date.now() - (artifact?.durationMs as number ?? 0)).toISOString();
@@ -128,7 +142,7 @@ export async function POST(req: NextRequest) {
             const session = await getVoiceSession("vapi", callId);
             const payload = await buildGHLCallPayload({
               callId,
-              to: "+13239165462",
+              to: process.env.LITTLABS_BUSINESS_PHONE ?? "+13239165462",
               from: callerPhone,
               callerName: session?.callerName ?? null,
               startedAt,

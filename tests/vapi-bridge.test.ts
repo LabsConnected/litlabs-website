@@ -22,6 +22,7 @@ vi.mock("@/lib/supabase", () => ({
       update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ error: null })) })) })),
     })),
   },
+  getSupabaseAdmin: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/vapi-tools", () => ({
@@ -183,6 +184,58 @@ describe("POST /api/vapi/events", () => {
     const res = await eventsPOST(req);
     expect(res.status).toBe(200);
   });
+
+  // ─── Vapi envelope format (body.message.{type,call,...}) ─────────
+
+  it("creates a voice session on call ringing (Vapi envelope format)", async () => {
+    const req = makeRequest("https://litlabs.net/api/vapi/events", {
+      message: {
+        type: "status-update",
+        status: "ringing",
+        call: { id: "call_env_1", customer: { number: "+1234567890" } },
+        timestamp: new Date().toISOString(),
+      },
+    });
+    const res = await eventsPOST(req);
+    expect(res.status).toBe(200);
+    expect(startVoiceSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "vapi",
+        providerCallId: "call_env_1",
+        callerPhone: "+1234567890",
+      }),
+    );
+  });
+
+  it("ends the voice session on end-of-call-report (Vapi envelope format)", async () => {
+    const req = makeRequest("https://litlabs.net/api/vapi/events", {
+      message: {
+        type: "end-of-call-report",
+        endedReason: "hangup",
+        call: { id: "call_env_2" },
+        artifact: { durationMs: 30000, transcript: "AI: Hi" },
+        timestamp: new Date().toISOString(),
+      },
+    });
+    const res = await eventsPOST(req);
+    expect(res.status).toBe(200);
+    expect(endVoiceSession).toHaveBeenCalledWith("vapi", "call_env_2", expect.any(Object));
+  });
+
+  it("handles assistant-request via Vapi envelope format", async () => {
+    const req = makeRequest("https://litlabs.net/api/vapi/events", {
+      message: {
+        type: "assistant-request",
+        call: { id: "call_env_3", customer: { number: "+1234567890" } },
+        timestamp: new Date().toISOString(),
+      },
+    });
+    const res = await eventsPOST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session).toBeDefined();
+    expect(json.session.userId).toBe("user_abc");
+  });
 });
 
 // ─── /api/vapi/turn ─────────────────────────────────────────────
@@ -202,12 +255,18 @@ describe("POST /api/vapi/turn", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects missing call ID", async () => {
+  it("returns spoken fallback (not 400) when call ID is missing", async () => {
+    // Vapi's Custom LLM payload is OpenAI-compatible and may not include
+    // body.call.id. We must not hard-fail (Vapi would hang up) — return
+    // a spoken fallback in OpenAI-compatible format instead.
     const req = makeRequest("https://litlabs.net/api/vapi/turn", {
       messages: [{ role: "user", content: "hi" }],
     });
     const res = await turnPOST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.choices).toBeDefined();
+    expect(json.text).toContain("couldn't identify your call");
   });
 
   it("rejects missing user message", async () => {
@@ -228,7 +287,7 @@ describe("POST /api/vapi/turn", () => {
     const res = await turnPOST(req);
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.text).toContain("couldn't find your session");
+    expect(json.text).toContain("couldn't identify your call");
   });
 
   it("routes through runLiTTForVoice and returns OpenAI-compatible format", async () => {
@@ -297,5 +356,55 @@ describe("POST /api/vapi/turn", () => {
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.text).toContain("error");
+  });
+
+  // ─── call-context extraction from system message ──────────────
+
+  it("resolves callId + caller from [call-context] in system message when body.call is absent", async () => {
+    // Simulates Vapi's Custom LLM payload with no body.call, but the
+    // system message contains the [call-context] tag injected by
+    // sync-vapi-bridge via {{call.id}} / {{customer.number}} templates.
+    vi.mocked(getVoiceSession).mockResolvedValueOnce(null);
+    const req = makeRequest("https://litlabs.net/api/vapi/turn", {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are LiTT, the AI assistant for LiTTree LabStudios.\n\n[call-context callId=call_ctx_1 callerNumber=+15551234567]",
+        },
+        { role: "user", content: "hello" },
+      ],
+    });
+    const res = await turnPOST(req);
+    expect(res.status).toBe(200);
+    // startVoiceSession should have been called with the extracted callId + phone
+    expect(startVoiceSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "vapi",
+        providerCallId: "call_ctx_1",
+        callerPhone: "+15551234567",
+      }),
+    );
+  });
+
+  it("ignores unsubstituted template variables in [call-context]", async () => {
+    // If Vapi doesn't substitute {{call.id}}, the literal text should
+    // be filtered out, not treated as a real call ID.
+    vi.mocked(getVoiceSession).mockResolvedValueOnce(null);
+    const req = makeRequest("https://litlabs.net/api/vapi/turn", {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are LiTT.\n\n[call-context callId={{call.id}} callerNumber={{customer.number}}]",
+        },
+        { role: "user", content: "hello" },
+      ],
+    });
+    const res = await turnPOST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // No valid callId or phone → spoken fallback
+    expect(json.text).toContain("couldn't identify your call");
   });
 });
