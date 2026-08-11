@@ -1,9 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import NavbarWrapper from "@/components/NavbarWrapper";
+import { AppShell } from "@/components/AppShell";
 import FooterWrapper from "@/components/FooterWrapper";
-import MobileBottomNav from "@/components/MobileBottomNav";
 import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
@@ -79,28 +78,18 @@ export default function LayoutShell({
     );
   }
 
+  // Authenticated routes — use the unified AppShell
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className="relative z-10 flex min-h-screen">
-        <div className="flex-1 flex flex-col min-h-screen min-w-0">
-          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper />
-          <main
-            id="main-content"
-            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
-              ownChrome ? "pb-0" : "pb-[calc(88px+env(safe-area-inset-bottom))]"
-            }`}
-          >
-            {children}
-          </main>
-          {!ownChrome && <MobileBottomNav />}
-          <FooterWrapper />
-          <GlobalCompanion />
-          <YouTubePlayerShell />
-          <CookieConsent />
-          <ServiceWorkerRegistration />
-        </div>
+      <div className="relative z-10">
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+        <AppShell>{children}</AppShell>
+        {!ownChrome && <FooterWrapper />}
+        <GlobalCompanion />
+        <YouTubePlayerShell />
+        <CookieConsent />
+        <ServiceWorkerRegistration />
       </div>
     </>
   );

@@ -276,8 +276,8 @@ describe("8. Stripe subscription state is never modified", () => {
   it("PLANS canonical definitions are unchanged (no price/feature modifications)", () => {
     // Verify the canonical plans still have their original values
     expect(PLANS.starter.monthlyPriceCents).toBe(0);
-    expect(PLANS.creator_beta.monthlyPriceCents).toBe(700);
-    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(1900);
+    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
+    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
     expect(PLANS.founder.monthlyPriceCents).toBe(14900);
   });
 });

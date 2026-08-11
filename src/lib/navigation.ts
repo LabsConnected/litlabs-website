@@ -25,6 +25,12 @@ import {
   Code2,
   Workflow,
   FolderKanban,
+  Bell,
+  Gamepad2 as GamesIcon,
+  Compass,
+  Terminal,
+  Mic,
+  Rocket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -35,6 +41,12 @@ export type NavItem = {
   online?: boolean;
   children?: NavItem[];
   shortcut?: string;
+};
+
+export type NavSection = {
+  id: string;
+  label: string;
+  items: NavItem[];
 };
 
 export type NavGroup = {
@@ -56,6 +68,53 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
+/* ─── Canonical App Shell navigation (COMMAND / CREATE / EXPLORE) ─── */
+
+export const APP_NAV_SECTIONS: NavSection[] = [
+  {
+    id: "command",
+    label: "Command",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
+      { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
+    ],
+  },
+  {
+    id: "create",
+    label: "Create",
+    items: [
+      { label: "Gallery", href: "/gallery", icon: Image },
+      { label: "Music", href: "/dashboard?app=music", icon: Music },
+    ],
+  },
+  {
+    id: "explore",
+    label: "Explore",
+    items: [
+      { label: "Games", href: "/games", icon: GamesIcon },
+      { label: "Discover", href: "/discover", icon: Compass },
+      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
+    ],
+  },
+];
+
+/* Bottom-of-sidebar utility items (always visible) */
+export const APP_NAV_BOTTOM: NavItem[] = [
+  { label: "Wallet", href: "/wallet", icon: Wallet },
+  { label: "Settings", href: "/settings", icon: Settings },
+  { label: "Profile", href: "/profile", icon: User },
+];
+
+/* Mobile bottom bar — uses same canonical data, simplified to 5 slots */
+export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
+  { label: "Home", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Me", href: "/profile", icon: User },
+];
+
+/* Legacy compat — still used by dead Sidebar.tsx, keep for safety */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Dashboard",
@@ -191,6 +250,36 @@ export function isActive(
     return pathname === path && searchMatch;
   }
   return pathname?.startsWith(path) ?? false;
+}
+
+/**
+ * Active-route check for the new AppShell navigation.
+ * Matches by path prefix, with special handling for /dashboard (exact match
+ * unless ?app= is present).
+ */
+export function isAppNavActive(
+  pathname: string | null,
+  searchParams: URLSearchParams,
+  href: string,
+): boolean {
+  if (!pathname) return false;
+  const [path, query] = href.split("?");
+  // /dashboard is active only when there's no ?app= param (unless the href has one)
+  if (path === "/dashboard" && !query) {
+    return pathname === "/dashboard" && !searchParams.get("app");
+  }
+  if (path === "/dashboard" && query) {
+    const hrefParams = new URLSearchParams(query);
+    return pathname === "/dashboard" &&
+      Array.from(hrefParams.entries()).every(([k, v]) => searchParams.get(k) === v);
+  }
+  // /studio is active for all /studio* routes
+  if (path === "/studio") {
+    return pathname === "/studio" || pathname.startsWith("/studio/");
+  }
+  // Exact match for root-level, prefix for others
+  if (path === "/") return pathname === "/";
+  return pathname === path || pathname.startsWith(`${path}/`);
 }
 
 export function flattenNav(): {

@@ -173,14 +173,17 @@ export function MissionControlDashboard() {
     gallery?: GalleryWidgetData;
     discoverFeed?: DiscoverFeedItem[];
   }>({});
-  const ownerMode = false;
+  const ownerMode = data?.ownerMode ?? false;
 
   const MODE_CONFIG: Record<string, { label: string; tool?: string; placeholder: string }> = {
     chat: { label: "Ask LiTT", placeholder: "Describe your idea, problem, or next task..." },
-    builder: { label: "Build App", tool: "build", placeholder: "Describe the app or site you want to build..." },
-    image: { label: "Image", tool: "image", placeholder: "Describe the image you want to create..." },
+    builder: { label: "Build", tool: "build", placeholder: "Describe the app or site you want to build..." },
+    image: { label: "Create", tool: "image", placeholder: "Describe the image you want to create..." },
     music: { label: "Music", tool: "music", placeholder: "Describe the music you want to create..." },
-    agent: { label: "Agent", tool: "agents", placeholder: "Describe the mission for your agent..." },
+    agent: { label: "Automate", tool: "agents", placeholder: "Describe the mission for your agent..." },
+    research: { label: "Research", tool: "chat", placeholder: "What do you want to research?" },
+    browser: { label: "Browser", tool: "browser", placeholder: "What do you want the browser agent to do?" },
+    voice: { label: "Voice", tool: "chat", placeholder: "Start a voice conversation with LiTT..." },
   };
 
   function studioHref(mode: string, prompt: string) {
@@ -540,6 +543,54 @@ export function MissionControlDashboard() {
             <QuickLaunchTile icon="bot" label="AGENTS" description="Run crew" href="/studio?tool=agents" accentColor={D.accentGreen} />
             <QuickLaunchTile icon="rocket" label="DEPLOY" description="Ship it" href="/deployments" accentColor={D.accentAmber} />
           </div>
+        </EntranceSection>
+
+        {/* === LiTT Operations === */}
+        <EntranceSection delay={0.28}>
+          <GlassPanel className="mb-5 p-5 sm:p-6">
+            <div className="flex items-center gap-2">
+              <Icon name="cpu" size={17} style={{ color: D.accentCyan }} />
+              <h2 className="text-sm font-black" style={{ color: D.textPrimary }}>LiTT Operations</h2>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* Browser Agent */}
+              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentCyan}15`, background: `${D.accentCyan}04` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Browser Agent</span>
+                  <StatusPulse color={D.textDim} label="" detail="Idle" />
+                </div>
+              </div>
+              {/* Voice / Vapi */}
+              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentGreen}15`, background: `${D.accentGreen}04` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Voice / Vapi</span>
+                  <StatusPulse color={D.accentGreen} label="" detail="Online" pulse />
+                </div>
+              </div>
+              {/* GHL / CRM */}
+              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentAmber}15`, background: `${D.accentAmber}04` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>GHL / CRM</span>
+                  <StatusPulse color={D.accentAmber} label="" detail="Connected" />
+                </div>
+              </div>
+              {/* Runtime */}
+              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accent}15`, background: `${D.accent}04` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Runtime</span>
+                  <StatusPulse color={data?.project?.terminalState === "connected" ? D.accentGreen : D.textDim} label="" detail={data?.project?.terminalState === "connected" ? "Ready" : "Offline"} pulse={data?.project?.terminalState === "connected"} />
+                </div>
+              </div>
+            </div>
+            {/* Approvals */}
+            {urgentCount > 0 && (
+              <Link href="/studio?tool=agents" className="mt-3 flex items-center justify-between rounded-xl border p-3 transition hover:opacity-80"
+                style={{ borderColor: `${D.accentAmber}25`, background: `${D.accentAmber}08` }}>
+                <span className="text-[11px] font-bold" style={{ color: D.accentAmber }}>Approvals</span>
+                <span className="text-[11px] font-black" style={{ color: D.accentAmber }}>{urgentCount} waiting →</span>
+              </Link>
+            )}
+          </GlassPanel>
         </EntranceSection>
 
         {/* === Recent Activity + Usage === */}
