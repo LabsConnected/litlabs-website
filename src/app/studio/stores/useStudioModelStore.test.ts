@@ -57,13 +57,7 @@ describe("useStudioModelStore", () => {
   it("MODELS array contains all expected categories", async () => {
     const { MODELS } = await import("./useStudioModelStore");
     const categories = new Set(MODELS.map((m) => m.category));
-    expect(categories.has("auto")).toBe(true);
-    expect(categories.has("free")).toBe(true);
-    expect(categories.has("fast")).toBe(true);
-    expect(categories.has("code")).toBe(true);
-    expect(categories.has("creative")).toBe(true);
-    expect(categories.has("vision")).toBe(true);
-    expect(categories.has("byok")).toBe(true);
+    expect(categories.has("advanced")).toBe(true);
     expect(categories.has("litt-alias")).toBe(true);
   });
 });

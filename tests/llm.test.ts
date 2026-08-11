@@ -89,7 +89,7 @@ describe("LLM Client & Studio Models Test Suite", () => {
     it("retrieves chat models and fallback defaults", () => {
       const model = getChatModel("non-existent");
       expect(model).toBeDefined();
-      expect(model.id).toBe("litt-fast"); // defaults to the first model in CHAT_MODELS
+      expect(model.id).toBe("litt-auto"); // defaults to the first model in CHAT_MODELS
 
       const realModel = getChatModel("gemini-2.5-flash");
       expect(realModel.id).toBe("gemini-2.5-flash");

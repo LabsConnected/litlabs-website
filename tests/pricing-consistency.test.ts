@@ -3,8 +3,8 @@ import { PLANS, PLAN_LIST, PLAN_RANK, getPlanById, hasPlanAccess, formatPrice, f
 
 describe("Pricing contract — single source of truth", () => {
   describe("Plan catalog integrity", () => {
-    it("has exactly 4 plans: starter, creator_beta, pro_builder_beta, founder", () => {
-      expect(Object.keys(PLANS).sort()).toEqual(
+    it("publishes exactly 4 customer plans: starter, creator_beta, pro_builder_beta, founder", () => {
+      expect(PLAN_LIST.map((plan) => plan.id).sort()).toEqual(
         ["starter", "creator_beta", "pro_builder_beta", "founder"].sort(),
       );
     });

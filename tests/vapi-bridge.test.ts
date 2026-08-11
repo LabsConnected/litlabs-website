@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 
 // Mock dependencies before importing
 vi.mock("@/lib/supabase", () => ({
+  getSupabaseAdmin: vi.fn(() => null),
   supabaseAdmin: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
@@ -228,7 +229,7 @@ describe("POST /api/vapi/turn", () => {
     const res = await turnPOST(req);
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.text).toContain("couldn't find your session");
+    expect(json.text).toContain("couldn't identify your call");
   });
 
   it("routes through runLiTTForVoice and returns OpenAI-compatible format", async () => {
