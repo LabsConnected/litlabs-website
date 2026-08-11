@@ -42,11 +42,12 @@ export async function GET(
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  // Check agent_work_queue first (the primary job table)
+  // Check agent_work_queue first (the primary job table) — scoped to this user
   const { data: job, error } = await supabaseAdmin
     .from("agent_work_queue")
     .select("*")
     .eq("id", jobId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) {
@@ -68,11 +69,12 @@ export async function GET(
     });
   }
 
-  // Fallback: check orchestration_jobs
+  // Fallback: check orchestration_jobs — scoped to this user
   const { data: orchJob } = await supabaseAdmin
     .from("orchestration_jobs")
     .select("*")
     .eq("id", jobId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (orchJob) {

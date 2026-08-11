@@ -76,7 +76,23 @@ export async function POST(request: NextRequest) {
 
   const data = JSON.parse(payload);
 
-  // Store all webhook events for audit
+  // Check for replay: if this delivery_id was already processed, skip
+  if (deliveryId) {
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from("github_webhook_events")
+        .select("id")
+        .eq("delivery_id", deliveryId)
+        .maybeSingle();
+      if (existing) {
+        return NextResponse.json({ received: true, replayed: true });
+      }
+    } catch {
+      // Non-fatal — proceed with processing
+    }
+  }
+
+  // Store webhook event for audit
   try {
     await supabaseAdmin.from("github_webhook_events").insert({
       event,

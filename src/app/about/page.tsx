@@ -80,7 +80,7 @@ export default function AboutPage() {
               <div>
                 <h2 className="text-3xl font-black tracking-tight mb-4">Meet Spark</h2>
                 <p className="text-white/60 leading-relaxed">
-                  <strong>Spark</strong> is LiTT's creative companion. While LiTT focuses on engineering and logic, 
+                  <strong>Spark</strong> is LiTT&apos;s creative companion. While LiTT focuses on engineering and logic, 
                   Spark handles design direction, image generation, branding, and creative ideation. Together, they form your AI building crew.
                 </p>
               </div>

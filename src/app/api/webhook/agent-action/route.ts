@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 
 // In-memory queue for agent actions (cleared on restart/deploy)
 interface AgentAction {
@@ -13,7 +14,27 @@ interface AgentAction {
 
 let actionQueue: AgentAction[] = [];
 
+/**
+ * Verify the bearer token against AGENT_ACTION_WEBHOOK_SECRET.
+ * Uses timing-safe comparison to prevent timing attacks.
+ */
+function authorizeRequest(req: NextRequest): boolean {
+  const secret = process.env.AGENT_ACTION_WEBHOOK_SECRET;
+  if (!secret || secret.length < 16) return false;
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!token || token.length !== secret.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token), Buffer.from(secret));
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
+  if (!authorizeRequest(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await req.json();
     const { action, target, payload, source = "activepieces" } = body;
@@ -42,8 +63,6 @@ export async function POST(req: NextRequest) {
       actionQueue = actionQueue.slice(0, 50);
     }
 
-    // Agent action queued
-
     return NextResponse.json({
       success: true,
       actionId: newAction.id,
@@ -58,7 +77,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!authorizeRequest(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   return NextResponse.json({
     actions: actionQueue,
     pendingCount: actionQueue.filter((a) => a.status === "pending").length,
@@ -66,6 +88,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  if (!authorizeRequest(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { id, status } = await req.json();
     const action = actionQueue.find((a) => a.id === id);
