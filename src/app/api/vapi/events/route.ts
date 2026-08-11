@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
             : undefined,
         });
 
-        // Send normalized call payload to GoHighLevel (async, non-blocking)
+        // Send normalized call payload to n8n for orchestration (async, non-blocking)
         const customer = call?.customer as Record<string, unknown> | undefined;
         const callerPhone = (customer?.number as string) ?? "";
         const transcript = typeof artifact?.transcript === "string"
