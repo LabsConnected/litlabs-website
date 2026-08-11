@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
   getProject,
@@ -31,6 +32,20 @@ import {
   type ToolResult,
   type CheckId,
 } from "@/lib/vapi-tools";
+import {
+  createJob,
+  getJob,
+  cancelJob,
+  approveJob,
+  serializeJob,
+  validateJobType,
+  isSafeRiskLevel,
+  isSafeRequestSource,
+  type JobType,
+  type RiskLevel,
+  type RequestSource,
+} from "@/lib/browser-jobs";
+import { executeBrowserJob } from "@/lib/browser-job-executor";
 
 /**
  * Vapi project-tools endpoint.
@@ -509,6 +524,136 @@ async function toolRequestDeploymentApproval(
   });
 }
 
+// ─── Browser job tools (queue-control, no browser execution) ────
+
+/** browser_start_job — enqueue a browser automation job. */
+async function toolBrowserStartJob(userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const jobType = str(args.job_type);
+  const typeError = validateJobType(jobType);
+  if (typeError) return fail(typeError);
+
+  const params = (args.params as Record<string, unknown>) ?? {};
+  if (typeof params !== "object" || Array.isArray(params)) {
+    return fail("params must be an object.");
+  }
+
+  const goal = optStr(args.goal);
+  const idempotencyKey = optStr(args.idempotency_key);
+  const riskLevelRaw = optStr(args.risk_level);
+  const requestedByRaw = optStr(args.requested_by) ?? "vapi";
+
+  if (riskLevelRaw && !isSafeRiskLevel(riskLevelRaw)) {
+    return fail("Invalid risk_level. Valid: low, medium, high.");
+  }
+  if (!isSafeRequestSource(requestedByRaw)) {
+    return fail("Invalid requested_by. Valid: vapi, studio, cron, admin.");
+  }
+
+  try {
+    const { job, created } = await createJob({
+      userId,
+      jobType: jobType as JobType,
+      goal,
+      riskLevel: riskLevelRaw as RiskLevel | undefined,
+      requestedBy: requestedByRaw as RequestSource,
+      idempotencyKey,
+      params,
+    });
+
+    // Trigger async execution only for newly created jobs
+    if (created && job.status === "queued") {
+      after(() => executeBrowserJob(job.id, userId).catch(() => {}));
+    }
+
+    const status = created ? "queued" : job.status;
+    return ok(null, `Browser job ${created ? "started" : "already exists"} (status: ${status}).`, {
+      jobId: job.id,
+      jobType: job.jobType,
+      status: job.status,
+      created,
+      liveViewUrl: job.liveViewUrl,
+      message: created
+        ? `I've started the browser job. It's now ${status}. I'll check on it in a moment.`
+        : `This job was already queued (idempotency key matched). Current status: ${status}.`,
+    });
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Failed to create browser job.");
+  }
+}
+
+/** browser_job_status — check the status of a browser job. */
+async function toolBrowserJobStatus(userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const jobId = str(args.job_id);
+  if (!jobId) return fail("browser_job_status requires a job_id.");
+
+  const job = await getJob(jobId, userId);
+  if (!job) return fail(`Job ${jobId} not found.`);
+
+  const progressText = job.progress.totalSteps > 0
+    ? `Step ${job.progress.step + 1}/${job.progress.totalSteps}.`
+    : "";
+
+  const statusMessage = {
+    queued: "The job is queued and waiting to start.",
+    running: `The job is running. ${progressText}`,
+    awaiting_approval: `The job is waiting for your approval before proceeding with a high-risk action. ${job.error ?? ""}`,
+    approved: "The job was approved and will resume shortly.",
+    completed: "The job completed successfully.",
+    failed: `The job failed: ${job.error ?? "unknown error"}`,
+    cancelled: "The job was cancelled.",
+  }[job.status];
+
+  return ok(null, statusMessage, {
+    jobId: job.id,
+    jobType: job.jobType,
+    status: job.status,
+    progress: job.progress,
+    result: job.result,
+    error: job.error,
+    liveViewUrl: job.liveViewUrl,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt,
+  });
+}
+
+/** browser_cancel_job — cancel a queued or awaiting_approval job. */
+async function toolBrowserCancelJob(userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const jobId = str(args.job_id);
+  if (!jobId) return fail("browser_cancel_job requires a job_id.");
+
+  const job = await cancelJob(jobId, userId);
+  if (!job) {
+    const existing = await getJob(jobId, userId);
+    if (!existing) return fail(`Job ${jobId} not found.`);
+    return fail(`Cannot cancel job in status "${existing.status}". Only queued or awaiting_approval jobs can be cancelled.`);
+  }
+
+  return ok(null, `Job ${jobId} has been cancelled.`, {
+    jobId: job.id,
+    status: job.status,
+  });
+}
+
+/** browser_approve_job — approve an awaiting_approval job. */
+async function toolBrowserApproveJob(userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const jobId = str(args.job_id);
+  if (!jobId) return fail("browser_approve_job requires a job_id.");
+
+  const job = await approveJob(jobId, userId);
+  if (!job) {
+    const existing = await getJob(jobId, userId);
+    if (!existing) return fail(`Job ${jobId} not found.`);
+    return fail(`Cannot approve job in status "${existing.status}". Only awaiting_approval jobs can be approved.`);
+  }
+
+  return ok(null, `Job ${jobId} has been approved. The high-risk action will proceed.`, {
+    jobId: job.id,
+    status: job.status,
+    approvedBy: job.approvedBy,
+    approvedAt: job.approvedAt,
+  });
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────
 
 async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
@@ -563,6 +708,19 @@ async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
       if (!projectId) return fail("request_deployment_approval requires a project_id.");
       return toolRequestDeploymentApproval(userId, projectId, args);
     }
+
+    // ── Browser Operator queue-control tools ───────────────────
+    case "browser_start_job":
+      return toolBrowserStartJob(userId, args);
+
+    case "browser_job_status":
+      return toolBrowserJobStatus(userId, args);
+
+    case "browser_cancel_job":
+      return toolBrowserCancelJob(userId, args);
+
+    case "browser_approve_job":
+      return toolBrowserApproveJob(userId, args);
 
     default:
       return fail(`Unknown tool "${call.name}". Valid tools: ${TOOL_NAMES.join(", ")}.`);

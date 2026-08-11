@@ -17,6 +17,7 @@ import {
   Music,
   Maximize2,
   Minimize2,
+  Globe,
 } from "lucide-react";
 import type { InspectorTab, DrawerTab } from "../lib/studio-destinations";
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
@@ -26,6 +27,7 @@ import StudioActivityTimeline from "./StudioActivityTimeline";
 import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
+import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 
 /**
  * StudioWorkspaceFrame — collapsible right inspector + bottom drawer.
@@ -48,6 +50,7 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
   { id: "preview", label: "Preview", icon: Eye },
   { id: "checks", label: "Checks", icon: CircleCheck },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
+  { id: "browser", label: "Browser", icon: Globe },
 ];
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
@@ -153,6 +156,10 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
     return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />;
   }
 
+  if (tab === "browser") {
+    return <StudioBrowserJobsPanel />;
+  }
+
   return (
     <div className="space-y-4">
       <InspectorSection title="Command center">
@@ -248,7 +255,11 @@ export function StudioInspector({
                 );
               })}
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2.5" role="region" aria-label={`${activeTab} inspector`}>
+            <div
+              className={activeTab === "browser" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto p-2.5"}
+              role="region"
+              aria-label={`${activeTab} inspector`}
+            >
               {children ?? (data ? <InspectorContent tab={activeTab} data={data} /> : (
                 <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }} role="status">
                   No {activeTab} yet

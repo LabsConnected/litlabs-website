@@ -251,6 +251,108 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
       required: ["project_id", "environment"],
     },
   },
+
+  // ─── Browser Operator queue-control tools ──────────────────────
+  // These are lightweight tools that enqueue, check, cancel, or approve
+  // browser automation jobs. The actual browser execution happens
+  // asynchronously — Vapi never waits for browser work to complete.
+
+  browser_start_job: {
+    name: "browser_start_job",
+    description:
+      "Enqueue a browser automation job. Returns immediately with a job ID — " +
+      "the browser work runs asynchronously. Use browser_job_status to poll " +
+      "for completion. Available job types: ghl.workflow.inspect (read-only, " +
+      "inspects a GoHighLevel workflow and returns its structure as JSON).",
+    parameters: {
+      type: "object",
+      properties: {
+        job_type: {
+          type: "string",
+          enum: ["ghl.workflow.inspect", "ghl.workflow.list", "ghl.workflow.finish"],
+          description:
+            "The type of browser job to enqueue. " +
+            "ghl.workflow.inspect: read-only inspection of a GHL workflow. " +
+            "ghl.workflow.list: list all GHL workflows. " +
+            "ghl.workflow.finish: create/finish a GHL workflow (requires approval).",
+        },
+        goal: {
+          type: "string",
+          description: "A human-readable description of what the job should accomplish.",
+        },
+        params: {
+          type: "object",
+          description:
+            "Job-type-specific parameters. For ghl.workflow.inspect: " +
+            "{ workflowName: string, ghlBaseUrl?: string }. " +
+            "For ghl.workflow.list: { ghlBaseUrl?: string }. " +
+            "For ghl.workflow.finish: { workflowName: string, branches: string[], webhookConfig: object }.",
+          properties: {},
+        },
+        idempotency_key: {
+          type: "string",
+          description:
+            "Optional. If provided, prevents duplicate jobs from retries. " +
+            "If a job with this key already exists, the existing job is returned.",
+        },
+      },
+      required: ["job_type", "params"],
+    },
+  },
+
+  browser_job_status: {
+    name: "browser_job_status",
+    description:
+      "Check the status of a browser automation job. Returns the current status, " +
+      "progress (step tracking), result (if completed), and live view URL " +
+      "(for watching the browser in real time). Poll this every few seconds " +
+      "after calling browser_start_job.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "The job ID returned by browser_start_job.",
+        },
+      },
+      required: ["job_id"],
+    },
+  },
+
+  browser_cancel_job: {
+    name: "browser_cancel_job",
+    description:
+      "Cancel a browser automation job. Only works if the job is still queued " +
+      "or awaiting approval. Running jobs cannot be cancelled via this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "The job ID to cancel.",
+        },
+      },
+      required: ["job_id"],
+    },
+  },
+
+  browser_approve_job: {
+    name: "browser_approve_job",
+    description:
+      "Approve a browser automation job that is awaiting approval. " +
+      "This allows a high-risk action (publish, delete, mass send) to proceed. " +
+      "Only the site owner can approve jobs.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "The job ID to approve.",
+        },
+      },
+      required: ["job_id"],
+    },
+  },
 };
 
 /** Ordered list of all tool names, mirroring TOOL_NAMES. */
@@ -293,6 +395,26 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
     { type: "request-start", content: "Recording your deployment request." },
     { type: "request-complete", content: "I've recorded the request. It still needs your explicit approval before anything ships." },
     { type: "request-failed", content: "I couldn't record the deployment request." },
+  ],
+  browser_start_job: [
+    { type: "request-start", content: "I'm opening the browser and starting that task now." },
+    { type: "request-complete", content: "I've started the browser job. I'll check on it in a moment." },
+    { type: "request-failed", content: "I couldn't start the browser job. The browser service may be unavailable." },
+    { type: "request-response-delayed", content: "The browser job is taking a moment to queue up. Hang tight." },
+  ],
+  browser_job_status: [
+    { type: "request-start", content: "Let me check on that browser job." },
+    { type: "request-failed", content: "I couldn't find that job. It may have expired." },
+  ],
+  browser_cancel_job: [
+    { type: "request-start", content: "Cancelling that browser job now." },
+    { type: "request-complete", content: "Done. The browser job has been cancelled." },
+    { type: "request-failed", content: "I couldn't cancel that job — it may already be running." },
+  ],
+  browser_approve_job: [
+    { type: "request-start", content: "Approving that browser job now." },
+    { type: "request-complete", content: "Approved. The browser job will continue with the high-risk action." },
+    { type: "request-failed", content: "I couldn't approve that job — it may not be awaiting approval." },
   ],
 };
 
