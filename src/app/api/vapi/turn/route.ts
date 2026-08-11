@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeVapiRequest } from "@/lib/vapi-tools";
-import { getVoiceSession } from "@/lib/voice/voice-session-service";
+import { getVoiceSession, startVoiceSession } from "@/lib/voice/voice-session-service";
 import { runLiTTForVoice } from "@/lib/voice/voice-runtime";
 import { insertMessage } from "@/lib/studio/conversation-service";
 
@@ -16,29 +16,11 @@ export const fetchCache = "force-no-store";
  * response, it sends the user's transcript here. We:
  *
  *   1. Authenticate via Bearer token (LITTLABS_VAPI_TOOL_TOKEN)
- *   2. Look up the voice session by Vapi call ID
+ *   2. Look up the voice session by Vapi call ID (or resolve from call data)
  *   3. Route the transcript through runLiTTForVoice() — same brain,
  *      same tools, same memory as Studio text
- *   4. Persist the user + assistant messages to the conversation
+ *   4. Persist the user + assistant messages to the conversation (async)
  *   5. Return the response text for Vapi to speak via TTS
- *
- * Vapi sends:
- *   {
- *     "call": { "id": "vapi_call_123", ... },
- *     "messages": [
- *       { "role": "user", "content": "How's my project looking?" }
- *     ]
- *   }
- *
- * We return:
- *   {
- *     "text": "Your project LabsConnected/litlabs-website is on the main branch..."
- *   }
- *
- * Or in OpenAI-compatible format (if Vapi uses Custom LLM mode):
- *   {
- *     "choices": [{ "message": { "role": "assistant", "content": "..." } }]
- *   }
  */
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
@@ -69,11 +51,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No user message found" }, { status: 400 });
   }
 
-  // Look up the voice session
-  const session = await getVoiceSession("vapi", callId);
+  // Try to look up the voice session first
+  let session = await getVoiceSession("vapi", callId);
+
+  // Fallback: if no session found (e.g. voice_sessions table missing or not yet created),
+  // resolve the caller directly from the call data
+  if (!session) {
+    const customer = call?.customer as Record<string, unknown> | undefined;
+    const callerPhone = (customer?.number as string) ?? "";
+    if (callerPhone) {
+      session = await startVoiceSession({
+        provider: "vapi",
+        providerCallId: callId,
+        callerPhone,
+        metadata: { assistantId: call?.assistantId, fallback: true },
+      });
+    }
+  }
+
   if (!session) {
     return NextResponse.json({
-      text: "I'm sorry, I couldn't find your session. Please try calling again.",
+      text: "I'm sorry, I couldn't identify your call. Please try calling again.",
     });
   }
 
