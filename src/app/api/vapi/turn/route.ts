@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeVapiRequest } from "@/lib/vapi-tools";
+import { rateLimit } from "@/lib/rate-limiter";
 import { getVoiceSession, startVoiceSession } from "@/lib/voice/voice-session-service";
 import { runLiTTForVoice } from "@/lib/voice/voice-runtime";
 import { insertMessage } from "@/lib/studio/conversation-service";
@@ -26,6 +27,21 @@ export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
   if (!authorizeVapiRequest(authHeader)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Rate limiting (fail-open, same as /api/vapi/tools)
+  const rateLimitResult = await rateLimit(req, 60, 60);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded", retryAfter: rateLimitResult.resetTime },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.resetTime),
+          "X-RateLimit-Remaining": String(rateLimitResult.remaining),
+        },
+      },
+    );
   }
 
   let body: Record<string, unknown>;

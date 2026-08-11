@@ -69,6 +69,39 @@ export function normalizePhone(phone: string): string {
 }
 
 /**
+ * In-memory session cache for when the voice_sessions table is unavailable.
+ * Keyed by `${provider}:${providerCallId}`. Sessions expire after 2 hours.
+ */
+const _sessionCache = new Map<string, { session: VoiceSession; expires: number }>();
+const SESSION_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+function cacheKey(provider: string, callId: string): string {
+  return `${provider}:${callId}`;
+}
+
+function getCachedSession(provider: string, callId: string): VoiceSession | null {
+  const key = cacheKey(provider, callId);
+  const entry = _sessionCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expires) {
+    _sessionCache.delete(key);
+    return null;
+  }
+  return entry.session;
+}
+
+function setCachedSession(session: VoiceSession): void {
+  _sessionCache.set(cacheKey(session.provider, session.providerCallId), {
+    session,
+    expires: Date.now() + SESSION_CACHE_TTL_MS,
+  });
+}
+
+function deleteCachedSession(provider: string, callId: string): void {
+  _sessionCache.delete(cacheKey(provider, callId));
+}
+
+/**
  * Resolve a phone number to a Clerk user ID.
  * Returns null if the phone is not linked to any account.
  */
@@ -146,7 +179,11 @@ export async function startVoiceSession(params: {
   callerName?: string | null;
   metadata?: Record<string, unknown>;
 }): Promise<VoiceSession> {
-  // Check if a session already exists for this call (idempotent)
+  // Check in-memory cache first (works even without voice_sessions table)
+  const cached = getCachedSession(params.provider, params.providerCallId);
+  if (cached) return cached;
+
+  // Check if a session already exists in DB (idempotent)
   if (supabaseAdmin) {
     const { data: existing } = await supabaseAdmin
       .from("voice_sessions")
@@ -154,7 +191,11 @@ export async function startVoiceSession(params: {
       .eq("provider", params.provider)
       .eq("provider_call_id", params.providerCallId)
       .maybeSingle();
-    if (existing) return mapSession(existing as DbVoiceSession);
+    if (existing) {
+      const session = mapSession(existing as DbVoiceSession);
+      setCachedSession(session);
+      return session;
+    }
   }
 
   // Resolve caller → user
@@ -181,7 +222,7 @@ export async function startVoiceSession(params: {
 
   // Persist the session
   if (!supabaseAdmin) {
-    return {
+    const session: VoiceSession = {
       id: `local-${Date.now()}`,
       provider: params.provider,
       providerCallId: params.providerCallId,
@@ -195,6 +236,8 @@ export async function startVoiceSession(params: {
       endedAt: null,
       metadata: params.metadata ?? null,
     };
+    setCachedSession(session);
+    return session;
   }
 
   const { data, error } = await supabaseAdmin
@@ -214,7 +257,7 @@ export async function startVoiceSession(params: {
     .single();
 
   if (error || !data) {
-    return {
+    const session: VoiceSession = {
       id: `fallback-${Date.now()}`,
       provider: params.provider,
       providerCallId: params.providerCallId,
@@ -228,9 +271,13 @@ export async function startVoiceSession(params: {
       endedAt: null,
       metadata: params.metadata ?? null,
     };
+    setCachedSession(session);
+    return session;
   }
 
-  return mapSession(data as DbVoiceSession);
+  const session = mapSession(data as DbVoiceSession);
+  setCachedSession(session);
+  return session;
 }
 
 /**
@@ -240,6 +287,10 @@ export async function getVoiceSession(
   provider: string,
   providerCallId: string,
 ): Promise<VoiceSession | null> {
+  // Check in-memory cache first
+  const cached = getCachedSession(provider, providerCallId);
+  if (cached) return cached;
+
   if (!supabaseAdmin) return null;
   const { data, error } = await supabaseAdmin
     .from("voice_sessions")
@@ -248,7 +299,9 @@ export async function getVoiceSession(
     .eq("provider_call_id", providerCallId)
     .maybeSingle();
   if (error || !data) return null;
-  return mapSession(data as DbVoiceSession);
+  const session = mapSession(data as DbVoiceSession);
+  setCachedSession(session);
+  return session;
 }
 
 /**
@@ -259,6 +312,9 @@ export async function endVoiceSession(
   providerCallId: string,
   metadata?: Record<string, unknown>,
 ): Promise<boolean> {
+  // Always clear from in-memory cache
+  deleteCachedSession(provider, providerCallId);
+
   if (!supabaseAdmin) return false;
   const { error } = await supabaseAdmin
     .from("voice_sessions")

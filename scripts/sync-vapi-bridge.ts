@@ -61,7 +61,7 @@ const DRY_RUN = process.argv.includes("--dry-run");
 
 // ─── Vapi API helpers ───────────────────────────────────────────
 
-async function vapiFetch(urlPath: string, method: string, body?: unknown): Promise<Record<string, unknown> | null> {
+async function vapiFetch(urlPath: string, method: string, body?: unknown): Promise<Record<string, any> | null> {
   const res = await fetch(`${VAPI_BASE}${urlPath}`, {
     method,
     headers: {
@@ -71,7 +71,7 @@ async function vapiFetch(urlPath: string, method: string, body?: unknown): Promi
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  let json: Record<string, unknown> | null = null;
+  let json: Record<string, any> | null = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
@@ -106,6 +106,8 @@ async function main() {
 
   // Build the assistant patch
   const patch = {
+    // Greeting spoken when the call connects
+    firstMessage: "Welcome to LiTlabs.net. This is LiTT, how can I help?",
     // Server URL for call lifecycle events (status-update, end-of-call-report, assistant-request)
     serverUrl: EVENTS_URL,
     // Custom LLM: Vapi sends transcripts to our /api/vapi/turn endpoint
@@ -145,20 +147,20 @@ async function main() {
   // Fetch current assistant to show what's changing
   const current = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "GET");
   console.log("Current assistant config:");
-  console.log(`  serverUrl       : ${current.serverUrl ?? "(none)"}`);
-  console.log(`  model.provider  : ${current.model?.provider ?? "(none)"}`);
-  console.log(`  model.url       : ${current.model?.url ?? "(none)"}`);
-  console.log(`  model.toolIds   : ${current.model?.toolIds?.length ?? 0} tool(s)`);
+  console.log(`  serverUrl       : ${current?.serverUrl ?? "(none)"}`);
+  console.log(`  model.provider  : ${current?.model?.provider ?? "(none)"}`);
+  console.log(`  model.url       : ${current?.model?.url ?? "(none)"}`);
+  console.log(`  model.toolIds   : ${current?.model?.toolIds?.length ?? 0} tool(s)`);
 
   // Apply the patch
   console.log("\nPatching assistant...");
   const updated = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "PATCH", patch);
 
   console.log("\nDone. Assistant updated:");
-  console.log(`  serverUrl       : ${updated.serverUrl ?? EVENTS_URL}`);
-  console.log(`  model.provider  : ${updated.model?.provider ?? "custom-llm"}`);
-  console.log(`  model.url       : ${updated.model?.url ?? TURN_URL}`);
-  console.log(`  model.toolIds   : ${updated.model?.toolIds?.length ?? 0} tool(s)`);
+  console.log(`  serverUrl       : ${updated?.serverUrl ?? EVENTS_URL}`);
+  console.log(`  model.provider  : ${updated?.model?.provider ?? "custom-llm"}`);
+  console.log(`  model.url       : ${updated?.model?.url ?? TURN_URL}`);
+  console.log(`  model.toolIds   : ${updated?.model?.toolIds?.length ?? 0} tool(s)`);
 
   console.log(
     `\nArchitecture is now: Phone → Vapi → /api/vapi/events (caller resolution) →` +

@@ -92,7 +92,7 @@ export async function executeRun(
     return generateWithImages(systemPrompt, req.message, history, imageAttachments, modelName);
   }
 
-  const r = await generateText(fullPrompt, options, undefined);
+  const r = await generateText(fullPrompt, options, systemPrompt);
   return { text: r.text, provider: r.provider, model: r.model, latencyMs: r.latencyMs };
 }
 

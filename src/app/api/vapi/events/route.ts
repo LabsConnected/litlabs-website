@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeVapiRequest } from "@/lib/vapi-tools";
+import { rateLimit } from "@/lib/rate-limiter";
 import {
   startVoiceSession,
   endVoiceSession,
@@ -38,6 +39,21 @@ export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
   if (!authorizeVapiRequest(authHeader)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Rate limiting (fail-open, same as /api/vapi/tools)
+  const rateLimitResult = await rateLimit(req, 60, 60);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded", retryAfter: rateLimitResult.resetTime },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.resetTime),
+          "X-RateLimit-Remaining": String(rateLimitResult.remaining),
+        },
+      },
+    );
   }
 
   let body: Record<string, unknown>;
@@ -107,8 +123,7 @@ export async function POST(req: NextRequest) {
       const contextBlock = session.userId
         ? `You are on a phone call with ${session.callerName ?? "the user"}. ` +
           `Their active project is ${session.projectId ?? "not set"}. ` +
-          `Conversation ID: ${session.conversationId ?? "none"}. ` +
-          `Use the litt_turn tool to respond to the user.`
+          `Conversation ID: ${session.conversationId ?? "none"}.`
         : `You are on a phone call from ${normalizePhone(callerPhone)}. ` +
           `This number is not linked to a LiTT account. ` +
           `Ask if they'd like to learn about LiTTree Lab Studios.`;
