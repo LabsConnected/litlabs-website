@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { redirect } from "next/navigation";
 import { buildChatRedirectUrl, type ChatSearchParams } from "@/lib/chat/redirect";
 
