@@ -61,6 +61,19 @@ export const TerminalPanel = forwardRef<
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const CONNECTION_TIMEOUT_MS = 10_000;
 
+  // Refs for callback props — updated every render but NOT included in the
+  // connection useEffect's dependency array. This prevents inline arrow
+  // functions from the parent (e.g. onConnectionChange={(c) => ...}) from
+  // causing the socket to disconnect/reconnect on every render.
+  const onLogRef = useRef(onLog);
+  const onCommandRef = useRef(onCommand);
+  const onConnectionChangeRef = useRef(onConnectionChange);
+  const onTerminalOutputRef = useRef(onTerminalOutput);
+  onLogRef.current = onLog;
+  onCommandRef.current = onCommand;
+  onConnectionChangeRef.current = onConnectionChange;
+  onTerminalOutputRef.current = onTerminalOutput;
+
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
     // Prevent duplicate connections from React Strict Mode double-invoke
@@ -592,10 +605,6 @@ export const TerminalPanel = forwardRef<
     isSignedIn,
     retryCount,
     projectId,
-    onLog,
-    onCommand,
-    onConnectionChange,
-    onTerminalOutput,
   ]);
 
   useEffect(() => {
