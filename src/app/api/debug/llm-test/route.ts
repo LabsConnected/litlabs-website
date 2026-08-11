@@ -1,15 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { streamText, generateText } from "@/lib/llm";
+import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /**
  * GET /api/debug/llm-test
- * Diagnostic endpoint to test LLM connectivity. No auth required.
- * Remove this route after debugging.
+ * Diagnostic endpoint to test LLM connectivity. Requires authentication.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { userId } = await auth(req);
+  if (!userId) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
+
   const results: { provider: string; ok: boolean; error?: string; text?: string }[] = [];
 
   // Test 1: Non-streaming generateText
