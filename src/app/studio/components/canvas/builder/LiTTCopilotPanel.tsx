@@ -21,6 +21,8 @@
  *   2. Contextual agent buttons (change based on selection)
  *   3. Chat input ("Ask LiTT...")
  *   4. Conversation history
+ *   5. Pending changes (preview/accept/reject)
+ *   6. Change log (recent edits with revert)
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -40,15 +42,38 @@ import {
   Check,
   AlertCircle,
   Loader2,
+  X,
+  RotateCcw,
+  History,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
-import type { CanvasNode } from "./types";
+import type { CanvasNode, NodeStyles, SectionTemplate } from "./types";
+import { SECTION_TEMPLATES, createNode } from "./types";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  pendingActions?: PendingAction[];
+}
+
+interface PendingAction {
+  type: "addSection" | "editText" | "editStyles" | "deleteNode" | "reorder" | "duplicateNode";
+  nodeId?: string;
+  text?: string;
+  styles?: Partial<NodeStyles>;
+  template?: string;
+  direction?: "up" | "down";
+  afterNodeId?: string;
+  label: string;
+}
+
+interface ChangeLogEntry {
+  id: string;
+  label: string;
+  timestamp: number;
+  historyIndex: number; // snapshot index for revert
 }
 
 // ─── Contextual agent buttons per node type ──────────────────────
@@ -61,9 +86,8 @@ interface AgentButton {
 
 function getAgentButtonsForNode(node: CanvasNode | null): AgentButton[] {
   if (!node) {
-    // Nothing selected — page-level actions
     return [
-      { label: "Build Page", icon: Sparkles, prompt: "Build a complete page based on what this project needs" },
+      { label: "Build Page", icon: Sparkles, prompt: "Build a complete landing page with hero, features, testimonials, and CTA sections" },
       { label: "Add Section", icon: Plus, prompt: "Add a new section that fits the current page" },
       { label: "Improve Design", icon: Palette, prompt: "Improve the overall design of this page — make it more polished and professional" },
       { label: "Finish Page", icon: Check, prompt: "Finish this page — add any missing sections like footer, CTA, or navigation" },
@@ -77,30 +101,23 @@ function getAgentButtonsForNode(node: CanvasNode | null): AgentButton[] {
         { label: "Rewrite", icon: Type, prompt: `Rewrite this heading to be more compelling: "${node.props?.text ?? ""}"` },
         { label: "Shorten", icon: Type, prompt: `Shorten this heading while keeping the message: "${node.props?.text ?? ""}"` },
         { label: "Make Catchier", icon: Wand2, prompt: `Make this heading catchier and more attention-grabbing: "${node.props?.text ?? ""}"` },
-        { label: "Generate Variations", icon: Copy, prompt: `Generate 3 variations of this heading: "${node.props?.text ?? ""}"` },
       ];
-
     case "text":
       return [
         { label: "Rewrite", icon: Type, prompt: `Rewrite this text to be clearer and more engaging: "${node.props?.text ?? ""}"` },
         { label: "Shorten", icon: Type, prompt: `Shorten this text: "${node.props?.text ?? ""}"` },
         { label: "Expand", icon: Plus, prompt: `Expand this text with more detail: "${node.props?.text ?? ""}"` },
       ];
-
     case "image":
       return [
-        { label: "Generate", icon: ImageIcon, prompt: "Generate a new AI image for this image element" },
         { label: "Replace", icon: RefreshCw, prompt: "Replace this image with a better alternative" },
-        { label: "Remove Background", icon: Wand2, prompt: "Remove the background from this image" },
         { label: "Match Brand", icon: Palette, prompt: "Adjust this image to match the brand theme" },
       ];
-
     case "button":
       return [
         { label: "Rewrite", icon: Type, prompt: `Rewrite this button text to be more action-oriented: "${node.props?.text ?? ""}"` },
         { label: "Redesign", icon: Palette, prompt: "Redesign this button to look more premium" },
       ];
-
     case "section":
     case "container":
     case "card":
@@ -110,23 +127,9 @@ function getAgentButtonsForNode(node: CanvasNode | null): AgentButton[] {
       return [
         { label: "Redesign", icon: Palette, prompt: `Redesign this ${node.type} to look more premium` },
         { label: "Add Content", icon: Plus, prompt: `Add relevant content inside this ${node.type}` },
-        { label: "Duplicate", icon: Copy, prompt: `Duplicate this ${node.type}` },
         { label: "Change Layout", icon: Layout, prompt: `Change the layout of this ${node.type}` },
         { label: "Make Responsive", icon: Smartphone, prompt: "Fix this section for mobile and tablet views" },
       ];
-
-    case "form":
-      return [
-        { label: "Add Field", icon: Plus, prompt: "Add a relevant form field" },
-        { label: "Redesign", icon: Palette, prompt: "Redesign this form to look more modern" },
-      ];
-
-    case "table":
-      return [
-        { label: "Add Row", icon: Plus, prompt: "Add a new row to this table" },
-        { label: "Redesign", icon: Palette, prompt: "Redesign this table to look more polished" },
-      ];
-
     default:
       return [
         { label: "Redesign", icon: Palette, prompt: `Improve this ${node.type}` },
@@ -135,17 +138,9 @@ function getAgentButtonsForNode(node: CanvasNode | null): AgentButton[] {
   }
 }
 
-// ─── Context summary ──────────────────────────────────────────────
-
 function getContextSummary(node: CanvasNode | null, breakpoint: string, route: string, nodeCount: number): string {
   if (!node) {
     return `Page: ${route} · ${nodeCount} elements · ${breakpoint} view · No selection`;
-  }
-  const path: string[] = [];
-  let current: CanvasNode | null = node;
-  while (current) {
-    path.unshift(current.metadata?.name || current.type);
-    current = current.parentId ? null : null; // simplified — store has getNodePath
   }
   return `Selected: ${node.type}${node.props?.text ? ` "${node.props.text.slice(0, 30)}"` : ""} · ${breakpoint} view · ${nodeCount} elements on page`;
 }
@@ -159,20 +154,131 @@ export function LiTTCopilotPanel() {
   const breakpoint = useCanvasBuilderStore((s) => s.breakpoint);
   const getNodePath = useCanvasBuilderStore((s) => s.getNodePath);
   const duplicateNode = useCanvasBuilderStore((s) => s.duplicateNode);
+  const updateNodeProps = useCanvasBuilderStore((s) => s.updateNodeProps);
+  const updateNodeStyles = useCanvasBuilderStore((s) => s.updateNodeStyles);
+  const removeNode = useCanvasBuilderStore((s) => s.removeNode);
+  const addSectionTemplate = useCanvasBuilderStore((s) => s.addSectionTemplate);
+  const addNodeObject = useCanvasBuilderStore((s) => s.addNodeObject);
+  const moveNode = useCanvasBuilderStore((s) => s.moveNode);
+  const undo = useCanvasBuilderStore((s) => s.undo);
+  const history = useCanvasBuilderStore((s) => s.history);
+  const historyIndex = useCanvasBuilderStore((s) => s.historyIndex);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [changeLog, setChangeLog] = useState<ChangeLogEntry[]>([]);
+  const [showChangeLog, setShowChangeLog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const nodeCount = Object.keys(document.nodes).length;
   const agentButtons = getAgentButtonsForNode(node);
   const contextSummary = getContextSummary(node, breakpoint, document.route, nodeCount);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Apply a single pending action to the canvas
+  const applyAction = useCallback((action: PendingAction): boolean => {
+    try {
+      switch (action.type) {
+        case "addSection": {
+          const template = SECTION_TEMPLATES.find((t) => t.id === action.template);
+          if (!template) return false;
+          const rootId = document.rootNodeIds[0];
+          if (!rootId) return false;
+          // Find insertion index
+          let index: number | undefined;
+          if (action.afterNodeId) {
+            const root = document.nodes[rootId];
+            const afterIdx = root.children.indexOf(action.afterNodeId);
+            if (afterIdx >= 0) index = afterIdx + 1;
+          }
+          addSectionTemplate(template, rootId);
+          return true;
+        }
+        case "editText": {
+          if (!action.nodeId) return false;
+          updateNodeProps(action.nodeId, { text: action.text });
+          return true;
+        }
+        case "editStyles": {
+          if (!action.nodeId || !action.styles) return false;
+          updateNodeStyles(action.nodeId, action.styles);
+          return true;
+        }
+        case "deleteNode": {
+          if (!action.nodeId) return false;
+          removeNode(action.nodeId);
+          return true;
+        }
+        case "duplicateNode": {
+          if (!action.nodeId) return false;
+          duplicateNode(action.nodeId);
+          return true;
+        }
+        case "reorder": {
+          if (!action.nodeId) return false;
+          const node = document.nodes[action.nodeId];
+          if (!node?.parentId) return false;
+          const parent = document.nodes[node.parentId];
+          const idx = parent.children.indexOf(action.nodeId);
+          if (action.direction === "up" && idx > 0) {
+            moveNode(action.nodeId, node.parentId, idx - 1);
+          } else if (action.direction === "down" && idx < parent.children.length - 1) {
+            moveNode(action.nodeId, node.parentId, idx + 1);
+          }
+          return true;
+        }
+        default:
+          return false;
+      }
+    } catch (err) {
+      console.error("[canvas-ai] Failed to apply action:", err);
+      return false;
+    }
+  }, [document, addSectionTemplate, updateNodeProps, updateNodeStyles, removeNode, duplicateNode, moveNode]);
+
+  // Apply all pending actions from a message
+  const handleAcceptAll = useCallback((msgId: string) => {
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== msgId || !m.pendingActions) return m;
+      const applied: ChangeLogEntry[] = [];
+      for (const action of m.pendingActions) {
+        const success = applyAction(action);
+        if (success) {
+          applied.push({
+            id: `cl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            label: action.label,
+            timestamp: Date.now(),
+            historyIndex: useCanvasBuilderStore.getState().historyIndex,
+          });
+        }
+      }
+      if (applied.length > 0) {
+        setChangeLog((prevLog) => [...applied.reverse(), ...prevLog].slice(0, 20));
+      }
+      return { ...m, pendingActions: undefined };
+    }));
+  }, [applyAction]);
+
+  // Reject (dismiss) pending actions
+  const handleRejectAll = useCallback((msgId: string) => {
+    setMessages((prev) => prev.map((m) =>
+      m.id === msgId ? { ...m, pendingActions: undefined } : m
+    ));
+  }, []);
+
+  // Revert to a specific change log entry
+  const handleRevert = useCallback((entry: ChangeLogEntry) => {
+    // Undo back to the history index before this change
+    const currentState = useCanvasBuilderStore.getState();
+    while (currentState.historyIndex > entry.historyIndex && currentState.historyIndex > 0) {
+      currentState.undo();
+    }
+    setChangeLog((prev) => prev.filter((e) => e.timestamp !== entry.timestamp));
+  }, []);
 
   const handleSendPrompt = useCallback(async (promptText: string) => {
     if (!promptText.trim() || isThinking) return;
@@ -187,24 +293,66 @@ export function LiTTCopilotPanel() {
     setInput("");
     setIsThinking(true);
 
-    // TODO: Wire to actual LiTT AI endpoint
-    // For now, simulate a response
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/canvas/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          document,
+          selectedNodeId,
+          breakpoint,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Request failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      const pendingActions: PendingAction[] = (data.actions || []).map((a: PendingAction & { label?: string }) => ({
+        type: a.type,
+        nodeId: a.nodeId,
+        text: a.text,
+        styles: a.styles,
+        template: a.template,
+        direction: a.direction,
+        afterNodeId: a.afterNodeId,
+        label: a.label || a.type,
+      }));
+
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-ai`,
         role: "assistant",
-        content: `I understand you want to: "${promptText}". I'm analyzing the current canvas state and will make the changes. (AI integration pending — this is a placeholder response.)`,
+        content: data.reply || "Done.",
         timestamp: Date.now(),
+        pendingActions: pendingActions.length > 0 ? pendingActions : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reach LiTT";
+      const errorMsg: ChatMessage = {
+        id: `msg-${Date.now()}-err`,
+        role: "assistant",
+        content: `I couldn't process that: ${msg}`,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
       setIsThinking(false);
-    }, 800);
-  }, [isThinking]);
+    }
+  }, [isThinking, document, selectedNodeId, breakpoint]);
 
   const handleAgentButton = (btn: AgentButton) => {
-    // Special handling for duplicate
     if (btn.label === "Duplicate" && selectedNodeId) {
       duplicateNode(selectedNodeId);
+      setChangeLog((prev) => [{
+        id: `cl-${Date.now()}`,
+        label: `Duplicated ${node?.type ?? "node"}`,
+        timestamp: Date.now(),
+        historyIndex: useCanvasBuilderStore.getState().historyIndex,
+      }, ...prev].slice(0, 20));
       return;
     }
     handleSendPrompt(btn.prompt);
@@ -224,7 +372,58 @@ export function LiTTCopilotPanel() {
         <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--glass-text-1)" }}>
           LiTT Copilot
         </span>
+        <div className="flex-1" />
+        <button
+          onClick={() => setShowChangeLog(!showChangeLog)}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/5"
+          style={{
+            color: showChangeLog ? "var(--glass-purple)" : "var(--text-muted)",
+            backgroundColor: showChangeLog ? "var(--glass-purple-soft)" : "transparent",
+          }}
+          title="Change log"
+        >
+          <History size={11} />
+          {changeLog.length > 0 && (
+            <span style={{ color: "var(--glass-purple)" }}>{changeLog.length}</span>
+          )}
+        </button>
       </div>
+
+      {/* Change Log Panel (collapsible) */}
+      {showChangeLog && (
+        <div
+          className="shrink-0 px-3 py-2 max-h-[200px] overflow-y-auto"
+          style={{ borderBottom: "1px solid var(--glass-border)", backgroundColor: "rgba(255,255,255,0.02)" }}
+        >
+          <div className="text-[9px] font-bold uppercase tracking-[0.08em] mb-2" style={{ color: "var(--text-muted)" }}>
+            Recent Changes
+          </div>
+          {changeLog.length === 0 ? (
+            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>No changes yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {changeLog.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center gap-2 rounded px-2 py-1 text-[10px]"
+                  style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
+                >
+                  <span className="flex-1 truncate" style={{ color: "var(--glass-text-2)" }}>{entry.label}</span>
+                  <button
+                    onClick={() => handleRevert(entry)}
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold transition hover:bg-red-500/10"
+                    style={{ color: "var(--text-muted)" }}
+                    title="Revert this change"
+                  >
+                    <RotateCcw size={9} />
+                    Revert
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Context summary */}
       <div
@@ -237,9 +436,9 @@ export function LiTTCopilotPanel() {
         <div className="text-[10px]" style={{ color: "var(--glass-text-3)" }}>
           {contextSummary}
         </div>
-        {node && (
+        {node && selectedNodeId && (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {getNodePath(selectedNodeId!).slice(-3).map((n, i, arr) => (
+            {getNodePath(selectedNodeId).slice(-3).map((n, i, arr) => (
               <span key={n.id} className="text-[9px] font-bold" style={{ color: i === arr.length - 1 ? "var(--glass-purple)" : "var(--text-muted)" }}>
                 {n.metadata?.name || n.type}
                 {i < arr.length - 1 && " / "}
@@ -304,6 +503,55 @@ export function LiTTCopilotPanel() {
             >
               {msg.content}
             </div>
+
+            {/* Pending actions — preview/accept/reject */}
+            {msg.pendingActions && msg.pendingActions.length > 0 && (
+              <div
+                className="w-full rounded-lg border p-2.5 space-y-2"
+                style={{
+                  borderColor: "var(--glass-border-purple)",
+                  backgroundColor: "rgba(139,92,246,0.06)",
+                }}
+              >
+                <div className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--glass-purple)" }}>
+                  Proposed Changes ({msg.pendingActions.length})
+                </div>
+                {msg.pendingActions.map((action, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[10px]" style={{ color: "var(--glass-text-2)" }}>
+                    <span className="h-1 w-1 rounded-full" style={{ backgroundColor: "var(--glass-purple)" }} />
+                    <span className="flex-1">{action.label}</span>
+                  </div>
+                ))}
+                <div className="flex gap-1.5 pt-1">
+                  <button
+                    onClick={() => handleAcceptAll(msg.id)}
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold transition"
+                    style={{
+                      backgroundColor: "var(--glass-purple)",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Check size={11} />
+                    Apply All
+                  </button>
+                  <button
+                    onClick={() => handleRejectAll(msg.id)}
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold transition hover:bg-white/5"
+                    style={{
+                      backgroundColor: "transparent",
+                      color: "var(--text-muted)",
+                      border: "1px solid var(--glass-border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <X size={11} />
+                    Reject
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
 

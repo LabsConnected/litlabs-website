@@ -14,6 +14,8 @@ import {
   ZoomOut,
   Maximize,
   Sparkles,
+  Code2,
+  Globe,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import type { Breakpoint } from "./types";
@@ -175,14 +177,25 @@ export function CanvasToolbar() {
         v{document.version} · saved
       </span>
 
-      {/* Preview */}
-      <button
-        onClick={() => setPreviewMode(!previewMode)}
-        style={previewMode ? btnActive : btnHover}
-        title="Preview"
-      >
-        <Eye size={14} />
-      </button>
+      {/* Build / Preview / Live mode toggle */}
+      <div className="flex items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+        <button
+          onClick={() => setPreviewMode(false)}
+          style={!previewMode ? btnActive : { ...btnBase, backgroundColor: "transparent", border: "none" }}
+          title="Build mode — edit blocks, drag/drop, inline edit"
+        >
+          <Code2 size={12} style={{ display: "inline" }} />
+          <span style={{ marginLeft: 4 }}>Build</span>
+        </button>
+        <button
+          onClick={() => setPreviewMode(true)}
+          style={previewMode ? btnActive : { ...btnBase, backgroundColor: "transparent", border: "none" }}
+          title="Preview mode — real site render in iframe"
+        >
+          <Eye size={12} style={{ display: "inline" }} />
+          <span style={{ marginLeft: 4 }}>Preview</span>
+        </button>
+      </div>
 
       {/* Save */}
       <button

@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useCallback, useState } from "react";
+import { useRef, useCallback, useState, useMemo, useEffect } from "react";
 import { Sparkles, Plus } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { NodeRenderer } from "./NodeRenderer";
 import type { NodeType } from "./types";
 import { createNode, PALETTE_ITEMS, SECTION_TEMPLATES, BREAKPOINT_WIDTHS } from "./types";
 import { EmptyCanvasGreeter } from "./EmptyCanvasGreeter";
+import { canvasToHtml } from "./canvas-to-html";
 
 function canHaveChildren(type: NodeType): boolean {
   return PALETTE_ITEMS.find((p) => p.type === type)?.canHaveChildren ?? false;
@@ -273,6 +274,77 @@ export function CanvasStage() {
   const isEmpty = document.nodes[rootId]?.children.length === 0;
   const bpWidth = BREAKPOINT_WIDTHS[breakpoint];
 
+  // Preview mode: render the canvas as HTML inside an iframe
+  const previewHtml = useMemo(() => {
+    if (!previewMode) return "";
+    return canvasToHtml(document);
+  }, [previewMode, document]);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Update iframe srcdoc when previewHtml changes
+  useEffect(() => {
+    if (previewMode && iframeRef.current) {
+      iframeRef.current.srcdoc = previewHtml;
+    }
+  }, [previewHtml, previewMode]);
+
+  if (previewMode) {
+    return (
+      <div
+        className="relative flex-1 overflow-auto flex flex-col items-center"
+        style={{ backgroundColor: "#0a0b10" }}
+      >
+        {/* Fake browser bar */}
+        <div
+          className="flex items-center gap-2 w-full shrink-0 px-3"
+          style={{ height: 36, borderBottom: "1px solid var(--glass-border)", backgroundColor: "rgba(255,255,255,0.02)" }}
+        >
+          <div className="flex gap-1">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "#ff5f57" }} />
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "#febc2e" }} />
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "#28c840" }} />
+          </div>
+          <div
+            className="flex-1 flex items-center gap-2 rounded-md px-3 py-1 text-[10px] font-mono"
+            style={{
+              backgroundColor: "rgba(255,255,255,0.04)",
+              color: "var(--text-muted)",
+              maxWidth: 400,
+              margin: "0 auto",
+            }}
+          >
+            <span style={{ opacity: 0.5 }}>🔒</span>
+            <span className="truncate">litlabs.net{document.route}</span>
+          </div>
+          <span className="text-[9px] font-bold" style={{ color: "var(--text-muted)" }}>
+            {bpWidth}px
+          </span>
+        </div>
+
+        {/* Iframe preview */}
+        <div className="flex-1 overflow-auto w-full flex justify-center" style={{ padding: "16px" }}>
+          <iframe
+            ref={iframeRef}
+            title="Canvas Preview"
+            srcDoc={previewHtml}
+            sandbox="allow-same-origin allow-popups allow-forms allow-scripts"
+            style={{
+              width: `${bpWidth}px`,
+              maxWidth: "100%",
+              height: "100%",
+              minHeight: 500,
+              border: "1px solid var(--glass-border)",
+              borderRadius: 8,
+              backgroundColor: "#0a0b10",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={stageRef}
@@ -292,11 +364,9 @@ export function CanvasStage() {
           minHeight: "100%",
           padding: "24px",
           margin: "0 auto",
-          width: previewMode ? `${bpWidth}px` : "100%",
-          maxWidth: previewMode ? `${bpWidth}px` : undefined,
+          width: "100%",
           transform: `scale(${zoom / 100})`,
           transformOrigin: "top center",
-          transition: "width 0.2s ease",
         }}
       >
         {rootId && <TreeNodeView nodeId={rootId} />}
