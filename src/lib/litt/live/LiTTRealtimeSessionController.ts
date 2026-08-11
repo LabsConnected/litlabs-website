@@ -482,15 +482,18 @@ export class LiTTRealtimeSessionController {
           },
           onmessage: (msg) => this.handleServerMessage(msg),
           onerror: (e) => {
-            // The SDK often passes a generic/empty error object. Surface a
-            // helpful, actionable message instead of "WebSocket error: unknown".
+            // The SDK's onerror callback often passes a raw Event object
+            // (not an Error), so String(e) produces "[object Event]".
+            // Surface a helpful, actionable message instead.
             const rawMessage = e && typeof e === "object" ? (e as { message?: string; code?: number | string }).message : undefined;
             const code = e && typeof e === "object" ? (e as { code?: number | string }).code : undefined;
-            let message = rawMessage || String(e || "");
+            let message = rawMessage || "";
             let kind: LiveSessionErrorKind = "websocket_rejected";
             let retryable = true;
 
-            if (!message || message === "unknown" || message === "[object Object]") {
+            // Catch all the useless stringifications: [object Event],
+            // [object Object], "unknown", empty string
+            if (!message || message === "unknown" || /^\[object /.test(message)) {
               message = "Gemini Live connection failed. This usually means the API key does not have Live API access, the model is unavailable in your region, or the ephemeral token was rejected.";
             }
             if (message.toLowerCase().includes("unauthorized") || message.toLowerCase().includes("authentication") || code === 401 || code === 403) {
@@ -508,6 +511,11 @@ export class LiTTRealtimeSessionController {
 
             this.emitError(kind, message, retryable);
             this.updateIndicators({ littAudio: "error", littVision: "error" });
+            // Don't stay stuck on "Connecting…" — onclose will handle
+            // reconnection logic, but set failed state for non-retryable
+            if (!retryable) {
+              this.setState("failed");
+            }
           },
           onclose: (e) => {
             this.handleWebSocketClose(e.code, e.reason);
@@ -998,11 +1006,23 @@ export class LiTTRealtimeSessionController {
       return;
     }
 
-    // Determine error type
+    // Determine error type and whether we should retry
+    let retryable = true;
+    const reasonLower = (reason || "").toLowerCase();
+
     if (code === 1008 || code === 4000) {
-      this.emitError("quota_exceeded", `Session closed: ${reason || "quota exceeded"}`, true);
+      // 1008 = policy violation (often auth/permission), 4000 = quota
+      if (reasonLower.includes("unauthorized") || reasonLower.includes("auth") || reasonLower.includes("key")) {
+        this.emitError("websocket_rejected", `Gemini Live authentication failed (${code}): ${reason || "API key rejected or missing Live API access"}`, false);
+        retryable = false;
+      } else {
+        this.emitError("quota_exceeded", `Session closed: ${reason || "quota exceeded"}`, true);
+      }
     } else if (code === 1011) {
       this.emitError("model_unavailable", `Server error: ${reason}`, true);
+    } else if (code === 1006) {
+      // 1006 = abnormal closure (usually network or server-side reject)
+      this.emitError("network_interrupted", `Connection closed unexpectedly. This often means the API key lacks Live API access or the model is unavailable.`, true);
     } else {
       this.emitError("network_interrupted", `Connection closed (${code}): ${reason}`, true);
     }
@@ -1011,8 +1031,8 @@ export class LiTTRealtimeSessionController {
 
     this.updateIndicators({ littAudio: "disconnected", littVision: "disconnected" });
 
-    // Attempt reconnection with exponential backoff
-    if (this.reconnectAttempts < 5) {
+    // Only attempt reconnection for retryable errors
+    if (retryable && this.reconnectAttempts < 5) {
       this.setState("reconnecting");
       const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
       this.reconnectAttempts++;
