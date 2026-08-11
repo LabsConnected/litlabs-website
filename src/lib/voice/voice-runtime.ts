@@ -177,10 +177,16 @@ export async function runLiTTForVoice(args: {
   const voiceSystem = [
     "You are LiTT, the AI assistant for LiTTree LabStudios.",
     "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
+    "",
+    "CONTEXT (use this to answer questions):",
     ctx.projectName ? `Active project: ${ctx.projectName}` : "",
     ctx.project?.activeBranch ? `Current branch: ${ctx.project.activeBranch}` : "",
     ctx.project?.repositoryName ? `Repository: ${ctx.project.repositoryName}` : "",
+    ctx.project?.repositoryProvider ? `Provider: ${ctx.project.repositoryProvider}` : "",
     ctx.memoryContext ? `Relevant memories:\n${ctx.memoryContext}` : "",
+    "",
+    "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
+    "Do not say you don't have information — the context above is the user's real project data.",
   ].filter(Boolean).join("\n");
 
   const transcript = ctx.history
