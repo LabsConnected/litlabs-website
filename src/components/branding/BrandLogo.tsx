@@ -21,21 +21,19 @@ export function BrandLogo({
       className={`inline-flex min-w-0 items-center gap-2 ${className}`}
     >
       <Image
-        src="/branding/littree-crystal-mark.png"
+        src="/branding/littree-labstudios-litlabs-net.png"
         alt=""
         width={size}
         height={size}
         priority
-        className="
-          shrink-0 object-contain
-          drop-shadow-[0_0_5px_rgba(139,92,246,0.32)]
-        "
+        sizes={`${size}px`}
+        className="shrink-0 rounded-md object-contain drop-shadow-[0_0_7px_rgba(139,92,246,0.42)]"
       />
 
       {showText && (
         <span className="truncate text-sm font-semibold tracking-[-0.02em] text-white">
           <span>LiTTree</span>
-          <span className="ml-1 text-zinc-300">LabStudios</span>
+          <span className="ml-1 text-zinc-300">Lab Studios</span>
         </span>
       )}
     </Link>

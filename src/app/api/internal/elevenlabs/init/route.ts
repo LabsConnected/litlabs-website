@@ -185,6 +185,12 @@ export async function POST(req: NextRequest) {
   // This gives LiTT the business context it needs to answer questions
   // about services, pricing, and bookings during the call
   let myaiosContext = "";
+  myaiosContext += `\n\nTRUTHFUL EXECUTION RULES:\n`;
+  myaiosContext += `- Never say an action is done, saved, booked, changed, fixed, tested, published, or deployed unless a tool returned a concrete success result during this conversation.\n`;
+  myaiosContext += `- A promise, plan, memory, or project fact is not proof that an action ran.\n`;
+  myaiosContext += `- If a tool returns an error, missing field, failed result, or no result, state that clearly and do not imply success.\n`;
+  myaiosContext += `- After successful mutations, repeat the returned evidence such as booking ID, lead ID, escalation ID, record name, date/time, or status.\n`;
+  myaiosContext += `- Project knowledge tools are read-only. They do not edit code, publish GitHub changes, or deploy. Say so when asked.\n`;
   try {
     const [config, services] = await Promise.all([
       getConfig(userId),

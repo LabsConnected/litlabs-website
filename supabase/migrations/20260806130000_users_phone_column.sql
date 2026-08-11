@@ -1,6 +1,6 @@
--- Add phone column to users table for voice-bridge caller identification.
+-- Add phone column to users table for voice-provider caller identification.
 --
--- The LiTT Voice Bridge looks up users by their Twilio Caller ID (phone
+-- Voice providers look up users by their caller ID (phone
 -- number). This column stores the user's phone in E.164 format so the
 -- voice bridge can resolve a caller to their clerk_id and build full
 -- LittUserContext via the Context Engine.
