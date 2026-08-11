@@ -195,8 +195,69 @@ export async function POST(req: NextRequest) {
   }
 
   // Return in OpenAI-compatible format (Vapi Custom LLM expects this)
+  // Vapi's OpenAI SDK sends stream:true by default for voice calls.
+  // If streaming is requested, return SSE format; otherwise return JSON.
+  const wantsStream = body.stream === true || body.stream === "true";
+  const completionId = `chatcmpl-${Date.now()}`;
+
+  if (wantsStream) {
+    // SSE streaming response — send the full text as a single chunk
+    // then close. Vapi's TTS pipeline needs this format to extract content.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        // Initial chunk with role
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            })}\n\n`,
+          ),
+        );
+        // Content chunk(s) — send as a few chunks for realistic streaming
+        const words = responseText.split(" ");
+        const chunkSize = 3;
+        for (let i = 0; i < words.length; i += chunkSize) {
+          const chunk = words.slice(i, i + chunkSize).join(" ") + (i + chunkSize < words.length ? " " : "");
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }],
+              })}\n\n`,
+            ),
+          );
+        }
+        // Final chunk with finish_reason
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            })}\n\n`,
+          ),
+        );
+        // Terminate the stream
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   return NextResponse.json({
-    id: `chatcmpl-${Date.now()}`,
+    id: completionId,
     object: "chat.completion",
     choices: [
       {
