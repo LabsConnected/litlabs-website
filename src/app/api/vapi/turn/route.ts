@@ -6,7 +6,8 @@ import { insertMessage } from "@/lib/studio/conversation-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 55;
+export const fetchCache = "force-no-store";
 
 /**
  * POST /api/vapi/turn
@@ -90,29 +91,34 @@ export async function POST(req: NextRequest) {
 
   const responseText = result.body.text;
 
-  // Persist messages to the conversation (if we have one)
-  if (session.userId && session.conversationId && session.projectId) {
-    try {
-      await insertMessage({
-        conversationId: session.conversationId,
-        ownerId: session.userId,
-        projectId: session.projectId,
-        role: "user",
-        content: userMessage.content,
-        status: "completed",
-      });
-      await insertMessage({
-        conversationId: session.conversationId,
-        ownerId: session.userId,
-        projectId: session.projectId,
-        role: "assistant",
-        agentSlug: "litt",
-        content: responseText,
-        status: "completed",
-      });
-    } catch {
-      // Message persistence is best-effort; do not fail the voice turn.
-    }
+  // Persist messages to the conversation asynchronously (do not block voice response)
+  const uid = session.userId;
+  const cid = session.conversationId;
+  const pid = session.projectId;
+  if (uid && cid && pid) {
+    void (async () => {
+      try {
+        await insertMessage({
+          conversationId: cid,
+          ownerId: uid,
+          projectId: pid,
+          role: "user",
+          content: userMessage.content,
+          status: "completed",
+        });
+        await insertMessage({
+          conversationId: cid,
+          ownerId: uid,
+          projectId: pid,
+          role: "assistant",
+          agentSlug: "litt",
+          content: responseText,
+          status: "completed",
+        });
+      } catch {
+        // Message persistence is best-effort; do not fail the voice turn.
+      }
+    })();
   }
 
   // Return in OpenAI-compatible format (Vapi Custom LLM expects this)

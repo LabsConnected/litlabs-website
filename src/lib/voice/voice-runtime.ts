@@ -27,7 +27,7 @@ import { auditRun } from "@/lib/litt-runtime/audit-service";
 import { detectActions } from "@/lib/litt-runtime/response-stream";
 import type { LiTTRunResult } from "@/lib/litt-runtime/types";
 
-const HISTORY_LIMIT = 12;
+const HISTORY_LIMIT = 6;
 
 /**
  * Build a ResolvedRunContext for a voice turn.
@@ -43,43 +43,53 @@ export async function resolveVoiceContext(args: {
 }): Promise<ResolvedRunContext> {
   const { userId, projectId, conversationId, message } = args;
 
-  // Resolve project server-side when a projectId is supplied.
-  let project: ResolvedRunContext["project"] = null;
-  if (userId && projectId) {
-    project = await resolveProject(userId, projectId);
-  }
+  // Run project resolution, conversation lookup, and memory recall in parallel
+  const [projectResult, convResult, memoryResult] = await Promise.all([
+    // Resolve project
+    (async () => {
+      if (!userId || !projectId) return null;
+      try {
+        return await resolveProject(userId, projectId);
+      } catch {
+        return null;
+      }
+    })(),
+    // Resolve conversation + history
+    (async () => {
+      if (!userId || !conversationId) return { convId: null, history: [] as HistoryEntry[] };
+      try {
+        const conversation = await getConversation(conversationId, userId);
+        if (!conversation) return { convId: null, history: [] as HistoryEntry[] };
+        const allMessages = await listMessages(conversation.id, userId);
+        const history = allMessages
+          .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
+          .slice(-HISTORY_LIMIT)
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+        return { convId: conversation.id, history };
+      } catch {
+        return { convId: null, history: [] as HistoryEntry[] };
+      }
+    })(),
+    // Recall memories (non-fatal)
+    (async () => {
+      if (!userId || !projectId) return "";
+      try {
+        const agentSlug = "litt" as AgentSlug;
+        const memories = await recallMemories(message, userId, projectId, {
+          agentSlug,
+          limit: 3,
+        });
+        return formatMemoryContext(memories);
+      } catch {
+        return "";
+      }
+    })(),
+  ]);
 
-  // Resolve conversation + DB history
-  let convId: string | null = conversationId;
-  let history: HistoryEntry[] = [];
-  if (userId && convId) {
-    const conversation = await getConversation(convId, userId);
-    if (conversation) {
-      convId = conversation.id;
-      const allMessages = await listMessages(conversation.id, userId);
-      history = allMessages
-        .filter((m) => m.status === "completed" && (m.role === "user" || m.role === "assistant"))
-        .slice(-HISTORY_LIMIT)
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
-    } else {
-      convId = null;
-    }
-  }
-
-  // Recall project-scoped memories
-  let memoryContext = "";
-  if (userId && project) {
-    const agentSlug = "litt" as AgentSlug;
-    try {
-      const memories = await recallMemories(message, userId, project.projectId, {
-        agentSlug,
-        limit: 5,
-      });
-      memoryContext = formatMemoryContext(memories);
-    } catch {
-      // Non-fatal
-    }
-  }
+  const project = projectResult;
+  const convId = convResult.convId;
+  const history = convResult.history;
+  const memoryContext = memoryResult;
 
   // Build capabilities from project state
   const capabilities: RawCapabilities = {
@@ -157,6 +167,8 @@ export async function runLiTTForVoice(args: {
     projectId: ctx.projectId ?? undefined,
     agentMode: "voice",
     agentSlug: "litt",
+    category: "fast",
+    maxTokens: 300,
   };
 
   const prompt = buildPrompt(ctx, req, null);
@@ -171,23 +183,31 @@ export async function runLiTTForVoice(args: {
   const verified = verifyResult(result.text);
   const verifiedText = verified.text;
 
-  // Persist memory (non-blocking)
-  if (ctx.userId && ctx.project) {
-    const { persistMemory } = await import("@/lib/studio/memory-service");
-    void persistMemory(
-      `User: ${args.message}\nLiTT: ${verifiedText}`,
-      ctx.userId,
-      ctx.project.projectId,
-      {
-        agentSlug: "litt",
-        memoryType: "conversation_summary",
-        conversationId: ctx.conversationId ?? undefined,
-      },
-    );
+  // Persist memory + audit asynchronously (do not block voice response)
+  const memUserId = ctx.userId;
+  const memProjectId = ctx.project?.projectId ?? null;
+  if (memUserId && memProjectId) {
+    void (async () => {
+      try {
+        const { persistMemory } = await import("@/lib/studio/memory-service");
+        await persistMemory(
+          `User: ${args.message}\nLiTT: ${verifiedText}`,
+          memUserId,
+          memProjectId,
+          {
+            agentSlug: "litt",
+            memoryType: "conversation_summary",
+            conversationId: ctx.conversationId ?? undefined,
+          },
+        );
+      } catch {
+        // Non-fatal
+      }
+    })();
   }
 
-  // Audit
-  auditRun({
+  // Audit asynchronously
+  void auditRun({
     userId: ctx.userId,
     conversationId: ctx.conversationId,
     projectId: ctx.projectId,

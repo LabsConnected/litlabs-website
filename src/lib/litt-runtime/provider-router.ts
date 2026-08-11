@@ -45,7 +45,7 @@ export function selectModelOptions(req: LiTTRunRequest): LLMOptions {
     // and don't pin a provider. When auto, honor an explicit provider pin.
     provider: category === "auto" ? provider : undefined,
     category,
-    maxTokens: 2048,
+    maxTokens: req.maxTokens ?? 2048,
     modelOverride,
   };
 }

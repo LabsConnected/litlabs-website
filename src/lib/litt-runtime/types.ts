@@ -41,6 +41,8 @@ export interface LiTTRunRequest {
   history?: HistoryEntry[];
   /** Model category for routing (auto/free/fast/code/creative/vision/byok). */
   category?: string;
+  /** Max output tokens (overrides default 2048). Voice uses 300 for speed. */
+  maxTokens?: number;
   userName?: string;
   pageContext?: PageContextHint;
   /** Client-derived capability hints. Server re-resolves and ignores conflicts. */
