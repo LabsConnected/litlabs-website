@@ -12,7 +12,7 @@
  * One brain, one tool system, one conversation memory.
  */
 
-import { resolveProject, buildProjectContextBlock } from "@/lib/studio/project-resolver";
+import { resolveProject } from "@/lib/studio/project-resolver";
 import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service";
 import { getConversation, listMessages } from "@/lib/studio/conversation-service";
 import { adaptLegacyCapability } from "@/lib/litt-kernel";
@@ -20,7 +20,6 @@ import type { CapabilityRecord } from "@/lib/litt-kernel";
 import type { RawCapabilities } from "@/lib/capabilities/translate";
 import type { AgentSlug } from "@/lib/studio/types";
 import type { ResolvedRunContext, HistoryEntry, LiTTRunRequest } from "@/lib/litt-runtime/types";
-import { buildPrompt } from "@/lib/litt-runtime/prompt-builder";
 import { executeRun } from "@/lib/litt-runtime/execution-engine";
 import { verifyResult } from "@/lib/litt-runtime/result-verifier";
 import { auditRun } from "@/lib/litt-runtime/audit-service";
@@ -169,14 +168,36 @@ export async function runLiTTForVoice(args: {
     agentSlug: "litt",
     category: "fast",
     maxTokens: 300,
+    timeoutMs: 12_000,
   };
 
-  const prompt = buildPrompt(ctx, req, null);
+  // Build a voice-optimized prompt — much shorter than the full kernel prompt.
+  // Voice needs speed: skip kernel governance, capability translation, and
+  // the full project context block. Include only essential context.
+  const voiceSystem = [
+    "You are LiTT, the AI assistant for LiTTree LabStudios.",
+    "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
+    ctx.projectName ? `Active project: ${ctx.projectName}` : "",
+    ctx.project?.activeBranch ? `Current branch: ${ctx.project.activeBranch}` : "",
+    ctx.project?.repositoryName ? `Repository: ${ctx.project.repositoryName}` : "",
+    ctx.memoryContext ? `Relevant memories:\n${ctx.memoryContext}` : "",
+  ].filter(Boolean).join("\n");
+
+  const transcript = ctx.history
+    .map((e) => (e.role === "user" ? `User: ${e.content}` : `LiTT: ${e.content}`))
+    .join("\n");
+
+  const voiceFull = [
+    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+    `User: ${args.message}`,
+    "",
+    "LiTT:",
+  ].filter(Boolean).join("\n");
 
   const result = await executeRun(
     req,
-    prompt.fullPrompt,
-    prompt.systemPrompt,
+    voiceFull,
+    voiceSystem,
     ctx.history,
   );
 

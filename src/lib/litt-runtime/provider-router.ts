@@ -46,6 +46,7 @@ export function selectModelOptions(req: LiTTRunRequest): LLMOptions {
     provider: category === "auto" ? provider : undefined,
     category,
     maxTokens: req.maxTokens ?? 2048,
+    timeoutMs: req.timeoutMs,
     modelOverride,
   };
 }

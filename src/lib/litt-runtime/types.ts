@@ -43,6 +43,8 @@ export interface LiTTRunRequest {
   category?: string;
   /** Max output tokens (overrides default 2048). Voice uses 300 for speed. */
   maxTokens?: number;
+  /** Per-request LLM timeout in ms. Voice uses 12000 to fail fast. */
+  timeoutMs?: number;
   userName?: string;
   pageContext?: PageContextHint;
   /** Client-derived capability hints. Server re-resolves and ignores conflicts. */

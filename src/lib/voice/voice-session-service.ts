@@ -89,27 +89,39 @@ async function resolveUserByPhone(phone: string): Promise<{
 
 /**
  * Resolve the active project for a user.
- * Tries the user_active_project table first, then falls back to most recent.
+ *
+ * Resolution order:
+ *   1. user_active_project (explicit selection in Studio/Dashboard)
+ *   2. resolveCurrentProject (most recently updated project)
+ *   3. listProjects legacy fallback
  */
 async function resolveActiveProject(userId: string): Promise<string | null> {
   try {
-    if (!supabaseAdmin) {
-      const projects = await listProjects(userId);
-      return projects.projects[0]?.id ?? projects.legacyOnly[0]?.id ?? null;
+    // 1. Honor the project explicitly selected in Studio/Dashboard
+    if (supabaseAdmin) {
+      const { data: activeRecord } = await supabaseAdmin
+        .from("user_active_project")
+        .select("project_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (activeRecord?.project_id) {
+        const project = await resolveCurrentProject({
+          userId,
+          explicitProjectId: activeRecord.project_id,
+        });
+
+        if (project) {
+          return project.projectId;
+        }
+      }
     }
 
-    const { data: activeRecord } = await supabaseAdmin
-      .from("user_active_project")
-      .select("project_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const project = await resolveCurrentProject({
-      userId,
-      explicitProjectId: activeRecord?.project_id ?? undefined,
-    });
+    // 2. Fallback to most recently updated project
+    const project = await resolveCurrentProject({ userId });
     return project?.projectId ?? null;
   } catch {
+    // 3. Final legacy fallback
     try {
       const projects = await listProjects(userId);
       return projects.projects[0]?.id ?? projects.legacyOnly[0]?.id ?? null;
