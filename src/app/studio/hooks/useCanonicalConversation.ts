@@ -98,6 +98,8 @@ function toUIMessage(
     agentMode: msg.agentMode ?? null,
     createdAt: new Date(msg.createdAt).getTime() || Date.now(),
     reasoning: msg.reasoning,
+    toolActivity: msg.toolActivity ?? null,
+    pendingApproval: msg.pendingApproval ?? null,
   };
 }
 

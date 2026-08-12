@@ -213,11 +213,14 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
   }
 
   if (ctx.executionMode === "act") {
-    lines.push("APPROVAL: You are in ACT mode. Mutations (file writes, commands) require explicit user approval. When you need to mutate, tell the user what you want to do and wait for approval.");
+    lines.push("APPROVAL: You are in ACT mode. The project, repo, and workspace above are your implicit context — do not ask the user to restate them.");
+    lines.push("ACT RULES: For actionable requests, immediately use available tools to inspect and execute. Do not ask 'what task are you tackling?' — the message IS the task. Continue active tasks across follow-ups like 'yes', 'do it', 'keep going'. Mutations require explicit user approval — state what you want to do, then wait. For conversational messages (hey, thanks, what's up), respond naturally without creating tasks or progress logs.");
   } else if (ctx.executionMode === "auto") {
     lines.push("APPROVAL: You are in AUTO mode. Safe workspace operations (file reads, writes, patches, git commit, builds) are auto-approved. Sensitive actions (force push, delete, rebase) still require approval.");
+    lines.push("AUTO RULES: Decide chat vs action automatically. If intent is clearly actionable, begin work without asking for confirmation. If conversational, respond naturally without tasks or progress logs.");
   } else {
     lines.push("APPROVAL: You are in PLAN mode. No mutations allowed — read-only inspection only.");
+    lines.push("PLAN RULES: Research, inspect, and plan only. Never write files or run commands. You can still read files, search code, and analyze.");
   }
 
   return lines.join("\n");

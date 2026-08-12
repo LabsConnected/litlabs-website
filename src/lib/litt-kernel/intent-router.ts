@@ -162,6 +162,29 @@ const PRIVATE_DATA_PATTERNS = [
   /\b(show me|what.*do i have|list my|my projects|my files|my account)\b/i,
 ];
 
+// ─── Conversational message detection ───────────────────────────
+
+/**
+ * Detect purely conversational messages that should never trigger
+ * task creation, work logs, or execution. These are greetings,
+ * acknowledgments, thanks, and casual chat.
+ */
+const CONVERSATIONAL_PATTERNS: RegExp[] = [
+  /^(hey|hi|hello|yo|sup|what'?s up|whats up|howdy|hey there|hi there)\b/i,
+  /^(thanks|thank you|thx|ty|appreciate it|cheers|cool|nice|awesome|got it|ok|okay|k|sounds good|perfect|great|love it|nice work|good job)\b/i,
+  /^(lol|lmao|haha|fr|facts|real|word|bet|say less|i feel you|makes sense|right on)\b/i,
+  /^(yes|yeah|yep|yup|sure|go for it|do it|proceed|continue|keep going|go ahead)\b/i,
+  /^(no|nope|nah|not really|skip|forget it|never mind|nvm)\b/i,
+  /^(what'?s good|how are you|how'?s it going|how do you do|what are you up to)\b/i,
+  /^(bye|see ya|later|goodnight|gn|talk later|catch you later)\b/i,
+];
+
+export function isConversational(message: string): boolean {
+  const trimmed = message.trim().toLowerCase();
+  if (trimmed.length > 60) return false; // long messages are likely actionable
+  return CONVERSATIONAL_PATTERNS.some((p) => p.test(trimmed));
+}
+
 // ─── Main classifier ────────────────────────────────────────────
 
 /**
@@ -182,6 +205,21 @@ export function classifyIntent(message: string): IntentClassification {
       requiresExecution: false,
       confidence: 0.3,
       reasoning: "Empty message — defaulting to think mode.",
+    };
+  }
+
+  // Conversational messages are never actionable — short-circuit before
+  // mode pattern matching so "what's up" doesn't match "status" mode.
+  if (isConversational(trimmed)) {
+    return {
+      mode: "think",
+      domains: [],
+      requiresProject: false,
+      requiresCurrentInformation: false,
+      requiresPrivateData: false,
+      requiresExecution: false,
+      confidence: 0.95,
+      reasoning: "Conversational message (greeting/acknowledgment/casual) — no execution required.",
     };
   }
 

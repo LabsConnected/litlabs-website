@@ -33,6 +33,10 @@ export interface ChatMessage {
   actions?: ArtifactAction[];
   /** Provider reasoning/thinking trace (client-side only, not persisted). */
   reasoning?: string;
+  /** V2: Real tool activity log — only present when actual tools executed. */
+  toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }> | null;
+  /** V2: Pending approval state when LiTT pauses for ACT-mode approval. */
+  pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
 }
 
 export interface AgentMeta {

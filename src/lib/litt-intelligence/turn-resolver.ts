@@ -51,6 +51,8 @@ const AMBIGUOUS_PATTERNS = [
   /\bagain\b/i,
   /\bsame problem\b/i,
   /\bas before\b/i,
+  // Continuation phrases — user wants to proceed with previous proposal
+  /\b(do it|go for it|go ahead|proceed|continue|keep going|yes do it|yeah do it|do that)\b/i,
 ];
 
 function isAmbiguous(message: string): boolean {
@@ -151,6 +153,13 @@ function resolveMessage(
   if (/(fix|repair|resolve|handle)\b.*(it|that|this|that shit|this shit)/i.test(trimmed)) {
     const expanded = `${trimmed} — referring to: ${topic}`;
     return { resolved: expanded, raw: trimmed, confidence: 0.82 };
+  }
+
+  // Continuation phrases — "do it", "yes", "go ahead", "keep going", "proceed"
+  // The user is approving/continuing the previous proposal or action.
+  if (/^(do it|go for it|go ahead|proceed|continue|keep going|yes do it|yeah do it|do that|yes|yeah|yep|sure)\b/i.test(trimmed) && trimmed.length < 40) {
+    const expanded = `Yes, proceed with: ${topic}`;
+    return { resolved: expanded, raw: trimmed, confidence: 0.85 };
   }
 
   // "make this better" / "make it better" — vague improvement request

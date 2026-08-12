@@ -297,4 +297,66 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     // should be zero standalone busy indicators.
     expect(pulses.length).toBe(0);
   });
+
+  // ─── ActiveTaskCard regression tests ───────────────────────────
+
+  it("does NOT render ActiveTaskCard for conversational assistant messages", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "what's up", createdAt: Date.now() },
+      { role: "assistant", content: "What's good 😎 I'm connected and ready.", status: "completed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    // No active-task-card should be present — conversational messages
+    // have no toolActivity.
+    expect(screen.queryByTestId("active-task-card")).toBeNull();
+  });
+
+  it("does NOT render 'Work log' text for any message", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "hey", createdAt: Date.now() },
+      { role: "assistant", content: "Hey, what are we working on?", status: "completed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    // The old fake "Work log · N of N steps complete" must never appear.
+    expect(screen.queryByText(/work log/i)).toBeNull();
+  });
+
+  it("renders ActiveTaskCard when message has real toolActivity", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "fix the bug", createdAt: Date.now() },
+      {
+        role: "assistant",
+        content: "Fixed the issue in the token route.",
+        status: "completed",
+        createdAt: Date.now(),
+        toolActivity: [
+          { toolId: "files.read", success: true, summary: "Read route.ts" },
+          { toolId: "files.write", success: true, summary: "Wrote fix to route.ts" },
+        ],
+      },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("active-task-card")).toBeTruthy();
+  });
 });

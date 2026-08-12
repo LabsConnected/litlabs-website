@@ -168,6 +168,8 @@ export function toChatMessage(msg: ConversationMessage): ChatMessage {
     createdAt: msg.createdAt,
     parentMessageId: msg.parentMessageId,
     regenerationOfMessageId: msg.regenerationOfMessageId,
+    toolActivity: msg.toolActivity ?? null,
+    pendingApproval: msg.pendingApproval ?? null,
   };
 }
 
