@@ -21,7 +21,6 @@ import {
 import {
   useStudioAgentStore,
   AGENT_META,
-  STUDIO_AGENTS,
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
@@ -97,8 +96,7 @@ export default function CommandComposer({
 
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
+  const [unifiedOpen, setUnifiedOpen] = useState(false);
   const [recorderMode, setRecorderMode] = useState<"audio" | "video" | "screen" | null>(null);
   const [attachAnchorRect, setAttachAnchorRect] = useState<DOMRect | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -107,11 +105,9 @@ export default function CommandComposer({
   const [ttsPopoverOpen, setTtsPopoverOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const agentTriggerRef = useRef<HTMLButtonElement>(null);
-  const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const unifiedTriggerRef = useRef<HTMLButtonElement>(null);
   const attachTriggerRef = useRef<HTMLButtonElement>(null);
-  const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
-  const [modelRect, setModelRect] = useState<DOMRect | null>(null);
+  const [unifiedRect, setUnifiedRect] = useState<DOMRect | null>(null);
 
   // Universal attachment system
   const {
@@ -238,31 +234,18 @@ export default function CommandComposer({
     }
   }, [addFiles]);
 
-  // Position agent popover on open.
+  // Position unified selector popover on open.
   useEffect(() => {
-    if (!agentOpen) return;
-    if (agentTriggerRef.current) setAgentRect(agentTriggerRef.current.getBoundingClientRect());
-    const update = () => agentTriggerRef.current && setAgentRect(agentTriggerRef.current.getBoundingClientRect());
+    if (!unifiedOpen) return;
+    if (unifiedTriggerRef.current) setUnifiedRect(unifiedTriggerRef.current.getBoundingClientRect());
+    const update = () => unifiedTriggerRef.current && setUnifiedRect(unifiedTriggerRef.current.getBoundingClientRect());
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [agentOpen]);
-
-  // Position model popover on open.
-  useEffect(() => {
-    if (!modelOpen) return;
-    if (modelTriggerRef.current) setModelRect(modelTriggerRef.current.getBoundingClientRect());
-    const update = () => modelTriggerRef.current && setModelRect(modelTriggerRef.current.getBoundingClientRect());
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [modelOpen]);
+  }, [unifiedOpen]);
 
   // Synchronous submission lock — prevents a fast double-click from
   // entering submit before React applies the busy=true prop.
@@ -522,20 +505,20 @@ export default function CommandComposer({
           }}
         />
 
-        {/* Agent selector — icon only on mobile, full on desktop */}
+        {/* Unified agent + model selector — one trigger, two-section popover */}
         <button
-          ref={agentTriggerRef}
+          ref={unifiedTriggerRef}
           type="button"
-          onClick={() => setAgentOpen((v) => !v)}
+          onClick={() => setUnifiedOpen((v) => !v)}
           className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-white/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: agentAccent,
           }}
-          aria-label="Select agent"
-          title={agentMeta.displayName}
-          aria-expanded={Boolean(agentOpen)}
-          data-testid="agent-trigger"
+          aria-label="Select assistant and model"
+          aria-expanded={Boolean(unifiedOpen)}
+          title={`${agentMeta.displayName} · ${selectedModel.label}`}
+          data-testid="unified-selector-trigger"
         >
           <span
             className="relative grid h-5 w-5 shrink-0 place-items-center rounded-md overflow-hidden text-[10px] font-black"
@@ -547,47 +530,25 @@ export default function CommandComposer({
               className="h-full w-full object-cover"
             />
           </span>
-          <span className="hidden sm:inline text-[11px] font-bold">{agentMeta.displayName}</span>
-        </button>
-        {agentOpen && agentRect &&
-          createPortal(
-            <AgentPopover
-              rect={agentRect}
-              activeId={activeAgentId}
-              onSelect={(id) => { if (onAgentChange) { onAgentChange(id); } else { setActiveAgent(id); } setAgentOpen(false); }}
-              onClose={() => setAgentOpen(false)}
-            />,
-            document.body,
-          )}
-
-        {/* Model picker — interactive button + popover */}
-        <button
-          ref={modelTriggerRef}
-          type="button"
-          onClick={() => setModelOpen((v) => !v)}
-          className="flex h-11 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold transition hover:bg-white/5"
-          style={{
-            borderColor: "var(--studio-border-strong)",
-            color: "var(--text-secondary)",
-          }}
-          aria-label="Select AI model"
-          aria-expanded={Boolean(modelOpen)}
-          title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
-          data-testid="model-trigger"
-        >
-          <span>{selectedModel.icon}</span>
-          <span className="hidden sm:inline">{selectedModel.label}</span>
-          <span className="sm:hidden">{selectedModel.label.split(" ")[0]}</span>
+          <span className="hidden sm:inline text-[11px] font-bold" style={{ color: "var(--text-secondary)" }}>
+            {agentMeta.displayName}
+          </span>
+          <span className="hidden sm:inline text-[10px] opacity-40">·</span>
+          <span className="hidden sm:inline text-[10px] font-semibold" style={{ color: "var(--text-muted)" }}>
+            {selectedModel.label}
+          </span>
           <ChevronDown size={10} className="pointer-events-none opacity-50" />
         </button>
-        {modelOpen && modelRect &&
+        {unifiedOpen && unifiedRect &&
           createPortal(
-            <ModelPopover
-              rect={modelRect}
-              selectedId={selectedModel.id}
+            <UnifiedSelectorPopover
+              rect={unifiedRect}
+              activeAgentId={activeAgentId}
+              selectedModelId={selectedModel.id}
               providerHealth={providerHealth}
-              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
-              onClose={() => setModelOpen(false)}
+              onAgentSelect={(id) => { if (onAgentChange) { onAgentChange(id); } else { setActiveAgent(id); } }}
+              onModelSelect={(m) => { selectModel(m); }}
+              onClose={() => setUnifiedOpen(false)}
             />,
             document.body,
           )}
@@ -990,20 +951,49 @@ function TtsPopover({
   );
 }
 
-/* ── Agent selector popover ────────────────────────────────────── */
-function AgentPopover({
+/* ── Unified agent + model selector popover ─────────────────────── */
+function planLabel(plan: string): string {
+  switch (plan) {
+    case "creator_beta": return "Creator Beta";
+    case "pro_builder_beta": return "Pro Builder Beta";
+    case "founder": return "Founding Member";
+    default: return plan;
+  }
+}
+
+/** MODE items — the main assistant modes. */
+const MODE_ITEMS: { id: AgentId; label: string; description: string }[] = [
+  { id: "litt", label: "LiTT", description: "Normal main assistant" },
+  { id: "spark", label: "Spark", description: "Creative mode" },
+];
+
+/** MODEL items — BYOK engines shown in the MODEL section. */
+const BYOK_MODEL_IDS = ["gpt-4o", "claude-sonnet"];
+
+/** Advanced LiTT aliases shown in a collapsible ADVANCED section. */
+const ADVANCED_LITT_IDS = ["litt-fast", "litt-balanced", "litt-reasoning", "litt-code", "litt-research"];
+
+function UnifiedSelectorPopover({
   rect,
-  activeId,
-  onSelect,
+  activeAgentId,
+  selectedModelId,
+  providerHealth,
+  onAgentSelect,
+  onModelSelect,
   onClose,
 }: {
   rect: DOMRect;
-  activeId: AgentId;
-  onSelect: (id: AgentId) => void;
+  activeAgentId: AgentId;
+  selectedModelId: string;
+  providerHealth: Record<string, ProviderHealth>;
+  onAgentSelect: (id: AgentId) => void;
+  onModelSelect: (model: SelectedModel) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { hasAccess, loading } = useUserPlan();
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -1015,21 +1005,35 @@ function AgentPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 270);
-  // Anchor above the trigger with 8px gap; fall below if not enough room
-  const popoverHeight = 260;
+  const left = Math.min(rect.left, window.innerWidth - 280);
+  const popoverHeight = 420;
   const gap = 8;
   const roomAbove = rect.top - gap;
   const top = roomAbove >= popoverHeight
     ? rect.top - popoverHeight - gap
     : rect.bottom + gap;
 
+  // LiTT Auto model
+  const littAutoModel = MODELS.find((m) => m.id === "litt-auto");
+  const isLittAutoSelected = selectedModelId === "litt-auto";
+
+  // BYOK models
+  const byokModels = MODELS.filter((m) => BYOK_MODEL_IDS.includes(m.id));
+
+  // Advanced LiTT aliases
+  const advancedModels = MODELS.filter((m) => ADVANCED_LITT_IDS.includes(m.id));
+
+  // Advanced provider models (everything else that's not litt-alias or byok)
+  const advancedProviderModels = MODELS.filter(
+    (m) => m.category === "advanced",
+  );
+
   return (
     <div
       ref={ref}
       role="dialog"
-      aria-label="Select agent"
-      className="fixed z-[200] w-64 max-h-[260px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
+      aria-label="Select assistant and model"
+      className="fixed z-[200] max-h-[420px] w-[280px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
       style={{
         left,
         top,
@@ -1037,22 +1041,31 @@ function AgentPopover({
         borderColor: "var(--studio-border-strong)",
       }}
     >
+      {/* ── MODE section ────────────────────────────────────────── */}
       <div
         className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)", backgroundColor: "var(--studio-elevated)" }}
+        style={{
+          color: "var(--text-secondary)",
+          borderBottom: "1px solid var(--studio-border)",
+          backgroundColor: "var(--studio-elevated)",
+        }}
       >
-        AI Team
+        Mode
       </div>
-      {STUDIO_AGENTS.map((meta) => {
+
+      {/* LiTT — main agent */}
+      {MODE_ITEMS.map((item) => {
+        const meta = AGENT_META[item.id];
+        if (!meta) return null;
         const accent = meta.color;
-        const isActive = activeId === meta.id;
+        const isActive = activeAgentId === item.id;
         const unlocked = loading || hasAccess(meta.minimumPlan);
         return (
-          <div key={meta.id}>
+          <div key={item.id}>
             <button
               type="button"
               disabled={!unlocked}
-              onClick={() => unlocked && onSelect(meta.id)}
+              onClick={() => unlocked && onAgentSelect(item.id)}
               className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
               style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
             >
@@ -1062,7 +1075,7 @@ function AgentPopover({
               >
                 {unlocked ? (
                   <img
-                    src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                    src={item.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
                     alt={meta.displayName}
                     className="h-full w-full object-cover"
                   />
@@ -1075,11 +1088,11 @@ function AgentPopover({
                   {meta.displayName}
                 </div>
                 <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
-                  {unlocked ? meta.role : `Requires ${planLabel(meta.minimumPlan)}`}
+                  {unlocked ? item.description : `Requires ${planLabel(meta.minimumPlan)}`}
                 </div>
               </div>
               {isActive && unlocked && (
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
+                <Check size={12} className="shrink-0" style={{ color: accent }} />
               )}
             </button>
             {!unlocked && (
@@ -1095,77 +1108,31 @@ function AgentPopover({
           </div>
         );
       })}
-    </div>
-  );
-}
 
-function planLabel(plan: string): string {
-  switch (plan) {
-    case "creator_beta": return "Creator Beta";
-    case "pro_builder_beta": return "Pro Builder Beta";
-    case "founder": return "Founding Member";
-    default: return plan;
-  }
-}
+      {/* LiTT Auto — autonomous mode (model alias, not agent) */}
+      {littAutoModel && (
+        <button
+          type="button"
+          onClick={() => onModelSelect(littAutoModel)}
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+          style={{ backgroundColor: isLittAutoSelected ? "rgba(114,242,56,0.08)" : "transparent" }}
+        >
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-sm" style={{ backgroundColor: "rgba(114,242,56,0.15)" }}>
+            {littAutoModel.icon}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
+              LiTT Auto
+            </div>
+            <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
+              Autonomous mode — routes automatically
+            </div>
+          </div>
+          {isLittAutoSelected && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+        </button>
+      )}
 
-/* ── Model selector popover ────────────────────────────────────── */
-const MODEL_CATEGORIES: { id: NonNullable<SelectedModel["category"]>; label: string }[] = [
-  { id: "auto", label: "Auto" },
-  { id: "free", label: "Free" },
-  { id: "fast", label: "Fast" },
-  { id: "code", label: "Code" },
-  { id: "creative", label: "Creative" },
-  { id: "vision", label: "Vision" },
-  { id: "byok", label: "BYOK" },
-];
-
-function ModelPopover({
-  rect,
-  selectedId,
-  providerHealth,
-  onSelect,
-  onClose,
-}: {
-  rect: DOMRect;
-  selectedId: string;
-  providerHealth: Record<string, ProviderHealth>;
-  onSelect: (model: SelectedModel) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const left = Math.min(rect.left, window.innerWidth - 300);
-  // Anchor above the trigger with 8px gap; fall below if not enough room
-  const popoverHeight = 350;
-  const gap = 8;
-  const roomAbove = rect.top - gap;
-  const top = roomAbove >= popoverHeight
-    ? rect.top - popoverHeight - gap
-    : rect.bottom + gap;
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Select model"
-      className="fixed z-[200] max-h-[350px] w-72 overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
-    >
+      {/* ── MODEL section ───────────────────────────────────────── */}
       <div
         className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
         style={{
@@ -1176,50 +1143,105 @@ function ModelPopover({
       >
         Model
       </div>
-      {MODEL_CATEGORIES.map((cat) => {
-        const models = MODELS.filter((m) => m.category === cat.id);
-        if (models.length === 0) return null;
+
+      {byokModels.map((m) => {
+        const isActive = selectedModelId === m.id;
+        const health = providerHealth[m.provider] ?? "available";
+        const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
         return (
-          <div key={cat.id}>
-            <div
-              className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {cat.label}
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => onModelSelect(m)}
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+            style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+          >
+            <span className="text-base shrink-0">{m.icon}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+              <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+                <span>{m.provider}</span>
+                <span>·</span>
+                <span style={{ color: m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
+                  {m.cost === "paid" ? "PAID" : m.cost === "free" ? "FREE" : "AUTO"}
+                </span>
+                <span>·</span>
+                <span>{m.speed}</span>
+              </div>
             </div>
-            {models.map((m) => {
-              const isActive = selectedId === m.id;
-              const health = providerHealth[m.provider] ?? "available";
-              const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onSelect(m)}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-                  style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
-                >
-                  <span className="text-base shrink-0">{m.icon}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-                    <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
-                      <span>{m.provider}</span>
-                      <span>·</span>
-                      <span style={{ color: m.cost === "free" ? "#72f238" : m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
-                        {m.cost === "free" ? "FREE" : m.cost === "paid" ? "PAID" : "AUTO"}
-                      </span>
-                      <span>·</span>
-                      <span>{m.speed}</span>
-                    </div>
-                  </div>
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
-                  {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-                </button>
-              );
-            })}
-          </div>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
+            {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+          </button>
         );
       })}
+
+      {/* ── ADVANCED section (collapsible) ──────────────────────── */}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-white/5"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <ChevronDown
+          size={10}
+          className="pointer-events-none transition-transform"
+          style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)" }}
+        />
+        <span className="text-[10px] font-bold uppercase tracking-wider">Advanced Models</span>
+      </button>
+
+      {showAdvanced && (
+        <>
+          {/* LiTT aliases (Fast, Balanced, Reasoning, Code, Research) */}
+          {advancedModels.map((m) => {
+            const isActive = selectedModelId === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onModelSelect(m)}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+                style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+              >
+                <span className="text-sm shrink-0">{m.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+                  <div className="text-[9px] truncate" style={{ color: "var(--text-muted)" }}>
+                    {m.description}
+                  </div>
+                </div>
+                {isActive && <Check size={10} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+              </button>
+            );
+          })}
+
+          {/* Raw provider models */}
+          {advancedProviderModels.map((m) => {
+            const isActive = selectedModelId === m.id;
+            const health = providerHealth[m.provider] ?? "available";
+            const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onModelSelect(m)}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+                style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+              >
+                <span className="text-sm shrink-0">{m.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+                  <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                    {m.provider} · {m.cost === "free" ? "FREE" : "PAID"}
+                  </div>
+                </div>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
+                {isActive && <Check size={10} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+              </button>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
