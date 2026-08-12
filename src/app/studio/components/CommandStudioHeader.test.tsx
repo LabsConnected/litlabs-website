@@ -28,6 +28,7 @@ const mockCapabilities = {
   terminalError: null,
   terminalFailureStage: null,
   terminalCwd: null,
+  terminalServerReachable: false,
   voiceTransportConnected: false,
   voiceMicrophoneOn: false,
   voiceHealth: { configured: false, tokenService: "unknown" as const, available: false },

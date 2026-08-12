@@ -569,10 +569,14 @@ export default function StudioActivityRail({
                 aria-label={`Switch agent to ${meta.displayName}`}
               >
                 <div
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[10px] font-black"
+                  className="relative grid h-6 w-6 shrink-0 place-items-center rounded-md overflow-hidden text-[10px] font-black"
                   style={{ backgroundColor: `${meta.color}20`, color: meta.color }}
                 >
-                  {meta.displayName[0]}
+                  <img
+                    src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                    alt={meta.displayName}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] font-bold truncate" style={{ color: active ? "var(--text-primary)" : "var(--text-secondary)" }}>
