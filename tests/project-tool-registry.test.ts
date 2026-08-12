@@ -20,7 +20,7 @@ describe("project tool registry", () => {
   });
 
   it("each tool has a handler and metadata", () => {
-    for (const [name, entry] of Object.entries(PROJECT_TOOLS)) {
+    for (const [, entry] of Object.entries(PROJECT_TOOLS)) {
       expect(typeof entry.handler).toBe("function");
       expect(entry.metadata).toBeDefined();
       expect(typeof entry.metadata.projectScoped).toBe("boolean");
