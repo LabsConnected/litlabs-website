@@ -155,6 +155,7 @@ export class LiTTRealtimeSessionController {
 
   // Facing mode
   private facingMode: "user" | "environment" = "user";
+  private isAcquiringCamera = false;
 
   constructor(config?: Partial<LiTTLiveConfig>) {
     this.config = {
@@ -865,6 +866,7 @@ export class LiTTRealtimeSessionController {
   // -------------------------------------------------------------------------
 
   private startFrameSampling() {
+    this.stopFrameSampling();
     if (!this.cameraStream && !this.screenStream) return;
     if (!this.session) return;
 
@@ -1026,21 +1028,52 @@ export class LiTTRealtimeSessionController {
     });
   }
 
-  /** Toggle camera on/off (stops sending frames, keeps preview) */
-  toggleCamera(): void {
+  /** Toggle camera on/off with track release, double-acquisition guard, and frame sampler cleanup */
+  async toggleCamera(): Promise<void> {
+    if (this.isAcquiringCamera) return;
+
+    // If camera is currently active, turn off & stop all tracks
     if (this.cameraStream) {
-      const enabled = !this.cameraStream.getVideoTracks()[0].enabled;
+      this.stopFrameSampling();
       this.cameraStream.getVideoTracks().forEach((track) => {
-        track.enabled = enabled;
+        track.enabled = false;
+        track.stop();
       });
-      if (!enabled) {
-        this.stopFrameSampling();
-        this.updateIndicators({ cameraPreview: "inactive", littVision: "disconnected", frameStream: "inactive" });
-      } else {
-        this.updateIndicators({ cameraPreview: "active" });
-        // Resume frame sampling
-        this.startFrameSampling();
+      this.cameraStream = null;
+      if (this.videoElement && !this.screenStream) {
+        this.videoElement.srcObject = null;
       }
+      this.updateIndicators({
+        cameraPreview: "inactive",
+        littVision: "disconnected",
+        frameStream: "inactive",
+      });
+      if (this.indicators.littAudio === "connected") {
+        this.setState("live_audio");
+      }
+      return;
+    }
+
+    // Acquire camera stream dynamically if disabled/uninitialized
+    this.isAcquiringCamera = true;
+    try {
+      await this.acquireCamera(this.facingMode);
+      if (this.videoElement && this.cameraStream) {
+        this.videoElement.srcObject = this.cameraStream;
+        await this.videoElement.play().catch(() => {});
+      }
+      this.updateIndicators({ cameraPreview: "active" });
+      this.startFrameSampling();
+    } catch {
+      // Error emitted by acquireCamera
+      this.stopFrameSampling();
+      const errStream = this.cameraStream as MediaStream | null;
+      if (errStream) {
+        errStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
+        this.cameraStream = null;
+      }
+    } finally {
+      this.isAcquiringCamera = false;
     }
   }
 

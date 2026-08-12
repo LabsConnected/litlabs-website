@@ -157,6 +157,8 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Image,
     accent: GROUP_ACCENTS.Gallery,
     items: [
+      { label: "Overview", href: "/gallery", icon: Image },
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { label: "Showcase", href: "/showcase", icon: Star },
     ],
   },
