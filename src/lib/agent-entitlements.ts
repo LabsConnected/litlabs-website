@@ -143,10 +143,12 @@ export async function resolveAgentEntitlement(
     if (simulation && simulation !== "owner" && simulation !== "zero_bits") {
       plan = simulationToPlanId(simulation);
     } else if (!simulation || simulation === "owner") {
-      // Owner with no simulation → full access (Pro Builder level)
-      plan = "pro_builder_beta";
+      // Owner with no simulation → full owner access (true "owner" tier)
+      plan = "owner";
+    } else if (simulation === "zero_bits") {
+      // zero_bits: owner plan access but balance is handled separately
+      plan = "owner";
     }
-    // "zero_bits" keeps owner plan access but balance is handled separately
   }
 
   // 4. Check plan-based access first.
@@ -202,7 +204,7 @@ export async function resolveAgentEntitlement(
 }
 
 function isValidPlan(p: string): p is PlanId {
-  return ["starter", "creator_beta", "pro_builder_beta", "founder"].includes(p);
+  return ["starter", "creator_beta", "pro_builder_beta", "founder", "owner"].includes(p);
 }
 
 function denied(

@@ -4,8 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "ts-node server.ts",
-    "build": "tsc -p tsconfig.json",
     "build:server": "tsc -p tsconfig.json",
+    "build:worker": "tsc -p tsconfig.worker.json && node -e \"require('fs').writeFileSync('dist/worker/package.json','{\\\"type\\\":\\\"module\\\"}\\n')\"",
+    "build": "npm run build:server && npm run build:worker",
+    "build:all": "npm run build:server && npm run build:worker",
+    "start:server": "node dist/server.js",
+    "start:worker": "node dist/worker/livekit-agent.js start",
     "start": "node dist/server.js"
   },
   "dependencies": {

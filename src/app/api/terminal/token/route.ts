@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   }
 
   const projectId = request.nextUrl.searchParams.get("projectId");
+  const baseUrl = process.env.TERMINAL_SERVER_URL || "";
 
   try {
     // If projectId is provided, the token MUST be bound to the project's
@@ -67,8 +68,9 @@ export async function GET(request: NextRequest) {
           );
         }
 
+        const tokenData = createTerminalToken(userId, { workspaceId, projectId });
         return NextResponse.json(
-          createTerminalToken(userId, { workspaceId, projectId }),
+          { ...tokenData, baseUrl },
           { headers: { "Cache-Control": "no-store" } },
         );
       } catch (err) {
@@ -87,9 +89,11 @@ export async function GET(request: NextRequest) {
     }
 
     // No projectId — issue a plain token (for non-project terminals)
-    return NextResponse.json(createTerminalToken(userId), {
-      headers: { "Cache-Control": "no-store" },
-    });
+    const plainToken = createTerminalToken(userId);
+    return NextResponse.json(
+      { ...plainToken, baseUrl },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch {
     return NextResponse.json(
       { error: "Terminal authentication is unavailable" },

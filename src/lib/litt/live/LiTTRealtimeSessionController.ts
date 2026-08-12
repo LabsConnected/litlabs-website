@@ -28,6 +28,7 @@
  */
 
 import { GoogleGenAI, Modality, MediaResolution, type Session } from "@google/genai";
+import { LiveKitAudioTransport, type TransportState, type AgentState } from "./LiveKitAudioTransport";
 import type {
   LiveSessionEvent,
   LiveSessionState,
@@ -102,11 +103,14 @@ export class LiTTRealtimeSessionController {
   private screenStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
 
-  // Gemini Live
+  // Gemini Live (legacy — kept for fallback)
   private ai: GoogleGenAI | null = null;
   private session: Session | null = null;
   private config: LiTTLiveConfig;
   private context: LiTTLiveSessionContext | null = null;
+
+  // LiveKit transport (hybrid — replaces Gemini Live WebSocket for audio)
+  private transport: LiveKitAudioTransport | null = null;
 
   // Audio capture
   private audioContext: AudioContext | null = null;
@@ -316,8 +320,8 @@ export class LiTTRealtimeSessionController {
       frameStream: "inactive",
     });
 
-    // 3. Connect to Gemini Live
-    await this.connectToGeminiLive();
+    // 3. Connect to LiveKit (hybrid transport — replaces Gemini Live WebSocket)
+    await this.connectToLiveKit();
   }
 
   // -------------------------------------------------------------------------
@@ -404,7 +408,169 @@ export class LiTTRealtimeSessionController {
   }
 
   // -------------------------------------------------------------------------
-  // Gemini Live connection
+  // LiveKit connection (hybrid transport — replaces Gemini Live for audio)
+  // -------------------------------------------------------------------------
+
+  private async connectToLiveKit(): Promise<void> {
+    this.setState("connecting");
+    this.updateIndicators({ littAudio: "connecting", littVision: "connecting" });
+
+    // Connection timeout — don't leave user on "Connecting…" forever
+    this.connectionTimer = setTimeout(() => {
+      if (this.state === "connecting" || this.state === "reconnecting") {
+        this.emitError("connection_timeout", "Connection timed out. Please retry.", true);
+        this.setState("failed");
+        this.updateIndicators({ littAudio: "error", littVision: "error" });
+      }
+    }, 15_000);
+
+    // Create the LiveKit transport
+    this.transport = new LiveKitAudioTransport();
+
+    // Wire transport events to the controller's emit() system
+    this.transport.on({
+      onStateChange: (state: TransportState) => {
+        if (state === "connected") {
+          if (this.connectionTimer) {
+            clearTimeout(this.connectionTimer);
+            this.connectionTimer = null;
+          }
+          this.reconnectAttempts = 0;
+          // Audio is connected via LiveKit
+          if (this.micStream) {
+            this.updateIndicators({ littAudio: "connected" });
+            const hasVision = !!(this.cameraStream || this.screenStream);
+            this.setState(hasVision ? "live_audio_and_vision" : "live_audio");
+          }
+          this.logEvent("live_connected", {
+            reconnect: this.reconnectAttempts > 0,
+            attempt: this.reconnectAttempts,
+            transport: "livekit",
+          });
+          // Start sending vision frames if camera/screen is active
+          this.startFrameSampling();
+        } else if (state === "reconnecting") {
+          this.setState("reconnecting");
+        } else if (state === "disconnected" && !this.isIntentionalClose) {
+          // Unexpected disconnect — attempt reconnection
+          this.emitError("network_interrupted", "Connection to LiTT was lost.", true);
+          this.updateIndicators({ littAudio: "disconnected", littVision: "disconnected" });
+          if (this.reconnectAttempts < 5) {
+            this.setState("reconnecting");
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            this.reconnectAttempts++;
+            this.reconnectTimer = setTimeout(() => { void this.reconnect(); }, delay);
+          } else {
+            this.setState("failed");
+          }
+        } else if (state === "error") {
+          this.updateIndicators({ littAudio: "error", littVision: "error" });
+          if (this.reconnectAttempts < 5) {
+            this.setState("reconnecting");
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            this.reconnectAttempts++;
+            this.reconnectTimer = setTimeout(() => { void this.reconnect(); }, delay);
+          } else {
+            this.setState("failed");
+          }
+        }
+      },
+
+      onAgentStateChange: (agentState: AgentState) => {
+        if (agentState === "thinking") {
+          this.logEvent("live_agent_thinking");
+        } else if (agentState === "speaking") {
+          if (this.firstAudioReceivedAt === null) {
+            this.firstAudioReceivedAt = Date.now();
+            this.logEvent("live_first_audio", {
+              latencyMs: this.firstAudioReceivedAt - (this.sessionStartTime || 0),
+            });
+          }
+          this.logEvent("live_agent_speaking");
+        }
+      },
+
+      onUserTranscriptDelta: (text: string) => {
+        if (text && text !== this.lastInputTranscriptChunk) {
+          this.lastInputTranscriptChunk = text;
+          this.currentUserTranscript = text;
+          this.emit({
+            type: "userTranscript",
+            transcript: { role: "user", text, isFinal: false, timestamp: Date.now() },
+          });
+        }
+      },
+
+      onUserTranscriptComplete: (text: string) => {
+        if (text) {
+          this.currentUserTranscript = text;
+          this.emit({
+            type: "userTranscript",
+            transcript: { role: "user", text, isFinal: true, timestamp: Date.now() },
+          });
+          this.logEvent("live_user_transcript", { text });
+        }
+      },
+
+      onAssistantTranscriptDelta: (text: string) => {
+        if (text && text !== this.lastOutputTranscriptChunk) {
+          this.lastOutputTranscriptChunk = text;
+          this.currentAssistantTranscript = text;
+          this.emit({
+            type: "assistantTranscript",
+            transcript: { role: "assistant", text, isFinal: false, timestamp: Date.now() },
+          });
+        }
+      },
+
+      onAssistantTranscriptComplete: (text: string) => {
+        if (text) {
+          this.currentAssistantTranscript = text;
+          this.emit({
+            type: "assistantTranscript",
+            transcript: { role: "assistant", text, isFinal: true, timestamp: Date.now() },
+          });
+          this.emit({ type: "turnComplete" });
+          this.logEvent("live_assistant_transcript", { text });
+        }
+      },
+
+      onToolCall: (call) => {
+        const toolCall: LiveToolCall = {
+          id: call.callId || call.name,
+          name: call.name,
+          args: call.args,
+        };
+        this.emit({ type: "toolCall", call: toolCall });
+        this.logEvent("live_tool_called", { toolName: call.name, toolCallId: call.callId });
+      },
+
+      onToolResult: (result) => {
+        this.logEvent("live_tool_result", { toolName: result.name, toolCallId: result.callId });
+      },
+
+      onError: (error) => {
+        const kind = error.code as LiveSessionErrorKind;
+        this.emitError(kind || "unknown", error.message, error.retryable);
+      },
+
+      onConnectionQualityChange: (quality) => {
+        this.logEvent("live_connection_quality", { quality });
+      },
+    });
+
+    // Connect to the LiveKit room
+    const roomName = `litt-${this.context?.userId || "anon"}-${this.context?.agentSlug || "default"}-${Date.now().toString(36)}`;
+    await this.transport.connect({
+      roomName,
+      agentId: this.context?.agentSlug,
+      instructions: this.config.systemInstruction,
+      voice: this.config.voiceName,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Gemini Live connection (legacy — kept for fallback)
   // -------------------------------------------------------------------------
 
   private async connectToGeminiLive(): Promise<void> {
@@ -483,8 +649,40 @@ export class LiTTRealtimeSessionController {
           },
           onmessage: (msg) => this.handleServerMessage(msg),
           onerror: (e) => {
-            this.emitError("websocket_rejected", `WebSocket error: ${e.message || "unknown"}`, true);
+            // The SDK's onerror callback often passes a raw Event object
+            // (not an Error), so String(e) produces "[object Event]".
+            // Surface a helpful, actionable message instead.
+            const rawMessage = e && typeof e === "object" ? (e as { message?: string; code?: number | string }).message : undefined;
+            const code = e && typeof e === "object" ? (e as { code?: number | string }).code : undefined;
+            let message = rawMessage || "";
+            let kind: LiveSessionErrorKind = "websocket_rejected";
+            let retryable = true;
+
+            // Catch all the useless stringifications: [object Event],
+            // [object Object], "unknown", empty string
+            if (!message || message === "unknown" || /^\[object /.test(message)) {
+              message = "Gemini Live connection failed. This usually means the API key does not have Live API access, the model is unavailable in your region, or the ephemeral token was rejected.";
+            }
+            if (message.toLowerCase().includes("unauthorized") || message.toLowerCase().includes("authentication") || code === 401 || code === 403) {
+              kind = "websocket_rejected";
+              message = "Gemini Live authentication failed. The API key may be invalid, revoked, or missing Live API access.";
+              retryable = false;
+            } else if (message.toLowerCase().includes("quota") || message.toLowerCase().includes("429") || code === 429) {
+              kind = "quota_exceeded";
+              message = "Gemini Live quota exceeded. Please try again later.";
+            } else if (message.toLowerCase().includes("not found") || message.toLowerCase().includes("model") || code === 404) {
+              kind = "model_unavailable";
+              message = "The requested Gemini Live model is not available.";
+              retryable = false;
+            }
+
+            this.emitError(kind, message, retryable);
             this.updateIndicators({ littAudio: "error", littVision: "error" });
+            // Don't stay stuck on "Connecting…" — onclose will handle
+            // reconnection logic, but set failed state for non-retryable
+            if (!retryable) {
+              this.setState("failed");
+            }
           },
           onclose: (e) => {
             this.handleWebSocketClose(e.code, e.reason);
@@ -496,17 +694,37 @@ export class LiTTRealtimeSessionController {
         clearTimeout(this.connectionTimer);
         this.connectionTimer = null;
       }
-      const msg = (err as Error).message || "unknown";
-      if (msg.includes("quota") || msg.includes("429")) {
+      const { message: rawMsg, code } = this.extractErrorMessage(err);
+      const msg = rawMsg || "unknown";
+      if (code === 401 || code === 403 || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("authentication")) {
+        this.emitError("websocket_rejected", "Gemini Live authentication failed. The API key may be invalid, revoked, or missing Live API access.", false);
+      } else if (msg.includes("quota") || msg.includes("429") || code === 429) {
         this.emitError("quota_exceeded", "Gemini API quota exceeded. Please try again later.", true);
-      } else if (msg.includes("model") || msg.includes("not found")) {
+      } else if (msg.includes("model") || msg.includes("not found") || code === 404) {
         this.emitError("model_unavailable", `Model ${model} is not available. ${msg}`, false);
+      } else if (msg.includes("api key") || msg.includes("apikey")) {
+        this.emitError("websocket_rejected", "Gemini Live API key rejected. Check that your key has Live API access and has not been revoked.", false);
       } else {
         this.emitError("websocket_rejected", `Failed to connect: ${msg}`, true);
       }
       this.setState("failed");
       this.updateIndicators({ littAudio: "error", littVision: "error" });
     }
+  }
+
+  /** Extract a human-readable message from any SDK error object. */
+  private extractErrorMessage(err: unknown): { message: string; code?: number } {
+    if (!err) return { message: "unknown" };
+    if (err instanceof Error) {
+      return { message: err.message };
+    }
+    if (typeof err === "object") {
+      const obj = err as { message?: string; error?: { message?: string }; code?: number; status?: number };
+      const message = obj.message || obj.error?.message || JSON.stringify(err);
+      const code = typeof obj.code === "number" ? obj.code : typeof obj.status === "number" ? obj.status : undefined;
+      return { message: message || "unknown", code };
+    }
+    return { message: String(err) };
   }
 
   // -------------------------------------------------------------------------
@@ -725,6 +943,13 @@ export class LiTTRealtimeSessionController {
   // -------------------------------------------------------------------------
 
   private startAudioCapture() {
+    // With LiveKit transport, mic audio is published as a WebRTC track
+    // automatically — no manual PCM16 capture needed.
+    if (this.transport) {
+      this.transport.startMicrophone().catch(() => {});
+      return;
+    }
+    // Legacy: Gemini Live manual PCM16 capture
     if (!this.micStream || !this.session) return;
 
     try {
@@ -868,7 +1093,8 @@ export class LiTTRealtimeSessionController {
   private startFrameSampling() {
     this.stopFrameSampling();
     if (!this.cameraStream && !this.screenStream) return;
-    if (!this.session) return;
+    // Need either the LiveKit transport or a Gemini Live session
+    if (!this.transport && !this.session) return;
 
     // Create canvas for frame capture
     if (!this.frameCanvas) {
@@ -891,7 +1117,7 @@ export class LiTTRealtimeSessionController {
     this.frameVideoElement = sampleVideo;
 
     this.frameInterval = setInterval(() => {
-      if (!this.session || this.isIntentionalClose) return;
+      if ((!this.session && !this.transport) || this.isIntentionalClose) return;
       if (document.hidden) return; // Don't sample when tab is hidden
 
       const video = sampleVideo;
@@ -906,9 +1132,15 @@ export class LiTTRealtimeSessionController {
 
       this.frameCanvas.toBlob(
         (blob) => {
-          if (!blob || !this.session || this.isIntentionalClose) return;
+          if (!blob || this.isIntentionalClose) return;
+          if (!this.session && !this.transport) return;
           try {
-            this.session.sendRealtimeInput({ media: blob as unknown as never });
+            // Send via LiveKit transport (hybrid) or Gemini Live (legacy)
+            if (this.transport) {
+              this.transport.sendVisionFrame(blob);
+            } else if (this.session) {
+              this.session.sendRealtimeInput({ media: blob as unknown as never });
+            }
             this.framesSent++;
             // Vision is connected once we successfully send a frame
             if (this.indicators.littVision !== "connected") {
@@ -956,11 +1188,23 @@ export class LiTTRealtimeSessionController {
       return;
     }
 
-    // Determine error type
+    // Determine error type and whether we should retry
+    let retryable = true;
+    const reasonLower = (reason || "").toLowerCase();
+
     if (code === 1008 || code === 4000) {
-      this.emitError("quota_exceeded", `Session closed: ${reason || "quota exceeded"}`, true);
+      // 1008 = policy violation (often auth/permission), 4000 = quota
+      if (reasonLower.includes("unauthorized") || reasonLower.includes("auth") || reasonLower.includes("key")) {
+        this.emitError("websocket_rejected", `Gemini Live authentication failed (${code}): ${reason || "API key rejected or missing Live API access"}`, false);
+        retryable = false;
+      } else {
+        this.emitError("quota_exceeded", `Session closed: ${reason || "quota exceeded"}`, true);
+      }
     } else if (code === 1011) {
       this.emitError("model_unavailable", `Server error: ${reason}`, true);
+    } else if (code === 1006) {
+      // 1006 = abnormal closure (usually network or server-side reject)
+      this.emitError("network_interrupted", `Connection closed unexpectedly. This often means the API key lacks Live API access or the model is unavailable.`, true);
     } else {
       this.emitError("network_interrupted", `Connection closed (${code}): ${reason}`, true);
     }
@@ -969,8 +1213,8 @@ export class LiTTRealtimeSessionController {
 
     this.updateIndicators({ littAudio: "disconnected", littVision: "disconnected" });
 
-    // Attempt reconnection with exponential backoff
-    if (this.reconnectAttempts < 5) {
+    // Only attempt reconnection for retryable errors
+    if (retryable && this.reconnectAttempts < 5) {
       this.setState("reconnecting");
       const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
       this.reconnectAttempts++;
@@ -1007,8 +1251,12 @@ export class LiTTRealtimeSessionController {
       this.tokenExpiresAt = null;
     }
 
-    // Reconnect to Gemini Live (fetches a fresh ephemeral token)
-    await this.connectToGeminiLive();
+    // Reconnect via LiveKit (hybrid transport) — fetches a fresh token
+    if (this.transport) {
+      try { await this.transport.disconnect(); } catch {}
+      this.transport = null;
+    }
+    await this.connectToLiveKit();
   }
 
   // -------------------------------------------------------------------------
@@ -1159,8 +1407,12 @@ export class LiTTRealtimeSessionController {
   /** Interrupt the current model response (barge-in) */
   interrupt(): void {
     this.stopPlayback();
+    // LiveKit transport — send interrupt signal to agent worker
+    if (this.transport) {
+      this.transport.interrupt().catch(() => {});
+    }
+    // Legacy: Gemini Live — send turnComplete to interrupt
     if (this.session) {
-      // Sending empty client content with turnComplete interrupts
       try {
         this.session.sendClientContent({ turnComplete: true });
       } catch {
@@ -1192,6 +1444,11 @@ export class LiTTRealtimeSessionController {
   // -------------------------------------------------------------------------
 
   private stopAudioCapture() {
+    // LiveKit transport — stop mic publishing
+    if (this.transport) {
+      this.transport.stopMicrophone();
+    }
+    // Legacy: Gemini Live manual capture cleanup
     if (this.audioWorkletNode) {
       try {
         this.audioWorkletNode.disconnect();
@@ -1261,7 +1518,7 @@ export class LiTTRealtimeSessionController {
       this.playbackContext = null;
     }
 
-    // Close Gemini Live session
+    // Close Gemini Live session (legacy)
     if (this.session) {
       try {
         this.session.close();
@@ -1269,6 +1526,14 @@ export class LiTTRealtimeSessionController {
       this.session = null;
     }
     this.ai = null;
+
+    // Disconnect LiveKit transport
+    if (this.transport) {
+      try {
+        void this.transport.disconnect();
+      } catch { /* ignore */ }
+      this.transport = null;
+    }
 
     // Stop ALL media stream tracks
     if (this.cameraStream) {

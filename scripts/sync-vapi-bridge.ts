@@ -21,6 +21,10 @@
  *
  * Optional env:
  *   VAPI_ASSISTANT_ID — default: ef18583c-3538-4025-ad9f-2114d745525e (LiTT)
+ *   VAPI_SERVER_CREDENTIAL_ID — if set, uses Vapi's recommended
+ *     `server: { url, credentialId }` auth for the events webhook
+ *     (create a Bearer Token credential in the Vapi dashboard first).
+ *     If not set, falls back to inline `server: { url, headers }` auth.
  *
  * This script never prints secret values.
  */
@@ -58,6 +62,9 @@ const TURN_URL = `${BASE_URL}/api/vapi/turn`;
 
 const VAPI_BASE = "https://api.vapi.ai";
 const DRY_RUN = process.argv.includes("--dry-run");
+// If set, use Vapi's recommended credential-based auth for the events webhook.
+// If not set, fall back to legacy inline serverHeaders auth.
+const SERVER_CREDENTIAL_ID = process.env.VAPI_SERVER_CREDENTIAL_ID;
 
 // ─── Vapi API helpers ───────────────────────────────────────────
 
@@ -101,15 +108,14 @@ async function main() {
   console.log(`  assistant id    : ${ASSISTANT_ID}`);
   console.log(`  events URL      : ${EVENTS_URL}`);
   console.log(`  turn URL        : ${TURN_URL}`);
-  console.log(`  auth            : Bearer <redacted>`);
+  console.log(`  events auth     : ${SERVER_CREDENTIAL_ID ? `credential ${SERVER_CREDENTIAL_ID}` : "inline server.headers"}`);
+  console.log(`  turn auth       : Bearer <redacted>`);
   console.log(`  dry run         : ${DRY_RUN ? "yes" : "no"}\n`);
 
   // Build the assistant patch
-  const patch = {
+  const patch: Record<string, unknown> = {
     // Greeting spoken when the call connects
     firstMessage: "Welcome to LiTlabs.net. This is LiTT, how can I help?",
-    // Server URL for call lifecycle events (status-update, end-of-call-report, assistant-request)
-    serverUrl: EVENTS_URL,
     // Custom LLM: Vapi sends transcripts to our /api/vapi/turn endpoint
     // and speaks the response via TTS
     model: {
@@ -123,20 +129,35 @@ async function main() {
       },
       // No tools — the LiTT Runtime handles all tool execution server-side
       toolIds: [],
-      // Minimal system message — the LiTT runtime injects full context per-call
+      // Minimal system message — the LiTT runtime injects full context per-call.
+      // We append call metadata as a trailing line so /api/vapi/turn can
+      // always recover the call ID and caller phone, even when Vapi's
+      // Custom LLM payload doesn't include body.call. Vapi substitutes
+      // {{call.id}} and {{customer.number}} at call start.
       messages: [
         {
           role: "system",
           content:
-            "You are LiTT, the AI assistant for LiTTree LabStudios. You handle voice calls and route them through the LiTT runtime.",
+            "You are LiTT, the AI assistant for LiTTree LabStudios. You handle voice calls and route them through the LiTT runtime.\n\n" +
+            "[call-context callId={{call.id}} callerNumber={{customer.number}}]",
         },
       ],
     },
   };
 
+  // Events webhook auth: Vapi's current API uses `server: { url, credentialId }`
+  // (credential-based, recommended) or `server: { url, headers }` (inline).
+  // The old top-level `serverUrl` + `serverHeaders` fields are deprecated and
+  // rejected by the API with 400 "property serverHeaders should not exist".
+  if (SERVER_CREDENTIAL_ID) {
+    patch.server = { url: EVENTS_URL, credentialId: SERVER_CREDENTIAL_ID };
+  } else {
+    patch.server = { url: EVENTS_URL, headers: { Authorization: authHeader } };
+  }
+
   if (DRY_RUN) {
     const safe = JSON.parse(JSON.stringify(patch));
-    if (safe.serverHeaders?.Authorization) safe.serverHeaders.Authorization = "Bearer <redacted>";
+    if (safe.server?.headers?.Authorization) safe.server.headers.Authorization = "Bearer <redacted>";
     if (safe.model?.headers?.Authorization) safe.model.headers.Authorization = "Bearer <redacted>";
     console.log("Dry run — would PATCH assistant with:\n");
     console.log(JSON.stringify(safe, null, 2));
@@ -147,7 +168,9 @@ async function main() {
   // Fetch current assistant to show what's changing
   const current = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "GET");
   console.log("Current assistant config:");
-  console.log(`  serverUrl       : ${current?.serverUrl ?? "(none)"}`);
+  console.log(`  server.url      : ${current?.server?.url ?? current?.serverUrl ?? "(none)"}`);
+  console.log(`  server.credId   : ${current?.server?.credentialId ?? "(none)"}`);
+  console.log(`  server.auth     : ${current?.server?.headers?.Authorization ? "inline headers" : current?.server?.credentialId ? "credential" : "(none)"}`);
   console.log(`  model.provider  : ${current?.model?.provider ?? "(none)"}`);
   console.log(`  model.url       : ${current?.model?.url ?? "(none)"}`);
   console.log(`  model.toolIds   : ${current?.model?.toolIds?.length ?? 0} tool(s)`);
@@ -157,7 +180,9 @@ async function main() {
   const updated = await vapiFetch(`/assistant/${ASSISTANT_ID}`, "PATCH", patch);
 
   console.log("\nDone. Assistant updated:");
-  console.log(`  serverUrl       : ${updated?.serverUrl ?? EVENTS_URL}`);
+  console.log(`  server.url      : ${updated?.server?.url ?? "(none)"}`);
+  console.log(`  server.credId   : ${updated?.server?.credentialId ?? "(none)"}`);
+  console.log(`  server.auth     : ${updated?.server?.headers?.Authorization ? "inline headers" : updated?.server?.credentialId ? "credential" : "(none)"}`);
   console.log(`  model.provider  : ${updated?.model?.provider ?? "custom-llm"}`);
   console.log(`  model.url       : ${updated?.model?.url ?? TURN_URL}`);
   console.log(`  model.toolIds   : ${updated?.model?.toolIds?.length ?? 0} tool(s)`);

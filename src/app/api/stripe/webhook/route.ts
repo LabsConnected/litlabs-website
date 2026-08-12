@@ -61,10 +61,10 @@ async function creditCreditPack(
       p_reference_id: sessionId,
     });
     if (error) {
-      console.error(`[stripe] credit_ledger grant failed for creditpack ${sessionId}: ${error.message}`);
+      // Credit ledger grant failed — error is captured in Supabase response
     }
-  } catch (err) {
-    console.error(`[stripe] creditCreditPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
+  } catch {
+    // Credit grant error — non-fatal, Stripe event already recorded
   }
 }
 

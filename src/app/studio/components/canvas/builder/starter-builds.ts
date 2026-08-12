@@ -7,7 +7,7 @@
  * entire structure directly on the Canvas.
  */
 
-import { type CanvasNode, type CanvasDocument, createEmptyDocument } from "./types";
+import { createNode, type CanvasNode, type CanvasDocument, createEmptyDocument } from "./types";
 import { SECTION_BLOCKS } from "./section-blocks";
 
 export interface StarterBuild {

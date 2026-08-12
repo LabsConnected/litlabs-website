@@ -1,0 +1,199 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "LiTTree — Voice Call Orchestration (Vapi → n8n)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-call-ended",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-voice",
+      "name": "Voice Call Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "voice-call-ended"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract the call payload from LiTT\nconst body = $input.first().json.body || $input.first().json;\nconst data = body.data || body;\n\nreturn [{\n  json: {\n    event: body.event || 'voice.call.ended',\n    source: body.source || 'litt-vapi',\n    callId: data.callId,\n    from: data.from,\n    to: data.to,\n    callerName: data.callerName,\n    startedAt: data.startedAt,\n    endedAt: data.endedAt,\n    durationMs: data.durationMs,\n    status: data.status,\n    intent: data.intent,\n    leadStatus: data.leadStatus,\n    followUpNeeded: data.followUpNeeded,\n    summary: data.summary,\n    isKnownUser: data.isKnownUser,\n    userId: data.userId,\n    projectId: data.projectId,\n    projectName: data.projectName,\n    transcript: data.transcript,\n    conversationId: data.conversationId\n  }\n}];"
+      },
+      "id": "func-parse",
+      "name": "Parse Call Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.leadStatus }}",
+              "value2": "hot"
+            }
+          ]
+        }
+      },
+      "id": "if-hot-lead",
+      "name": "Is Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "channel": "general",
+        "text": "=🔔 HOT LEAD from voice call!\n\n📞 From: {{ $json.from }}\n🎯 Intent: {{ $json.intent }}\n🔥 Lead: {{ $json.leadStatus }}\n📋 Summary: {{ $json.summary }}\n⏱ Duration: {{ Math.round($json.durationMs / 1000) }}s\n\nFollow-up needed: {{ $json.followUpNeeded }}\nCall ID: {{ $json.callId }}",
+        "otherOptions": {}
+      },
+      "id": "slack-hot",
+      "name": "Notify Slack (Hot)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [850, 200],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "subject": "=Hot lead from voice call — {{ $json.from }}",
+        "body": "=A hot lead just called in.\n\nFrom: {{ $json.from }}\nIntent: {{ $json.intent }}\nSummary: {{ $json.summary }}\nDuration: {{ Math.round($json.durationMs / 1000) }}s\nCall ID: {{ $json.callId }}\n\nFollow up immediately!",
+        "options": {}
+      },
+      "id": "email-hot",
+      "name": "Email Notification (Hot)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [850, 350],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.followUpNeeded }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-followup",
+      "name": "Needs Follow-up?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GHL_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "voice_call" },
+            { "name": "callId", "value": "={{ $json.callId }}" },
+            { "name": "phone", "value": "={{ $json.from }}" },
+            { "name": "intent", "value": "={{ $json.intent }}" },
+            { "name": "leadStatus", "value": "={{ $json.leadStatus }}" },
+            { "name": "summary", "value": "={{ $json.summary }}" },
+            { "name": "transcript", "value": "={{ $json.transcript }}" },
+            { "name": "followUpNeeded", "value": "={{ $json.followUpNeeded }}" },
+            { "name": "isKnownUser", "value": "={{ $json.isKnownUser }}" },
+            { "name": "userId", "value": "={{ $json.userId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ghl-send",
+      "name": "Send to GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1250, 200],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_WEBHOOK_URL || '' }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "table", "value": "voice_call_logs" },
+            { "name": "callId", "value": "={{ $json.callId }}" },
+            { "name": "from", "value": "={{ $json.from }}" },
+            { "name": "intent", "value": "={{ $json.intent }}" },
+            { "name": "leadStatus", "value": "={{ $json.leadStatus }}" },
+            { "name": "summary", "value": "={{ $json.summary }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "supabase-log",
+      "name": "Log to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1250, 400],
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Voice Call Webhook": {
+      "main": [
+        [
+          { "node": "Parse Call Data", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse Call Data": {
+      "main": [
+        [
+          { "node": "Is Hot Lead?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is Hot Lead?": {
+      "main": [
+        [
+          { "node": "Notify Slack (Hot)", "type": "main", "index": 0 },
+          { "node": "Email Notification (Hot)", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Notify Slack (Hot)": {
+      "main": [
+        [
+          { "node": "Needs Follow-up?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Email Notification (Hot)": {
+      "main": [
+        [
+          { "node": "Needs Follow-up?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Needs Follow-up?": {
+      "main": [
+        [
+          { "node": "Send to GHL", "type": "main", "index": 0 },
+          { "node": "Log to Supabase", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": [
+    { "name": "voice" },
+    { "name": "vapi" },
+    { "name": "orchestration" }
+  ]
+}

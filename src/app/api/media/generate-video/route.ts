@@ -6,6 +6,12 @@ import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
 import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
 import { createVideoJob } from "@/lib/video-jobs";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  createGenerationJob,
+  getGenerationJobByRequestId,
+  updateGenerationJobStatus,
+} from "@/lib/generation/jobs";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -29,8 +35,17 @@ async function handler(req: NextRequest) {
       mimeType,
       model: clientModel = "veo",
       imageUrl, // public HTTPS URL for Alibaba i2v
+      requestId: clientRequestId, // client-provided for idempotent retries
     } = body;
     let duration = body.duration ?? 5;
+
+    // ── Idempotency: use client-provided requestId or generate one ──
+    // The same requestId across retries prevents double-charging.
+    const requestId = clientRequestId || crypto.randomUUID();
+
+    // ── Cost calculation (server-authoritative) ────────────────────
+    // Use the cost engine for real provider-cost-based pricing.
+    // Fall back to registry pricing if the cost engine returns lower.
 
     // ── Server-authoritative model resolution ──────────────────────
     // Resolve the model from our registry — never trust client cost.
@@ -41,9 +56,31 @@ async function handler(req: NextRequest) {
         { status: 400 },
       );
     }
-    const cost = getVideoModelPricing(videoModel.id);
+    const registryCost = getVideoModelPricing(videoModel.id);
+    const costResult = calculateRetailBits({
+      modality: "video",
+      provider: videoModel.id === "happyhorse" ? "alibaba" : "veo",
+      model: videoModel.apiModel,
+      durationSeconds: Number(duration),
+      resolution,
+    });
+    const cost = Math.max(registryCost, costResult.retailLiTTBits);
     const model = videoModel.apiModel;
     const isHappyHorse = videoModel.id === "happyhorse";
+
+    // ── Idempotency: check for existing job ────────────────────────
+    const existingJob = await getGenerationJobByRequestId(userId, requestId);
+    if (existingJob && (existingJob.status === "completed" || existingJob.status === "generating")) {
+      return NextResponse.json({
+        provider: existingJob.provider,
+        operationName: existingJob.providerJobId,
+        taskId: existingJob.providerJobId,
+        taskStatus: existingJob.status === "completed" ? "SUCCEEDED" : "PENDING",
+        cost: existingJob.littBitsCharged,
+        balance: null,
+        replayed: true,
+      });
+    }
 
     // ── Validate capabilities ──────────────────────────────────────
     const caps = videoModel.capabilities;

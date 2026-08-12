@@ -1,18 +1,21 @@
 /**
- * Intent Classifier + GHL Payload Builder
+ * Intent Classifier + Call Payload Builder
  *
  * After a Vapi call ends, this module:
  *   1. Classifies the call intent from the transcript (website/ai/branding/music/support/other)
  *   2. Determines lead status (hot/warm/cold/not-lead)
  *   3. Decides if human follow-up is needed
  *   4. Generates a short call summary
- *   5. Assembles the normalized GHL payload
+ *   5. Assembles the normalized call payload
+ *
+ * The payload is sent to n8n (orchestration layer) which routes to
+ * CRM, email, Slack, GHL, or other downstream systems.
  *
  * Uses the "fast" LLM category (Groq) for speed — this runs async after the call ends.
  */
 
 import { generateText } from "@/lib/llm";
-import type { GHLCallPayload, IntentTag, LeadStatus } from "./ghl-types";
+import type { CallPayload, IntentTag, LeadStatus } from "./call-payload-types";
 
 const INTENT_KEYWORDS: Record<IntentTag, string[]> = {
   "intent:website": ["website", "web design", "landing page", "web dev", "seo", "site", "wordpress", "webflow", "react", "next.js"],
@@ -169,9 +172,10 @@ async function llmClassifyCall(
 }
 
 /**
- * Build a normalized GHL call payload from Vapi end-of-call data.
+ * Build a normalized call payload from Vapi end-of-call data.
+ * The payload is sent to n8n for downstream orchestration.
  */
-export async function buildGHLCallPayload(params: {
+export async function buildCallPayload(params: {
   callId: string;
   to: string;
   from: string;
@@ -186,7 +190,7 @@ export async function buildGHLCallPayload(params: {
   projectId: string | null;
   projectName: string | null;
   conversationId: string | null;
-}): Promise<GHLCallPayload> {
+}): Promise<CallPayload> {
   const { intent, summary, leadStatus, followUpNeeded } = await llmClassifyCall(params.transcript);
 
   return {
@@ -210,3 +214,8 @@ export async function buildGHLCallPayload(params: {
     conversationId: params.conversationId,
   };
 }
+
+/**
+ * @deprecated Use buildCallPayload instead. Re-exported for backward compat.
+ */
+export const buildGHLCallPayload = buildCallPayload;

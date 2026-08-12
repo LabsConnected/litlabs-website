@@ -1006,7 +1006,6 @@ function CommandStudioContent() {
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
                 onCancel={conversation.cancel}
-                onAgentChange={conversation.switchAgent}
                 busy={conversation.busy || creatingProject}
                 disabled={conversation.requiresReauth}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}

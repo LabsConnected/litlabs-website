@@ -41,7 +41,7 @@ export type MissionMode =
   | "templates";
 
 /** Internal tabs inside the right inspector. */
-export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
+export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals" | "browser";
 
 /** Internal tabs inside the bottom drawer. */
 export type DrawerTab = "activity" | "terminal" | "media";

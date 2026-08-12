@@ -213,8 +213,8 @@ describe("6. Zero-BITS simulation triggers insufficient-credit behavior", () => 
     expect(ent.isOwner).toBe(true);
   });
 
-  it("zero_bits simulationToPlanId maps to pro_builder_beta", () => {
-    expect(simulationToPlanId("zero_bits")).toBe("pro_builder_beta");
+  it("zero_bits simulationToPlanId maps to owner", () => {
+    expect(simulationToPlanId("zero_bits")).toBe("owner");
   });
 });
 
@@ -269,8 +269,8 @@ describe("8. Stripe subscription state is never modified", () => {
     expect(simulationToPlanId("starter")).toBe("starter");
     expect(simulationToPlanId("creator_beta")).toBe("creator_beta");
     expect(simulationToPlanId("pro_builder_beta")).toBe("pro_builder_beta");
-    expect(simulationToPlanId("owner")).toBe("pro_builder_beta");
-    expect(simulationToPlanId("zero_bits")).toBe("pro_builder_beta");
+    expect(simulationToPlanId("owner")).toBe("owner");
+    expect(simulationToPlanId("zero_bits")).toBe("owner");
   });
 
   it("PLANS canonical definitions are unchanged (no price/feature modifications)", () => {

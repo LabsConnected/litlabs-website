@@ -244,6 +244,130 @@ function QuickLaunchTile({
   );
 }
 
+/* ─── Owner Diagnostics Card ─────────────────────────────────────────── */
+
+interface LlmTestResult {
+  provider: string;
+  ok: boolean;
+  error?: string;
+  errorCategory?: string;
+  text?: string;
+  latencyMs?: number;
+  failover?: string[];
+}
+
+interface LlmTestResponse {
+  timestamp: string;
+  providerKeys: Record<string, { keySet: boolean; model: string }>;
+  failoverChain: string[];
+  results: LlmTestResult[];
+}
+
+function OwnerDiagnosticsCard() {
+  const D = { ...DashTokens, bg: "transparent", bgGradient: DashTokens.heroGradient };
+  const [diag, setDiag] = useState<LlmTestResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const runDiag = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/debug/llm-test", { cache: "no-store", credentials: "include" });
+      if (res.ok) setDiag(await res.json());
+    } catch {
+      // non-fatal
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Auto-run once on mount
+  useEffect(() => { void runDiag(); }, [runDiag]);
+
+  const allOk = diag?.results.every((r) => r.ok) ?? null;
+  const hasAuthFailure = diag?.results.some((r) => r.errorCategory === "auth_failure") ?? false;
+  const hasKeyMissing = diag?.results.some((r) => r.errorCategory === "key_missing") ?? false;
+
+  const statusColor = allOk === null ? D.textDim : allOk ? D.accentGreen : hasAuthFailure ? D.accentRed : D.accentAmber;
+  const statusLabel = allOk === null ? "Checking..." : allOk ? "All providers healthy" : hasAuthFailure ? "Auth failure — key may be leaked/revoked" : hasKeyMissing ? "Missing provider keys" : "Provider error";
+
+  return (
+    <EntranceSection delay={0.26}>
+      <GlassPanel className="mb-5 p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Icon name="cpu" size={17} style={{ color: statusColor }} />
+            <h2 className="text-sm font-black" style={{ color: D.textPrimary }}>AI Provider Diagnostics</h2>
+            <span className="rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider"
+              style={{ borderColor: `${statusColor}40`, background: `${statusColor}15`, color: statusColor }}>
+              {statusLabel}
+            </span>
+          </div>
+          <button type="button" onClick={() => void runDiag()} disabled={loading}
+            className="rounded-lg border px-3 py-1.5 text-[10px] font-bold transition hover:opacity-80 disabled:opacity-50"
+            style={{ borderColor: D.border, background: D.surface, color: D.textMuted }}>
+            <Icon name="refresh" size={12} className={loading ? "animate-spin" : ""} /> Test
+          </button>
+        </div>
+
+        {/* Auth failure warning */}
+        {hasAuthFailure && (
+          <div className="mt-3 rounded-xl border p-3 text-xs"
+            style={{ borderColor: `${D.accentRed}33`, background: `${D.accentRed}10`, color: D.dangerText }}>
+            <Icon name="alert" size={14} className="mr-1.5 inline" />
+            An AI provider API key is invalid, revoked, or reported as leaked. Rotate the key and update the environment variable to restore AI functionality.
+          </div>
+        )}
+
+        {/* Provider key status */}
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {diag && Object.entries(diag.providerKeys).map(([name, info]) => (
+            <div key={name} className="rounded-xl border p-3" style={{ borderColor: info.keySet ? `${D.accentGreen}15` : `${D.accentRed}15`, background: info.keySet ? `${D.accentGreen}04` : `${D.accentRed}04` }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider" style={{ color: D.textMuted }}>{name}</span>
+                <span className="text-[9px] font-bold" style={{ color: info.keySet ? D.accentGreen : D.accentRed }}>
+                  {info.keySet ? "KEY SET" : "NO KEY"}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[10px]" style={{ color: D.textDim }}>{info.model}</div>
+            </div>
+          ))}
+          {!diag && loading && (
+            <div className="col-span-3 py-4 text-center text-[11px]" style={{ color: D.textDim }}>
+              <Icon name="refresh" size={14} className="mr-1.5 inline animate-spin" /> Testing providers...
+            </div>
+          )}
+        </div>
+
+        {/* Expandable test results */}
+        {diag && (
+          <button type="button" onClick={() => setExpanded(!expanded)}
+            className="mt-3 text-[10px] font-bold transition hover:opacity-80" style={{ color: D.accent }}>
+            {expanded ? "Hide" : "Show"} test results
+          </button>
+        )}
+        {expanded && diag && (
+          <div className="mt-3 space-y-2">
+            {diag.results.map((r, i) => (
+              <div key={i} className="rounded-lg border p-2.5 text-[11px]" style={{ borderColor: r.ok ? `${D.accentGreen}20` : `${D.accentRed}20`, background: r.ok ? `${D.accentGreen}04` : `${D.accentRed}04` }}>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold" style={{ color: r.ok ? D.accentGreen : D.accentRed }}>
+                    {r.ok ? "✓" : "✗"} {r.provider}
+                  </span>
+                  {r.latencyMs && <span style={{ color: D.textDim }}>{r.latencyMs}ms</span>}
+                </div>
+                {r.text && <div className="mt-1 truncate" style={{ color: D.textMuted }}>Response: {r.text}</div>}
+                {r.error && <div className="mt-1 break-words font-mono text-[10px]" style={{ color: D.dangerText }}>{r.error}</div>}
+                {r.failover && r.failover.length > 0 && <div className="mt-1 text-[10px]" style={{ color: D.textDim }}>Failover: {r.failover.join(" → ")}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassPanel>
+    </EntranceSection>
+  );
+}
+
 /* ─── Main Component ─────────────────────────────────────────────────── */
 
 export function MissionControlDashboard() {
@@ -477,6 +601,9 @@ export function MissionControlDashboard() {
             </BorderBeam>
           </CursorSpotlight>
         </EntranceSection>
+
+        {/* === Owner Diagnostics — AI Provider Status === */}
+        {ownerMode && <OwnerDiagnosticsCard />}
 
         {/* === Metric strip === */}
         <section className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">

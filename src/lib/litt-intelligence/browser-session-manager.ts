@@ -237,13 +237,17 @@ export async function startSession(
 
   const stagehand = new Stagehand({
     env: "BROWSERBASE",
-    model: options.model ?? "gemini-2.5-flash",
+    model: options.model ?? "google/gemini-2.5-flash",
     browserbaseSessionCreateParams: {
       proxies: options.useProxies ?? false,
       browserSettings: {
         blockAds: true,
       },
     },
+    // Disable pino-pretty transport — it uses worker threads that fail
+    // in Vercel serverless environments. Use a no-op external logger instead.
+    disablePino: true,
+    logger: () => {},
   });
 
   await stagehand.init();
@@ -265,7 +269,7 @@ export async function startSession(
     liveViewUrl,
     error: null,
     metadata: {
-      model: options.model ?? "gemini-2.5-flash",
+      model: options.model ?? "google/gemini-2.5-flash",
       useProxies: options.useProxies ?? false,
     },
     createdAt: now,

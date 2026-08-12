@@ -11,6 +11,38 @@ export const maxDuration = 55;
 export const fetchCache = "force-no-store";
 
 /**
+ * Extract call context (callId + callerNumber) from the system message.
+ *
+ * sync-vapi-bridge.ts injects this into the assistant's system prompt:
+ *   [call-context callId={{call.id}} callerNumber={{customer.number}}]
+ *
+ * Vapi substitutes the template variables at call start. If a variable
+ * is not available, it may appear as literal {{...}} text — we filter
+ * those out so we don't pass template syntax as a real ID.
+ */
+function extractCallContextFromMessages(
+  messages: Array<{ role: string; content?: string; message?: string }> | undefined,
+): { callId?: string; callerNumber?: string } {
+  const sys = messages?.find((m) => m.role === "system");
+  const text = sys?.content ?? sys?.message;
+  if (!text || typeof text !== "string") return {};
+
+  const idMatch = text.match(/callId=([^\s\]}]+)/);
+  const numMatch = text.match(/callerNumber=([^\s\]}]+)/);
+
+  const callId = idMatch?.[1];
+  const callerNumber = numMatch?.[1];
+
+  // Filter out unsubstituted template variables (e.g. "{{call.id}}")
+  const isTemplate = (v?: string) => !v || v.includes("{{") || v.includes("}}");
+
+  return {
+    callId: isTemplate(callId) ? undefined : callId,
+    callerNumber: isTemplate(callerNumber) ? undefined : callerNumber,
+  };
+}
+
+/**
  * POST /api/vapi/turn
  *
  * The canonical Vapi → LiTT bridge. When Vapi's Custom LLM needs a
@@ -51,42 +83,69 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Extract the Vapi call ID
-  const call = body.call as Record<string, unknown> | undefined;
-  const callId = call?.id as string | undefined;
-  if (!callId) {
-    return NextResponse.json({ error: "Missing call ID" }, { status: 400 });
-  }
+  // Vapi's Custom LLM payload is OpenAI-compatible ({ model, messages, ... })
+  // but also includes call metadata. The call object may be at body.call
+  // (legacy/extra metadata) or body.message.call (envelope-wrapped).
+  // We try body.call first, then fall back to parsing the [call-context ...]
+  // tag that sync-vapi-bridge injects into the system message.
+  const message = (body.message as Record<string, unknown> | undefined) ?? body;
+  const call = (message.call as Record<string, unknown> | undefined) ??
+    (body.call as Record<string, unknown> | undefined);
 
-  // Extract the latest user message
-  const messages = body.messages as Array<{ role: string; content: string }> | undefined;
+  // Extract the latest user message.
+  // Vapi's OpenAI-compatible payload uses `messages[].content`.
+  const messages = (message.messages ?? body.messages) as Array<{ role: string; content?: string; message?: string }> | undefined;
   const userMessage = messages?.findLast?.((m) => m.role === "user") ??
     messages?.filter((m) => m.role === "user").pop();
+  const userContent = userMessage?.content ?? userMessage?.message;
 
-  if (!userMessage?.content) {
+  if (!userContent) {
     return NextResponse.json({ error: "No user message found" }, { status: 400 });
   }
 
-  // Try to look up the voice session first
-  let session = await getVoiceSession("vapi", callId);
+  // Resolve callId + callerNumber: try body.call first, then parse
+  // the [call-context ...] tag from the system message (injected by
+  // sync-vapi-bridge via {{call.id}} / {{customer.number}} templates).
+  let callId = call?.id as string | undefined;
+  let callerPhone = (call?.customer as Record<string, unknown> | undefined)?.number as string | undefined;
 
-  // Fallback: if no session found (e.g. voice_sessions table missing or not yet created),
-  // resolve the caller directly from the call data
-  if (!session) {
-    const customer = call?.customer as Record<string, unknown> | undefined;
-    const callerPhone = (customer?.number as string) ?? "";
-    if (callerPhone) {
-      session = await startVoiceSession({
-        provider: "vapi",
-        providerCallId: callId,
-        callerPhone,
-        metadata: { assistantId: call?.assistantId, fallback: true },
-      });
-    }
+  if (!callId || !callerPhone) {
+    const ctx = extractCallContextFromMessages(messages);
+    if (!callId) callId = ctx.callId;
+    if (!callerPhone) callerPhone = ctx.callerNumber;
+  }
+
+  // Try to look up the voice session by call ID first
+  let session = callId ? await getVoiceSession("vapi", callId) : null;
+
+  // Fallback: if no session found (or no callId), resolve the caller
+  // directly from the call data to create a transient session.
+  if (!session && callId && callerPhone) {
+    session = await startVoiceSession({
+      provider: "vapi",
+      providerCallId: callId,
+      callerPhone,
+      metadata: { assistantId: call?.assistantId, fallback: true },
+    });
   }
 
   if (!session) {
+    // No call ID and no caller phone — can't identify the call, but
+    // don't hard-fail with 400 (Vapi would treat that as an LLM error
+    // and hang up). Return a spoken fallback instead.
     return NextResponse.json({
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "I'm sorry, I couldn't identify your call. Please try calling again.",
+          },
+          finish_reason: "stop",
+        },
+      ],
       text: "I'm sorry, I couldn't identify your call. Please try calling again.",
     });
   }
@@ -96,7 +155,7 @@ export async function POST(req: NextRequest) {
     userId: session.userId,
     projectId: session.projectId,
     conversationId: session.conversationId,
-    message: userMessage.content,
+    message: userContent,
   });
 
   if (result.status !== 200) {
@@ -117,7 +176,7 @@ export async function POST(req: NextRequest) {
           ownerId: uid,
           projectId: pid,
           role: "user",
-          content: userMessage.content,
+          content: userContent,
           status: "completed",
         });
         await insertMessage({
@@ -136,8 +195,69 @@ export async function POST(req: NextRequest) {
   }
 
   // Return in OpenAI-compatible format (Vapi Custom LLM expects this)
+  // Vapi's OpenAI SDK sends stream:true by default for voice calls.
+  // If streaming is requested, return SSE format; otherwise return JSON.
+  const wantsStream = body.stream === true || body.stream === "true";
+  const completionId = `chatcmpl-${Date.now()}`;
+
+  if (wantsStream) {
+    // SSE streaming response — send the full text as a single chunk
+    // then close. Vapi's TTS pipeline needs this format to extract content.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        // Initial chunk with role
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            })}\n\n`,
+          ),
+        );
+        // Content chunk(s) — send as a few chunks for realistic streaming
+        const words = responseText.split(" ");
+        const chunkSize = 3;
+        for (let i = 0; i < words.length; i += chunkSize) {
+          const chunk = words.slice(i, i + chunkSize).join(" ") + (i + chunkSize < words.length ? " " : "");
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }],
+              })}\n\n`,
+            ),
+          );
+        }
+        // Final chunk with finish_reason
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            })}\n\n`,
+          ),
+        );
+        // Terminate the stream
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   return NextResponse.json({
-    id: `chatcmpl-${Date.now()}`,
+    id: completionId,
     object: "chat.completion",
     choices: [
       {

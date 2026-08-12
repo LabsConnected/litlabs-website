@@ -13,6 +13,9 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Sparkles,
+  Code2,
+  Globe,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import type { Breakpoint } from "./types";
@@ -32,6 +35,7 @@ export function CanvasToolbar() {
   const setZoom = useCanvasBuilderStore((s) => s.setZoom);
   const saveDocument = useCanvasBuilderStore((s) => s.saveDocument);
   const document = useCanvasBuilderStore((s) => s.document);
+  const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
 
   const btnBase: React.CSSProperties = {
     display: "flex",
@@ -152,19 +156,46 @@ export function CanvasToolbar() {
 
       <div className="flex-1" />
 
+      {/* Ask LiTT */}
+      <button
+        onClick={() => setRightPanelTab("litt")}
+        className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold transition"
+        style={{
+          backgroundColor: "var(--glass-purple-soft)",
+          border: "1px solid var(--glass-border-purple)",
+          color: "var(--glass-purple)",
+          cursor: "pointer",
+        }}
+        title="Ask LiTT to build, redesign, or improve"
+      >
+        <Sparkles size={12} />
+        Ask LiTT...
+      </button>
+
       {/* Save status */}
       <span style={{ fontSize: 9, fontWeight: 600, color: "var(--glass-text-3)" }}>
         v{document.version} · saved
       </span>
 
-      {/* Preview */}
-      <button
-        onClick={() => setPreviewMode(!previewMode)}
-        style={previewMode ? btnActive : btnHover}
-        title="Preview"
-      >
-        <Eye size={14} />
-      </button>
+      {/* Build / Preview / Live mode toggle */}
+      <div className="flex items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+        <button
+          onClick={() => setPreviewMode(false)}
+          style={!previewMode ? btnActive : { ...btnBase, backgroundColor: "transparent", border: "none" }}
+          title="Build mode — edit blocks, drag/drop, inline edit"
+        >
+          <Code2 size={12} style={{ display: "inline" }} />
+          <span style={{ marginLeft: 4 }}>Build</span>
+        </button>
+        <button
+          onClick={() => setPreviewMode(true)}
+          style={previewMode ? btnActive : { ...btnBase, backgroundColor: "transparent", border: "none" }}
+          title="Preview mode — real site render in iframe"
+        >
+          <Eye size={12} style={{ display: "inline" }} />
+          <span style={{ marginLeft: 4 }}>Preview</span>
+        </button>
+      </div>
 
       {/* Save */}
       <button

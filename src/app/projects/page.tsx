@@ -102,7 +102,7 @@ export default function ProjectsPage() {
       subtitle="Your home base for repositories, creations, agents, and active work."
       icon={<FolderKanban size={24} />}
     >
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 sm:py-8">
         <section
           className="overflow-hidden rounded-3xl border"
           style={{

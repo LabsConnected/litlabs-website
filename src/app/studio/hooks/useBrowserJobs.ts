@@ -49,6 +49,8 @@ export interface BrowserJob {
 }
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "awaiting_approval", "approved"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
 const LIST_POLL_ACTIVE_MS = 2000;
 const LIST_POLL_IDLE_MS = 15000;
 const DETAIL_POLL_MS = 1500;

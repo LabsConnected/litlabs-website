@@ -21,6 +21,13 @@ export const TOOL_NAMES = [
   "create_preview",
   "get_deployment_status",
   "request_deployment_approval",
+  // Browser Operator queue-control tools (lightweight — no browser execution
+  // in the Vapi request lifecycle; they enqueue/status/cancel/approve jobs
+  // that execute asynchronously via the browser job executor).
+  "browser_start_job",
+  "browser_job_status",
+  "browser_cancel_job",
+  "browser_approve_job",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 

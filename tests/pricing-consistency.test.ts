@@ -3,15 +3,23 @@ import { PLANS, PLAN_LIST, PLAN_RANK, getPlanById, hasPlanAccess, formatPrice, f
 
 describe("Pricing contract — single source of truth", () => {
   describe("Plan catalog integrity", () => {
+    it("has exactly 4 customer plans + 1 internal owner plan", () => {
+      // PLANS includes the internal "owner" tier (enabled: false, not purchasable)
+      expect(Object.keys(PLANS).sort()).toEqual(
+        ["starter", "creator_beta", "pro_builder_beta", "founder", "owner"].sort(),
+      );
+    });
+
     it("publishes exactly 4 customer plans: starter, creator_beta, pro_builder_beta, founder", () => {
       expect(PLAN_LIST.map((plan) => plan.id).sort()).toEqual(
         ["starter", "creator_beta", "pro_builder_beta", "founder"].sort(),
       );
     });
 
-    it("PLAN_LIST matches PLANS values", () => {
+    it("PLAN_LIST excludes internal owner plan (only 4 customer plans)", () => {
       expect(PLAN_LIST.length).toBe(4);
       expect(PLAN_LIST.every((p) => PLANS[p.id] === p)).toBe(true);
+      expect(PLAN_LIST.find((p) => p.id === "owner")).toBeUndefined();
     });
 
     it("every plan has a unique id", () => {

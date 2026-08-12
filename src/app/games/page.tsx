@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
+import { ProductFrame } from "@/components/ProductPageFrame";
 import {
   Search,
   Gamepad2,
@@ -163,7 +164,7 @@ export default function GamesPage() {
         {/* === LiTT ARCADE HERO === */}
         <section className="relative overflow-hidden border-b border-white/10">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(155,77,255,.15),transparent_40%),radial-gradient(circle_at_80%_10%,rgba(34,211,238,.1),transparent_35%)]" />
-          <div className="relative mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
+          <div className="relative mx-auto max-w-[1500px] px-4 py-10 sm:px-6 sm:py-14">
             {/* Back to Dashboard — visible on mobile where top nav is hidden */}
             <Link
               href="/dashboard"
@@ -200,7 +201,7 @@ export default function GamesPage() {
 
         {/* === CONTINUE PLAYING === */}
         {recentRetro && (
-          <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6">
+          <section className="mx-auto max-w-[1500px] px-4 pt-8 sm:px-6">
             <div className="mb-4">
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Continue Playing</p>
               <h2 className="mt-1 text-xl font-black sm:text-2xl">Pick up where you left off</h2>
@@ -223,7 +224,7 @@ export default function GamesPage() {
         )}
 
         {/* === LiTT RETRO ARCADE — EMBEDDED STANDARD === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6">
           <RetroArcadeHero variant="banner" />
           <div className="mt-6">
             <RetroArcadeEmbedded />
@@ -231,7 +232,7 @@ export default function GamesPage() {
         </section>
 
         {/* === PLAY-IN-LITT PROMISE === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6">
           <div className="mb-5">
             <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">The LiTT play promise</p>
             <h2 className="mt-1 text-xl font-black sm:text-2xl">Less link-hopping. More playing.</h2>
@@ -252,7 +253,7 @@ export default function GamesPage() {
         </section>
 
         {/* === BUILD A GAME IN STUDIO === */}
-        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6">
           <div className="flex flex-col items-start gap-4 rounded-3xl border border-white/10 bg-linear-to-br from-violet-500/10 to-transparent p-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-violet-400">Build with LiTT</p>
@@ -266,7 +267,7 @@ export default function GamesPage() {
         </section>
 
         {/* === LEGAL / PRIVATE STORAGE NOTE === */}
-        <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">
+        <section className="mx-auto max-w-[1500px] px-4 pb-12 sm:px-6">
           <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-400/4 p-4">
             <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" />
             <p className="text-xs leading-5 text-white/60">
@@ -276,7 +277,7 @@ export default function GamesPage() {
         </section>
 
         {/* === QUICK PLAY === */}
-        <section id="quick-play" className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <section id="quick-play" className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6">
           <div className="mb-5 flex items-end justify-between gap-3">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[.25em] text-[#9B4DFF]">LiTT Arcade</p>

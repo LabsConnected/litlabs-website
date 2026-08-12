@@ -206,31 +206,22 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
   });
 
-  it("keeps LiTT and Spark visible and switches through the canonical callback", () => {
-    const onAgentChange = vi.fn();
+  it("does not render an agent selector — only the model picker", () => {
     render(
       <CommandComposer
         value=""
         onChange={vi.fn()}
         onSend={vi.fn()}
-        onAgentChange={onAgentChange}
         busy={false}
       />,
     );
 
-    // Open the agent popover
-    const agentBtn = screen.getByRole("button", { name: /select agent/i });
-    fireEvent.click(agentBtn);
+    // Model picker is still present
+    expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
 
-    // Agent popover renders buttons with agent names
-    // Use a regex that matches the agent button text but not the
-    // "Start LiTT Live" button (which has "LiTT Live" in its aria-label)
-    const littBtn = screen.getByRole("button", { name: /LiTT.*Engineer/i });
-    const sparkBtn = screen.getByRole("button", { name: /Spark.*Companion/i });
-    expect(littBtn).toBeTruthy();
-    expect(sparkBtn).toBeTruthy();
-    fireEvent.click(sparkBtn);
-    expect(onAgentChange).toHaveBeenCalledWith("spark");
+    // Agent selector button/popover is gone
+    expect(screen.queryByRole("button", { name: /select agent/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /select agent/i })).toBeNull();
   });
 
   it("camera button opens camera preview popover", () => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
+import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI, Modality } from "@google/genai";
 import {
@@ -11,6 +11,13 @@ import {
 } from "@/lib/media";
 import { uploadBinaryAsset } from "@/lib/r2";
 import { supabaseAdmin } from "@/lib/supabase";
+import { calculateRetailBits } from "@/lib/generation/cost-engine";
+import {
+  createGenerationJob,
+  completeGenerationJob,
+  failGenerationJob,
+  getGenerationJobByRequestId,
+} from "@/lib/generation/jobs";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -57,6 +64,8 @@ type MediaRequest = {
   imageSize?: "1K" | "2K" | "4K";
   referenceUrl?: string;
   generationMode?: ImageGenerationMode;
+  /** Client-generated request ID for idempotent retries. */
+  requestId?: string;
 };
 
 type MediaResult = {
@@ -858,8 +867,10 @@ async function dispatchProvider(
 // ── Main handler ─────────────────────────────────────────────────
 
 async function handler(req: NextRequest) {
-  const requestId = crypto.randomUUID();
   const startTime = Date.now();
+  // Use client-provided requestId for idempotency, or generate one.
+  // The client should send the same requestId on retries to avoid double-charging.
+  let requestId: string = "";
 
   const { userId } = await auth(req);
   if (!userId) {
@@ -889,7 +900,7 @@ async function handler(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        requestId,
+        requestId: "parse-error",
         providerId: null,
         code: "BAD_REQUEST",
         error: "Invalid request body — send JSON",
@@ -899,11 +910,15 @@ async function handler(req: NextRequest) {
         status: 400,
         headers: {
           "Cache-Control": "no-store",
-          "X-Request-Id": requestId,
+          "X-Request-Id": "parse-error",
         },
       },
     );
   }
+
+  // Set requestId from client or generate a new one.
+  // Client-provided requestId enables idempotent retries.
+  requestId = body.requestId || crypto.randomUUID();
 
   const prompt = body.prompt?.trim();
   if (!prompt || prompt.length < 3) {
@@ -1001,19 +1016,55 @@ async function handler(req: NextRequest) {
     );
   }
 
-  // ── Wallet check ───────────────────────────────────────────────
-  const cost = provider.cost(format);
-  let wallet = null;
-  if (!provider.free) {
-    wallet = await getUserWallet(userId);
-    if (wallet.balance < cost) {
+  // ── Wallet check (canonical credit_ledger) ────────────────────
+  // Use the cost engine for server-authoritative pricing.
+  // Legacy provider.cost() is still used for free providers (cost=0).
+  const legacyCost = provider.cost(format);
+  const costResult = calculateRetailBits({
+    modality: "image",
+    provider: providerId,
+    model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image",
+  });
+  const cost = provider.free ? 0 : Math.max(legacyCost, costResult.retailLiTTBits);
+
+  // Idempotency: check for existing job with this requestId
+  const existingJob = await getGenerationJobByRequestId(userId, requestId);
+  if (existingJob && existingJob.status === "completed") {
+    // Replay — return the existing result without re-charging
+    return NextResponse.json(
+      {
+        success: true,
+        requestId,
+        providerId: existingJob.provider as MediaProviderId,
+        downloadUrl: existingJob.metadata?.durableUrl as string ?? null,
+        thumbUrl: null,
+        title: existingJob.prompt.slice(0, 60),
+        id: existingJob.id,
+        cost: existingJob.littBitsCharged,
+        free: existingJob.littBitsCharged === 0,
+        balance: null,
+        replayed: true,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+          "X-Request-Id": requestId,
+        },
+      },
+    );
+  }
+
+  if (cost > 0) {
+    const balances = await getCreditBalances(userId);
+    if (balances.total < cost) {
       return NextResponse.json(
         {
           success: false,
           requestId,
           providerId,
           code: "INSUFFICIENT_FUNDS",
-          error: `Insufficient LiTTBits. Need ${cost}, have ${wallet.balance}`,
+          error: `Insufficient LiTTBits. Need ${cost}, have ${balances.total}`,
           retryable: false,
         } satisfies GenerationErrorResponse,
         {
@@ -1093,17 +1144,53 @@ async function handler(req: NextRequest) {
     durableUrl = await persistImage(userId, result.downloadUrl, usedProviderId, prompt);
   }
 
-  // ── Deduct cost (only after successful generation) ─────────────
+  // ── Deduct cost via canonical wallet ledger (idempotent) ───────
   const usedProvider = getProvider(usedProviderId)!;
-  const usedCost = usedProvider.cost(format);
+  const usedCostResult = calculateRetailBits({
+    modality: "image",
+    provider: usedProviderId,
+    model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image",
+  });
+  const usedCost = usedProvider.free ? 0 : Math.max(usedProvider.cost(format), usedCostResult.retailLiTTBits);
   let newBalance: number | null = null;
 
   if (!usedProvider.free && usedCost > 0) {
-    const updated = await updateWalletBalance(userId, -usedCost);
-    newBalance = updated.balance;
+    // Idempotent debit — same requestId = no double charge
+    const charge = await adjustWalletBalance({
+      clerkId: userId,
+      amount: -usedCost,
+      type: "spend",
+      reason: `Image generation: ${usedProviderId} — ${prompt.slice(0, 60)}`,
+      idempotencyKey: `image:charge:${requestId}`,
+    });
+    newBalance = charge.balance;
   } else {
-    const currentWallet = await getUserWallet(userId);
-    newBalance = currentWallet?.balance ?? null;
+    // Free provider — still get balance for display
+    try {
+      const balances = await getCreditBalances(userId);
+      newBalance = balances.total;
+    } catch {
+      newBalance = null;
+    }
+  }
+
+  // ── Record generation job (durable, queryable) ─────────────────
+  try {
+    const jobId = crypto.randomUUID();
+    await createGenerationJob({
+      id: jobId,
+      userId,
+      modality: "image",
+      provider: usedProviderId,
+      model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image",
+      prompt,
+      requestId,
+      littBitsCharged: usedCost,
+      metadata: { durableUrl, durationMs: Date.now() - startTime },
+    });
+    await completeGenerationJob(jobId, null, usedCostResult.providerCostCents);
+  } catch {
+    // Best-effort — don't fail the response if job recording fails
   }
 
   const duration = Date.now() - startTime;

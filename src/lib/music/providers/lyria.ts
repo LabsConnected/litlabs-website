@@ -14,7 +14,9 @@ import "server-only";
 import { GoogleGenAI, Modality } from "@google/genai";
 import type {
   GenerateSongInput,
+  GenerationStatus,
   MusicBlueprint,
+  MusicProviderName,
   ProviderGenerationResult,
   ProviderStatusResult,
 } from "@/types/music";

@@ -53,16 +53,19 @@ ALTER TABLE public.media_playback_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.media_playlists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_active_project ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage their own media history" ON public.media_playback_history;
 CREATE POLICY "Users can manage their own media history"
   ON public.media_playback_history
   FOR ALL
   USING (user_id = auth.uid()::text OR user_id = current_setting('request.jwt.claims', true)::json->>'sub');
 
+DROP POLICY IF EXISTS "Users can manage their own playlists" ON public.media_playlists;
 CREATE POLICY "Users can manage their own playlists"
   ON public.media_playlists
   FOR ALL
   USING (user_id = auth.uid()::text OR user_id = current_setting('request.jwt.claims', true)::json->>'sub');
 
+DROP POLICY IF EXISTS "Users can manage their own active project" ON public.user_active_project;
 CREATE POLICY "Users can manage their own active project"
   ON public.user_active_project
   FOR ALL

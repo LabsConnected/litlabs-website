@@ -23,14 +23,14 @@ import { NextRequest } from "next/server";
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
-const { mockGetUserWallet } = vi.hoisted(() => ({ mockGetUserWallet: vi.fn() }));
-const { mockUpdateWalletBalance } = vi.hoisted(() => ({ mockUpdateWalletBalance: vi.fn() }));
+const { mockGetCreditBalances } = vi.hoisted(() => ({ mockGetCreditBalances: vi.fn() }));
+const { mockAdjustWalletBalance } = vi.hoisted(() => ({ mockAdjustWalletBalance: vi.fn() }));
 const { mockUploadBinaryAsset } = vi.hoisted(() => ({ mockUploadBinaryAsset: vi.fn() }));
 
 vi.mock("@/lib/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/user-db", () => ({
-  getUserWallet: mockGetUserWallet,
-  updateWalletBalance: mockUpdateWalletBalance,
+vi.mock("@/lib/wallet-ledger", () => ({
+  getCreditBalances: mockGetCreditBalances,
+  adjustWalletBalance: mockAdjustWalletBalance,
 }));
 vi.mock("@/lib/rate-limiter", () => ({
   withRateLimit: (handler: unknown) => handler,
@@ -38,6 +38,21 @@ vi.mock("@/lib/rate-limiter", () => ({
 }));
 vi.mock("@/lib/r2", () => ({
   uploadBinaryAsset: mockUploadBinaryAsset,
+}));
+vi.mock("@/lib/generation/cost-engine", () => ({
+  calculateRetailBits: vi.fn(() => ({
+    providerCostCents: 3,
+    infrastructureAllowanceCents: 1,
+    marginPercent: 50,
+    retailLiTTBits: 1,
+  })),
+}));
+vi.mock("@/lib/generation/jobs", () => ({
+  createGenerationJob: vi.fn(async () => null),
+  completeGenerationJob: vi.fn(async () => {}),
+  failGenerationJob: vi.fn(async () => {}),
+  getGenerationJobByRequestId: vi.fn(async () => null),
+  updateGenerationJobStatus: vi.fn(async () => {}),
 }));
 
 // Mock @google/genai
@@ -75,8 +90,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.resetModules();
   mockAuth.mockResolvedValue({ userId: "test-user-id", clerkId: "test-clerk-id" });
-  mockGetUserWallet.mockResolvedValue({ balance: 100 });
-  mockUpdateWalletBalance.mockResolvedValue({ balance: 99 });
+  mockGetCreditBalances.mockResolvedValue({ total: 100, monthly: 50, purchased: 50, betaPromotional: 0, lastDailyClaim: null });
+  mockAdjustWalletBalance.mockResolvedValue({ balance: 99, previousBalance: 100, replayed: false });
   mockUploadBinaryAsset.mockResolvedValue({ publicUrl: "https://r2.example.com/image.png" });
   // Clear all env vars that might leak between tests
   setEnv({
@@ -522,7 +537,7 @@ describe("Image Studio API — billing", () => {
     mockGenerateContent.mockResolvedValue({
       candidates: [{ content: { parts: [] } }], // no image data
     });
-    mockGetUserWallet.mockResolvedValue({ balance: 100 });
+    mockGetCreditBalances.mockResolvedValue({ total: 100, monthly: 50, purchased: 50, betaPromotional: 0, lastDailyClaim: null });
 
     const { POST } = await import("@/app/api/media/generate/route");
     const req = makeRequest({ prompt: "test", providerId: "gemini" });
@@ -532,7 +547,7 @@ describe("Image Studio API — billing", () => {
     expect(data.success).toBe(false);
 
     // Wallet balance should NOT have been deducted
-    expect(mockUpdateWalletBalance).not.toHaveBeenCalled();
+    expect(mockAdjustWalletBalance).not.toHaveBeenCalled();
   });
 
   it("deducts LiTTBits exactly once on successful paid generation", async () => {
@@ -543,8 +558,8 @@ describe("Image Studio API — billing", () => {
         { content: { parts: [{ inlineData: { data: "base64img", mimeType: "image/png" } }] } },
       ],
     });
-    mockGetUserWallet.mockResolvedValue({ balance: 100 });
-    mockUpdateWalletBalance.mockResolvedValue({ balance: 99 });
+    mockGetCreditBalances.mockResolvedValue({ total: 100, monthly: 50, purchased: 50, betaPromotional: 0, lastDailyClaim: null });
+    mockAdjustWalletBalance.mockResolvedValue({ balance: 99, previousBalance: 100, replayed: false });
 
     const { POST } = await import("@/app/api/media/generate/route");
     const req = makeRequest({ prompt: "test image", providerId: "gemini" });
@@ -554,9 +569,15 @@ describe("Image Studio API — billing", () => {
     expect(data.success).toBe(true);
     expect(data.cost).toBe(1);
 
-    // Should have deducted exactly once
-    expect(mockUpdateWalletBalance).toHaveBeenCalledTimes(1);
-    expect(mockUpdateWalletBalance).toHaveBeenCalledWith("test-user-id", -1);
+    // Should have deducted exactly once via canonical wallet ledger
+    expect(mockAdjustWalletBalance).toHaveBeenCalledTimes(1);
+    expect(mockAdjustWalletBalance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clerkId: "test-user-id",
+        amount: -1,
+        type: "spend",
+      }),
+    );
   });
 });
 

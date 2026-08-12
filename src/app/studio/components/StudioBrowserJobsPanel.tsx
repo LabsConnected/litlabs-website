@@ -7,13 +7,15 @@
  *   - List of recent browser jobs with status badges and progress bars
  *   - Selected job detail with step-by-step progress
  *   - Live Browserbase view (iframe when available)
+ *   - Live activity log from SSE event stream (/api/browser/jobs/:id/events)
  *   - Action controls: Cancel (queued/awaiting), Approve (awaiting_approval)
  *   - Error and result display
  *
- * Data comes from useBrowserJobs() which polls /api/browser/jobs.
- * No SSE needed — the polling hook handles adaptive refresh rates.
+ * Data sources:
+ *   - useBrowserJobs() — polls /api/browser/jobs for job list + status
+ *   - useBrowserJobEvents() — SSE stream for real-time event log
  */
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import {
   Globe,
   Loader2,
@@ -28,8 +30,14 @@ import {
   RefreshCw,
   ChevronRight,
   Bot,
+  Eye,
+  Zap,
+  Search,
+  RotateCw,
+  Circle,
 } from "lucide-react";
 import { useBrowserJobs, type BrowserJob, type BrowserJobStep } from "../hooks/useBrowserJobs";
+import { useBrowserJobEvents, type AgentJobEvent } from "../hooks/useBrowserJobEvents";
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "awaiting_approval", "approved"]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -199,6 +207,97 @@ function StepItem({ step, index }: { step: BrowserJobStep; index: number }) {
   );
 }
 
+// ─── Event Item ──────────────────────────────────────────────
+
+function eventIcon(type: AgentJobEvent["type"]) {
+  switch (type) {
+    case "job.started": return <Play size={10} style={{ color: "var(--litt-primary)" }} />;
+    case "step.started": return <ChevronRight size={10} style={{ color: "var(--litt-primary)" }} />;
+    case "observation": return <Eye size={10} style={{ color: "#3b82f6" }} />;
+    case "action": return <Zap size={10} style={{ color: "#e3b341" }} />;
+    case "verification": return <CheckCircle2 size={10} style={{ color: "#22c55e" }} />;
+    case "step.completed": return <CheckCircle2 size={10} style={{ color: "#22c55e" }} />;
+    case "retry": return <RotateCw size={10} style={{ color: "#f59e0b" }} />;
+    case "approval.required": return <ShieldCheck size={10} style={{ color: "#e3b341" }} />;
+    case "job.completed": return <CheckCircle2 size={10} style={{ color: "#22c55e" }} />;
+    case "job.failed": return <XCircle size={10} style={{ color: "#ef4444" }} />;
+    default: return <Circle size={8} style={{ color: "var(--text-muted)" }} />;
+  }
+}
+
+function eventTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function EventItem({ event }: { event: AgentJobEvent }) {
+  return (
+    <div className="flex items-start gap-2 py-1">
+      <div className="mt-0.5 shrink-0">{eventIcon(event.type)}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-1.5">
+          <span className="shrink-0 text-[8px] font-mono" style={{ color: "var(--text-muted)" }}>
+            {eventTime(event.createdAt)}
+          </span>
+          <span className="truncate text-[10px]" style={{ color: "var(--text-secondary)" }}>
+            {event.message}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Activity Log ─────────────────────────────────────────────
+
+function ActivityLog({ jobId }: { jobId: string }) {
+  const { events, connected, error } = useBrowserJobEvents(jobId);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll to bottom when new events arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events.length]);
+
+  if (error && events.length === 0) {
+    return (
+      <div className="px-3 py-2 text-[9px]" style={{ color: "var(--text-muted)" }}>
+        Event stream unavailable
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="px-3 py-2 text-[9px]" style={{ color: "var(--text-muted)" }}>
+        {connected ? "Waiting for events..." : "Connecting..."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-1">
+      <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+        <Search size={9} />
+        Activity
+        {connected && (
+          <span className="ml-1 inline-flex items-center gap-0.5 rounded-full px-1 py-0 text-[7px]" style={{ backgroundColor: "rgba(34,197,94,0.15)", color: "#22c55e" }}>
+            <span className="inline-block h-1 w-1 rounded-full" style={{ backgroundColor: "#22c55e" }} />
+            LIVE
+          </span>
+        )}
+      </div>
+      <div ref={scrollRef} className="mt-1 max-h-48 overflow-y-auto">
+        {events.map((event) => (
+          <EventItem key={event.id} event={event} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Job Detail ──────────────────────────────────────────────
 
 function JobDetail({
@@ -280,6 +379,7 @@ function JobDetail({
               style={{ height: 200, border: "none", backgroundColor: "#0a0b10" }}
               title="Browserbase live view"
               allow="clipboard-read; clipboard-write"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
           </div>
           <a
@@ -308,6 +408,9 @@ function JobDetail({
           </div>
         </div>
       )}
+
+      {/* Live Activity Log (SSE) */}
+      <ActivityLog jobId={job.jobId} />
 
       {/* Error */}
       {job.error && job.status === "failed" && (

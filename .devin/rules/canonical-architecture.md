@@ -10,8 +10,9 @@ LiTT is the OS for turning ideas into reality. The Mission is the primary object
 ## Agents
 
 - Exactly two user-facing agents: **LiTT** (operating) and **Spark** (creative).
+- **LiTT Code** is the current user-facing coding agent/product name. All user-facing coding-agent UI, terminal branding, headings, and documentation should say "LiTT Code". Internal identifiers/types/functions may remain `LiTT` where renaming would create unnecessary churn.
 - All others are internal services LiTT invokes.
-- Retired names: LiTT-Code, LiTTle-Bit, Jarvis. Do not use them.
+- Retired names: LiTTle-Bit, Jarvis. Do not use them.
 
 ## Mission Lifecycle
 

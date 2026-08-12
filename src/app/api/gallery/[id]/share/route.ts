@@ -35,11 +35,12 @@ async function shareHandler(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const client = getAdminSupabase();
 
-    // Verify the gallery item exists and is public
+    // Verify the gallery item exists and belongs to the caller
     const { data: item } = await client
       .from("gallery_items")
       .select("id, user_id, title, image_url, video_url, media_type")
       .eq("id", id)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (!item) {

@@ -14,6 +14,7 @@ export type SelectedModel = {
   apiModel?: string;
   apiProvider?: string;
   category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok" | "litt-alias" | "advanced";
+  bitsLabel?: string;
 };
 
 export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
@@ -31,11 +32,12 @@ export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
   apiModel: m.apiModel,
   apiProvider: m.apiProvider,
   category: m.category,
+  bitsLabel: m.bitsLabel,
 }));
 
 export const RECOMMENDED_IDS = CHAT_MODELS.filter((m) => m.recommended).map((m) => m.id);
 
-const DEFAULT_MODEL = MODELS.find((m) => m.id === "litt-balanced") ?? MODELS[0];
+const DEFAULT_MODEL = MODELS.find((m) => m.id === "litt-auto") ?? MODELS[0];
 
 function getInitialModel(): SelectedModel {
   if (typeof window === "undefined") return DEFAULT_MODEL;
@@ -65,6 +67,7 @@ function toSelectedModel(m: StudioModel): SelectedModel {
     apiModel: m.apiModel,
     apiProvider: m.apiProvider,
     category: m.category,
+    bitsLabel: m.bitsLabel,
   };
 }
 

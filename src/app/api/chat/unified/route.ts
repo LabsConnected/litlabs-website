@@ -5,6 +5,8 @@ import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgentEntitlement, chargeAgentRun } from "@/lib/agent-entitlements";
+import { chargeLlmUsage } from "@/lib/llm-billing";
+import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -135,7 +137,7 @@ async function handleAgentChat(body: UnifiedChatRequest) {
   });
 }
 
-async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
+async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, clerkId: string | null) {
   const {
     agentSlug = DEFAULT_AGENT_SLUG,
     message,
@@ -178,11 +180,38 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
       undefined,
     );
     await logConversation(agent, userId, message, r.text);
+
+    // Charge LiTTBits for the LLM call (best-effort, never blocks the response).
+    // BYOK calls are not charged. Shadow mode calculates but doesn't debit.
+    let billingInfo: { charged: number; balance: number | null } | null = null;
+    if (clerkId && r.usage) {
+      try {
+        const callId = randomUUID();
+        const billing = await chargeLlmUsage({
+          clerkId,
+          provider: r.provider,
+          model: r.model,
+          promptTokens: r.usage.prompt,
+          completionTokens: r.usage.completion,
+          isByok: false,
+          littAliasId: modelCategory === "litt-alias" ? llmProvider : undefined,
+          callId,
+        });
+        billingInfo = {
+          charged: billing.debited ? billing.cost.retailLiTTBits : 0,
+          balance: billing.balance,
+        };
+      } catch {
+        // Billing failure must never block the response
+      }
+    }
+
     return NextResponse.json({
       response: r.text,
       provider: r.provider,
       model: r.model,
       latencyMs: r.latencyMs,
+      ...(billingInfo ? { billing: billingInfo } : {}),
     });
   }
 
@@ -209,6 +238,28 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
           ),
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+
+        // Best-effort billing for streaming — estimate tokens from text length.
+        // ~4 chars per token is a standard heuristic.
+        if (clerkId && assistantText) {
+          try {
+            const estimatedCompletionTokens = Math.ceil(assistantText.length / 4);
+            const estimatedPromptTokens = Math.ceil(prompt.length / 4);
+            const callId = randomUUID();
+            await chargeLlmUsage({
+              clerkId,
+              provider: r.provider,
+              model: r.model,
+              promptTokens: estimatedPromptTokens,
+              completionTokens: estimatedCompletionTokens,
+              isByok: false,
+              littAliasId: modelCategory === "litt-alias" ? llmProvider : undefined,
+              callId,
+            });
+          } catch {
+            // Billing failure must never break the stream
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "stream error";
         controller.enqueue(
@@ -345,7 +396,7 @@ async function handler(req: NextRequest) {
         return await handleSimpleChat(body, userId);
       case "llm":
       default:
-        return await handleLLMChat(body, userId);
+        return await handleLLMChat(body, userId, clerkId);
     }
   } catch (err) {
     return NextResponse.json(
