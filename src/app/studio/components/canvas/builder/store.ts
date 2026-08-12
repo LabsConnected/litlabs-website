@@ -14,6 +14,12 @@ import {
   createEmptyDocument,
   PALETTE_ITEMS,
 } from "./types";
+import {
+  type ProjectType,
+  type HtmlProject,
+  type HtmlFile,
+  createEmptyHtmlProject,
+} from "./projectTypes";
 
 const STORAGE_KEY = "litt:canvasBuilder:document";
 const HISTORY_LIMIT = 50;
@@ -33,6 +39,14 @@ interface CanvasBuilderStore {
   previewMode: boolean;
   leftPanelTab: "build" | "blocks" | "components" | "assets" | "layers";
   rightPanelTab: "properties" | "litt";
+
+  // Project type system
+  projectType: ProjectType;
+  htmlProject: HtmlProject;
+  setProjectType: (type: ProjectType) => void;
+  updateHtmlFile: (name: string, content: string) => void;
+  setActiveHtmlFile: (name: string) => void;
+  setHtmlProject: (project: HtmlProject) => void;
 
   // Actions
   loadDocument: () => void;
@@ -176,6 +190,25 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   previewMode: false,
   leftPanelTab: "build",
   rightPanelTab: "properties",
+
+  // Project type system
+  projectType: "website",
+  htmlProject: createEmptyHtmlProject(),
+  setProjectType: (type) => set({ projectType: type }),
+  updateHtmlFile: (name, content) =>
+    set((state) => ({
+      htmlProject: {
+        ...state.htmlProject,
+        files: state.htmlProject.files.map((f) =>
+          f.name === name ? { ...f, content } : f,
+        ),
+      },
+    })),
+  setActiveHtmlFile: (name) =>
+    set((state) => ({
+      htmlProject: { ...state.htmlProject, activeFile: name },
+    })),
+  setHtmlProject: (project) => set({ htmlProject: project }),
 
   loadDocument: () => {
     const stored = loadFromStorage();

@@ -76,12 +76,52 @@ interface ChangeLogEntry {
   historyIndex: number; // snapshot index for revert
 }
 
-// ─── Contextual agent buttons per node type ──────────────────────
+// ─── Contextual agent buttons per node type + project type ─────────
 
 interface AgentButton {
   label: string;
   icon: typeof Wand2;
   prompt: string;
+}
+
+function getAgentButtonsForProjectType(projectType: string): AgentButton[] {
+  switch (projectType) {
+    case "html":
+      return [
+        { label: "Build Project", icon: Sparkles, prompt: "Build a complete HTML project — create the HTML structure, CSS styling, and JavaScript interactivity" },
+        { label: "Edit HTML", icon: Type, prompt: "Improve the HTML structure — add semantic elements and better markup" },
+        { label: "Edit CSS", icon: Palette, prompt: "Improve the CSS styling — make it more polished, responsive, and modern" },
+        { label: "Add JavaScript", icon: Wand2, prompt: "Add JavaScript interactivity — animations, event handlers, dynamic behavior" },
+        { label: "Fix Errors", icon: AlertCircle, prompt: "Check for and fix any HTML, CSS, or JavaScript errors in this project" },
+        { label: "Preview", icon: Check, prompt: "Review the current project and suggest improvements" },
+      ];
+    case "game2d":
+    case "game3d":
+      return [
+        { label: "Build Game", icon: Sparkles, prompt: "Build a complete game with player controls, enemies, scoring, and sound" },
+        { label: "Add Object", icon: Plus, prompt: "Add a new game object — player, enemy, platform, coin, or powerup" },
+        { label: "Add Behavior", icon: Wand2, prompt: "Add a behavior to the selected object — movement, collision, health, or custom logic" },
+        { label: "Generate Asset", icon: ImageIcon, prompt: "Generate a game asset — sprite, background, or sound effect" },
+        { label: "Test Game", icon: AlertCircle, prompt: "Test the game and fix any issues" },
+        { label: "Play", icon: Check, prompt: "Run the game in preview mode" },
+      ];
+    case "app":
+      return [
+        { label: "Build App", icon: Sparkles, prompt: "Build a complete web app with interactive components and state management" },
+        { label: "Add Component", icon: Plus, prompt: "Add a new UI component to the app" },
+        { label: "Improve Design", icon: Palette, prompt: "Improve the app's design — make it more polished and professional" },
+        { label: "Make Responsive", icon: Smartphone, prompt: "Fix the app layout for mobile and tablet views" },
+        { label: "Audit", icon: AlertCircle, prompt: "Audit this app for design issues, accessibility, and performance" },
+      ];
+    default:
+      return [
+        { label: "Build Page", icon: Sparkles, prompt: "Build a complete landing page with hero, features, testimonials, and CTA sections" },
+        { label: "Add Section", icon: Plus, prompt: "Add a new section that fits the current page" },
+        { label: "Improve Design", icon: Palette, prompt: "Improve the overall design of this page — make it more polished and professional" },
+        { label: "Finish Page", icon: Check, prompt: "Finish this page — add any missing sections like footer, CTA, or navigation" },
+        { label: "Audit Page", icon: AlertCircle, prompt: "Audit this page for design issues, accessibility, and mobile responsiveness" },
+      ];
+  }
 }
 
 function getAgentButtonsForNode(node: CanvasNode | null): AgentButton[] {
@@ -172,7 +212,12 @@ export function LiTTCopilotPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const nodeCount = Object.keys(document.nodes).length;
-  const agentButtons = getAgentButtonsForNode(node);
+  const projectType = useCanvasBuilderStore((s) => s.projectType);
+  // For HTML and Game modes, use project-type-specific buttons (no node selection).
+  // For Website/App/Component modes, use the existing node-contextual buttons.
+  const agentButtons = (projectType === "html" || projectType === "game2d" || projectType === "game3d")
+    ? getAgentButtonsForProjectType(projectType)
+    : getAgentButtonsForNode(node);
   const contextSummary = getContextSummary(node, breakpoint, document.route, nodeCount);
 
   useEffect(() => {
