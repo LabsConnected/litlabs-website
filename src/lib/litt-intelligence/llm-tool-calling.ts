@@ -82,6 +82,21 @@ export function toOpenRouterTools(tools: ToolDefinition[]): OpenRouterTool[] {
   }));
 }
 
+/**
+ * Build a reverse map from OpenRouter function names back to original tool IDs.
+ * OpenRouter names replace dots with underscores (project.scan → project_scan),
+ * which is lossy for tools that use underscores natively (search_code → search_code).
+ * This map lets us recover the original ID without guessing.
+ */
+export function buildToolIdReverseMap(tools: ToolDefinition[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const tool of tools) {
+    const openRouterName = tool.id.replace(/\./g, "_");
+    map.set(openRouterName, tool.id);
+  }
+  return map;
+}
+
 export function toToolDefinitionId(openRouterName: string): string {
   return openRouterName.replace(/_/g, ".");
 }
@@ -119,6 +134,7 @@ export async function callLLMWithTools(
 
   const model = options?.model ?? "google/gemini-2.5-flash";
   const openRouterTools = toOpenRouterTools(tools);
+  const toolIdMap = buildToolIdReverseMap(tools);
 
   const body: Record<string, unknown> = {
     model,
@@ -176,7 +192,7 @@ export async function callLLMWithTools(
     }
     return {
       toolCallId: raw.id,
-      toolId: toToolDefinitionId(raw.function.name),
+      toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
       inputs,
     };
   });

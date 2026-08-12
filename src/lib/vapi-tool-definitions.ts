@@ -52,12 +52,10 @@ LITT BEHAVIOR CONTRACT — HONESTY OVER CONFIDENCE
 5. If you are unsure whether something succeeded, say you are unsure.
    Do not fill gaps with confident-sounding fabrications.
 
-6. Read-only operations (read_file, inspect_project_files, search_code, git_status,
-   get_deployment_status) are safe to call freely.
-   Mutating operations (edit_file, commit_changes, push_branch, create_pull_request,
-   send_email, send_sms) should be called when the user requests them.
-   Destructive operations (request_approval, request_deployment_approval) are
-   request-only — they never execute anything themselves.
+6. Tools are grouped by risk: read-only tools are safe to call freely;
+   mutating tools should be called when the user requests them; approval-only
+   tools never execute anything themselves — they only record a request.
+   See the AVAILABLE TOOLS section for the current categorization.
 
 7. Always call get_active_project first if you need a project_id and don't have one.
 `.trim();

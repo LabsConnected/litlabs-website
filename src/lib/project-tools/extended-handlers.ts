@@ -279,13 +279,60 @@ export const toolStartPreviewServer: ToolHandler = async (userId, args) => {
   }
 
   try {
+    // Use the terminal server's dedicated preview API instead of shelling
+    // out via exec. The preview API handles process lifecycle, health
+    // checks, logging, and proxying properly.
+    const { TERMINAL_BASE, internalHeaders } = await import("@/lib/project-tools/registry");
     const pkgManager = project.packageManager ?? "pnpm";
-    await runWorkspaceCommand(workspaceId, userId, `cd "${project.workspaceRoot ?? "."}" && ${pkgManager} dev --port 3000 &`);
+
+    const startResp = await fetch(
+      `${TERMINAL_BASE()}/internal/workspace/${workspaceId}/preview/start`,
+      {
+        method: "POST",
+        headers: internalHeaders(),
+        body: JSON.stringify({
+          userId,
+          packageManager: pkgManager,
+          framework: project.framework ?? undefined,
+        }),
+      },
+    );
+
+    if (!startResp.ok) {
+      const errBody = await startResp.text().catch(() => "");
+      return fail(`Preview start failed (${startResp.status}): ${errBody.slice(0, 300)}`);
+    }
+
+    const startData = await startResp.json().catch(() => null) as {
+      workspaceId?: string;
+      status?: string;
+      port?: number;
+      framework?: string;
+      command?: string;
+      startedAt?: string;
+    } | null;
+
+    // Poll preview status briefly to confirm it's running
     await new Promise((r) => setTimeout(r, 3000));
-    const probe = await runWorkspaceCommand(workspaceId, userId, `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "not_ready"`);
-    const httpStatus = (probe.stdout ?? "").trim();
-    return ok(projectId, `Preview server started. HTTP status: ${httpStatus}`, {
-      workspaceId, port: 3000, httpStatus, running: httpStatus !== "not_ready" && httpStatus !== "000",
+    const statusResp = await fetch(
+      `${TERMINAL_BASE()}/internal/workspace/${workspaceId}/preview/status?userId=${encodeURIComponent(userId)}`,
+      { headers: internalHeaders() },
+    );
+    const statusData = await statusResp.json().catch(() => null) as {
+      status?: string;
+      healthy?: boolean;
+      port?: number;
+      url?: string;
+    } | null;
+
+    const running = statusData?.status === "running" && statusData?.healthy !== false;
+    return ok(projectId, `Preview server started. Status: ${statusData?.status ?? "unknown"}.`, {
+      workspaceId,
+      port: statusData?.port ?? startData?.port ?? null,
+      status: statusData?.status ?? startData?.status ?? "unknown",
+      healthy: statusData?.healthy ?? null,
+      url: statusData?.url ?? null,
+      running,
     });
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Failed to start preview server.");

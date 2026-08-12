@@ -56,6 +56,7 @@ vi.mock("@/lib/project-tools/registry", () => ({
     read_file: { handler: vi.fn(), metadata: { projectScoped: true, mutating: false, readOnly: true } },
     edit_file: { handler: vi.fn(), metadata: { projectScoped: true, mutating: true, readOnly: false } },
   },
+  buildToolCapabilitySummary: vi.fn(() => "AVAILABLE TOOLS (grouped by risk):\n  Read-only: get_active_project, read_file\n  Mutating: edit_file"),
 }));
 
 // Mock callLLMWithTools to simulate tool calls
@@ -88,6 +89,11 @@ vi.mock("@/lib/studio/memory-service", () => ({
   recallMemories: vi.fn(async () => []),
   formatMemoryContext: vi.fn(() => ""),
   persistMemory: vi.fn(async () => ({})),
+}));
+
+vi.mock("@/lib/connectors/user-facts", () => ({
+  getUserFacts: vi.fn(async () => []),
+  buildFactsContextBlock: vi.fn(() => ""),
 }));
 
 vi.mock("@/lib/studio/conversation-service", () => ({

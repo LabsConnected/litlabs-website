@@ -26,8 +26,9 @@ import { auditRun } from "@/lib/litt-runtime/audit-service";
 import { detectActions } from "@/lib/litt-runtime/response-stream";
 import type { LiTTRunResult } from "@/lib/litt-runtime/types";
 import { callLLMWithTools, type ToolDefinition as LLMToolDefinition } from "@/lib/litt-intelligence/llm-tool-calling";
-import { executeProjectTool, getProjectToolDefinitions, PROJECT_TOOLS } from "@/lib/project-tools/registry";
+import { executeProjectTool, getProjectToolDefinitions, PROJECT_TOOLS, buildToolCapabilitySummary } from "@/lib/project-tools/registry";
 import { LITT_BEHAVIOR_CONTRACT } from "@/lib/vapi-tool-definitions";
+import { getUserFacts, buildFactsContextBlock } from "@/lib/connectors/user-facts";
 
 const HISTORY_LIMIT = 6;
 const MAX_TOOL_ROUNDS = 8; // Allows full dev workflows: get_active_project → search_code → read_file → edit_file → run_project_checks → browser_test → commit → push
@@ -48,8 +49,9 @@ export async function resolveVoiceContext(args: {
 }): Promise<ResolvedRunContext> {
   const { userId, projectId, conversationId, message } = args;
 
-  // Run project resolution, conversation lookup, and memory recall in parallel
-  const [projectResult, convResult, memoryResult] = await Promise.all([
+  // Run project resolution, conversation lookup, memory recall, and user
+  // facts fetch in parallel — all are non-fatal if they fail.
+  const [projectResult, convResult, memoryResult, factsResult] = await Promise.all([
     // Resolve project
     (async () => {
       if (!userId || !projectId) return null;
@@ -89,12 +91,24 @@ export async function resolveVoiceContext(args: {
         return "";
       }
     })(),
+    // Fetch user facts for personal context (non-fatal)
+    (async () => {
+      if (!userId) return "";
+      try {
+        const facts = await getUserFacts(userId);
+        if (facts.length === 0) return "";
+        return buildFactsContextBlock(facts);
+      } catch {
+        return "";
+      }
+    })(),
   ]);
 
   const project = projectResult;
   const convId = convResult.convId;
   const history = convResult.history;
   const memoryContext = memoryResult;
+  const factsContext = factsResult;
 
   // Build capabilities from project state
   const capabilities: RawCapabilities = {
@@ -132,6 +146,7 @@ export async function resolveVoiceContext(args: {
     kernelCapabilities,
     history,
     memoryContext,
+    factsContext,
   };
 }
 
@@ -200,14 +215,13 @@ export async function runLiTTForVoice(args: {
     ctx.project?.repositoryName ? `Repository: ${ctx.project.repositoryName}` : "",
     ctx.project?.repositoryProvider ? `Provider: ${ctx.project.repositoryProvider}` : "",
     ctx.memoryContext ? `Relevant memories:\n${ctx.memoryContext}` : "",
+    ctx.factsContext ? ctx.factsContext : "",
     "",
     "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
     "Do not say you don't have information — the context above is the user's real project data.",
     "",
     "TOOLS:",
-    "You have tools available to inspect code, edit files, run tests, create branches,",
-    "commit, push, create pull requests, search code, remember context, test pages in",
-    "the browser, send email, and request approvals.",
+    buildToolCapabilitySummary(),
     "IMPORTANT: When the user asks you to DO something (inspect, read, edit, search,",
     "test, create, commit, push, send), you MUST call the appropriate tool — do not",
     "just describe what you would do. Actually invoke the tool function.",
@@ -294,12 +308,14 @@ export async function runLiTTForVoice(args: {
 
         // Execute each tool call through the shared registry
         for (const tc of llmResp.toolCalls) {
-          // callLLMWithTools converts tool names: underscores → dots (for
-          // business tools like business.services.list). Project tools use
-          // underscores natively (get_active_project). Try both forms.
-          const toolName = tc.toolId.includes(".")
-            ? tc.toolId.replace(/\./g, "_")
-            : tc.toolId;
+          // callLLMWithTools converts tool names via toToolDefinitionId,
+          // which replaces ALL underscores with dots. This is lossy for
+          // project tools that use underscores natively (e.g. git_diff
+          // becomes git.diff). Try the raw id first, then the dot→underscore
+          // conversion, so both project tools and business tools resolve.
+          const toolName = PROJECT_TOOLS[tc.toolId]
+            ? tc.toolId
+            : tc.toolId.replace(/\./g, "_");
           const toolEntry = PROJECT_TOOLS[toolName];
           if (!toolEntry) {
             messages.push({

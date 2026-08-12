@@ -97,6 +97,8 @@ export interface ResolvedRunContext {
   history: HistoryEntry[];
   /** Recalled project-scoped memories (authenticated users only). */
   memoryContext: string;
+  /** User facts (learned preferences, confirmed profile data). */
+  factsContext?: string;
 }
 
 /**

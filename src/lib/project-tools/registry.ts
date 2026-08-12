@@ -64,14 +64,14 @@ import { executeBrowserJob } from "@/lib/browser-job-executor";
  * Resolve the terminal server base URL.
  * Production has TERMINAL_SERVER_URL (not TERMINAL_SERVER_INTERNAL_URL).
  */
-const TERMINAL_BASE = () =>
+export const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
   process.env.TERMINAL_SERVER_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
   "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
-function internalHeaders(): Record<string, string> {
+export function internalHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
     "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
@@ -1264,7 +1264,7 @@ export const PROJECT_TOOLS: Record<string, {
   list_projects: { handler: toolListProjects, metadata: { projectScoped: false, mutating: false, readOnly: true } },
   create_project: { handler: toolCreateProject, metadata: { projectScoped: false, mutating: true, readOnly: false } },
   switch_project: { handler: toolSwitchProject, metadata: { projectScoped: false, mutating: true, readOnly: false } },
-  memory_search: { handler: toolMemorySearch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  memory_search: { handler: toolMemorySearch, metadata: { projectScoped: true, mutating: false, readOnly: true } },
   run_command: { handler: toolRunCommand, metadata: { projectScoped: true, mutating: false, readOnly: false } },
   web_search: { handler: toolWebSearch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
   web_fetch: { handler: toolWebFetch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
@@ -1313,4 +1313,29 @@ export function getProjectToolDefinitions(): Array<{
       inputSchema: (def?.parameters as unknown as Record<string, unknown>) ?? { type: "object", properties: {} },
     };
   });
+}
+
+/**
+ * Build a concise, dynamically-generated summary of available tool
+ * capabilities for inclusion in system prompts. Groups tools by
+ * category (read-only, mutating, approval-only) using registry
+ * metadata so the prompt stays in sync as tools are added.
+ */
+export function buildToolCapabilitySummary(): string {
+  const entries = Object.entries(PROJECT_TOOLS);
+  const readOnly = entries.filter(([, m]) => m.metadata.readOnly && !m.metadata.mutating).map(([name]) => name);
+  const mutating = entries.filter(([, m]) => m.metadata.mutating).map(([name]) => name);
+  const approvalOnly = entries.filter(([, m]) => !m.metadata.readOnly && !m.metadata.mutating).map(([name]) => name);
+
+  const lines: string[] = ["AVAILABLE TOOLS (grouped by risk):"];
+  if (readOnly.length > 0) {
+    lines.push(`  Read-only (safe to call freely): ${readOnly.join(", ")}`);
+  }
+  if (mutating.length > 0) {
+    lines.push(`  Mutating (call when user requests): ${mutating.join(", ")}`);
+  }
+  if (approvalOnly.length > 0) {
+    lines.push(`  Approval-only (never execute directly): ${approvalOnly.join(", ")}`);
+  }
+  return lines.join("\n");
 }
