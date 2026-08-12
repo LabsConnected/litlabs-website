@@ -156,13 +156,14 @@ describe("LiTT Intelligence — Action Loop", () => {
         requiredCapabilities: ["filesystem"],
         requiredPermissions: ["files:write"],
         risk: "high",
+        permissionLevel: "workspace-write",
         approvalPolicy: { required: true, autoApproveReadOnly: false, requireExplicitForMutations: true, neverAllow: false },
         timeoutMs: 5000,
         idempotent: false,
         readOnly: false,
         enabled: true,
       },
-      async () => ({ success: true }),
+      async (_inputs) => ({ success: true }),
     );
 
     const plan = planner.createPlan("user-a", "proj-a", "Write file", [
@@ -205,13 +206,14 @@ describe("LiTT Intelligence — Action Loop", () => {
         requiredCapabilities: [],
         requiredPermissions: [],
         risk: "low",
+        permissionLevel: "read",
         approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
         timeoutMs: 5000,
         idempotent: true,
         readOnly: true,
         enabled: true,
       },
-      async () => { throw new Error("Intentional failure"); },
+      async (_inputs) => { throw new Error("Intentional failure"); },
     );
 
     const plan = planner.createPlan("user-a", "proj-a", "Test failure", [
@@ -252,13 +254,14 @@ describe("LiTT Intelligence — Action Loop", () => {
         requiredCapabilities: [],
         requiredPermissions: [],
         risk: "low",
+        permissionLevel: "read",
         approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
         timeoutMs: 5000,
         idempotent: true,
         readOnly: true,
         enabled: true,
       },
-      async () => { callOrder.push("a"); return { ok: true }; },
+      async (_inputs) => { callOrder.push("a"); return { ok: true }; },
     );
 
     toolRegistry.register(
@@ -273,13 +276,14 @@ describe("LiTT Intelligence — Action Loop", () => {
         requiredCapabilities: [],
         requiredPermissions: [],
         risk: "low",
+        permissionLevel: "read",
         approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
         timeoutMs: 5000,
         idempotent: true,
         readOnly: true,
         enabled: true,
       },
-      async () => { callOrder.push("b"); return { ok: true }; },
+      async (_inputs) => { callOrder.push("b"); return { ok: true }; },
     );
 
     const plan = planner.createPlan("user-a", "proj-a", "Dependency test", [
@@ -337,13 +341,14 @@ describe("LiTT Intelligence — Action Loop", () => {
         requiredCapabilities: [],
         requiredPermissions: [],
         risk: "low",
+        permissionLevel: "read",
         approvalPolicy: { required: false, autoApproveReadOnly: true, requireExplicitForMutations: false, neverAllow: false },
         timeoutMs: 5000,
         idempotent: true,
         readOnly: true,
         enabled: true,
       },
-      async () => ({ done: true }),
+      async (_inputs) => ({ done: true }),
     );
 
     const plan = planner.createPlan("user-a", "proj-a", "Test", [
