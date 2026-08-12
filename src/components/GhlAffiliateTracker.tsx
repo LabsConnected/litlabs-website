@@ -30,6 +30,7 @@
 import Script from "next/script";
 import { useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
+import { logger } from "@/lib/client-logger";
 
 const GHL_LOCATION_ID = "sT0yL2XFTU0l87Ooce3h";
 const GHL_BACKEND_URL = "https://backend.leadconnectorhq.com";
@@ -155,19 +156,22 @@ export function GhlAffiliateSignupTracker() {
     })
       .then((res) => res.json())
       .then((data: { tracked?: boolean; replayed?: boolean; reason?: string }) => {
-        // Log the result for debugging — no sensitive data
+        // Log the result for debugging — no sensitive data.
+        // Dedupe-success and tracking-success are dev-only noise; only
+        // actual failures surface in production.
         if (data.tracked && !data.replayed) {
-          console.info(`[ghl] Lead tracked for user ${user.id}${amId ? ` amId=${amId}` : ""}`);
+          logger.debug(`[ghl] Lead tracked for user ${user.id}${amId ? ` amId=${amId}` : ""}`);
         } else if (data.replayed) {
-          // Already tracked — this is the expected path for existing users
-          console.info(`[ghl] Lead already tracked for user ${user.id}, skipping`);
+          // Already tracked — this is the expected path for existing users.
+          // Dedupe behavior is correct; don't spam the production console.
+          logger.debug(`[ghl] Lead already tracked for user ${user.id}, skipping`);
         } else if (!data.tracked && data.reason) {
-          console.warn(`[ghl] Lead tracking failed for user ${user.id}: ${data.reason}`);
+          logger.warn(`[ghl] Lead tracking failed for user ${user.id}: ${data.reason}`);
         }
       })
       .catch((err) => {
         // Network error — will retry on next sign-in
-        console.warn(`[ghl] track-lead request failed: ${err instanceof Error ? err.message : "network error"}`);
+        logger.warn(`[ghl] track-lead request failed: ${err instanceof Error ? err.message : "network error"}`);
       })
       .finally(() => {
         callInFlightRef.current = false;
