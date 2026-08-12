@@ -110,18 +110,9 @@ function SidebarContent({
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <BrandLogo
             href="/dashboard"
-            size={28}
-            showText={false}
-            className={collapsed ? "inline-flex" : "inline-flex"}
+            size={30}
+            showText={!collapsed}
           />
-          {!collapsed && (
-            <BrandLogo
-              href="/dashboard"
-              size={28}
-              showText
-              className="hidden sm:inline-flex"
-            />
-          )}
         </div>
         {onToggleCollapse && !onClose && (
           <button onClick={onToggleCollapse} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>

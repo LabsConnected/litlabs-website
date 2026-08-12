@@ -71,7 +71,7 @@ function formatTime(value: string): string {
 
 /* ─── Sub-components ─────────────────────────────────────────────────── */
 
-MetricCard({
+function MetricCard({
   label,
   value,
   detail,
@@ -612,42 +612,6 @@ export function MissionControlDashboard() {
             </Link>
           </div>
         </section>
-                    style={{ color: D.textPrimary }}
-                  />
-                  <button onClick={submit} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl transition hover:scale-[1.05] active:scale-95"
-                    style={{ background: D.accent, color: D.textOnAccent, boxShadow: `0 0 28px ${D.accent}40` }} aria-label="Open in Studio">
-                    <Icon name="arrow" size={19} />
-                  </button>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {Object.entries(MODE_CONFIG).filter(([key]) => key !== "chat").map(([key, config]) => (
-                    <button key={key} onClick={() => setMode(key)}
-                      className="rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5"
-                      style={{
-                        borderColor: mode === key ? `${D.accent}80` : "rgba(255,255,255,0.08)",
-                        background: mode === key ? `${D.accent}18` : "rgba(255,255,255,0.03)",
-                        color: mode === key ? D.accent : "rgba(255,255,255,0.55)",
-                      }}>
-                      {config.label}
-                    </button>
-                  ))}
-                  <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
-                  <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                    className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5 disabled:opacity-50"
-                    style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.55)" }}>
-                    <Icon name="plus" size={12} /> {uploading ? "Uploading..." : "Upload"}
-                  </button>
-                  <button onClick={startVoice}
-                    className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5"
-                    style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.55)" }}>
-                    <Icon name="message" size={12} className={listening ? "animate-pulse" : ""} style={{ color: listening ? D.accentRed : undefined }} />
-                    {listening ? "Listening..." : "Voice"}
-                  </button>
-                </div>
-              </div>
-            </BorderBeam>
-          </CursorSpotlight>
-        </EntranceSection>
 
         {/* === Continue Working + System Status === */}
         <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">

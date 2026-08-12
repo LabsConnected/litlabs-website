@@ -89,10 +89,7 @@ function DesktopSidebar({
         style={{ borderColor: `${T.borderColor}15` }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <BrandLogo href="/dashboard" size={26} showText={false} />
-          {!collapsed && (
-            <BrandLogo href="/dashboard" size={26} showText className="hidden sm:inline-flex" />
-          )}
+          <BrandLogo href="/dashboard" size={28} showText={!collapsed} />
         </div>
         <button
           onClick={onToggleCollapse}
