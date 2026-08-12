@@ -10,8 +10,8 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 
-const PUBLIC_PATHS = [
-  "/",
+// Routes that render minimal chrome (no navbar / footer)
+const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
   "/sign-up",
@@ -28,7 +28,7 @@ const PUBLIC_PATHS = [
   "/hire",
 ];
 
-// Routes that render their own bottom navigation / floating chrome
+// Routes that render their own custom interactive chrome (e.g. cloud emulator)
 const SELF_CONTAINED_CHROME = ["/games/cloud"];
 
 // Routes that have their own full-page navigation/sidebar and should NOT
@@ -36,8 +36,8 @@ const SELF_CONTAINED_CHROME = ["/games/cloud"];
 // These pages still require auth but manage their own chrome.
 const OWN_SHELL_PATHS = ["/settings"];
 
-function isPublicPath(path: string) {
-  return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+function isBarePublicPath(path: string) {
+  return BARE_PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
 function hasOwnChrome(path: string) {
@@ -57,11 +57,11 @@ export default function LayoutShell({
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const publicPage = isPublicPath(pathname || "/");
-  const isStudio = (pathname || "").startsWith("/studio");
-  const ownChrome = hasOwnChrome(pathname || "/");
-  const ownShell = hasOwnShell(pathname || "/");
+  const pathname = usePathname() || "/";
+  const barePublic = isBarePublicPath(pathname);
+  const isStudio = pathname.startsWith("/studio");
+  const ownChrome = hasOwnChrome(pathname);
+  const ownShell = hasOwnShell(pathname);
 
   if (isStudio) {
     return (
@@ -71,19 +71,20 @@ export default function LayoutShell({
         <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
           {children}
         </div>
-        {/* Media Hub lives inside the Studio drawer — no floating player */}
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
     );
   }
 
-  if (publicPage) {
+  if (barePublic) {
     return (
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-screen">{children}</main>
+        <main id="main-content" className="relative z-10 min-h-screen">
+          {children}
+        </main>
         <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />

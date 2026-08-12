@@ -35,7 +35,6 @@
     "terminal:start": "node terminal-server/dist/server.js",
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
     "daemon:dev": "tsx src/daemon.ts",
-    "voice:dev": "node voice-bridge/server.js",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\" \"pnpm daemon:dev\"",
     "diagnose:connections": "tsx scripts/diagnose-connections.ts",
     "sync:vapi-tools": "tsx scripts/sync-vapi-tools.ts",

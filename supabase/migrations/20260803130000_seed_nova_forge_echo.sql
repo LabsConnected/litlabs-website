@@ -101,7 +101,7 @@ WHERE a.slug IN ('nova', 'forge', 'echo')
 -- Nova, Forge, Echo are individually purchasable (not subscription-bundled).
 -- included_plan_ids is empty — access is granted via the purchase path only.
 
-INSERT INTO public.marketplace_items (slug, name, description, item_type, agent_id, price_cents, currency, category, featured, included_plan_ids)
+INSERT INTO public.marketplace_items (slug, name, description, item_type, agent_id, price_cents, category, capability_key, is_featured, included_plan_ids)
 SELECT
   a.slug,
   a.display_name,
@@ -109,12 +109,12 @@ SELECT
   'agent',
   a.id,
   a.price_cents,
-  'usd',
   CASE a.slug
     WHEN 'nova' THEN 'creative'
     WHEN 'forge' THEN 'developer'
     WHEN 'echo' THEN 'marketing'
   END,
+  'agent.' || a.slug,
   true,
   ARRAY[]::TEXT[]
 FROM public.agents a
@@ -126,6 +126,7 @@ ON CONFLICT (slug) DO UPDATE SET
   agent_id = EXCLUDED.agent_id,
   price_cents = EXCLUDED.price_cents,
   category = EXCLUDED.category,
-  featured = true,
+  capability_key = EXCLUDED.capability_key,
+  is_featured = true,
   included_plan_ids = ARRAY[]::TEXT[],
   updated_at = now();

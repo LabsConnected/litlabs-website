@@ -1,7 +1,7 @@
 /**
  * Internal API: Voice Context Lookup
  *
- * Called by the LiTT Voice Bridge to resolve a phone number (Twilio Caller ID)
+ * Resolves a voice-provider caller ID to account and project context.
  * to a full LittUserContext. This is the bridge between "someone is calling"
  * and "LiTT knows who they are, what they're working on, and their preferences."
  *

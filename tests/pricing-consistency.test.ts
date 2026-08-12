@@ -10,6 +10,12 @@ describe("Pricing contract — single source of truth", () => {
       );
     });
 
+    it("publishes exactly 4 customer plans: starter, creator_beta, pro_builder_beta, founder", () => {
+      expect(PLAN_LIST.map((plan) => plan.id).sort()).toEqual(
+        ["starter", "creator_beta", "pro_builder_beta", "founder"].sort(),
+      );
+    });
+
     it("PLAN_LIST excludes internal owner plan (only 4 customer plans)", () => {
       expect(PLAN_LIST.length).toBe(4);
       expect(PLAN_LIST.every((p) => PLANS[p.id] === p)).toBe(true);

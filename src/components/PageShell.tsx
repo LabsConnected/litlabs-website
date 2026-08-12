@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
+import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { type PageFrameVariant, VARIANT_MAX_WIDTH } from "@/components/ProductPageFrame";
 
@@ -71,12 +72,23 @@ export default function PageShell({
                 }}
               />
             )}
-            <div className="min-w-0">
-              <div
-                className="mb-1.5 text-[9px] font-black uppercase tracking-[.24em]"
-                style={{ color: T.accentColor }}
-              >
-                LiTTree LabStudios
+            <div className="min-w-0 flex-1">
+              <div className="mb-1.5 flex items-center gap-2">
+                <Link
+                  href="/dashboard"
+                  className="text-[9px] font-black uppercase tracking-[.24em] transition-opacity hover:opacity-80"
+                  style={{ color: T.accentColor }}
+                >
+                  LiTTree LabStudios
+                </Link>
+                <span className="text-[9px] opacity-30">/</span>
+                <Link
+                  href="/dashboard"
+                  className="text-[9px] font-bold uppercase tracking-wider opacity-60 transition-opacity hover:opacity-100"
+                  style={{ color: T.textColor }}
+                >
+                  Dashboard
+                </Link>
               </div>
               {title && (
                 <h1

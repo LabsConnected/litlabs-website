@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 
 // Mock dependencies before importing
 vi.mock("@/lib/supabase", () => ({
+  getSupabaseAdmin: vi.fn(() => null),
   supabaseAdmin: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
@@ -22,7 +23,6 @@ vi.mock("@/lib/supabase", () => ({
       update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ error: null })) })) })),
     })),
   },
-  getSupabaseAdmin: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/vapi-tools", () => ({
