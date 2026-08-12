@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient, AgentDispatchClient } from "livekit-server-sdk";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
@@ -72,6 +72,21 @@ export async function POST(req: NextRequest) {
       });
     } catch {
       // Room may already exist — that's fine
+    }
+
+    // Explicit dispatch: tell LiveKit to send the LiTT agent worker to this
+    // room. The worker registers with agentName "litt" (see livekit-agent.ts),
+    // so without this dispatch call it will NOT auto-join the room.
+    const agentName = process.env.LIVEKIT_AGENT_NAME || "litt";
+    const dispatchClient = new AgentDispatchClient(
+      livekitUrl.replace(/^wss?:\/\//, "https://"),
+      apiKey,
+      apiSecret,
+    );
+    try {
+      await dispatchClient.createDispatch(roomName, agentName);
+    } catch {
+      // Dispatch may already exist for this room/agent — that's fine
     }
 
     // Build the browser token

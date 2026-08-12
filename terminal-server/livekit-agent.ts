@@ -278,7 +278,18 @@ if (isMainWorkerProcess) {
 
   // Run via the LiveKit agents CLI (spawns/coordinates worker processes).
   // Only the main process should start the CLI orchestrator.
+  //
+  // agentName enables explicit dispatch: the worker will NOT auto-join every
+  // room. Instead, the browser token must specify `agentName: "litt"` in its
+  // grants, or AgentDispatch.createDispatch must be called. This prevents
+  // unrelated rooms from triggering the LiTT voice pipeline.
+  // Override via LIVEKIT_AGENT_NAME env var if needed.
   if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url) }));
+    cli.runApp(
+      new ServerOptions({
+        agent: fileURLToPath(import.meta.url),
+        agentName: process.env.LIVEKIT_AGENT_NAME || "litt",
+      }),
+    );
   }
 }
