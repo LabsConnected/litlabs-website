@@ -28,6 +28,10 @@ export const TOOL_NAMES = [
   "browser_job_status",
   "browser_cancel_job",
   "browser_approve_job",
+  // Owner notification tools — send SMS or email to the site owner.
+  // These use the owner's contact info configured in the environment.
+  "send_sms",
+  "send_email",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 

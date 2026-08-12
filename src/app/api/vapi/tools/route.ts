@@ -654,6 +654,104 @@ async function toolBrowserApproveJob(userId: string, args: Record<string, unknow
   });
 }
 
+// ─── Owner notification tools ───────────────────────────────────
+
+/**
+ * send_sms — send an SMS to the site owner via Vapi's SMS API.
+ *
+ * Uses the Vapi phone number (+13239165462) as the from number.
+ * The to number defaults to the owner's configured phone but can be
+ * overridden by the caller (e.g. if a different user asks to be texted).
+ */
+async function toolSendSms(_userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const message = str(args.message);
+  if (!message) return fail("send_sms requires a message.");
+  if (message.length > 1600) return fail("Message too long (1600 char max).");
+
+  const toNumber = str(args.to_number) || process.env.LITTLABS_OWNER_PHONE || "";
+  if (!toNumber) return fail("No destination phone number configured. Set LITTLABS_OWNER_PHONE or pass to_number.");
+
+  const vapiKey = process.env.VAPI_API_KEY;
+  if (!vapiKey) return fail("VAPI_API_KEY not configured — cannot send SMS.");
+
+  const fromNumber = process.env.LITTLABS_VAPI_PHONE_NUMBER || "+13239165462";
+  const phoneNumberId = process.env.LITTLABS_VAPI_PHONE_NUMBER_ID || "25d47ca0-40a9-40c8-b348-f6afc9c4f5ab";
+
+  try {
+    const resp = await fetch("https://api.vapi.ai/sms", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${vapiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          to: toNumber,
+          from: fromNumber,
+          content: message,
+        },
+        phoneNumberId,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "unknown error");
+      return fail(`SMS send failed (${resp.status}): ${errText.slice(0, 200)}`);
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    return ok(null, `SMS sent to ${toNumber}.`, { to: toNumber, from: fromNumber, messageId: data.id ?? null });
+  } catch (err) {
+    return fail(`SMS send error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * send_email — send an email to the site owner.
+ *
+ * Uses Resend if RESEND_API_KEY is configured, otherwise returns a
+ * clear failure (never claims to have sent when it hasn't).
+ */
+async function toolSendEmail(_userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const subject = str(args.subject) || "Message from LiTT";
+  const body = str(args.body);
+  if (!body) return fail("send_email requires a body.");
+
+  const toEmail = str(args.to_email) || process.env.LITTLABS_OWNER_EMAIL || "";
+  if (!toEmail) return fail("No destination email configured. Set LITTLABS_OWNER_EMAIL or pass to_email.");
+
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) {
+    return fail("Email sending is not configured (RESEND_API_KEY missing). Tell the caller email is not available yet.");
+  }
+
+  try {
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "LiTT <noreply@litlabs.net>",
+        to: toEmail,
+        subject,
+        text: body,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "unknown error");
+      return fail(`Email send failed (${resp.status}): ${errText.slice(0, 200)}`);
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    return ok(null, `Email sent to ${toEmail}.`, { to: toEmail, subject, messageId: data.id ?? null });
+  } catch (err) {
+    return fail(`Email send error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────
 
 async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
@@ -721,6 +819,13 @@ async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
 
     case "browser_approve_job":
       return toolBrowserApproveJob(userId, args);
+
+    // ── Owner notification tools ───────────────────────────────
+    case "send_sms":
+      return toolSendSms(userId, args);
+
+    case "send_email":
+      return toolSendEmail(userId, args);
 
     default:
       return fail(`Unknown tool "${call.name}". Valid tools: ${TOOL_NAMES.join(", ")}.`);
