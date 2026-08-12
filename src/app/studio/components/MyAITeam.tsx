@@ -182,10 +182,18 @@ export function MyAITeam({ onOpenAgent }: MyAITeamProps) {
                   >
                     {/* Avatar */}
                     <span
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[11px] font-black"
+                      className="relative grid h-8 w-8 shrink-0 place-items-center rounded-lg overflow-hidden text-[11px] font-black"
                       style={{ backgroundColor: `${accent}15`, color: accent }}
                     >
-                      {unlocked ? meta.displayName[0] : <Lock size={12} />}
+                      {unlocked ? (
+                        <img
+                          src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                          alt={meta.displayName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Lock size={12} />
+                      )}
                     </span>
 
                     {/* Info */}

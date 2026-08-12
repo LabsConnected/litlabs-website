@@ -538,10 +538,14 @@ export default function CommandComposer({
           data-testid="agent-trigger"
         >
           <span
-            className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-black"
+            className="relative grid h-5 w-5 shrink-0 place-items-center rounded-md overflow-hidden text-[10px] font-black"
             style={{ backgroundColor: `${agentAccent}20`, color: agentAccent }}
           >
-            {agentMeta.displayName[0]}
+            <img
+              src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+              alt={agentMeta.displayName}
+              className="h-full w-full object-cover"
+            />
           </span>
           <span className="hidden sm:inline text-[11px] font-bold">{agentMeta.displayName}</span>
         </button>
@@ -1053,10 +1057,18 @@ function AgentPopover({
               style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
             >
               <span
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[11px] font-black"
+                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg overflow-hidden text-[11px] font-black"
                 style={{ backgroundColor: `${accent}20`, color: accent }}
               >
-                {unlocked ? meta.displayName[0] : <Lock size={11} />}
+                {unlocked ? (
+                  <img
+                    src={meta.id === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt-mascot-avatar.png"}
+                    alt={meta.displayName}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Lock size={11} />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
