@@ -1,13 +1,17 @@
 "use client";
 
 /**
- * OwnerTestModeIndicator — a top-right HUD badge + dropdown that lets the
+ * OwnerTestModeIndicator — owner/test-role badge + dropdown that lets the
  * platform owner switch between testing as OWNER, Starter, Creator,
  * Pro Builder, or Zero-BITS.
  *
- * Anchored to the top-right of the viewport so it reads as session/account
- * context rather than a composer action. The dropdown opens downward and
- * clamps to the viewport so it never clips offscreen.
+ * Two placement modes:
+ *   - `inline` (recommended): renders in normal flow inside a header/action
+ *     cluster. The dropdown is absolutely anchored to the trigger and opens
+ *     downward. Use this in CommandStudioHeader so OWNER reads as
+ *     session/account context, not a floating overlay.
+ *   - `fixed`: legacy floating badge pinned to the top-right of the viewport.
+ *     Only use on pages that don't have a header slot for it.
  *
  * Only renders for the platform owner. Fetches state from
  * /api/owner/test-mode and POSTs to change simulation.
@@ -27,7 +31,12 @@ interface TestModeState {
   options: { value: SimulatedPlan; label: string; description: string }[];
 }
 
-export function OwnerTestModeIndicator() {
+export interface OwnerTestModeIndicatorProps {
+  /** `inline` = normal flow (header slot); `fixed` = viewport-pinned overlay. */
+  placement?: "inline" | "fixed";
+}
+
+export function OwnerTestModeIndicator({ placement = "fixed" }: OwnerTestModeIndicatorProps = {}) {
   const [state, setState] = useState<TestModeState | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -93,16 +102,25 @@ export function OwnerTestModeIndicator() {
   const badgeColor = isTestMode ? "#f59e0b" : "#10b981";
   const badgeBg = isTestMode ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)";
 
+  const isInline = placement === "inline";
+
   return (
     <div
       ref={ref}
-      style={{
-        position: "fixed",
-        top: 16,
-        right: 16,
-        zIndex: 9999,
-        fontFamily: "inherit",
-      }}
+      style={
+        isInline
+          ? {
+              position: "relative",
+              fontFamily: "inherit",
+            }
+          : {
+              position: "fixed",
+              top: 16,
+              right: 16,
+              zIndex: 9999,
+              fontFamily: "inherit",
+            }
+      }
     >
       {/* Badge button */}
       <button
@@ -128,7 +146,9 @@ export function OwnerTestModeIndicator() {
         <ChevronDown size={12} style={{ opacity: 0.6 }} />
       </button>
 
-      {/* Dropdown — opens downward from the top-right trigger */}
+      {/* Dropdown — opens downward from the trigger, right-aligned.
+          Inline variant stacks above header content; fixed variant clamps
+          to the viewport so it never clips offscreen. */}
       {open && (
         <div
           style={{
@@ -146,6 +166,7 @@ export function OwnerTestModeIndicator() {
             boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
             padding: 8,
             backdropFilter: "blur(12px)",
+            zIndex: isInline ? 200 : 10000,
           }}
         >
           <div

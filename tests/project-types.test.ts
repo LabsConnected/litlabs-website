@@ -40,6 +40,7 @@ describe("project types — rowToCanonical", () => {
       build_command: "pnpm build",
       test_command: "pnpm test",
       install_command: "pnpm install",
+      workspace_type: "website",
       created_at: "2026-07-26T00:00:00Z",
       updated_at: "2026-07-26T00:00:00Z",
     };
@@ -52,6 +53,7 @@ describe("project types — rowToCanonical", () => {
     expect(project.workspaceStatus).toBe("ready");
     expect(project.workspaceId).toBe("ws-abc12345-def67890");
     expect(project.githubRepositoryId).toBeNull();
+    expect(project.workspaceType).toBe("website");
   });
 
   it("maps a github studio project row correctly", () => {
@@ -86,6 +88,7 @@ describe("project types — rowToCanonical", () => {
       build_command: null,
       test_command: null,
       install_command: null,
+      workspace_type: "website",
       created_at: "2026-07-26T00:00:00Z",
       updated_at: "2026-07-26T00:00:00Z",
     };
@@ -166,6 +169,7 @@ describe("project types — unauthorized access prevention", () => {
       build_command: null,
       test_command: null,
       install_command: null,
+      workspace_type: "website",
       created_at: "2026-07-26T00:00:00Z",
       updated_at: "2026-07-26T00:00:00Z",
     };

@@ -82,7 +82,7 @@ export function VisualCanvasBuilder() {
   }, [loadDocument]);
 
   // Load project type from server when the active project changes
-  // The server stores the workspace type in the `framework` column
+  // The server stores the workspace type in the dedicated `workspace_type` column
   useEffect(() => {
     if (!serverProjectId) return;
     let cancelled = false;
@@ -91,10 +91,10 @@ export function VisualCanvasBuilder() {
         const res = await fetch(`/api/studio-projects/${serverProjectId}`);
         if (!res.ok) return;
         const data = await res.json();
-        const framework = data.project?.framework;
+        const workspaceType = data.project?.workspaceType;
         const validTypes: ProjectType[] = ["website", "html", "game2d", "game3d", "app", "component"];
-        if (framework && validTypes.includes(framework as ProjectType) && !cancelled) {
-          setProjectType(framework as ProjectType);
+        if (workspaceType && validTypes.includes(workspaceType as ProjectType) && !cancelled) {
+          setProjectType(workspaceType as ProjectType);
         }
       } catch {
         // Non-fatal — localStorage fallback still has the type

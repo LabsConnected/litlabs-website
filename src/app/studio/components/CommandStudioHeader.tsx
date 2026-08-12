@@ -32,6 +32,7 @@ import {
   Settings,
 } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
+import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#72f238", label: "Available" },
@@ -420,6 +421,11 @@ export default function CommandStudioHeader({
           />,
           document.body,
         )}
+
+      {/* Owner / test-role selector — inline in the header action cluster.
+          Self-hides for non-owners, so it adds zero clutter for regular users.
+          Treated as session/account context (not a chat action). */}
+      <OwnerTestModeIndicator placement="inline" />
 
       {/* User avatar */}
       <div className="shrink-0" data-testid="user-avatar">

@@ -102,6 +102,7 @@ vi.mock("@/lib/supabase", () => {
                 build_command: null,
                 test_command: null,
                 install_command: null,
+                workspace_type: "website",
                 created_at: "2024-01-01T00:00:00Z",
                 updated_at: "2024-01-01T00:00:00Z",
               },
@@ -115,7 +116,7 @@ vi.mock("@/lib/supabase", () => {
       }
 
       if (this._method === "update") {
-        // updateProjectWorkspace / updateProjectRuntime: scoped by user_id
+        // updateProjectWorkspace / updateProjectRuntime / updateProjectWorkspaceType: scoped by user_id
         if (userIdFilter && userIdFilter.value === "user-A") {
           resolve({
             data: {
@@ -149,6 +150,7 @@ vi.mock("@/lib/supabase", () => {
               build_command: null,
               test_command: null,
               install_command: null,
+              workspace_type: "website",
               created_at: "2024-01-01T00:00:00Z",
               updated_at: "2024-01-01T00:00:00Z",
             },
@@ -178,7 +180,9 @@ import {
   deleteProject,
   updateProjectWorkspace,
   updateProjectRuntime,
+  updateProjectWorkspaceType,
 } from "./project-repository";
+import { rowToCanonical, type StudioProjectRow } from "./types";
 
 describe("project-repository ownership enforcement", () => {
   beforeEach(() => {
@@ -258,6 +262,84 @@ describe("project-repository ownership enforcement", () => {
         runtimeStatus: "ready",
       });
       expect(result).toBeNull();
+    });
+  });
+
+  describe("updateProjectWorkspaceType", () => {
+    it("returns updated project when userId matches owner", async () => {
+      const result = await updateProjectWorkspaceType("proj-A", "user-A", "html");
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe("proj-A");
+      expect(result?.workspaceType).toBe("website"); // mock returns default
+    });
+
+    it("returns null when non-owner attempts to update workspace type", async () => {
+      const result = await updateProjectWorkspaceType("proj-A", "user-B", "html");
+      expect(result).toBeNull();
+    });
+
+    it("does not modify the framework field", async () => {
+      // The mock data has framework: "static" — updateProjectWorkspaceType
+      // should NOT change it. The mock always returns the same data,
+      // so we verify framework is still "static" after the update.
+      const result = await updateProjectWorkspaceType("proj-A", "user-A", "game2d");
+      expect(result).not.toBeNull();
+      expect(result?.framework).toBe("static");
+    });
+  });
+
+  describe("rowToCanonical workspace_type mapping", () => {
+    const baseRow: StudioProjectRow = {
+      id: "proj-X",
+      user_id: "user-X",
+      name: "Test",
+      slug: "test",
+      source_type: "blank",
+      access_mode: "private",
+      template_id: "blank-static",
+      github_installation_id: null,
+      github_repository_id: null,
+      github_owner: null,
+      github_repo: null,
+      github_full_name: null,
+      github_default_branch: null,
+      github_branch: null,
+      latest_commit_sha: null,
+      workspace_id: null,
+      workspace_status: "not_prepared",
+      workspace_root: null,
+      workspace_error: null,
+      workspace_prepared_at: null,
+      runtime_status: "stopped",
+      preview_url: null,
+      runtime_error: null,
+      framework: "static",
+      package_manager: "none",
+      root_directory: ".",
+      development_command: null,
+      build_command: null,
+      test_command: null,
+      install_command: null,
+      workspace_type: "html",
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    };
+
+    it("maps workspace_type to workspaceType", () => {
+      const project = rowToCanonical(baseRow);
+      expect(project.workspaceType).toBe("html");
+      expect(project.framework).toBe("static");
+    });
+
+    it("defaults workspaceType to 'website' when workspace_type is null", () => {
+      const project = rowToCanonical({ ...baseRow, workspace_type: null });
+      expect(project.workspaceType).toBe("website");
+    });
+
+    it("preserves framework separately from workspace_type", () => {
+      const project = rowToCanonical({ ...baseRow, framework: "nextjs", workspace_type: "game2d" });
+      expect(project.framework).toBe("nextjs");
+      expect(project.workspaceType).toBe("game2d");
     });
   });
 });

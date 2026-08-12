@@ -712,10 +712,15 @@ export class ProjectVerificationError extends Error {
 }
 
 /**
- * Update the workspace_type (stored in the `framework` column) on a
- * canonical project. This persists the LiTT Creation Workspace project
- * type (website, html, game2d, game3d, app, component) server-side so
- * it survives logout/login and is shared across devices.
+ * Update the workspace_type on a canonical project. This persists the
+ * LiTT Creation Workspace project type (website, html, game2d, game3d,
+ * app, component) server-side so it survives logout/login and is shared
+ * across devices.
+ *
+ * This is SEPARATE from the `framework` column, which remains for actual
+ * runtime technology values (static, nextjs, vite, expo). The preview
+ * manager and terminal runtime depend on `framework` having correct
+ * technology values.
  *
  * Only operates on studio_projects — does not modify legacy table.
  */
@@ -727,7 +732,7 @@ export async function updateProjectWorkspaceType(
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .update({
-      framework: workspaceType,
+      workspace_type: workspaceType,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId)

@@ -9,7 +9,6 @@ import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
 import { MediaHubProvider } from "@/components/media/MediaHubProvider";
 import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
 import LayoutShell from "@/components/LayoutShell";
-import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
 import { GhlAffiliateScript, GhlAffiliateSignupTracker } from "@/components/GhlAffiliateTracker";
 import {
@@ -109,7 +108,6 @@ export default function RootLayout({
               <YouTubePlayerProvider>
                 <MusicPlayerProvider>
                   <LayoutShell>{children}</LayoutShell>
-                  <OwnerTestModeIndicator />
                 </MusicPlayerProvider>
               </YouTubePlayerProvider>
             </MediaHubProvider>

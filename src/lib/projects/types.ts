@@ -62,6 +62,10 @@ export interface CanonicalProject {
   testCommand: string | null;
   installCommand: string | null;
 
+  // LiTT Creation Workspace type (website, html, game2d, game3d, app, component)
+  // Separate from framework — framework is for runtime technology (static, nextjs, vite, expo)
+  workspaceType: string;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -98,6 +102,7 @@ export interface StudioProjectRow {
   build_command: string | null;
   test_command: string | null;
   install_command: string | null;
+  workspace_type: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -160,6 +165,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     buildCommand: row.build_command,
     testCommand: row.test_command,
     installCommand: row.install_command,
+    workspaceType: row.workspace_type ?? "website",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -198,6 +204,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     buildCommand: null,
     testCommand: null,
     installCommand: null,
+    workspaceType: "website",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
