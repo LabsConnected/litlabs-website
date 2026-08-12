@@ -14,6 +14,7 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
+import { useStudioProjectStore } from "../stores/useStudioProjectStore";
 import type { StudioTool } from "../components/StudioSidebar";
 import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
 import {
@@ -30,11 +31,13 @@ export interface SendResult {
 
 const ACTIVE_PROJECT_KEY = "litt:active-project-id";
 
-function getActiveProjectId(serverProjectId?: string | null): string | null {
-  if (typeof window === "undefined") return serverProjectId ?? null;
-  // Server-resolved project ID is authoritative.
-  // localStorage is only a fallback cache.
-  return serverProjectId ?? localStorage.getItem(ACTIVE_PROJECT_KEY) ?? null;
+function getActiveProjectId(
+  storeProjectId?: string | null,
+  serverProjectId?: string | null,
+): string | null {
+  // Canonical project store is authoritative (it syncs with ?project= URL).
+  // Server-resolved project ID is a secondary fallback.
+  return storeProjectId ?? serverProjectId ?? null;
 }
 
 function generateClientRequestId(): string {
@@ -76,6 +79,10 @@ export function useCanonicalConversation({
   const [sendError, setSendError] = useState<string | null>(null);
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
+
+  // Canonical project selection — the single source of truth across Studio.
+  // useStudioProjectStore syncs with ?project= URL and localStorage.
+  const storeProjectId = useStudioProjectStore((s) => s.currentProjectId);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgentId = useStudioAgentStore((s) => s.setActiveAgent);
@@ -143,7 +150,7 @@ export function useCanonicalConversation({
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
-    const projectId = getActiveProjectId(serverProjectId);
+    const projectId = getActiveProjectId(storeProjectId, serverProjectId);
     if (!projectId) return;
 
     const s = getStore();
@@ -174,11 +181,11 @@ export function useCanonicalConversation({
     } finally {
       getStore().setLoading(false);
     }
-  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId]);
+  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId, storeProjectId]);
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
-    let projectId = getActiveProjectId(serverProjectId);
+    let projectId = getActiveProjectId(storeProjectId, serverProjectId);
 
     // Auto-provision a blank project if the user has none yet. Without this,
     // chat is completely dead for new users — createConversation fails and the
@@ -197,8 +204,10 @@ export function useCanonicalConversation({
         if (projRes.ok) {
           const projData = await projRes.json();
           projectId = projData.project?.id ?? null;
-          if (projectId && typeof window !== "undefined") {
-            localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+          if (projectId) {
+            // Update the canonical project store so all Studio surfaces
+            // (Chat, Builder, Code, Terminal) pick up the new project.
+            useStudioProjectStore.getState().selectProject(projectId);
           }
         }
       } catch {
@@ -236,7 +245,7 @@ export function useCanonicalConversation({
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [getStore, activeAgentId, serverProjectId]);
+  }, [getStore, activeAgentId, serverProjectId, storeProjectId]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
@@ -277,6 +286,23 @@ export function useCanonicalConversation({
   useEffect(() => {
     syncUrl();
   }, [syncUrl]);
+
+  // Sync ?project= to URL when the canonical project store changes.
+  // The store reads from URL on init; this effect writes back when the
+  // user selects a project from any Studio surface (Chat, Builder, etc.).
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (storeProjectId) {
+      params.set("project", storeProjectId);
+    } else {
+      params.delete("project");
+    }
+    const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (target !== current) {
+      router.replace(target, { scroll: false });
+    }
+  }, [storeProjectId, pathname, router, searchParams]);
 
   // Load conversations on mount
   useEffect(() => {
