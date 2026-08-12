@@ -224,13 +224,15 @@ export const USER_CONNECTION_PROVIDERS: Record<UserConnectionProvider, ProviderD
       "contacts_read",
     ],
     envVars: [],
+    // Base scopes for identity only — incremental scopes are requested
+    // on-demand when the user grants specific capabilities.
+    // See INCREMENTAL_SCOPES below for the per-capability scope mapping.
     oauthScopes: [
       "openid",
       "email",
       "profile",
-      "https://www.googleapis.com/auth/calendar.readonly",
     ],
-    description: "Google Calendar, Gmail, and Contacts",
+    description: "Google Calendar, Gmail, and Contacts — incremental permissions",
   },
   microsoft: {
     id: "microsoft",
@@ -606,4 +608,87 @@ export function isConnectorEnabled(flag: ConnectorFeatureFlag): boolean {
   if (srv === "true") return true;
   if (srv === "false") return false;
   return false;
+}
+
+// ── Incremental OAuth Scopes ───────────────────────────────────────────
+//
+// Maps each capability to the OAuth scopes required to perform it.
+// This enables incremental consent: LiTT only requests the scopes needed
+// for the current task, not every possible scope upfront.
+//
+// Users grant capabilities one at a time. Each capability maps to specific
+// provider scopes. When a user grants a new capability, the OAuth flow
+// requests only that scope (plus already-granted scopes for re-auth).
+//
+
+export const INCREMENTAL_SCOPES: Partial<Record<CapabilityId, string[]>> = {
+  // Google Calendar
+  google_calendar_read: [
+    "https://www.googleapis.com/auth/calendar.readonly",
+  ],
+  google_calendar_write: [
+    "https://www.googleapis.com/auth/calendar",
+  ],
+  // Gmail — progressively more sensitive
+  gmail_metadata: [
+    "https://www.googleapis.com/auth/gmail.metadata",
+  ],
+  gmail_read: [
+    "https://www.googleapis.com/auth/gmail.readonly",
+  ],
+  gmail_draft: [
+    "https://www.googleapis.com/auth/gmail.compose",
+  ],
+  gmail_send: [
+    "https://www.googleapis.com/auth/gmail.send",
+  ],
+  // Google Contacts
+  contacts_read: [
+    "https://www.googleapis.com/auth/contacts.readonly",
+  ],
+  // Microsoft Graph
+  microsoft_calendar_read: [
+    "Calendars.Read",
+  ],
+  microsoft_calendar_write: [
+    "Calendars.ReadWrite",
+  ],
+  microsoft_mail_read: [
+    "Mail.Read",
+  ],
+  microsoft_mail_send: [
+    "Mail.Send",
+  ],
+};
+
+/**
+ * Get the OAuth scopes required for a set of capabilities.
+ * Used when initiating an incremental OAuth flow — only request
+ * the scopes needed for the capabilities being granted.
+ */
+export function getScopesForCapabilities(caps: CapabilityId[]): string[] {
+  const scopes = new Set<string>();
+  for (const cap of caps) {
+    const capScopes = INCREMENTAL_SCOPES[cap];
+    if (capScopes) {
+      for (const s of capScopes) scopes.add(s);
+    }
+  }
+  return Array.from(scopes);
+}
+
+/**
+ * Get the capabilities that a set of OAuth scopes unlocks.
+ * Used after OAuth callback to determine which capabilities
+ * the user has now granted.
+ */
+export function getCapabilitiesForScopes(scopes: string[]): CapabilityId[] {
+  const scopeSet = new Set(scopes);
+  const granted: CapabilityId[] = [];
+  for (const [cap, capScopes] of Object.entries(INCREMENTAL_SCOPES)) {
+    if (capScopes && capScopes.every((s) => scopeSet.has(s))) {
+      granted.push(cap as CapabilityId);
+    }
+  }
+  return granted;
 }

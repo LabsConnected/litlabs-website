@@ -16,6 +16,7 @@ import {
   getCapabilityStatus,
 } from "@/lib/connectors/connector-repository";
 import type { CapabilityId, CapabilityStatus } from "@/lib/connectors/provider-registry";
+import { CAPABILITY_DEFINITIONS } from "@/lib/connectors/provider-registry";
 
 export interface UserLocation {
   city: string | null;
@@ -205,12 +206,29 @@ export function hasLocation(ctx: UserContext): boolean {
   return ctx.location.source !== "none" && ctx.location.city !== null;
 }
 
+/**
+ * Check if a capability is granted.
+ *
+ * FAIL CLOSED for private user data: capabilities with permission
+ * "connection_consent", "sensitive_access", or "explicit_approval"
+ * require status === "ready". "unknown" is NOT permission.
+ *
+ * For public-data capabilities (permission === "none"), "unknown" is
+ * still allowed since they don't access private user data.
+ */
 export function hasCapability(
   ctx: UserContext,
   cap: CapabilityId,
 ): boolean {
   const status = ctx.capabilities[cap];
-  return status === "ready" || status === "unknown";
+  if (status === "ready") return true;
+
+  // For public-data capabilities, allow "unknown" (fail open)
+  const def = CAPABILITY_DEFINITIONS[cap];
+  if (def?.permission === "none" && status === "unknown") return true;
+
+  // For all private-data capabilities, fail closed — "unknown" is not permission
+  return false;
 }
 
 export function formatTemperature(

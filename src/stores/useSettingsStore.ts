@@ -27,6 +27,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "notifications", label: "Notifications", description: "Alerts, email, quiet hours", icon: "Bell", minMode: "standard" },
   { id: "billing", label: "Billing & Credits", description: "Plan, usage, beta credits", icon: "Sparkles", minMode: "standard" },
   { id: "privacy", label: "Privacy & Security", description: "Sessions, data, audit log", icon: "Shield", minMode: "standard" },
+  { id: "litt-knows", label: "What LiTT Knows", description: "Profile, memory, connections, consent", icon: "Bot", minMode: "standard" },
 
   // ── Advanced: page customization, navigation, devices ─────────────
   { id: "voice-camera", label: "Voice & Camera", description: "Microphone, camera, and voice", icon: "Mic", minMode: "advanced" },

@@ -41,6 +41,7 @@ import type { LayoutStyle } from "@/context/ThemeContext";
 import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/studio/stores/useStudioModelStore";
 import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
 import { useLocalSettings } from "@/hooks/useLocalSettings";
+import { WhatLiTTKnowsSection } from "./litt-knows/WhatLiTTKnowsSection";
 
 /* ── Icon map ──────────────────────────────────────────────────────── */
 
@@ -660,6 +661,8 @@ function SettingsContent({
       return <BillingSection T={T} />;
     case "privacy":
       return <PrivacySection T={T} />;
+    case "litt-knows":
+      return <WhatLiTTKnowsSection T={T} />;
     case "performance":
       return <PerformanceSection T={T} />;
     case "advanced":
