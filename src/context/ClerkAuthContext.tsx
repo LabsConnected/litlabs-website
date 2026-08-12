@@ -7,12 +7,14 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { useAuth as useClerkAuthHook } from "@clerk/nextjs";
+import { useAuth as useClerkAuthHook, useUser as useClerkUserHook } from "@clerk/nextjs";
+import type { AppUser } from "@/hooks/useClerkAuth";
 
-interface AuthState {
+export interface AuthState {
   isLoaded: boolean;
   isSignedIn: boolean;
   userId: string | null;
+  user: AppUser | null;
   sessionClaims: { name?: string | null; username?: string | null } | undefined;
   getToken: () => Promise<string | null>;
   signOut: () => Promise<void>;
@@ -24,6 +26,7 @@ const DEFAULT_AUTH: AuthState = {
   isLoaded: true,
   isSignedIn: false,
   userId: null,
+  user: null,
   sessionClaims: undefined,
   getToken: async () => null,
   signOut: async () => {},
@@ -35,6 +38,8 @@ const ClerkAuthContext = createContext<AuthState>(DEFAULT_AUTH);
 
 function ClerkAuthInner({ children }: { children: ReactNode }) {
   const clerk = useClerkAuthHook();
+  const { user: clerkUser, isLoaded: userLoaded } = useClerkUserHook();
+  
   const [sessionUser, setSessionUser] = useState<{
     id: string;
     name: string | null;
@@ -66,7 +71,7 @@ function ClerkAuthInner({ children }: { children: ReactNode }) {
       });
   }, [clerk.isLoaded, clerk.isSignedIn]);
 
-  const isLoaded = clerk.isLoaded || sessionLoaded;
+  const isLoaded = (clerk.isLoaded && userLoaded) || sessionLoaded;
   const isSignedIn = clerk.isSignedIn || !!sessionUser;
   const userId = clerk.userId || sessionUser?.id || null;
   const sessionClaims:
@@ -79,10 +84,38 @@ function ClerkAuthInner({ children }: { children: ReactNode }) {
       ? { name: sessionUser.name, username: sessionUser.email }
       : undefined);
 
+  let appUser: AppUser | null = null;
+  if (clerkUser) {
+    appUser = {
+      id: clerkUser.id,
+      firstName: clerkUser.firstName,
+      fullName: clerkUser.fullName,
+      username: clerkUser.username,
+      imageUrl: clerkUser.imageUrl,
+      primaryEmailAddress: clerkUser.primaryEmailAddress
+        ? { emailAddress: clerkUser.primaryEmailAddress.emailAddress }
+        : null,
+      publicMetadata: clerkUser.publicMetadata,
+    };
+  } else if (sessionUser) {
+    appUser = {
+      id: sessionUser.id,
+      firstName: sessionUser.name?.split(" ")[0] ?? null,
+      fullName: sessionUser.name,
+      username: sessionUser.email.split("@")[0] || null,
+      imageUrl: null,
+      primaryEmailAddress: sessionUser.email
+        ? { emailAddress: sessionUser.email }
+        : null,
+      publicMetadata: {},
+    };
+  }
+
   const value: AuthState = {
     isLoaded,
     isSignedIn,
     userId,
+    user: appUser,
     sessionClaims,
     getToken: clerk.getToken ?? (async () => null),
     signOut: clerk.signOut ?? (async () => {}),
@@ -123,10 +156,26 @@ function NoClerkAuth({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  let appUser: AppUser | null = null;
+  if (sessionUser) {
+    appUser = {
+      id: sessionUser.id,
+      firstName: sessionUser.name?.split(" ")[0] ?? null,
+      fullName: sessionUser.name,
+      username: sessionUser.email.split("@")[0] || null,
+      imageUrl: null,
+      primaryEmailAddress: sessionUser.email
+        ? { emailAddress: sessionUser.email }
+        : null,
+      publicMetadata: {},
+    };
+  }
+
   const value: AuthState = {
     isLoaded: sessionLoaded,
     isSignedIn: !!sessionUser,
     userId: sessionUser?.id ?? null,
+    user: appUser,
     sessionClaims: sessionUser
       ? { name: sessionUser.name, username: sessionUser.email }
       : undefined,

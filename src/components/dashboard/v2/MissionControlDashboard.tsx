@@ -71,7 +71,101 @@ function formatTime(value: string): string {
 
 /* ─── Sub-components ─────────────────────────────────────────────────── */
 
-function MissionCard({ mission }: { mission: MissionControlResponse["missions"][number] }) {
+function MetricCard({
+  label,
+  value,
+  detail,
+  icon,
+  highlight = false,
+  statusColor,
+}: {
+  label: string;
+  value: string | number;
+  detail?: string;
+  icon: string;
+  highlight?: boolean;
+  statusColor?: string;
+}) {
+  const isEmpty = value === "No project" || value === "Unavailable" || value === "None" || value === 0 && label !== "Active Missions" && label !== "Needs Attention";
+  const dotColor = statusColor ?? (isEmpty ? D.textDim : highlight ? D.accentGreen : D.accent);
+  return (
+    <div
+      className="dash-metric group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.02]"
+      style={{
+        background: highlight ? `${D.accent}08` : D.surface,
+        borderColor: highlight ? `${D.accent}30` : D.border,
+        boxShadow: highlight ? D.glow : "none",
+        backdropFilter: "blur(12px)",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <span
+          className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[.18em]"
+          style={{ color: isEmpty ? D.textDim : D.textMuted }}
+        >
+          <span
+            className="h-2 w-2 rounded-full transition-all group-hover:scale-125"
+            style={{
+              backgroundColor: dotColor,
+              boxShadow: `0 0 6px ${dotColor}80`,
+            }}
+          />
+          {label}
+        </span>
+        <Icon
+          name={icon}
+          size={15}
+          style={{ color: isEmpty ? D.textDim : `${D.accent}b0` }}
+          className="transition-transform group-hover:scale-110"
+        />
+      </div>
+      <div
+        className="mt-3 text-2xl font-black tracking-tight capitalize"
+        style={{ color: isEmpty ? D.textDim : D.textPrimary }}
+      >
+        {value}
+      </div>
+      {detail ? (
+        <div className="mt-1 text-xs" style={{ color: D.textDim }}>
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RuntimeBadge({ label, state }: { label: string; state: string }) {
+  const lower = (state || "").toLowerCase();
+  const good = ["ready", "connected", "running", "production", "live"].includes(lower);
+  const sleeping = ["disconnected", "not_connected", "missing", "idle", "not_prepared"].includes(lower);
+  const bad = ["failed", "error"].includes(lower);
+  const color = good ? D.accentGreen : bad ? D.accentRed : sleeping ? D.accentAmber : D.textDim;
+
+  const displayState = good ? "Running" : bad ? "Error" : sleeping ? "Idle" : stateLabel(state);
+  const friendlyLabel = `${label}: ${displayState}`;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold capitalize"
+      style={{ borderColor: `${color}40`, background: `${color}15`, color }}
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{
+          background: color,
+          animation: sleeping ? "pulse 2s ease-in-out infinite" : undefined,
+        }}
+      />
+      {friendlyLabel}
+    </span>
+  );
+}
+
+function MissionCard({
+  mission,
+}: {
+  mission: MissionControlResponse["missions"][number];
+}) {
   const color = MISSION_STATE_COLOR[mission.state] || D.textMuted;
   return (
     <Link
@@ -161,6 +255,7 @@ interface LlmTestResult {
   latencyMs?: number;
   failover?: string[];
 }
+
 interface LlmTestResponse {
   timestamp: string;
   providerKeys: Record<string, { keySet: boolean; model: string }>;
@@ -502,35 +597,148 @@ export function MissionControlDashboard() {
                     <Icon name="arrow" size={19} />
                   </button>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {Object.entries(MODE_CONFIG).filter(([key]) => key !== "chat").map(([key, config]) => (
-                    <button key={key} onClick={() => setMode(key)}
-                      className="rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5"
-                      style={{
-                        borderColor: mode === key ? `${D.accent}80` : "rgba(255,255,255,0.08)",
-                        background: mode === key ? `${D.accent}18` : "rgba(255,255,255,0.03)",
-                        color: mode === key ? D.accent : "rgba(255,255,255,0.55)",
-                      }}>
-                      {config.label}
-                    </button>
-                  ))}
-                  <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
-                  <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                    className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5 disabled:opacity-50"
-                    style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.55)" }}>
-                    <Icon name="plus" size={12} /> {uploading ? "Uploading..." : "Upload"}
-                  </button>
-                  <button onClick={startVoice}
-                    className="flex items-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-bold transition hover:-translate-y-0.5"
-                    style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.55)" }}>
-                    <Icon name="message" size={12} className={listening ? "animate-pulse" : ""} style={{ color: listening ? D.accentRed : undefined }} />
-                    {listening ? "Listening..." : "Voice"}
-                  </button>
-                </div>
               </div>
             </BorderBeam>
           </CursorSpotlight>
         </EntranceSection>
+
+        {/* === Owner Diagnostics — AI Provider Status === */}
+        {ownerMode && <OwnerDiagnosticsCard />}
+
+        {/* === Metric strip === */}
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+          <MetricCard
+            label="Active Missions"
+            value={activeMissions.length}
+            detail="Currently running or waiting"
+            icon="zap"
+            highlight={activeMissions.length > 0}
+            statusColor={activeMissions.length > 0 ? D.accentGreen : D.textDim}
+          />
+          <MetricCard
+            label="Needs Attention"
+            value={urgentCount}
+            detail="Approvals, failures, or degraded services"
+            icon="alert"
+            highlight={urgentCount > 0}
+            statusColor={urgentCount > 0 ? D.accentRed : D.accentGreen}
+          />
+          <MetricCard
+            label="LiTTBits"
+            value={(data?.billing.balance ?? 0).toLocaleString()}
+            detail={data?.billing.plan ?? "Free"}
+            icon="wallet"
+            highlight={(data?.billing.balance ?? 0) > 0}
+            statusColor={(data?.billing.balance ?? 0) > 0 ? D.accent : D.textDim}
+          />
+          <MetricCard
+            label="Workspace"
+            value={data?.project?.workspaceState ?? "No project"}
+            detail={data?.project?.repository ?? "Connect a project"}
+            icon="layers"
+            statusColor={data?.project?.workspaceState === "ready" ? D.accentGreen : data?.project ? D.accentAmber : D.textDim}
+          />
+          <MetricCard
+            label="Terminal"
+            value={data?.project?.terminalState ?? "Unavailable"}
+            detail="Project execution runtime"
+            icon="terminal"
+            statusColor={data?.project?.terminalState === "connected" ? D.accentGreen : data?.project?.terminalState === "disconnected" ? D.accentAmber : D.textDim}
+          />
+          <MetricCard
+            label="Deployment"
+            value={data?.project?.deploymentState ?? "None"}
+            detail="Latest project environment"
+            icon="rocket"
+            statusColor={data?.project?.deploymentState === "production" ? D.accentGreen : data?.project?.deploymentState ? D.accentAmber : D.textDim}
+          />
+        </section>
+
+        {/* === Quick Actions bar === */}
+        <section className="mb-5">
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+            <Link
+              href="/studio?tool=chat"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accent}33`,
+                background: `${D.accent}10`,
+              }}
+            >
+              <Icon name="message" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Ask LiTT
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Continue the active project conversation.
+              </div>
+            </Link>
+            <Link
+              href="/studio?tool=code"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentCyan}22`,
+                background: `${D.accentCyan}0f`,
+              }}
+            >
+              <Icon name="code" size={18} style={{ color: D.accentCyan }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                LiTT Code
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Files, editor, terminal, checks, and preview.
+              </div>
+            </Link>
+            <Link
+              href="/studio?tool=chat&prompt=Run%20a%20complete%20project%20health%20check"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentGreen}22`,
+                background: `${D.accentGreen}0e`,
+              }}
+            >
+              <Icon name="heart" size={18} style={{ color: D.accentGreen }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Health Scan
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Run actual checks against the active workspace.
+              </div>
+            </Link>
+            <Link
+              href="/deployments"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accentAmber}22`,
+                background: `${D.accentAmber}0e`,
+              }}
+            >
+              <Icon name="rocket" size={18} style={{ color: D.accentAmber }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Deploy
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Preview, production, logs, and rollback.
+              </div>
+            </Link>
+            <Link
+              href="/games"
+              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+              style={{
+                borderColor: `${D.accent}33`,
+                background: `${D.accent}10`,
+              }}
+            >
+              <Icon name="gamepad" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
+                Games
+              </div>
+              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
+                Game Cloud, Retro Arcade and browser games.
+              </div>
+            </Link>
+          </div>
+        </section>
 
         {/* === Continue Working + System Status === */}
         <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
@@ -715,9 +923,6 @@ export function MissionControlDashboard() {
             )}
           </GlassPanel>
         </EntranceSection>
-
-        {/* === Owner Diagnostics — AI Provider Status === */}
-        {ownerMode && <OwnerDiagnosticsCard />}
 
         {/* === Recent Activity + Usage === */}
         <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
