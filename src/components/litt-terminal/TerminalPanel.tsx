@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { clearTerminalTokenCache, getTerminalToken, WorkspaceNotReadyError } from "@/lib/terminal-client";
+import { clearTerminalTokenCache, getTerminalTokenResult, WorkspaceNotReadyError } from "@/lib/terminal-client";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -181,21 +181,6 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
 
-    const envWsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
-    const wsUrl = envWsUrl && envWsUrl !== "ws://localhost:4001" && !envWsUrl.includes("localhost")
-      ? envWsUrl
-      : "https://litlabs-terminal-server-production-0be1.up.railway.app";
-
-    if (!wsUrl) {
-      terminalStore.setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_WS_URL.");
-      terminalStore.setStatus("error");
-      term.writeln("\x1b[31m❌ Terminal server is not configured.\x1b[0m");
-      term.writeln("\x1b[33mThe PTY backend runs as a separate service.\x1b[0m");
-      term.writeln("\x1b[33mIn production, a terminal server must be deployed and NEXT_PUBLIC_TERMINAL_WS_URL must point to it.\x1b[0m");
-      onLog?.("[WS] Terminal server URL not configured");
-      return;
-    }
-
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
     terminalStore.setStatus("connecting");
 
@@ -226,34 +211,43 @@ export const TerminalPanel = forwardRef<
     };
 
     let attemptedUnauthorizedRetry = false;
+    let wsUrl = "";
 
     const connect = async () => {
       const authToken = await getToken?.();
-      return getTerminalToken(false, projectId, authToken || undefined);
+      return getTerminalTokenResult(false, projectId, authToken || undefined);
     };
 
     void connect()
-      .then((token) => {
+      .then(({ token, baseUrl }) => {
         if (disposed) return;
+        wsUrl = baseUrl || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
+        if (!wsUrl || (process.env.NODE_ENV === "production" && wsUrl.includes("localhost"))) {
+          terminalStore.setError("Terminal server URL not configured. Set TERMINAL_SERVER_URL on the server.");
+          terminalStore.setStatus("error");
+          term.writeln("\x1b[31m❌ Terminal server URL not configured.\x1b[0m");
+          onLog?.("[WS] No baseUrl from token endpoint");
+          return;
+        }
         // Start PTY timeout only now — workspace is ready, socket is connecting
         startConnectTimeout();
         const connectedSocket = io(wsUrl, {
           auth: { token },
           transports: ["websocket", "polling"],
-          reconnectionAttempts: 5,
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 30000,
+          randomizationFactor: 0.5,
         });
 
         socketRef.current = connectedSocket;
 
-        connectedSocket.on("reconnect_failed", () => {
-          if (connectTimeoutRef.current) {
-            clearTimeout(connectTimeoutRef.current);
-            connectTimeoutRef.current = null;
-          }
-          terminalStore.setError("PTY server unavailable after 5 reconnection attempts");
-          terminalStore.setStatus("unavailable");
-          term.writeln("\x1b[31m❌ PTY server unavailable. Click Retry to try again.\x1b[0m");
-          onLog?.("[WS] Reconnection failed after 5 attempts");
+        connectedSocket.on("reconnect_attempt", (attempt: number) => {
+          terminalStore.setStatus("connecting");
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+          term.writeln(`\x1b[33m⟳ Reconnecting (attempt ${attempt}, next in ${Math.round(delay / 1000)}s)...\x1b[0m`);
+          onLog?.(`[WS] Reconnect attempt ${attempt}`);
         });
 
         connectedSocket.on("connect", () => {
@@ -325,12 +319,17 @@ export const TerminalPanel = forwardRef<
             setConnected(false);
             terminalStore.setStatus("connecting");
             terminalStore.setFailureStage("auth");
-            void connect().then((freshToken) => {
+            void connect().then(({ token: freshToken, baseUrl: freshBaseUrl }) => {
               if (disposed) return;
-              const retrySocket = io(wsUrl, {
+              const retryWsUrl = freshBaseUrl || wsUrl;
+              const retrySocket = io(retryWsUrl, {
                 auth: { token: freshToken },
                 transports: ["websocket", "polling"],
-                reconnectionAttempts: 5,
+                reconnection: true,
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 30000,
+                randomizationFactor: 0.5,
               });
               socketRef.current = retrySocket;
               retrySocket.on("connect_error", (nextErr: Error) => {
@@ -441,14 +440,19 @@ export const TerminalPanel = forwardRef<
                   terminalStore.setFailureStage(null);
                   clearTerminalTokenCache();
                   // Retry token fetch now that workspace is prepared
-                  return connect().then((token) => {
+                  return connect().then(({ token, baseUrl: retryBaseUrl }) => {
                     if (disposed) return;
+                    const retryWsUrl = retryBaseUrl || wsUrl;
                     // Start PTY timeout for retry socket
                     startConnectTimeout();
-                    const retrySocket = io(wsUrl, {
+                    const retrySocket = io(retryWsUrl, {
                       auth: { token },
                       transports: ["websocket", "polling"],
-                      reconnectionAttempts: 5,
+                      reconnection: true,
+                      reconnectionAttempts: Infinity,
+                      reconnectionDelay: 1000,
+                      reconnectionDelayMax: 30000,
+                      randomizationFactor: 0.5,
                     });
                     socketRef.current = retrySocket;
 

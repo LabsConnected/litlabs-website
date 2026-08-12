@@ -13,9 +13,11 @@ WORKDIR /app
 # Copy terminal server package files
 COPY package.json ./
 COPY tsconfig.json ./
+COPY tsconfig.worker.json ./
 
-# Install dependencies using npm (no workspace root required)
-RUN npm install
+# Install dependencies — --ignore-scripts=false ensures node-pty native build runs
+# (root .npmrc has ignore-scripts=true; this override is scoped to Docker build only)
+RUN npm install --ignore-scripts=false
 
 # Copy terminal server source
 COPY . .
@@ -25,12 +27,13 @@ RUN npm run build
 
 # Workspace root — Railway persistent volume mount point
 ENV TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
-ENV TERMINAL_SERVER_PORT=4001
 ENV NODE_ENV=production
+# PORT is provided by Railway at runtime; terminal server reads process.env.PORT
 
 # Create the workspace directory
 RUN mkdir -p /data/littree-workspaces
 
-EXPOSE 4001
+# Railway assigns $PORT dynamically — don't hardcode 4001
+EXPOSE ${PORT:-4001}
 
 CMD ["node", "dist/server.js"]

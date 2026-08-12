@@ -4,15 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "ts-node server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build:server": "tsc -p tsconfig.json",
+    "build:worker": "tsc -p tsconfig.worker.json && node -e \"require('fs').writeFileSync('dist/worker/package.json','{\\\"type\\\":\\\"module\\\"}\\n')\"",
+    "build": "npm run build:server && npm run build:worker",
+    "build:all": "npm run build:server && npm run build:worker",
+    "start:server": "node dist/server.js",
+    "start:worker": "node dist/worker/livekit-agent.js start",
     "start": "node dist/server.js"
   },
   "dependencies": {
     "@clerk/backend": "^3.11.4",
+    "@livekit/agents": "^1.6.2",
+    "@livekit/agents-plugin-openai": "^1.6.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jose": "^6.2.3",
+    "livekit-server-sdk": "^2.17.0",
     "node-pty": "^1.0.0",
     "simple-git": "^3.27.0",
     "socket.io": "^4.7.5"

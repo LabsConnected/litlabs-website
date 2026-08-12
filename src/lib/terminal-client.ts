@@ -4,6 +4,12 @@ type CachedTerminalToken = {
   token: string;
   expiresAt: number;
   projectId: string | null;
+  baseUrl: string;
+};
+
+export type TerminalTokenResult = {
+  token: string;
+  baseUrl: string;
 };
 
 export class WorkspaceNotReadyError extends Error {
@@ -18,7 +24,7 @@ export class WorkspaceNotReadyError extends Error {
 }
 
 let cached: CachedTerminalToken | null = null;
-let pending: Promise<string> | null = null;
+let pending: Promise<TerminalTokenResult> | null = null;
 
 export function clearTerminalTokenCache() {
   cached = null;
@@ -30,10 +36,19 @@ export async function getTerminalToken(
   projectId?: string,
   authToken?: string,
 ): Promise<string> {
+  const result = await getTerminalTokenResult(forceRefresh, projectId, authToken);
+  return result.token;
+}
+
+export async function getTerminalTokenResult(
+  forceRefresh = false,
+  projectId?: string,
+  authToken?: string,
+): Promise<TerminalTokenResult> {
   const now = Date.now();
   const requestedProjectId = projectId ?? null;
   if (!forceRefresh && cached && cached.projectId === requestedProjectId && cached.expiresAt - now > 30_000) {
-    return cached.token;
+    return { token: cached.token, baseUrl: cached.baseUrl };
   }
   if (!forceRefresh && pending) return pending;
 
@@ -55,15 +70,13 @@ export async function getTerminalToken(
         CachedTerminalToken & { error: string; code?: string; detail?: string }
       >;
       if (!response.ok || !body.token || !body.expiresAt) {
-        // Surface workspace-not-ready distinctly so the UI can trigger
-        // workspace preparation before retrying.
         if (response.status === 409 && body.code === "WORKSPACE_NOT_READY") {
           throw new WorkspaceNotReadyError(body.error || "Workspace not ready", body.detail);
         }
         throw new Error(body.error || "Terminal authentication failed");
       }
-      cached = { token: body.token, expiresAt: body.expiresAt, projectId: requestedProjectId };
-      return body.token;
+      cached = { token: body.token, expiresAt: body.expiresAt, projectId: requestedProjectId, baseUrl: body.baseUrl || "" };
+      return { token: body.token, baseUrl: body.baseUrl || "" };
     })
     .finally(() => {
       pending = null;

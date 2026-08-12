@@ -57,7 +57,7 @@ services:
       - "4001:4001"
     environment:
       - TERMINAL_SERVER_PORT=4001
-      - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
+      - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000,http://localhost:3001
       - TERMINAL_AUTH_SECRET=${TERMINAL_AUTH_SECRET}
       - TERMINAL_INTERNAL_SERVICE_KEY=${TERMINAL_INTERNAL_SERVICE_KEY}
       - TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
