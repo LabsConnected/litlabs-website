@@ -46,6 +46,7 @@ import {
   type RequestSource,
 } from "@/lib/browser-jobs";
 import { executeBrowserJob } from "@/lib/browser-job-executor";
+import { resolveRecipient } from "@/lib/vapi-recipient-policy";
 
 /**
  * Vapi project-tools endpoint.
@@ -655,30 +656,6 @@ async function toolBrowserApproveJob(userId: string, args: Record<string, unknow
 // ─── Owner notification tools ───────────────────────────────────
 
 /**
- * Allowed recipient allowlist for SMS/email. If set, only these
- * recipients (plus the configured owner) are permitted. If unset,
- * only the owner destination is allowed — no arbitrary recipients.
- *
- * Format: comma-separated E.164 numbers or email addresses.
- * Example: LITTLABS_ALLOWED_RECIPIENTS="+12314285411,+15555555555"
- *          LITTLABS_ALLOWED_RECIPIENTS="owner@example.com,team@example.com"
- */
-function getAllowedRecipients(): Set<string> {
-  const raw = process.env.LITTLABS_ALLOWED_RECIPIENTS ?? "";
-  if (!raw) return new Set();
-  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
-}
-
-/**
- * Check if a destination is allowed: must be the configured owner
- * or in the explicit allowlist.
- */
-function isAllowedRecipient(destination: string, ownerDest: string): boolean {
-  if (destination === ownerDest) return true;
-  return getAllowedRecipients().has(destination);
-}
-
-/**
  * send_sms — send an SMS to the site owner.
  *
  * SECURITY: Only the configured owner phone (LITTLABS_OWNER_PHONE) or
@@ -686,23 +663,21 @@ function isAllowedRecipient(destination: string, ownerDest: string): boolean {
  * receive SMS. Caller-supplied arbitrary numbers are rejected.
  *
  * NOTE: SMS requires a Twilio-imported number in Vapi. The current
- * Vapi number (+13239165462) only supports voice. This tool returns
- * an honest failure until a Twilio number with SMS is imported.
+ * Vapi number (+13239165462) only supports voice. This tool always
+ * returns an honest failure until an SMS-capable number is configured.
  */
 async function toolSendSms(_userId: string, args: Record<string, unknown>): Promise<ToolResult> {
   const message = str(args.message);
   if (!message) return fail("send_sms requires a message.");
 
   const ownerPhone = process.env.LITTLABS_OWNER_PHONE ?? "";
-  if (!ownerPhone) return fail("No owner phone number configured (LITTLABS_OWNER_PHONE missing).");
-
-  // Resolve destination: default to owner, reject arbitrary alternates
   const requestedDest = str(args.to_number) || ownerPhone;
-  if (!isAllowedRecipient(requestedDest, ownerPhone)) {
-    return fail(
-      `Rejected: destination ${requestedDest} is not the configured owner or in the allowlist. ` +
-      "SMS may only be sent to the owner's phone number."
-    );
+  const policy = resolveRecipient(requestedDest, {
+    ownerDestination: ownerPhone,
+    allowedRecipientsRaw: process.env.LITTLABS_ALLOWED_RECIPIENTS,
+  });
+  if (!policy.allowed) {
+    return fail(policy.reason);
   }
 
   // SMS via Vapi requires a Twilio number. The current Vapi-provided
@@ -729,15 +704,13 @@ async function toolSendEmail(_userId: string, args: Record<string, unknown>): Pr
   if (!body) return fail("send_email requires a body.");
 
   const ownerEmail = process.env.LITTLABS_OWNER_EMAIL ?? "";
-  if (!ownerEmail) return fail("No owner email configured (LITTLABS_OWNER_EMAIL missing).");
-
-  // Resolve destination: default to owner, reject arbitrary alternates
   const requestedDest = str(args.to_email) || ownerEmail;
-  if (!isAllowedRecipient(requestedDest, ownerEmail)) {
-    return fail(
-      `Rejected: destination ${requestedDest} is not the configured owner or in the allowlist. ` +
-      "Email may only be sent to the owner's email address."
-    );
+  const policy = resolveRecipient(requestedDest, {
+    ownerDestination: ownerEmail,
+    allowedRecipientsRaw: process.env.LITTLABS_ALLOWED_RECIPIENTS,
+  });
+  if (!policy.allowed) {
+    return fail(policy.reason);
   }
 
   const resendKey = process.env.RESEND_API_KEY;

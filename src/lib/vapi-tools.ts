@@ -101,9 +101,11 @@ export function isSafeWorkspacePath(value: string): boolean {
     return false;
   }
 
-  // Reject shell metacharacters — paths are used in workspace commands
-  // (e.g. git diff) and must never be parsed as shell syntax.
-  // Blocked: ; ` $ ( ) | & < > \n \r and ${...}
+  // Reject shell metacharacters as defense-in-depth. Paths are no longer
+  // interpolated into shell commands from the Vapi tools route (the git diff
+  // call was removed), but other workspace operations may still use paths in
+  // command strings. This guard ensures a path can never become shell syntax.
+  // Blocked: ; ` $ ( ) | & < > \n \r
   if (/[;`$()|&<>\n\r]/.test(normalized)) return false;
 
   // Reject blocked patterns

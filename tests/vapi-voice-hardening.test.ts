@@ -118,10 +118,11 @@ describe("Rule 3: Alternate arbitrary SMS recipient rejected", () => {
     expect(isSafeToolName("send_sms")).toBe(true);
   });
 
-  it("SMS tool description says it returns failure when unavailable", async () => {
+  it("SMS tool description says SMS is currently unavailable", async () => {
     const { VAPI_TOOL_DEFINITIONS } = await import("@/lib/vapi-tool-definitions");
     const def = VAPI_TOOL_DEFINITIONS.send_sms;
-    expect(def.description).toContain("failure");
+    expect(def.description).toContain("UNAVAILABLE");
+    expect(def.description).not.toContain("sent from the LiTT phone number");
   });
 });
 
@@ -224,12 +225,11 @@ describe("Rule 7: Voice cannot falsely claim canonical messaging execution", () 
 // ─── Rule 8: Explicit Vapi messaging tools remain protected ──────
 
 describe("Rule 8: Explicit Vapi messaging tools remain protected", () => {
-  it("route.ts has recipient allowlist enforcement", async () => {
+  it("route.ts uses the pure recipient policy module", async () => {
     const fs = await import("fs");
     const source = fs.readFileSync("src/app/api/vapi/tools/route.ts", "utf-8");
-    expect(source).toContain("isAllowedRecipient");
-    expect(source).toContain("LITTLABS_ALLOWED_RECIPIENTS");
-    expect(source).toContain("not the configured owner or in the allowlist");
+    expect(source).toContain("resolveRecipient");
+    expect(source).toContain("vapi-recipient-policy");
   });
 
   it("send_sms and send_email dispatch cases exist in route", async () => {
@@ -237,6 +237,14 @@ describe("Rule 8: Explicit Vapi messaging tools remain protected", () => {
     const source = fs.readFileSync("src/app/api/vapi/tools/route.ts", "utf-8");
     expect(source).toContain('case "send_sms"');
     expect(source).toContain('case "send_email"');
+  });
+
+  it("recipient policy is behaviorally tested in its own test file", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("tests/vapi-recipient-policy.test.ts", "utf-8");
+    expect(source).toContain("resolveRecipient");
+    expect(source).toContain("arbitrary");
+    expect(source).toContain("fails closed");
   });
 });
 

@@ -359,10 +359,11 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
   send_sms: {
     name: "send_sms",
     description:
-      "Send an SMS text message to the site owner or a specified number. " +
-      "Use this when the caller asks to be texted a link, file info, or any other content. " +
-      "The message is sent from the LiTT phone number (+13239165462). " +
-      "Returns success or failure — never claim the SMS was sent unless this returns success.",
+      "Send an SMS text message to the site owner. " +
+      "SMS is currently UNAVAILABLE — the LiTT phone number does not support text messaging yet. " +
+      "This tool always returns failure until an SMS-capable provider/number is configured. " +
+      "Use this when the caller asks to be texted so the failure is recorded honestly. " +
+      "Never claim the SMS was sent unless this returns success.",
     parameters: {
       type: "object",
       properties: {
@@ -373,8 +374,10 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
         to_number: {
           type: "string",
           description:
-            "Destination phone number in E.164 format (e.g. +12312485411). " +
-            "If omitted, defaults to the owner's configured phone number.",
+            "Destination phone number in E.164 format. " +
+            "Defaults to the owner's configured phone number. " +
+            "Alternate destinations must be explicitly server-side allowlisted " +
+            "(LITTLABS_ALLOWED_RECIPIENTS) — arbitrary numbers are rejected.",
         },
       },
       required: ["message"],
@@ -384,10 +387,10 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
   send_email: {
     name: "send_email",
     description:
-      "Send an email to the site owner or a specified address. " +
-      "Use this when the caller asks to be emailed a link, file, or info. " +
+      "Send an email to the site owner via Resend. " +
       "Returns success or failure — never claim the email was sent unless this returns success. " +
-      "If email sending is not configured, returns a clear failure (tell the caller honestly).",
+      "If email sending is not configured (RESEND_API_KEY missing), returns a clear failure " +
+      "and the caller should be told honestly.",
     parameters: {
       type: "object",
       properties: {
@@ -403,7 +406,9 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
           type: "string",
           description:
             "Destination email address. " +
-            "If omitted, defaults to the owner's configured email.",
+            "Defaults to the owner's configured email. " +
+            "Alternate destinations must be explicitly server-side allowlisted " +
+            "(LITTLABS_ALLOWED_RECIPIENTS) — arbitrary addresses are rejected.",
         },
       },
       required: ["body"],
@@ -473,9 +478,9 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
     { type: "request-failed", content: "I couldn't approve that job — it may not be awaiting approval." },
   ],
   send_sms: [
-    { type: "request-start", content: "Sending you a text now." },
+    { type: "request-start", content: "I'll check whether texting is available." },
     { type: "request-complete", content: "Done. I've sent you a text." },
-    { type: "request-failed", content: "I couldn't send the text. The messaging service may be unavailable." },
+    { type: "request-failed", content: "I can't send texts yet — the phone number doesn't support texting." },
   ],
   send_email: [
     { type: "request-start", content: "Sending you an email now." },
