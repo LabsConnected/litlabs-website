@@ -206,7 +206,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
   });
 
-  it("does not render an agent selector — only the model picker", () => {
+  it("renders an agent selector with model picker", () => {
     render(
       <CommandComposer
         value=""
@@ -219,8 +219,8 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     // Model picker is still present
     expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
 
-    // Agent selector button/popover is gone
-    expect(screen.queryByRole("button", { name: /select agent/i })).toBeNull();
+    // Agent selector button is present (popover only opens on click)
+    expect(screen.getByRole("button", { name: /select agent/i })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: /select agent/i })).toBeNull();
   });
 
