@@ -15,7 +15,6 @@ import {
   TOOL_NAMES,
   ok,
   fail,
-  type ToolCall,
 } from "@/lib/vapi-tools";
 
 // ─── Path safety ────────────────────────────────────────────────
@@ -85,8 +84,26 @@ describe("isSafeWorkspacePath", () => {
 // ─── Tool allowlisting ──────────────────────────────────────────
 
 describe("isSafeToolName", () => {
-  it("accepts all 8 allowlisted tools", () => {
+  it("accepts all allowlisted tools", () => {
     for (const name of TOOL_NAMES) {
+      expect(isSafeToolName(name)).toBe(true);
+    }
+  });
+
+  it("includes the new git, search, memory, approval, and browser test tools", () => {
+    const expected = [
+      "git_status",
+      "create_branch",
+      "commit_changes",
+      "push_branch",
+      "create_pull_request",
+      "search_code",
+      "remember_project_context",
+      "request_approval",
+      "browser_test",
+    ];
+    for (const name of expected) {
+      expect(TOOL_NAMES).toContain(name);
       expect(isSafeToolName(name)).toBe(true);
     }
   });
@@ -412,7 +429,6 @@ describe("POST /api/vapi/tools — route handler", () => {
   let POST: typeof import("@/app/api/vapi/tools/route").POST;
   let getProject: typeof import("@/lib/projects/project-repository").getProject;
   let verifyProjectWorkspace: typeof import("@/lib/projects/project-repository").verifyProjectWorkspace;
-  let updateProjectRuntime: typeof import("@/lib/projects/project-repository").updateProjectRuntime;
   let resolveCurrentProject: typeof import("@/lib/projects/resolve-current-project").resolveCurrentProject;
   let getDeployments: typeof import("@/lib/deployments").getDeployments;
 
@@ -422,7 +438,6 @@ describe("POST /api/vapi/tools — route handler", () => {
     const projectRepo = await import("@/lib/projects/project-repository");
     getProject = projectRepo.getProject;
     verifyProjectWorkspace = projectRepo.verifyProjectWorkspace;
-    updateProjectRuntime = projectRepo.updateProjectRuntime;
     const resolveProj = await import("@/lib/projects/resolve-current-project");
     resolveCurrentProject = resolveProj.resolveCurrentProject;
     const deps = await import("@/lib/deployments");

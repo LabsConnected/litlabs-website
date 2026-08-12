@@ -152,6 +152,15 @@ export default defineConfig({
       },
     },
 
+    // ── Self-contained auth tests — use Clerk backend API, no auth-setup dependency ──
+    {
+      name: "self-contained-auth",
+      testMatch: /isolation/,
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+
     // ── Authenticated projects — only when Clerk credentials are available ──
     ...authProjects,
   ],

@@ -19,6 +19,49 @@
 
 import { TOOL_NAMES, type ToolName, CHECK_IDS, type CheckId } from "./vapi-tools";
 
+// ─── Behavior contract ──────────────────────────────────────────
+//
+// This contract should be included in the LiTT assistant's system prompt
+// (configured in the Vapi dashboard). It is the single most important
+// behavioral rule for the voice agent.
+//
+// The contract exists as a constant so it can be:
+//   1. Imported by the sync script and printed for easy copy-paste
+//   2. Included in future automated system-prompt sync
+//   3. Versioned and reviewed in PRs
+
+export const LITT_BEHAVIOR_CONTRACT = `
+LITT BEHAVIOR CONTRACT — HONESTY OVER CONFIDENCE
+
+1. NEVER claim an external action happened unless its tool returned success.
+   - If send_email returns failure, tell the caller honestly.
+   - If edit_file returns failure, say so — do not claim the file was updated.
+   - If push_branch returns failure, do not say the branch was pushed.
+   - If create_pull_request returns failure, do not say a PR was created.
+
+2. NEVER promise to do something and then not call the tool.
+   - If you say "I'll send you an email," you MUST call send_email.
+   - If you say "I'll fix that," you MUST call edit_file.
+
+3. If a tool is not available or not configured, say so plainly.
+   - "Email sending isn't configured yet" is better than silence or false claims.
+
+4. If a tool returns "pending_approval," tell the caller that approval is needed
+   before the action will proceed. Do not claim the action is done.
+
+5. If you are unsure whether something succeeded, say you are unsure.
+   Do not fill gaps with confident-sounding fabrications.
+
+6. Read-only operations (read_file, inspect_project_files, search_code, git_status,
+   get_deployment_status) are safe to call freely.
+   Mutating operations (edit_file, commit_changes, push_branch, create_pull_request,
+   send_email, send_sms) should be called when the user requests them.
+   Destructive operations (request_approval, request_deployment_approval) are
+   request-only — they never execute anything themselves.
+
+7. Always call get_active_project first if you need a project_id and don't have one.
+`.trim();
+
 // ─── Types ──────────────────────────────────────────────────────
 
 /** A JSON Schema parameter definition (OpenAI function-calling style). */
@@ -414,6 +457,232 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
       required: ["body"],
     },
   },
+
+  // ── Git operations — enable the full voice-driven dev workflow ──
+
+  git_status: {
+    name: "git_status",
+    description:
+      "Run 'git status --porcelain' in the project workspace. Returns structured " +
+      "output of modified, staged, and untracked files. Read-only. " +
+      "Never claim the repository is clean unless this returns an empty status.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+      },
+      required: ["project_id"],
+    },
+  },
+
+  create_branch: {
+    name: "create_branch",
+    description:
+      "Create and switch to a new git branch in the project workspace. " +
+      "The branch name must be a safe, simple slug (lowercase, hyphens, no spaces). " +
+      "Returns success or failure — never claim the branch was created unless this returns success.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        branch_name: {
+          type: "string",
+          description:
+            "The new branch name. Must be lowercase with hyphens (e.g. 'fix/mobile-nav'). " +
+            "No spaces, no special characters except hyphens and slashes.",
+        },
+      },
+      required: ["project_id", "branch_name"],
+    },
+  },
+
+  commit_changes: {
+    name: "commit_changes",
+    description:
+      "Stage all changes and create a git commit in the project workspace. " +
+      "The commit message should be a clear, conventional-commits-style summary. " +
+      "Returns success or failure with the commit SHA. " +
+      "Never claim changes were committed unless this returns success with a SHA.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        message: {
+          type: "string",
+          description: "The commit message. Should be a clear summary of what changed (e.g. 'fix: close mobile nav on route change').",
+        },
+      },
+      required: ["project_id", "message"],
+    },
+  },
+
+  push_branch: {
+    name: "push_branch",
+    description:
+      "Push the current branch to the remote repository (git push -u origin <branch>). " +
+      "Returns success or failure. Never claim the branch was pushed unless this returns success.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        branch_name: {
+          type: "string",
+          description: "The branch to push. Defaults to the current active branch.",
+        },
+      },
+      required: ["project_id"],
+    },
+  },
+
+  create_pull_request: {
+    name: "create_pull_request",
+    description:
+      "Create a GitHub pull request for the current (or specified) branch via the GitHub API. " +
+      "Requires a GitHub connection (App or PAT). Returns the PR URL and number. " +
+      "Never claim a PR was created unless this returns success with a PR number and URL.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        title: {
+          type: "string",
+          description: "The PR title.",
+        },
+        body: {
+          type: "string",
+          description: "The PR description (markdown). Should summarize what changed and why.",
+        },
+        branch_name: {
+          type: "string",
+          description: "The head branch to merge from. Defaults to the current active branch.",
+        },
+        base_branch: {
+          type: "string",
+          description: "The base branch to merge into. Defaults to the repository's default branch (usually 'main').",
+        },
+      },
+      required: ["project_id", "title"],
+    },
+  },
+
+  // ── Code search + project memory ───────────────────────────────
+
+  search_code: {
+    name: "search_code",
+    description:
+      "Search for a text pattern across the project workspace using ripgrep. " +
+      "Returns matching file paths, line numbers, and truncated line content. " +
+      "Read-only. Use this to find where code lives before editing it.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        pattern: {
+          type: "string",
+          description: "The text pattern or regex to search for.",
+        },
+        file_glob: {
+          type: "string",
+          description: "Optional file glob to narrow the search (e.g. '*.tsx', 'src/**/*.ts').",
+        },
+        max_results: {
+          type: "integer",
+          description: "Maximum number of matches to return. Defaults to 20.",
+        },
+      },
+      required: ["project_id", "pattern"],
+    },
+  },
+
+  remember_project_context: {
+    name: "remember_project_context",
+    description:
+      "Persist a piece of project context to memory so LiTT can recall it in future conversations. " +
+      "Use this when the user tells you something worth remembering about the project " +
+      "(architecture decisions, preferences, constraints, goals). " +
+      "Returns success or failure — never claim you remembered something unless this returns success. " +
+      "Secrets, API keys, and credentials are automatically blocked.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        content: {
+          type: "string",
+          description: "The context to remember. Should be a clear, self-contained statement (e.g. 'The mobile nav uses a Zustand store for open/close state').",
+        },
+        memory_type: {
+          type: "string",
+          enum: ["project_fact", "project_decision", "architecture", "workflow", "constraint", "user_preference"],
+          description: "The type of memory. Defaults to 'project_fact'.",
+        },
+      },
+      required: ["project_id", "content"],
+    },
+  },
+
+  // ── General approval gate ──────────────────────────────────────
+
+  request_approval: {
+    name: "request_approval",
+    description:
+      "Record a request to perform a high-risk or destructive operation. " +
+      "This is request-only — it NEVER executes the operation. " +
+      "The operation requires separate explicit human approval recorded on the backend. " +
+      "Use this for: database schema changes, bulk deletes, force-pushes, " +
+      "production config changes, or any action with irreversible side effects. " +
+      "Never claim the operation was approved or executed unless a separate approval " +
+      "confirmation is received.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: projectIdParam,
+        action: {
+          type: "string",
+          description: "A short identifier for the requested action (e.g. 'drop_users_table', 'force_push_main').",
+        },
+        description: {
+          type: "string",
+          description: "A human-readable description of what the operation will do and why it's needed.",
+        },
+        risk_level: {
+          type: "string",
+          enum: ["medium", "high", "critical"],
+          description: "The risk level. 'critical' includes irreversible or production-impacting actions.",
+        },
+      },
+      required: ["action", "description", "risk_level"],
+    },
+  },
+
+  // ── Synchronous browser test ───────────────────────────────────
+
+  browser_test: {
+    name: "browser_test",
+    description:
+      "Open a URL in the browser, wait for it to load, and return the page title, " +
+      "any console errors, and a screenshot URL. This is SYNCHRONOUS — it blocks until " +
+      "the browser work completes (up to 60 seconds). " +
+      "Use this to visually test a page after making changes. " +
+      "Never claim a page works unless this returns success with no console errors.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "The URL to test. Can be a preview URL, localhost, or any accessible URL.",
+        },
+        viewport_width: {
+          type: "integer",
+          description: "Browser viewport width in pixels. Defaults to 1280. Use 375 for mobile testing.",
+        },
+        viewport_height: {
+          type: "integer",
+          description: "Browser viewport height in pixels. Defaults to 720.",
+        },
+      },
+      required: ["url"],
+    },
+  },
 };
 
 /** Ordered list of all tool names, mirroring TOOL_NAMES. */
@@ -486,6 +755,54 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
     { type: "request-start", content: "Sending you an email now." },
     { type: "request-complete", content: "Done. I've sent you an email." },
     { type: "request-failed", content: "I couldn't send the email — email sending may not be configured yet." },
+  ],
+  // ── Git operations ──
+  git_status: [
+    { type: "request-start", content: "Let me check the git status of your project." },
+    { type: "request-failed", content: "I couldn't check the git status. The workspace may be busy." },
+  ],
+  create_branch: [
+    { type: "request-start", content: "Creating a new branch for this work." },
+    { type: "request-complete", content: "Done. I've created and switched to the new branch." },
+    { type: "request-failed", content: "I couldn't create that branch. The name may be invalid or the workspace is busy." },
+  ],
+  commit_changes: [
+    { type: "request-start", content: "Committing your changes now." },
+    { type: "request-complete", content: "Done. I've committed the changes." },
+    { type: "request-failed", content: "I couldn't commit — there may be nothing to commit or the workspace is busy." },
+  ],
+  push_branch: [
+    { type: "request-start", content: "Pushing the branch to your remote repository." },
+    { type: "request-complete", content: "Done. The branch has been pushed." },
+    { type: "request-failed", content: "I couldn't push the branch. Your GitHub connection may need attention." },
+  ],
+  create_pull_request: [
+    { type: "request-start", content: "Creating a pull request for you now." },
+    { type: "request-complete", content: "Done. I've created the pull request." },
+    { type: "request-failed", content: "I couldn't create the pull request. Your GitHub connection may need attention." },
+  ],
+  // ── Search + memory ──
+  search_code: [
+    { type: "request-start", content: "Searching your codebase for that." },
+    { type: "request-failed", content: "I couldn't search the codebase right now." },
+  ],
+  remember_project_context: [
+    { type: "request-start", content: "I'll remember that for next time." },
+    { type: "request-complete", content: "Done. I've saved that context for future conversations." },
+    { type: "request-failed", content: "I couldn't save that context. It may contain blocked content." },
+  ],
+  // ── Approval gate ──
+  request_approval: [
+    { type: "request-start", content: "Recording your approval request for this operation." },
+    { type: "request-complete", content: "I've recorded the request. It still needs your explicit approval before anything happens." },
+    { type: "request-failed", content: "I couldn't record the approval request." },
+  ],
+  // ── Sync browser test ──
+  browser_test: [
+    { type: "request-start", content: "Opening that page in the browser to test it now." },
+    { type: "request-complete", content: "Done. I've loaded the page and captured the results." },
+    { type: "request-failed", content: "I couldn't test that page — the browser service may be unavailable." },
+    { type: "request-response-delayed", content: "The page is still loading. Hang tight." },
   ],
 };
 

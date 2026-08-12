@@ -34,6 +34,7 @@ import fs from "fs";
 import {
   buildVapiToolPayload,
   ALL_VAPI_TOOL_NAMES,
+  LITT_BEHAVIOR_CONTRACT,
   type VapiToolPayload,
 } from "../src/lib/vapi-tool-definitions";
 import type { ToolName } from "../src/lib/vapi-tools";
@@ -74,11 +75,17 @@ function parseArgs(argv: string[]): {
   tools: ToolName[];
   attach: boolean;
   dryRun: boolean;
+  printContract: boolean;
 } {
   const argMap: Record<string, string> = {};
   for (const a of argv.slice(2)) {
     const m = /^--([a-zA-Z-]+)(?:=(.*))?$/.exec(a);
     if (m) argMap[m[1]] = m[2] ?? "true";
+  }
+
+  // --print-contract: print the behavior contract and exit
+  if (argMap["print-contract"] === "true") {
+    return { tools: [], attach: false, dryRun: false, printContract: true };
   }
 
   const toolsRaw = (argMap.tools ?? "edit_file,inspect_project_files,read_file")
@@ -97,6 +104,7 @@ function parseArgs(argv: string[]): {
     tools: toolsRaw as ToolName[],
     attach: argMap.attach !== "false" && argMap["no-attach"] !== "true",
     dryRun: argMap["dry-run"] === "true",
+    printContract: false,
   };
 }
 
@@ -197,7 +205,13 @@ async function attachToolsToAssistant(
 // ─── Main ───────────────────────────────────────────────────────
 
 async function main() {
-  const { tools, attach, dryRun } = parseArgs(process.argv);
+  const { tools, attach, dryRun, printContract } = parseArgs(process.argv);
+
+  // ── Print behavior contract and exit ──
+  if (printContract) {
+    console.log(LITT_BEHAVIOR_CONTRACT);
+    process.exit(0);
+  }
 
   // ── Validate env ──
   const missing: string[] = [];

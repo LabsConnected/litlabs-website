@@ -25,8 +25,14 @@ import { verifyResult } from "@/lib/litt-runtime/result-verifier";
 import { auditRun } from "@/lib/litt-runtime/audit-service";
 import { detectActions } from "@/lib/litt-runtime/response-stream";
 import type { LiTTRunResult } from "@/lib/litt-runtime/types";
+import { callLLMWithTools, type ToolDefinition as LLMToolDefinition } from "@/lib/litt-intelligence/llm-tool-calling";
+import { executeProjectTool, getProjectToolDefinitions, PROJECT_TOOLS } from "@/lib/project-tools/registry";
+import { LITT_BEHAVIOR_CONTRACT } from "@/lib/vapi-tool-definitions";
 
 const HISTORY_LIMIT = 6;
+const MAX_TOOL_ROUNDS = 8; // Allows full dev workflows: get_active_project → search_code → read_file → edit_file → run_project_checks → browser_test → commit → push
+const VOICE_TOTAL_TIMEOUT_MS = 45_000; // Hard cap across all tool rounds — voice needs to respond within Vapi's timeout
+const MAX_REPEAT_CALLS = 2; // Max times the same tool+args can be called before the loop breaks (prevents infinite loops)
 
 /**
  * Build a ResolvedRunContext for a voice turn.
@@ -171,21 +177,21 @@ export async function runLiTTForVoice(args: {
     timeoutMs: 12_000,
   };
 
-  // Build a voice-optimized prompt — much shorter than the full kernel prompt.
-  // Voice needs speed: skip kernel governance, capability translation, and
-  // the full project context block. Include only essential context.
+  // ── Voice-optimized system prompt ──────────────────────────────
   //
-  // IMPORTANT: This voice runtime does NOT dispatch tools. The canonical
-  // LiTT execution engine produces text only — tool registry dispatch is
-  // a future phase. Therefore the voice prompt must NOT claim it can send
-  // SMS/email or that it routes through canonical tools. If the caller
-  // asks to be texted or emailed, voice must answer truthfully that
-  // messaging actions are not available from the voice runtime yet.
-  // Explicit Vapi tool calls to /api/vapi/tools are a separate path and
-  // CAN execute send_email/send_sms, but that is not triggered from here.
+  // The voice runtime CAN dispatch tools via the shared project tool
+  // registry. Tools are advertised to the LLM via native function
+  // calling (callLLMWithTools). The LLM decides whether a tool is
+  // needed; if so, we execute it through the registry and feed the
+  // result back. If no tools are needed, we return text directly.
+  //
+  // The behavior contract is included to enforce honesty: never claim
+  // an action happened unless its tool returned success.
   const voiceSystem = [
     "You are LiTT, the AI assistant for LiTTree LabStudios.",
     "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
+    "",
+    LITT_BEHAVIOR_CONTRACT,
     "",
     "CONTEXT (use this to answer questions):",
     ctx.projectName ? `Active project: ${ctx.projectName}` : "",
@@ -197,12 +203,17 @@ export async function runLiTTForVoice(args: {
     "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
     "Do not say you don't have information — the context above is the user's real project data.",
     "",
-    "MESSAGING (SMS/EMAIL):",
-    "If the caller asks you to text or email them, answer truthfully:",
-    "- SMS is not available from this voice call yet.",
-    "- Email is not available from this voice call yet.",
-    "- Do NOT claim you sent anything. Do NOT promise to send something later.",
-    "- If the caller wants the site link, tell them it's https://litlabs.net.",
+    "TOOLS:",
+    "You have tools available to inspect code, edit files, run tests, create branches,",
+    "commit, push, create pull requests, search code, remember context, test pages in",
+    "the browser, send email, and request approvals.",
+    "IMPORTANT: When the user asks you to DO something (inspect, read, edit, search,",
+    "test, create, commit, push, send), you MUST call the appropriate tool — do not",
+    "just describe what you would do. Actually invoke the tool function.",
+    "If a tool returns failure, tell the caller honestly what went wrong.",
+    "If a tool requires a project_id and you don't have one, call get_active_project first.",
+    "After a tool returns, summarize the result for the caller in 1-2 sentences.",
+    "",
     "The site URL is https://litlabs.net.",
   ].filter(Boolean).join("\n");
 
@@ -210,23 +221,180 @@ export async function runLiTTForVoice(args: {
     .map((e) => (e.role === "user" ? `User: ${e.content}` : `LiTT: ${e.content}`))
     .join("\n");
 
-  const voiceFull = [
-    voiceSystem,
-    "",
-    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-    `User: ${args.message}`,
-    "",
-    "LiTT:",
-  ].filter(Boolean).join("\n");
+  // ── Tool dispatch loop ─────────────────────────────────────────
+  //
+  // 1. Call the LLM with tools advertised via native function calling.
+  // 2. If the LLM returns tool_calls, execute them through the shared
+  //    registry and feed results back to the LLM.
+  // 3. Repeat until the LLM returns text only (no tool_calls) or we
+  //    hit the max rounds safety limit.
+  // 4. If no tools are needed (the LLM returns text immediately),
+  //    skip the loop entirely and use the text directly.
+  //
+  // Voice needs speed: if the OPENROUTER_API_KEY is not configured,
+  // fall back to the text-only executeRun path (no tool dispatch).
 
-  const result = await executeRun(
-    req,
-    voiceFull,
-    voiceSystem,
-    ctx.history,
-  );
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  let finalText: string;
+  let finalProvider: string;
+  let finalModel: string;
+  let finalLatencyMs: number;
 
-  const verified = verifyResult(result.text);
+  if (openRouterKey && ctx.userId) {
+    // ── Native tool-calling path ──
+    const toolDefs = getProjectToolDefinitions();
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...ctx.history.slice(-HISTORY_LIMIT).map((e) => ({
+        role: e.role as "user" | "assistant",
+        content: e.content,
+      })),
+      { role: "user" as const, content: args.message },
+    ];
+
+    const t0 = Date.now();
+    let roundText = "";
+    const roundProvider = "openrouter";
+    let roundModel = "google/gemini-2.5-flash";
+    // Track repeated tool calls to detect infinite loops
+    const toolCallCounts = new Map<string, number>();
+
+    try {
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        // Total timeout check — voice must respond within Vapi's window
+        if (Date.now() - t0 > VOICE_TOTAL_TIMEOUT_MS) {
+          roundText = "I'm still working on that but I'm running low on time. Let me finish this up and get back to you.";
+          break;
+        }
+
+        const llmResp = await callLLMWithTools(
+          voiceSystem,
+          messages,
+          toolDefs as LLMToolDefinition[],
+          {
+            model: roundModel,
+            maxTokens: 500,
+            temperature: 0.2,
+          },
+        );
+
+        roundModel = llmResp.model;
+        roundText = llmResp.text;
+
+        // No tool calls → we're done, return the text
+        if (llmResp.toolCalls.length === 0) {
+          break;
+        }
+
+        // Add the assistant's tool-call message to the conversation
+        messages.push({
+          role: "assistant",
+          content: roundText || `[Calling ${llmResp.toolCalls.length} tool(s)]`,
+        });
+
+        // Execute each tool call through the shared registry
+        for (const tc of llmResp.toolCalls) {
+          // callLLMWithTools converts tool names: underscores → dots (for
+          // business tools like business.services.list). Project tools use
+          // underscores natively (get_active_project). Try both forms.
+          const toolName = tc.toolId.includes(".")
+            ? tc.toolId.replace(/\./g, "_")
+            : tc.toolId;
+          const toolEntry = PROJECT_TOOLS[toolName];
+          if (!toolEntry) {
+            messages.push({
+              role: "assistant",
+              content: `Tool "${tc.toolId}" is not available. Valid tools: ${Object.keys(PROJECT_TOOLS).slice(0, 8).join(", ")}...`,
+            });
+            continue;
+          }
+
+          // Inject project_id from context if the tool is project-scoped
+          // and the LLM didn't provide one
+          const toolArgs = { ...tc.inputs };
+          if (toolEntry.metadata.projectScoped && !toolArgs.project_id && ctx.projectId) {
+            toolArgs.project_id = ctx.projectId;
+          }
+
+          // Repeated-call detection: if the same tool+args has been called
+          // too many times, stop the loop to prevent infinite cycling
+          const callKey = `${toolName}:${JSON.stringify(toolArgs)}`;
+          const callCount = (toolCallCounts.get(callKey) ?? 0) + 1;
+          toolCallCounts.set(callKey, callCount);
+          if (callCount > MAX_REPEAT_CALLS) {
+            messages.push({
+              role: "assistant",
+              content: `I've already tried "${toolName}" with these arguments ${MAX_REPEAT_CALLS} times and it didn't resolve the issue. Let me summarize what I know so far.`,
+            });
+            // Force a final text response by calling without tools
+            const finalResp = await callLLMWithTools(
+              voiceSystem,
+              messages,
+              [],
+              { model: roundModel, maxTokens: 300, temperature: 0.2 },
+            );
+            roundText = finalResp.text;
+            break;
+          }
+
+          try {
+            const result = await executeProjectTool(toolName, ctx.userId, toolArgs);
+            const resultText = result.success
+              ? `SUCCESS: ${result.message} ${JSON.stringify(result.data).slice(0, 500)}`
+              : `FAILED: ${result.message}`;
+            messages.push({ role: "assistant", content: resultText });
+          } catch (err) {
+            messages.push({
+              role: "assistant",
+              content: `ERROR: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+        }
+
+        // If we broke out of the inner loop due to repeated calls, exit the outer loop too
+        if (toolCallCounts.values().some((c) => c > MAX_REPEAT_CALLS)) {
+          break;
+        }
+
+        // On the last round, force a text response
+        if (round === MAX_TOOL_ROUNDS - 1) {
+          // Call one more time without tools to get a final text response
+          const finalResp = await callLLMWithTools(
+            voiceSystem,
+            messages,
+            [],
+            { model: roundModel, maxTokens: 300, temperature: 0.2 },
+          );
+          roundText = finalResp.text;
+        }
+      }
+    } catch (err) {
+      // Tool-calling path failed — fall back to text-only
+      roundText = `I ran into an issue processing that. ${err instanceof Error ? err.message : "Please try again."}`;
+    }
+
+    finalText = roundText;
+    finalProvider = roundProvider;
+    finalModel = roundModel;
+    finalLatencyMs = Date.now() - t0;
+  } else {
+    // ── Text-only fallback path (no OPENROUTER_API_KEY) ──
+    const voiceFull = [
+      voiceSystem,
+      "",
+      transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+      `User: ${args.message}`,
+      "",
+      "LiTT:",
+    ].filter(Boolean).join("\n");
+
+    const result = await executeRun(req, voiceFull, voiceSystem, ctx.history);
+    finalText = result.text;
+    finalProvider = result.provider;
+    finalModel = result.model;
+    finalLatencyMs = result.latencyMs;
+  }
+
+  const verified = verifyResult(finalText);
   const verifiedText = verified.text;
 
   // Persist memory + audit asynchronously (do not block voice response)
@@ -259,9 +427,9 @@ export async function runLiTTForVoice(args: {
     projectId: ctx.projectId,
     mode: "voice",
     agentSlug: "litt",
-    provider: result.provider,
-    model: result.model,
-    latencyMs: result.latencyMs,
+    provider: finalProvider,
+    model: finalModel,
+    latencyMs: finalLatencyMs,
     status: verified.ok ? "completed" : "failed",
     errorClass: verified.warning,
   });
@@ -272,10 +440,10 @@ export async function runLiTTForVoice(args: {
     status: 200,
     body: {
       text: verifiedText,
-      provider: result.provider,
-      model: result.model,
-      latencyMs: result.latencyMs,
-      reasoning: result.reasoning,
+      provider: finalProvider,
+      model: finalModel,
+      latencyMs: finalLatencyMs,
+      reasoning: undefined,
       actions,
     },
   };

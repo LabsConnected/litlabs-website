@@ -84,13 +84,13 @@ describe("Rule 2: edit_file no longer executes git diff through shell", () => {
   });
 
   it("edit_file audit record stores diffPreview as null and diffLines as 0", async () => {
-    const routeSource = await import("fs").then((fs) =>
-      fs.readFileSync("src/app/api/vapi/tools/route.ts", "utf-8"),
-    );
+    const fs = await import("fs");
+    // The audit record logic now lives in the shared registry, not the route.
+    const registrySource = fs.readFileSync("src/lib/project-tools/registry.ts", "utf-8");
     // The audit record should set diffPreview: null and diffLines: 0
     // rather than executing a shell command to get a real diff.
-    expect(routeSource).toContain("diffLines: 0");
-    expect(routeSource).toContain("diffPreview: null");
+    expect(registrySource).toContain("diffLines: 0");
+    expect(registrySource).toContain("diffPreview: null");
   });
 });
 
@@ -205,38 +205,42 @@ describe("Rule 6: Voice runtime contains no direct send side effects", () => {
 // ─── Rule 7: Voice cannot falsely claim canonical messaging ──────
 
 describe("Rule 7: Voice cannot falsely claim canonical messaging execution", () => {
-  it("voice prompt does not claim it can send SMS/email via tools", async () => {
+  it("voice prompt includes the LITT behavior contract for honesty", async () => {
     const fs = await import("fs");
     const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
-    // The prompt must NOT tell the LLM to "use the send_sms or send_email tool"
-    // because the voice runtime does not dispatch tools.
+    // The voice runtime now dispatches tools through the shared registry,
+    // so it includes the behavior contract to enforce honesty:
+    // never claim an action succeeded unless the tool returned success.
+    expect(source).toContain("LITT_BEHAVIOR_CONTRACT");
+  });
+
+  it("voice prompt does not tell the LLM to falsely claim success", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
+    // The prompt must NOT tell the LLM to claim actions succeeded without tool results
     expect(source).not.toContain("use the send_sms or send_email tool");
     expect(source).not.toContain("use the send_sms tool");
     expect(source).not.toContain("use the send_email tool");
-  });
-
-  it("voice prompt truthfully states messaging is not available from voice", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/lib/voice/voice-runtime.ts", "utf-8");
-    expect(source).toContain("not available from this voice call");
   });
 });
 
 // ─── Rule 8: Explicit Vapi messaging tools remain protected ──────
 
 describe("Rule 8: Explicit Vapi messaging tools remain protected", () => {
-  it("route.ts uses the pure recipient policy module", async () => {
+  it("route.ts uses the shared project tool registry", async () => {
     const fs = await import("fs");
     const source = fs.readFileSync("src/app/api/vapi/tools/route.ts", "utf-8");
-    expect(source).toContain("resolveRecipient");
-    expect(source).toContain("vapi-recipient-policy");
+    expect(source).toContain("executeProjectTool");
+    expect(source).toContain("project-tools/registry");
   });
 
-  it("send_sms and send_email dispatch cases exist in route", async () => {
+  it("send_sms and send_email handlers exist in the registry", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/app/api/vapi/tools/route.ts", "utf-8");
-    expect(source).toContain('case "send_sms"');
-    expect(source).toContain('case "send_email"');
+    const source = fs.readFileSync("src/lib/project-tools/registry.ts", "utf-8");
+    expect(source).toContain("toolSendSms");
+    expect(source).toContain("toolSendEmail");
+    expect(source).toContain("resolveRecipient");
+    expect(source).toContain("vapi-recipient-policy");
   });
 
   it("recipient policy is behaviorally tested in its own test file", async () => {

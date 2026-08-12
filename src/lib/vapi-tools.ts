@@ -32,6 +32,27 @@ export const TOOL_NAMES = [
   // These use the owner's contact info configured in the environment.
   "send_sms",
   "send_email",
+  // ── Git operations — enable the full "plan → branch → edit → test → PR" loop.
+  // These run git commands in the workspace via the terminal server, and
+  // create PRs via the GitHub API (Octokit). All are audited.
+  "git_status",
+  "create_branch",
+  "commit_changes",
+  "push_branch",
+  "create_pull_request",
+  // ── Code search + project memory — search across the workspace and
+  // persist context for later recall.
+  "search_code",
+  "remember_project_context",
+  // ── General approval gate — for destructive/high-risk operations that
+  // are not deployment-specific. Records a pending approval and returns.
+  // The actual operation does not execute until approval is confirmed.
+  "request_approval",
+  // ── Synchronous browser test — starts a browser job, polls until
+  // completion (or timeout), and returns the result directly in the
+  // tool response. Unlike the async browser_*_job tools, this blocks
+  // the Vapi call until the browser work is done.
+  "browser_test",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
