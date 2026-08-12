@@ -190,6 +190,7 @@ export async function runLiTTForVoice(args: {
   const voiceSystem = [
     "You are LiTT, the AI assistant for LiTTree LabStudios.",
     "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
+    "Always respond in English, regardless of the caller's accent or language.",
     "",
     LITT_BEHAVIOR_CONTRACT,
     "",
