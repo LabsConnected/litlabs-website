@@ -1,11 +1,6 @@
 "use client";
 
-import { useAuth, useUser } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
-
-const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-
-type SessionUser = { id: string; name: string | null; email: string };
+import { useClerkAuthContext } from "@/context/ClerkAuthContext";
 
 export type AppUser = {
   id: string;
@@ -17,99 +12,22 @@ export type AppUser = {
   publicMetadata: Record<string, unknown>;
 };
 
-function useCustomSession() {
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/auth/session", {
-      credentials: "include",
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data?.user) {
-          setSessionUser({
-            id: data.user.id,
-            name: data.user.name ?? null,
-            email: data.user.email ?? "",
-          });
-        }
-        setIsLoaded(true);
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setIsLoaded(true);
-      });
-    return () => controller.abort();
-  }, []);
-
-  return { sessionUser, isLoaded };
-}
-
-function useConfiguredAuth() {
-  const clerk = useAuth();
+export function useClerkAuth() {
+  const context = useClerkAuthContext();
   return {
-    ...clerk,
-    isLoaded: clerk.isLoaded,
-    isSignedIn: Boolean(clerk.isSignedIn),
-    userId: clerk.userId,
-    sessionClaims: clerk.sessionClaims as
-      | { name?: string | null; username?: string | null }
-      | undefined,
+    isLoaded: context.isLoaded,
+    isSignedIn: context.isSignedIn,
+    userId: context.userId,
+    sessionClaims: context.sessionClaims,
+    getToken: context.getToken,
+    signOut: context.signOut,
   };
 }
 
-function useSessionAuth() {
-  const { sessionUser, isLoaded } = useCustomSession();
+export function useAppUser() {
+  const context = useClerkAuthContext();
   return {
-    isLoaded,
-    isSignedIn: Boolean(sessionUser),
-    userId: sessionUser?.id ?? null,
-    sessionClaims: sessionUser
-      ? { name: sessionUser.name, username: sessionUser.email }
-      : undefined,
-    getToken: async () => null,
+    user: context.user,
+    isLoaded: context.isLoaded,
   };
 }
-
-export const useClerkAuth = clerkConfigured ? useConfiguredAuth : useSessionAuth;
-
-function useConfiguredUser() {
-  const { user, isLoaded } = useUser();
-  const appUser: AppUser | null = user
-    ? {
-        id: user.id,
-        firstName: user.firstName,
-        fullName: user.fullName,
-        username: user.username,
-        imageUrl: user.imageUrl,
-        primaryEmailAddress: user.primaryEmailAddress
-          ? { emailAddress: user.primaryEmailAddress.emailAddress }
-          : null,
-        publicMetadata: user.publicMetadata,
-      }
-    : null;
-  return { user: appUser, isLoaded };
-}
-
-function useSessionUser() {
-  const { sessionUser, isLoaded } = useCustomSession();
-  const user: AppUser | null = sessionUser
-    ? {
-        id: sessionUser.id,
-        firstName: sessionUser.name?.split(" ")[0] ?? null,
-        fullName: sessionUser.name,
-        username: sessionUser.email.split("@")[0] || null,
-        imageUrl: null,
-        primaryEmailAddress: sessionUser.email
-          ? { emailAddress: sessionUser.email }
-          : null,
-        publicMetadata: {},
-      }
-    : null;
-  return { user, isLoaded };
-}
-
-export const useAppUser = clerkConfigured ? useConfiguredUser : useSessionUser;

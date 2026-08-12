@@ -36,6 +36,10 @@
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
     "daemon:dev": "tsx src/daemon.ts",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\" \"pnpm daemon:dev\"",
+    "mobile:start": "pnpm --filter @litt/companion start",
+    "mobile:check": "pnpm --filter @litt/companion typecheck",
+    "mobile:doctor": "pnpm --filter @litt/companion exec npx --yes expo-doctor",
+    "mobile:verify": "pnpm mobile:doctor && pnpm mobile:check",
     "diagnose:connections": "tsx scripts/diagnose-connections.ts",
     "sync:vapi-tools": "tsx scripts/sync-vapi-tools.ts",
     "sync:vapi-bridge": "tsx scripts/sync-vapi-bridge.ts",
@@ -104,6 +108,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@clerk/testing": "^2.2.15",
+    "@next/swc-win32-x64-msvc": "16.2.11",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.6.3",

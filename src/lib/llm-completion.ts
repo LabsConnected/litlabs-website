@@ -38,46 +38,56 @@ async function completeOpenRouter(
     throw new Error("Missing OPENROUTER_API_KEY");
   }
 
-  const response = await fetch(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: options.model,
-        messages: [
-          {
-            role: "user",
-            content: options.prompt,
-          },
-        ],
-        max_tokens: options.maxTokens || 512,
-        temperature: options.temperature ?? 0.2,
-      }),
-    },
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenRouter error ${response.status}: ${text}`);
+  try {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: options.model,
+          messages: [
+            {
+              role: "user",
+              content: options.prompt,
+            },
+          ],
+          max_tokens: options.maxTokens || 512,
+          temperature: options.temperature ?? 0.2,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OpenRouter error ${response.status}: ${text}`);
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+    const choice = (
+      data?.choices as Array<Record<string, unknown>> | undefined
+    )?.[0];
+    const message =
+      (choice as Record<string, unknown> | undefined)?.message || {};
+    const messageRecord = message as Record<string, unknown>;
+
+    return {
+      text:
+        typeof messageRecord.content === "string" ? messageRecord.content : "",
+      usage: data?.usage as CompletionResult["usage"],
+    };
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  const choice = (
-    data?.choices as Array<Record<string, unknown>> | undefined
-  )?.[0];
-  const message =
-    (choice as Record<string, unknown> | undefined)?.message || {};
-  const messageRecord = message as Record<string, unknown>;
 
-  return {
-    text:
-      typeof messageRecord.content === "string" ? messageRecord.content : "",
-    usage: data?.usage as CompletionResult["usage"],
-  };
 }
 
 async function completeBedrock(
