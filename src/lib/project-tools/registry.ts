@@ -29,7 +29,6 @@ import {
   updateProjectRuntime,
 } from "@/lib/projects/project-repository";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
-import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { getDeployments } from "@/lib/deployments";
 import { getUserGitHubOctokit } from "@/lib/github-pat";
@@ -61,10 +60,23 @@ import { executeBrowserJob } from "@/lib/browser-job-executor";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
+/**
+ * Resolve the terminal server base URL.
+ * Production has TERMINAL_SERVER_URL (not TERMINAL_SERVER_INTERNAL_URL).
+ */
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
+  process.env.TERMINAL_SERVER_URL ??
+  process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
   "https://litlabs-terminal-server-production-0be1.up.railway.app";
+
+function internalHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
+  };
+}
 
 export async function runWorkspaceCommand(
   workspaceId: string,
@@ -73,10 +85,7 @@ export async function runWorkspaceCommand(
 ) {
   const response = await fetch(`${TERMINAL_BASE()}/internal/workspace/${workspaceId}/exec`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
-    },
+    headers: internalHeaders(),
     body: JSON.stringify({ command, userId }),
   });
   const payload = (await response.json().catch(() => null)) as {
@@ -90,25 +99,112 @@ export async function runWorkspaceCommand(
   return payload ?? {};
 }
 
-async function workspaceFileRequest(
+/** List files in a workspace directory. Falls back to `ls` via exec. */
+async function workspaceListFiles(
   workspaceId: string,
   userId: string,
-  projectId: string,
-  action: "read" | "write",
   path: string,
-  content?: string,
-) {
-  const { token } = createTerminalToken(userId, { workspaceId, projectId });
-  const resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-Workspace-Id": workspaceId,
-    },
-    body: JSON.stringify({ path, content }),
+): Promise<Array<{ name: string; type: "file" | "directory"; size?: number }>> {
+  const resp = await fetch(
+    `${TERMINAL_BASE()}/internal/workspace/${workspaceId}/files?path=${encodeURIComponent(path)}`,
+    { headers: internalHeaders() },
+  );
+  if (resp.ok) {
+    const data = await resp.json().catch(() => null);
+    if (Array.isArray(data)) return data;
+  }
+  const safePath = path.replace(/'/g, "'\\''");
+  const result = await runWorkspaceCommand(workspaceId, userId, `ls -1p -- '${safePath}'`);
+  const lines = (result.stdout ?? "").split("\n").filter(Boolean);
+  return lines.map((line) => {
+    const isDir = line.endsWith("/");
+    return { name: isDir ? line.slice(0, -1) : line, type: isDir ? "directory" : "file" };
   });
-  return resp;
+}
+
+/** Read a file from the workspace. Falls back to `cat` via exec. */
+async function workspaceReadFile(
+  workspaceId: string,
+  userId: string,
+  path: string,
+): Promise<string> {
+  const resp = await fetch(
+    `${TERMINAL_BASE()}/internal/workspace/${workspaceId}/files/read?path=${encodeURIComponent(path)}`,
+    { headers: internalHeaders() },
+  );
+  if (resp.ok) {
+    const data = await resp.json().catch(() => null);
+    if (data && typeof data === "object" && typeof (data as { content?: unknown }).content === "string") {
+      return (data as { content: string }).content;
+    }
+    if (typeof data === "string") return data;
+  }
+  const safePath = path.replace(/'/g, "'\\''");
+  const result = await runWorkspaceCommand(workspaceId, userId, `cat -- '${safePath}'`);
+  if (result.exitCode !== 0) throw new Error(result.stderr || `Failed to read ${path}`);
+  return result.stdout ?? "";
+}
+
+/** Write a file to the workspace. Falls back to exec with base64. */
+async function workspaceWriteFile(
+  workspaceId: string,
+  userId: string,
+  path: string,
+  content: string,
+): Promise<void> {
+  const resp = await fetch(
+    `${TERMINAL_BASE()}/internal/workspace/${workspaceId}/files/write`,
+    { method: "POST", headers: internalHeaders(), body: JSON.stringify({ path, content }) },
+  );
+  if (resp.ok) return;
+  const safePath = path.replace(/'/g, "'\\''");
+  const b64 = Buffer.from(content).toString("base64");
+  const result = await runWorkspaceCommand(
+    workspaceId, userId, `echo '${b64}' | base64 -d > '${safePath}'`,
+  );
+  if (result.exitCode !== 0) throw new Error(result.stderr || `Failed to write ${path}`);
+}
+
+/** Delete a file or directory. */
+export async function workspaceDeleteFile(
+  workspaceId: string, userId: string, path: string,
+): Promise<void> {
+  const safePath = path.replace(/'/g, "'\\''");
+  const result = await runWorkspaceCommand(workspaceId, userId, `rm -rf -- '${safePath}'`);
+  if (result.exitCode !== 0) throw new Error(result.stderr || `Failed to delete ${path}`);
+}
+
+/** Create a directory (mkdir -p). */
+export async function workspaceMkdir(
+  workspaceId: string, userId: string, path: string,
+): Promise<void> {
+  const safePath = path.replace(/'/g, "'\\''");
+  const result = await runWorkspaceCommand(workspaceId, userId, `mkdir -p -- '${safePath}'`);
+  if (result.exitCode !== 0) throw new Error(result.stderr || `Failed to create directory ${path}`);
+}
+
+/** Rename or move a file/directory. */
+export async function workspaceRename(
+  workspaceId: string, userId: string, oldPath: string, newPath: string,
+): Promise<void> {
+  const safeOld = oldPath.replace(/'/g, "'\\''");
+  const safeNew = newPath.replace(/'/g, "'\\''");
+  const result = await runWorkspaceCommand(workspaceId, userId, `mv -- '${safeOld}' '${safeNew}'`);
+  if (result.exitCode !== 0) throw new Error(result.stderr || `Failed to rename ${oldPath}`);
+}
+
+/** Apply a unified diff patch via git apply. */
+export async function workspaceApplyPatch(
+  workspaceId: string, userId: string, patch: string,
+): Promise<{ applied: boolean; output: string }> {
+  const b64 = Buffer.from(patch).toString("base64");
+  const result = await runWorkspaceCommand(
+    workspaceId, userId, `echo '${b64}' | base64 -d | git apply --verbose -`,
+  );
+  if (result.exitCode !== 0) {
+    return { applied: false, output: result.stderr || result.stdout || "Patch did not apply cleanly" };
+  }
+  return { applied: true, output: result.stdout || "Patch applied successfully" };
 }
 
 // ─── String helpers (mirror vapi-tools str/optStr) ──────────────
@@ -207,19 +303,15 @@ export const toolInspectProjectFiles: ToolHandler = async (userId, args) => {
   const path = str(args.path, ".");
   if (path !== "." && !isSafeWorkspacePath(path)) return fail("Invalid or blocked workspace path.");
 
-  const { token } = createTerminalToken(userId, { workspaceId, projectId });
-  const resp = await fetch(`${TERMINAL_BASE()}/ws-files?path=${encodeURIComponent(path)}`, {
-    headers: { Authorization: `Bearer ${token}`, "X-Workspace-Id": workspaceId },
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "Unknown error");
-    return fail(`Failed to list files: ${text}`);
+  try {
+    const entries = await workspaceListFiles(workspaceId, userId, path);
+    return ok(projectId, `Listed ${entries.length} entries at "${path}".`, {
+      path,
+      entries,
+    });
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Failed to list files.");
   }
-  const entries = await resp.json();
-  return ok(projectId, `Listed ${Array.isArray(entries) ? entries.length : 0} entries at "${path}".`, {
-    path,
-    entries,
-  });
 };
 
 /** read_file — read a single file from the project workspace. */
@@ -240,18 +332,16 @@ export const toolReadFile: ToolHandler = async (userId, args) => {
     return fail(err instanceof Error ? err.message : "Project workspace is unavailable.");
   }
 
-  const resp = await workspaceFileRequest(workspaceId, userId, projectId, "read", path);
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "Unknown error");
-    return fail(`Failed to read file: ${text}`);
+  try {
+    const content = await workspaceReadFile(workspaceId, userId, path);
+    return ok(projectId, `Read ${content.length} characters from "${path}".`, {
+      path,
+      content,
+      size: content.length,
+    });
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Failed to read file.");
   }
-  const payload = await resp.json();
-  const content = typeof payload === "string" ? payload : str(payload?.content);
-  return ok(projectId, `Read ${content.length} characters from "${path}".`, {
-    path,
-    content,
-    size: content.length,
-  });
 };
 
 /** edit_file — write file content in the project workspace (audited). */
@@ -276,9 +366,15 @@ export const toolEditFile: ToolHandler = async (userId, args) => {
     return fail(err instanceof Error ? err.message : "Project workspace is unavailable.");
   }
 
-  const resp = await workspaceFileRequest(workspaceId, userId, projectId, "write", path, content);
+  let wroteOk = false;
+  let writeError = "";
+  try {
+    await workspaceWriteFile(workspaceId, userId, path, content);
+    wroteOk = true;
+  } catch (err) {
+    writeError = err instanceof Error ? err.message : "Unknown write error";
+  }
 
-  const wroteOk = resp.ok;
   await logFileOperation({
     userId,
     projectId,
@@ -288,12 +384,11 @@ export const toolEditFile: ToolHandler = async (userId, args) => {
     contentLength: content.length,
     source: "system",
     ok: wroteOk,
-    error: wroteOk ? undefined : `HTTP ${resp.status}`,
+    error: wroteOk ? undefined : writeError,
   }).catch(() => {});
 
   if (!wroteOk) {
-    const text = await resp.text().catch(() => "Unknown error");
-    return fail(`Failed to write file: ${text}`);
+    return fail(`Failed to write file: ${writeError}`);
   }
 
   const changeRecordId = `change-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1111,6 +1206,15 @@ export const toolBrowserTest: ToolHandler = async (_userId, args) => {
   }
 };
 
+// ─── Extended tool handlers (imported from separate file) ───────
+import {
+  toolGitDiff, toolGitLog, toolCreateCheckpoint, toolRestoreCheckpoint,
+  toolDeleteFile, toolCreateDirectory, toolRenameFile, toolApplyPatch,
+  toolStartPreviewServer, toolListProjects, toolCreateProject, toolSwitchProject,
+  toolMemorySearch, toolRunCommand, toolWebSearch, toolWebFetch,
+  toolGithubSearchCode, toolGithubListPullRequests, toolGithubReadFile,
+} from "@/lib/project-tools/extended-handlers";
+
 // ─── Registry ───────────────────────────────────────────────────
 
 /**
@@ -1147,6 +1251,26 @@ export const PROJECT_TOOLS: Record<string, {
   remember_project_context: { handler: toolRememberProjectContext, metadata: { projectScoped: true, mutating: true, readOnly: false } },
   request_approval: { handler: toolRequestApproval, metadata: { projectScoped: false, mutating: false, readOnly: false } },
   browser_test: { handler: toolBrowserTest, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  // Extended tools
+  git_diff: { handler: toolGitDiff, metadata: { projectScoped: true, mutating: false, readOnly: true } },
+  git_log: { handler: toolGitLog, metadata: { projectScoped: true, mutating: false, readOnly: true } },
+  create_checkpoint: { handler: toolCreateCheckpoint, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  restore_checkpoint: { handler: toolRestoreCheckpoint, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  delete_file: { handler: toolDeleteFile, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  create_directory: { handler: toolCreateDirectory, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  rename_file: { handler: toolRenameFile, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  apply_patch: { handler: toolApplyPatch, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  start_preview_server: { handler: toolStartPreviewServer, metadata: { projectScoped: true, mutating: true, readOnly: false } },
+  list_projects: { handler: toolListProjects, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  create_project: { handler: toolCreateProject, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  switch_project: { handler: toolSwitchProject, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  memory_search: { handler: toolMemorySearch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  run_command: { handler: toolRunCommand, metadata: { projectScoped: true, mutating: false, readOnly: false } },
+  web_search: { handler: toolWebSearch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  web_fetch: { handler: toolWebFetch, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  github_search_code: { handler: toolGithubSearchCode, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  github_list_pull_requests: { handler: toolGithubListPullRequests, metadata: { projectScoped: true, mutating: false, readOnly: true } },
+  github_read_file: { handler: toolGithubReadFile, metadata: { projectScoped: true, mutating: false, readOnly: true } },
 };
 
 /**

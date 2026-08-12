@@ -53,6 +53,33 @@ export const TOOL_NAMES = [
   // tool response. Unlike the async browser_*_job tools, this blocks
   // the Vapi call until the browser work is done.
   "browser_test",
+  // ── Group 1: Git diff, log, checkpoint, restore
+  "git_diff",
+  "git_log",
+  "create_checkpoint",
+  "restore_checkpoint",
+  // ── Group 2: File operations
+  "delete_file",
+  "create_directory",
+  "rename_file",
+  "apply_patch",
+  // ── Group 3: Preview server
+  "start_preview_server",
+  // ── Group 4: Project management
+  "list_projects",
+  "create_project",
+  "switch_project",
+  // ── Group 5: Memory search
+  "memory_search",
+  // ── Group 6: Run command (strict allowlist)
+  "run_command",
+  // ── Group 7: Web search and fetch
+  "web_search",
+  "web_fetch",
+  // ── Group 8: GitHub read/search/PR-list
+  "github_search_code",
+  "github_list_pull_requests",
+  "github_read_file",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 

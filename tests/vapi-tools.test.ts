@@ -109,11 +109,11 @@ describe("isSafeToolName", () => {
   });
 
   it("rejects unknown tools", () => {
-    expect(isSafeToolName("delete_file")).toBe(false);
-    expect(isSafeToolName("run_command")).toBe(false);
     expect(isSafeToolName("deploy")).toBe(false);
     expect(isSafeToolName("")).toBe(false);
     expect(isSafeToolName("exec")).toBe(false);
+    expect(isSafeToolName("rm_rf")).toBe(false);
+    expect(isSafeToolName("shell_injection")).toBe(false);
   });
 });
 

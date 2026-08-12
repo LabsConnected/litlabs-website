@@ -683,6 +683,283 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
       required: ["url"],
     },
   },
+
+  // ── Group 1: Git diff, log, checkpoint, restore ──
+  git_diff: {
+    name: "git_diff",
+    description:
+      "Show uncommitted changes in the project workspace. Returns the diff output and file count. " +
+      "Set staged=true to see only staged changes. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        staged: { type: "boolean", description: "If true, show only staged (cached) changes." },
+      },
+      required: ["project_id"],
+    },
+  },
+  git_log: {
+    name: "git_log",
+    description:
+      "Show recent commit history. Returns a list of commits with SHA and message. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        max_count: { type: "integer", description: "Max commits to return (1-50, default 10)." },
+      },
+      required: ["project_id"],
+    },
+  },
+  create_checkpoint: {
+    name: "create_checkpoint",
+    description:
+      "Create a git checkpoint (commit) in the workspace. Stages all changes and commits with a 'checkpoint:' prefix. " +
+      "Use this before making risky changes so you can roll back.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        label: { type: "string", description: "Short label for the checkpoint (min 2 chars)." },
+        description: { type: "string", description: "Optional longer description." },
+      },
+      required: ["project_id", "label"],
+    },
+  },
+  restore_checkpoint: {
+    name: "restore_checkpoint",
+    description:
+      "Restore the workspace to a previous commit using git reset --hard. " +
+      "This is DESTRUCTIVE — uncommitted changes will be lost. Use the SHA from git_log or create_checkpoint.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        sha: { type: "string", description: "The commit hash to restore to (7-40 hex chars)." },
+      },
+      required: ["project_id", "sha"],
+    },
+  },
+
+  // ── Group 2: File operations ──
+  delete_file: {
+    name: "delete_file",
+    description:
+      "Delete a file or directory from the project workspace. Mutating — use with care. " +
+      "Protected paths (.env, .git, node_modules, etc.) are blocked.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        path: { type: "string", description: "The file or directory path to delete." },
+      },
+      required: ["project_id", "path"],
+    },
+  },
+  create_directory: {
+    name: "create_directory",
+    description: "Create a new directory in the project workspace (mkdir -p).",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        path: { type: "string", description: "The directory path to create." },
+      },
+      required: ["project_id", "path"],
+    },
+  },
+  rename_file: {
+    name: "rename_file",
+    description: "Rename or move a file/directory in the workspace. Both paths must be safe (no protected paths).",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        old_path: { type: "string", description: "The current path." },
+        new_path: { type: "string", description: "The new path." },
+      },
+      required: ["project_id", "old_path", "new_path"],
+    },
+  },
+  apply_patch: {
+    name: "apply_patch",
+    description:
+      "Apply a unified diff patch to the workspace using git apply. " +
+      "Use this for targeted edits to multiple files. The patch must apply cleanly or it will be rejected.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        patch: { type: "string", description: "Unified diff patch content (max 50000 chars)." },
+      },
+      required: ["project_id", "patch"],
+    },
+  },
+
+  // ── Group 3: Preview server ──
+  start_preview_server: {
+    name: "start_preview_server",
+    description:
+      "Start or restart the dev server in the project workspace. " +
+      "Boots the dev server on port 3000 and probes it for readiness. " +
+      "Use this before browser_test to ensure the app is running.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+      },
+      required: ["project_id"],
+    },
+  },
+
+  // ── Group 4: Project management ──
+  list_projects: {
+    name: "list_projects",
+    description:
+      "List all projects for the owner. Returns project IDs, names, repositories, and workspace status. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  create_project: {
+    name: "create_project",
+    description:
+      "Create a new blank project. Requires a name and optional template ID. " +
+      "Valid templates: nextjs-basic, react-basic, html-blank, node-basic.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Project name (min 2 chars)." },
+        template_id: { type: "string", description: "Template: nextjs-basic, react-basic, html-blank, node-basic. Defaults to nextjs-basic." },
+      },
+      required: ["name"],
+    },
+  },
+  switch_project: {
+    name: "switch_project",
+    description:
+      "Set the owner's active project. Future tool calls will use this project by default.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID to switch to." },
+      },
+      required: ["project_id"],
+    },
+  },
+
+  // ── Group 5: Memory search ──
+  memory_search: {
+    name: "memory_search",
+    description:
+      "Search saved memories for the user/project. Returns matching memory entries with content and type. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query." },
+        project_id: { type: "string", description: "Optional project ID to scope the search." },
+        limit: { type: "integer", description: "Max results (1-20, default 5)." },
+      },
+      required: ["query"],
+    },
+  },
+
+  // ── Group 6: Run command ──
+  run_command: {
+    name: "run_command",
+    description:
+      "Run a safe command in the project workspace. Only allowlisted commands are permitted " +
+      "(pnpm install/add/remove, npm run, npx tsc/eslint/pretier/vitest, git status/branch/log/diff, ls, cat, grep, rg, etc.). " +
+      "Shell metacharacters, force flags, rm, sudo, and git push are NOT allowed. " +
+      "Use request_approval for commands outside the allowlist.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        command: { type: "string", description: "The command to run (max 500 chars, must match allowlist)." },
+        timeout_ms: { type: "integer", description: "Timeout in ms (1000-30000, default 15000)." },
+      },
+      required: ["project_id", "command"],
+    },
+  },
+
+  // ── Group 7: Web search and fetch ──
+  web_search: {
+    name: "web_search",
+    description:
+      "Search the web for information. Returns titles, URLs, and snippets. " +
+      "Use this to look up documentation, error messages, or API references. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query." },
+        max_results: { type: "integer", description: "Max results (1-10, default 5)." },
+      },
+      required: ["query"],
+    },
+  },
+  web_fetch: {
+    name: "web_fetch",
+    description:
+      "Fetch a URL and return its text content. HTML is stripped to plain text. " +
+      "Internal/private URLs are blocked (SSRF protection). Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The URL to fetch (http or https)." },
+        max_chars: { type: "integer", description: "Max chars to return (500-20000, default 4000)." },
+      },
+      required: ["url"],
+    },
+  },
+
+  // ── Group 8: GitHub read/search/PR-list ──
+  github_search_code: {
+    name: "github_search_code",
+    description:
+      "Search code on GitHub. If a project_id is provided, scopes the search to that repository. " +
+      "Requires a connected GitHub account. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query." },
+        project_id: { type: "string", description: "Optional project ID to scope to the project's repo." },
+      },
+      required: ["query"],
+    },
+  },
+  github_list_pull_requests: {
+    name: "github_list_pull_requests",
+    description:
+      "List pull requests for the project's GitHub repository. Returns PR numbers, titles, states, and URLs. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        state: { type: "string", description: "PR state: open, closed, or all. Defaults to open." },
+        max_results: { type: "integer", description: "Max PRs to return (1-30, default 10)." },
+      },
+      required: ["project_id"],
+    },
+  },
+  github_read_file: {
+    name: "github_read_file",
+    description:
+      "Read a file from GitHub (not the workspace). Returns file content or directory listing. " +
+      "Requires a connected GitHub account. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "The project ID." },
+        path: { type: "string", description: "The file path in the repository." },
+        branch: { type: "string", description: "Optional branch name. Defaults to the repo's default branch." },
+      },
+      required: ["project_id", "path"],
+    },
+  },
 };
 
 /** Ordered list of all tool names, mirroring TOOL_NAMES. */
@@ -803,6 +1080,101 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
     { type: "request-complete", content: "Done. I've loaded the page and captured the results." },
     { type: "request-failed", content: "I couldn't test that page — the browser service may be unavailable." },
     { type: "request-response-delayed", content: "The page is still loading. Hang tight." },
+  ],
+  // ── Group 1: Git diff, log, checkpoint, restore ──
+  git_diff: [
+    { type: "request-start", content: "Checking what's changed in your project." },
+    { type: "request-failed", content: "I couldn't get the diff right now." },
+  ],
+  git_log: [
+    { type: "request-start", content: "Looking up your recent commit history." },
+    { type: "request-failed", content: "I couldn't retrieve the commit log." },
+  ],
+  create_checkpoint: [
+    { type: "request-start", content: "Creating a checkpoint for you." },
+    { type: "request-complete", content: "Done. I've created a checkpoint you can roll back to." },
+    { type: "request-failed", content: "I couldn't create the checkpoint." },
+  ],
+  restore_checkpoint: [
+    { type: "request-start", content: "Restoring your project to the previous checkpoint." },
+    { type: "request-complete", content: "Done. Your project is back to that checkpoint." },
+    { type: "request-failed", content: "I couldn't restore to that checkpoint." },
+  ],
+  // ── Group 2: File operations ──
+  delete_file: [
+    { type: "request-start", content: "Deleting that file for you." },
+    { type: "request-complete", content: "Done. File deleted." },
+    { type: "request-failed", content: "I couldn't delete that file." },
+  ],
+  create_directory: [
+    { type: "request-start", content: "Creating that directory." },
+    { type: "request-complete", content: "Done. Directory created." },
+    { type: "request-failed", content: "I couldn't create that directory." },
+  ],
+  rename_file: [
+    { type: "request-start", content: "Renaming that file." },
+    { type: "request-complete", content: "Done. File renamed." },
+    { type: "request-failed", content: "I couldn't rename that file." },
+  ],
+  apply_patch: [
+    { type: "request-start", content: "Applying that patch now." },
+    { type: "request-complete", content: "Done. Patch applied successfully." },
+    { type: "request-failed", content: "The patch didn't apply cleanly. I'll tell you what went wrong." },
+  ],
+  // ── Group 3: Preview server ──
+  start_preview_server: [
+    { type: "request-start", content: "Starting your preview server." },
+    { type: "request-complete", content: "Done. Your preview server is running." },
+    { type: "request-failed", content: "I couldn't start the preview server." },
+    { type: "request-response-delayed", content: "The server is still starting up. Give it a moment." },
+  ],
+  // ── Group 4: Project management ──
+  list_projects: [
+    { type: "request-start", content: "Listing your projects." },
+    { type: "request-failed", content: "I couldn't list your projects right now." },
+  ],
+  create_project: [
+    { type: "request-start", content: "Creating a new project for you." },
+    { type: "request-complete", content: "Done. I've created the new project." },
+    { type: "request-failed", content: "I couldn't create the project." },
+  ],
+  switch_project: [
+    { type: "request-start", content: "Switching your active project." },
+    { type: "request-complete", content: "Done. I've switched your active project." },
+    { type: "request-failed", content: "I couldn't switch to that project." },
+  ],
+  // ── Group 5: Memory search ──
+  memory_search: [
+    { type: "request-start", content: "Searching my memory for that." },
+    { type: "request-failed", content: "I couldn't search my memory right now." },
+  ],
+  // ── Group 6: Run command ──
+  run_command: [
+    { type: "request-start", content: "Running that command for you." },
+    { type: "request-complete", content: "Done. The command finished." },
+    { type: "request-failed", content: "I couldn't run that command — it may not be in the allowlist." },
+  ],
+  // ── Group 7: Web ──
+  web_search: [
+    { type: "request-start", content: "Searching the web for that." },
+    { type: "request-failed", content: "I couldn't search the web right now." },
+  ],
+  web_fetch: [
+    { type: "request-start", content: "Fetching that page for you." },
+    { type: "request-failed", content: "I couldn't fetch that page." },
+  ],
+  // ── Group 8: GitHub ──
+  github_search_code: [
+    { type: "request-start", content: "Searching GitHub for that code." },
+    { type: "request-failed", content: "I couldn't search GitHub right now." },
+  ],
+  github_list_pull_requests: [
+    { type: "request-start", content: "Listing your pull requests." },
+    { type: "request-failed", content: "I couldn't list your pull requests." },
+  ],
+  github_read_file: [
+    { type: "request-start", content: "Reading that file from GitHub." },
+    { type: "request-failed", content: "I couldn't read that file from GitHub." },
   ],
 };
 
