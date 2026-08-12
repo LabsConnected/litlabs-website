@@ -148,18 +148,30 @@ export default defineAgent({
       metadata?.agentId ?? "(none)",
     );
 
-    // Voice pipeline models live on AgentSession (v1.6.2 architecture).
+    // Voice pipeline: OpenAI Realtime API (gpt-4o-realtime-preview).
+    // Single streaming WebSocket handles STT + LLM + TTS together — audio in,
+    // audio out with ~300-500ms to first audio byte (vs 2-5s with the old
+    // 3-stage Whisper → gpt-4o-mini → gpt-4o-mini-tts batch pipeline).
+    // inputAudioTranscription uses whisper-1 so user transcripts still arrive
+    // via the UserInputTranscribed event for the data channel.
     const session = new AgentSession({
-      stt: new openai.STT({ model: "whisper-1" }),
-      llm: new openai.LLM({ model: "gpt-4o-mini", temperature: 0.7 }),
-      tts: new openai.TTS({
-        model: "gpt-4o-mini-tts",
-        voice: (metadata?.voice as openai.TTSOptions["voice"]) || "alloy",
-        instructions: "Speak as LiTT — confident, concise, technically precise.",
+      llm: new openai.realtime.RealtimeModel({
+        model: "gpt-4o-realtime-preview",
+        voice: (metadata?.voice as openai.realtime.Voice) || "alloy",
+        inputAudioTranscription: { model: "whisper-1" },
+        // Server-side VAD with 500ms silence → endpoint. The Realtime API
+        // handles turn detection natively; we keep the same 500ms silence
+        // duration as the old endpointing config.
+        turnDetection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+        },
       }),
-      // 500ms endpointing delay + barge-in (interruption) enabled.
+      // Barge-in (interruption) still enabled — the Realtime API supports
+      // native interruption via truncate.
       turnHandling: {
-        endpointing: { minDelay: 500 },
         interruption: { enabled: true },
       },
     });
