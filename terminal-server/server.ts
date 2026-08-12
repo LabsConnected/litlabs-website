@@ -69,7 +69,15 @@ function requireInternalServiceAuth(req: AuthenticatedRequest, res: Response, ne
 }
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
-const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
+const ALLOWED_ORIGINS = [
+  ...(process.env.TERMINAL_ALLOWED_ORIGIN || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  // Always allow local development origins
+  "http://localhost:3000",
+  "http://localhost:3001",
+].filter((v, i, arr) => arr.indexOf(v) === i); // dedupe
 const WORKSPACE_ROOT = process.env.TERMINAL_WORKSPACE_ROOT || resolve("/tmp/littree-workspaces");
 const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
 
@@ -155,14 +163,14 @@ if (
 mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 const app = express();
-app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }));
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGIN,
+    origin: ALLOWED_ORIGINS,
     credentials: true,
   },
   pingTimeout: 60000,
@@ -237,6 +245,7 @@ app.get("/health", async (_req, res) => {
     service: "terminal-server",
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
+    activeSessions: sessions.size,
     timestamp: new Date().toISOString(),
     readiness: allReady ? "ready" : "not_ready",
     checks: {
@@ -1156,7 +1165,7 @@ io.on("connection", (socket) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🔥 LiTTree Terminal Server running on http://0.0.0.0:${PORT}`);
-  console.log(`   Allowed origin: ${ALLOWED_ORIGIN}`);
+  console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
 });
