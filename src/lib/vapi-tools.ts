@@ -28,6 +28,10 @@ export const TOOL_NAMES = [
   "browser_job_status",
   "browser_cancel_job",
   "browser_approve_job",
+  // Owner notification tools — send SMS or email to the site owner.
+  // These use the owner's contact info configured in the environment.
+  "send_sms",
+  "send_email",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -96,6 +100,11 @@ export function isSafeWorkspacePath(value: string): boolean {
   if (normalized.split("/").some((segment) => segment === ".." || segment.includes("\u0000"))) {
     return false;
   }
+
+  // Reject shell metacharacters — paths are used in workspace commands
+  // (e.g. git diff) and must never be parsed as shell syntax.
+  // Blocked: ; ` $ ( ) | & < > \n \r and ${...}
+  if (/[;`$()|&<>\n\r]/.test(normalized)) return false;
 
   // Reject blocked patterns
   if (BLOCKED_PATH_PATTERNS.some((re) => re.test(normalized))) return false;

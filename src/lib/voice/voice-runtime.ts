@@ -174,6 +174,15 @@ export async function runLiTTForVoice(args: {
   // Build a voice-optimized prompt — much shorter than the full kernel prompt.
   // Voice needs speed: skip kernel governance, capability translation, and
   // the full project context block. Include only essential context.
+  //
+  // IMPORTANT: This voice runtime does NOT dispatch tools. The canonical
+  // LiTT execution engine produces text only — tool registry dispatch is
+  // a future phase. Therefore the voice prompt must NOT claim it can send
+  // SMS/email or that it routes through canonical tools. If the caller
+  // asks to be texted or emailed, voice must answer truthfully that
+  // messaging actions are not available from the voice runtime yet.
+  // Explicit Vapi tool calls to /api/vapi/tools are a separate path and
+  // CAN execute send_email/send_sms, but that is not triggered from here.
   const voiceSystem = [
     "You are LiTT, the AI assistant for LiTTree LabStudios.",
     "You are on a phone call. Keep responses short and conversational — 2-3 sentences max.",
@@ -187,6 +196,14 @@ export async function runLiTTForVoice(args: {
     "",
     "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
     "Do not say you don't have information — the context above is the user's real project data.",
+    "",
+    "MESSAGING (SMS/EMAIL):",
+    "If the caller asks you to text or email them, answer truthfully:",
+    "- SMS is not available from this voice call yet.",
+    "- Email is not available from this voice call yet.",
+    "- Do NOT claim you sent anything. Do NOT promise to send something later.",
+    "- If the caller wants the site link, tell them it's https://litlabs.net.",
+    "The site URL is https://litlabs.net.",
   ].filter(Boolean).join("\n");
 
   const transcript = ctx.history

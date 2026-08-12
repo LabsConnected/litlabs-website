@@ -245,7 +245,7 @@ async function toolReadFile(
   });
 }
 
-/** edit_file — write file content in the project workspace (audited + git diff). */
+/** edit_file — write file content in the project workspace (audited). */
 async function toolEditFile(
   userId: string,
   projectId: string,
@@ -289,16 +289,14 @@ async function toolEditFile(
     return fail(`Failed to write file: ${text}`);
   }
 
-  // Capture a git diff for the change record
-  let gitDiff: string | null = null;
-  try {
-    const diffResult = await runWorkspaceCommand(workspaceId, userId, `git diff -- ${path}`);
-    gitDiff = String(diffResult.stdout ?? "").trim() || null;
-  } catch {
-    // Diff is best-effort; the write still succeeded
-  }
-
-  // Record a structured change record (never logs file contents)
+  // Record a structured change record (never logs file contents).
+  // Note: git diff preview is intentionally omitted on this path.
+  // The terminal server's exec endpoint runs commands through a shell
+  // (bash -c / PowerShell -Command), so interpolating a user-controlled
+  // path into a git diff command would be a command-injection risk.
+  // A future argv-safe exec protocol on the terminal server could
+  // restore diff previews; until then, the audit record captures the
+  // path, change summary, and content length without a diff.
   const changeRecordId = `change-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   if (supabaseAdmin) {
     try {
@@ -314,8 +312,8 @@ async function toolEditFile(
           path,
           changeSummary,
           contentLength: content.length,
-          diffLines: gitDiff ? gitDiff.split("\n").length : 0,
-          diffPreview: gitDiff ? gitDiff.slice(0, 500) : null,
+          diffLines: 0,
+          diffPreview: null,
           requestedBy: "vapi",
           createdAt: new Date().toISOString(),
         },
@@ -330,7 +328,7 @@ async function toolEditFile(
     changeSummary,
     changeRecordId,
     bytes: content.length,
-    diffLines: gitDiff ? gitDiff.split("\n").length : 0,
+    diffLines: 0,
   });
 }
 
@@ -654,6 +652,126 @@ async function toolBrowserApproveJob(userId: string, args: Record<string, unknow
   });
 }
 
+// ─── Owner notification tools ───────────────────────────────────
+
+/**
+ * Allowed recipient allowlist for SMS/email. If set, only these
+ * recipients (plus the configured owner) are permitted. If unset,
+ * only the owner destination is allowed — no arbitrary recipients.
+ *
+ * Format: comma-separated E.164 numbers or email addresses.
+ * Example: LITTLABS_ALLOWED_RECIPIENTS="+12314285411,+15555555555"
+ *          LITTLABS_ALLOWED_RECIPIENTS="owner@example.com,team@example.com"
+ */
+function getAllowedRecipients(): Set<string> {
+  const raw = process.env.LITTLABS_ALLOWED_RECIPIENTS ?? "";
+  if (!raw) return new Set();
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+/**
+ * Check if a destination is allowed: must be the configured owner
+ * or in the explicit allowlist.
+ */
+function isAllowedRecipient(destination: string, ownerDest: string): boolean {
+  if (destination === ownerDest) return true;
+  return getAllowedRecipients().has(destination);
+}
+
+/**
+ * send_sms — send an SMS to the site owner.
+ *
+ * SECURITY: Only the configured owner phone (LITTLABS_OWNER_PHONE) or
+ * an explicitly allowlisted recipient (LITTLABS_ALLOWED_RECIPIENTS) may
+ * receive SMS. Caller-supplied arbitrary numbers are rejected.
+ *
+ * NOTE: SMS requires a Twilio-imported number in Vapi. The current
+ * Vapi number (+13239165462) only supports voice. This tool returns
+ * an honest failure until a Twilio number with SMS is imported.
+ */
+async function toolSendSms(_userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const message = str(args.message);
+  if (!message) return fail("send_sms requires a message.");
+
+  const ownerPhone = process.env.LITTLABS_OWNER_PHONE ?? "";
+  if (!ownerPhone) return fail("No owner phone number configured (LITTLABS_OWNER_PHONE missing).");
+
+  // Resolve destination: default to owner, reject arbitrary alternates
+  const requestedDest = str(args.to_number) || ownerPhone;
+  if (!isAllowedRecipient(requestedDest, ownerPhone)) {
+    return fail(
+      `Rejected: destination ${requestedDest} is not the configured owner or in the allowlist. ` +
+      "SMS may only be sent to the owner's phone number."
+    );
+  }
+
+  // SMS via Vapi requires a Twilio number. The current Vapi-provided
+  // number doesn't support SMS. Return honest failure.
+  return fail(
+    "SMS sending is not available yet — the LiTT phone number doesn't support text messaging. " +
+    "A Twilio number with SMS capability needs to be imported into Vapi. " +
+    "Tell the caller honestly that texting is not available yet."
+  );
+}
+
+/**
+ * send_email — send an email to the site owner via Resend.
+ *
+ * SECURITY: Only the configured owner email (LITTLABS_OWNER_EMAIL) or
+ * an explicitly allowlisted recipient may receive email. Caller-supplied
+ * arbitrary addresses are rejected.
+ *
+ * Returns honest failure if RESEND_API_KEY is not configured.
+ */
+async function toolSendEmail(_userId: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const subject = str(args.subject) || "Message from LiTT";
+  const body = str(args.body);
+  if (!body) return fail("send_email requires a body.");
+
+  const ownerEmail = process.env.LITTLABS_OWNER_EMAIL ?? "";
+  if (!ownerEmail) return fail("No owner email configured (LITTLABS_OWNER_EMAIL missing).");
+
+  // Resolve destination: default to owner, reject arbitrary alternates
+  const requestedDest = str(args.to_email) || ownerEmail;
+  if (!isAllowedRecipient(requestedDest, ownerEmail)) {
+    return fail(
+      `Rejected: destination ${requestedDest} is not the configured owner or in the allowlist. ` +
+      "Email may only be sent to the owner's email address."
+    );
+  }
+
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) {
+    return fail("Email sending is not configured (RESEND_API_KEY missing). Tell the caller email is not available yet.");
+  }
+
+  try {
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "LiTT <noreply@litlabs.net>",
+        to: requestedDest,
+        subject,
+        text: body,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "unknown error");
+      return fail(`Email send failed (${resp.status}): ${errText.slice(0, 200)}`);
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    return ok(null, `Email sent to ${requestedDest}.`, { to: requestedDest, subject, messageId: data.id ?? null });
+  } catch (err) {
+    return fail(`Email send error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────
 
 async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
@@ -721,6 +839,13 @@ async function dispatch(call: ToolCall, userId: string): Promise<ToolResult> {
 
     case "browser_approve_job":
       return toolBrowserApproveJob(userId, args);
+
+    // ── Owner notification tools ───────────────────────────────
+    case "send_sms":
+      return toolSendSms(userId, args);
+
+    case "send_email":
+      return toolSendEmail(userId, args);
 
     default:
       return fail(`Unknown tool "${call.name}". Valid tools: ${TOOL_NAMES.join(", ")}.`);

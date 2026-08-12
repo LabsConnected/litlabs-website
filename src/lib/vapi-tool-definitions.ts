@@ -353,6 +353,62 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
       required: ["job_id"],
     },
   },
+
+  // ─── Owner notification tools ───────────────────────────────────
+
+  send_sms: {
+    name: "send_sms",
+    description:
+      "Send an SMS text message to the site owner or a specified number. " +
+      "Use this when the caller asks to be texted a link, file info, or any other content. " +
+      "The message is sent from the LiTT phone number (+13239165462). " +
+      "Returns success or failure — never claim the SMS was sent unless this returns success.",
+    parameters: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "The SMS message body (max 1600 characters).",
+        },
+        to_number: {
+          type: "string",
+          description:
+            "Destination phone number in E.164 format (e.g. +12312485411). " +
+            "If omitted, defaults to the owner's configured phone number.",
+        },
+      },
+      required: ["message"],
+    },
+  },
+
+  send_email: {
+    name: "send_email",
+    description:
+      "Send an email to the site owner or a specified address. " +
+      "Use this when the caller asks to be emailed a link, file, or info. " +
+      "Returns success or failure — never claim the email was sent unless this returns success. " +
+      "If email sending is not configured, returns a clear failure (tell the caller honestly).",
+    parameters: {
+      type: "object",
+      properties: {
+        subject: {
+          type: "string",
+          description: "Email subject line. Defaults to 'Message from LiTT'.",
+        },
+        body: {
+          type: "string",
+          description: "The email body (plain text).",
+        },
+        to_email: {
+          type: "string",
+          description:
+            "Destination email address. " +
+            "If omitted, defaults to the owner's configured email.",
+        },
+      },
+      required: ["body"],
+    },
+  },
 };
 
 /** Ordered list of all tool names, mirroring TOOL_NAMES. */
@@ -415,6 +471,16 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
     { type: "request-start", content: "Approving that browser job now." },
     { type: "request-complete", content: "Approved. The browser job will continue with the high-risk action." },
     { type: "request-failed", content: "I couldn't approve that job — it may not be awaiting approval." },
+  ],
+  send_sms: [
+    { type: "request-start", content: "Sending you a text now." },
+    { type: "request-complete", content: "Done. I've sent you a text." },
+    { type: "request-failed", content: "I couldn't send the text. The messaging service may be unavailable." },
+  ],
+  send_email: [
+    { type: "request-start", content: "Sending you an email now." },
+    { type: "request-complete", content: "Done. I've sent you an email." },
+    { type: "request-failed", content: "I couldn't send the email — email sending may not be configured yet." },
   ],
 };
 
