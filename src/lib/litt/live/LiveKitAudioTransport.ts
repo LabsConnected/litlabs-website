@@ -68,13 +68,16 @@ export interface LiveKitTransportEvents {
   onToolResult: (result: { name: string; callId: string; result: unknown }) => void;
   onError: (error: { code: string; message: string; retryable: boolean }) => void;
   onConnectionQualityChange: (quality: ConnectionQuality) => void;
+  /** Fired when the microphone track is actually published to LiveKit. */
+  onMicrophonePublished: () => void;
+  /** Fired when a LiTT agent worker (ParticipantKind.AGENT) joins the room. */
+  onAgentJoined: () => void;
 }
 
 // ─── Transport ──────────────────────────────────────────────────────────────
 
 export class LiveKitAudioTransport {
   private room: Room | null = null;
-  private micStream: MediaStream | null = null;
   private audioEl: HTMLAudioElement | null = null;
   private state: TransportState = "disconnected";
   private agentState: AgentState = "idle";
@@ -82,6 +85,10 @@ export class LiveKitAudioTransport {
   private events: Partial<LiveKitTransportEvents> = {};
   private reconnectAttempts = 0;
   private isIntentionalDisconnect = false;
+  /** True only after a Track.Source.Microphone publication is verified. */
+  private micPublished = false;
+  /** True only after a ParticipantKind.AGENT participant is in the room. */
+  private agentJoined = false;
 
   // ─── Event handler registration ───────────────────────────────────────
 
@@ -95,6 +102,16 @@ export class LiveKitAudioTransport {
 
   getAgentState(): AgentState {
     return this.agentState;
+  }
+
+  /** True only if the microphone track is actually published to LiveKit. */
+  isMicrophonePublished(): boolean {
+    return this.micPublished;
+  }
+
+  /** True only if a LiTT agent worker (ParticipantKind.AGENT) is in the room. */
+  isAgentJoined(): boolean {
+    return this.agentJoined;
   }
 
   // ─── Connection ───────────────────────────────────────────────────────
@@ -146,13 +163,29 @@ export class LiveKitAudioTransport {
         autoSubscribe: true,
       });
 
-      // 4. Publish microphone (the agent worker needs to receive it)
+      // 4. Publish microphone through LiveKit — LiveKit is the SINGLE owner
+      //    of microphone audio. Do NOT call getUserMedia separately.
+      //    setMicrophoneEnabled(true) acquires + publishes the mic track.
       try {
-        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         await this.room.localParticipant.setMicrophoneEnabled(true);
-      } catch {
-        // Mic permission denied — connection can still proceed for TTS-only
-        this.emitError("microphone_permission_denied", "Microphone access denied. Voice input will not work.", false);
+
+        // Verify the microphone track was actually published
+        const publication = this.room.localParticipant.getTrackPublication(
+          Track.Source.Microphone,
+        );
+
+        if (!publication?.track) {
+          throw new Error("LiveKit microphone was not published");
+        }
+
+        this.micPublished = true;
+        this.events.onMicrophonePublished?.();
+      } catch (err) {
+        // Mic permission denied or publish failed — connection can still
+        // proceed for TTS-only, but voice input will NOT work.
+        this.micPublished = false;
+        const msg = err instanceof Error ? err.message : "Microphone access denied";
+        this.emitError("microphone_permission_denied", msg, false);
       }
 
       // 5. Set up audio element for remote (agent) audio playback
@@ -160,6 +193,10 @@ export class LiveKitAudioTransport {
       this.audioEl.autoplay = true;
       this.audioEl.style.display = "none";
       document.body.appendChild(this.audioEl);
+
+      // 6. Check if the agent worker is already in the room (may have joined
+      //    before us if the room was reused)
+      this.checkForAgentParticipant();
 
       this.setState("connected");
       this.reconnectAttempts = 0;
@@ -185,20 +222,34 @@ export class LiveKitAudioTransport {
       this.audioEl = null;
     }
 
+    this.micPublished = false;
+    this.agentJoined = false;
     this.setState("disconnected");
   }
 
   // ─── Microphone ───────────────────────────────────────────────────────
+  // LiveKit is the SINGLE owner of microphone audio. Mute/unmute operates
+  // on the actual LiveKit publication, not a separate MediaStream.
 
   async startMicrophone(): Promise<void> {
     if (!this.room) return;
     try {
-      if (!this.micStream) {
-        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
       await this.room.localParticipant.setMicrophoneEnabled(true);
-    } catch {
-      this.emitError("microphone_permission_denied", "Microphone access denied.", false);
+
+      // Verify publication
+      const publication = this.room.localParticipant.getTrackPublication(
+        Track.Source.Microphone,
+      );
+      if (!publication?.track) {
+        throw new Error("LiveKit microphone was not published");
+      }
+
+      this.micPublished = true;
+      this.events.onMicrophonePublished?.();
+    } catch (err) {
+      this.micPublished = false;
+      const msg = err instanceof Error ? err.message : "Microphone access denied";
+      this.emitError("microphone_permission_denied", msg, false);
     }
   }
 
@@ -206,17 +257,22 @@ export class LiveKitAudioTransport {
     if (this.room) {
       this.room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
     }
-    if (this.micStream) {
-      this.micStream.getTracks().forEach((t) => t.stop());
-      this.micStream = null;
-    }
+    this.micPublished = false;
   }
 
-  setMuted(muted: boolean): void {
-    if (this.micStream) {
-      this.micStream.getTracks().forEach((t) => {
-        t.enabled = !muted;
-      });
+  /** Mute/unmute via the actual LiveKit microphone publication. */
+  async setMuted(muted: boolean): Promise<void> {
+    if (!this.room) return;
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(!muted);
+      // Update micPublished state — if we just unmuted, verify the track exists
+      if (!muted) {
+        const pub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        this.micPublished = !!pub?.track;
+        if (this.micPublished) this.events.onMicrophonePublished?.();
+      }
+    } catch {
+      // non-fatal
     }
   }
 
@@ -315,9 +371,29 @@ export class LiveKitAudioTransport {
     // Participant connected (the agent worker joining)
     this.room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
       if (participant.kind === ParticipantKind.AGENT) {
-        // Agent worker has joined — we're ready
+        this.agentJoined = true;
+        this.events.onAgentJoined?.();
       }
     });
+
+    // Participant disconnected — agent may have left
+    this.room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+      if (participant.kind === ParticipantKind.AGENT) {
+        this.agentJoined = false;
+      }
+    });
+  }
+
+  /** Check if an agent participant is already in the room (e.g. room reuse). */
+  private checkForAgentParticipant(): void {
+    if (!this.room) return;
+    for (const participant of this.room.remoteParticipants.values()) {
+      if (participant.kind === ParticipantKind.AGENT) {
+        this.agentJoined = true;
+        this.events.onAgentJoined?.();
+        return;
+      }
+    }
   }
 
   private handleDataMessage(payload: Uint8Array): void {

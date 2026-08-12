@@ -83,10 +83,18 @@ export async function POST(req: NextRequest) {
       apiKey,
       apiSecret,
     );
+    let dispatchError: string | null = null;
     try {
       await dispatchClient.createDispatch(roomName, agentName);
-    } catch {
-      // Dispatch may already exist for this room/agent — that's fine
+    } catch (err) {
+      // Dispatch may already exist for this room/agent — that's fine.
+      // But surface real errors (auth, network, config) so the browser
+      // knows the agent may not join. Don't silently swallow everything.
+      const msg = err instanceof Error ? err.message : String(err);
+      // "already exists" / "duplicate" errors are expected and safe to ignore
+      if (!/already|exist|duplicate/i.test(msg)) {
+        dispatchError = msg;
+      }
     }
 
     // Build the browser token
@@ -114,6 +122,8 @@ export async function POST(req: NextRequest) {
       token: jwt,
       url: livekitUrl,
       roomName,
+      agentDispatched: dispatchError === null,
+      ...(dispatchError ? { dispatchError } : {}),
     });
   } catch (err) {
     console.error("[livekit-token] error:", err);

@@ -48,6 +48,8 @@ export interface LiveConnectionIndicators {
   littAudio: ConnectionStatus;
   littVision: ConnectionStatus;
   frameStream: DeviceStatus;
+  /** True when the LiTT agent worker (ParticipantKind.AGENT) has joined the room. */
+  agentJoined: boolean;
 }
 
 // ---------------------------------------------------------------------------

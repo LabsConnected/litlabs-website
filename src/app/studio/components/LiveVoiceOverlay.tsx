@@ -176,6 +176,31 @@ export default function LiveVoiceOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Browser Back handling — first Back press closes LiTT Live and returns
+  // to Studio instead of leaving the site entirely. We push a history entry
+  // on mount and intercept popstate to end the session cleanly.
+  useEffect(() => {
+    window.history.pushState({ littLive: true }, "", window.location.href);
+
+    const handlePopState = () => {
+      session.end();
+      onEnd();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      // If we're closing without a Back press (e.g. hang up button), and
+      // our history entry is still on top, pop it so the user doesn't get
+      // a stale "littLive" entry on next Back.
+      if (window.history.state?.littLive) {
+        window.history.back();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync camera display state with indicators
   useEffect(() => {
     if (indicators.cameraPreview === "active") {
@@ -244,6 +269,8 @@ export default function LiveVoiceOverlay({
   const screenOn = indicators.screen === "active";
   const visionActive = indicators.littVision === "connected";
   const voiceActive = indicators.littAudio === "connected";
+  const micActive = indicators.microphone === "active" || indicators.microphone === "muted";
+  const agentJoined = indicators.agentJoined ?? false;
   const showEllipsis = littState !== "idle" && littState !== "error";
   const cameraVisible = cameraOn && cameraDisplay === "active";
 
@@ -330,14 +357,23 @@ export default function LiveVoiceOverlay({
           </div>
         </div>
 
-        {/* Top-right: Vision + Voice status */}
+        {/* Top-right: MIC / AGENT / VOICE / VISION status — truthful indicators */}
         <div className="absolute right-5 top-5 flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
-            VISION
+            MIC
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                visionActive ? "bg-emerald-400" : "bg-white/20",
+                isMuted ? "bg-red-400" : micActive ? "bg-emerald-400" : "bg-white/20",
+              )}
+            />
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+            AGENT
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                agentJoined ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-white/20",
               )}
             />
           </div>
@@ -346,7 +382,16 @@ export default function LiveVoiceOverlay({
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                voiceActive ? "bg-emerald-400" : "bg-white/20",
+                voiceActive ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-white/20",
+              )}
+            />
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wider text-white/50">
+            VISION
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                visionActive ? "bg-emerald-400" : "bg-white/20",
               )}
             />
           </div>

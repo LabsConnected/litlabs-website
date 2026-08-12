@@ -54,6 +54,7 @@ const IDLE_INDICATORS: LiveConnectionIndicators = {
   littAudio: "disconnected",
   littVision: "disconnected",
   frameStream: "inactive",
+  agentJoined: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,45 @@ export class LiTTRealtimeSessionController {
     this.emit({ type: "indicatorsChange", indicators: this.indicators });
   }
 
+  /**
+   * Mark littAudio as "connected" ONLY when all three are true:
+   *   1. LiveKit room is connected (transport state)
+   *   2. Microphone track is actually published
+   *   3. LiTT agent worker has joined the room
+   *
+   * This prevents false-green VOICE indicators where the room connects
+   * but the mic isn't published or the agent never joined.
+   */
+  private updateAudioConnectedState(): void {
+    if (!this.transport) return;
+
+    const roomConnected = this.transport.getState() === "connected";
+    const micPublished = this.transport.isMicrophonePublished();
+    const agentJoined = this.transport.isAgentJoined();
+
+    if (roomConnected && micPublished && agentJoined) {
+      // All three conditions met — voice is truly connected
+      if (this.indicators.littAudio !== "connected") {
+        this.updateIndicators({ littAudio: "connected" });
+        const hasVision = !!(this.cameraStream || this.screenStream);
+        const targetState = hasVision ? "live_audio_and_vision" : "live_audio";
+        if (this.state === "connecting" || this.state === "reconnecting" || this.state === "local_preview") {
+          this.setState(targetState);
+        }
+      }
+    } else if (roomConnected && !micPublished) {
+      // Room connected but mic not published — show "connecting" for audio
+      if (this.indicators.littAudio === "connecting" || this.indicators.littAudio === "disconnected") {
+        this.updateIndicators({ littAudio: "connecting" });
+      }
+    } else if (roomConnected && micPublished && !agentJoined) {
+      // Mic is published but agent hasn't joined yet — still connecting
+      if (this.indicators.littAudio === "connecting" || this.indicators.littAudio === "disconnected") {
+        this.updateIndicators({ littAudio: "connecting" });
+      }
+    }
+  }
+
   private emitError(kind: LiveSessionErrorKind, message: string, retryable: boolean) {
     const error: LiveSessionError = { kind, message, retryable };
     this.emit({ type: "error", error });
@@ -285,12 +325,14 @@ export class LiTTRealtimeSessionController {
     this.setState("requesting_permission");
 
     // 1. Acquire media streams
+    //    NOTE: Microphone is NOT acquired here anymore. LiveKit is the
+    //    single owner of mic audio — it acquires + publishes the track
+    //    via setMicrophoneEnabled(true) in the transport. Acquiring a
+    //    separate getUserMedia({audio:true}) stream here would create
+    //    competing mic ownership and false-green indicators.
     try {
       if (wantCamera) {
         await this.acquireCamera(this.facingMode);
-      }
-      if (wantMic) {
-        await this.acquireMicrophone();
       }
       if (wantScreen) {
         await this.acquireScreen();
@@ -310,10 +352,12 @@ export class LiTTRealtimeSessionController {
     }
 
     // We now have a local preview but are NOT connected to the model yet.
+    // Microphone status is set by the LiveKit transport after it actually
+    // publishes the mic track — not here.
     this.setState("local_preview");
     this.updateIndicators({
       cameraPreview: this.cameraStream ? "active" : "inactive",
-      microphone: this.micStream ? (this.isMuted ? "muted" : "active") : "inactive",
+      microphone: wantMic ? "active" : "inactive", // provisional — transport verifies
       screen: this.screenStream ? "active" : "inactive",
       littAudio: "disconnected",
       littVision: "disconnected",
@@ -436,12 +480,11 @@ export class LiTTRealtimeSessionController {
             this.connectionTimer = null;
           }
           this.reconnectAttempts = 0;
-          // Audio is connected via LiveKit
-          if (this.micStream) {
-            this.updateIndicators({ littAudio: "connected" });
-            const hasVision = !!(this.cameraStream || this.screenStream);
-            this.setState(hasVision ? "live_audio_and_vision" : "live_audio");
-          }
+          // Room is connected — but voice is NOT green until both:
+          //   1. Microphone is actually published (onMicrophonePublished)
+          //   2. LiTT agent worker has joined (onAgentJoined)
+          // Only update vision + state here; audio stays "connecting" until
+          // both conditions are met.
           this.logEvent("live_connected", {
             reconnect: this.reconnectAttempts > 0,
             attempt: this.reconnectAttempts,
@@ -449,6 +492,8 @@ export class LiTTRealtimeSessionController {
           });
           // Start sending vision frames if camera/screen is active
           this.startFrameSampling();
+          // Check if we can mark audio connected yet
+          this.updateAudioConnectedState();
         } else if (state === "reconnecting") {
           this.setState("reconnecting");
         } else if (state === "disconnected" && !this.isIntentionalClose) {
@@ -474,6 +519,19 @@ export class LiTTRealtimeSessionController {
             this.setState("failed");
           }
         }
+      },
+
+      onMicrophonePublished: () => {
+        // Mic track is actually published to LiveKit — update indicator
+        this.updateIndicators({ microphone: this.isMuted ? "muted" : "active" });
+        this.updateAudioConnectedState();
+      },
+
+      onAgentJoined: () => {
+        // LiTT agent worker has joined the room
+        this.logEvent("live_agent_joined");
+        this.updateIndicators({ agentJoined: true });
+        this.updateAudioConnectedState();
       },
 
       onAgentStateChange: (agentState: AgentState) => {
@@ -1263,9 +1321,14 @@ export class LiTTRealtimeSessionController {
   // Controls
   // -------------------------------------------------------------------------
 
-  /** Toggle microphone mute */
+  /** Toggle microphone mute — operates on the actual LiveKit publication */
   toggleMute(): void {
     this.isMuted = !this.isMuted;
+    // Use the LiveKit transport to mute/unmute the actual published track
+    if (this.transport) {
+      void this.transport.setMuted(this.isMuted);
+    }
+    // Legacy: Gemini Live — toggle the raw mic stream
     if (this.micStream) {
       this.micStream.getAudioTracks().forEach((track) => {
         track.enabled = !this.isMuted;

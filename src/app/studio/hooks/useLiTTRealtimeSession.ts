@@ -80,6 +80,7 @@ export function useLiTTRealtimeSession(): UseLiTTRealtimeSession {
     littAudio: "disconnected",
     littVision: "disconnected",
     frameStream: "inactive",
+    agentJoined: false,
   });
   const [userTranscript, setUserTranscript] = useState("");
   const [assistantTranscript, setAssistantTranscript] = useState("");
