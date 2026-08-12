@@ -9,7 +9,8 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { ProjectTypeSelector } from "./ProjectTypeSelector";
 import { HtmlProjectEditor } from "./HtmlProjectEditor";
 import { useCanvasBuilderStore } from "./store";
-import { getProjectTypeMeta } from "./projectTypes";
+import { getProjectTypeMeta, type ProjectType } from "./projectTypes";
+import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
 
 const HTML_FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -69,11 +70,38 @@ export function VisualCanvasBuilder() {
   const tool = useCanvasBuilderStore((s) => s.tool);
   const setTool = useCanvasBuilderStore((s) => s.setTool);
   const projectType = useCanvasBuilderStore((s) => s.projectType);
+  const setProjectType = useCanvasBuilderStore((s) => s.setProjectType);
+
+  // Server-backed project ID for loading persisted workspace type
+  const { capabilities } = useConnectionSummary();
+  const serverProjectId = capabilities.projectId ?? null;
 
   // Load persisted document on mount
   useEffect(() => {
     loadDocument();
   }, [loadDocument]);
+
+  // Load project type from server when the active project changes
+  // The server stores the workspace type in the `framework` column
+  useEffect(() => {
+    if (!serverProjectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/studio-projects/${serverProjectId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const framework = data.project?.framework;
+        const validTypes: ProjectType[] = ["website", "html", "game2d", "game3d", "app", "component"];
+        if (framework && validTypes.includes(framework as ProjectType) && !cancelled) {
+          setProjectType(framework as ProjectType);
+        }
+      } catch {
+        // Non-fatal — localStorage fallback still has the type
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [serverProjectId, setProjectType]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {

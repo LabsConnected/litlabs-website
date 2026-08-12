@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { PROJECT_TYPES, type ProjectType, type ProjectTypeMeta } from "./projectTypes";
+import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
 
 const ICONS: Record<string, LucideIcon> = {
   Globe,
@@ -39,6 +40,10 @@ export function ProjectTypeSelector() {
   const setProjectType = useCanvasBuilderStore((s) => s.setProjectType);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Server-backed project ID for persisting workspace type
+  const { capabilities } = useConnectionSummary();
+  const projectId = capabilities.projectId ?? null;
 
   const current = PROJECT_TYPES.find((p) => p.id === projectType) ?? PROJECT_TYPES[0];
   const CurrentIcon = ICONS[current.icon] ?? Globe;
@@ -58,6 +63,16 @@ export function ProjectTypeSelector() {
   const handleSelect = (type: ProjectType) => {
     setProjectType(type);
     setOpen(false);
+    // Persist to server so it survives logout/login and is shared across devices
+    if (projectId) {
+      fetch(`/api/studio-projects/${projectId}/workspace-type`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceType: type }),
+      }).catch(() => {
+        // Non-fatal — localStorage still has the type as fallback
+      });
+    }
   };
 
   return (

@@ -25,10 +25,14 @@ import {
   AlertCircle,
   Terminal,
   Trash2,
+  Loader2,
+  Check,
   type LucideIcon,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { buildHtmlPreview, type HtmlFileLanguage } from "./projectTypes";
+import { useHtmlProjectSync } from "./useHtmlProjectSync";
+import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
 
 interface ConsoleMessage {
   id: string;
@@ -55,6 +59,11 @@ export function HtmlProjectEditor() {
   const htmlProject = useCanvasBuilderStore((s) => s.htmlProject);
   const updateHtmlFile = useCanvasBuilderStore((s) => s.updateHtmlFile);
   const setActiveHtmlFile = useCanvasBuilderStore((s) => s.setActiveHtmlFile);
+
+  // Server-backed file sync
+  const { capabilities } = useConnectionSummary();
+  const projectId = capabilities.projectId ?? null;
+  const sync = useHtmlProjectSync({ projectId, enabled: !!projectId });
 
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [previewKey, setPreviewKey] = useState(0);
@@ -152,6 +161,20 @@ export function HtmlProjectEditor() {
           <ViewModeButton mode="preview" current={viewMode} onClick={setViewMode} icon={Eye} label="Preview" />
         </div>
         <div className="flex-1" />
+        {/* Save status indicator */}
+        <div className="flex items-center gap-1.5 text-[10px] font-medium" style={{ color: "var(--glass-text-3)" }}>
+          {sync.isLoading ? (
+            <><Loader2 size={11} className="animate-spin" /> Loading…</>
+          ) : sync.isSaving ? (
+            <><Loader2 size={11} className="animate-spin" /> Saving…</>
+          ) : sync.error ? (
+            <><AlertCircle size={11} style={{ color: "#fca5a5" }} /> Save error</>
+          ) : sync.lastSavedAt ? (
+            <><Check size={11} style={{ color: "#86efac" }} /> Saved</>
+          ) : projectId ? (
+            <><Check size={11} style={{ color: "#86efac" }} /> Ready</>
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={handleRefresh}

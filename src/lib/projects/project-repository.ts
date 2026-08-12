@@ -710,3 +710,34 @@ export class ProjectVerificationError extends Error {
     this.name = "ProjectVerificationError";
   }
 }
+
+/**
+ * Update the workspace_type (stored in the `framework` column) on a
+ * canonical project. This persists the LiTT Creation Workspace project
+ * type (website, html, game2d, game3d, app, component) server-side so
+ * it survives logout/login and is shared across devices.
+ *
+ * Only operates on studio_projects — does not modify legacy table.
+ */
+export async function updateProjectWorkspaceType(
+  projectId: string,
+  userId: string,
+  workspaceType: string,
+): Promise<CanonicalProject | null> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      framework: workspaceType,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update workspace type: ${error.message}`);
+  }
+
+  return data ? rowToCanonical(data as StudioProjectRow) : null;
+}
