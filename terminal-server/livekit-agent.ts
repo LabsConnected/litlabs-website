@@ -148,15 +148,19 @@ export default defineAgent({
       metadata?.agentId ?? "(none)",
     );
 
-    // Voice pipeline: OpenAI Realtime API (gpt-4o-realtime-preview).
+    // Voice pipeline: OpenAI Realtime API (gpt-realtime — GA model).
     // Single streaming WebSocket handles STT + LLM + TTS together — audio in,
     // audio out with ~300-500ms to first audio byte (vs 2-5s with the old
     // 3-stage Whisper → gpt-4o-mini → gpt-4o-mini-tts batch pipeline).
     // inputAudioTranscription uses whisper-1 so user transcripts still arrive
     // via the UserInputTranscribed event for the data channel.
+    //
+    // Model history:
+    //   gpt-4o-realtime-preview — deprecated/removed by OpenAI
+    //   gpt-realtime — current GA speech-to-speech model (20% cheaper)
     const session = new AgentSession({
       llm: new openai.realtime.RealtimeModel({
-        model: "gpt-4o-realtime-preview",
+        model: "gpt-realtime",
         voice: (metadata?.voice as openai.realtime.Voice) || "alloy",
         inputAudioTranscription: { model: "whisper-1" },
         // Server-side VAD with 500ms silence → endpoint. The Realtime API
