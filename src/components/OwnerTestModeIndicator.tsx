@@ -1,9 +1,13 @@
 "use client";
 
 /**
- * OwnerTestModeIndicator — a floating badge + dropdown that lets the
+ * OwnerTestModeIndicator — a top-right HUD badge + dropdown that lets the
  * platform owner switch between testing as OWNER, Starter, Creator,
  * Pro Builder, or Zero-BITS.
+ *
+ * Anchored to the top-right of the viewport so it reads as session/account
+ * context rather than a composer action. The dropdown opens downward and
+ * clamps to the viewport so it never clips offscreen.
  *
  * Only renders for the platform owner. Fetches state from
  * /api/owner/test-mode and POSTs to change simulation.
@@ -94,7 +98,7 @@ export function OwnerTestModeIndicator() {
       ref={ref}
       style={{
         position: "fixed",
-        bottom: 16,
+        top: 16,
         right: 16,
         zIndex: 9999,
         fontFamily: "inherit",
@@ -124,15 +128,18 @@ export function OwnerTestModeIndicator() {
         <ChevronDown size={12} style={{ opacity: 0.6 }} />
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — opens downward from the top-right trigger */}
       {open && (
         <div
           style={{
             position: "absolute",
-            bottom: "100%",
+            top: "100%",
             right: 0,
-            marginBottom: 8,
+            marginTop: 8,
             minWidth: 280,
+            maxWidth: "min(320px, calc(100vw - 32px))",
+            maxHeight: "min(70vh, 560px)",
+            overflowY: "auto",
             borderRadius: 12,
             border: "1px solid var(--studio-border, #333)",
             background: "var(--studio-bg, #1a1a1a)",
