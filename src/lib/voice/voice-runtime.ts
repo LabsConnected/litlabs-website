@@ -160,6 +160,12 @@ export async function runLiTTForVoice(args: {
     };
   }
 
+  // ── Pre-process: detect "send me" intent and execute the send ──
+  // The voice runtime doesn't have tool-calling, so we detect send
+  // intent from the user's message and execute it BEFORE generating
+  // LiTT's response. This way LiTT can truthfully report success/failure.
+  const sendResult = await detectAndExecuteSend(args.message, ctx.userId);
+
   const req: LiTTRunRequest = {
     message: args.message,
     conversationId: ctx.conversationId ?? undefined,
@@ -185,8 +191,19 @@ export async function runLiTTForVoice(args: {
     ctx.project?.repositoryProvider ? `Provider: ${ctx.project.repositoryProvider}` : "",
     ctx.memoryContext ? `Relevant memories:\n${ctx.memoryContext}` : "",
     "",
+    "OWNER CONTACT INFO (use when the caller asks to be contacted):",
+    `- Phone (SMS): ${process.env.LITTLABS_OWNER_PHONE ?? "+12314285411"}`,
+    `- Email: ${process.env.LITTLABS_OWNER_EMAIL ?? "laidbacknostress4life@gmail.com"}`,
+    "",
     "When the user asks about their project, branch, or repository, answer using the CONTEXT above.",
     "Do not say you don't have information — the context above is the user's real project data.",
+    "",
+    "SENDING SMS/EMAIL:",
+    sendResult
+      ? sendResult.success
+        ? `You already sent the ${sendResult.type} successfully. Tell the caller it's been sent.`
+        : `You tried to send the ${sendResult.type} but it failed: ${sendResult.error}. Tell the caller honestly.`
+      : "If the caller asks you to send a text or email, tell them you can do that and you'll send it right now. Do NOT claim you already sent something unless the send result above says success.",
   ].filter(Boolean).join("\n");
 
   const transcript = ctx.history
@@ -262,4 +279,109 @@ export async function runLiTTForVoice(args: {
       actions,
     },
   };
+}
+
+// ─── Send intent detection + execution ───────────────────────────
+
+interface SendResult {
+  type: "SMS" | "email";
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Detect if the user's message asks to send an SMS or email, and
+ * execute the send if so. Returns null if no send intent detected.
+ *
+ * This runs BEFORE the LLM generates its response, so LiTT can
+ * truthfully report whether the send succeeded.
+ */
+async function detectAndExecuteSend(message: string, _userId: string): Promise<SendResult | null> {
+  const lower = message.toLowerCase();
+
+  // Detect SMS intent: "text me", "send me a text", "SMS me"
+  const wantsSms = /\b(text me|send me a text|send.*sms|text.*to my phone|send.*to my phone)\b/i.test(lower)
+    || (/\bsend\b/i.test(lower) && /\b(text|sms|phone)\b/i.test(lower) && !/\bemail\b/i.test(lower));
+
+  // Detect email intent: "email me", "send me an email"
+  const wantsEmail = /\b(email me|send me an? email|send.*to my email)\b/i.test(lower)
+    || (/\bsend\b/i.test(lower) && /\bemail\b/i.test(lower));
+
+  if (!wantsSms && !wantsEmail) return null;
+
+  // Build the message content from the user's request
+  // For now, send a simple link to the project + the user's original message
+  const ownerPhone = process.env.LITTLABS_OWNER_PHONE ?? "+12314285411";
+  const ownerEmail = process.env.LITTLABS_OWNER_EMAIL ?? "laidbacknostress4life@gmail.com";
+
+  if (wantsSms) {
+    // SMS requires a Twilio-imported number in Vapi. The current Vapi number
+    // (+13239165462) is a Vapi-provided number that only supports voice.
+    // To enable SMS, a Twilio number with 10DLC approval must be imported.
+    // For now, return an honest failure so LiTT tells the caller truthfully.
+    return {
+      type: "SMS",
+      success: false,
+      error: "SMS sending is not available yet — the LiTT phone number doesn't support text messaging. A Twilio number with SMS capability needs to be imported into Vapi.",
+    };
+  }
+
+  if (wantsEmail) {
+    try {
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) return { type: "email", success: false, error: "RESEND_API_KEY not configured" };
+
+      const emailBody = buildEmailContent(message);
+
+      const resp = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: "LiTT <noreply@litlabs.net>",
+          to: ownerEmail,
+          subject: "Message from LiTT",
+          text: emailBody,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "unknown error");
+        return { type: "email", success: false, error: `HTTP ${resp.status}: ${errText.slice(0, 100)}` };
+      }
+
+      return { type: "email", success: true };
+    } catch (err) {
+      return { type: "email", success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  return null;
+}
+
+/** Build SMS content from the user's message context. */
+function buildSmsContent(userMessage: string): string {
+  // If the user mentioned a link, URL, or "landing page", include the production URL
+  const mentionsLandingPage = /landing page/i.test(userMessage);
+  const mentionsLink = /\blink\b/i.test(userMessage);
+
+  if (mentionsLandingPage || mentionsLink) {
+    return `LiTT here — here's your landing page link: https://litlabs.net\n\nReply if you need anything else.`;
+  }
+
+  return `LiTT here — you asked me to text you. Reply if you need anything else.`;
+}
+
+/** Build email content from the user's message context. */
+function buildEmailContent(userMessage: string): string {
+  const mentionsLandingPage = /landing page/i.test(userMessage);
+  const mentionsLink = /\blink\b/i.test(userMessage);
+
+  if (mentionsLandingPage || mentionsLink) {
+    return `Hi,\n\nHere's your landing page link: https://litlabs.net\n\nThe site is deployed from the main branch of the litlabs-website repository on GitHub.\n\n— LiTT`;
+  }
+
+  return `Hi,\n\nYou asked me to email you during our phone call.\n\n— LiTT`;
 }
