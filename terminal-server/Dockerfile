@@ -14,17 +14,24 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Override root .npmrc (which has ignore-scripts=true) — we need native builds
+# for node-pty and sharp to run during npm install.
+RUN echo "ignore-scripts=false" > .npmrc
+
 # Copy terminal server package files
 COPY package.json ./
 COPY tsconfig.json ./
 COPY tsconfig.worker.json ./
 
-# Install dependencies — --ignore-scripts=false ensures node-pty native build runs
-# (root .npmrc has ignore-scripts=true; this override is scoped to Docker build only)
+# Install dependencies — native builds (node-pty, sharp) must run
 RUN npm install --ignore-scripts=false
 
 # Copy terminal server source
 COPY . .
+
+# Re-assert .npmrc after COPY (root .npmrc has ignore-scripts=true which
+# would block sharp/node-pty native builds during any post-install steps)
+RUN echo "ignore-scripts=false" > .npmrc
 
 # Build the terminal server
 RUN npm run build
