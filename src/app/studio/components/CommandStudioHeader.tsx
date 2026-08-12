@@ -141,6 +141,7 @@ export default function CommandStudioHeader({
 
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
+  const ptyIdle = capabilities.terminalExecution === "idle";
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = providerHealth[selectedModel.provider] ?? "available";
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
@@ -150,7 +151,9 @@ export default function CommandStudioHeader({
   // the real workspace readiness state. "Workspace available" requires
   // the selected project's workspace to be verified ready (projectReady),
   // not merely that repo/terminal capabilities exist.
-  const hasProject = repoConnected || ptyAvailable;
+  // "idle" (server online, no session) counts as having a project —
+  // the terminal is ready to connect on demand.
+  const hasProject = repoConnected || ptyAvailable || ptyIdle;
   const workspaceReady = Boolean(projectReady);
   const statusColor = workspaceReady && hasAi
     ? "var(--litt-primary)"
@@ -524,6 +527,7 @@ function WorkspaceStatusPopover({
   const ptyLabel =
     ptyState === "available" ? "Connected" :
     ptyState === "connecting" ? "Connecting…" :
+    ptyState === "idle" ? "Ready · no session" :
     ptyState === "error" ? "Error" : "Disconnected";
 
   const left = Math.min(rect.left, window.innerWidth - 320);
@@ -583,9 +587,9 @@ function WorkspaceStatusPopover({
         <StatusRow
           label="Terminal (PTY)"
           value={ptyLabel}
-          ok={ptyState === "available"}
-          warn={ptyState === "connecting" || ptyState === "error"}
-          detail={ptyState === "available" ? "Ready for command execution" : "Open the terminal drawer to connect"}
+          ok={ptyState === "available" || ptyState === "idle"}
+          warn={ptyState === "connecting"}
+          detail={ptyState === "available" ? "Ready for command execution" : ptyState === "idle" ? "Server online — open terminal to start a session" : "Open the terminal drawer to connect"}
         />
         {ptyState !== "available" && onOpenTerminalAction && (
           <div className="px-3 py-2">

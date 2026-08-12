@@ -68,6 +68,8 @@ interface StudioActivityRailProps {
   projectName: string | null;
   modelLabel: string;
   terminalStatus: import("@/lib/capabilities/types").TerminalStatus;
+  /** True when the terminal server /health endpoint responded OK. */
+  terminalServerReachable?: boolean;
   repositoryName: string | null;
   branch?: string | null;
   onOpenTerminal?: () => void;
@@ -90,6 +92,7 @@ export default function StudioActivityRail({
   projectName,
   modelLabel,
   terminalStatus,
+  terminalServerReachable,
   repositoryName,
   branch,
   onOpenTerminal,
@@ -632,14 +635,15 @@ export default function StudioActivityRail({
                 terminalStatus === "project_context_missing" ? "Project context missing" :
                 terminalStatus === "pty_failed" ? "PTY failed" :
                 terminalStatus === "auth_failed" ? "Auth failed" :
-                terminalStatus === "unavailable" ? "Unavailable" :
+                terminalStatus === "unavailable" ? "Server unreachable" :
                 terminalStatus === "error" ? "Error" :
+                terminalServerReachable ? "Ready · no session" :
                 "Disconnected"
               }
               status={
                 terminalStatus === "connected" ? "success" :
                 terminalStatus === "connecting" ? "pending" :
-                terminalStatus === "disconnected" ? "muted" :
+                terminalStatus === "disconnected" ? (terminalServerReachable ? "success" : "muted") :
                 "error"
               }
               onClick={terminalStatus !== "connected" ? onOpenTerminal : undefined}

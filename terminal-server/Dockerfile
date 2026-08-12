@@ -3,9 +3,13 @@
 # To build locally: docker build -f Dockerfile . from terminal-server/ directory
 FROM node:20-slim
 
-# Install dependencies for node-pty and optional shell tools
+# Install dependencies for node-pty, sharp, ffmpeg, and optional shell tools
+# - python3/make/g++: native builds (node-pty, sharp)
+# - ffmpeg: required by @livekit/agents (fluent-ffmpeg) for audio processing
+# - libvips-dev: sharp image processing (fallback if prebuilt binary unavailable)
 RUN apt-get update && apt-get install -y \
     python3 make g++ bash git curl \
+    ffmpeg libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -520,10 +520,20 @@ export function MissionControlDashboard() {
   }
 
   /* ─── System status summary ──────────────────────────────────────── */
+  const terminalState = data?.project?.terminalState;
+  const workspaceState = data?.project?.workspaceState;
   const systemStatuses = [
     { label: "GitHub", state: data?.project ? "connected" : "not_connected", detail: data?.project?.repository ?? "Not connected" },
-    { label: "Runtime", state: data?.project?.terminalState ?? "disconnected", detail: data?.project?.terminalState === "connected" ? "Online" : "Offline" },
-    { label: "Workspace", state: data?.project?.workspaceState ?? "missing", detail: data?.project?.workspaceState === "ready" ? "Ready" : "Setup needed" },
+    {
+      label: "Runtime",
+      state: terminalState === "connected" ? "connected" : terminalState === "connecting" ? "degraded" : "disconnected",
+      detail: terminalState === "connected" ? "Online" : terminalState === "connecting" ? "Connecting…" : "Ready · no session",
+    },
+    {
+      label: "Workspace",
+      state: workspaceState === "ready" ? "ready" : workspaceState ? "degraded" : "missing",
+      detail: workspaceState === "ready" ? "Ready" : workspaceState ? "Preparing…" : "No project selected",
+    },
     { label: "Production", state: data?.project?.deploymentState ?? "none", detail: data?.project?.deploymentState === "production" ? "Live" : "Not deployed" },
   ];
 

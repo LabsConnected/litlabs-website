@@ -35,7 +35,7 @@ export interface ConnectionCapabilities {
   sourceType: "github" | "blank" | "template" | "upload" | null;
   workspaceStatus: string | null;
   githubInstalled: boolean;
-  terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
+  terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error" | "idle";
   writeAccess: boolean;
   connectedProviders: string[];
   availableTools: string[];
@@ -47,6 +47,8 @@ export interface ConnectionCapabilities {
   terminalFailureStage: string | null;
   /** Verified cwd from PTY session — only set when PTY is truly ready. */
   terminalCwd: string | null;
+  /** True when the terminal server /health endpoint responded OK (server is alive). */
+  terminalServerReachable: boolean;
   /** Voice transport connected (TTS-ready). Client-derived from VoiceSessionContext. */
   voiceTransportConnected: boolean;
   /** Microphone currently capturing audio. Client-derived from VoiceSessionContext. */
@@ -76,6 +78,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   terminalError: null,
   terminalFailureStage: null,
   terminalCwd: null,
+  terminalServerReachable: false,
   voiceTransportConnected: false,
   voiceMicrophoneOn: false,
   voiceHealth: {
@@ -206,32 +209,40 @@ export function useConnectionSummary() {
         next.terminalExecution = "available";
         next.terminalCwd = terminalCwd;
         next.terminalFailureStage = null;
+        next.terminalServerReachable = true;
       } else if (terminalStatus === "connected" && !terminalCwd) {
         // Store says connected but no cwd — PTY not truly ready yet
         next.terminalStatus = "connecting";
         next.terminalExecution = "connecting";
         next.terminalFailureStage = "pty_creation_failed";
+        next.terminalServerReachable = true;
       } else if (terminalStatus === "connecting") {
         next.terminalStatus = "connecting";
         next.terminalExecution = "connecting";
         next.terminalFailureStage = terminalFailureStage;
+        next.terminalServerReachable = true;
       } else if (terminalStatus === "error" || terminalStatus === "auth_failed" || terminalStatus === "pty_failed" || terminalStatus === "unavailable") {
         next.terminalStatus = terminalStatus;
         next.terminalError = terminalError;
         next.terminalExecution = "error";
         next.terminalFailureStage = terminalFailureStage;
+        // For error states, server reachability is unknown — leave as default (false)
+        // unless the server probe (termRes) updates it below.
       } else {
         // Client says disconnected — check if server is at least alive
         if (termRes.status === "fulfilled" && termRes.value.ok) {
           const termData = await termRes.value.json();
-          // Server confirms: terminal server exists but no session
+          next.terminalServerReachable = !!termData.serverReachable;
+          // "idle" = server is reachable, no PTY session — normal idle state.
+          // "unavailable" = server unreachable — real error.
           next.terminalStatus = "disconnected";
           next.terminalSessionId = null;
-          next.terminalExecution = "unavailable";
+          next.terminalExecution = termData.serverReachable ? "idle" : "unavailable";
           next.terminalError = termData.error ?? null;
         } else {
           next.terminalStatus = "disconnected";
           next.terminalExecution = "unavailable";
+          next.terminalServerReachable = false;
         }
       }
 

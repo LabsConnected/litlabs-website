@@ -22,7 +22,7 @@ import type { ResolvedRunContext, LiTTRunRequest, LiTTMode, HistoryEntry } from 
 
 const HISTORY_LIMIT = 12;
 
-const TERMINAL_EXECUTION_STATES = ["available", "unavailable", "connecting", "degraded", "error"] as const;
+const TERMINAL_EXECUTION_STATES = ["available", "unavailable", "connecting", "degraded", "error", "idle"] as const;
 const TERMINAL_STATES = ["disconnected", "connecting", "connected", "error"] as const;
 const VOICE_INPUT_STATES = ["idle", "requesting_permission", "connecting", "listening", "error"] as const;
 const VOICE_STATES = ["idle", "requesting_permission", "connecting", "listening", "user_speaking", "processing", "assistant_speaking", "muted", "error"] as const;

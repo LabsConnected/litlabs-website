@@ -124,6 +124,9 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   if (termExec === "available" && termCwd) {
     terminalState = `Project terminal is connected and ready. Verified working directory: ${termCwd}`;
     terminalAction = "";
+  } else if (termExec === "idle") {
+    terminalState = "Terminal server is online and ready. No active PTY session — open the Terminal drawer to start one.";
+    terminalAction = "If the user asks to run commands, say: \"The terminal server is online. Open the Terminal drawer to start a session.\" Do NOT claim the terminal is broken or unavailable.";
   } else if (termExec === "connecting") {
     terminalState = "Project terminal is still connecting (waiting for PTY session).";
     terminalAction =

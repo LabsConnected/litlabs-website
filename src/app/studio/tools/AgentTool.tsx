@@ -160,8 +160,9 @@ export default function AgentTool() {
       if (!agent.enabled) return "offline";
       // LiTT depends on terminal + GitHub for full operation
       if (agent.id === "litt") {
-        if (connCaps.terminalExecution === "available" && connCaps.githubInstalled) return "online";
-        if (connCaps.terminalExecution === "connecting" || connCaps.terminalExecution === "degraded") return "degraded";
+        const termOk = connCaps.terminalExecution === "available" || connCaps.terminalExecution === "idle";
+        if (termOk && connCaps.githubInstalled) return "online";
+        if (connCaps.terminalExecution === "connecting" || connCaps.terminalExecution === "degraded" || connCaps.terminalExecution === "error") return "degraded";
         return "setup";
       }
       // Spark depends on creative providers
@@ -764,7 +765,7 @@ function DetailOverview({
         </div>
         <div className="space-y-1.5">
           <ConnectionRow label="GitHub" connected={connCaps.githubInstalled} detail={connCaps.repositoryName ?? "Not connected"} />
-          <ConnectionRow label="Terminal" connected={connCaps.terminalExecution === "available"} detail={connCaps.terminalExecution === "available" ? "Ready" : connCaps.terminalExecution} />
+          <ConnectionRow label="Terminal" connected={connCaps.terminalExecution === "available" || connCaps.terminalExecution === "idle"} detail={connCaps.terminalExecution === "available" ? "Connected" : connCaps.terminalExecution === "idle" ? "Ready · no session" : connCaps.terminalExecution} />
           <ConnectionRow label="Voice" connected={connCaps.voiceHealth.available} detail={connCaps.voiceHealth.available ? "Healthy" : "Not configured"} />
           <ConnectionRow label="Workspace" connected={connCaps.workspaceStatus === "ready"} detail={connCaps.workspaceStatus ?? "Not ready"} />
         </div>
@@ -921,7 +922,7 @@ function DetailPermissions({ agent, connCaps }: { agent: AgentDefinition; connCa
 
   const permissions = [
     { label: "Write access", granted: connCaps.writeAccess, detail: connCaps.writeAccess ? "Can write files" : "Read-only" },
-    { label: "Terminal execution", granted: connCaps.terminalExecution === "available", detail: connCaps.terminalExecution },
+    { label: "Terminal execution", granted: connCaps.terminalExecution === "available" || connCaps.terminalExecution === "idle", detail: connCaps.terminalExecution === "available" ? "Connected" : connCaps.terminalExecution === "idle" ? "Ready · no session" : connCaps.terminalExecution },
     { label: "GitHub access", granted: connCaps.githubInstalled, detail: connCaps.repositoryName ?? "Not connected" },
     { label: "Deployment", granted: false, detail: "Requires approval" },
     { label: "Voice", granted: connCaps.voiceHealth.available, detail: connCaps.voiceHealth.available ? "Available" : "Not configured" },

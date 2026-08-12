@@ -1047,6 +1047,7 @@ function CommandStudioContent() {
               projectName={capabilities.projectName}
               modelLabel={modelLabel}
               terminalStatus={capabilities.terminalStatus}
+              terminalServerReachable={capabilities.terminalServerReachable}
               repositoryName={capabilities.repositoryName}
               branch={capabilities.activeBranch ?? contextLine.branch}
               onOpenTerminal={handleOpenTerminal}
