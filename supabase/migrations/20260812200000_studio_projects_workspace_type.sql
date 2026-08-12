@@ -33,11 +33,19 @@ ALTER TABLE public.studio_projects
 
 -- Backfill: any rows that had workspace type values incorrectly stored
 -- in the framework column (from commit c1a4d233) should be migrated
--- to workspace_type and framework restored to NULL (since those were
--- not real runtime framework values).
+-- to workspace_type. Then restore framework to the correct runtime
+-- technology value based on template_id, rather than blindly setting
+-- it to NULL. PreviewManager depends on framework having accurate
+-- technology values (static, nextjs, vite, expo).
 UPDATE public.studio_projects
   SET workspace_type = framework,
-      framework = NULL
+      framework = CASE
+        WHEN template_id = 'blank-static' THEN 'static'
+        WHEN template_id = 'nextjs' THEN 'nextjs'
+        WHEN template_id = 'react-vite' THEN 'vite'
+        WHEN template_id = 'expo-react-native' THEN 'expo'
+        ELSE NULL
+      END
   WHERE framework IN ('website', 'html', 'game2d', 'game3d', 'app', 'component');
 
 COMMIT;

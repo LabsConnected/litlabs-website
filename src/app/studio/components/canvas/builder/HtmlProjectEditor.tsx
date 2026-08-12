@@ -187,6 +187,42 @@ export function HtmlProjectEditor() {
         </button>
       </div>
 
+      {/* Recovery prompt — server empty + local cache exists */}
+      {sync.recoveryPrompt && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 text-xs"
+          style={{
+            background: "rgba(251,191,36,0.08)",
+            borderBottom: "1px solid rgba(251,191,36,0.25)",
+            color: "#fde68a",
+          }}
+        >
+          <AlertCircle size={14} style={{ color: "#fbbf24", flexShrink: 0 }} />
+          <span className="flex-1">
+            Recovered local version found for this project. The server workspace is empty.
+            Restore your cached files to the server, or start fresh?
+          </span>
+          <button
+            type="button"
+            onClick={sync.resolveRecoveryRestore}
+            disabled={sync.isSaving}
+            className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50"
+            style={{ background: "rgba(251,191,36,0.15)", color: "#fde68a" }}
+          >
+            {sync.isSaving ? <Loader2 size={11} className="animate-spin" /> : "Restore to workspace"}
+          </button>
+          <button
+            type="button"
+            onClick={sync.resolveRecoveryFresh}
+            disabled={sync.isSaving}
+            className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50"
+            style={{ background: "rgba(255,255,255,0.06)", color: "var(--glass-text-2)" }}
+          >
+            Start fresh
+          </button>
+        </div>
+      )}
+
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Code side */}

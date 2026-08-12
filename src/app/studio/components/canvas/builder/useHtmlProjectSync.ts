@@ -7,12 +7,15 @@
  * Flow:
  *   1. On project change, immediately reset client state to a fresh
  *      empty template (prevents cross-project file bleed).
- *   2. Load files from the server workspace (index.html, style.css,
- *      script.js). Empty files are valid canonical files.
- *   3. On file edits, debounce-save to the server workspace.
+ *   2. Load files from the server workspace using loadServerFiles.
+ *      Any hard read error (500/401/403/network) aborts the load.
+ *      404 means file is missing (not a hard error).
+ *   3. Reconcile: server wins if it has files. If server is empty and
+ *      local cache exists, this is an EXPLICIT RECOVERY decision —
+ *      the user must choose to restore local cache or start fresh.
+ *      Local cache is NEVER silently treated as canonical.
+ *   4. On file edits, debounce-save to the server workspace.
  *      Every write must return HTTP 2xx or the save is marked as failed.
- *   4. localStorage is cached per-projectId so switching back restores
- *      the correct cached state instantly.
  *
  * The server workspace is canonical. If server and local disagree,
  * server wins on load, local wins on save.
@@ -21,6 +24,15 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useCanvasBuilderStore } from "./store";
 import { createEmptyHtmlProject, type HtmlProject } from "./projectTypes";
+import {
+  loadServerFiles,
+  saveServerFiles,
+  readLocalCache,
+  writeLocalCache,
+  reconcileLoad,
+  SAVE_DEBOUNCE_MS,
+  type ReconcileResult,
+} from "./htmlProjectSyncPolicy";
 
 interface UseHtmlProjectSyncOptions {
   projectId: string | null;
@@ -32,64 +44,12 @@ interface UseHtmlProjectSyncResult {
   isSaving: boolean;
   error: string | null;
   lastSavedAt: number | null;
-}
-
-const HTML_FILES = ["index.html", "style.css", "script.js"];
-const SAVE_DEBOUNCE_MS = 1500;
-const CACHE_KEY_PREFIX = "litt:canvasBuilder:htmlProject:";
-
-/**
- * Fetch a file from the server workspace.
- * Returns { content: string | null, exists: boolean }.
- * - exists=true, content=string (possibly "") → file exists on server
- * - exists=false → file not found (404 or similar)
- * Throws on network errors or non-401/404 error responses.
- */
-async function fetchServerFile(
-  projectId: string,
-  fileName: string,
-): Promise<{ content: string | null; exists: boolean }> {
-  const res = await fetch(`/api/studio-projects/${projectId}/files`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "read", path: fileName }),
-  });
-
-  if (res.status === 404) {
-    return { content: null, exists: false };
-  }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  // The terminal server returns { content: string } or { content: string, path: string }
-  // content can be "" (empty file) — that is a valid canonical file
-  const content = typeof data.content === "string" ? data.content : null;
-  return { content, exists: content !== null };
-}
-
-/**
- * Write a file to the server workspace.
- * Throws if the server returns a non-2xx response.
- */
-async function writeServerFile(
-  projectId: string,
-  fileName: string,
-  content: string,
-): Promise<void> {
-  const res = await fetch(`/api/studio-projects/${projectId}/files`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "write", path: fileName, content }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
+  /** When server is empty and local cache exists, this is set so the UI can prompt the user. */
+  recoveryPrompt: { cachedFiles: HtmlProject["files"]; } | null;
+  /** Resolve the recovery prompt by restoring local cache to server. */
+  resolveRecoveryRestore: () => Promise<void>;
+  /** Resolve the recovery prompt by starting fresh (seed template to server). */
+  resolveRecoveryFresh: () => Promise<void>;
 }
 
 export function useHtmlProjectSync({
@@ -100,77 +60,72 @@ export function useHtmlProjectSync({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [recoveryPrompt, setRecoveryPrompt] = useState<
+    { cachedFiles: HtmlProject["files"]; } | null
+  >(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProjectIdRef = useRef<string | null>(null);
   const isInternalUpdateRef = useRef(false);
+  const recoveryProjectIdRef = useRef<string | null>(null);
 
   // ─── Reset + load on project change ─────────────────────────────────
   useEffect(() => {
     if (!enabled || !projectId) return;
     if (loadedProjectIdRef.current === projectId) return;
 
+    // Clear any pending recovery prompt from a previous project
+    setRecoveryPrompt(null);
+    recoveryProjectIdRef.current = null;
+
     // FIX 1: Immediately reset client state to a fresh empty template.
-    // This prevents cross-project file bleed — the previous project's
-    // files are never uploaded to the new project's workspace.
+    // This prevents cross-project file bleed.
     isInternalUpdateRef.current = true;
     const freshProject = createEmptyHtmlProject();
 
-    // Try to restore from per-project localStorage cache first (instant)
-    try {
-      const cached = localStorage.getItem(CACHE_KEY_PREFIX + projectId);
-      if (cached) {
-        const parsed = JSON.parse(cached) as HtmlProject;
-        if (parsed.files && Array.isArray(parsed.files) && parsed.files.length > 0) {
-          useCanvasBuilderStore.getState().setHtmlProject(parsed);
-          isInternalUpdateRef.current = false;
-          // Don't set loadedProjectIdRef yet — loadFromServer will set it
-          // after the server content is confirmed. This prevents the
-          // debounced save from firing with stale cached content before
-          // the server content has been loaded.
-          void loadFromServer(projectId, /* hasLocalCache */ true);
-          return;
-        }
-      }
-    } catch {
-      // Cache read failed — continue with fresh template
+    // Try to restore from per-project localStorage cache first (instant display)
+    const localCache = readLocalCache(projectId);
+    if (localCache) {
+      useCanvasBuilderStore.getState().setHtmlProject(localCache);
+      isInternalUpdateRef.current = false;
+      // Still load from server — don't set loadedProjectIdRef until server confirms
+    } else {
+      // No local cache — start with fresh template
+      useCanvasBuilderStore.getState().setHtmlProject(freshProject);
+      isInternalUpdateRef.current = false;
     }
 
-    // No local cache — start with fresh template, then load from server
-    useCanvasBuilderStore.getState().setHtmlProject(freshProject);
-    isInternalUpdateRef.current = false;
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
 
-    void loadFromServer(projectId, /* hasLocalCache */ false);
-
-    async function loadFromServer(pid: string, hasLocalCache: boolean) {
-      setIsLoading(true);
-      setError(null);
+    (async () => {
       try {
-        // Fetch each HTML file from the server workspace
-        const fileResults = await Promise.allSettled(
-          HTML_FILES.map((fileName) => fetchServerFile(pid, fileName)),
-        );
+        // FIX 2: loadServerFiles uses Promise.all — any hard read error
+        // (500/401/403/network) aborts the load. 404 = missing file.
+        const loadResult = await loadServerFiles(fetch, projectId);
 
-        // Collect successfully loaded files
-        // FIX 3: Distinguish "file exists with empty content" from "file not found"
-        const loadedFiles: { name: string; content: string }[] = [];
-        let anyExists = false;
-        for (let i = 0; i < fileResults.length; i++) {
-          const result = fileResults[i];
-          if (result.status === "fulfilled" && result.value.exists) {
-            anyExists = true;
-            loadedFiles.push({
-              name: HTML_FILES[i],
-              content: result.value.content ?? "",
-            });
-          }
+        if (cancelled) return;
+
+        if (loadResult.status === "error") {
+          // Hard load failure — do NOT seed or overwrite. Show error.
+          setError(loadResult.error ?? "Failed to load files");
+          return;
         }
 
-        if (anyExists) {
-          // Server has files — use them as canonical (overrides local cache)
+        // Reconcile server result with local cache
+        const freshTemplate = createEmptyHtmlProject();
+        const decision: ReconcileResult = reconcileLoad(
+          loadResult,
+          localCache,
+          freshTemplate,
+        );
+
+        if (decision.action === "server") {
+          // Server has files — canonical wins
           const currentProject = useCanvasBuilderStore.getState().htmlProject;
           const newFiles = currentProject.files.map((f) => {
-            const loaded = loadedFiles.find((lf) => lf.name === f.name);
+            const loaded = decision.files.find((lf) => lf.name === f.name);
             return loaded ? { ...f, content: loaded.content } : f;
           });
           isInternalUpdateRef.current = true;
@@ -179,34 +134,93 @@ export function useHtmlProjectSync({
             files: newFiles,
           });
           isInternalUpdateRef.current = false;
-        } else if (!hasLocalCache) {
-          // Server is empty AND no local cache — seed from the fresh template
-          // (which is already in the store from the reset above)
+          loadedProjectIdRef.current = projectId;
+        } else if (decision.action === "seed") {
+          // No local cache, server empty — seed from fresh template
           const currentProject = useCanvasBuilderStore.getState().htmlProject;
           const seedResults = await Promise.allSettled(
-            currentProject.files.map((f) => writeServerFile(pid, f.name, f.content)),
+            currentProject.files.map((f) =>
+              saveServerFiles(fetch, projectId, [f]),
+            ),
           );
-          // Only mark as "saved" if all seed writes returned 2xx
-          const allSeedOk = seedResults.every(
-            (r) => r.status === "fulfilled",
-          );
-          if (allSeedOk) {
+          const allSeedOk = seedResults.every((r) => r.status === "fulfilled");
+          if (allSeedOk && !cancelled) {
             setLastSavedAt(Date.now());
+            loadedProjectIdRef.current = projectId;
           }
+        } else if (decision.action === "recovery") {
+          // FIX 4: Server empty + local cache exists — EXPLICIT recovery
+          // decision. Do NOT silently treat local cache as canonical.
+          // Prompt the user to choose: restore local cache to server, or start fresh.
+          recoveryProjectIdRef.current = projectId;
+          setRecoveryPrompt({ cachedFiles: decision.files });
+          // Don't set loadedProjectIdRef yet — resolved after user decision
         }
-        // If hasLocalCache and server is empty, keep the local cache
-        // (it was likely seeded in a previous session)
-        // Don't set lastSavedAt — nothing was saved by the user
-
-        loadedProjectIdRef.current = pid;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to load files";
-        setError(msg);
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : "Failed to load files";
+          setError(msg);
+        }
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, enabled]);
+
+  // ─── Recovery resolution ────────────────────────────────────────────
+  const resolveRecoveryRestore = useCallback(async () => {
+    const pid = recoveryProjectIdRef.current;
+    const prompt = recoveryPrompt;
+    if (!pid || !prompt) return;
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      // Push cached files to server
+      const currentProject = useCanvasBuilderStore.getState().htmlProject;
+      await saveServerFiles(fetch, pid, currentProject.files);
+      writeLocalCache(pid, currentProject);
+      setLastSavedAt(Date.now());
+      loadedProjectIdRef.current = pid;
+      setRecoveryPrompt(null);
+      recoveryProjectIdRef.current = null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to restore";
+      setError(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [recoveryPrompt]);
+
+  const resolveRecoveryFresh = useCallback(async () => {
+    const pid = recoveryProjectIdRef.current;
+    if (!pid) return;
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      // Seed from fresh template
+      const freshProject = createEmptyHtmlProject();
+      isInternalUpdateRef.current = true;
+      useCanvasBuilderStore.getState().setHtmlProject(freshProject);
+      isInternalUpdateRef.current = false;
+      await saveServerFiles(fetch, pid, freshProject.files);
+      writeLocalCache(pid, freshProject);
+      setLastSavedAt(Date.now());
+      loadedProjectIdRef.current = pid;
+      setRecoveryPrompt(null);
+      recoveryProjectIdRef.current = null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to seed";
+      setError(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
 
   // ─── Debounced save to server on file changes ───────────────────────
   const htmlProject = useCanvasBuilderStore((s) => s.htmlProject);
@@ -216,23 +230,14 @@ export function useHtmlProjectSync({
       setIsSaving(true);
       setError(null);
       try {
-        // FIX 2: Every write must return HTTP 2xx.
-        // writeServerFile throws on non-2xx, so Promise.all rejects on any failure.
-        await Promise.all(
-          project.files.map((f) => writeServerFile(pid, f.name, f.content)),
-        );
+        // FIX 2: saveServerFiles uses Promise.all — any non-2xx throws
+        await saveServerFiles(fetch, pid, project.files);
 
         // All writes succeeded — cache to per-project localStorage
-        try {
-          localStorage.setItem(CACHE_KEY_PREFIX + pid, JSON.stringify(project));
-        } catch {
-          // Cache write failed — non-fatal
-        }
-
+        writeLocalCache(pid, project);
         setLastSavedAt(Date.now());
       } catch (err) {
-        // FIX 2: Only set lastSavedAt after every file returns 2xx.
-        // If any write fails, we set an error instead of "Saved".
+        // Only set lastSavedAt after every file returns 2xx
         const msg = err instanceof Error ? err.message : "Failed to save";
         setError(msg);
       } finally {
@@ -246,6 +251,7 @@ export function useHtmlProjectSync({
     if (!enabled || !projectId) return;
     if (loadedProjectIdRef.current !== projectId) return; // Don't save before initial load
     if (isInternalUpdateRef.current) return; // Don't save if we just loaded from server
+    if (recoveryPrompt) return; // Don't save while recovery prompt is open
 
     // Debounce the save
     if (saveTimerRef.current) {
@@ -260,7 +266,15 @@ export function useHtmlProjectSync({
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [htmlProject, projectId, enabled, saveToServer]);
+  }, [htmlProject, projectId, enabled, saveToServer, recoveryPrompt]);
 
-  return { isLoading, isSaving, error, lastSavedAt };
+  return {
+    isLoading,
+    isSaving,
+    error,
+    lastSavedAt,
+    recoveryPrompt,
+    resolveRecoveryRestore,
+    resolveRecoveryFresh,
+  };
 }
