@@ -22,10 +22,20 @@ import {
   FileCode,
   FileType2,
   FileJson,
+  AlertCircle,
+  Terminal,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
 import { buildHtmlPreview, type HtmlFileLanguage } from "./projectTypes";
+
+interface ConsoleMessage {
+  id: string;
+  type: "error" | "warn" | "runtime_error" | "ready";
+  text: string;
+  timestamp: number;
+}
 
 const FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -48,7 +58,53 @@ export function HtmlProjectEditor() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [previewKey, setPreviewKey] = useState(0);
+  const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
+  const [showConsole, setShowConsole] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Listen for console/error messages from the preview iframe
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (!e.data || e.data.source !== "litt-html-preview") return;
+      const { type, payload } = e.data;
+
+      if (type === "preview_ready") {
+        setConsoleMessages([]);
+        return;
+      }
+
+      let text = "";
+      let msgType: ConsoleMessage["type"] = "error";
+
+      if (type === "console_error") {
+        text = payload;
+        msgType = "error";
+      } else if (type === "console_warn") {
+        text = payload;
+        msgType = "warn";
+      } else if (type === "runtime_error") {
+        text = payload.message + (payload.lineno ? ` (line ${payload.lineno})` : "") + (payload.stack ? `\n${payload.stack}` : "");
+        msgType = "runtime_error";
+      } else {
+        return;
+      }
+
+      const msg: ConsoleMessage = {
+        id: `console-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: msgType,
+        text,
+        timestamp: Date.now(),
+      };
+      setConsoleMessages((prev) => [...prev, msg]);
+      // Auto-show console when errors arrive
+      if (msgType === "error" || msgType === "runtime_error") {
+        setShowConsole(true);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   const activeFile = htmlProject.files.find((f) => f.name === htmlProject.activeFile) ?? htmlProject.files[0];
 
@@ -68,7 +124,12 @@ export function HtmlProjectEditor() {
   }, [previewSrc]);
 
   const handleRefresh = useCallback(() => {
+    setConsoleMessages([]);
     setPreviewKey((k) => k + 1);
+  }, []);
+
+  const handleClearConsole = useCallback(() => {
+    setConsoleMessages([]);
   }, []);
 
   const handleCodeChange = useCallback(
@@ -190,6 +251,27 @@ export function HtmlProjectEditor() {
             >
               <Eye size={12} />
               LIVE PREVIEW
+              <div className="flex-1" />
+              {/* Console toggle */}
+              <button
+                type="button"
+                onClick={() => setShowConsole(!showConsole)}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors"
+                style={{
+                  background: consoleMessages.some((m) => m.type === "error" || m.type === "runtime_error")
+                    ? "rgba(239,68,68,0.15)"
+                    : showConsole ? "rgba(255,255,255,0.08)" : "transparent",
+                  color: consoleMessages.some((m) => m.type === "error" || m.type === "runtime_error")
+                    ? "#fca5a5"
+                    : "var(--glass-text-3)",
+                }}
+              >
+                <Terminal size={10} />
+                CONSOLE
+                {consoleMessages.length > 0 && (
+                  <span style={{ opacity: 0.7 }}>({consoleMessages.length})</span>
+                )}
+              </button>
             </div>
             <div className="flex-1 overflow-hidden" style={{ background: "white" }}>
               <iframe
@@ -198,9 +280,90 @@ export function HtmlProjectEditor() {
                 src={previewSrc}
                 title="HTML Preview"
                 className="w-full h-full border-0"
-                sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin"
+                sandbox="allow-scripts allow-modals allow-forms allow-popups"
               />
             </div>
+            {/* Console panel */}
+            {showConsole && (
+              <div
+                className="flex flex-col shrink-0 overflow-hidden"
+                style={{
+                  height: 180,
+                  borderTop: "1px solid var(--glass-border)",
+                  background: "#0d0e14",
+                }}
+              >
+                <div
+                  className="flex items-center gap-2 px-3 py-1.5 shrink-0"
+                  style={{ borderBottom: "1px solid var(--glass-border)" }}
+                >
+                  <Terminal size={11} style={{ color: "var(--glass-text-3)" }} />
+                  <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: "var(--glass-text-3)" }}>
+                    Console
+                  </span>
+                  <div className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={handleClearConsole}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] transition-colors hover:bg-white/5"
+                    style={{ color: "var(--glass-text-3)" }}
+                  >
+                    <Trash2 size={10} />
+                    Clear
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
+                  {consoleMessages.length === 0 ? (
+                    <div className="text-[10px] italic" style={{ color: "var(--glass-text-3)" }}>
+                      No errors. Console output from the preview will appear here.
+                    </div>
+                  ) : (
+                    consoleMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className="flex items-start gap-2 px-2 py-1 rounded mb-1"
+                        style={{
+                          background:
+                            msg.type === "error" || msg.type === "runtime_error"
+                              ? "rgba(239,68,68,0.08)"
+                              : msg.type === "warn"
+                                ? "rgba(245,158,11,0.08)"
+                                : "transparent",
+                        }}
+                      >
+                        <AlertCircle
+                          size={11}
+                          style={{
+                            color:
+                              msg.type === "error" || msg.type === "runtime_error"
+                                ? "#fca5a5"
+                                : msg.type === "warn"
+                                  ? "#fcd34d"
+                                  : "var(--glass-text-3)",
+                            marginTop: 1,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span
+                          style={{
+                            color:
+                              msg.type === "error" || msg.type === "runtime_error"
+                                ? "#fca5a5"
+                                : msg.type === "warn"
+                                  ? "#fcd34d"
+                                  : "#a1a1aa",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {msg.text}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

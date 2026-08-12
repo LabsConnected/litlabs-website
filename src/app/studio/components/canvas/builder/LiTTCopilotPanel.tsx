@@ -339,42 +339,89 @@ export function LiTTCopilotPanel() {
     setIsThinking(true);
 
     try {
-      const res = await fetch("/api/canvas/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptText,
-          document,
-          selectedNodeId,
-          breakpoint,
-        }),
-      });
+      // HTML project mode — send files to the HTML AI endpoint
+      if (projectType === "html") {
+        const htmlProject = useCanvasBuilderStore.getState().htmlProject;
+        const res = await fetch("/api/canvas/html-ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            files: htmlProject.files.map((f) => ({
+              name: f.name,
+              content: f.content,
+              language: f.language,
+            })),
+          }),
+        });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Request failed (${res.status})`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Request failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        const updatedFiles = (data.files || []) as Array<{ name: string; content: string }>;
+
+        // Apply returned file updates to the store
+        if (updatedFiles.length > 0) {
+          const currentProject = useCanvasBuilderStore.getState().htmlProject;
+          const newFiles = currentProject.files.map((f) => {
+            const updated = updatedFiles.find((uf) => uf.name === f.name);
+            return updated ? { ...f, content: updated.content } : f;
+          });
+          useCanvasBuilderStore.getState().setHtmlProject({
+            ...currentProject,
+            files: newFiles,
+          });
+        }
+
+        const assistantMsg: ChatMessage = {
+          id: `msg-${Date.now()}-ai`,
+          role: "assistant",
+          content: data.reply || `Updated ${updatedFiles.length} file(s).`,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } else {
+        // Canvas mode — send document to the canvas AI endpoint
+        const res = await fetch("/api/canvas/ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            document,
+            selectedNodeId,
+            breakpoint,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Request failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        const pendingActions: PendingAction[] = (data.actions || []).map((a: PendingAction & { label?: string }) => ({
+          type: a.type,
+          nodeId: a.nodeId,
+          text: a.text,
+          styles: a.styles,
+          template: a.template,
+          direction: a.direction,
+          afterNodeId: a.afterNodeId,
+          label: a.label || a.type,
+        }));
+
+        const assistantMsg: ChatMessage = {
+          id: `msg-${Date.now()}-ai`,
+          role: "assistant",
+          content: data.reply || "Done.",
+          timestamp: Date.now(),
+          pendingActions: pendingActions.length > 0 ? pendingActions : undefined,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
       }
-
-      const data = await res.json();
-      const pendingActions: PendingAction[] = (data.actions || []).map((a: PendingAction & { label?: string }) => ({
-        type: a.type,
-        nodeId: a.nodeId,
-        text: a.text,
-        styles: a.styles,
-        template: a.template,
-        direction: a.direction,
-        afterNodeId: a.afterNodeId,
-        label: a.label || a.type,
-      }));
-
-      const assistantMsg: ChatMessage = {
-        id: `msg-${Date.now()}-ai`,
-        role: "assistant",
-        content: data.reply || "Done.",
-        timestamp: Date.now(),
-        pendingActions: pendingActions.length > 0 ? pendingActions : undefined,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to reach LiTT";
       const errorMsg: ChatMessage = {
@@ -387,7 +434,7 @@ export function LiTTCopilotPanel() {
     } finally {
       setIsThinking(false);
     }
-  }, [isThinking, document, selectedNodeId, breakpoint]);
+  }, [isThinking, document, selectedNodeId, breakpoint, projectType]);
 
   const handleAgentButton = (btn: AgentButton) => {
     if (btn.label === "Duplicate" && selectedNodeId) {

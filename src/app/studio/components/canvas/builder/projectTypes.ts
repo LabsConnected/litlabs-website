@@ -185,7 +185,12 @@ btn.addEventListener("click", () => {
 
 /**
  * Combine all HTML project files into a single HTML document for
- * live preview in an iframe. CSS is inlined into <style>, JS into <script>.
+ * live preview in a sandboxed iframe. CSS is inlined into <style>,
+ * JS into <script>.
+ *
+ * An error-capture script is injected to forward console.error,
+ * window.onerror, and unhandledrejection events back to the parent
+ * window via postMessage so LiTT can see and fix runtime errors.
  */
 export function buildHtmlPreview(files: HtmlFile[]): string {
   const html = files.find((f) => f.name === "index.html")?.content ?? "";
@@ -213,6 +218,58 @@ export function buildHtmlPreview(files: HtmlFile[]): string {
   }
   if (!preview.includes("<script>") && js) {
     preview = preview.replace("</body>", `<script>\n${js}\n</script>\n</body>`);
+  }
+
+  // Inject error-capture script at the very beginning of <head> so it
+  // catches errors from inline scripts and external resources.
+  const errorCaptureScript = `<script>
+(function() {
+  var send = function(type, data) {
+    try { parent.postMessage({ source: 'litt-html-preview', type: type, payload: data }, '*'); } catch(e) {}
+  };
+  // Capture console.error and console.warn
+  ['error', 'warn'].forEach(function(method) {
+    var orig = console[method];
+    console[method] = function() {
+      var args = Array.prototype.slice.call(arguments);
+      send('console_' + method, args.map(function(a) {
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch(e) { return String(a); }
+      }).join(' '));
+      orig.apply(console, args);
+    };
+  });
+  // Capture uncaught errors
+  window.addEventListener('error', function(e) {
+    send('runtime_error', {
+      message: e.message || 'Unknown error',
+      filename: e.filename || '',
+      lineno: e.lineno || 0,
+      colno: e.colno || 0,
+      stack: e.error && e.error.stack ? e.error.stack : '',
+    });
+  });
+  // Capture unhandled promise rejections
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason;
+    send('runtime_error', {
+      message: 'Unhandled Promise rejection: ' + (reason && reason.message ? reason.message : String(reason)),
+      filename: '',
+      lineno: 0,
+      colno: 0,
+      stack: reason && reason.stack ? reason.stack : '',
+    });
+  });
+  // Signal that the preview is ready
+  send('preview_ready', { url: location.href });
+})();
+</script>`;
+
+  if (preview.includes("<head>")) {
+    preview = preview.replace("<head>", `<head>\n${errorCaptureScript}`);
+  } else if (preview.includes("<html>")) {
+    preview = preview.replace("<html>", `<html>\n${errorCaptureScript}`);
+  } else {
+    preview = errorCaptureScript + preview;
   }
 
   return preview;

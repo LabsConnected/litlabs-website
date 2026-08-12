@@ -22,6 +22,8 @@ import {
 } from "./projectTypes";
 
 const STORAGE_KEY = "litt:canvasBuilder:document";
+const HTML_PROJECT_STORAGE_KEY = "litt:canvasBuilder:htmlProject";
+const PROJECT_TYPE_STORAGE_KEY = "litt:canvasBuilder:projectType";
 const HISTORY_LIMIT = 50;
 
 interface CanvasBuilderStore {
@@ -86,6 +88,48 @@ function saveToStorage(doc: CanvasDocument) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
   } catch {}
+}
+
+function saveHtmlProjectToStorage(project: HtmlProject) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(HTML_PROJECT_STORAGE_KEY, JSON.stringify(project));
+  } catch {}
+}
+
+function loadHtmlProjectFromStorage(): HtmlProject | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(HTML_PROJECT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<HtmlProject>;
+    if (!parsed.files || !Array.isArray(parsed.files)) return null;
+    return {
+      files: parsed.files.filter((f) => f && typeof f.name === "string" && typeof f.content === "string"),
+      activeFile: typeof parsed.activeFile === "string" ? parsed.activeFile : parsed.files[0]?.name ?? "index.html",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveProjectTypeToStorage(type: ProjectType) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PROJECT_TYPE_STORAGE_KEY, type);
+  } catch {}
+}
+
+function loadProjectTypeFromStorage(): ProjectType | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(PROJECT_TYPE_STORAGE_KEY);
+    if (!raw) return null;
+    const valid: ProjectType[] = ["website", "html", "game2d", "game3d", "app", "component"];
+    return valid.includes(raw as ProjectType) ? (raw as ProjectType) : null;
+  } catch {
+    return null;
+  }
 }
 
 function isValidNodeType(type: unknown): type is NodeType {
@@ -191,24 +235,34 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   leftPanelTab: "build",
   rightPanelTab: "properties",
 
-  // Project type system
-  projectType: "website",
-  htmlProject: createEmptyHtmlProject(),
-  setProjectType: (type) => set({ projectType: type }),
+  // Project type system — load persisted state
+  projectType: loadProjectTypeFromStorage() ?? "website",
+  htmlProject: loadHtmlProjectFromStorage() ?? createEmptyHtmlProject(),
+  setProjectType: (type) => {
+    saveProjectTypeToStorage(type);
+    set({ projectType: type });
+  },
   updateHtmlFile: (name, content) =>
-    set((state) => ({
-      htmlProject: {
+    set((state) => {
+      const newProject = {
         ...state.htmlProject,
         files: state.htmlProject.files.map((f) =>
           f.name === name ? { ...f, content } : f,
         ),
-      },
-    })),
+      };
+      saveHtmlProjectToStorage(newProject);
+      return { htmlProject: newProject };
+    }),
   setActiveHtmlFile: (name) =>
-    set((state) => ({
-      htmlProject: { ...state.htmlProject, activeFile: name },
-    })),
-  setHtmlProject: (project) => set({ htmlProject: project }),
+    set((state) => {
+      const newProject = { ...state.htmlProject, activeFile: name };
+      saveHtmlProjectToStorage(newProject);
+      return { htmlProject: newProject };
+    }),
+  setHtmlProject: (project) => {
+    saveHtmlProjectToStorage(project);
+    set({ htmlProject: project });
+  },
 
   loadDocument: () => {
     const stored = loadFromStorage();
