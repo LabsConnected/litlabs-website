@@ -257,21 +257,7 @@ function CommandStudioContent() {
   // state, and a laptop first-run default (collapsed) that never
   // overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
-  // Captured ONCE via a lazy initializer (before any effect can write to
-  // localStorage) so the laptop-default effect below can tell a real
-  // prior user preference apart from the value our own persistence
-  // effect is about to write on this very mount (Phase C2.1 fix — this
-  // used to re-read localStorage after the persistence effect had
-  // already run, so it always saw a "preference" and never applied the
-  // laptop default).
-  const [hadStoredLittPreference] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem(LITT_COLLAPSED_KEY) !== null;
-    } catch {
-      return false;
-    }
-  });
+
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -298,19 +284,17 @@ function CommandStudioContent() {
   const isMobileLitt = viewportTier === "mobile";
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
 
-  // Laptop first-run default: collapse LiTT once for users who land on a
-  // 1024-1439px viewport with no stored preference yet. Runs at most
-  // once and never overrides an explicit prior choice.
+  // LiTT panel defaults to EXPANDED on all desktop tiers (laptop + desktop).
+  // The chat is the primary left surface — users should see it immediately,
+  // not a 64px collapsed strip. They can manually collapse via the panel
+  // button and that preference is persisted via the localStorage effect above.
   const laptopDefaultAppliedRef = useRef(false);
   useEffect(() => {
     if (laptopDefaultAppliedRef.current) return;
     if (viewportTier === null) return;
     laptopDefaultAppliedRef.current = true;
-    if (viewportTier !== "laptop") return;
-    if (!hadStoredLittPreference) {
-      setLittCollapsed(true);
-    }
-  }, [viewportTier, hadStoredLittPreference]);
+    // No auto-collapse — expanded by default on all desktop tiers.
+  }, [viewportTier]);
 
   // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
   const CONTEXT_OPEN_KEY = "littree:studio:context-open";
