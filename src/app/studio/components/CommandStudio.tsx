@@ -1000,6 +1000,7 @@ function CommandStudioContent() {
               </div>
             )}
 
+            {/* Studio Workspace Composer */}
             {isStudioWorkConversation && (
               <CommandComposer
                 value={composerValue}

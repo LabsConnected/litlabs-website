@@ -1,0 +1,6 @@
+appId: net.litlabs.companion
+---
+- launchApp
+- assertVisible: "LiTT Companion"
+- assertVisible: "Studio"
+- assertVisible: "Activity"

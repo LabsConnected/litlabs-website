@@ -1,0 +1,36 @@
+name: E2E Android Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build_and_test:
+    name: Build Android APK & Run Maestro E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.15.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run TypeScript check
+        run: pnpm mobile:check
+
+      - name: Build Android E2E APK
+        uses: expo/eas-build-action@v1
+        with:
+          platform: android
+          profile: e2e-test
+
+      - name: Run Maestro E2E Tests
+        uses: mobile-dev-inc/action-maestro@v1
+        with:
+          workspace: packages/litt-companion/.maestro

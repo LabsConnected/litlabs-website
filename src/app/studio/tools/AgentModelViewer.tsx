@@ -11,7 +11,6 @@
  */
 
 import { useEffect, useRef, useState, createElement } from "react";
-import "@google/model-viewer";
 import { X, RotateCcw, Loader2, Boxes } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
@@ -57,6 +56,7 @@ export function AgentModelViewer({
   const [autoRotate, setAutoRotate] = useState(false);
 
   useEffect(() => {
+    import("@google/model-viewer").catch(() => {});
     if (!modelUrl || !viewerRef.current) return;
     const viewer = viewerRef.current;
 

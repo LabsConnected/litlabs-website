@@ -141,44 +141,45 @@ export function DraggableWidgetGrid({
     });
   }, [enabledWidgets, ownerMode]);
 
-  // Check if a widget has data to show
+  // Check if a widget has data to show (or clean internal empty state)
   const hasData = useCallback(
     (widgetId: string): boolean => {
+      if (editMode) return true;
       switch (widgetId) {
         case "litt-quick-ask": return true;
-        case "mission-queue": return (data?.missions ?? []).length > 0;
-        case "current-project": return !!data?.project;
-        case "project-runtime": return !!data?.project;
-        case "pending-approvals": return (data?.missions ?? []).some(m => m.state === "awaiting_approval");
-        case "recent-activity": return (data?.activity ?? []).length > 0;
-        case "recent-creations": return (widgetData.recentCreations ?? []).length > 0;
-        case "my-gallery": return (widgetData.gallery?.myGallery ?? []).length > 0;
-        case "trending-gallery": return (widgetData.gallery?.trending ?? []).length > 0;
-        case "discover-feed": return (widgetData.discoverFeed ?? []).length > 0;
+        case "mission-queue": return true;
+        case "current-project": return true;
+        case "project-runtime": return true;
+        case "pending-approvals": return true;
+        case "recent-activity": return true;
+        case "recent-creations": return true;
+        case "my-gallery": return true;
+        case "trending-gallery": return true;
+        case "discover-feed": return true;
         case "music-player": return true;
-        case "littbits": return (data?.billing.balance ?? 0) > 0;
+        case "littbits": return true;
         case "system-health": return true;
-        case "visitors-online": return ownerMode && (data?.growth?.visitorsOnline ?? 0) > 0;
-        case "signed-in-online": return ownerMode && (data?.growth?.signedInOnline ?? 0) > 0;
-        case "signups-today": return ownerMode && (data?.growth?.signupsToday ?? 0) > 0;
-        case "studio-opens": return ownerMode && (data?.growth?.studioOpensToday ?? 0) > 0;
-        case "first-prompts": return ownerMode && (data?.growth?.firstPromptsToday ?? 0) > 0;
-        case "upgrades": return ownerMode && (data?.growth?.upgradesToday ?? 0) > 0;
-        case "revenue": return ownerMode && (data?.billing.revenueTodayCents ?? 0) > 0;
-        case "provider-costs": return ownerMode && (data?.billing.estimatedProviderCostTodayCents ?? 0) > 0;
-        case "notifications": return false;
-        case "deployments": return false;
-        case "saved-items": return false;
-        case "audit-events": return false;
-        case "failed-tools": return false;
-        case "failed-jobs": return false;
-        case "terminal-sessions": return false;
-        case "litt-live-sessions": return false;
-        case "marketplace-installs": return false;
+        case "notifications": return true;
+        case "deployments": return true;
+        case "saved-items": return true;
+        case "visitors-online": return ownerMode;
+        case "signed-in-online": return ownerMode;
+        case "signups-today": return ownerMode;
+        case "studio-opens": return ownerMode;
+        case "first-prompts": return ownerMode;
+        case "upgrades": return ownerMode;
+        case "revenue": return ownerMode;
+        case "provider-costs": return ownerMode;
+        case "audit-events": return ownerMode;
+        case "failed-tools": return ownerMode;
+        case "failed-jobs": return ownerMode;
+        case "terminal-sessions": return ownerMode;
+        case "litt-live-sessions": return ownerMode;
+        case "marketplace-installs": return ownerMode;
         default: return false;
       }
     },
-    [data, widgetData, ownerMode],
+    [editMode, ownerMode],
   );
 
   // Render individual widget content

@@ -459,6 +459,25 @@ export function MissionControlDashboard() {
                   <span className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accent }}>What are we building?</span>
                 </div>
                 <div className="mt-4 flex items-center gap-2">
+                  <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 transition hover:bg-white/5 active:scale-95 disabled:opacity-50"
+                    title="Upload file or image"
+                  >
+                    <Icon name={uploading ? "refresh" : "plus"} size={18} className={uploading ? "animate-spin" : ""} style={{ color: D.textMuted }} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startVoice}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/10 transition hover:bg-white/5 active:scale-95"
+                    style={{ color: listening ? D.accentRed : D.textMuted }}
+                    title={listening ? "Listening..." : "Voice input"}
+                  >
+                    <Icon name="mic" size={18} className={listening ? "animate-pulse" : ""} />
+                  </button>
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}

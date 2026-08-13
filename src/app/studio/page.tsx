@@ -127,6 +127,16 @@ function StudioHub() {
           >
             Create free account
           </Link>
+
+          {process.env.NODE_ENV !== "production" && (
+            <a
+              href="/api/auth/dev-login?redirect=/studio"
+              className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-2.5 text-xs font-bold text-emerald-400 transition-all hover:bg-emerald-500/20"
+              data-testid="dev-signin-btn"
+            >
+              ⚡ 1-Click Dev Sign In (Local Session)
+            </a>
+          )}
         </div>
       </div>
     );
