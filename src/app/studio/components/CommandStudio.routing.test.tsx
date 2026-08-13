@@ -282,6 +282,29 @@ vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));
 vi.mock("./canvas/ActionChips", () => ({ ActionChips: () => null }));
 vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <div /> }));
 
+// Mock new shell components (Phase C2)
+vi.mock("./litt/LiTTAmbientHUD", () => ({
+  default: ({ onExpand }: { onExpand: () => void }) => (
+    <div data-testid="litt-ambient-hud">
+      <button onClick={onExpand} data-testid="litt-expand-btn">Expand</button>
+    </div>
+  ),
+}));
+vi.mock("./context/ContextDrawer", () => ({
+  default: ({ open, onClose, filesContent, inspectorContent }: {
+    open: boolean; onClose: () => void; filesContent: React.ReactNode; inspectorContent: React.ReactNode;
+  }) => open ? (
+    <div data-testid="context-drawer">
+      <button onClick={onClose} data-testid="context-drawer-close">Close</button>
+      <div data-testid="context-files-content">{filesContent}</div>
+      <div data-testid="context-inspector-content">{inspectorContent}</div>
+    </div>
+  ) : null,
+}));
+vi.mock("./shell/StudioOperatorBar", () => ({
+  default: () => <div data-testid="studio-operator-bar" />,
+}));
+
 // jsdom polyfill
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = vi.fn();
@@ -409,17 +432,113 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("Files button remains independently toggleable", () => {
+    it("Files button toggles Context Drawer", () => {
       render(<CommandStudio />);
-      const filesBtn = screen.getByRole("button", { name: "Files" });
+      const filesBtn = screen.getByTestId("workspace-tab-files");
       expect(filesBtn).toBeTruthy();
-      // Files should not be active by default
-      expect(filesBtn.className).not.toContain("glass-active");
+      // Context drawer should not be open by default
+      expect(screen.queryByTestId("context-drawer")).toBeNull();
       // Toggle it on
       act(() => {
         fireEvent.click(filesBtn);
       });
       expect(filesBtn.className).toContain("glass-active");
+      expect(screen.getByTestId("context-drawer")).toBeTruthy();
+    });
+  });
+
+  describe("Ultra Vision shell topology (Phase C2)", () => {
+    it("renders LiTT panel on the left side", () => {
+      render(<CommandStudio />);
+      const littPanel = screen.getByTestId("litt-panel");
+      expect(littPanel).toBeTruthy();
+    });
+
+    it("renders only one LiTT panel", () => {
+      render(<CommandStudio />);
+      const littPanels = screen.getAllByTestId("litt-panel");
+      expect(littPanels.length).toBe(1);
+    });
+
+    it("renders only one CommandComposer", () => {
+      render(<CommandStudio />);
+      // CommandComposer is inside the LiTT chat content
+      // There should be at most one composer input
+      const composers = screen.queryAllByTestId("model-picker-mock");
+      // The model picker mock is used as a proxy — there should be at most 1
+      expect(composers.length).toBeLessThanOrEqual(1);
+    });
+
+    it("renders Operator status bar at the bottom", () => {
+      render(<CommandStudio />);
+      expect(screen.getByTestId("studio-operator-bar")).toBeTruthy();
+    });
+
+    it("LiTT collapse button works", () => {
+      render(<CommandStudio />);
+      const collapseBtn = screen.getByTestId("litt-panel-collapse");
+      expect(collapseBtn).toBeTruthy();
+      act(() => {
+        fireEvent.click(collapseBtn);
+      });
+      // After collapse, the ambient HUD should appear
+      expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
+      // The expanded panel should be gone
+      expect(screen.queryByTestId("litt-panel")).toBeNull();
+    });
+
+    it("collapsed LiTT can be expanded again", () => {
+      render(<CommandStudio />);
+      // Collapse
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
+      });
+      expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
+      // Expand
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-expand-btn"));
+      });
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+      expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
+    });
+
+    it("collapsed state does not remove workspace tabs", () => {
+      render(<CommandStudio />);
+      // Collapse LiTT
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
+      });
+      // Workspace tabs should still be present
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
+    });
+
+    it("Context drawer opens and closes", () => {
+      render(<CommandStudio />);
+      // Open via Files toggle
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-drawer")).toBeTruthy();
+      // Close
+      act(() => {
+        fireEvent.click(screen.getByTestId("context-drawer-close"));
+      });
+      expect(screen.queryByTestId("context-drawer")).toBeNull();
+    });
+
+    it("old left Files permanent panel is gone (no studio-files-panel)", () => {
+      render(<CommandStudio />);
+      // The old files panel testid should not exist
+      expect(screen.queryByTestId("studio-files-panel")).toBeNull();
+    });
+
+    it("no Game placeholder is rendered", () => {
+      render(<CommandStudio />);
+      expect(screen.queryByText(/coming soon/i)).toBeNull();
+      expect(screen.queryByTestId("game-creator")).toBeNull();
     });
   });
 });

@@ -33,6 +33,9 @@ import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
+import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
+import ContextDrawer from "./context/ContextDrawer";
+import StudioOperatorBar from "./shell/StudioOperatorBar";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -155,6 +158,7 @@ function CommandStudioContent() {
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
+  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   // Look up health by provider first, then fall back to apiProvider
   // (e.g. "Auto" models route to "gemini" under the hood).
   const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
@@ -253,23 +257,90 @@ function CommandStudioContent() {
     }
   }, [sidePanel]);
 
-  // Derived booleans for downstream components
-  const activityRailOpen = sidePanel === "activity";
-  const inspectorOpen = sidePanel === "inspector";
+  // LiTT panel — always present on desktop, expand/collapse.
+  // Phase C2: moved from right to left. Always visible (expanded or collapsed).
+  const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
+  const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem(LITT_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
+    } catch {
+      // ignore
+    }
+  }, [littCollapsed]);
 
-  // LiTT Live Activity panel — right side, open by default on desktop.
-  // Shows real-time execution events (tool calls, diffs, checks, approvals).
-  const [littLiveOpen, setLittLiveOpen] = useState(true);
+  // LiTT tab preference — lets header/activity button switch to Live
+  const [littTabPreference, setLittTabPreference] = useState<"chat" | "live" | undefined>(undefined);
 
-  // Toggle helpers — opening one closes the others
+  // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
+  const CONTEXT_OPEN_KEY = "littree:studio:context-open";
+  const CONTEXT_TAB_KEY = "littree:studio:context-tab";
+  const [contextDrawerOpen, setContextDrawerOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem(CONTEXT_OPEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [contextDrawerTab, setContextDrawerTab] = useState<"files" | "inspector">(() => {
+    if (typeof window === "undefined") return "files" as const;
+    try {
+      const stored = localStorage.getItem(CONTEXT_TAB_KEY);
+      return stored === "inspector" ? "inspector" : "files" as const;
+    } catch {
+      return "files" as const;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTEXT_OPEN_KEY, String(contextDrawerOpen));
+    } catch {
+      // ignore
+    }
+  }, [contextDrawerOpen]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTEXT_TAB_KEY, contextDrawerTab);
+    } catch {
+      // ignore
+    }
+  }, [contextDrawerTab]);
+
+  // Derived booleans for downstream components (must be after state declarations)
+  const activityRailOpen = !littCollapsed;
+  const inspectorOpen = contextDrawerOpen && contextDrawerTab === "inspector";
+
+  // Toggle helpers for header compatibility
   const handleToggleActivity = useCallback(() => {
-    setLittLiveOpen((v) => !v);
+    setLittCollapsed((v) => !v);
   }, []);
   const handleToggleInspector = useCallback(() => {
-    setSidePanel((current) => (current === "inspector" ? "none" : "inspector"));
+    setContextDrawerTab("inspector");
+    setContextDrawerOpen((v) => !v);
   }, []);
 
-  // Keyboard shortcut: Ctrl+Shift+A toggles the Activity panel.
+  // Context drawer open helpers
+  const handleOpenContextFiles = useCallback(() => {
+    setContextDrawerTab("files");
+    setContextDrawerOpen(true);
+  }, []);
+  const handleOpenContextInspector = useCallback(() => {
+    setContextDrawerTab("inspector");
+    setContextDrawerOpen(true);
+  }, []);
+  const handleToggleContext = useCallback(() => {
+    setContextDrawerOpen((v) => !v);
+  }, []);
+
+  // Keyboard shortcut: Ctrl+Shift+A toggles the LiTT panel collapse.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -294,9 +365,8 @@ function CommandStudioContent() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
-  // Collapsible Files / Components panel — sits between the shared sidebar
-  // and the workspace. Toggled by the Files button in the tab bar.
-  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
+  // Files panel state is now managed by the Context Drawer (Phase C2).
+  // The old filesPanelOpen state has been replaced by contextDrawerOpen + contextDrawerTab.
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
@@ -744,261 +814,23 @@ function CommandStudioContent() {
           busy={conversation.busy}
         />
 
-        {/* Body: workspace + inspector.
-            The desktop nav rail (CommandStudioNav) has been removed — the
-            unified AppShell sidebar now provides global navigation.
-            Studio's internal tabs (Chat/Canvas/Code/Preview/Files) remain. */}
+        {/* Body: LiTT (left) | Workspace (center) | Context Drawer (right).
+            Phase C2: LiTT moved from right to left. Files/Inspector moved
+            from left-of-workspace to right Context Drawer. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Persistent primary workspace switcher: Chat | Canvas | Code | Preview */}
-            <div
-              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
-              style={{
-                height: 36,
-                backgroundColor: "rgba(13,9,22,0.85)",
-                borderColor: "rgba(155,77,255,0.1)",
-              }}
-            >
-              {workspaceTabs.map((t) => {
-                const tabMode = workspaceStageToMode(t.id);
-                const isActive = destination === "studio" && studioMode === tabMode
-                  && (t.id !== "plan" || workSurface !== "builder");
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => {
-                      setDestination("studio");
-                      setStudioMode(tabMode);
-                      if (t.id === "plan") setWorkSurface("conversation");
-                    }}
-                    className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
-                    style={{
-                      color: isActive ? "var(--text-main)" : "var(--text-dim)",
-                      backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
-                    }}
-                    aria-label={t.label}
-                    data-testid={`workspace-tab-${t.id}`}
-                  >
-                    {t.label}
-                    {isActive && (
-                      <span
-                        className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
-                        style={{
-                          background: "var(--purple)",
-                          boxShadow: "0 0 6px rgba(139,92,246,0.5)",
-                        }}
-                        aria-hidden
-                      />
-                    )}
-                  </button>
-                );
-              })}
-
-              {/* Files / Components toggle — collapsible left panel */}
-              <button
-                type="button"
-                onClick={() => setFilesPanelOpen((v) => !v)}
-                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${filesPanelOpen ? "glass-active" : ""}`}
-                style={{
-                  color: filesPanelOpen ? "var(--text-main)" : "var(--text-dim)",
-                  backgroundColor: filesPanelOpen ? "var(--purple-soft)" : "transparent",
-                }}
-                aria-label="Files"
-                aria-pressed={filesPanelOpen}
-              >
-                Files
-                {filesPanelOpen && (
-                  <span
-                    className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
-                    style={{
-                      background: "var(--purple)",
-                      boxShadow: "0 0 6px rgba(139,92,246,0.5)",
-                    }}
-                    aria-hidden
-                  />
-                )}
-              </button>
-            </div>
-
-            {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
-            {destination === "create" && (
-              <div
-                className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
-                style={{
-                  height: 36,
-                  backgroundColor: "rgba(13,9,22,0.85)",
-                  borderColor: "rgba(155,77,255,0.1)",
-                }}
-              >
-                {createTabs.map((t) => {
-                  const isActive = createMode === t.id;
-                  const TabIcon = t.icon;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setCreateMode(t.id)}
-                      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
-                      style={{
-                        color: isActive ? "var(--purple)" : "var(--text-dim)",
-                        backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
-                      }}
-                      aria-label={t.label}
-                    >
-                      <TabIcon size={13} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Workspace content — Files/Components panel + main workspace + LiTT Live Activity */}
-            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-              {/* Collapsible Files / Components panel — sits between shared sidebar and workspace */}
-              {filesPanelOpen && (
-                <div
-                  className="hidden shrink-0 flex-col overflow-hidden border-r md:flex"
-                  style={{
-                    width: 240,
-                    backgroundColor: "var(--studio-surface)",
-                    borderRight: "1px solid var(--studio-border)",
-                  }}
-                  data-testid="studio-files-panel"
-                >
-                  <div
-                    className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
-                    style={{ borderColor: "var(--studio-border)" }}
-                  >
-                    <span
-                      className="text-[10px] font-black uppercase tracking-[0.12em]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      Files / Components
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setFilesPanelOpen(false)}
-                      className="grid h-6 w-6 place-items-center rounded-md hover:bg-white/10"
-                      style={{ color: "var(--text-muted)" }}
-                      aria-label="Close Files panel"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                    <StudioProjectFiles
-                      projectId={capabilities.projectId}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                      workspaceStatus={capabilities.workspaceStatus}
-                      writeAccess={capabilities.writeAccess}
-                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
-                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
-                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {isPlan ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <StudioPlanSurface
-                      capabilities={capabilities}
-                      modelLabel={modelLabel}
-                      onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
-                      onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
-                      onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
-                      onOpenTerminal={handleOpenTerminal}
-                      onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
-                      onOpenFiles={() => setFilesPanelOpen(true)}
-                      onRollback={handleRollback}
-                    />
-                  </div>
-                ) : isCanvas ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <VisualCanvasBuilder />
-                  </div>
-                ) : isCode ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <CodeWorkspace
-                      projectId={capabilities.projectId}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch}
-                      workspaceStatus={capabilities.workspaceStatus ?? null}
-                      writeAccess={capabilities.writeAccess ?? true}
-                    />
-                  </div>
-                ) : isPreview ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <StudioPreviewPanel
-                      projectId={capabilities.projectId}
-                      projectName={capabilities.projectName}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch}
-                      workspaceStatus={capabilities.workspaceStatus ?? null}
-                    />
-                  </div>
-                ) : WorkspaceComponent ? (
-                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent projectId={capabilities.projectId} />
-                  </div>
-                ) : (
-                  <StudioUnavailableSurface
-                    destination={destination}
-                    capabilities={capabilities}
-                    modelLabel={modelLabel}
-                  />
-                )}
-              </div>
-
-              {/* Right inspector — folded into LiTT Live Activity panel.
-                  StudioInspector is no longer rendered as a permanent column.
-                  Files/checks/context are accessible via the LiTT Live panel
-                  and the Files drawer. */}
-
-            </div>
-
-            {/* Bottom drawer — collapsed by default, sits above composer */}
-            <StudioDrawer
-              open={drawerOpen}
-              onToggle={() => setDrawerOpen((v) => !v)}
-              activeTab={drawerTab}
-              onTabChange={setDrawerTab}
-            >
-              {/* Keep the terminal mounted in the background to handle auto-connect and keep PTY alive */}
-              <div style={{ display: drawerTab === "terminal" ? "block" : "none", height: "100%" }}>
-                <StudioTerminalDrawer
-                  projectId={capabilities.projectId}
-                  repositoryName={capabilities.repositoryName}
-                  branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                  visible={drawerOpen && drawerTab === "terminal"}
-                />
-              </div>
-
-              {/* Render others conditionally since they don't have background workers */}
-              {drawerOpen && drawerTab === "media" && <MediaUtilityDock />}
-              {drawerOpen && drawerTab === "activity" && (
-                <StudioActivityPanel
-                  messages={conversation.messages}
-                  busy={conversation.busy}
-                  modelLabel={modelLabel}
-                  projectName={capabilities.projectName}
-                  terminalStatus={capabilities.terminalStatus}
-                />
-              )}
-            </StudioDrawer>
-          </main>
-
-          {/* LiTT Panel — right side. One agent, two views: Chat | Live.
-              Chat = conversation transcript + composer
-              Live = real-time execution telemetry
-              Both tabs share the same conversation/execution state. */}
-          {littLiveOpen && (
+          {/* LiTT panel — left side. Always present on desktop.
+              Expanded: 320px with Chat/Live tabs.
+              Collapsed: 64px ambient HUD with phase/voice indicators. */}
+          {littCollapsed ? (
+            <LiTTAmbientHUD
+              onExpand={() => setLittCollapsed(false)}
+              voiceConnected={liveSession.isLive}
+              micOn={liveSession.isLive}
+            />
+          ) : (
             <LiTTPanel
-              onClose={() => setLittLiveOpen(false)}
+              onCollapse={() => setLittCollapsed(true)}
+              preferredTab={littTabPreference}
               chatContent={
                 <>
                   <StudioWorkSurface
@@ -1125,7 +957,292 @@ function CommandStudioContent() {
               }
             />
           )}
+
+          <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
+            {/* Persistent primary workspace switcher: Chat | Canvas | Code | Preview */}
+            <div
+              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
+              style={{
+                height: 36,
+                backgroundColor: "rgba(13,9,22,0.85)",
+                borderColor: "rgba(155,77,255,0.1)",
+              }}
+            >
+              {workspaceTabs.map((t) => {
+                const tabMode = workspaceStageToMode(t.id);
+                const isActive = destination === "studio" && studioMode === tabMode
+                  && (t.id !== "plan" || workSurface !== "builder");
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setDestination("studio");
+                      setStudioMode(tabMode);
+                      if (t.id === "plan") setWorkSurface("conversation");
+                    }}
+                    className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
+                    style={{
+                      color: isActive ? "var(--text-main)" : "var(--text-dim)",
+                      backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
+                    }}
+                    aria-label={t.label}
+                    data-testid={`workspace-tab-${t.id}`}
+                  >
+                    {t.label}
+                    {isActive && (
+                      <span
+                        className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                        style={{
+                          background: "var(--purple)",
+                          boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                        }}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                );
+              })}
+
+              {/* Files toggle — opens Context Drawer on the right (Phase C2) */}
+              <button
+                type="button"
+                onClick={handleToggleContext}
+                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${contextDrawerOpen ? "glass-active" : ""}`}
+                style={{
+                  color: contextDrawerOpen ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: contextDrawerOpen ? "var(--purple-soft)" : "transparent",
+                }}
+                aria-label="Files"
+                aria-pressed={contextDrawerOpen}
+                data-testid="workspace-tab-files"
+              >
+                Files
+                {contextDrawerOpen && (
+                  <span
+                    className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                    style={{
+                      background: "var(--purple)",
+                      boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                    }}
+                    aria-hidden
+                  />
+                )}
+              </button>
+            </div>
+
+            {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
+            {destination === "create" && (
+              <div
+                className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
+                style={{
+                  height: 36,
+                  backgroundColor: "rgba(13,9,22,0.85)",
+                  borderColor: "rgba(155,77,255,0.1)",
+                }}
+              >
+                {createTabs.map((t) => {
+                  const isActive = createMode === t.id;
+                  const TabIcon = t.icon;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setCreateMode(t.id)}
+                      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
+                      style={{
+                        color: isActive ? "var(--purple)" : "var(--text-dim)",
+                        backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
+                      }}
+                      aria-label={t.label}
+                    >
+                      <TabIcon size={13} strokeWidth={isActive ? 2.2 : 1.7} className="pointer-events-none" />
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Workspace content — main workspace surface only.
+                Files/Inspector now live in the right Context Drawer (Phase C2). */}
+            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {isPlan ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioPlanSurface
+                      capabilities={capabilities}
+                      modelLabel={modelLabel}
+                      onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
+                      onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
+                      onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
+                      onOpenTerminal={handleOpenTerminal}
+                      onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+                      onOpenFiles={handleOpenContextFiles}
+                      onRollback={handleRollback}
+                    />
+                  </div>
+                ) : isCanvas ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <VisualCanvasBuilder />
+                  </div>
+                ) : isCode ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <CodeWorkspace
+                      projectId={capabilities.projectId}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
+                      writeAccess={capabilities.writeAccess ?? true}
+                    />
+                  </div>
+                ) : isPreview ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioPreviewPanel
+                      projectId={capabilities.projectId}
+                      projectName={capabilities.projectName}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
+                    />
+                  </div>
+                ) : WorkspaceComponent ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+                    <WorkspaceComponent projectId={capabilities.projectId} />
+                  </div>
+                ) : (
+                  <StudioUnavailableSurface
+                    destination={destination}
+                    capabilities={capabilities}
+                    modelLabel={modelLabel}
+                  />
+                )}
+              </div>
+
+              {/* Right inspector — folded into LiTT Live Activity panel.
+                  StudioInspector is no longer rendered as a permanent column.
+                  Files/checks/context are accessible via the LiTT Live panel
+                  and the Files drawer. */}
+
+            </div>
+
+            {/* Bottom drawer — collapsed by default, sits above composer */}
+            <StudioDrawer
+              open={drawerOpen}
+              onToggle={() => setDrawerOpen((v) => !v)}
+              activeTab={drawerTab}
+              onTabChange={setDrawerTab}
+            >
+              {/* Keep the terminal mounted in the background to handle auto-connect and keep PTY alive */}
+              <div style={{ display: drawerTab === "terminal" ? "block" : "none", height: "100%" }}>
+                <StudioTerminalDrawer
+                  projectId={capabilities.projectId}
+                  repositoryName={capabilities.repositoryName}
+                  branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                  visible={drawerOpen && drawerTab === "terminal"}
+                />
+              </div>
+
+              {/* Render others conditionally since they don't have background workers */}
+              {drawerOpen && drawerTab === "media" && <MediaUtilityDock />}
+              {drawerOpen && drawerTab === "activity" && (
+                <StudioActivityPanel
+                  messages={conversation.messages}
+                  busy={conversation.busy}
+                  modelLabel={modelLabel}
+                  projectName={capabilities.projectName}
+                  terminalStatus={capabilities.terminalStatus}
+                />
+              )}
+            </StudioDrawer>
+          </main>
+
+          {/* Context Drawer — right side. Files | Inspector.
+              Replaces the old left Files panel and right Inspector.
+              Closes completely to 0px — workspace reclaims width. */}
+          <ContextDrawer
+            open={contextDrawerOpen}
+            onClose={() => setContextDrawerOpen(false)}
+            initialTab={contextDrawerTab}
+            filesContent={
+              <div className="flex h-full flex-col overflow-hidden">
+                <div
+                  className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+                  style={{ borderColor: "var(--studio-border)" }}
+                >
+                  <span
+                    className="text-[10px] font-black uppercase tracking-[0.12em]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    Files / Components
+                  </span>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+                  <StudioProjectFiles
+                    projectId={capabilities.projectId}
+                    repositoryName={capabilities.repositoryName}
+                    branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                    workspaceStatus={capabilities.workspaceStatus}
+                    writeAccess={capabilities.writeAccess}
+                    onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                    onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                    onWorkspacePrepared={() => { void refreshCapabilities(); }}
+                  />
+                </div>
+              </div>
+            }
+            inspectorContent={
+              <StudioInspector
+                open={true}
+                onToggle={() => setContextDrawerOpen(false)}
+                activeTab={inspectorTab}
+                onTabChange={setInspectorTab}
+                data={{
+                  capabilities,
+                  modelLabel,
+                  modelHealth,
+                  activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+                  destination,
+                  surface: studioMode,
+                  messages: conversation.messages,
+                  busy: conversation.busy,
+                  workspaceRevision,
+                  healthRunTrigger,
+                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                  onWorkspacePrepared: () => { void refreshCapabilities(); },
+                }}
+              />
+            }
+          />
         </div>
+
+        {/* Operator status bar — bottom. Uses real execution state. */}
+        <StudioOperatorBar
+          onOpenTerminal={handleOpenTerminal}
+          onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+          onRollback={handleRollback}
+          onStop={() => {
+            conversation.cancel();
+            useExecutionStore.getState().endRun("cancelled");
+          }}
+          onResolveApproval={(decision) => {
+            const pending = useExecutionStore.getState().pendingApproval;
+            if (pending?.pausedRunId && conversation.selectedConversationId) {
+              void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ decision }),
+              }).then(() => {
+                useExecutionStore.getState().resolveApproval(decision);
+                conversation.regenerate();
+              });
+            } else {
+              useExecutionStore.getState().resolveApproval(decision);
+            }
+          }}
+          terminalStatus={capabilities.terminalStatus}
+          modelLabel={modelLabel}
+        />
 
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
