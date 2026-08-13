@@ -202,8 +202,8 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    // Model picker is a button with aria-label "Select AI model"
-    expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
+    // Model picker is a button with aria-label "Select assistant and model"
+    expect(screen.getByRole("button", { name: /select assistant and model/i })).toBeTruthy();
   });
 
   it("renders an agent selector with model picker", () => {
@@ -216,12 +216,10 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
 
-    // Model picker is still present
-    expect(screen.getByRole("button", { name: /select AI model/i })).toBeTruthy();
-
-    // Agent selector button is present (popover only opens on click)
-    expect(screen.getByRole("button", { name: /select agent/i })).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: /select agent/i })).toBeNull();
+    // Unified assistant + model picker is present (popover only opens on click)
+    expect(screen.getByRole("button", { name: /select assistant and model/i })).toBeTruthy();
+    // The popover dialog is not open until clicked
+    expect(screen.queryByRole("dialog", { name: /select assistant and model/i })).toBeNull();
   });
 
   it("camera button opens camera preview popover", () => {

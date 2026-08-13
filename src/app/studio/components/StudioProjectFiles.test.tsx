@@ -8,6 +8,13 @@ vi.mock("@/hooks/useClerkAuth", () => ({
   useClerkAuth: () => ({ getToken }),
 }));
 
+vi.mock("../context/StudioContext", () => ({
+  useStudioContext: () => ({
+    setActiveFile: vi.fn(),
+    activeFile: null,
+  }),
+}));
+
 describe("StudioProjectFiles", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
