@@ -527,6 +527,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Studio manages its own full-height chrome (header, mobile bottom nav,
+  // composer). The shared sidebar still renders on desktop, but we suppress
+  // AppShell's mobile top bar, mobile bottom bar, and main bottom padding
+  // to avoid double chrome on mobile.
+  const isStudio = pathname?.startsWith("/studio") ?? false;
+
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -542,26 +548,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
       </Suspense>
 
-      {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety */}
-      <Suspense fallback={null}>
-        <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
-      </Suspense>
+      {/* Mobile drawer (conditional) — wrapped in Suspense for useSearchParams SSG safety.
+          Skipped for Studio (Studio has its own mobile nav with a Home link). */}
+      {!isStudio && (
+        <Suspense fallback={null}>
+          <MobileDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar (replaces NavbarWrapper on mobile) */}
-        <MobileTopBar onMenuClick={() => setMobileOpen(true)} />
+        {/* Mobile top bar — skipped for Studio (Studio has its own header) */}
+        {!isStudio && <MobileTopBar onMenuClick={() => setMobileOpen(true)} />}
 
-        {/* Main content */}
+        {/* Main content.
+            Studio is full-height (h-dvh) and manages its own mobile bottom nav,
+            so we skip the mobile bottom padding that reserves space for AppShell's
+            mobile bottom bar. */}
         <main
           id="main-content"
-          className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0"
+          className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden ${
+            isStudio ? "" : "pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0"
+          }`}
         >
           {children}
         </main>
 
-        {/* Mobile bottom bar */}
-        <MobileBottomBar />
+        {/* Mobile bottom bar — skipped for Studio (Studio has its own MobileCommandNav) */}
+        {!isStudio && <MobileBottomBar />}
       </div>
     </div>
   );

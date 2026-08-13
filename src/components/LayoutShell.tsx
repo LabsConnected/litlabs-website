@@ -63,20 +63,6 @@ export default function LayoutShell({
   const ownChrome = hasOwnChrome(pathname);
   const ownShell = hasOwnShell(pathname);
 
-  if (isStudio) {
-    return (
-      <>
-        <AnimatedBackgroundWrapper />
-        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
-          {children}
-        </div>
-        <CookieConsent />
-        <ServiceWorkerRegistration />
-      </>
-    );
-  }
-
   if (barePublic) {
     return (
       <>
@@ -109,16 +95,18 @@ export default function LayoutShell({
     );
   }
 
-  // Authenticated routes — use the unified AppShell
+  // Authenticated routes — use the unified AppShell.
+  // Studio flows through AppShell too (shared sidebar) but skips footer,
+  // global companion, and YouTube shell since it manages its own full-height chrome.
   return (
     <>
       <AnimatedBackgroundWrapper />
       <div className="relative z-10">
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <AppShell>{children}</AppShell>
-        {!ownChrome && <FooterWrapper />}
-        <GlobalCompanion />
-        <YouTubePlayerShell />
+        {!ownChrome && !isStudio && <FooterWrapper />}
+        {!isStudio && <GlobalCompanion />}
+        {!isStudio && <YouTubePlayerShell />}
         <CookieConsent />
         <ServiceWorkerRegistration />
       </div>

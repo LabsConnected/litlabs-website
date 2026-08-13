@@ -27,7 +27,7 @@ import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
-import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
+import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
@@ -286,11 +286,6 @@ function CommandStudioContent() {
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
-  }, []);
-
-  const handleSelectMoreMode = useCallback((mode: MoreMode) => {
-    setDestination("more");
-    setMoreMode(mode);
   }, []);
 
   // handleRouteTool must be declared before useStudioConversation so the
@@ -709,10 +704,11 @@ function CommandStudioContent() {
           busy={conversation.busy}
         />
 
-        {/* Body: nav rail + workspace + inspector */}
+        {/* Body: workspace + inspector.
+            The desktop nav rail (CommandStudioNav) has been removed — the
+            unified AppShell sidebar now provides global navigation.
+            Studio's internal tabs (Chat/Canvas/Code/Preview/Files) remain. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <CommandStudioNav active={destination} onSelect={handleSelectDestination} onSelectMoreMode={handleSelectMoreMode} />
-
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
             <div

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { useWallet } from "@/context/WalletContext";
 import StudioProjectPicker from "./StudioProjectPicker";
 import {
@@ -427,26 +426,8 @@ export default function CommandStudioHeader({
           Treated as session/account context (not a chat action). */}
       <OwnerTestModeIndicator placement="inline" />
 
-      {/* User avatar */}
-      <div className="shrink-0" data-testid="user-avatar">
-        <UserButton
-          afterSignOutUrl="/"
-          appearance={{
-            elements: {
-              avatarBox: "w-6 h-6 rounded-full",
-              userButtonPopoverCard: "bg-[#0a0b12] border border-white/10 shadow-2xl",
-              userButtonPopoverActionButton: "text-white/85 hover:bg-white/8",
-              userButtonPopoverActionButtonText: "text-white/85",
-              userButtonPopoverFooter: "text-white/40",
-              userButtonPopoverHeaderTitle: "text-white/90",
-              userButtonPopoverHeaderSubtitle: "text-white/55",
-              userButtonPopoverProfile: "text-white/85",
-              userButtonPopoverProfilePrimaryText: "text-white/90",
-              userButtonPopoverProfileSecondaryText: "text-white/55",
-            },
-          }}
-        />
-      </div>
+      {/* Clerk UserButton removed — account/profile/settings are now accessed
+          through the unified AppShell sidebar (Wallet, Settings, Profile). */}
     </header>
   );
 }
