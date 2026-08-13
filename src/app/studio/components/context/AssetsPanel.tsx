@@ -12,6 +12,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useStudioContext } from "@/app/studio/context/StudioContext";
+import { useAssetsRefreshTrigger } from "@/app/studio/hooks/useAssetsRefresh";
 import type { StudioAsset } from "@/lib/assets/types";
 import { FileImage, FileVideo, FileAudio, FileMusic, FileCode, FileBox, Loader2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -28,6 +29,7 @@ const KIND_ICON: Partial<Record<StudioAsset["kind"], LucideIcon>> = {
 
 export default function AssetsPanel({ projectId }: { projectId?: string | null }) {
   const { activeAssetId, setActiveAssetId } = useStudioContext();
+  const refreshTrigger = useAssetsRefreshTrigger();
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export default function AssetsPanel({ projectId }: { projectId?: string | null }
 
   useEffect(() => {
     fetchAssets();
-  }, [fetchAssets]);
+  }, [fetchAssets, refreshTrigger]);
 
   if (loading) {
     return (

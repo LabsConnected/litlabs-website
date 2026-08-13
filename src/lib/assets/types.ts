@@ -96,11 +96,19 @@ export interface StudioAsset {
  * Examples:
  *   project_asset:550e8400-e29b-41d4-a716-446655440000
  *   user_media:550e8400-e29b-41d4-a716-446655440000
+ *   generation_job:550e8400-e29b-41d4-a716-446655440000
+ *   music_track:550e8400-e29b-41d4-a716-446655440000
  */
 
-export type AssetSourcePrefix = "project_asset" | "user_media";
+export type AssetSourcePrefix =
+  | "project_asset"
+  | "user_media"
+  | "generation_job"
+  | "music_track";
 
 export const ASSET_SOURCE_PREFIXES: readonly AssetSourcePrefix[] = [
   "project_asset",
   "user_media",
+  "generation_job",
+  "music_track",
 ];

@@ -2,8 +2,8 @@
  * Asset Lake — canonical read repository.
  *
  * One canonical read layer that aggregates assets from all source
- * adapters (project_assets, user_media) and returns normalized
- * StudioAsset records.
+ * adapters (project_assets, user_media, generation_jobs, music_tracks)
+ * and returns normalized StudioAsset records.
  *
  * Security:
  *   - Server-only (uses supabaseAdmin).
@@ -12,6 +12,8 @@
  *     BEFORE any read — the caller's ownership of the project is checked
  *     server-side, not trusted from a client-supplied projectId.
  *   - user_media are scoped to the authenticated user's own rows.
+ *   - generation_jobs are scoped to the authenticated user's own rows.
+ *   - music_tracks are scoped to the authenticated user's own rows.
  *   - Never exposes another user's private media.
  *   - No arbitrary userId/projectId impersonation via parameters.
  */
@@ -23,7 +25,10 @@ import { getProject } from "@/lib/projects/project-repository";
 import { listProjectAssets } from "@/lib/visual-builds/repository";
 import { projectAssetsToStudioAssets } from "./adapters/project-asset";
 import { userMediaRowsToStudioAssets, type UserMediaRow } from "./adapters/user-media";
+import { generationJobsToStudioAssets } from "./adapters/generation-job";
+import { musicTracksToStudioAssets, type MusicTrackRow } from "./adapters/music-track";
 import type { AssetKind, StudioAsset } from "./types";
+import type { GenerationJob } from "@/lib/generation/types";
 
 export interface ListStudioAssetsOptions {
   /** Clerk user ID of the authenticated user. */
@@ -119,6 +124,87 @@ async function fetchUserMedia(
 }
 
 /**
+ * Fetch the authenticated user's own completed generation_jobs and convert
+ * to StudioAssets. Only completed jobs with a URL in metadata are returned.
+ */
+async function fetchGenerationJobs(
+  internalUserId: string,
+  limit: number,
+): Promise<StudioAsset[]> {
+  if (!supabaseAdmin) return [];
+  const { data, error } = await supabaseAdmin
+    .from("generation_jobs")
+    .select("*")
+    .eq("user_id", internalUserId)
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+  return generationJobsToStudioAssets(data as unknown as GenerationJob[]);
+}
+
+/**
+ * Fetch the authenticated user's own music_tracks and convert to StudioAssets.
+ * Constructs the audio URL from the R2 storage key via the tracks API pattern.
+ */
+async function fetchMusicTracks(
+  internalUserId: string,
+  limit: number,
+): Promise<StudioAsset[]> {
+  if (!supabaseAdmin) return [];
+
+  // Query music_tracks with a join to get the audio URL.
+  // The audio_url is constructed server-side from the R2 storage key.
+  // For the Asset Lake, we query the tracks and construct URLs.
+  const { data, error } = await supabaseAdmin
+    .from("music_tracks")
+    .select(`
+      id, user_id, generation_id, project_id, version_label, title,
+      blueprint, audio_storage_key, duration, bpm, musical_key,
+      visibility, lbc_charged, provider, provider_model,
+      created_at, updated_at
+    `)
+    .eq("user_id", internalUserId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+
+  // Construct audio URLs from storage keys.
+  // Public tracks use the public R2 URL; private tracks need signed URLs.
+  // For the Asset Lake read layer, we construct public URLs for public tracks
+  // and skip private tracks that need signed URLs (the /api/music/tracks
+  // endpoint handles signed URL generation for playback).
+  const tracks = data as MusicTrackRow[];
+  const tracksWithUrls = tracks.map((track) => {
+    // Construct URL from R2 storage key for public tracks.
+    // Private tracks are handled by the music tracks API for playback.
+    if (track.visibility === "public") {
+      const r2PublicUrl = constructR2PublicUrl(track.audio_storage_key);
+      return { ...track, audio_url: r2PublicUrl };
+    }
+    // For private/unlisted tracks, we still include them but without
+    // a playable URL — the Assets panel can show metadata and the
+    // music player handles signed URL generation on demand.
+    return { ...track, audio_url: null };
+  });
+
+  return musicTracksToStudioAssets(tracksWithUrls);
+}
+
+/**
+ * Construct a public R2 URL from a storage key.
+ * Returns null if the R2 configuration is incomplete.
+ */
+function constructR2PublicUrl(storageKey: string): string | null {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const publicBucket = process.env.NEXT_PUBLIC_R2_PUBLIC_BUCKET;
+  if (!accountId || !publicBucket) return null;
+  return `https://${accountId}.r2.dev/${publicBucket}/${storageKey}`;
+}
+
+/**
  * List normalized StudioAssets for the authenticated user.
  *
  * Aggregates from project_assets (if projectId is given) and user_media
@@ -161,9 +247,17 @@ export async function listStudioAssets(
       if (internalUserId) {
         const userAssets = await fetchUserMedia(internalUserId, limit);
         results.push(...userAssets);
+
+        // Also fetch generation_jobs (user's own completed jobs).
+        const jobAssets = await fetchGenerationJobs(internalUserId, limit);
+        results.push(...jobAssets);
+
+        // Also fetch music_tracks (user's own tracks).
+        const musicAssets = await fetchMusicTracks(internalUserId, limit);
+        results.push(...musicAssets);
       }
     } catch {
-      // If user_media fetch fails, continue with what we have.
+      // If user-scoped fetch fails, continue with what we have.
     }
   }
 
@@ -240,6 +334,56 @@ export async function getStudioAsset(
 
     const { userMediaToStudioAsset } = await import("./adapters/user-media");
     return { asset: userMediaToStudioAsset(data as UserMediaRow), error: null };
+  }
+
+  if (prefix === "generation_job") {
+    const internalUserId = await resolveInternalUserId(opts.clerkId);
+    if (!internalUserId) {
+      return { asset: null, error: "User not found." };
+    }
+    const { data, error } = await supabaseAdmin
+      .from("generation_jobs")
+      .select("*")
+      .eq("id", rawId)
+      .eq("user_id", internalUserId) // Security: only own jobs
+      .maybeSingle();
+
+    if (error || !data) {
+      return { asset: null, error: null };
+    }
+
+    const { generationJobToStudioAsset } = await import("./adapters/generation-job");
+    return { asset: generationJobToStudioAsset(data as unknown as GenerationJob), error: null };
+  }
+
+  if (prefix === "music_track") {
+    const internalUserId = await resolveInternalUserId(opts.clerkId);
+    if (!internalUserId) {
+      return { asset: null, error: "User not found." };
+    }
+    const { data, error } = await supabaseAdmin
+      .from("music_tracks")
+      .select(`
+        id, user_id, generation_id, project_id, version_label, title,
+        blueprint, audio_storage_key, duration, bpm, musical_key,
+        visibility, lbc_charged, provider, provider_model,
+        created_at, updated_at
+      `)
+      .eq("id", rawId)
+      .eq("user_id", internalUserId) // Security: only own tracks
+      .maybeSingle();
+
+    if (error || !data) {
+      return { asset: null, error: null };
+    }
+
+    const track = data as MusicTrackRow;
+    // Construct URL for public tracks.
+    if (track.visibility === "public") {
+      track.audio_url = constructR2PublicUrl(track.audio_storage_key);
+    }
+    const { musicTrackToStudioAsset } = await import("./adapters/music-track");
+    return { asset: musicTrackToStudioAsset(track), error: null };
   }
 
   return { asset: null, error: `Unknown asset source prefix: ${prefix}` };

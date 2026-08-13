@@ -38,6 +38,7 @@ import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
+import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -1234,7 +1235,9 @@ function CommandStudioContent() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent projectId={capabilities.projectId} />
+                    <StudioCreatorHost creator={studioCreator ?? "image"}>
+                      <WorkspaceComponent projectId={capabilities.projectId} />
+                    </StudioCreatorHost>
                   </div>
                 ) : (
                   <StudioUnavailableSurface

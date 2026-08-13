@@ -1,21 +1,15 @@
 /**
- * GET /api/assets
+ * /api/assets — Canonical Asset Lake API.
  *
- * Canonical Asset Lake read API. Returns normalized StudioAsset records
- * from project_assets and/or user_media, scoped to the authenticated
- * user.
- *
- * Query params:
- *   projectId — filter to a specific project's assets
- *   kind      — filter by asset kind (image, video, music, audio, design, code, game)
- *   scope     — "project" | "user" | "all" (default: "all")
- *   limit     — max results (default 50, max 200)
+ * GET  — Read normalized StudioAsset records from all sources.
+ * POST — Register a creator output as an asset (write seam).
  *
  * Security:
  *   - Authenticated users only.
  *   - Project ownership verified server-side via getProject() before
  *     any project_assets read — client-supplied projectId is NOT trusted.
- *   - user_media scoped to the authenticated user's own rows.
+ *   - user_media / generation_jobs / music_tracks scoped to the
+ *     authenticated user's own rows.
  *   - No demo/fake fallback data.
  *   - Invalid explicit filters are rejected with 400, not silently ignored.
  */
@@ -23,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { listStudioAssets } from "@/lib/assets/repository";
+import { registerStudioAsset } from "@/lib/assets/registration";
 import { isAssetKind, type AssetKind } from "@/lib/assets/types";
 
 export const dynamic = "force-dynamic";
@@ -102,4 +97,97 @@ export async function GET(req: NextRequest) {
     assets,
     count: assets.length,
   });
+}
+
+/**
+ * POST /api/assets
+ *
+ * Register a creator output as an asset in the Asset Lake.
+ *
+ * This is the WRITE/REGISTRATION seam for creator outputs that are
+ * currently browser-only or not yet in a source the Asset Lake can read.
+ * It creates a generation_jobs record with the durable URL and metadata,
+ * making the asset visible to the READ adapter.
+ *
+ * For outputs already in generation_jobs (e.g., Image generation), no
+ * separate registration is needed — the READ adapter picks them up.
+ *
+ * Request body:
+ *   kind        — required: image, video, music, audio
+ *   url         — required: durable URL of the asset
+ *   thumbnailUrl, mimeType, provider, model, prompt,
+ *   width, height, durationSeconds, costCredits — optional metadata
+ *   projectId   — optional, verified server-side
+ *   requestId   — optional idempotency key
+ *   metadata    — optional additional metadata
+ *
+ * Response:
+ *   { asset: StudioAsset, replayed: boolean }
+ */
+export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth(req);
+  if (!clerkId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  // Validate required fields.
+  const kind = body.kind;
+  if (typeof kind !== "string" || !isAssetKind(kind)) {
+    return NextResponse.json(
+      { error: `Invalid or missing 'kind'. Valid values: image, video, music, audio, design, code, game.` },
+      { status: 400 },
+    );
+  }
+
+  const url = body.url;
+  if (typeof url !== "string" || !url.startsWith("http")) {
+    return NextResponse.json(
+      { error: "Invalid or missing 'url'. Must be a valid HTTP(S) URL." },
+      { status: 400 },
+    );
+  }
+
+  // Build registration input with type-safe optional fields.
+  const input = {
+    kind: kind as AssetKind,
+    url,
+    thumbnailUrl: typeof body.thumbnailUrl === "string" ? body.thumbnailUrl : undefined,
+    mimeType: typeof body.mimeType === "string" ? body.mimeType : undefined,
+    provider: typeof body.provider === "string" ? body.provider : undefined,
+    model: typeof body.model === "string" ? body.model : undefined,
+    prompt: typeof body.prompt === "string" ? body.prompt : undefined,
+    width: typeof body.width === "number" ? body.width : undefined,
+    height: typeof body.height === "number" ? body.height : undefined,
+    durationSeconds: typeof body.durationSeconds === "number" ? body.durationSeconds : undefined,
+    costCredits: typeof body.costCredits === "number" ? body.costCredits : undefined,
+    projectId: typeof body.projectId === "string" ? body.projectId : undefined,
+    requestId: typeof body.requestId === "string" ? body.requestId : undefined,
+    metadata: body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+      ? body.metadata as Record<string, unknown>
+      : undefined,
+  };
+
+  const { asset, error, replayed } = await registerStudioAsset(input, clerkId);
+
+  if (error) {
+    if (error === "Authentication required.") {
+      return NextResponse.json({ error }, { status: 401 });
+    }
+    if (error === "Database is not configured.") {
+      return NextResponse.json({ error }, { status: 503 });
+    }
+    if (error === "Project not found or access denied.") {
+      return NextResponse.json({ error }, { status: 403 });
+    }
+    return NextResponse.json({ error }, { status: 400 });
+  }
+
+  return NextResponse.json({ asset, replayed }, { status: replayed ? 200 : 201 });
 }
