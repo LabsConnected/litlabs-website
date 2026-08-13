@@ -18,6 +18,7 @@ import {
   failGenerationJob,
   getGenerationJobByRequestId,
 } from "@/lib/generation/jobs";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -93,6 +94,8 @@ type GenerationResponse = {
   generationJobId?: string | null;
   /** Canonical Asset Lake ID (generation_job:<id>) for auto-selection. */
   assetId?: string | null;
+  /** True if generation succeeded but Asset Lake persistence failed. */
+  assetPersistenceFailed?: boolean;
 };
 
 type GenerationErrorResponse = {
@@ -897,6 +900,11 @@ async function handler(req: NextRequest) {
     );
   }
 
+  // Resolve Clerk ID → internal public.users.id UUID.
+  // generation_jobs.user_id requires the internal UUID, NOT the Clerk ID.
+  // Wallet operations still use the Clerk ID.
+  const internalUserId = await resolveInternalUserId(userId);
+
   let body: MediaRequest;
   try {
     body = await req.json();
@@ -1032,7 +1040,10 @@ async function handler(req: NextRequest) {
   const cost = provider.free ? 0 : Math.max(legacyCost, costResult.retailLiTTBits);
 
   // Idempotency: check for existing job with this requestId
-  const existingJob = await getGenerationJobByRequestId(userId, requestId);
+  // Uses internal UUID, not Clerk ID.
+  const existingJob = internalUserId
+    ? await getGenerationJobByRequestId(internalUserId, requestId)
+    : null;
   if (existingJob && existingJob.status === "completed") {
     // Replay — return the existing result without re-charging
     return NextResponse.json(
@@ -1048,6 +1059,8 @@ async function handler(req: NextRequest) {
         free: existingJob.littBitsCharged === 0,
         balance: null,
         replayed: true,
+        generationJobId: existingJob.id,
+        assetId: `generation_job:${existingJob.id}`,
       },
       {
         status: 200,
@@ -1179,24 +1192,41 @@ async function handler(req: NextRequest) {
   }
 
   // ── Record generation job (durable, queryable) ─────────────────
+  // Uses internal UUID for user_id, NOT the Clerk ID.
+  // If persistence fails, generation still succeeded — but we must
+  // NOT return a fabricated assetId. The response distinguishes:
+  //   generation succeeded + asset persisted → assetId is canonical
+  //   generation succeeded + asset persistence failed → assetId is null
   let generationJobId: string | null = null;
-  try {
-    const jobId = crypto.randomUUID();
-    await createGenerationJob({
-      id: jobId,
-      userId,
-      modality: "image",
-      provider: usedProviderId,
-      model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image",
-      prompt,
-      requestId,
-      littBitsCharged: usedCost,
-      metadata: { durableUrl, durationMs: Date.now() - startTime },
-    });
-    await completeGenerationJob(jobId, `generation_job:${jobId}`, usedCostResult.providerCostCents);
-    generationJobId = jobId;
-  } catch {
-    // Best-effort — don't fail the response if job recording fails
+  let assetPersistenceFailed = false;
+  if (internalUserId) {
+    try {
+      const jobId = crypto.randomUUID();
+      await createGenerationJob({
+        id: jobId,
+        userId: internalUserId,
+        modality: "image",
+        provider: usedProviderId,
+        model: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-lite-image",
+        prompt,
+        requestId,
+        littBitsCharged: usedCost,
+        metadata: { durableUrl, durationMs: Date.now() - startTime },
+      });
+      await completeGenerationJob(jobId, `generation_job:${jobId}`, usedCostResult.providerCostCents);
+      generationJobId = jobId;
+    } catch (persistErr) {
+      // Generation succeeded but Asset Lake persistence failed.
+      // Log the error and mark it — do NOT fabricate an assetId.
+      console.error(
+        `[media/generate] Asset persistence failed for requestId=${requestId}:`,
+        persistErr instanceof Error ? persistErr.message : persistErr,
+      );
+      assetPersistenceFailed = true;
+    }
+  } else {
+    // Could not resolve internal user ID — persistence impossible.
+    assetPersistenceFailed = true;
   }
 
   const duration = Date.now() - startTime;
@@ -1217,6 +1247,9 @@ async function handler(req: NextRequest) {
       balance: newBalance,
       generationJobId,
       assetId: generationJobId ? `generation_job:${generationJobId}` : null,
+      // Truthful: if persistence failed, the generation succeeded
+      // but the asset is NOT in Asset Lake. Clients must not auto-select.
+      assetPersistenceFailed,
     } satisfies GenerationResponse,
     {
       status: 200,

@@ -3,7 +3,8 @@ import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
-import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob } from "@/lib/generation/jobs";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 import { uploadAudio } from "@/lib/r2";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -17,6 +18,9 @@ export async function POST(req: NextRequest) {
       { error: "Gemini API key not configured" },
       { status: 500 },
     );
+
+  // Resolve Clerk ID → internal public.users.id UUID for generation_jobs.
+  const internalUserId = await resolveInternalUserId(userId);
 
   try {
     const { operationName } = await req.json();
@@ -74,16 +78,19 @@ export async function POST(req: NextRequest) {
       }
 
       // Mark the generation job as failed.
-      const genJob = await getGenerationJobByProviderJobId(userId, operationName);
-      if (genJob) {
-        const { failGenerationJob } = await import("@/lib/generation/jobs");
-        await failGenerationJob(genJob.id, "Video generation failed — no video output");
+      // Uses internal UUID for lookup, NOT the Clerk ID.
+      if (internalUserId) {
+        const genJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
+        if (genJob) {
+          await failGenerationJob(genJob.id, "Video generation failed — no video output");
+        }
       }
     }
 
     // If the operation succeeded, persist the video to R2 and complete
     // the generation_jobs row so it becomes visible in the Asset Lake.
     let durableUrl: string | null = null;
+    let assetId: string | null = null;
     if (updated.done && videoUri) {
       try {
         // Download the video from Google's signed URL and upload to R2.
@@ -95,14 +102,18 @@ export async function POST(req: NextRequest) {
           durableUrl = saved.publicUrl;
 
           // Complete the persistent generation_jobs row.
-          const genJob = await getGenerationJobByProviderJobId(userId, operationName);
-          if (genJob) {
-            await updateGenerationJobMetadata(genJob.id, {
-              durableUrl: saved.publicUrl,
-              contentType: "video/mp4",
-              storageKey: saved.storageKey,
-            });
-            await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+          // Uses internal UUID for lookup, NOT the Clerk ID.
+          if (internalUserId) {
+            const genJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
+            if (genJob) {
+              await updateGenerationJobMetadata(genJob.id, {
+                durableUrl: saved.publicUrl,
+                contentType: "video/mp4",
+                storageKey: saved.storageKey,
+              });
+              await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+              assetId = `generation_job:${genJob.id}`;
+            }
           }
         }
       } catch {
@@ -117,6 +128,7 @@ export async function POST(req: NextRequest) {
       done: updated.done,
       videoUri: durableUrl ?? videoUri,
       saved: durableUrl !== null,
+      assetId,
       refunded,
       cost: job.cost,
     });

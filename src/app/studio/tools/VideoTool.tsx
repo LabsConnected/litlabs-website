@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { apiFetch, readApiResponse, type ApiJson } from "@/lib/api-response";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { useStudioContext } from "../context/StudioContext";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -159,6 +160,7 @@ function ChipRow({
 /* ─── Main Component ─────────────────────────────────────────────────── */
 
 export default function VideoTool() {
+  const { setActiveAssetId } = useStudioContext();
   const [mode, setMode] = useState<CreationMode>("quick");
   const [prompt, setPrompt] = useState("");
   const [originalPrompt, setOriginalPrompt] = useState("");
@@ -464,8 +466,13 @@ export default function VideoTool() {
           setGenStatus("finalizing");
           let videoUrl: string;
           if (isAlibaba) {
+            // Alibaba: server already saved to R2, URL is durable.
+            videoUrl = statusData[videoUrlKey] as string;
+          } else if (statusData.saved) {
+            // Veo: server persisted to R2, URL is durable — use directly.
             videoUrl = statusData[videoUrlKey] as string;
           } else {
+            // Veo fallback: server could not persist — download as blob.
             const videoRes = await fetch(statusData[videoUrlKey] as string, { signal: ac.signal });
             if (!videoRes.ok) throw new Error("Failed to download generated video.");
             const blob = await videoRes.blob();
@@ -479,9 +486,13 @@ export default function VideoTool() {
           setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "complete", videoUrl } : g));
           refreshWallet().catch(() => {});
 
-          // Notify the Asset Lake that a new persistent video asset exists.
-          // The server has created a generation_jobs row with the durable URL.
-          notifyAssetsChanged();
+          // Auto-select the newly persisted video asset and notify Asset Lake.
+          // Only when the server confirms durable persistence (assetId present).
+          const assetId = statusData.assetId as string | null | undefined;
+          if (assetId) {
+            setActiveAssetId(assetId);
+            notifyAssetsChanged();
+          }
 
           break;
         }

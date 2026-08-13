@@ -285,9 +285,11 @@ describe("E.2.4: Cost truthfulness", () => {
     // This is a real zero — the generation was free.
   });
 
-  it("generation job with costUnknown metadata flag is surfaced", () => {
+  it("generation job with costUnknown metadata flag surfaces undefined cost", () => {
     // When registration doesn't provide costCredits, the metadata
     // gets costUnknown: true so consumers can distinguish.
+    // The adapter must surface undefined, NOT 0 — "cost not reported"
+    // is not the same as "generation was free."
     const job = makeJob({
       littBitsCharged: 0, // NOT NULL constraint → stored as 0
       metadata: {
@@ -297,7 +299,7 @@ describe("E.2.4: Cost truthfulness", () => {
     });
     const asset = generationJobToStudioAsset(job);
     expect(asset).not.toBeNull();
-    expect(asset!.costCredits).toBe(0);
+    expect(asset!.costCredits).toBeUndefined();
     expect(asset!.metadata?.costUnknown).toBe(true);
   });
 

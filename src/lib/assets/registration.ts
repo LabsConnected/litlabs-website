@@ -283,17 +283,26 @@ export async function registerStudioAsset(
   };
 
   // Create the generation_jobs record with real provenance.
-  const job = await createGenerationJob({
-    id: jobId,
-    userId: user.id,
-    modality,
-    provider: input.provider,
-    model: input.model,
-    prompt: input.prompt,
-    requestId,
-    littBitsCharged: input.costCredits ?? 0,
-    metadata,
-  });
+  let job;
+  try {
+    job = await createGenerationJob({
+      id: jobId,
+      userId: user.id,
+      modality,
+      provider: input.provider,
+      model: input.model,
+      prompt: input.prompt,
+      requestId,
+      littBitsCharged: input.costCredits ?? 0,
+      metadata,
+    });
+  } catch (createErr) {
+    return {
+      asset: null,
+      error: `Failed to create asset record: ${createErr instanceof Error ? createErr.message : "unknown error"}`,
+      replayed: false,
+    };
+  }
 
   if (!job) {
     return { asset: null, error: "Failed to create asset record.", replayed: false };

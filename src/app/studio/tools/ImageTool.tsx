@@ -1045,6 +1045,7 @@ export default function ImageTool() {
         const isFree = data.free === true;
         const dataCost = typeof data.cost === "number" ? data.cost : 0;
         const assetId = data.assetId as string | null | undefined;
+        const assetPersistenceFailed = data.assetPersistenceFailed === true;
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -1079,10 +1080,15 @@ export default function ImageTool() {
         // Notify the Asset Lake that a new persistent asset exists.
         // The server already created a generation_jobs row — the
         // Assets panel just needs to refresh to pick it up.
-        notifyAssetsChanged();
+        // Only notify if persistence actually succeeded.
+        if (!assetPersistenceFailed) {
+          notifyAssetsChanged();
+        }
 
         // Auto-select the newly generated asset as the active asset.
-        if (assetId) {
+        // Do NOT auto-select if persistence failed — there is no
+        // canonical asset to select.
+        if (assetId && !assetPersistenceFailed) {
           setActiveAssetId(assetId);
         }
       } catch (err) {

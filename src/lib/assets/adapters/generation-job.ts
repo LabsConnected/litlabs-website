@@ -151,7 +151,14 @@ export function generationJobToStudioAsset(
     width,
     height,
     durationSeconds,
-    costCredits: job.littBitsCharged,
+    // Cost truthfulness: if metadata.costUnknown is true, the real
+    // generation cost was not reported — surface as undefined, NOT 0.
+    // A genuinely free generation has littBitsCharged=0 and no
+    // costUnknown flag, and correctly surfaces as 0.
+    costCredits:
+      (job.metadata as Record<string, unknown>)?.costUnknown === true
+        ? undefined
+        : job.littBitsCharged,
     createdAt: job.createdAt,
     updatedAt: job.completedAt ?? undefined,
     visibility: "private", // generation jobs are user-private by default
