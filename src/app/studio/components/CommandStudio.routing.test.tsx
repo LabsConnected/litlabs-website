@@ -658,11 +658,15 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
     });
 
-    it("laptop tier defaults to collapsed LiTT when no preference is stored", async () => {
+    it("laptop tier defaults to expanded LiTT when no preference is stored", async () => {
+      // LiTT now defaults expanded on ALL desktop/laptop tiers (>=1024px)
+      // unless the user has an explicit persisted collapse preference.
+      // The old laptop-only auto-collapse was removed because it hid the
+      // chat behind a 64px strip for first-time users.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       render(<CommandStudio />);
       await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
 

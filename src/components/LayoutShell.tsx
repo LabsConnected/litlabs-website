@@ -9,10 +9,11 @@ import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 // Routes that render minimal chrome (no navbar / footer).
-// Only truly public pages: auth, legal, docs, pricing, and marketing.
-// Authenticated product pages (games, showcase, marketplace) use AppShell.
+// Only truly public pages: auth, legal, docs, pricing.
+// Note: /hire is hybrid — bare for signed-out, AppShell for signed-in.
 const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
@@ -22,8 +23,11 @@ const BARE_PUBLIC_PATHS = [
   "/cookies",
   "/docs",
   "/pricing",
-  "/hire",
 ];
+
+// Routes that are bare-public ONLY when signed out.
+// When signed in, they get the AppShell sidebar.
+const HYBRID_PUBLIC_PATHS = ["/hire"];
 
 // Routes that render their own custom interactive chrome (e.g. cloud emulator)
 const SELF_CONTAINED_CHROME = ["/games/cloud"];
@@ -35,6 +39,10 @@ const OWN_SHELL_PATHS = ["/settings"];
 
 function isBarePublicPath(path: string) {
   return BARE_PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+function isHybridPublicPath(path: string) {
+  return HYBRID_PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
 function hasOwnChrome(path: string) {
@@ -55,10 +63,28 @@ export default function LayoutShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname() || "/";
+  const { isSignedIn } = useClerkAuth();
   const barePublic = isBarePublicPath(pathname);
+  const hybridPublic = isHybridPublicPath(pathname);
   const isStudio = pathname.startsWith("/studio");
   const ownChrome = hasOwnChrome(pathname);
   const ownShell = hasOwnShell(pathname);
+
+  // Hybrid pages: bare public for signed-out, AppShell for signed-in
+  if (hybridPublic && !isSignedIn) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+        <main id="main-content" className="relative z-10 min-h-screen">
+          {children}
+        </main>
+        <GlobalCompanion />
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+      </>
+    );
+  }
 
   if (barePublic) {
     return (

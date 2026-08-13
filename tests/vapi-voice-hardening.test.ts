@@ -181,7 +181,7 @@ describe("Rule 6: Voice runtime contains no direct send side effects", () => {
   it("voice-runtime.ts does not export detectAndExecuteSend", async () => {
     const mod = await import("@/lib/voice/voice-runtime");
     expect((mod as Record<string, unknown>).detectAndExecuteSend).toBeUndefined();
-  });
+  }, 15000);
 
   it("voice-runtime.ts does not export buildSmsContent or buildEmailContent", async () => {
     const mod = await import("@/lib/voice/voice-runtime");

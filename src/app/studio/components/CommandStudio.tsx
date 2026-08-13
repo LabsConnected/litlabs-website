@@ -10,6 +10,7 @@ import {
   Music,
   Globe,
   FolderOpen,
+  Palette,
 } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -875,12 +876,13 @@ function CommandStudioContent() {
   ];
 
     // Create secondary tabs — visible only when Create is active
-  const createTabs: { id: CreateMode; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
+  const createTabs: { id: CreateMode | "design"; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
     { id: "image", label: "Image", icon: ImageIcon },
     { id: "video", label: "Video", icon: Clapperboard },
-    { id: "audio", label: "Audio", icon: AudioLines },
     { id: "music", label: "Music", icon: Music },
-    { id: "environment", label: "360° Env", icon: Globe },
+    { id: "audio", label: "Audio", icon: AudioLines },
+    { id: "design", label: "Design", icon: Palette },
+    { id: "environment", label: "360°", icon: Globe },
   ];
 
   // LiTT Chat/Live content — built ONCE per render and reused by whichever
@@ -1231,13 +1233,23 @@ function CommandStudioContent() {
                 }}
               >
                 {createTabs.map((t) => {
-                  const isActive = createMode === t.id;
+                  const isActive = t.id === "design"
+                    ? studioMode === "design"
+                    : createMode === t.id;
                   const TabIcon = t.icon;
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setCreateMode(t.id)}
+                      onClick={() => {
+                        if (t.id === "design") {
+                          setStudioMode("design");
+                          setDestination("studio");
+                        } else {
+                          setCreateMode(t.id as CreateMode);
+                          setDestination("create");
+                        }
+                      }}
                       className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                       style={{
                         color: isActive ? "var(--purple)" : "var(--text-dim)",

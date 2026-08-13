@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useStudioContext } from "../context/StudioContext";
 
 interface FileEntry {
   name: string;
@@ -143,6 +144,7 @@ export default function StudioProjectFiles({
   onWorkspacePrepared?: () => void;
 }) {
   const { getToken } = useClerkAuth();
+  const { setActiveFile } = useStudioContext();
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -250,6 +252,7 @@ export default function StudioProjectFiles({
     setEntries({});
     setExpanded(new Set());
     setActivePath(null);
+    setActiveFile(null); // Clear canonical activeFile on project change
     setContent("");
     setOriginalContent("");
     setUnsupportedPath(null);
@@ -314,6 +317,7 @@ export default function StudioProjectFiles({
     if (entry.type !== "file") return;
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     setActivePath(entry.path);
+    setActiveFile(entry.path); // Drive canonical StudioContext.activeFile
     setUnsupportedPath(null);
     setError(null);
     if (!isTextFile(entry.path)) {

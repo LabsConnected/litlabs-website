@@ -57,7 +57,7 @@ export const APPS = [
     color: "#ff9ff3",
     href: "/marketplace",
   },
-  { id: "music", label: "Music", icon: Music, color: "#ff2d78", href: "/dashboard?app=music" },
+  { id: "music", label: "Music", icon: Music, color: "#ff2d78", href: "/studio?tool=music" },
   {
     id: "games",
     label: "Games",

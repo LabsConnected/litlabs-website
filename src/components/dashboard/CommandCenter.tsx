@@ -304,7 +304,7 @@ function QuickActionsWidget() {
     { label: "New Project", href: "/projects/new", icon: "plus", color: "#B6FF4A" },
     { label: "Start Mission", href: "/studio?tool=workflows", icon: "target", color: "#22D3EE" },
     { label: "Create Image", href: "/studio?tool=image", icon: "image", color: "#ec4899" },
-    { label: "Play Music", href: "/dashboard?app=music", icon: "music", color: "#a855f7" },
+    { label: "Play Music", href: "/studio?tool=music", icon: "music", color: "#a855f7" },
     { label: "Connect GitHub", href: "/studio/github", icon: "git", color: "#f97316" },
     { label: "View Showcase", href: "/showcase", icon: "package", color: "#3b82f6" },
     { label: "Review Usage", href: "/wallet", icon: "wallet", color: "#B6FF4A" },
@@ -631,7 +631,7 @@ function MusicWidget() {
     <div className="space-y-3">
       <MusicPlayer mode="mini" />
       <div className="flex gap-2">
-        <ActionButton href="/dashboard?app=music" label="Open Music Hub" icon="music" color="#a855f7" />
+        <ActionButton href="/studio?tool=music" label="Open Music Studio" icon="music" color="#a855f7" />
         <ActionButton href="/studio?tool=audio" label="Create Audio" icon="sparkles" color="#22d3ee" />
       </div>
       <p className="text-[10px]" style={{ color: T.textMuted }}>Your player keeps working while you build. Add streams, playlists, or your own generated audio in Music Hub.</p>
