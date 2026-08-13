@@ -1119,6 +1119,15 @@ function CommandStudioContent() {
                 setDrawerTab("terminal");
               }}
               onOpenTerminal={handleOpenTerminal}
+              onStop={() => {
+                conversation.cancel();
+                useExecutionStore.getState().endRun("cancelled");
+              }}
+              onRollback={() => {
+                // Rollback is a future feature — for now, just open the terminal
+                // so the user can manually git checkout the checkpoint SHA
+                handleOpenTerminal();
+              }}
               onResolveApproval={(decision) => {
                 // Approval resolution: call the paused run API, then regenerate
                 const pending = useExecutionStore.getState().pendingApproval;

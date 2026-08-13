@@ -19,6 +19,7 @@ import {
   Circle,
   PanelRightClose,
   AlertTriangle,
+  RotateCcw,
   Eye,
   EyeOff,
   Trash2,
@@ -54,6 +55,10 @@ interface LiTTLiveActivityProps {
   onOpenTerminal?: () => void;
   /** Called when an approval should be resolved. */
   onResolveApproval?: (decision: "approved" | "rejected") => void;
+  /** Called when the user clicks Stop while LiTT is running. */
+  onStop?: () => void;
+  /** Called when the user clicks Rollback to the last checkpoint. */
+  onRollback?: () => void;
 }
 
 const PHASE_CONFIG: Record<ExecutionPhase, { label: string; icon: typeof Activity; color: string }> = {
@@ -75,6 +80,8 @@ export default function LiTTLiveActivity({
   onOpenCheck,
   onOpenTerminal,
   onResolveApproval,
+  onStop,
+  onRollback,
 }: LiTTLiveActivityProps) {
   const events = useExecutionStore((s) => s.events);
   const phase = useExecutionStore((s) => s.phase);
@@ -229,6 +236,44 @@ export default function LiTTLiveActivity({
             <Edit3 size={9} className="pointer-events-none" />
             {changesSummary.modified + changesSummary.added + changesSummary.deleted} change{(changesSummary.modified + changesSummary.added + changesSummary.deleted) !== 1 ? "s" : ""}
           </span>
+        )}
+        {/* Stop control — visible while LiTT is running */}
+        {isRunning && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            className="ml-auto flex items-center gap-1 rounded-md border px-2 py-0.5 text-[9px] font-bold transition hover:bg-white/10"
+            style={{
+              borderColor: "var(--error)40",
+              backgroundColor: "var(--error)10",
+              color: "var(--error)",
+            }}
+            aria-label="Stop LiTT"
+            title="Stop execution"
+            data-testid="litt-live-stop"
+          >
+            <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: "var(--error)" }} aria-hidden />
+            Stop
+          </button>
+        )}
+        {/* Rollback control — visible when a checkpoint exists and not running */}
+        {!isRunning && checkpoint && onRollback && (
+          <button
+            type="button"
+            onClick={onRollback}
+            className="ml-auto flex items-center gap-1 rounded-md border px-2 py-0.5 text-[9px] font-bold transition hover:bg-white/10"
+            style={{
+              borderColor: "var(--studio-border-strong)",
+              backgroundColor: "var(--studio-card)",
+              color: "var(--text-secondary)",
+            }}
+            aria-label="Rollback to checkpoint"
+            title={`Rollback to ${checkpoint.label}`}
+            data-testid="litt-live-rollback"
+          >
+            <RotateCcw size={9} className="pointer-events-none" />
+            Rollback
+          </button>
         )}
       </div>
 
