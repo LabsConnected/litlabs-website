@@ -36,8 +36,8 @@ export interface UserMediaRow {
   created_at: string;
 }
 
-/** Map user_media type → AssetKind. */
-export function inferKindFromUserMedia(row: UserMediaRow): AssetKind {
+/** Map user_media type → AssetKind. Returns null for unknown types. */
+export function inferKindFromUserMedia(row: UserMediaRow): AssetKind | null {
   switch (row.type) {
     case "image":
       return "image";
@@ -46,8 +46,9 @@ export function inferKindFromUserMedia(row: UserMediaRow): AssetKind {
     case "audio":
       return "audio";
     default:
-      // Unknown type — default to image since gallery is image-heavy.
-      return "image";
+      // Unknown type — do NOT fabricate. Return null so the caller
+      // can skip the row truthfully.
+      return null;
   }
 }
 
@@ -60,8 +61,12 @@ export function mapVisibility(isPublic: boolean): AssetVisibility {
  * Convert a user_media row into a canonical StudioAsset.
  * Source is always "imported" because provenance is unknown.
  * No provider, model, prompt, or dimensions are fabricated.
+ * Returns null if the media type is unknown (not fabricated as image).
  */
-export function userMediaToStudioAsset(row: UserMediaRow): StudioAsset {
+export function userMediaToStudioAsset(row: UserMediaRow): StudioAsset | null {
+  const kind = inferKindFromUserMedia(row);
+  if (!kind) return null; // Unknown type — skip truthfully.
+
   const metadata: Record<string, unknown> = {
     category: row.category,
     likesCount: row.likes_count,
@@ -70,7 +75,7 @@ export function userMediaToStudioAsset(row: UserMediaRow): StudioAsset {
   const asset: StudioAsset = {
     id: buildCanonicalId("user_media", row.id),
     projectId: null, // user_media has no project binding
-    kind: inferKindFromUserMedia(row),
+    kind,
     source: "imported",
     name: row.caption || "Untitled",
     url: row.url,
@@ -84,9 +89,12 @@ export function userMediaToStudioAsset(row: UserMediaRow): StudioAsset {
 
 /**
  * Batch-convert user_media rows into StudioAssets.
+ * Rows with unknown types are skipped (not fabricated).
  */
 export function userMediaRowsToStudioAssets(
   rows: UserMediaRow[],
 ): StudioAsset[] {
-  return rows.map(userMediaToStudioAsset);
+  return rows
+    .map(userMediaToStudioAsset)
+    .filter((a): a is StudioAsset => a !== null);
 }

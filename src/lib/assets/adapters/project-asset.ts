@@ -44,8 +44,8 @@ export function mapSource(sourceType: VisualSourceType): AssetSource {
   }
 }
 
-/** Infer AssetKind from contentType / inspection. */
-export function inferKindFromProjectAsset(asset: ProjectAsset): AssetKind {
+/** Infer AssetKind from contentType / inspection. Returns null for unknown types. */
+export function inferKindFromProjectAsset(asset: ProjectAsset): AssetKind | null {
   const ct = asset.contentType.toLowerCase();
   if (ct.startsWith("image/")) return "image";
   if (ct.startsWith("video/")) return "video";
@@ -54,8 +54,9 @@ export function inferKindFromProjectAsset(asset: ProjectAsset): AssetKind {
     // so we default to "audio" unless the inspection or metadata says otherwise.
     return "audio";
   }
-  // Fallback: visual-builds assets are primarily images.
-  return "image";
+  // Unknown content type — do NOT fabricate. Return null so the caller
+  // can skip or handle the row truthfully.
+  return null;
 }
 
 /** Derive a human-readable name from available fields. */
@@ -72,8 +73,12 @@ function deriveName(asset: ProjectAsset): string {
 /**
  * Convert a visual-builds ProjectAsset into a canonical StudioAsset.
  * Does NOT fabricate any optional fields — absent values are omitted.
+ * Returns null if the asset kind cannot be determined (unknown MIME type).
  */
-export function projectAssetToStudioAsset(asset: ProjectAsset): StudioAsset {
+export function projectAssetToStudioAsset(asset: ProjectAsset): StudioAsset | null {
+  const kind = inferKindFromProjectAsset(asset);
+  if (!kind) return null; // Unknown content type — skip truthfully.
+
   const metadata: Record<string, unknown> = {
     checksum: asset.checksum,
     inspection: asset.inspection,
@@ -93,7 +98,7 @@ export function projectAssetToStudioAsset(asset: ProjectAsset): StudioAsset {
   const studioAsset: StudioAsset = {
     id: buildCanonicalId("project_asset", asset.id),
     projectId: asset.projectId,
-    kind: inferKindFromProjectAsset(asset),
+    kind,
     source: mapSource(asset.sourceType),
     name: deriveName(asset),
     url: asset.storedUrl,
@@ -115,9 +120,12 @@ export function projectAssetToStudioAsset(asset: ProjectAsset): StudioAsset {
 
 /**
  * Batch-convert an array of ProjectAssets into StudioAssets.
+ * Rows with unknown content types are skipped (not fabricated).
  */
 export function projectAssetsToStudioAssets(
   assets: ProjectAsset[],
 ): StudioAsset[] {
-  return assets.map(projectAssetToStudioAsset);
+  return assets
+    .map(projectAssetToStudioAsset)
+    .filter((a): a is StudioAsset => a !== null);
 }

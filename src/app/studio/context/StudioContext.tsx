@@ -1,32 +1,35 @@
 /**
- * StudioSessionContext — canonical cross-Studio session context.
+ * StudioContext — canonical cross-Studio session context.
  *
  * This is the single canonical context that travels across
  * Plan / Canvas / Code / Preview and across all creator surfaces.
  *
- * CRITICAL DESIGN RULES (per Phase D contract):
+ * CRITICAL DESIGN RULES (Phase D.1 — controlled state ownership):
  *
- * 1. This context ADAPTS existing canonical state — it does NOT
- *    create independent duplicate routing state.
- *    - workspaceMode is derived from the existing WorkspaceStage /
- *      StudioMode system via workspaceStageToMode / modeToWorkspaceStage.
- *    - creator is derived from the existing CreateMode / CreatorKind
- *      system.
- *    - projectId comes from the existing capabilities.projectId /
- *      useConnectionSummary source.
+ * 1. The four authoritative values — projectId, sessionId,
+ *    workspaceMode, creator — are CONTROLLED PROPS. The parent
+ *    (CommandStudio) owns them and passes them in. The provider does
+ *    NOT mirror them in internal state. This eliminates the
+ *    StudioContextSync / _set* bridge that previously duplicated
+ *    routing state and could drift.
  *
- * 2. sessionId reuses the canonical conversationId from
- *    useConversationStore when available. If no conversation is
- *    selected, a stable fallback is derived from the projectId so
- *    the context still has a stable identity. The fallback is NOT
- *    random — it is deterministic per project.
+ * 2. workspaceMode and creator are INDEPENDENT. The parent must
+ *    preserve the last Plan/Canvas/Code/Preview stage when a creator
+ *    is activated, so the context can represent e.g.
+ *    { workspaceMode: "code", creator: "image" }.
  *
- * 3. activeFile and activeAssetId are the only genuinely new state
- *    introduced by this context. They are cleared on project change.
+ * 3. activeFile and activeAssetId are the only state the provider
+ *    owns. They are cleared when projectId changes (detected via a
+ *    ref comparison on the controlled prop).
  *
  * 4. setWorkspaceMode() and setCreator() delegate into the EXISTING
- *    routing state (CommandStudio's setStudioMode / setCreateMode).
- *    They do not create route drift.
+ *    routing state via callbacks. They do not create route drift.
+ *    setCreator(null) exits the creator surface and returns to the
+ *    last workspace stage — the parent handles this routing.
+ *
+ * 5. sessionId is a controlled prop. The parent derives it from the
+ *    canonical conversationId when available, or a deterministic
+ *    fallback. The provider does not generate random IDs.
  */
 
 "use client";
@@ -36,6 +39,8 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
+  useRef,
   useMemo,
   type ReactNode,
 } from "react";
@@ -44,22 +49,22 @@ import type { WorkspaceStage, CreatorKind } from "@/app/studio/lib/studio-destin
 // ─── Contract types ──────────────────────────────────────────────
 
 export interface StudioContextValue {
-  /** Stable session identity (reuses conversationId when available). */
+  /** Stable session identity (controlled — from conversationId or deterministic fallback). */
   sessionId: string;
 
-  /** Active project, or null if no project is selected. */
+  /** Active project, or null if no project is selected (controlled). */
   projectId: string | null;
 
-  /** Current workspace stage. */
+  /** Current workspace stage — INDEPENDENT from creator (controlled). */
   workspaceMode: WorkspaceStage;
 
-  /** Active creator, or null if not in a creator surface. */
+  /** Active creator, or null if not in a creator surface (controlled). */
   creator: CreatorKind | null;
 
-  /** Active file path in CodeWorkspace, or null. */
+  /** Active file path in CodeWorkspace, or null (provider-owned). */
   activeFile: string | null;
 
-  /** Active asset ID (canonical, source-qualified), or null. */
+  /** Active asset ID (canonical, source-qualified), or null (provider-owned). */
   activeAssetId: string | null;
 }
 
@@ -67,36 +72,18 @@ export interface StudioContextActions {
   /** Switch workspace stage — delegates to existing routing. */
   setWorkspaceMode: (mode: WorkspaceStage) => void;
 
-  /** Switch creator — delegates to existing routing. */
+  /**
+   * Switch creator — delegates to existing routing.
+   * Pass null to exit the creator surface and return to the last
+   * workspace stage (Plan/Canvas/Code/Preview).
+   */
   setCreator: (creator: CreatorKind | null) => void;
 
-  /** Set the active file path. */
+  /** Set the active file path (provider-owned state). */
   setActiveFile: (path: string | null) => void;
 
-  /** Set the active asset ID. */
+  /** Set the active asset ID (provider-owned state). */
   setActiveAssetId: (id: string | null) => void;
-
-  /**
-   * Internal: update projectId from the authoritative source.
-   * Clears activeFile and activeAssetId when the project changes
-   * (unless the asset belongs to the new project).
-   */
-  _setProjectId: (id: string | null) => void;
-
-  /**
-   * Internal: update sessionId from the canonical conversation source.
-   */
-  _setSessionId: (id: string) => void;
-
-  /**
-   * Internal: update workspaceMode from the authoritative routing source.
-   */
-  _setWorkspaceMode: (mode: WorkspaceStage) => void;
-
-  /**
-   * Internal: update creator from the authoritative routing source.
-   */
-  _setCreator: (creator: CreatorKind | null) => void;
 }
 
 export type StudioContextApi = StudioContextValue & StudioContextActions;
@@ -110,17 +97,17 @@ const StudioContext = createContext<StudioContextApi | null>(null);
 export interface StudioContextProviderProps {
   children: ReactNode;
 
-  /** Initial project ID from the authoritative source. */
-  initialProjectId: string | null;
+  /** Authoritative project ID (controlled). */
+  projectId: string | null;
 
-  /** Initial session ID (conversation ID) from the canonical source. */
-  initialSessionId: string;
+  /** Authoritative session ID (controlled — conversationId or deterministic fallback). */
+  sessionId: string;
 
-  /** Initial workspace stage. */
-  initialWorkspaceMode: WorkspaceStage;
+  /** Authoritative workspace stage (controlled — independent from creator). */
+  workspaceMode: WorkspaceStage;
 
-  /** Initial creator, or null. */
-  initialCreator: CreatorKind | null;
+  /** Authoritative creator, or null (controlled). */
+  creator: CreatorKind | null;
 
   /**
    * Callback to delegate workspace mode changes into the existing
@@ -132,6 +119,7 @@ export interface StudioContextProviderProps {
   /**
    * Callback to delegate creator changes into the existing routing
    * state (CommandStudio's setCreateMode / setDestination).
+   * setCreator(null) exits the creator surface.
    */
   onCreatorChange?: (creator: CreatorKind | null) => void;
 }
@@ -139,69 +127,48 @@ export interface StudioContextProviderProps {
 /**
  * StudioContextProvider — the canonical cross-Studio context.
  *
- * Wraps the Studio shell. Adapts existing routing state rather than
- * duplicating it. The provider is controlled — the parent (CommandStudio)
- * passes in the authoritative values and receives change callbacks.
+ * Controlled props for projectId/sessionId/workspaceMode/creator.
+ * Provider owns only activeFile/activeAssetId (cleared on project change).
  */
 export function StudioContextProvider({
   children,
-  initialProjectId,
-  initialSessionId,
-  initialWorkspaceMode,
-  initialCreator,
+  projectId,
+  sessionId,
+  workspaceMode,
+  creator,
   onWorkspaceModeChange,
   onCreatorChange,
 }: StudioContextProviderProps) {
-  const [projectId, setProjectId] = useState<string | null>(initialProjectId);
-  const [sessionId, setSessionId] = useState<string>(initialSessionId);
-  const [workspaceMode, setWorkspaceModeState] = useState<WorkspaceStage>(initialWorkspaceMode);
-  const [creator, setCreatorState] = useState<CreatorKind | null>(initialCreator);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
 
-  // Track previous projectId to detect changes.
-  const prevProjectIdRef = useMemo(() => ({ value: projectId }), [projectId]);
-
-  // Internal: update projectId from authoritative source.
-  // Clears activeFile and activeAssetId on project change.
-  const _setProjectId = useCallback((id: string | null) => {
-    setProjectId((prev) => {
-      if (prev === id) return prev;
-      // Project changed — clear stale pointers.
+  // Clear activeFile/activeAssetId when projectId changes.
+  // Uses a ref to detect the change without mirroring projectId in state.
+  const prevProjectIdRef = useRef<string | null>(projectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== projectId) {
+      prevProjectIdRef.current = projectId;
       setActiveFile(null);
       setActiveAssetId(null);
-      return id;
-    });
-  }, []);
-
-  const _setSessionId = useCallback((id: string) => {
-    setSessionId((prev) => (prev === id ? prev : id));
-  }, []);
-
-  const _setWorkspaceMode = useCallback((mode: WorkspaceStage) => {
-    setWorkspaceModeState((prev) => (prev === mode ? prev : mode));
-  }, []);
-
-  const _setCreator = useCallback((c: CreatorKind | null) => {
-    setCreatorState((prev) => (prev === c ? prev : c));
-  }, []);
+    }
+  }, [projectId]);
 
   // Public: setWorkspaceMode delegates to existing routing.
   const setWorkspaceMode = useCallback(
     (mode: WorkspaceStage) => {
-      _setWorkspaceMode(mode);
       onWorkspaceModeChange?.(mode);
     },
-    [_setWorkspaceMode, onWorkspaceModeChange],
+    [onWorkspaceModeChange],
   );
 
   // Public: setCreator delegates to existing routing.
+  // null exits the creator surface — the parent handles returning
+  // to the last workspace stage.
   const setCreator = useCallback(
     (c: CreatorKind | null) => {
-      _setCreator(c);
       onCreatorChange?.(c);
     },
-    [_setCreator, onCreatorChange],
+    [onCreatorChange],
   );
 
   const value: StudioContextApi = useMemo(
@@ -216,10 +183,6 @@ export function StudioContextProvider({
       setCreator,
       setActiveFile,
       setActiveAssetId,
-      _setProjectId,
-      _setSessionId,
-      _setWorkspaceMode,
-      _setCreator,
     }),
     [
       sessionId,
@@ -230,10 +193,6 @@ export function StudioContextProvider({
       activeAssetId,
       setWorkspaceMode,
       setCreator,
-      _setProjectId,
-      _setSessionId,
-      _setWorkspaceMode,
-      _setCreator,
     ],
   );
 

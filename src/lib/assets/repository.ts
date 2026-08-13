@@ -8,8 +8,9 @@
  * Security:
  *   - Server-only (uses supabaseAdmin).
  *   - Resolves Clerk ID → internal user UUID before querying user_media.
- *   - project_assets are scoped by projectId (project membership verified
- *     by the caller, typically via capabilities).
+ *   - project_assets access is verified via getProject(projectId, clerkId)
+ *     BEFORE any read — the caller's ownership of the project is checked
+ *     server-side, not trusted from a client-supplied projectId.
  *   - user_media are scoped to the authenticated user's own rows.
  *   - Never exposes another user's private media.
  *   - No arbitrary userId/projectId impersonation via parameters.
@@ -18,6 +19,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabase";
+import { getProject } from "@/lib/projects/project-repository";
 import { listProjectAssets } from "@/lib/visual-builds/repository";
 import { projectAssetsToStudioAssets } from "./adapters/project-asset";
 import { userMediaRowsToStudioAssets, type UserMediaRow } from "./adapters/user-media";
@@ -64,12 +66,35 @@ async function resolveInternalUserId(clerkId: string): Promise<string | null> {
 }
 
 /**
+ * Verify that the authenticated user owns/has access to the given project
+ * before reading its assets. Returns true if access is granted.
+ *
+ * Uses the canonical getProject(projectId, clerkId) ownership check —
+ * the same pattern used by /api/studio-projects/[projectId].
+ */
+async function verifyProjectAccess(
+  projectId: string,
+  clerkId: string,
+): Promise<boolean> {
+  try {
+    const project = await getProject(projectId, clerkId);
+    return project !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch project_assets for a given project and convert to StudioAssets.
+ * Ownership is verified BEFORE any read.
  */
 async function fetchProjectAssets(
   projectId: string,
+  clerkId: string,
   limit: number,
 ): Promise<StudioAsset[]> {
+  const hasAccess = await verifyProjectAccess(projectId, clerkId);
+  if (!hasAccess) return [];
   const assets = await listProjectAssets(projectId, { limit });
   return projectAssetsToStudioAssets(assets);
 }
@@ -119,9 +144,10 @@ export async function listStudioAssets(
   const results: StudioAsset[] = [];
 
   // Fetch project_assets if scoped to project or all.
+  // Ownership is verified inside fetchProjectAssets via getProject().
   if ((scope === "project" || scope === "all") && opts.projectId) {
     try {
-      const projectAssets = await fetchProjectAssets(opts.projectId, limit);
+      const projectAssets = await fetchProjectAssets(opts.projectId, opts.clerkId, limit);
       results.push(...projectAssets);
     } catch {
       // If project_assets fetch fails, continue with user_media.
@@ -186,9 +212,12 @@ export async function getStudioAsset(
     if (!opts.projectId) {
       return { asset: null, error: "Project ID required for project assets." };
     }
-    // Fetch all project assets and find by raw ID.
-    // This is acceptable for Phase D — a direct query by id can be added later.
-    const assets = await fetchProjectAssets(opts.projectId, MAX_LIMIT);
+    // Verify ownership before reading project assets.
+    const hasAccess = await verifyProjectAccess(opts.projectId, opts.clerkId);
+    if (!hasAccess) {
+      return { asset: null, error: "Project not found." };
+    }
+    const assets = await fetchProjectAssets(opts.projectId, opts.clerkId, MAX_LIMIT);
     const found = assets.find((a) => a.id === canonicalId);
     return { asset: found ?? null, error: null };
   }

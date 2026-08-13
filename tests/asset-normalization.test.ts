@@ -114,8 +114,12 @@ describe("kind inference from project_asset", () => {
     expect(inferKindFromProjectAsset(makeProjectAsset({ contentType: "audio/mpeg" }))).toBe("audio");
   });
 
-  it("unknown content type → image (fallback)", () => {
-    expect(inferKindFromProjectAsset(makeProjectAsset({ contentType: "application/octet-stream" }))).toBe("image");
+  it("unknown content type → null (truthful, not fabricated as image)", () => {
+    expect(inferKindFromProjectAsset(makeProjectAsset({ contentType: "application/octet-stream" }))).toBeNull();
+  });
+
+  it("empty content type → null (truthful, not fabricated as image)", () => {
+    expect(inferKindFromProjectAsset(makeProjectAsset({ contentType: "" }))).toBeNull();
   });
 });
 
@@ -132,8 +136,8 @@ describe("kind inference from user_media", () => {
     expect(inferKindFromUserMedia(makeUserMediaRow({ type: "audio" }))).toBe("audio");
   });
 
-  it("unknown type → image (fallback)", () => {
-    expect(inferKindFromUserMedia(makeUserMediaRow({ type: "unknown" }))).toBe("image");
+  it("unknown type → null (truthful, not fabricated as image)", () => {
+    expect(inferKindFromUserMedia(makeUserMediaRow({ type: "unknown" }))).toBeNull();
   });
 });
 
@@ -154,23 +158,24 @@ describe("user_media visibility mapping", () => {
 describe("projectAssetToStudioAsset", () => {
   it("maps generated asset with full provenance", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset());
-    expect(asset.id).toBe("project_asset:asset-uuid-001");
-    expect(asset.projectId).toBe("proj-uuid-001");
-    expect(asset.kind).toBe("image");
-    expect(asset.source).toBe("generated");
-    expect(asset.url).toBe("https://cdn.litlabs.net/asset.png");
-    expect(asset.mimeType).toBe("image/png");
-    expect(asset.provider).toBe("fal");
-    expect(asset.prompt).toBe("A neon city skyline at dusk");
-    expect(asset.width).toBe(1920);
-    expect(asset.height).toBe(1080);
-    expect(asset.visibility).toBe("private");
+    expect(asset).not.toBeNull();
+    expect(asset!.id).toBe("project_asset:asset-uuid-001");
+    expect(asset!.projectId).toBe("proj-uuid-001");
+    expect(asset!.kind).toBe("image");
+    expect(asset!.source).toBe("generated");
+    expect(asset!.url).toBe("https://cdn.litlabs.net/asset.png");
+    expect(asset!.mimeType).toBe("image/png");
+    expect(asset!.provider).toBe("fal");
+    expect(asset!.prompt).toBe("A neon city skyline at dusk");
+    expect(asset!.width).toBe(1920);
+    expect(asset!.height).toBe(1080);
+    expect(asset!.visibility).toBe("private");
   });
 
   it("preserves checksum and inspection in metadata", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset());
-    expect(asset.metadata?.checksum).toBe("sha256:abc123");
-    expect(asset.metadata?.inspection).toEqual(expect.objectContaining({
+    expect(asset!.metadata?.checksum).toBe("sha256:abc123");
+    expect(asset!.metadata?.inspection).toEqual(expect.objectContaining({
       reachable: true,
       statusCode: 200,
     }));
@@ -178,41 +183,48 @@ describe("projectAssetToStudioAsset", () => {
 
   it("preserves missionId and buildId in metadata", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset());
-    expect(asset.metadata?.missionId).toBe("mission-uuid-001");
-    expect(asset.metadata?.buildId).toBe("build-uuid-001");
+    expect(asset!.metadata?.missionId).toBe("mission-uuid-001");
+    expect(asset!.metadata?.buildId).toBe("build-uuid-001");
   });
 
   it("preserves originalUrl in metadata", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset());
-    expect(asset.metadata?.originalUrl).toBe("https://example.com/original.png");
+    expect(asset!.metadata?.originalUrl).toBe("https://example.com/original.png");
   });
 
   it("maps uploaded sourceType correctly", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset({ sourceType: "uploaded" }));
-    expect(asset.source).toBe("uploaded");
+    expect(asset!.source).toBe("uploaded");
   });
 
   it("maps stock sourceType to imported", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset({ sourceType: "stock" }));
-    expect(asset.source).toBe("imported");
+    expect(asset!.source).toBe("imported");
   });
 
   it("does NOT fabricate dimensions when null", () => {
     const asset = projectAssetToStudioAsset(
       makeProjectAsset({ width: null, height: null }),
     );
-    expect(asset.width).toBeUndefined();
-    expect(asset.height).toBeUndefined();
+    expect(asset!.width).toBeUndefined();
+    expect(asset!.height).toBeUndefined();
   });
 
   it("does NOT fabricate provider when empty", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset({ provider: "" }));
-    expect(asset.provider).toBeUndefined();
+    expect(asset!.provider).toBeUndefined();
   });
 
   it("does NOT fabricate prompt when null", () => {
     const asset = projectAssetToStudioAsset(makeProjectAsset({ prompt: null }));
-    expect(asset.prompt).toBeUndefined();
+    expect(asset!.prompt).toBeUndefined();
+  });
+
+  it("returns null for unknown content type (no fabrication)", () => {
+    const asset = projectAssetToStudioAsset(
+      makeProjectAsset({ contentType: "application/octet-stream" }),
+    );
+    expect(asset).toBeNull();
   });
 
   it("validates against Zod schema", () => {
@@ -227,36 +239,42 @@ describe("projectAssetToStudioAsset", () => {
 describe("userMediaToStudioAsset", () => {
   it("maps public user_media correctly", () => {
     const asset = userMediaToStudioAsset(makeUserMediaRow({ is_public: true }));
-    expect(asset.id).toBe("user_media:media-uuid-001");
-    expect(asset.projectId).toBeNull();
-    expect(asset.kind).toBe("image");
-    expect(asset.source).toBe("imported"); // provenance unknown
-    expect(asset.visibility).toBe("public");
-    expect(asset.name).toBe("My artwork");
-    expect(asset.url).toBe("https://cdn.litlabs.net/upload.jpg");
+    expect(asset).not.toBeNull();
+    expect(asset!.id).toBe("user_media:media-uuid-001");
+    expect(asset!.projectId).toBeNull();
+    expect(asset!.kind).toBe("image");
+    expect(asset!.source).toBe("imported"); // provenance unknown
+    expect(asset!.visibility).toBe("public");
+    expect(asset!.name).toBe("My artwork");
+    expect(asset!.url).toBe("https://cdn.litlabs.net/upload.jpg");
   });
 
   it("maps private user_media correctly", () => {
     const asset = userMediaToStudioAsset(makeUserMediaRow({ is_public: false }));
-    expect(asset.visibility).toBe("private");
+    expect(asset!.visibility).toBe("private");
   });
 
   it("does NOT fabricate provider/model/prompt", () => {
     const asset = userMediaToStudioAsset(makeUserMediaRow());
-    expect(asset.provider).toBeUndefined();
-    expect(asset.model).toBeUndefined();
-    expect(asset.prompt).toBeUndefined();
+    expect(asset!.provider).toBeUndefined();
+    expect(asset!.model).toBeUndefined();
+    expect(asset!.prompt).toBeUndefined();
   });
 
   it("uses 'Untitled' when caption is null", () => {
     const asset = userMediaToStudioAsset(makeUserMediaRow({ caption: null }));
-    expect(asset.name).toBe("Untitled");
+    expect(asset!.name).toBe("Untitled");
   });
 
   it("preserves category and likes in metadata", () => {
     const asset = userMediaToStudioAsset(makeUserMediaRow());
-    expect(asset.metadata?.category).toBe("gallery");
-    expect(asset.metadata?.likesCount).toBe(5);
+    expect(asset!.metadata?.category).toBe("gallery");
+    expect(asset!.metadata?.likesCount).toBe(5);
+  });
+
+  it("returns null for unknown media type (no fabrication)", () => {
+    const asset = userMediaToStudioAsset(makeUserMediaRow({ type: "unknown" }));
+    expect(asset).toBeNull();
   });
 
   it("validates against Zod schema", () => {

@@ -9,27 +9,48 @@ import type { WorkspaceStage, CreatorKind } from "@/app/studio/lib/studio-destin
 
 // ─── Test helpers ────────────────────────────────────────────────
 
-function wrapper(props: {
-  initialProjectId?: string | null;
-  initialSessionId?: string;
-  initialWorkspaceMode?: WorkspaceStage;
-  initialCreator?: CreatorKind | null;
+interface WrapperProps {
+  projectId?: string | null;
+  sessionId?: string;
+  workspaceMode?: WorkspaceStage;
+  creator?: CreatorKind | null;
   onWorkspaceModeChange?: (m: WorkspaceStage) => void;
   onCreatorChange?: (c: CreatorKind | null) => void;
-}) {
+  children?: React.ReactNode;
+}
+
+/**
+ * Single stable wrapper component for use with renderHook's
+ * initialProps + rerender pattern. This is required for controlled-props
+ * testing — rerendering with a new wrapper function identity would
+ * re-mount the provider and lose provider-owned state.
+ */
+function ControlledWrapper({
+  projectId = "proj-001",
+  sessionId = "session-001",
+  workspaceMode = "plan",
+  creator = null,
+  onWorkspaceModeChange,
+  onCreatorChange,
+  children,
+}: WrapperProps) {
+  return (
+    <StudioContextProvider
+      projectId={projectId}
+      sessionId={sessionId}
+      workspaceMode={workspaceMode}
+      creator={creator}
+      onWorkspaceModeChange={onWorkspaceModeChange}
+      onCreatorChange={onCreatorChange}
+    >
+      {children}
+    </StudioContextProvider>
+  );
+}
+
+function wrapper(props: WrapperProps) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return (
-      <StudioContextProvider
-        initialProjectId={props.initialProjectId ?? "proj-001"}
-        initialSessionId={props.initialSessionId ?? "session-001"}
-        initialWorkspaceMode={props.initialWorkspaceMode ?? "plan"}
-        initialCreator={props.initialCreator ?? null}
-        onWorkspaceModeChange={props.onWorkspaceModeChange}
-        onCreatorChange={props.onCreatorChange}
-      >
-        {children}
-      </StudioContextProvider>
-    );
+    return <ControlledWrapper {...props}>{children}</ControlledWrapper>;
   };
 }
 
@@ -47,7 +68,7 @@ describe("StudioContext type contracts", () => {
     expect(stages).toContain("preview");
   });
 
-  it("CreatorKind exact union remains: image video music audio design game environment", () => {
+  it("CreatorKind exact unions remains: image video music audio design game environment", () => {
     const kinds: CreatorKind[] = [
       "image", "video", "music", "audio", "design", "game", "environment",
     ];
@@ -65,16 +86,16 @@ describe("StudioContext type contracts", () => {
   });
 });
 
-// ─── Context value tests ─────────────────────────────────────────
+// ─── Context value tests (controlled props) ──────────────────────
 
-describe("StudioContextProvider", () => {
-  it("provides initial values", () => {
+describe("StudioContextProvider — controlled props", () => {
+  it("provides controlled values", () => {
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({
-        initialProjectId: "proj-abc",
-        initialSessionId: "sess-xyz",
-        initialWorkspaceMode: "code",
-        initialCreator: "image",
+        projectId: "proj-abc",
+        sessionId: "sess-xyz",
+        workspaceMode: "code",
+        creator: "image",
       }),
     });
 
@@ -86,29 +107,61 @@ describe("StudioContextProvider", () => {
     expect(result.current.activeAssetId).toBeNull();
   });
 
-  it("setWorkspaceMode updates context and calls onWorkspaceModeChange", () => {
+  it("workspaceMode and creator are independent — can represent code + image", () => {
+    const { result } = renderHook(() => useStudioContext(), {
+      wrapper: wrapper({
+        workspaceMode: "code",
+        creator: "image",
+      }),
+    });
+
+    expect(result.current.workspaceMode).toBe("code");
+    expect(result.current.creator).toBe("image");
+  });
+
+  it("workspaceMode and creator are independent — can represent canvas + video", () => {
+    const { result } = renderHook(() => useStudioContext(), {
+      wrapper: wrapper({
+        workspaceMode: "canvas",
+        creator: "video",
+      }),
+    });
+
+    expect(result.current.workspaceMode).toBe("canvas");
+    expect(result.current.creator).toBe("video");
+  });
+
+  it("setWorkspaceMode calls onWorkspaceModeChange delegate", () => {
     const onWorkspaceModeChange = vi.fn();
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({ onWorkspaceModeChange }),
     });
 
     act(() => result.current.setWorkspaceMode("canvas"));
-    expect(result.current.workspaceMode).toBe("canvas");
     expect(onWorkspaceModeChange).toHaveBeenCalledWith("canvas");
   });
 
-  it("setCreator updates context and calls onCreatorChange", () => {
+  it("setCreator calls onCreatorChange delegate", () => {
     const onCreatorChange = vi.fn();
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({ onCreatorChange }),
     });
 
     act(() => result.current.setCreator("video"));
-    expect(result.current.creator).toBe("video");
     expect(onCreatorChange).toHaveBeenCalledWith("video");
   });
 
-  it("setActiveFile updates activeFile", () => {
+  it("setCreator(null) calls onCreatorChange with null (exit creator surface)", () => {
+    const onCreatorChange = vi.fn();
+    const { result } = renderHook(() => useStudioContext(), {
+      wrapper: wrapper({ creator: "image", onCreatorChange }),
+    });
+
+    act(() => result.current.setCreator(null));
+    expect(onCreatorChange).toHaveBeenCalledWith(null);
+  });
+
+  it("setActiveFile updates activeFile (provider-owned state)", () => {
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({}),
     });
@@ -120,7 +173,7 @@ describe("StudioContextProvider", () => {
     expect(result.current.activeFile).toBeNull();
   });
 
-  it("setActiveAssetId updates activeAssetId", () => {
+  it("setActiveAssetId updates activeAssetId (provider-owned state)", () => {
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({}),
     });
@@ -131,123 +184,150 @@ describe("StudioContextProvider", () => {
     act(() => result.current.setActiveAssetId(null));
     expect(result.current.activeAssetId).toBeNull();
   });
+});
 
-  it("project change updates projectId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-001" }),
+// ─── Project change clears provider-owned state ──────────────────
+
+describe("StudioContextProvider — project change clears activeFile/activeAssetId", () => {
+  it("changing projectId prop clears activeFile and activeAssetId", () => {
+    let currentProps: WrapperProps = {
+      projectId: "proj-001",
+      sessionId: "sess-001",
+      workspaceMode: "plan",
+      creator: null,
+    };
+
+    const { result, rerender } = renderHook(() => useStudioContext(), {
+      wrapper: function TestWrapper({ children }) {
+        return <ControlledWrapper {...currentProps}>{children}</ControlledWrapper>;
+      },
     });
 
-    act(() => result.current._setProjectId("proj-002"));
-    expect(result.current.projectId).toBe("proj-002");
-  });
-
-  it("project change clears stale activeFile", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-001" }),
+    act(() => {
+      result.current.setActiveFile("src/app/page.tsx");
+      result.current.setActiveAssetId("project_asset:abc-123");
     });
-
-    act(() => result.current.setActiveFile("src/app/page.tsx"));
     expect(result.current.activeFile).toBe("src/app/page.tsx");
-
-    act(() => result.current._setProjectId("proj-002"));
-    expect(result.current.projectId).toBe("proj-002");
-    expect(result.current.activeFile).toBeNull();
-  });
-
-  it("project change clears stale activeAssetId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-001" }),
-    });
-
-    act(() => result.current.setActiveAssetId("project_asset:abc-123"));
     expect(result.current.activeAssetId).toBe("project_asset:abc-123");
 
-    act(() => result.current._setProjectId("proj-002"));
+    // Change project — should clear provider-owned state.
+    currentProps = { ...currentProps, projectId: "proj-002" };
+    rerender();
+
     expect(result.current.projectId).toBe("proj-002");
+    expect(result.current.activeFile).toBeNull();
     expect(result.current.activeAssetId).toBeNull();
   });
 
   it("setting same projectId does NOT clear activeFile/activeAssetId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-001" }),
+    let currentProps: WrapperProps = {
+      projectId: "proj-001",
+      sessionId: "sess-001",
+      workspaceMode: "plan",
+      creator: null,
+    };
+
+    const { result, rerender } = renderHook(() => useStudioContext(), {
+      wrapper: function TestWrapper({ children }) {
+        return <ControlledWrapper {...currentProps}>{children}</ControlledWrapper>;
+      },
     });
 
-    act(() => result.current.setActiveFile("src/app/page.tsx"));
-    act(() => result.current.setActiveAssetId("project_asset:abc-123"));
+    act(() => {
+      result.current.setActiveFile("src/app/page.tsx");
+      result.current.setActiveAssetId("project_asset:abc-123");
+    });
 
-    act(() => result.current._setProjectId("proj-001")); // same project
+    // Re-render with same project — should NOT clear.
+    rerender();
+
     expect(result.current.activeFile).toBe("src/app/page.tsx");
     expect(result.current.activeAssetId).toBe("project_asset:abc-123");
   });
+});
 
-  it("stage switch preserves sessionId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialSessionId: "sess-stable" }),
+// ─── Stage/creator independence ──────────────────────────────────
+
+describe("StudioContextProvider — stage/creator independence", () => {
+  it("active asset survives stage switching (controlled prop change)", () => {
+    let currentProps: WrapperProps = {
+      projectId: "proj-001",
+      sessionId: "sess-001",
+      workspaceMode: "plan",
+      creator: null,
+    };
+
+    const { result, rerender } = renderHook(() => useStudioContext(), {
+      wrapper: function TestWrapper({ children }) {
+        return <ControlledWrapper {...currentProps}>{children}</ControlledWrapper>;
+      },
     });
 
-    act(() => result.current.setWorkspaceMode("canvas"));
-    expect(result.current.sessionId).toBe("sess-stable");
+    act(() => result.current.setActiveAssetId("project_asset:abc-123"));
 
-    act(() => result.current.setWorkspaceMode("code"));
-    expect(result.current.sessionId).toBe("sess-stable");
+    currentProps = { ...currentProps, workspaceMode: "canvas" };
+    rerender();
+    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
 
-    act(() => result.current.setWorkspaceMode("preview"));
-    expect(result.current.sessionId).toBe("sess-stable");
+    currentProps = { ...currentProps, workspaceMode: "code" };
+    rerender();
+    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
+
+    currentProps = { ...currentProps, workspaceMode: "preview" };
+    rerender();
+    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
   });
 
-  it("stage switch preserves projectId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-stable" }),
+  it("creator switch preserves sessionId and projectId", () => {
+    let currentProps: WrapperProps = {
+      projectId: "proj-stable",
+      sessionId: "sess-stable",
+      workspaceMode: "code",
+      creator: null,
+    };
+
+    const { result, rerender } = renderHook(() => useStudioContext(), {
+      wrapper: function TestWrapper({ children }) {
+        return <ControlledWrapper {...currentProps}>{children}</ControlledWrapper>;
+      },
     });
 
-    act(() => result.current.setWorkspaceMode("canvas"));
-    expect(result.current.projectId).toBe("proj-stable");
-
-    act(() => result.current.setWorkspaceMode("code"));
-    expect(result.current.projectId).toBe("proj-stable");
-  });
-
-  it("creator switch preserves sessionId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialSessionId: "sess-stable" }),
-    });
-
-    act(() => result.current.setCreator("video"));
+    // Activate image creator — stage stays "code" (independent).
+    currentProps = { ...currentProps, creator: "image" };
+    rerender();
     expect(result.current.sessionId).toBe("sess-stable");
-
-    act(() => result.current.setCreator("music"));
-    expect(result.current.sessionId).toBe("sess-stable");
-  });
-
-  it("creator switch preserves projectId", () => {
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ initialProjectId: "proj-stable" }),
-    });
-
-    act(() => result.current.setCreator("video"));
     expect(result.current.projectId).toBe("proj-stable");
+    expect(result.current.workspaceMode).toBe("code");
+    expect(result.current.creator).toBe("image");
 
-    act(() => result.current.setCreator("design"));
-    expect(result.current.projectId).toBe("proj-stable");
+    // Switch to video creator — stage still "code".
+    currentProps = { ...currentProps, creator: "video" };
+    rerender();
+    expect(result.current.workspaceMode).toBe("code");
+    expect(result.current.creator).toBe("video");
   });
+});
 
-  it("active asset survives stage switching", () => {
+// ─── No mirrored state — provider does not expose _set* ──────────
+
+describe("StudioContextProvider — no mirrored state machinery", () => {
+  it("context API does NOT expose _set* methods", () => {
     const { result } = renderHook(() => useStudioContext(), {
       wrapper: wrapper({}),
     });
 
-    act(() => result.current.setActiveAssetId("project_asset:abc-123"));
-
-    act(() => result.current.setWorkspaceMode("canvas"));
-    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
-
-    act(() => result.current.setWorkspaceMode("code"));
-    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
-
-    act(() => result.current.setWorkspaceMode("preview"));
-    expect(result.current.activeAssetId).toBe("project_asset:abc-123");
+    // The controlled-props design removed all _set* methods.
+    const api = result.current as unknown as Record<string, unknown>;
+    expect(api._setProjectId).toBeUndefined();
+    expect(api._setSessionId).toBeUndefined();
+    expect(api._setWorkspaceMode).toBeUndefined();
+    expect(api._setCreator).toBeUndefined();
   });
+});
 
+// ─── Error boundary ──────────────────────────────────────────────
+
+describe("useStudioContext error handling", () => {
   it("useStudioContext throws outside provider", () => {
     // Suppress the error boundary noise in the test output.
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -255,29 +335,6 @@ describe("StudioContextProvider", () => {
       "useStudioContext must be used within a StudioContextProvider",
     );
     spy.mockRestore();
-  });
-
-  it("context does not create independent duplicate routing state — setWorkspaceMode delegates", () => {
-    const onWorkspaceModeChange = vi.fn();
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ onWorkspaceModeChange }),
-    });
-
-    // The public setWorkspaceMode must call the delegate callback
-    // so the existing routing state (CommandStudio's setStudioMode)
-    // stays in sync.
-    act(() => result.current.setWorkspaceMode("code"));
-    expect(onWorkspaceModeChange).toHaveBeenCalledWith("code");
-  });
-
-  it("context does not create independent duplicate routing state — setCreator delegates", () => {
-    const onCreatorChange = vi.fn();
-    const { result } = renderHook(() => useStudioContext(), {
-      wrapper: wrapper({ onCreatorChange }),
-    });
-
-    act(() => result.current.setCreator("design"));
-    expect(onCreatorChange).toHaveBeenCalledWith("design");
   });
 });
 

@@ -13,9 +13,11 @@
  *
  * Security:
  *   - Authenticated users only.
- *   - No arbitrary userId/projectId impersonation.
+ *   - Project ownership verified server-side via getProject() before
+ *     any project_assets read — client-supplied projectId is NOT trusted.
  *   - user_media scoped to the authenticated user's own rows.
  *   - No demo/fake fallback data.
+ *   - Invalid explicit filters are rejected with 400, not silently ignored.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,6 +26,9 @@ import { listStudioAssets } from "@/lib/assets/repository";
 import { isAssetKind, type AssetKind } from "@/lib/assets/types";
 
 export const dynamic = "force-dynamic";
+
+const VALID_SCOPES = ["project", "user", "all"] as const;
+type ValidScope = (typeof VALID_SCOPES)[number];
 
 export async function GET(req: NextRequest) {
   const { userId: clerkId } = await auth(req);
@@ -37,25 +42,41 @@ export async function GET(req: NextRequest) {
   const scopeParam = searchParams.get("scope") || "all";
   const limitParam = searchParams.get("limit");
 
-  // Validate kind if provided.
+  // Validate kind — reject invalid explicit values truthfully.
   let kind: AssetKind | undefined;
-  if (kindParam && isAssetKind(kindParam)) {
+  if (kindParam) {
+    if (!isAssetKind(kindParam)) {
+      return NextResponse.json(
+        { error: `Invalid kind filter: '${kindParam}'. Valid values: image, video, music, audio, design, code, game.` },
+        { status: 400 },
+      );
+    }
     kind = kindParam;
   }
 
-  // Validate scope.
-  const scope =
-    scopeParam === "project" || scopeParam === "user" || scopeParam === "all"
-      ? scopeParam
-      : "all";
+  // Validate scope — reject invalid explicit values truthfully.
+  let scope: ValidScope = "all";
+  if (scopeParam) {
+    if (!VALID_SCOPES.includes(scopeParam as ValidScope)) {
+      return NextResponse.json(
+        { error: `Invalid scope: '${scopeParam}'. Valid values: project, user, all.` },
+        { status: 400 },
+      );
+    }
+    scope = scopeParam as ValidScope;
+  }
 
-  // Parse limit.
+  // Parse limit — reject invalid explicit values truthfully.
   let limit: number | undefined;
   if (limitParam) {
     const parsed = parseInt(limitParam, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      limit = parsed;
+    if (isNaN(parsed) || parsed <= 0) {
+      return NextResponse.json(
+        { error: `Invalid limit: '${limitParam}'. Must be a positive integer.` },
+        { status: 400 },
+      );
     }
+    limit = parsed;
   }
 
   const { assets, error } = await listStudioAssets({

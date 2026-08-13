@@ -36,7 +36,7 @@ import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
 import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
 import AssetsPanel from "./context/AssetsPanel";
-import { StudioContextProvider, useStudioContext } from "../context/StudioContext";
+import { StudioContextProvider } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { useViewportTier } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
@@ -130,35 +130,6 @@ function AgentVoiceSync() {
 }
 
 /**
- * StudioContextSync — invisible bridge that pushes authoritative routing
- * state into the StudioContextProvider's internal state.
- *
- * This component renders nothing. It exists so that when CommandStudio's
- * own state (destination, studioMode, createMode, conversation, project)
- * changes via user interaction or URL sync, the canonical StudioContext
- * reflects those changes without the provider needing to be re-mounted
- * (which would lose activeFile/activeAssetId).
- */
-function StudioContextSync({
-  projectId,
-  sessionId,
-  workspaceMode,
-  creator,
-}: {
-  projectId: string | null;
-  sessionId: string;
-  workspaceMode: import("@/app/studio/lib/studio-destinations").WorkspaceStage;
-  creator: import("@/app/studio/lib/studio-destinations").CreatorKind | null;
-}) {
-  const ctx = useStudioContext();
-  useEffect(() => { ctx._setProjectId(projectId); }, [projectId, ctx]);
-  useEffect(() => { ctx._setSessionId(sessionId); }, [sessionId, ctx]);
-  useEffect(() => { ctx._setWorkspaceMode(workspaceMode); }, [workspaceMode, ctx]);
-  useEffect(() => { ctx._setCreator(creator); }, [creator, ctx]);
-  return null;
-}
-
-/**
  * CommandStudio — Phase 1.1 functional stabilization.
  *
  * One compact header, five navigation destinations, one dominant LiTT
@@ -218,6 +189,15 @@ function CommandStudioContent() {
     initial.legacyTool === "build" ? "builder" : "conversation",
   );
 
+  // ── Phase D.1: independent workspace stage ───────────────────────
+  // The canonical workspaceMode (Plan/Canvas/Code/Preview) is INDEPENDENT
+  // from creator. When a creator is activated (destination → "create"),
+  // we preserve the last workspace stage so the context can represent
+  // e.g. { workspaceMode: "code", creator: "image" }.
+  const [lastWorkspaceStage, setLastWorkspaceStage] = useState<WorkspaceStage>(
+    deriveWorkspaceStage(initial.destination, (initial.mode as StudioMode) ?? "work") ?? "plan",
+  );
+
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
@@ -250,6 +230,16 @@ function CommandStudioContent() {
       setMissionMode((cur) => (cur === newMode ? cur : newMode));
     }
   }, [searchParams]);
+
+  // ── Phase D.1: track the last workspace stage when in Studio ──────
+  // When the user is in the Studio destination (Plan/Canvas/Code/Preview),
+  // record the stage so it persists when a creator is activated.
+  useEffect(() => {
+    if (destination === "studio") {
+      const stage = deriveWorkspaceStage(destination, studioMode);
+      if (stage) setLastWorkspaceStage(stage);
+    }
+  }, [destination, studioMode]);
 
   // Phase C2.2: the old "unified side panel manager" (StudioSidePanel /
   // littree:studio:side-panel / littree:studio:activity-rail-open) has
@@ -986,27 +976,39 @@ function CommandStudioContent() {
     />
   );
 
-  // ── Phase D: canonical StudioContext ──────────────────────────────
-  // Derive the canonical context values from the authoritative routing
-  // state. The provider adapts existing state — it does NOT duplicate it.
-  const studioWorkspaceMode = deriveWorkspaceStage(destination, studioMode) ?? "plan";
+  // ── Phase D.1: canonical StudioContext (controlled props) ─────────
+  // The four authoritative values are controlled props — the provider
+  // does NOT mirror them. workspaceMode is INDEPENDENT from creator:
+  // when a creator is active, we use the last workspace stage so the
+  // context can represent { workspaceMode: "code", creator: "image" }.
+  const studioWorkspaceMode = destination === "studio"
+    ? (deriveWorkspaceStage(destination, studioMode) ?? lastWorkspaceStage)
+    : lastWorkspaceStage;
   const studioCreator = deriveCreator(destination, studioMode, createMode);
+  // sessionId: reuse the canonical conversationId when available.
+  // Deterministic fallback: project-scoped if a project is active,
+  // otherwise a stable "studio:default" — never random.
   const studioSessionId = conversation.selectedConversationId
     ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
 
   return (
     <StudioContextProvider
-      initialProjectId={capabilities.projectId ?? null}
-      initialSessionId={studioSessionId}
-      initialWorkspaceMode={studioWorkspaceMode}
-      initialCreator={studioCreator}
+      projectId={capabilities.projectId ?? null}
+      sessionId={studioSessionId}
+      workspaceMode={studioWorkspaceMode}
+      creator={studioCreator}
       onWorkspaceModeChange={(mode) => {
         const mapped = workspaceStageToMode(mode);
         setStudioMode(mapped);
         setDestination("studio");
       }}
       onCreatorChange={(c) => {
-        if (c === null) return;
+        if (c === null) {
+          // Exit creator surface — return to the last workspace stage.
+          setDestination("studio");
+          setStudioMode(workspaceStageToMode(lastWorkspaceStage));
+          return;
+        }
         // Delegate to existing routing: create-mode creators go through
         // the Create destination; "design" goes through Studio/design.
         if (c === "design") {
@@ -1018,12 +1020,6 @@ function CommandStudioContent() {
         }
       }}
     >
-      <StudioContextSync
-        projectId={capabilities.projectId ?? null}
-        sessionId={studioSessionId}
-        workspaceMode={studioWorkspaceMode}
-        creator={studioCreator}
-      />
     <>
       <AgentVoiceSync />
 
