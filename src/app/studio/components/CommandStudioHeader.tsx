@@ -30,7 +30,6 @@ import {
   Eraser,
   Settings,
 } from "lucide-react";
-import { BrandLogo } from "@/components/branding/BrandLogo";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {

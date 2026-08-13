@@ -678,7 +678,6 @@ function CommandStudioContent() {
   }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
-  const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
@@ -1087,9 +1086,7 @@ function CommandStudioContent() {
                     conversation.cancel();
                     useExecutionStore.getState().endRun("cancelled");
                   }}
-                  onRollback={() => {
-                    handleOpenTerminal();
-                  }}
+                  onRollback={handleRollback}
                   onResolveApproval={(decision) => {
                     const pending = useExecutionStore.getState().pendingApproval;
                     if (pending?.pausedRunId && conversation.selectedConversationId) {
