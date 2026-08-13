@@ -1,17 +1,22 @@
 "use client";
 
 /**
- * LiTTAmbientHUD — compact 64px collapsed LiTT panel.
+ * LiTTAmbientHUD — collapsed-state chrome for the LiTT panel.
+ *
+ * Pure presentational content — no state, no width/border of its own.
+ * The parent (LiTTPanel) owns the 64px width and border so the LiTT
+ * panel can stay a single mounted element across collapse/expand
+ * (Phase C2.1 — no unmount/remount on collapse).
  *
  * Shows truthful state using existing stores:
  * - LiTT mark/head
  * - Phase indicator
  * - Running pulse
  * - Approval indicator
- * - Expand button
+ * - Microphone indicator — reflects the REAL device status, never
+ *   inferred from "is a live session active" alone.
  *
  * No raw reasoning. No second runtime status system.
- * Respects prefers-reduced-motion.
  */
 
 import {
@@ -29,7 +34,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutionStore";
-import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import type { DeviceStatus } from "@/lib/litt/live/types";
 
 const PHASE_ICON: Record<ExecutionPhase, ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>> = {
   idle: Circle,
@@ -57,14 +62,22 @@ const PHASE_COLOR: Record<ExecutionPhase, string> = {
 
 export interface LiTTAmbientHUDProps {
   onExpand: () => void;
+  /** Whether a Live voice/vision session is connected at all */
   voiceConnected?: boolean;
-  micOn?: boolean;
+  /**
+   * REAL microphone device status from the realtime session's
+   * indicators (e.g. `liveSession.indicators.microphone`). Only
+   * "active" renders as mic-on — every other status (inactive, muted,
+   * denied, error) renders as mic-off. Do not derive this from
+   * `isLive` alone; a live session does not guarantee an active mic.
+   */
+  microphoneStatus?: DeviceStatus;
 }
 
 export default function LiTTAmbientHUD({
   onExpand,
   voiceConnected,
-  micOn,
+  microphoneStatus,
 }: LiTTAmbientHUDProps) {
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
@@ -72,15 +85,11 @@ export default function LiTTAmbientHUD({
 
   const PhaseIcon = PHASE_ICON[phase] ?? Circle;
   const phaseColor = PHASE_COLOR[phase] ?? "var(--text-muted)";
+  const micOn = microphoneStatus === "active";
 
   return (
     <div
-      className="flex h-full w-16 shrink-0 flex-col items-center gap-2 border-r py-3"
-      style={{
-        backgroundColor: "var(--studio-surface)",
-        borderRight: "1px solid var(--studio-border)",
-        backdropFilter: "blur(12px)",
-      }}
+      className="flex h-full w-16 shrink-0 flex-col items-center gap-2 py-3"
       data-testid="litt-ambient-hud"
     >
       {/* LiTT mark — expand button */}
@@ -93,6 +102,7 @@ export default function LiTTAmbientHUD({
         }}
         aria-label="Expand LiTT panel"
         title="Expand LiTT"
+        data-testid="litt-hud-expand"
       >
         <div
           className="flex h-7 w-7 items-center justify-center rounded-lg"
@@ -158,7 +168,9 @@ export default function LiTTAmbientHUD({
         </div>
       )}
 
-      {/* Voice/mic indicator */}
+      {/* Voice/mic indicator — only shown while a Live session is
+          connected, and only ever reports mic-on when the real device
+          status is "active". */}
       {voiceConnected && (
         <div
           className="flex h-6 w-6 items-center justify-center rounded-md"
@@ -167,6 +179,8 @@ export default function LiTTAmbientHUD({
           }}
           title={micOn ? "Microphone on" : "Microphone off"}
           aria-label={micOn ? "Microphone on" : "Microphone off"}
+          data-testid="litt-hud-mic-indicator"
+          data-mic-on={micOn}
         >
           {micOn ? (
             <Mic size={11} strokeWidth={2} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />

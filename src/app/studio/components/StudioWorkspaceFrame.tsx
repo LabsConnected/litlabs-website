@@ -188,6 +188,7 @@ export function StudioInspector({
   onTabChange,
   children,
   data,
+  embedded = false,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -195,7 +196,69 @@ export function StudioInspector({
   onTabChange: (t: InspectorTab) => void;
   children?: React.ReactNode;
   data?: StudioInspectorData;
+  /**
+   * When true, skip this component's own collapse handle, mobile
+   * backdrop, and mobile "Workspace inspector" header — the parent
+   * (e.g. ContextDrawer) already owns open/close chrome and a backdrop.
+   * Only the tab strip + content render. Used to avoid nested duplicate
+   * close controls when Inspector is embedded elsewhere (Phase C2.1).
+   */
+  embedded?: boolean;
 }) {
+  const tabStripAndContent = (
+    <>
+      {!embedded && (
+        <div className="flex shrink-0 items-center justify-between border-b px-2 md:hidden" style={{ borderColor: "var(--studio-border)" }}>
+          <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Workspace inspector</span>
+          <button type="button" onClick={onToggle} className="rounded-md px-2 py-1 text-xs" style={{ color: "var(--text-muted)" }} aria-label="Close inspector">×</button>
+        </div>
+      )}
+      <div
+        className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
+        style={{ borderColor: "var(--studio-border)" }}
+      >
+        {INSPECTOR_TABS.map((t) => {
+          const Icon = t.icon;
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onTabChange(t.id)}
+              className="flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[10px] font-bold transition"
+              style={{
+                color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
+                borderBottom: isActive ? "2px solid var(--litt-primary)" : "2px solid transparent",
+              }}
+              aria-label={t.label}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <Icon size={12} className="pointer-events-none" />
+              <span className="hidden lg:inline">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div
+        className={activeTab === "browser" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto p-2.5"}
+        role="region"
+        aria-label={`${activeTab} inspector`}
+      >
+        {children ?? (data ? <InspectorContent tab={activeTab} data={data} /> : (
+          <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }} role="status">
+            No {activeTab} yet
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    // No collapse handle, no mobile backdrop/header, no fixed positioning —
+    // the parent (ContextDrawer) already provides all of that chrome.
+    return <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">{tabStripAndContent}</div>;
+  }
+
   return (
     <>
       {/* Collapse/expand handle — always visible on desktop */}
@@ -225,47 +288,7 @@ export function StudioInspector({
               paddingTop: "env(safe-area-inset-top)",
             }}
           >
-            <div className="flex shrink-0 items-center justify-between border-b px-2 md:hidden" style={{ borderColor: "var(--studio-border)" }}>
-              <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--text-secondary)" }}>Workspace inspector</span>
-              <button type="button" onClick={onToggle} className="rounded-md px-2 py-1 text-xs" style={{ color: "var(--text-muted)" }} aria-label="Close inspector">×</button>
-            </div>
-            <div
-              className="flex shrink-0 items-center gap-0.5 border-b px-1.5"
-              style={{ borderColor: "var(--studio-border)" }}
-            >
-              {INSPECTOR_TABS.map((t) => {
-                const Icon = t.icon;
-                const isActive = activeTab === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onTabChange(t.id)}
-                    className="flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[10px] font-bold transition"
-                    style={{
-                      color: isActive ? "var(--litt-primary)" : "var(--text-muted)",
-                      borderBottom: isActive ? "2px solid var(--litt-primary)" : "2px solid transparent",
-                    }}
-                    aria-label={t.label}
-                    aria-current={isActive ? "page" : undefined}
-                  >
-                    <Icon size={12} className="pointer-events-none" />
-                    <span className="hidden lg:inline">{t.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div
-              className={activeTab === "browser" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto p-2.5"}
-              role="region"
-              aria-label={`${activeTab} inspector`}
-            >
-              {children ?? (data ? <InspectorContent tab={activeTab} data={data} /> : (
-                <div className="flex h-full items-center justify-center text-[11px]" style={{ color: "var(--text-muted)" }} role="status">
-                  No {activeTab} yet
-                </div>
-              ))}
-            </div>
+            {tabStripAndContent}
           </aside>
         </>
       )}

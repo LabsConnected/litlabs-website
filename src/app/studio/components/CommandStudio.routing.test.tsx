@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import "@testing-library/jest-dom";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 // We mock the heavy dependencies so CommandStudio can mount in jsdom.
@@ -282,25 +283,11 @@ vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));
 vi.mock("./canvas/ActionChips", () => ({ ActionChips: () => null }));
 vi.mock("@/components/chat/MessageAvatar", () => ({ UserMessageAvatar: () => <div /> }));
 
-// Mock new shell components (Phase C2)
-vi.mock("./litt/LiTTAmbientHUD", () => ({
-  default: ({ onExpand }: { onExpand: () => void }) => (
-    <div data-testid="litt-ambient-hud">
-      <button onClick={onExpand} data-testid="litt-expand-btn">Expand</button>
-    </div>
-  ),
-}));
-vi.mock("./context/ContextDrawer", () => ({
-  default: ({ open, onClose, filesContent, inspectorContent }: {
-    open: boolean; onClose: () => void; filesContent: React.ReactNode; inspectorContent: React.ReactNode;
-  }) => open ? (
-    <div data-testid="context-drawer">
-      <button onClick={onClose} data-testid="context-drawer-close">Close</button>
-      <div data-testid="context-files-content">{filesContent}</div>
-      <div data-testid="context-inspector-content">{inspectorContent}</div>
-    </div>
-  ) : null,
-}));
+// Shell components (Phase C2.1): LiTTAmbientHUD and ContextDrawer are
+// intentionally NOT mocked here. The bugs this phase fixes were state
+// ownership bugs inside those exact components (uncontrolled tab state,
+// unmount-on-collapse, mic truthfulness) — mocking them away would hide
+// regressions instead of catching them.
 vi.mock("./shell/StudioOperatorBar", () => ({
   default: () => <div data-testid="studio-operator-bar" />,
 }));
@@ -436,14 +423,15 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       render(<CommandStudio />);
       const filesBtn = screen.getByTestId("workspace-tab-files");
       expect(filesBtn).toBeTruthy();
-      // Context drawer should not be open by default
-      expect(screen.queryByTestId("context-drawer")).toBeNull();
+      // Context drawer stays mounted (state-preserving) but closed by
+      // default — `data-open` reflects the real open state.
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
       // Toggle it on
       act(() => {
         fireEvent.click(filesBtn);
       });
       expect(filesBtn.className).toContain("glass-active");
-      expect(screen.getByTestId("context-drawer")).toBeTruthy();
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
     });
   });
 
@@ -481,14 +469,23 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       act(() => {
         fireEvent.click(collapseBtn);
       });
-      // After collapse, the ambient HUD should appear
+      // After collapse, the ambient HUD chrome should be shown...
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
-      // The expanded panel should be gone
-      expect(screen.queryByTestId("litt-panel")).toBeNull();
+      expect(screen.getByTestId("litt-panel-collapsed-chrome")).toHaveStyle({ display: "flex" });
+      // ...and the expanded chrome/content stays MOUNTED (not removed),
+      // just hidden — this is the Phase C2.1 state-preservation fix.
+      expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "none" });
+      // The single LiTT panel container itself is never removed.
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
     });
 
-    it("collapsed LiTT can be expanded again", () => {
+    it("collapsed LiTT can be expanded again and preserves the active tab", () => {
       render(<CommandStudio />);
+      // Switch to Live before collapsing
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-tab-live"));
+      });
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
       // Collapse
       act(() => {
         fireEvent.click(screen.getByTestId("litt-panel-collapse"));
@@ -496,10 +493,12 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
       // Expand
       act(() => {
-        fireEvent.click(screen.getByTestId("litt-expand-btn"));
+        fireEvent.click(screen.getByTestId("litt-hud-expand"));
       });
-      expect(screen.getByTestId("litt-panel")).toBeTruthy();
-      expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
+      expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
+      // Active tab (Live) survived the round trip because the content
+      // was never unmounted.
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
     });
 
     it("collapsed state does not remove workspace tabs", () => {
@@ -517,16 +516,18 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("Context drawer opens and closes", () => {
       render(<CommandStudio />);
+      // Closed by default — width 0, not interactable.
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
       // Open via Files toggle
       act(() => {
         fireEvent.click(screen.getByTestId("workspace-tab-files"));
       });
-      expect(screen.getByTestId("context-drawer")).toBeTruthy();
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       // Close
       act(() => {
         fireEvent.click(screen.getByTestId("context-drawer-close"));
       });
-      expect(screen.queryByTestId("context-drawer")).toBeNull();
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
     });
 
     it("old left Files permanent panel is gone (no studio-files-panel)", () => {
@@ -539,6 +540,147 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       render(<CommandStudio />);
       expect(screen.queryByText(/coming soon/i)).toBeNull();
       expect(screen.queryByTestId("game-creator")).toBeNull();
+    });
+
+    it("Files button opens the drawer on the Files tab", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "false");
+    });
+
+    it("Inspector header action opens the drawer on the Inspector tab", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "false");
+    });
+
+    it("switching tabs inside the drawer updates parent state, not internal state", () => {
+      render(<CommandStudio />);
+      // Open on Files
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-tab-files")).toHaveAttribute("aria-pressed", "true");
+      // Click Inspector tab inside the drawer
+      act(() => {
+        fireEvent.click(screen.getByTestId("context-tab-inspector"));
+      });
+      expect(screen.getByTestId("context-tab-inspector")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
+      // The Files workspace-tab button must no longer show as active —
+      // it must reflect the REAL active tab, not a stale local one
+      // (Phase C2.1 fix for the controlled-drawer bug).
+      const filesBtn = screen.getByTestId("workspace-tab-files");
+      expect(filesBtn.className).not.toContain("glass-active");
+    });
+
+    it("Files workspace-tab button is inactive while Inspector is showing", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
+      });
+      const filesBtn = screen.getByTestId("workspace-tab-files");
+      expect(filesBtn.className).not.toContain("glass-active");
+      expect(filesBtn).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("clicking Files while Inspector is open switches to Files without closing the drawer", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
+    });
+
+    it("clicking Files again while Files is active closes the drawer", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-files"));
+      });
+      expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
+    });
+
+    it("mic HUD is not shown ON when the microphone is inactive", () => {
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
+      });
+      // No live session in this test, so the mic indicator should not
+      // render at all (voiceConnected is false), and definitely never
+      // report mic-on merely because a session object exists.
+      expect(screen.queryByTestId("litt-hud-mic-indicator")).toBeNull();
+    });
+
+    it("desktop tier renders the LiTT rail, not the mobile sheet", () => {
+      render(<CommandStudio />);
+      expect(screen.getByTestId("litt-panel")).toBeTruthy();
+      expect(screen.queryByTestId("litt-mobile-trigger")).toBeNull();
+      expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
+    });
+
+    it("mobile tier does not render the desktop LiTT rail or a 64px HUD", () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      render(<CommandStudio />);
+      expect(screen.queryByTestId("litt-panel")).toBeNull();
+      expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
+      // Mobile access control must be present instead.
+      expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
+    });
+
+    it("mobile trigger opens a real LiTT sheet with chat and composer", () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-mobile-trigger"));
+      });
+      expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
+      // Closing returns to workspace-only mobile state.
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-mobile-sheet-close"));
+      });
+      expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
+    });
+
+    it("laptop tier defaults to collapsed LiTT when no preference is stored", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
+      render(<CommandStudio />);
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+      });
+    });
+
+    it("laptop tier does not override an explicit stored preference", async () => {
+      localStorage.setItem("littree:studio:litt-collapsed", "false");
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
+      render(<CommandStudio />);
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+      });
+    });
+
+    it("desktop tier (>=1440px) defaults to expanded LiTT when no preference is stored", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+      render(<CommandStudio />);
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+      });
     });
   });
 });

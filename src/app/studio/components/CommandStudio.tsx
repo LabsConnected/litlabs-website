@@ -33,8 +33,9 @@ import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
-import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
+import LiTTMobileSheet from "./litt/LiTTMobileSheet";
 import ContextDrawer from "./context/ContextDrawer";
+import { useViewportTier } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
@@ -257,9 +258,27 @@ function CommandStudioContent() {
     }
   }, [sidePanel]);
 
-  // LiTT panel — always present on desktop, expand/collapse.
-  // Phase C2: moved from right to left. Always visible (expanded or collapsed).
+  // LiTT panel — always present on desktop/laptop, expand/collapse.
+  // Phase C2: moved from right to left. Phase C2.1: viewport-tier aware
+  // (desktop/laptop rail vs mobile overlay sheet), single canonical tab
+  // state, and a laptop first-run default (collapsed) that never
+  // overrides an explicit stored user preference.
   const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
+  // Captured ONCE via a lazy initializer (before any effect can write to
+  // localStorage) so the laptop-default effect below can tell a real
+  // prior user preference apart from the value our own persistence
+  // effect is about to write on this very mount (Phase C2.1 fix — this
+  // used to re-read localStorage after the persistence effect had
+  // already run, so it always saw a "preference" and never applied the
+  // laptop default).
+  const [hadStoredLittPreference] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem(LITT_COLLAPSED_KEY) !== null;
+    } catch {
+      return false;
+    }
+  });
   const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -276,8 +295,29 @@ function CommandStudioContent() {
     }
   }, [littCollapsed]);
 
-  // LiTT tab preference — lets header/activity button switch to Live
-  const [littTabPreference, setLittTabPreference] = useState<"chat" | "live" | undefined>(undefined);
+  // Canonical LiTT active tab — single source of truth shared by the
+  // desktop rail, the mobile sheet, and header/activity actions.
+  const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
+
+  // Viewport tier drives desktop-rail vs mobile-sheet LiTT presentation.
+  // null until the first client measurement (SSR-safe — see hook docs).
+  const viewportTier = useViewportTier();
+  const isMobileLitt = viewportTier === "mobile";
+  const [mobileLittOpen, setMobileLittOpen] = useState(false);
+
+  // Laptop first-run default: collapse LiTT once for users who land on a
+  // 1024-1439px viewport with no stored preference yet. Runs at most
+  // once and never overrides an explicit prior choice.
+  const laptopDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (laptopDefaultAppliedRef.current) return;
+    if (viewportTier === null) return;
+    laptopDefaultAppliedRef.current = true;
+    if (viewportTier !== "laptop") return;
+    if (!hadStoredLittPreference) {
+      setLittCollapsed(true);
+    }
+  }, [viewportTier, hadStoredLittPreference]);
 
   // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
   const CONTEXT_OPEN_KEY = "littree:studio:context-open";
@@ -316,18 +356,20 @@ function CommandStudioContent() {
 
   // Derived booleans for downstream components (must be after state declarations)
   const activityRailOpen = !littCollapsed;
-  const inspectorOpen = contextDrawerOpen && contextDrawerTab === "inspector";
+  // Files workspace-tab button only lights up when the drawer is open
+  // AND actually showing Files — never merely because the drawer is
+  // open on Inspector (Phase C2.1 fix).
+  const filesButtonActive = contextDrawerOpen && contextDrawerTab === "files";
 
   // Toggle helpers for header compatibility
   const handleToggleActivity = useCallback(() => {
     setLittCollapsed((v) => !v);
   }, []);
-  const handleToggleInspector = useCallback(() => {
-    setContextDrawerTab("inspector");
-    setContextDrawerOpen((v) => !v);
-  }, []);
 
-  // Context drawer open helpers
+  // Context drawer open helpers — both are OPEN actions (switch tab +
+  // ensure open), never a toggle-closed. Only the drawer's own close
+  // button and the Files workspace-tab button (which has explicit
+  // toggle semantics) close the drawer.
   const handleOpenContextFiles = useCallback(() => {
     setContextDrawerTab("files");
     setContextDrawerOpen(true);
@@ -336,9 +378,22 @@ function CommandStudioContent() {
     setContextDrawerTab("inspector");
     setContextDrawerOpen(true);
   }, []);
-  const handleToggleContext = useCallback(() => {
-    setContextDrawerOpen((v) => !v);
-  }, []);
+  // Files workspace-tab button: open-to-Files, switch-to-Files, or
+  // close, depending on current drawer state (Phase C2.1 fix — this
+  // used to just toggle open/closed regardless of which tab was active,
+  // which could highlight "Files" while Inspector was actually showing).
+  const handleFilesButtonClick = useCallback(() => {
+    if (!contextDrawerOpen) {
+      setContextDrawerTab("files");
+      setContextDrawerOpen(true);
+      return;
+    }
+    if (contextDrawerTab === "files") {
+      setContextDrawerOpen(false);
+      return;
+    }
+    setContextDrawerTab("files");
+  }, [contextDrawerOpen, contextDrawerTab]);
 
   // Keyboard shortcut: Ctrl+Shift+A toggles the LiTT panel collapse.
   useEffect(() => {
@@ -778,6 +833,137 @@ function CommandStudioContent() {
     { id: "environment", label: "360° Env", icon: Globe },
   ];
 
+  // LiTT Chat/Live content — built ONCE per render and reused by whichever
+  // single LiTT surface is actually mounted (desktop/laptop rail via
+  // LiTTPanel, or the mobile overlay via LiTTMobileSheet). Exactly one of
+  // those two ever renders at a time (gated by viewportTier), so there is
+  // never a second CommandComposer / LiTTLiveActivity instance (Phase C2.1).
+  const littChatContent = (
+    <>
+      <StudioWorkSurface
+        messages={conversation.messages}
+        busy={conversation.busy}
+        loading={conversation.loading}
+        activeAgentId={conversation.activeAgentId}
+        fallbackNotice={conversation.fallbackNotice}
+        onRouteToolAction={handleRouteTool}
+        onRegenerateAction={conversation.regenerate}
+        onEmptyAction={handleEmptyAction}
+        onSelectConversation={handleSelectConversation}
+        hasProject={projectReady}
+        projectName={capabilities.projectName}
+        sourceType={capabilities.sourceType}
+        githubInstalled={capabilities.githubInstalled}
+        capabilities={capabilities}
+        modelHealth={modelHealth}
+        modelLabel={modelLabel}
+        displayName={profileDisplayName}
+        onStartBlank={handleStartBlank}
+        onConnectRepo={handleConnectRepo}
+      />
+      {(conversation.requiresReauth || conversation.sendError) && (
+        <div
+          className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+          style={{
+            borderColor: "rgba(239,68,68,0.3)",
+            backgroundColor: "rgba(239,68,68,0.08)",
+            color: "#fca5a5",
+          }}
+        >
+          <span className="min-w-0 flex-1 font-medium">
+            {conversation.requiresReauth
+              ? "Your session expired. Sign in again to continue."
+              : conversation.sendError}
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {!conversation.requiresReauth && conversation.sendError && (
+              <button
+                type="button"
+                onClick={() => conversation.clearSendError()}
+                className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                aria-label="Dismiss error"
+              >
+                ✕
+              </button>
+            )}
+            {conversation.requiresReauth ? (
+              <button
+                type="button"
+                onClick={() => {
+                  conversation.clearRequiresReauth();
+                  window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                }}
+                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+              >
+                Sign in again
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+              >
+                Refresh session
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <CommandComposer
+        value={composerValue}
+        onChange={setComposerValue}
+        onSend={handleComposerSend}
+        onCancel={conversation.cancel}
+        busy={conversation.busy || creatingProject}
+        disabled={conversation.requiresReauth}
+        onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
+        onToggleLive={() => setLivePanelOpen((v) => !v)}
+        liveActive={livePanelOpen && liveSession.isLive}
+        contextLine={contextLine}
+        executionMode={executionMode}
+        onExecutionModeChange={setExecutionMode}
+      />
+    </>
+  );
+
+  const littLiveContent = (
+    <LiTTLiveActivity
+      onOpenFile={(_filePath) => {
+        setDestination("studio");
+        setStudioMode("code");
+      }}
+      onOpenDiff={() => {
+        setDrawerOpen(true);
+        setDrawerTab("activity");
+      }}
+      onOpenCheck={() => {
+        setDrawerOpen(true);
+        setDrawerTab("terminal");
+      }}
+      onOpenTerminal={handleOpenTerminal}
+      onStop={() => {
+        conversation.cancel();
+        useExecutionStore.getState().endRun("cancelled");
+      }}
+      onRollback={handleRollback}
+      onResolveApproval={(decision) => {
+        const pending = useExecutionStore.getState().pendingApproval;
+        if (pending?.pausedRunId && conversation.selectedConversationId) {
+          void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ decision }),
+          }).then(() => {
+            useExecutionStore.getState().resolveApproval(decision);
+            conversation.regenerate();
+          });
+        } else {
+          useExecutionStore.getState().resolveApproval(decision);
+        }
+      }}
+    />
+  );
+
   return (
     <>
       <AgentVoiceSync />
@@ -798,7 +984,7 @@ function CommandStudioContent() {
           onOpenActivityAction={handleToggleActivity}
           activityRailOpen={activityRailOpen}
           onOpenTerminalAction={handleOpenTerminal}
-          onOpenInspectorAction={handleToggleInspector}
+          onOpenInspectorAction={handleOpenContextInspector}
           onProjectSelectAction={handleSelectProject}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
@@ -818,143 +1004,25 @@ function CommandStudioContent() {
             Phase C2: LiTT moved from right to left. Files/Inspector moved
             from left-of-workspace to right Context Drawer. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          {/* LiTT panel — left side. Always present on desktop.
+          {/* LiTT panel — left side on desktop/laptop (>=1024px).
               Expanded: 320px with Chat/Live tabs.
-              Collapsed: 64px ambient HUD with phase/voice indicators. */}
-          {littCollapsed ? (
-            <LiTTAmbientHUD
-              onExpand={() => setLittCollapsed(false)}
-              voiceConnected={liveSession.isLive}
-              micOn={liveSession.isLive}
-            />
-          ) : (
+              Collapsed: 64px ambient HUD with phase/voice indicators.
+              Below 1024px, LiTT is NOT rendered here at all — it is
+              accessed via the mobile trigger + overlay sheet below
+              (Phase C2.1). `viewportTier === null` means the client
+              hasn't measured yet; render nothing for a tick rather than
+              guess, to avoid a flash of the wrong tier's chrome. */}
+          {viewportTier !== null && !isMobileLitt && (
             <LiTTPanel
+              collapsed={littCollapsed}
               onCollapse={() => setLittCollapsed(true)}
-              preferredTab={littTabPreference}
-              chatContent={
-                <>
-                  <StudioWorkSurface
-                    messages={conversation.messages}
-                    busy={conversation.busy}
-                    loading={conversation.loading}
-                    activeAgentId={conversation.activeAgentId}
-                    fallbackNotice={conversation.fallbackNotice}
-                    onRouteToolAction={handleRouteTool}
-                    onRegenerateAction={conversation.regenerate}
-                    onEmptyAction={handleEmptyAction}
-                    onSelectConversation={handleSelectConversation}
-                    hasProject={projectReady}
-                    projectName={capabilities.projectName}
-                    sourceType={capabilities.sourceType}
-                    githubInstalled={capabilities.githubInstalled}
-                    capabilities={capabilities}
-                    modelHealth={modelHealth}
-                    modelLabel={modelLabel}
-                    displayName={profileDisplayName}
-                    onStartBlank={handleStartBlank}
-                    onConnectRepo={handleConnectRepo}
-                  />
-                  {(conversation.requiresReauth || conversation.sendError) && (
-                    <div
-                      className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
-                      style={{
-                        borderColor: "rgba(239,68,68,0.3)",
-                        backgroundColor: "rgba(239,68,68,0.08)",
-                        color: "#fca5a5",
-                      }}
-                    >
-                      <span className="min-w-0 flex-1 font-medium">
-                        {conversation.requiresReauth
-                          ? "Your session expired. Sign in again to continue."
-                          : conversation.sendError}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {!conversation.requiresReauth && conversation.sendError && (
-                          <button
-                            type="button"
-                            onClick={() => conversation.clearSendError()}
-                            className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                            aria-label="Dismiss error"
-                          >
-                            ✕
-                          </button>
-                        )}
-                        {conversation.requiresReauth ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              conversation.clearRequiresReauth();
-                              window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
-                            }}
-                            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                          >
-                            Sign in again
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => window.location.reload()}
-                            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                          >
-                            Refresh session
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <CommandComposer
-                    value={composerValue}
-                    onChange={setComposerValue}
-                    onSend={handleComposerSend}
-                    onCancel={conversation.cancel}
-                    busy={conversation.busy || creatingProject}
-                    disabled={conversation.requiresReauth}
-                    onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                    onToggleLive={() => setLivePanelOpen((v) => !v)}
-                    liveActive={livePanelOpen && liveSession.isLive}
-                    contextLine={contextLine}
-                    executionMode={executionMode}
-                    onExecutionModeChange={setExecutionMode}
-                  />
-                </>
-              }
-              liveContent={
-                <LiTTLiveActivity
-                  onOpenFile={(_filePath) => {
-                    setDestination("studio");
-                    setStudioMode("code");
-                  }}
-                  onOpenDiff={() => {
-                    setDrawerOpen(true);
-                    setDrawerTab("activity");
-                  }}
-                  onOpenCheck={() => {
-                    setDrawerOpen(true);
-                    setDrawerTab("terminal");
-                  }}
-                  onOpenTerminal={handleOpenTerminal}
-                  onStop={() => {
-                    conversation.cancel();
-                    useExecutionStore.getState().endRun("cancelled");
-                  }}
-                  onRollback={handleRollback}
-                  onResolveApproval={(decision) => {
-                    const pending = useExecutionStore.getState().pendingApproval;
-                    if (pending?.pausedRunId && conversation.selectedConversationId) {
-                      void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ decision }),
-                      }).then(() => {
-                        useExecutionStore.getState().resolveApproval(decision);
-                        conversation.regenerate();
-                      });
-                    } else {
-                      useExecutionStore.getState().resolveApproval(decision);
-                    }
-                  }}
-                />
-              }
+              onExpand={() => setLittCollapsed(false)}
+              activeTab={littActiveTab}
+              onTabChange={setLittActiveTab}
+              voiceConnected={liveSession.isLive}
+              microphoneStatus={liveSession.indicators.microphone}
+              chatContent={littChatContent}
+              liveContent={littLiveContent}
             />
           )}
 
@@ -1004,21 +1072,24 @@ function CommandStudioContent() {
                 );
               })}
 
-              {/* Files toggle — opens Context Drawer on the right (Phase C2) */}
+              {/* Files toggle — opens Context Drawer on the right, on the
+                  Files tab specifically (Phase C2.1). Only highlighted
+                  when the drawer is open AND showing Files — it must not
+                  light up while Inspector happens to be the active tab. */}
               <button
                 type="button"
-                onClick={handleToggleContext}
-                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${contextDrawerOpen ? "glass-active" : ""}`}
+                onClick={handleFilesButtonClick}
+                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${filesButtonActive ? "glass-active" : ""}`}
                 style={{
-                  color: contextDrawerOpen ? "var(--text-main)" : "var(--text-dim)",
-                  backgroundColor: contextDrawerOpen ? "var(--purple-soft)" : "transparent",
+                  color: filesButtonActive ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: filesButtonActive ? "var(--purple-soft)" : "transparent",
                 }}
                 aria-label="Files"
-                aria-pressed={contextDrawerOpen}
+                aria-pressed={filesButtonActive}
                 data-testid="workspace-tab-files"
               >
                 Files
-                {contextDrawerOpen && (
+                {filesButtonActive && (
                   <span
                     className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
                     style={{
@@ -1159,11 +1230,15 @@ function CommandStudioContent() {
 
           {/* Context Drawer — right side. Files | Inspector.
               Replaces the old left Files panel and right Inspector.
-              Closes completely to 0px — workspace reclaims width. */}
+              Closes completely to 0px — workspace reclaims width.
+              Fully controlled: CommandStudio owns contextDrawerTab as the
+              single source of truth (Phase C2.1 — no internal drawer
+              state duplicating this). */}
           <ContextDrawer
             open={contextDrawerOpen}
+            activeTab={contextDrawerTab}
+            onTabChange={setContextDrawerTab}
             onClose={() => setContextDrawerOpen(false)}
-            initialTab={contextDrawerTab}
             filesContent={
               <div className="flex h-full flex-col overflow-hidden">
                 <div
@@ -1193,6 +1268,7 @@ function CommandStudioContent() {
             }
             inspectorContent={
               <StudioInspector
+                embedded
                 open={true}
                 onToggle={() => setContextDrawerOpen(false)}
                 activeTab={inspectorTab}
@@ -1249,6 +1325,49 @@ function CommandStudioContent() {
 
         {/* Mobile bottom nav — 5 destinations */}
         <MobileCommandNav active={destination} onSelect={handleSelectDestination} />
+
+        {/* Mobile LiTT access (<1024px) — Phase C2.1.
+            The desktop/laptop rail above is not rendered on this tier at
+            all, so this trigger + sheet is the ONLY way to reach LiTT on
+            mobile. The sheet reuses the exact same littChatContent /
+            littLiveContent used by the desktop rail — never both at once. */}
+        {isMobileLitt && !mobileLittOpen && (
+          <button
+            type="button"
+            onClick={() => setMobileLittOpen(true)}
+            className="fixed z-[10015] flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            style={{
+              right: 12,
+              bottom: "calc(64px + env(safe-area-inset-bottom) + 12px)",
+              backgroundColor: "var(--studio-surface)",
+              borderColor: "var(--studio-border-strong)",
+              color: "var(--litt-primary)",
+              backdropFilter: "blur(12px)",
+            }}
+            aria-label="Open LiTT"
+            data-testid="litt-mobile-trigger"
+          >
+            <span
+              className="flex h-4 w-4 items-center justify-center rounded-md text-[9px] font-black"
+              style={{
+                background: "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(99,102,241,0.15))",
+              }}
+              aria-hidden
+            >
+              L
+            </span>
+            LiTT
+          </button>
+        )}
+        {isMobileLitt && mobileLittOpen && (
+          <LiTTMobileSheet
+            activeTab={littActiveTab}
+            onTabChange={setLittActiveTab}
+            onClose={() => setMobileLittOpen(false)}
+            chatContent={littChatContent}
+            liveContent={littLiveContent}
+          />
+        )}
       </div>
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
