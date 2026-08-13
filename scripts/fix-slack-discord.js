@@ -1,6 +1,6 @@
 // Fix activation issues — Gmail node params and HTTP Request node
 const N8N_URL = 'https://n8n-production-2519.up.railway.app';
-const N8N_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZjI4MGE2NS02ODM2LTQ0ZTYtYjc3NS1lOTQ3MjE3ZjYyZTEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiYTZlZTYyZGYtOTRhYi00ZmFhLTg2ZGYtYWIxMGU2OGVhOTA1IiwiaWF0IjoxNzg1ODY5NzU3LCJleHAiOjE4MTc0MDU3NTU5OTh9.NUL0EhN1J0m3O6qikYPcM-Yahd1e65RL7ZAv9Hcdo_E';
+const N8N_KEY = process.env.N8N_API_KEY || '';
 
 async function main() {
   // === Fix Stripe workflow — Gmail node needs proper parameters ===
@@ -124,3 +124,4 @@ async function main() {
 }
 
 main().catch(console.error);
+
