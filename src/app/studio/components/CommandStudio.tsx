@@ -31,7 +31,8 @@ import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
-import StudioActivityRail from "./StudioActivityRail";
+import LiTTLiveActivity from "./LiTTLiveActivity";
+import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
@@ -251,9 +252,13 @@ function CommandStudioContent() {
   const activityRailOpen = sidePanel === "activity";
   const inspectorOpen = sidePanel === "inspector";
 
+  // LiTT Live Activity panel — right side, open by default on desktop.
+  // Shows real-time execution events (tool calls, diffs, checks, approvals).
+  const [littLiveOpen, setLittLiveOpen] = useState(true);
+
   // Toggle helpers — opening one closes the others
   const handleToggleActivity = useCallback(() => {
-    setSidePanel((current) => (current === "activity" ? "none" : "activity"));
+    setLittLiveOpen((v) => !v);
   }, []);
   const handleToggleInspector = useCallback(() => {
     setSidePanel((current) => (current === "inspector" ? "none" : "inspector"));
@@ -283,6 +288,10 @@ function CommandStudioContent() {
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
+
+  // Collapsible Files / Components panel — sits between the shared sidebar
+  // and the workspace. Toggled by the Files button in the tab bar.
+  const [filesPanelOpen, setFilesPanelOpen] = useState(false);
 
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
@@ -648,15 +657,15 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
 
-  // Primary workspace tabs — always visible: Chat | Canvas | Code | Preview | Files
+  // Primary workspace tabs — Chat | Canvas | Code | Preview.
+  // Files is no longer a primary tab — it's a collapsible left panel.
   // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
-  // Preview = studio/preview, Files = opens inspector on files tab
-  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode; isFilesInspector?: boolean }[] = [
+  // Preview = studio/preview
+  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
     { id: "chat", label: "Chat", destination: "studio", mode: "work" },
     { id: "canvas", label: "Canvas", destination: "studio", mode: "files" },
     { id: "code", label: "Code", destination: "studio", mode: "code" },
     { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
-    { id: "files", label: "Files", destination: "studio", mode: "code", isFilesInspector: true },
   ];
 
     // Create secondary tabs — visible only when Create is active
@@ -710,7 +719,7 @@ function CommandStudioContent() {
             Studio's internal tabs (Chat/Canvas/Code/Preview/Files) remain. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
+            {/* Persistent primary workspace switcher: Chat | Canvas | Code | Preview */}
             <div
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
@@ -720,21 +729,14 @@ function CommandStudioContent() {
               }}
             >
               {primaryTabs.map((t) => {
-                const isActive = t.isFilesInspector
-                  ? inspectorOpen && inspectorTab === "files"
-                  : t.destination === "studio"
-                    ? destination === "studio" && studioMode === t.mode
-                    : destination === t.destination;
+                const isActive = t.destination === "studio"
+                  ? destination === "studio" && studioMode === t.mode
+                  : destination === t.destination;
                 return (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => {
-                      if (t.isFilesInspector) {
-                        setSidePanel((cur) => (cur === "inspector" && inspectorTab === "files" ? "none" : "inspector"));
-                        setInspectorTab("files");
-                        return;
-                      }
                       if (t.destination === "studio") {
                         setDestination("studio");
                         setStudioMode(t.mode as StudioMode);
@@ -764,6 +766,31 @@ function CommandStudioContent() {
                   </button>
                 );
               })}
+
+              {/* Files / Components toggle — collapsible left panel */}
+              <button
+                type="button"
+                onClick={() => setFilesPanelOpen((v) => !v)}
+                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${filesPanelOpen ? "glass-active" : ""}`}
+                style={{
+                  color: filesPanelOpen ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: filesPanelOpen ? "var(--purple-soft)" : "transparent",
+                }}
+                aria-label="Files"
+                aria-pressed={filesPanelOpen}
+              >
+                Files
+                {filesPanelOpen && (
+                  <span
+                    className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                    style={{
+                      background: "var(--purple)",
+                      boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                    }}
+                    aria-hidden
+                  />
+                )}
+              </button>
             </div>
 
             {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
@@ -799,8 +826,64 @@ function CommandStudioContent() {
               </div>
             )}
 
-            {/* Workspace content */}
+            {/* Workspace content — Files/Components panel + main workspace + LiTT Live Activity */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              {/* Collapsible Files / Components panel — sits between shared sidebar and workspace */}
+              {filesPanelOpen && (
+                <div
+                  className="hidden shrink-0 flex-col overflow-hidden border-r md:flex"
+                  style={{
+                    width: 240,
+                    backgroundColor: "var(--studio-surface)",
+                    borderRight: "1px solid var(--studio-border)",
+                  }}
+                  data-testid="studio-files-panel"
+                >
+                  <div
+                    className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+                    style={{ borderColor: "var(--studio-border)" }}
+                  >
+                    <span
+                      className="text-[10px] font-black uppercase tracking-[0.12em]"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      Files / Components
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFilesPanelOpen(false)}
+                      className="grid h-6 w-6 place-items-center rounded-md hover:bg-white/10"
+                      style={{ color: "var(--text-muted)" }}
+                      aria-label="Close Files panel"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+                    <StudioInspector
+                      open={true}
+                      onToggle={() => setFilesPanelOpen(false)}
+                      activeTab="files"
+                      onTabChange={() => {}}
+                      data={{
+                        capabilities,
+                        modelLabel,
+                        modelHealth,
+                        activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
+                        destination,
+                        surface: studioMode,
+                        messages: conversation.messages,
+                        busy: conversation.busy,
+                        workspaceRevision,
+                        healthRunTrigger,
+                        onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                        onWorkspacePrepared: () => { void refreshCapabilities(); },
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {isStudioWorkConversation ? (
                   <StudioWorkSurface
@@ -861,27 +944,11 @@ function CommandStudioContent() {
                 )}
               </div>
 
-              {/* Right inspector — collapsed by default */}
-              <StudioInspector
-                open={inspectorOpen}
-                onToggle={handleToggleInspector}
-                activeTab={inspectorTab}
-                onTabChange={setInspectorTab}
-                data={{
-                  capabilities,
-                  modelLabel,
-                  modelHealth,
-                  activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
-                  destination,
-                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "missions" ? missionMode : destination === "more" ? moreMode : "overview",
-                  messages: conversation.messages,
-                  busy: conversation.busy,
-                  workspaceRevision,
-                  healthRunTrigger,
-                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                  onWorkspacePrepared: () => { void refreshCapabilities(); },
-                }}
-              />
+              {/* Right inspector — folded into LiTT Live Activity panel.
+                  StudioInspector is no longer rendered as a permanent column.
+                  Files/checks/context are accessible via the LiTT Live panel
+                  and the Files drawer. */}
+
             </div>
 
             {/* Bottom drawer — collapsed by default, sits above composer */}
@@ -1033,22 +1100,41 @@ function CommandStudioContent() {
             )}
           </main>
 
-          {/* Right Activity Rail — optional, toggled by header Activity button.
-              When hidden, the main canvas reclaims the full width (no spacer). */}
-          {activityRailOpen && (
-            <StudioActivityRail
-              messages={conversation.messages}
-              busy={conversation.busy}
-              activeAgentId={conversation.activeAgentId}
-              projectName={capabilities.projectName}
-              modelLabel={modelLabel}
-              terminalStatus={capabilities.terminalStatus}
-              terminalServerReachable={capabilities.terminalServerReachable}
-              repositoryName={capabilities.repositoryName}
-              branch={capabilities.activeBranch ?? contextLine.branch}
+          {/* LiTT Live Activity panel — right side, shows real-time execution.
+              Replaces the old StudioActivityRail. Visible while LiTT works
+              regardless of which center tab is active. */}
+          {littLiveOpen && (
+            <LiTTLiveActivity
+              onClose={() => setLittLiveOpen(false)}
+              onOpenFile={(_filePath) => {
+                setDestination("studio");
+                setStudioMode("code");
+              }}
+              onOpenDiff={() => {
+                setDrawerOpen(true);
+                setDrawerTab("activity");
+              }}
+              onOpenCheck={() => {
+                setDrawerOpen(true);
+                setDrawerTab("terminal");
+              }}
               onOpenTerminal={handleOpenTerminal}
-              onSelectAgent={conversation.switchAgent}
-              onClose={() => setSidePanel("none")}
+              onResolveApproval={(decision) => {
+                // Approval resolution: call the paused run API, then regenerate
+                const pending = useExecutionStore.getState().pendingApproval;
+                if (pending?.pausedRunId && conversation.selectedConversationId) {
+                  void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ decision }),
+                  }).then(() => {
+                    useExecutionStore.getState().resolveApproval(decision);
+                    conversation.regenerate();
+                  });
+                } else {
+                  useExecutionStore.getState().resolveApproval(decision);
+                }
+              }}
             />
           )}
         </div>

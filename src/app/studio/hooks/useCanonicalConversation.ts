@@ -25,6 +25,7 @@ import {
   parseConversationFromUrl,
   serializeConversationToUrl,
 } from "../stores/useConversationStore";
+import { useExecutionStore, feedSSEEventToExecutionStore } from "../stores/useExecutionStore";
 
 export type SendErrorKind = "auth" | "conflict" | "network" | "provider" | "validation";
 
@@ -629,6 +630,7 @@ export function useCanonicalConversation({
       };
 
       setBusy(true);
+      useExecutionStore.getState().startRun();
 
       if (!conversationId) {
         const optimisticConversationId = `${OPTIMISTIC_CONVERSATION_ID_PREFIX}${clientRequestId}`;
@@ -638,6 +640,7 @@ export function useCanonicalConversation({
           // Conversation creation failed (401/403/network) — roll back all
           // optimistic state and require reauthentication if it was a 401.
           rollbackOptimistic(optimisticConversationId);
+          useExecutionStore.getState().endRun("failed");
           setBusy(false);
           if (sendErrorRef.current?.includes("session expired")) {
             setRequiresReauth(true);
@@ -945,6 +948,9 @@ export function useCanonicalConversation({
                 const src = evt.detail ?? { message: evt.message, partialText: evt.partialText };
                 errorPayload = { message: src.message, partialText: src.partialText };
               }
+
+              // Feed every event into the execution store for the LiTT Live panel
+              feedSSEEventToExecutionStore(evt);
             } catch {
               // ignore malformed chunk
             }
@@ -1061,6 +1067,7 @@ export function useCanonicalConversation({
         if (requestController && requestAbortRef.current === requestController) requestAbortRef.current = null;
         getStore().setStreaming(false);
         setBusy(false);
+        useExecutionStore.getState().endRun();
       }
     },
     [busy, getStore, createConversation, loadMessages, onRouteToolAction, onRouteInspectorAction, onRunHealthChecks, selectedModel, activeAgentId, activeAgentMode, activeAgentInstanceId, executionMode, setFallbackNotice, authHeaders, isLoaded, requiresReauth, runtimeContext, setSendError],
@@ -1118,6 +1125,7 @@ export function useCanonicalConversation({
       setSendError(error instanceof Error ? error.message : "Regeneration failed. Please try again.");
     } finally {
       getStore().setStreaming(false);
+      useExecutionStore.getState().endRun();
       setBusy(false);
     }
   }, [busy, getStore, loadMessages, authHeaders, runtimeContext, setSendError]);
