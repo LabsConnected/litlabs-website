@@ -56,6 +56,18 @@ export default function SpaceTool() {
         </span>
       </div>
 
+      {/* Truthful status banner — 360° generation is not yet wired to a real provider */}
+      <div
+        className="rounded-xl p-3 text-xs"
+        style={{
+          backgroundColor: "rgba(255,107,53,0.08)",
+          border: "1px solid rgba(255,107,53,0.2)",
+          color: "rgba(255,165,107,0.9)",
+        }}
+      >
+        360° environment generation is not yet available. The skybox provider endpoint returns 503. This creator will be functional once a real generation provider is connected.
+      </div>
+
       {/* Prompt */}
       <div
         className="rounded-xl p-4 flex flex-col gap-3"

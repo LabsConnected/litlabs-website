@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Settings, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings, Sparkles, MessageSquare } from "lucide-react";
 import { useCanvasBuilderStore } from "./store";
-import { LiTTCopilotPanel } from "./LiTTCopilotPanel";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -45,72 +44,58 @@ const inputStyle: React.CSSProperties = {
 };
 
 export function PropertiesPanel() {
-  const rightPanelTab = useCanvasBuilderStore((s) => s.rightPanelTab);
-  const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
+  const selectedNodeId = useCanvasBuilderStore((s) => s.selectedNodeId);
+  const node = useCanvasBuilderStore((s) => (s.selectedNodeId ? s.document.nodes[s.selectedNodeId] : null));
 
-  const tabBtn: React.CSSProperties = {
-    flex: 1,
-    height: 26,
-    borderRadius: 6,
-    border: "1px solid transparent",
-    backgroundColor: "transparent",
-    color: "var(--glass-text-3)",
-    fontSize: 9,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    transition: "all 0.12s ease",
-  };
-
-  const tabActive: React.CSSProperties = {
-    ...tabBtn,
-    backgroundColor: "var(--glass-purple-soft)",
-    borderColor: "var(--glass-border-purple)",
-    color: "var(--glass-purple)",
-  };
-
-  // Tab switcher at the top
-  const tabSwitcher = (
-    <div
-      className="flex shrink-0 items-center gap-0.5 p-1.5"
-      style={{ borderBottom: "1px solid var(--glass-border)" }}
-    >
-      <button
-        onClick={() => setRightPanelTab("properties")}
-        style={rightPanelTab === "properties" ? tabActive : tabBtn}
-      >
-        <Settings size={11} /> Properties
-      </button>
-      <button
-        onClick={() => setRightPanelTab("litt")}
-        style={rightPanelTab === "litt" ? tabActive : tabBtn}
-      >
-        <Sparkles size={11} /> LiTT
-      </button>
-    </div>
-  );
-
-  if (rightPanelTab === "litt") {
-    return (
-      <div className="flex h-full w-full flex-col">
-        {tabSwitcher}
-        <div className="flex-1 overflow-hidden">
-          <LiTTCopilotPanel />
-        </div>
-      </div>
+  const handleAskLiTT = () => {
+    // Dispatch a custom event that CommandStudio listens for to expand
+    // the canonical left LiTT panel and switch it to Chat tab.
+    // The Canvas context (selected node, document) is included so the
+    // canonical LiTT conversation can reference it.
+    const nodeName = node?.props?.text || node?.type || "canvas";
+    window.dispatchEvent(
+      new CustomEvent("studio:ask-litt", {
+        detail: {
+          context: `Canvas component selected: ${nodeName}`,
+          nodeId: selectedNodeId,
+        },
+      }),
     );
-  }
+  };
 
   return (
-    <>
-      {tabSwitcher}
-      <PropertiesPanelContent />
-    </>
+    <div className="flex h-full w-full flex-col">
+      {/* Properties header with Ask LiTT button */}
+      <div
+        className="flex shrink-0 items-center gap-0.5 p-1.5"
+        style={{ borderBottom: "1px solid var(--glass-border)" }}
+      >
+        <div
+          className="flex items-center gap-1 px-1 text-[9px] font-black uppercase tracking-[0.08em]"
+          style={{ color: "var(--glass-text-2)" }}
+        >
+          <Settings size={11} /> Properties
+        </div>
+        <div className="flex-1" />
+        <button
+          onClick={handleAskLiTT}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold transition hover:bg-white/10"
+          style={{
+            color: "var(--glass-purple)",
+            backgroundColor: "var(--glass-purple-soft)",
+            border: "1px solid var(--glass-border-purple)",
+          }}
+          aria-label="Ask LiTT about this component"
+          title="Ask LiTT — opens the canonical LiTT chat with this component's context"
+        >
+          <MessageSquare size={10} className="pointer-events-none" />
+          Ask LiTT
+        </button>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <PropertiesPanelContent />
+      </div>
+    </div>
   );
 }
 

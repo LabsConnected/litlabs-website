@@ -11,6 +11,8 @@ import { HtmlProjectEditor } from "./HtmlProjectEditor";
 import { useCanvasBuilderStore } from "./store";
 import { getProjectTypeMeta, type ProjectType } from "./projectTypes";
 import { useConnectionSummary } from "@/app/studio/hooks/useConnectionSummary";
+import { useResizableWidth } from "@/app/studio/hooks/useResizableWidth";
+import ResizeHandle from "@/app/studio/components/shell/ResizeHandle";
 
 const HTML_FILE_ICONS: Record<string, LucideIcon> = {
   "index.html": FileCode,
@@ -169,6 +171,22 @@ export function VisualCanvasBuilder() {
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
 
+  // Resizable palette and inspector widths — persisted, clamped
+  const paletteResize = useResizableWidth({
+    storageKey: "littree:studio:canvas-palette-width",
+    defaultWidth: 210,
+    minWidth: 180,
+    maxWidth: 320,
+    direction: "left",
+  });
+  const inspectorResize = useResizableWidth({
+    storageKey: "littree:studio:canvas-inspector-width",
+    defaultWidth: 300,
+    minWidth: 240,
+    maxWidth: 420,
+    direction: "right",
+  });
+
   // HTML/CSS/JS mode — render the file editor with live preview
   if (typeMeta.editor === "html") {
     return (
@@ -246,18 +264,31 @@ export function VisualCanvasBuilder() {
       <div className="relative flex flex-1 overflow-hidden">
         {/* Palette overlay — left side, absolute positioned */}
         {paletteOpen && (
-          <div
-            className="absolute left-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-r"
-            style={{
-              width: 200,
-              backgroundColor: "rgba(10,11,16,0.95)",
-              borderColor: "var(--studio-border)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            <ProjectTypeSelector />
-            <ComponentPalette />
-          </div>
+          <>
+            <div
+              className="absolute left-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-r"
+              style={{
+                width: paletteResize.width,
+                backgroundColor: "rgba(10,11,16,0.95)",
+                borderColor: "var(--studio-border)",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <ProjectTypeSelector />
+              <ComponentPalette />
+            </div>
+            {/* Resize handle on the right edge of the palette */}
+            <div className="absolute top-0 bottom-0 z-30" style={{ left: paletteResize.width }}>
+              <ResizeHandle
+                onDragStart={paletteResize.onDragStart}
+                onReset={paletteResize.reset}
+                isDragging={paletteResize.isDragging}
+                direction="left"
+                ariaLabel="Resize component palette"
+                testId="palette-resize-handle"
+              />
+            </div>
+          </>
         )}
 
         {/* Center: Canvas Stage — always full width */}
@@ -265,17 +296,30 @@ export function VisualCanvasBuilder() {
 
         {/* Inspector overlay — right side, absolute positioned */}
         {inspectorOpen && (
-          <div
-            className="absolute right-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-l"
-            style={{
-              width: 280,
-              backgroundColor: "rgba(10,11,16,0.95)",
-              borderColor: "var(--studio-border)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            <PropertiesPanel />
-          </div>
+          <>
+            {/* Resize handle on the left edge of the inspector */}
+            <div className="absolute top-0 bottom-0 z-30" style={{ right: inspectorResize.width }}>
+              <ResizeHandle
+                onDragStart={inspectorResize.onDragStart}
+                onReset={inspectorResize.reset}
+                isDragging={inspectorResize.isDragging}
+                direction="right"
+                ariaLabel="Resize properties inspector"
+                testId="inspector-resize-handle"
+              />
+            </div>
+            <div
+              className="absolute right-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-l"
+              style={{
+                width: inspectorResize.width,
+                backgroundColor: "rgba(10,11,16,0.95)",
+                borderColor: "var(--studio-border)",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <PropertiesPanel />
+            </div>
+          </>
         )}
       </div>
     </div>

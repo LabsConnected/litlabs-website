@@ -7,6 +7,8 @@ import DragDropCanvas from "@/components/DragDropCanvas";
 import Editor from "@monaco-editor/react";
 import { Play, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useResizableWidth } from "@/app/studio/hooks/useResizableWidth";
+import ResizeHandle from "@/app/studio/components/shell/ResizeHandle";
 
 interface CanvasItem {
   id: string;
@@ -35,6 +37,59 @@ export default function DesignCanvas() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"canvas" | "code" | "split">("split");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Resizable split — canvas pane width as percentage (20–80%)
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    if (typeof window === "undefined") return 50;
+    try {
+      const stored = localStorage.getItem("littree:studio:design-split");
+      return stored ? Math.min(80, Math.max(20, parseInt(stored, 10))) : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isSplitDragging, setIsSplitDragging] = useState(false);
+
+  const onSplitDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsSplitDragging(true);
+    const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : e.clientX;
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const startX = clientX;
+    const startWidth = container.getBoundingClientRect().width;
+    const startPct = splitPct;
+    const onMove = (cx: number) => {
+      const delta = cx - startX;
+      const newPct = Math.min(80, Math.max(20, startPct + (delta / startWidth) * 100));
+      setSplitPct(newPct);
+    };
+    const onMouseMove = (ev: MouseEvent) => { ev.preventDefault(); onMove(ev.clientX); };
+    const onTouchMove = (ev: TouchEvent) => { if (ev.touches.length) onMove(ev.touches[0].clientX); };
+    const onEnd = () => {
+      setIsSplitDragging(false);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onEnd);
+      try { localStorage.setItem("littree:studio:design-split", String(splitPct)); } catch { /* ignore */ }
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+  }, [splitPct]);
+
+  // Persist split percentage
+  useEffect(() => {
+    try { localStorage.setItem("littree:studio:design-split", String(splitPct)); } catch { /* ignore */ }
+  }, [splitPct]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,24 +183,38 @@ export default function DesignCanvas() {
   }
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
+    <div ref={splitContainerRef} className="flex h-full w-full overflow-hidden">
       <div
         className={cn(
           "h-full overflow-hidden",
           view === "code" ? "hidden" : "flex",
-          view === "split" ? "w-1/2" : "w-full",
         )}
-        style={{ borderRight: view === "split" ? `1px solid ${T.borderColor}25` : "none" }}
+        style={{
+          width: view === "split" ? `${splitPct}%` : "100%",
+          borderRight: view === "split" ? `1px solid ${T.borderColor}25` : "none",
+        }}
       >
         <DragDropCanvas items={items} onItemsChange={handleItemsChange} />
       </div>
+
+      {/* Split resize handle */}
+      {view === "split" && (
+        <ResizeHandle
+          onDragStart={onSplitDragStart}
+          onReset={() => setSplitPct(50)}
+          isDragging={isSplitDragging}
+          direction="left"
+          ariaLabel="Resize design split"
+          testId="design-split-handle"
+        />
+      )}
 
       <div
         className={cn(
           "flex h-full flex-col",
           view === "canvas" ? "hidden" : "flex",
-          view === "split" ? "w-1/2" : "w-full",
         )}
+        style={{ width: view === "split" ? `${100 - splitPct}%` : "100%" }}
       >
         <div
           className="flex shrink-0 items-center gap-1 border-b px-2 py-1"

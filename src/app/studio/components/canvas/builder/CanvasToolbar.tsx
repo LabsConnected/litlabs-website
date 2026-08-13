@@ -35,7 +35,7 @@ export function CanvasToolbar() {
   const setZoom = useCanvasBuilderStore((s) => s.setZoom);
   const saveDocument = useCanvasBuilderStore((s) => s.saveDocument);
   const document = useCanvasBuilderStore((s) => s.document);
-  const setRightPanelTab = useCanvasBuilderStore((s) => s.setRightPanelTab);
+  const saveState = useCanvasBuilderStore((s) => s.saveState);
 
   const btnBase: React.CSSProperties = {
     display: "flex",
@@ -156,9 +156,21 @@ export function CanvasToolbar() {
 
       <div className="flex-1" />
 
-      {/* Ask LiTT */}
+      {/* Ask LiTT — routes to the canonical left LiTT, not a duplicate chat */}
       <button
-        onClick={() => setRightPanelTab("litt")}
+        onClick={() => {
+          const selectedNode = useCanvasBuilderStore.getState().selectedNodeId;
+          const nodeName = selectedNode
+            ? useCanvasBuilderStore.getState().document.nodes[selectedNode]?.props?.text ||
+              useCanvasBuilderStore.getState().document.nodes[selectedNode]?.type ||
+              "selected component"
+            : "the canvas";
+          window.dispatchEvent(
+            new CustomEvent("studio:ask-litt", {
+              detail: { context: `Canvas — ${nodeName}` },
+            }),
+          );
+        }}
         className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold transition"
         style={{
           backgroundColor: "var(--glass-purple-soft)",
@@ -166,26 +178,38 @@ export function CanvasToolbar() {
           color: "var(--glass-purple)",
           cursor: "pointer",
         }}
-        title="Ask LiTT to build, redesign, or improve"
+        title="Ask LiTT — opens the canonical LiTT chat with Canvas context"
       >
         <Sparkles size={12} />
         Ask LiTT...
       </button>
 
-      {/* Save status */}
-      <span style={{ fontSize: 9, fontWeight: 600, color: "var(--glass-text-3)" }}>
-        v{document.version} · saved
+      {/* Save status — truthful based on saveState */}
+      <span style={{
+        fontSize: 9,
+        fontWeight: 600,
+        color: saveState === "error"
+          ? "#fca5a5"
+          : saveState === "saving"
+            ? "var(--glass-text-3)"
+            : saveState === "dirty"
+              ? "#fbbf24"
+              : saveState === "saved"
+                ? "#86efac"
+                : "var(--glass-text-3)",
+      }}>
+        v{document.version} · {saveState === "saving" ? "saving…" : saveState === "error" ? "error" : saveState === "dirty" ? "unsaved" : saveState === "saved" ? "saved" : "local"}
       </span>
 
-      {/* Build / Preview / Live mode toggle */}
+      {/* Edit / Preview mode toggle — renamed from "Build" to "Edit" for truthfulness */}
       <div className="flex items-center gap-0.5 rounded-lg p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
         <button
           onClick={() => setPreviewMode(false)}
           style={!previewMode ? btnActive : { ...btnBase, backgroundColor: "transparent", border: "none" }}
-          title="Build mode — edit blocks, drag/drop, inline edit"
+          title="Edit mode — edit blocks, drag/drop, inline edit"
         >
           <Code2 size={12} style={{ display: "inline" }} />
-          <span style={{ marginLeft: 4 }}>Build</span>
+          <span style={{ marginLeft: 4 }}>Edit</span>
         </button>
         <button
           onClick={() => setPreviewMode(true)}
