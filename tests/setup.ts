@@ -45,6 +45,60 @@ Object.defineProperty(globalThis, "localStorage", {
   writable: true,
 });
 
+// jsdom does not implement window.matchMedia. Provide a minimal polyfill
+// that evaluates simple min-width/max-width queries against a
+// configurable virtual viewport width (default: desktop, 1440px), so
+// hooks like useViewportTier work in tests without a real browser.
+// Tests can override the width via `globalThis.__TEST_VIEWPORT_WIDTH__`.
+declare global {
+  var __TEST_VIEWPORT_WIDTH__: number | undefined;
+}
+globalThis.__TEST_VIEWPORT_WIDTH__ = globalThis.__TEST_VIEWPORT_WIDTH__ ?? 1440;
+
+function evaluateMediaQuery(query: string): boolean {
+  const minMatch = query.match(/min-width:\s*(\d+)px/);
+  const maxMatch = query.match(/max-width:\s*(\d+)px/);
+  // Only min-width/max-width queries are understood by this polyfill.
+  // Anything else (prefers-reduced-motion, prefers-color-scheme, hover,
+  // pointer, etc.) defaults to false — the same "feature not present"
+  // behavior most components expect in a plain jsdom environment, and
+  // the same effective default as when window.matchMedia didn't exist
+  // at all before this polyfill was added.
+  if (!minMatch && !maxMatch) return false;
+  const width = globalThis.__TEST_VIEWPORT_WIDTH__ ?? 1440;
+  if (minMatch && width < Number(minMatch[1])) return false;
+  if (maxMatch && width > Number(maxMatch[1])) return false;
+  return true;
+}
+
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = ((query: string) => {
+    const listeners = new Set<(e: MediaQueryListEvent) => void>();
+    const mql = {
+      get matches() {
+        return evaluateMediaQuery(query);
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: string, listener: (e: MediaQueryListEvent) => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: (e: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+      addListener: (listener: (e: MediaQueryListEvent) => void) => {
+        listeners.add(listener);
+      },
+      removeListener: (listener: (e: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+      dispatchEvent: () => true,
+    } as unknown as MediaQueryList;
+    return mql;
+  }) as typeof window.matchMedia;
+}
+
 beforeEach(() => {
   localStorage.clear();
+  globalThis.__TEST_VIEWPORT_WIDTH__ = 1440;
 });

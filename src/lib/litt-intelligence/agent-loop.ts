@@ -58,6 +58,7 @@ const ENGINEERING_KEYWORDS = [
   "audit",
   "scan",
   "inspect",
+  "inspection",
   "production ready",
   "fix it",
   "fix all",
@@ -93,6 +94,35 @@ const ENGINEERING_KEYWORDS = [
   "evaluate",
   "analyze",
   "analyse",
+  // Action-oriented triggers — inspect before answering
+  "design",
+  "redesign",
+  "landing page",
+  "build me",
+  "build a",
+  "create a",
+  "add a feature",
+  "add feature",
+  "implement",
+  "refactor",
+  "restructure",
+  "improve the",
+  "improve it",
+  "upgrade",
+  "update the",
+  "change the",
+  "modify",
+  "how does",
+  "how is",
+  "where is",
+  "show me",
+  "walk me through",
+  "explain the architecture",
+  "what does",
+  "what's the structure",
+  "whats the structure",
+  "plan",
+  "roadmap",
 ];
 
 const GIT_KEYWORDS = [
@@ -268,7 +298,7 @@ function formatToolResultsBlock(
           }
         }
       } else if (exec.toolId === "git.status") {
-        lines.push(`Branch: ${r?.branch ?? "unknown"}`);
+        lines.push(`Branch: ${r?.branch ?? "none"}`);
         lines.push(`Status: ${r?.status ?? "unknown"}`);
         lines.push(`Recent commits: ${r?.recentCommits ?? "none"}`);
         if (r?.diffStat) lines.push(`Diff: ${r?.diffStat}`);

@@ -56,7 +56,8 @@ export type StudioTool =
   | "space"
   | "clibridge"
   | "loops"
-  | "preview";
+  | "preview"
+  | "game";
 
 type ToolItem = {
   id: StudioTool;

@@ -10,7 +10,9 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 
-// Routes that render minimal chrome (no navbar / footer)
+// Routes that render minimal chrome (no navbar / footer).
+// Only truly public pages: auth, legal, docs, pricing, and marketing.
+// Authenticated product pages (games, showcase, marketplace) use AppShell.
 const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
@@ -20,11 +22,6 @@ const BARE_PUBLIC_PATHS = [
   "/cookies",
   "/docs",
   "/pricing",
-  "/showcase",
-  "/marketplace",
-  "/gallery",
-  "/games",
-  "/social",
   "/hire",
 ];
 
@@ -63,20 +60,6 @@ export default function LayoutShell({
   const ownChrome = hasOwnChrome(pathname);
   const ownShell = hasOwnShell(pathname);
 
-  if (isStudio) {
-    return (
-      <>
-        <AnimatedBackgroundWrapper />
-        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <div className="relative z-10 h-dvh w-full max-w-full overflow-hidden">
-          {children}
-        </div>
-        <CookieConsent />
-        <ServiceWorkerRegistration />
-      </>
-    );
-  }
-
   if (barePublic) {
     return (
       <>
@@ -109,16 +92,18 @@ export default function LayoutShell({
     );
   }
 
-  // Authenticated routes — use the unified AppShell
+  // Authenticated routes — use the unified AppShell.
+  // Studio flows through AppShell too (shared sidebar) but skips footer,
+  // global companion, and YouTube shell since it manages its own full-height chrome.
   return (
     <>
       <AnimatedBackgroundWrapper />
       <div className="relative z-10">
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <AppShell>{children}</AppShell>
-        {!ownChrome && <FooterWrapper />}
-        <GlobalCompanion />
-        <YouTubePlayerShell />
+        {!ownChrome && !isStudio && <FooterWrapper />}
+        {!isStudio && <GlobalCompanion />}
+        {!isStudio && <YouTubePlayerShell />}
         <CookieConsent />
         <ServiceWorkerRegistration />
       </div>

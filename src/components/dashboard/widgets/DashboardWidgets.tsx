@@ -283,7 +283,7 @@ export function TrendingGalleryWidget({ items, collapsed, onToggleCollapse, onRe
   return (
     <WidgetShell title="Trending Gallery" icon="trending" accent={D.accentAmber} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onRemove={onRemove}>
       {items.length === 0 ? (
-        <WidgetEmpty icon="trending" message="No trending items" actionLabel="Browse Gallery" actionHref="/gallery" />
+        <WidgetEmpty icon="trending" message="No trending items" actionLabel="Browse Showcase" actionHref="/showcase" />
       ) : (
         <div className="grid grid-cols-3 gap-2 overflow-y-auto">
           {items.map((item) => (

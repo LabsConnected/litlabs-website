@@ -45,7 +45,7 @@ const COMMANDS: CommandItem[] = [
     icon: ShoppingBag,
     status: "published",
   },
-  { id: "gallery", label: "Gallery", icon: Image, status: "idle" },
+  { id: "showcase", label: "Showcase", icon: Image, status: "idle" },
   { id: "console", label: "Console", icon: Cpu, status: "idle" },
   { id: "games", label: "Games", icon: Gamepad2, status: "idle" },
   { id: "music", label: "Music", icon: Music, status: "idle" },

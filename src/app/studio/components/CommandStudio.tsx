@@ -27,16 +27,28 @@ import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
-import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
+import { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
-import StudioActivityRail from "./StudioActivityRail";
+import LiTTLiveActivity from "./LiTTLiveActivity";
+import LiTTPanel from "./LiTTPanel";
+import LiTTMobileSheet from "./litt/LiTTMobileSheet";
+import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
+import AssetsPanel from "./context/AssetsPanel";
+import { StudioContextProvider } from "../context/StudioContext";
+import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
+import { StudioCreatorHost } from "./creators/StudioCreatorHost";
+import { useViewportTier } from "../hooks/useViewportTier";
+import StudioOperatorBar from "./shell/StudioOperatorBar";
+import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import StudioProjectFiles from "./StudioProjectFiles";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
+  workspaceStageToMode,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
@@ -44,6 +56,7 @@ import {
   type MissionMode,
   type InspectorTab,
   type DrawerTab,
+  type WorkspaceStage,
 } from "../lib/studio-destinations";
 import type { StudioTool } from "./StudioSidebar";
 
@@ -53,6 +66,7 @@ import type { StudioTool } from "./StudioSidebar";
 const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
 const VisualCanvasBuilder = dynamic(() => import("./canvas/builder/VisualCanvasBuilder").then((m) => m.VisualCanvasBuilder), { ssr: false });
 const CodeWorkspace = dynamic(() => import("./code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
+const StudioPlanSurface = dynamic(() => import("./StudioPlanSurface"), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -149,6 +163,7 @@ function CommandStudioContent() {
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
+  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   // Look up health by provider first, then fall back to apiProvider
   // (e.g. "Auto" models route to "gemini" under the hood).
   const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
@@ -173,6 +188,15 @@ function CommandStudioContent() {
   // Dynamic Work surface — not derived from initial.legacyTool after init.
   const [workSurface, setWorkSurface] = useState<WorkSurface>(
     initial.legacyTool === "build" ? "builder" : "conversation",
+  );
+
+  // ── Phase D.1: independent workspace stage ───────────────────────
+  // The canonical workspaceMode (Plan/Canvas/Code/Preview) is INDEPENDENT
+  // from creator. When a creator is activated (destination → "create"),
+  // we preserve the last workspace stage so the context can represent
+  // e.g. { workspaceMode: "code", creator: "image" }.
+  const [lastWorkspaceStage, setLastWorkspaceStage] = useState<WorkspaceStage>(
+    deriveWorkspaceStage(initial.destination, (initial.mode as StudioMode) ?? "work") ?? "plan",
   );
 
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
@@ -208,58 +232,167 @@ function CommandStudioContent() {
     }
   }, [searchParams]);
 
-  // ── Unified side panel manager ────────────────────────────────────
-  // Only ONE side panel may be open at a time. Opening one closes the
-  // others. The canvas immediately reclaims width when a panel closes.
-  // New users start with no side panel. The last choice persists.
-  type StudioSidePanel = "none" | "activity" | "inspector" | "settings";
-  const SIDE_PANEL_STORAGE_KEY = "littree:studio:side-panel";
-  const [sidePanel, setSidePanel] = useState<StudioSidePanel>(() => {
-    if (typeof window === "undefined") return "none";
+  // ── Phase D.1: track the last workspace stage when in Studio ──────
+  // When the user is in the Studio destination (Plan/Canvas/Code/Preview),
+  // record the stage so it persists when a creator is activated.
+  useEffect(() => {
+    if (destination === "studio") {
+      const stage = deriveWorkspaceStage(destination, studioMode);
+      if (stage) setLastWorkspaceStage(stage);
+    }
+  }, [destination, studioMode]);
+
+  // Phase C2.2: the old "unified side panel manager" (StudioSidePanel /
+  // littree:studio:side-panel / littree:studio:activity-rail-open) has
+  // been removed. It stopped driving any rendered UI once the LiTT
+  // panel and Context Drawer became the canonical shell state in C2/
+  // C2.1 — it was a ghost state machine that some call sites still
+  // wrote to, silently doing nothing. Those call sites now use the
+  // real Context Drawer / LiTT state directly (see
+  // handleOpenContextInspector, littCollapsed, littActiveTab below).
+
+  // LiTT panel — always present on desktop/laptop, expand/collapse.
+  // Phase C2: moved from right to left. Phase C2.1: viewport-tier aware
+  // (desktop/laptop rail vs mobile overlay sheet), single canonical tab
+  // state, and a laptop first-run default (collapsed) that never
+  // overrides an explicit stored user preference.
+  const LITT_COLLAPSED_KEY = "littree:studio:litt-collapsed";
+
+  const [littCollapsed, setLittCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
     try {
-      const stored = localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-      if (stored === "activity" || stored === "inspector" || stored === "settings") return stored;
-      return "none";
+      return localStorage.getItem(LITT_COLLAPSED_KEY) === "true";
     } catch {
-      return "none";
+      return false;
     }
   });
-
-  // Backwards-compat: if old activity-rail-open key was "true", migrate
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const oldKey = localStorage.getItem("littree:studio:activity-rail-open");
-      if (oldKey === "true" && sidePanel === "none") {
-        setSidePanel("activity");
-        localStorage.removeItem("littree:studio:activity-rail-open");
-      }
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [sidePanel]);
-
   useEffect(() => {
     try {
-      localStorage.setItem(SIDE_PANEL_STORAGE_KEY, sidePanel);
+      localStorage.setItem(LITT_COLLAPSED_KEY, String(littCollapsed));
     } catch {
-      // Ignore unavailable storage.
+      // ignore
     }
-  }, [sidePanel]);
+  }, [littCollapsed]);
 
-  // Derived booleans for downstream components
-  const activityRailOpen = sidePanel === "activity";
-  const inspectorOpen = sidePanel === "inspector";
+  // Canonical LiTT active tab — single source of truth shared by the
+  // desktop rail, the mobile sheet, and header/activity actions.
+  const [littActiveTab, setLittActiveTab] = useState<"chat" | "live">("chat");
 
-  // Toggle helpers — opening one closes the others
-  const handleToggleActivity = useCallback(() => {
-    setSidePanel((current) => (current === "activity" ? "none" : "activity"));
+  // Viewport tier drives desktop-rail vs mobile-sheet LiTT presentation.
+  // null until the first client measurement (SSR-safe — see hook docs).
+  const viewportTier = useViewportTier();
+  const isMobileLitt = viewportTier === "mobile";
+  const [mobileLittOpen, setMobileLittOpen] = useState(false);
+
+  // LiTT panel defaults to EXPANDED on all desktop tiers (laptop + desktop).
+  // The chat is the primary left surface — users should see it immediately,
+  // not a 64px collapsed strip. They can manually collapse via the panel
+  // button and that preference is persisted via the localStorage effect above.
+  const laptopDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (laptopDefaultAppliedRef.current) return;
+    if (viewportTier === null) return;
+    laptopDefaultAppliedRef.current = true;
+    // No auto-collapse — expanded by default on all desktop tiers.
+  }, [viewportTier]);
+
+  // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
+  const CONTEXT_OPEN_KEY = "littree:studio:context-open";
+  const CONTEXT_TAB_KEY = "littree:studio:context-tab";
+  const [contextDrawerOpen, setContextDrawerOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem(CONTEXT_OPEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
+    if (typeof window === "undefined") return "files";
+    try {
+      const stored = localStorage.getItem(CONTEXT_TAB_KEY);
+      if (stored === "inspector" || stored === "assets") return stored;
+      return "files";
+    } catch {
+      return "files";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTEXT_OPEN_KEY, String(contextDrawerOpen));
+    } catch {
+      // ignore
+    }
+  }, [contextDrawerOpen]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTEXT_TAB_KEY, contextDrawerTab);
+    } catch {
+      // ignore
+    }
+  }, [contextDrawerTab]);
+
+  // Derived booleans for downstream components (must be after state declarations)
+  // Truthful "Activity" visibility (Phase C2.2). Activity means "LiTT ->
+  // Live is actually visible right now" — NOT merely "LiTT is expanded".
+  // LiTT can be expanded while showing Chat, in which case Activity must
+  // read as not-visible.
+  const activityVisible = isMobileLitt
+    ? mobileLittOpen && littActiveTab === "live"
+    : !littCollapsed && littActiveTab === "live";
+  // Files workspace-tab button only lights up when the drawer is open
+  // AND actually showing Files — never merely because the drawer is
+  // open on Inspector (Phase C2.1 fix).
+  const filesButtonActive = contextDrawerOpen && contextDrawerTab === "files";
+
+  // Activity is an OPEN action, not a collapse/expand toggle (Phase
+  // C2.2 fix). It always ensures LiTT -> Live is visible:
+  //   desktop/laptop: switch to Live, expand LiTT if collapsed.
+  //   mobile: switch to Live, open the LiTT mobile sheet.
+  // It never merely flips littCollapsed — that conflated "LiTT
+  // expanded/collapsed" with "Activity visible", which could report
+  // Activity as open while LiTT was actually showing Chat, or do
+  // nothing visible at all on mobile (the desktop rail isn't rendered
+  // there, so toggling littCollapsed had no visible effect).
+  const handleOpenActivity = useCallback(() => {
+    setLittActiveTab("live");
+    if (isMobileLitt) {
+      setMobileLittOpen(true);
+    } else {
+      setLittCollapsed(false);
+    }
+  }, [isMobileLitt]);
+
+  // Context drawer open helpers — both are OPEN actions (switch tab +
+  // ensure open), never a toggle-closed. Only the drawer's own close
+  // button and the Files workspace-tab button (which has explicit
+  // toggle semantics) close the drawer.
+  const handleOpenContextFiles = useCallback(() => {
+    setContextDrawerTab("files");
+    setContextDrawerOpen(true);
   }, []);
-  const handleToggleInspector = useCallback(() => {
-    setSidePanel((current) => (current === "inspector" ? "none" : "inspector"));
+  const handleOpenContextInspector = useCallback(() => {
+    setContextDrawerTab("inspector");
+    setContextDrawerOpen(true);
   }, []);
+  // Files workspace-tab button: open-to-Files, switch-to-Files, or
+  // close, depending on current drawer state (Phase C2.1 fix — this
+  // used to just toggle open/closed regardless of which tab was active,
+  // which could highlight "Files" while Inspector was actually showing).
+  const handleFilesButtonClick = useCallback(() => {
+    if (!contextDrawerOpen) {
+      setContextDrawerTab("files");
+      setContextDrawerOpen(true);
+      return;
+    }
+    if (contextDrawerTab === "files") {
+      setContextDrawerOpen(false);
+      return;
+    }
+    setContextDrawerTab("files");
+  }, [contextDrawerOpen, contextDrawerTab]);
 
-  // Keyboard shortcut: Ctrl+Shift+A toggles the Activity panel.
+  // Keyboard shortcut: Ctrl+Shift+A opens LiTT Activity (Live).
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -268,12 +401,12 @@ function CommandStudioContent() {
         event.key.toLowerCase() === "a"
       ) {
         event.preventDefault();
-        handleToggleActivity();
+        handleOpenActivity();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleToggleActivity]);
+  }, [handleOpenActivity]);
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [cameraStatus, setCameraStatus] = useState<string>("idle");
@@ -284,13 +417,11 @@ function CommandStudioContent() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [healthRunTrigger, setHealthRunTrigger] = useState(0);
 
+  // Files panel state is now managed by the Context Drawer (Phase C2).
+  // The old filesPanelOpen state has been replaced by contextDrawerOpen + contextDrawerTab.
+
   const handleSelectDestination = useCallback((dest: StudioDestination) => {
     setDestination(dest);
-  }, []);
-
-  const handleSelectMoreMode = useCallback((mode: MoreMode) => {
-    setDestination("more");
-    setMoreMode(mode);
   }, []);
 
   // handleRouteTool must be declared before useStudioConversation so the
@@ -323,23 +454,23 @@ function CommandStudioContent() {
       }
     }
     if (mapped.openInspector) {
-      setSidePanel("inspector");
+      handleOpenContextInspector();
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector]);
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
     onRouteToolAction: handleRouteTool,
     onRouteInspectorAction: (tab) => {
       setInspectorTab(tab);
-      setSidePanel("inspector");
+      handleOpenContextInspector();
     },
     onRunHealthChecks: () => {
       // Open the checks panel and trigger run-all
       setInspectorTab("checks");
-      setSidePanel("inspector");
+      handleOpenContextInspector();
       setHealthRunTrigger((n) => n + 1);
     },
     serverProjectId: capabilities.projectId,
@@ -411,9 +542,12 @@ function CommandStudioContent() {
         await refreshCapabilities();
       }
       return result;
-    } catch {
-      // Restore the typed message so the user doesn't lose input
+    } catch (err) {
+      // Restore the typed message so the user doesn't lose input, and
+      // surface the error so the user knows why their message didn't send.
       setComposerValue(value);
+      console.error("[Studio] Composer send failed:", err);
+      return { accepted: false, persisted: false, errorKind: "network" as const };
     }
   }, [conversation, capabilities.projectId, refreshCapabilities]);
 
@@ -421,8 +555,11 @@ function CommandStudioContent() {
     setComposerValue(prompt);
   }, []);
 
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);
+    setProjectCreateError(null);
     try {
       const token = await getToken?.();
       const res = await fetch("/api/studio-projects", {
@@ -440,6 +577,8 @@ function CommandStudioContent() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
+        setProjectCreateError(msg);
         console.error("[handleStartBlank] Failed to create project:", err);
         return;
       }
@@ -465,6 +604,8 @@ function CommandStudioContent() {
       setStudioMode("work");
       setWorkSurface("conversation");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error while creating project.";
+      setProjectCreateError(msg);
       console.error("[handleStartBlank] Error:", err);
     } finally {
       setCreatingProject(false);
@@ -498,6 +639,30 @@ function CommandStudioContent() {
     setDrawerOpen(true);
     setDrawerTab("terminal");
   }, []);
+
+  // Real rollback: call restore_checkpoint via the Studio API (git reset --hard <sha>).
+  // Falls back to opening Terminal if no checkpoint or API call fails.
+  const handleRollback = useCallback(async () => {
+    const ckpt = useExecutionStore.getState().checkpoint;
+    if (!ckpt?.gitSha || !capabilities.projectId) {
+      handleOpenTerminal();
+      return;
+    }
+    try {
+      const res = await fetch("/api/studio/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: capabilities.projectId, sha: ckpt.gitSha }),
+      });
+      if (res.ok) {
+        void refreshCapabilities();
+      } else {
+        handleOpenTerminal();
+      }
+    } catch {
+      handleOpenTerminal();
+    }
+  }, [capabilities.projectId, handleOpenTerminal, refreshCapabilities]);
 
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
@@ -629,6 +794,7 @@ function CommandStudioContent() {
     if (destination === "studio") {
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
+      if (studioMode === "design") return "design";
       if (studioMode === "preview") return "preview";
       // Work mode: dynamic surface state, not initial URL
       return workSurface === "builder" ? "build" : null;
@@ -648,20 +814,21 @@ function CommandStudioContent() {
   }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
-  const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
+  const isPlan = destination === "studio" && studioMode === "work" && workSurface !== "builder";
   const isCanvas = destination === "studio" && studioMode === "files";
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
 
-  // Primary workspace tabs — always visible: Chat | Canvas | Code | Preview | Files
-  // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
-  // Preview = studio/preview, Files = opens inspector on files tab
-  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode; isFilesInspector?: boolean }[] = [
-    { id: "chat", label: "Chat", destination: "studio", mode: "work" },
-    { id: "canvas", label: "Canvas", destination: "studio", mode: "files" },
-    { id: "code", label: "Code", destination: "studio", mode: "code" },
-    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
-    { id: "files", label: "Files", destination: "studio", mode: "code", isFilesInspector: true },
+  // Primary workspace tabs — canonical Ultra Vision stages.
+  // Plan | Canvas | Code | Preview
+  // These map through workspaceStageToMode() to legacy StudioMode internals.
+  // Chat lives inside the LiTT right panel (Chat | Live tabs).
+  // Files/Components live in the contextual left drawer.
+  const workspaceTabs: { id: WorkspaceStage; label: string }[] = [
+    { id: "plan", label: "Plan" },
+    { id: "canvas", label: "Canvas" },
+    { id: "code", label: "Code" },
+    { id: "preview", label: "Preview" },
   ];
 
     // Create secondary tabs — visible only when Create is active
@@ -673,7 +840,181 @@ function CommandStudioContent() {
     { id: "environment", label: "360° Env", icon: Globe },
   ];
 
+  // LiTT Chat/Live content — built ONCE per render and reused by whichever
+  // single LiTT surface is actually mounted (desktop/laptop rail via
+  // LiTTPanel, or the mobile overlay via LiTTMobileSheet). Exactly one of
+  // those two ever renders at a time (gated by viewportTier), so there is
+  // never a second CommandComposer / LiTTLiveActivity instance (Phase C2.1).
+  const littChatContent = (
+    <>
+      <StudioWorkSurface
+        messages={conversation.messages}
+        busy={conversation.busy}
+        loading={conversation.loading}
+        activeAgentId={conversation.activeAgentId}
+        fallbackNotice={conversation.fallbackNotice}
+        onRouteToolAction={handleRouteTool}
+        onRegenerateAction={conversation.regenerate}
+        onEmptyAction={handleEmptyAction}
+        onSelectConversation={handleSelectConversation}
+        hasProject={projectReady}
+        projectName={capabilities.projectName}
+        sourceType={capabilities.sourceType}
+        githubInstalled={capabilities.githubInstalled}
+        capabilities={capabilities}
+        modelHealth={modelHealth}
+        modelLabel={modelLabel}
+        displayName={profileDisplayName}
+        onStartBlank={handleStartBlank}
+        onConnectRepo={handleConnectRepo}
+      />
+      {(conversation.requiresReauth || conversation.sendError || projectCreateError) && (
+        <div
+          className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+          style={{
+            borderColor: "rgba(239,68,68,0.3)",
+            backgroundColor: "rgba(239,68,68,0.08)",
+            color: "#fca5a5",
+          }}
+        >
+          <span className="min-w-0 flex-1 font-medium">
+            {conversation.requiresReauth
+              ? "Your session expired. Sign in again to continue."
+              : conversation.sendError ?? projectCreateError}
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
+              <button
+                type="button"
+                onClick={() => { conversation.clearSendError(); setProjectCreateError(null); }}
+                className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                aria-label="Dismiss error"
+              >
+                ✕
+              </button>
+            )}
+            {conversation.requiresReauth ? (
+              <button
+                type="button"
+                onClick={() => {
+                  conversation.clearRequiresReauth();
+                  window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                }}
+                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+              >
+                Sign in again
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+              >
+                Refresh session
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <CommandComposer
+        value={composerValue}
+        onChange={setComposerValue}
+        onSend={handleComposerSend}
+        onCancel={conversation.cancel}
+        busy={conversation.busy || creatingProject}
+        disabled={conversation.requiresReauth}
+        onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
+        onToggleLive={() => setLivePanelOpen((v) => !v)}
+        liveActive={livePanelOpen && liveSession.isLive}
+        contextLine={contextLine}
+        executionMode={executionMode}
+        onExecutionModeChange={setExecutionMode}
+      />
+    </>
+  );
+
+  const littLiveContent = (
+    <LiTTLiveActivity
+      onOpenFile={(_filePath) => {
+        setDestination("studio");
+        setStudioMode("code");
+      }}
+      onOpenDiff={() => {
+        setDrawerOpen(true);
+        setDrawerTab("activity");
+      }}
+      onOpenCheck={() => {
+        setDrawerOpen(true);
+        setDrawerTab("terminal");
+      }}
+      onOpenTerminal={handleOpenTerminal}
+      onStop={() => {
+        conversation.cancel();
+        useExecutionStore.getState().endRun("cancelled");
+      }}
+      onRollback={handleRollback}
+      onResolveApproval={(decision) => {
+        const pending = useExecutionStore.getState().pendingApproval;
+        if (pending?.pausedRunId && conversation.selectedConversationId) {
+          void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ decision }),
+          }).then(() => {
+            useExecutionStore.getState().resolveApproval(decision);
+            conversation.regenerate();
+          });
+        } else {
+          useExecutionStore.getState().resolveApproval(decision);
+        }
+      }}
+    />
+  );
+
+  // ── Phase D.1: canonical StudioContext (controlled props) ─────────
+  // The four authoritative values are controlled props — the provider
+  // does NOT mirror them. workspaceMode is INDEPENDENT from creator:
+  // when a creator is active, we use the last workspace stage so the
+  // context can represent { workspaceMode: "code", creator: "image" }.
+  const studioWorkspaceMode = destination === "studio"
+    ? (deriveWorkspaceStage(destination, studioMode) ?? lastWorkspaceStage)
+    : lastWorkspaceStage;
+  const studioCreator = deriveCreator(destination, studioMode, createMode);
+  // sessionId: reuse the canonical conversationId when available.
+  // Deterministic fallback: project-scoped if a project is active,
+  // otherwise a stable "studio:default" — never random.
+  const studioSessionId = conversation.selectedConversationId
+    ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
+
   return (
+    <StudioContextProvider
+      projectId={capabilities.projectId ?? null}
+      sessionId={studioSessionId}
+      workspaceMode={studioWorkspaceMode}
+      creator={studioCreator}
+      onWorkspaceModeChange={(mode) => {
+        const mapped = workspaceStageToMode(mode);
+        setStudioMode(mapped);
+        setDestination("studio");
+      }}
+      onCreatorChange={(c) => {
+        if (c === null) {
+          // Exit creator surface — return to the last workspace stage.
+          setDestination("studio");
+          setStudioMode(workspaceStageToMode(lastWorkspaceStage));
+          return;
+        }
+        // Delegate to existing routing: create-mode creators go through
+        // the Create destination; "design" goes through Studio/design.
+        if (c === "design") {
+          setStudioMode("design");
+          setDestination("studio");
+        } else {
+          setCreateMode(c as CreateMode);
+          setDestination("create");
+        }
+      }}
+    >
     <>
       <AgentVoiceSync />
 
@@ -690,10 +1031,10 @@ function CommandStudioContent() {
         <CommandStudioHeader
           branch={contextLine.branch}
           onPreviewAction={handlePreview}
-          onOpenActivityAction={handleToggleActivity}
-          activityRailOpen={activityRailOpen}
+          onOpenActivityAction={handleOpenActivity}
+          activityVisible={activityVisible}
           onOpenTerminalAction={handleOpenTerminal}
-          onOpenInspectorAction={handleToggleInspector}
+          onOpenInspectorAction={handleOpenContextInspector}
           onProjectSelectAction={handleSelectProject}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
@@ -709,12 +1050,34 @@ function CommandStudioContent() {
           busy={conversation.busy}
         />
 
-        {/* Body: nav rail + workspace + inspector */}
+        {/* Body: LiTT (left) | Workspace (center) | Context Drawer (right).
+            Phase C2: LiTT moved from right to left. Files/Inspector moved
+            from left-of-workspace to right Context Drawer. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <CommandStudioNav active={destination} onSelect={handleSelectDestination} onSelectMoreMode={handleSelectMoreMode} />
+          {/* LiTT panel — left side on desktop/laptop (>=1024px).
+              Expanded: 320px with Chat/Live tabs.
+              Collapsed: 64px ambient HUD with phase/voice indicators.
+              Below 1024px, LiTT is NOT rendered here at all — it is
+              accessed via the mobile trigger + overlay sheet below
+              (Phase C2.1). `viewportTier === null` means the client
+              hasn't measured yet; render nothing for a tick rather than
+              guess, to avoid a flash of the wrong tier's chrome. */}
+          {viewportTier !== null && !isMobileLitt && (
+            <LiTTPanel
+              collapsed={littCollapsed}
+              onCollapse={() => setLittCollapsed(true)}
+              onExpand={() => setLittCollapsed(false)}
+              activeTab={littActiveTab}
+              onTabChange={setLittActiveTab}
+              voiceConnected={liveSession.isLive}
+              microphoneStatus={liveSession.indicators.microphone}
+              chatContent={littChatContent}
+              liveContent={littLiveContent}
+            />
+          )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Persistent primary workspace switcher: Chat | Create | Preview | Code */}
+            {/* Persistent primary workspace switcher: Chat | Canvas | Code | Preview */}
             <div
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
@@ -723,29 +1086,18 @@ function CommandStudioContent() {
                 borderColor: "rgba(155,77,255,0.1)",
               }}
             >
-              {primaryTabs.map((t) => {
-                const isActive = t.isFilesInspector
-                  ? inspectorOpen && inspectorTab === "files"
-                  : t.destination === "studio"
-                    ? destination === "studio" && studioMode === t.mode
-                    : destination === t.destination;
+              {workspaceTabs.map((t) => {
+                const tabMode = workspaceStageToMode(t.id);
+                const isActive = destination === "studio" && studioMode === tabMode
+                  && (t.id !== "plan" || workSurface !== "builder");
                 return (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => {
-                      if (t.isFilesInspector) {
-                        setSidePanel((cur) => (cur === "inspector" && inspectorTab === "files" ? "none" : "inspector"));
-                        setInspectorTab("files");
-                        return;
-                      }
-                      if (t.destination === "studio") {
-                        setDestination("studio");
-                        setStudioMode(t.mode as StudioMode);
-                        if (t.mode === "work") setWorkSurface("conversation");
-                      } else {
-                        setDestination(t.destination);
-                      }
+                      setDestination("studio");
+                      setStudioMode(tabMode);
+                      if (t.id === "plan") setWorkSurface("conversation");
                     }}
                     className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
@@ -753,6 +1105,7 @@ function CommandStudioContent() {
                       backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
                     }}
                     aria-label={t.label}
+                    data-testid={`workspace-tab-${t.id}`}
                   >
                     {t.label}
                     {isActive && (
@@ -768,6 +1121,35 @@ function CommandStudioContent() {
                   </button>
                 );
               })}
+
+              {/* Files toggle — opens Context Drawer on the right, on the
+                  Files tab specifically (Phase C2.1). Only highlighted
+                  when the drawer is open AND showing Files — it must not
+                  light up while Inspector happens to be the active tab. */}
+              <button
+                type="button"
+                onClick={handleFilesButtonClick}
+                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${filesButtonActive ? "glass-active" : ""}`}
+                style={{
+                  color: filesButtonActive ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: filesButtonActive ? "var(--purple-soft)" : "transparent",
+                }}
+                aria-label="Files"
+                aria-pressed={filesButtonActive}
+                data-testid="workspace-tab-files"
+              >
+                Files
+                {filesButtonActive && (
+                  <span
+                    className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                    style={{
+                      background: "var(--purple)",
+                      boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                    }}
+                    aria-hidden
+                  />
+                )}
+              </button>
             </div>
 
             {/* Create secondary tabs: Image | Video | Audio | Music — only when Create is active */}
@@ -803,31 +1185,24 @@ function CommandStudioContent() {
               </div>
             )}
 
-            {/* Workspace content */}
+            {/* Workspace content — main workspace surface only.
+                Files/Inspector now live in the right Context Drawer (Phase C2). */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {isStudioWorkConversation ? (
-                  <StudioWorkSurface
-                    messages={conversation.messages}
-                    busy={conversation.busy}
-                    loading={conversation.loading}
-                    activeAgentId={conversation.activeAgentId}
-                    fallbackNotice={conversation.fallbackNotice}
-                    onRouteToolAction={handleRouteTool}
-                    onRegenerateAction={conversation.regenerate}
-                    onEmptyAction={handleEmptyAction}
-                    onSelectConversation={handleSelectConversation}
-                    hasProject={projectReady}
-                    projectName={capabilities.projectName}
-                    sourceType={capabilities.sourceType}
-                    githubInstalled={capabilities.githubInstalled}
-                    capabilities={capabilities}
-                    modelHealth={modelHealth}
-                    modelLabel={modelLabel}
-                    displayName={profileDisplayName}
-                    onStartBlank={handleStartBlank}
-                    onConnectRepo={handleConnectRepo}
-                  />
+                {isPlan ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioPlanSurface
+                      capabilities={capabilities}
+                      modelLabel={modelLabel}
+                      onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
+                      onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
+                      onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
+                      onOpenTerminal={handleOpenTerminal}
+                      onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+                      onOpenFiles={handleOpenContextFiles}
+                      onRollback={handleRollback}
+                    />
+                  </div>
                 ) : isCanvas ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <VisualCanvasBuilder />
@@ -854,7 +1229,13 @@ function CommandStudioContent() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <WorkspaceComponent projectId={capabilities.projectId} />
+                    {studioCreator ? (
+                      <StudioCreatorHost>
+                        <WorkspaceComponent projectId={capabilities.projectId} />
+                      </StudioCreatorHost>
+                    ) : (
+                      <WorkspaceComponent projectId={capabilities.projectId} />
+                    )}
                   </div>
                 ) : (
                   <StudioUnavailableSurface
@@ -865,27 +1246,11 @@ function CommandStudioContent() {
                 )}
               </div>
 
-              {/* Right inspector — collapsed by default */}
-              <StudioInspector
-                open={inspectorOpen}
-                onToggle={handleToggleInspector}
-                activeTab={inspectorTab}
-                onTabChange={setInspectorTab}
-                data={{
-                  capabilities,
-                  modelLabel,
-                  modelHealth,
-                  activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
-                  destination,
-                  surface: destination === "studio" ? studioMode : destination === "create" ? createMode : destination === "missions" ? missionMode : destination === "more" ? moreMode : "overview",
-                  messages: conversation.messages,
-                  busy: conversation.busy,
-                  workspaceRevision,
-                  healthRunTrigger,
-                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                  onWorkspacePrepared: () => { void refreshCapabilities(); },
-                }}
-              />
+              {/* Right inspector — folded into LiTT Live Activity panel.
+                  StudioInspector is no longer rendered as a permanent column.
+                  Files/checks/context are accessible via the LiTT Live panel
+                  and the Files drawer. */}
+
             </div>
 
             {/* Bottom drawer — collapsed by default, sits above composer */}
@@ -917,151 +1282,151 @@ function CommandStudioContent() {
                 />
               )}
             </StudioDrawer>
-
-            {/* Bottom status bar — preview status, context info, selected code indicator */}
-            {isStudioWorkConversation && (
-              <div
-                className="flex shrink-0 items-center gap-3 border-t px-3 py-1 text-[10px] font-medium overflow-hidden whitespace-nowrap"
-                style={{
-                  borderColor: "var(--studio-border)",
-                  backgroundColor: "var(--studio-surface)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                {conversation.busy ? (
-                  <span className="flex items-center gap-1.5" style={{ color: "var(--spark-primary)" }}>
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: "var(--spark-primary)" }} />
-                    Refreshing preview…
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} />
-                    Preview ready
-                  </span>
-                )}
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span>Context: {conversation.messages.length} {conversation.messages.length === 1 ? "file" : "files"}</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span>Preview :8443</span>
-                <div className="flex-1" />
-                <span className="hidden sm:inline" style={{ color: "var(--text-secondary)" }}>Selected code</span>
-              </div>
-            )}
-
-            {/* Persistent composer — visible at all times in Studio/Work conversation */}
-            {/* Reauthentication banner — visible when session expires during Studio use.
-                Disables the composer and offers a real recovery action. */}
-            {isStudioWorkConversation && (conversation.requiresReauth || conversation.sendError) && (
-              <div
-                className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
-                style={{
-                  borderColor: "rgba(239,68,68,0.3)",
-                  backgroundColor: "rgba(239,68,68,0.08)",
-                  color: "#fca5a5",
-                }}
-              >
-                <span className="min-w-0 flex-1 font-medium">
-                  {conversation.requiresReauth
-                    ? "Your session expired. Sign in again to continue."
-                    : conversation.sendError}
-                </span>
-                <div className="flex shrink-0 items-center gap-2">
-                  {!conversation.requiresReauth && conversation.sendError && (
-                    <button
-                      type="button"
-                      onClick={() => conversation.clearSendError()}
-                      className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                      aria-label="Dismiss error"
-                    >
-                      ✕
-                    </button>
-                  )}
-                  {conversation.requiresReauth ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        conversation.clearRequiresReauth();
-                        window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
-                      }}
-                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                    >
-                      Sign in again
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => window.location.reload()}
-                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                    >
-                      Refresh session
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {isStudioWorkConversation && (
-              <CommandComposer
-                value={composerValue}
-                onChange={setComposerValue}
-                onSend={handleComposerSend}
-                onCancel={conversation.cancel}
-                busy={conversation.busy || creatingProject}
-                disabled={conversation.requiresReauth}
-                onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                onToggleLive={() => setLivePanelOpen((v) => !v)}
-                liveActive={livePanelOpen && liveSession.isLive}
-                contextLine={contextLine}
-                executionMode={executionMode}
-                onExecutionModeChange={setExecutionMode}
-              />
-            )}
-
-            {/* Keyboard shortcuts footer — visible in Studio/Work conversation */}
-            {isStudioWorkConversation && (
-              <div
-                className="hidden shrink-0 items-center justify-center gap-3 border-t px-3 py-1 text-[10px] font-medium md:flex"
-                style={{
-                  borderColor: "var(--studio-border)",
-                  backgroundColor: "var(--studio-surface)",
-                  color: "var(--text-muted)",
-                }}
-                aria-hidden
-              >
-                <span><kbd className="font-mono">⌘↵</kbd> send</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span><kbd className="font-mono">⌘K</kbd> command palette</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span><kbd className="font-mono">Esc</kbd> close overlay</span>
-              </div>
-            )}
           </main>
 
-          {/* Right Activity Rail — optional, toggled by header Activity button.
-              When hidden, the main canvas reclaims the full width (no spacer). */}
-          {activityRailOpen && (
-            <StudioActivityRail
-              messages={conversation.messages}
-              busy={conversation.busy}
-              activeAgentId={conversation.activeAgentId}
-              projectName={capabilities.projectName}
-              modelLabel={modelLabel}
-              terminalStatus={capabilities.terminalStatus}
-              terminalServerReachable={capabilities.terminalServerReachable}
-              repositoryName={capabilities.repositoryName}
-              branch={capabilities.activeBranch ?? contextLine.branch}
-              onOpenTerminal={handleOpenTerminal}
-              onSelectAgent={conversation.switchAgent}
-              onClose={() => setSidePanel("none")}
-            />
-          )}
+          {/* Context Drawer — right side. Files | Inspector.
+              Replaces the old left Files panel and right Inspector.
+              Closes completely to 0px — workspace reclaims width.
+              Fully controlled: CommandStudio owns contextDrawerTab as the
+              single source of truth (Phase C2.1 — no internal drawer
+              state duplicating this). */}
+          <ContextDrawer
+            open={contextDrawerOpen}
+            activeTab={contextDrawerTab}
+            onTabChange={setContextDrawerTab}
+            onClose={() => setContextDrawerOpen(false)}
+            filesContent={
+              <div className="flex h-full flex-col overflow-hidden">
+                <div
+                  className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+                  style={{ borderColor: "var(--studio-border)" }}
+                >
+                  <span
+                    className="text-[10px] font-black uppercase tracking-[0.12em]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    Files / Components
+                  </span>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+                  <StudioProjectFiles
+                    projectId={capabilities.projectId}
+                    repositoryName={capabilities.repositoryName}
+                    branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                    workspaceStatus={capabilities.workspaceStatus}
+                    writeAccess={capabilities.writeAccess}
+                    onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                    onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                    onWorkspacePrepared={() => { void refreshCapabilities(); }}
+                  />
+                </div>
+              </div>
+            }
+            assetsContent={
+              <AssetsPanel projectId={capabilities.projectId} />
+            }
+            inspectorContent={
+              <StudioInspector
+                embedded
+                open={true}
+                onToggle={() => setContextDrawerOpen(false)}
+                activeTab={inspectorTab}
+                onTabChange={setInspectorTab}
+                data={{
+                  capabilities,
+                  modelLabel,
+                  modelHealth,
+                  activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+                  destination,
+                  surface: studioMode,
+                  messages: conversation.messages,
+                  busy: conversation.busy,
+                  workspaceRevision,
+                  healthRunTrigger,
+                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                  onWorkspacePrepared: () => { void refreshCapabilities(); },
+                }}
+              />
+            }
+          />
         </div>
+
+        {/* Operator status bar — bottom. Uses real execution state. */}
+        <StudioOperatorBar
+          onOpenTerminal={handleOpenTerminal}
+          onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+          onRollback={handleRollback}
+          onStop={() => {
+            conversation.cancel();
+            useExecutionStore.getState().endRun("cancelled");
+          }}
+          onResolveApproval={(decision) => {
+            const pending = useExecutionStore.getState().pendingApproval;
+            if (pending?.pausedRunId && conversation.selectedConversationId) {
+              void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ decision }),
+              }).then(() => {
+                useExecutionStore.getState().resolveApproval(decision);
+                conversation.regenerate();
+              });
+            } else {
+              useExecutionStore.getState().resolveApproval(decision);
+            }
+          }}
+          terminalStatus={capabilities.terminalStatus}
+          modelLabel={modelLabel}
+        />
 
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
 
         {/* Mobile bottom nav — 5 destinations */}
         <MobileCommandNav active={destination} onSelect={handleSelectDestination} />
+
+        {/* Mobile LiTT access (<1024px) — Phase C2.1.
+            The desktop/laptop rail above is not rendered on this tier at
+            all, so this trigger + sheet is the ONLY way to reach LiTT on
+            mobile. The sheet reuses the exact same littChatContent /
+            littLiveContent used by the desktop rail — never both at once. */}
+        {isMobileLitt && !mobileLittOpen && (
+          <button
+            type="button"
+            onClick={() => setMobileLittOpen(true)}
+            className="fixed z-[10015] flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[11px] font-bold shadow-lg"
+            style={{
+              right: 12,
+              bottom: "calc(64px + env(safe-area-inset-bottom) + 12px)",
+              backgroundColor: "var(--studio-surface)",
+              borderColor: "var(--studio-border-strong)",
+              color: "var(--litt-primary)",
+              backdropFilter: "blur(12px)",
+            }}
+            aria-label="Open LiTT"
+            data-testid="litt-mobile-trigger"
+          >
+            <span
+              className="flex h-4 w-4 items-center justify-center rounded-md text-[9px] font-black"
+              style={{
+                background: "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(99,102,241,0.15))",
+              }}
+              aria-hidden
+            >
+              L
+            </span>
+            LiTT
+          </button>
+        )}
+        {isMobileLitt && mobileLittOpen && (
+          <LiTTMobileSheet
+            activeTab={littActiveTab}
+            onTabChange={setLittActiveTab}
+            onClose={() => setMobileLittOpen(false)}
+            chatContent={littChatContent}
+            liveContent={littLiveContent}
+          />
+        )}
       </div>
 
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
@@ -1119,6 +1484,7 @@ function CommandStudioContent() {
       )}
 
     </>
+    </StudioContextProvider>
   );
 }
 

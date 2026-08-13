@@ -306,7 +306,7 @@ function QuickActionsWidget() {
     { label: "Create Image", href: "/studio?tool=image", icon: "image", color: "#ec4899" },
     { label: "Play Music", href: "/dashboard?app=music", icon: "music", color: "#a855f7" },
     { label: "Connect GitHub", href: "/studio/github", icon: "git", color: "#f97316" },
-    { label: "View Gallery", href: "/gallery", icon: "package", color: "#3b82f6" },
+    { label: "View Showcase", href: "/showcase", icon: "package", color: "#3b82f6" },
     { label: "Review Usage", href: "/wallet", icon: "wallet", color: "#B6FF4A" },
   ];
   return (

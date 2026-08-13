@@ -12,6 +12,7 @@ import {
   getGenerationJobByRequestId,
   updateGenerationJobStatus,
 } from "@/lib/generation/jobs";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
@@ -24,6 +25,11 @@ async function handler(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Resolve Clerk ID → internal public.users.id UUID.
+  // generation_jobs.user_id requires the internal UUID, NOT the Clerk ID.
+  // Wallet operations and video-jobs still use the Clerk ID.
+  const internalUserId = await resolveInternalUserId(userId);
 
   try {
     const body = await req.json();
@@ -69,7 +75,10 @@ async function handler(req: NextRequest) {
     const isHappyHorse = videoModel.id === "happyhorse";
 
     // ── Idempotency: check for existing job ────────────────────────
-    const existingJob = await getGenerationJobByRequestId(userId, requestId);
+    // Uses internal UUID, not Clerk ID.
+    const existingJob = internalUserId
+      ? await getGenerationJobByRequestId(internalUserId, requestId)
+      : null;
     if (existingJob && (existingJob.status === "completed" || existingJob.status === "generating")) {
       return NextResponse.json({
         provider: existingJob.provider,
@@ -167,6 +176,35 @@ async function handler(req: NextRequest) {
           charged: true,
           refunded: false,
         });
+
+        // Create a persistent generation_jobs row so this video
+        // generation is visible in the Asset Lake once completed.
+        // The status route will mark it completed with the durable URL.
+        // Uses internal UUID for user_id, NOT the Clerk ID.
+        if (internalUserId) {
+          const genJobId = crypto.randomUUID();
+          await createGenerationJob({
+            id: genJobId,
+            userId: internalUserId,
+            modality: "video",
+            provider: "alibaba",
+            model,
+            prompt: prompt?.trim() ?? "",
+            requestId,
+            littBitsCharged: cost,
+            metadata: {
+              providerJobId: result.taskId,
+              videoJobId: jobId,
+              aspectRatio,
+              resolution,
+              duration: Number(duration),
+            },
+          });
+          // Mark as generating — the status route completes it.
+          await updateGenerationJobStatus(genJobId, "generating", {
+            providerJobId: result.taskId,
+          });
+        }
 
         return NextResponse.json({
           provider: "alibaba",
@@ -270,6 +308,35 @@ async function handler(req: NextRequest) {
         charged: true,
         refunded: false,
       });
+
+      // Create a persistent generation_jobs row so this video
+      // generation is visible in the Asset Lake once completed.
+      // The status route will mark it completed with the durable URL.
+      // Uses internal UUID for user_id, NOT the Clerk ID.
+      if (internalUserId) {
+        const genJobId = crypto.randomUUID();
+        await createGenerationJob({
+          id: genJobId,
+          userId: internalUserId,
+          modality: "video",
+          provider: "veo",
+          model,
+          prompt: prompt.trim(),
+          requestId,
+          littBitsCharged: cost,
+          metadata: {
+            providerJobId: operation.name,
+            videoJobId: jobId,
+            aspectRatio,
+            resolution,
+            duration: Number(duration),
+          },
+        });
+        // Mark as generating — the status route completes it.
+        await updateGenerationJobStatus(genJobId, "generating", {
+          providerJobId: operation.name,
+        });
+      }
 
       return NextResponse.json({
         provider: "veo",

@@ -7,14 +7,14 @@ import { ArrowUpRight, Sparkles } from "lucide-react";
 const PRODUCT_LINKS = [
   { href: "/agents", label: "Agents" },
   { href: "/studio", label: "Studio" },
-  { href: "/gallery", label: "Gallery" },
+  { href: "/showcase", label: "Showcase" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/pricing", label: "Pricing" },
 ];
 
 const RESOURCE_LINKS = [
   { href: "/docs", label: "Docs" },
-  { href: "/gallery", label: "Gallery" },
+  { href: "/showcase", label: "Showcase" },
 ];
 
 const COMPANY_LINKS = [

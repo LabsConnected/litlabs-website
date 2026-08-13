@@ -181,6 +181,7 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
   const lines: string[] = [
     "RUNTIME CONTEXT (server-authoritative — do not guess):",
     `- Project: ${ctx.projectName ?? "none"}`,
+    `- Project ID: ${ctx.projectId ?? "none"}`,
     `- Workspace: ${ctx.workspaceReady ? "ready" : "not ready"}`,
     `- Workspace execution: ${ctx.workspaceExecutionAvailable ? "available — LiTT can read, write, and execute commands in the workspace" : "not available"}`,
     `- Visible terminal UI: ${ctx.terminalStatus}${ctx.terminalServerAlive ? " (server alive)" : ""}`,
@@ -191,6 +192,11 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
     `- Available tools: ${ctx.availableTools.length > 0 ? ctx.availableTools.join(", ") : "none"}`,
     `- Execution mode: ${ctx.executionMode}`,
   ];
+
+  if (ctx.projectId) {
+    lines.push("");
+    lines.push(`IMPORTANT: When calling project tools (inspect_project_files, read_file, edit_file, etc.), pass project_id="${ctx.projectId}". Do NOT use the repository name as project_id.`);
+  }
 
   if (ctx.model) {
     lines.push(`- Model: ${ctx.model}`);

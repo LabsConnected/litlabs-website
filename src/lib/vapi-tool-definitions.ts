@@ -958,6 +958,144 @@ export const VAPI_TOOL_DEFINITIONS: Record<ToolName, VapiToolDefinition> = {
       required: ["project_id", "path"],
     },
   },
+
+  // ── Growth Engine — campaign generation, approval, manual publishing ──
+  // Phase 1a: all providers in manual mode (no paid API calls).
+  // LiTT generates platform-native content, the user approves, posts by
+  // hand, and records the result via growth_mark_published.
+  growth_create_campaign: {
+    name: "growth_create_campaign",
+    description:
+      "Create a growth campaign for a product update, launch, or announcement. " +
+      "A campaign is one event that gets adapted into platform-native content " +
+      "(X, Reddit, Hacker News, Product Hunt). Returns the campaign ID. " +
+      "After creating a campaign, call growth_generate_content for each target provider.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Campaign name (e.g. 'Canvas feature launch')." },
+        objective: {
+          type: "string",
+          enum: ["launch", "feature_update", "announcement", "demo", "milestone", "general"],
+          description: "The campaign objective. Defaults to 'general'.",
+        },
+        event_summary: {
+          type: "string",
+          description:
+            "A clear summary of what happened / what's being announced. " +
+            "This is the source material the content engine adapts per platform. " +
+            "Be specific — include what the feature does, who it's for, and why it matters.",
+        },
+        target_providers: {
+          type: "array",
+          items: { type: "string", enum: ["x", "reddit", "hackernews", "producthunt"] },
+          description: "Which platforms to generate content for. Defaults to ['x'].",
+        },
+      },
+      required: ["name", "event_summary"],
+    },
+  },
+  growth_generate_content: {
+    name: "growth_generate_content",
+    description:
+      "Generate platform-native content for one provider from a campaign. " +
+      "Same event → different presentation per platform (X: punchy hook, " +
+      "Reddit: build-in-public founder post, HN: Show HN, PH: launch assets). " +
+      "Returns a draft content ID + preview. The draft must be approved via " +
+      "growth_approve_post before it can be published.",
+    parameters: {
+      type: "object",
+      properties: {
+        campaign_id: { type: "string", description: "The campaign ID from growth_create_campaign." },
+        provider: {
+          type: "string",
+          enum: ["x", "reddit", "hackernews", "producthunt"],
+          description: "Which platform to generate content for.",
+        },
+      },
+      required: ["campaign_id", "provider"],
+    },
+  },
+  growth_list_drafts: {
+    name: "growth_list_drafts",
+    description:
+      "List content drafts for a campaign, optionally filtered by provider or status. " +
+      "Read-only. Use this to review drafts before approving them.",
+    parameters: {
+      type: "object",
+      properties: {
+        campaign_id: { type: "string", description: "Optional campaign ID to scope the list." },
+        provider: {
+          type: "string",
+          enum: ["x", "reddit", "hackernews", "producthunt"],
+          description: "Optional provider filter.",
+        },
+        status: {
+          type: "string",
+          enum: ["draft", "approved", "rejected", "published", "archived"],
+          description: "Optional status filter. Defaults to all.",
+        },
+      },
+      required: [],
+    },
+  },
+  growth_rewrite_post: {
+    name: "growth_rewrite_post",
+    description:
+      "Rewrite a content draft based on instructions. Creates a new version " +
+      "(does not overwrite the old draft). Use this when the user wants " +
+      "changes to a draft before approving it.",
+    parameters: {
+      type: "object",
+      properties: {
+        content_id: { type: "string", description: "The content draft ID to rewrite." },
+        instructions: {
+          type: "string",
+          description: "Instructions for the rewrite (e.g. 'make it shorter', 'add a question at the end', 'less hype').",
+        },
+      },
+      required: ["content_id", "instructions"],
+    },
+  },
+  growth_approve_post: {
+    name: "growth_approve_post",
+    description:
+      "Approve a content draft, moving it from 'draft' to 'approved'. " +
+      "Only approved content can be published. Only draft or rejected " +
+      "content can be approved.",
+    parameters: {
+      type: "object",
+      properties: {
+        content_id: { type: "string", description: "The content draft ID to approve." },
+      },
+      required: ["content_id"],
+    },
+  },
+  growth_mark_published: {
+    name: "growth_mark_published",
+    description:
+      "Record that a piece of content has been published manually on the platform. " +
+      "In Phase 1a, all publishing is manual — LiTT prepares the content and a " +
+      "compose URL, the user posts by hand, then calls this tool with the post URL. " +
+      "LiTT records the publication with UTMs for attribution. " +
+      "Enforces daily post limits and minimum intervals per provider. " +
+      "Never claim a post was published unless this tool returns success.",
+    parameters: {
+      type: "object",
+      properties: {
+        content_id: { type: "string", description: "The approved content ID that was published." },
+        external_url: {
+          type: "string",
+          description: "The URL of the published post (e.g. the tweet URL, Reddit post URL).",
+        },
+        external_id: {
+          type: "string",
+          description: "Optional platform-specific post ID (e.g. tweet ID).",
+        },
+      },
+      required: ["content_id", "external_url"],
+    },
+  },
 };
 
 /** Ordered list of all tool names, mirroring TOOL_NAMES. */
@@ -1173,6 +1311,37 @@ const DEFAULT_MESSAGES: Record<ToolName, VapiToolMessage[]> = {
   github_read_file: [
     { type: "request-start", content: "Reading that file from GitHub." },
     { type: "request-failed", content: "I couldn't read that file from GitHub." },
+  ],
+  // ── Growth Engine ──
+  growth_create_campaign: [
+    { type: "request-start", content: "Creating a growth campaign for you." },
+    { type: "request-complete", content: "Done. I've created the campaign. Want me to generate content for it?" },
+    { type: "request-failed", content: "I couldn't create the campaign. The database may be unavailable." },
+  ],
+  growth_generate_content: [
+    { type: "request-start", content: "Writing platform-native content for you now." },
+    { type: "request-complete", content: "Done. I've drafted the content. Review it and approve it when you're ready." },
+    { type: "request-failed", content: "I couldn't generate content. The AI service may be unavailable." },
+    { type: "request-response-delayed", content: "Still writing — this takes a moment." },
+  ],
+  growth_list_drafts: [
+    { type: "request-start", content: "Let me pull up your drafts." },
+    { type: "request-failed", content: "I couldn't list your drafts right now." },
+  ],
+  growth_rewrite_post: [
+    { type: "request-start", content: "Rewriting that post for you." },
+    { type: "request-complete", content: "Done. I've created a new version. Review and approve it when ready." },
+    { type: "request-failed", content: "I couldn't rewrite that post." },
+  ],
+  growth_approve_post: [
+    { type: "request-start", content: "Approving that draft." },
+    { type: "request-complete", content: "Done. The content is approved and ready to publish." },
+    { type: "request-failed", content: "I couldn't approve that — it may not be in draft status." },
+  ],
+  growth_mark_published: [
+    { type: "request-start", content: "Recording your publication." },
+    { type: "request-complete", content: "Done. I've recorded the publication with tracking links for attribution." },
+    { type: "request-failed", content: "I couldn't record that publication. You may have hit a daily post limit." },
   ],
 };
 

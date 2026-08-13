@@ -341,7 +341,7 @@ export default function SocialPageContent() {
                   active: true,
                 },
                 { label: "Studio", href: "/studio", icon: Zap },
-                { label: "Gallery", href: "/gallery", icon: Sparkles },
+                { label: "Showcase", href: "/showcase", icon: Sparkles },
                 { label: "Market", href: "/marketplace", icon: BarChart3 },
                 { label: "Agents", href: "/agents", icon: Users },
               ].map((link) => (

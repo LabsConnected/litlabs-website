@@ -25,6 +25,7 @@ import {
 } from "@/lib/litt-runtime";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { ProgressEmitter, type ProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { createPausedRun } from "@/lib/litt-intelligence/paused-run-store";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
@@ -395,20 +396,22 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let v1Result: Awaited<ReturnType<typeof runAgentLoop>> | null = null;
   let finalPrompt = prompt;
 
+  // Prepare V2 transport and config BEFORE the stream starts.
+  // The actual loop runs INSIDE the stream so events can be streamed in real-time.
+  let v2Transport: Awaited<ReturnType<typeof createWorkspaceTransport>> | null = null;
+  let v2Config: Partial<AgentLoopConfig> | null = null;
+
   if (useV2) {
-    // Create workspace transport for V2 tool execution
-    let transport;
     try {
-      transport = await createWorkspaceTransport(conversation.projectId!, userId);
+      v2Transport = await createWorkspaceTransport(conversation.projectId!, userId);
     } catch (_err) {
-      // Transport creation failed (workspace not provisioned, DB error, etc.)
-      // Fall back to V1
+      // Transport creation failed — fall back to V1
       v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
       finalPrompt = v1Result.enrichedPrompt;
     }
 
-    if (transport) {
-      const v2Config: Partial<AgentLoopConfig> = {
+    if (v2Transport) {
+      v2Config = {
         systemPrompt: built.systemPrompt + "\n\n" + runtimeContextBlock,
         executionMode: canonicalCtx.executionMode,
         enableBuildFix: true,
@@ -421,8 +424,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           projectId: conversation.projectId ?? undefined,
         },
       };
-
-      v2Result = await runAgentLoopV2(resolvedMessage, transport, v2Config);
     }
   } else {
     // V1 fallback — no executable workspace, read-only inspection only
@@ -501,13 +502,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       let assistantText = "";
       let reasoningText = "";
       try {
-        if (v2Result) {
-          // ── V2 path: stream progress events, then emit finalText ──
-          // V2 already did all LLM calls with tool calling. Its finalText
-          // IS the assistant response. No second LLM call.
+        if (v2Transport && v2Config) {
+          // ── V2 path: run agent loop INSIDE the stream with real-time events ──
+          // The ProgressEmitter streams events to the SSE controller as they
+          // happen, so the user can watch LiTT work in real-time.
 
-          // Stream sanitized progress events (never chain-of-thought)
-          for (const evt of v2Result.events) {
+          const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
+            // Stream each event to the client immediately
             if (evt.type === "tool_start") {
               controller.enqueue(event({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary }));
             } else if (evt.type === "tool_result") {
@@ -516,6 +517,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 toolId: evt.toolId,
                 success: evt.success,
                 summary: evt.summary,
+                durationMs: evt.durationMs,
               }));
             } else if (evt.type === "approval_required") {
               controller.enqueue(event({
@@ -528,13 +530,42 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             } else if (evt.type === "build_start") {
               controller.enqueue(event({ type: "build_start", check: evt.check }));
             } else if (evt.type === "build_result") {
-              controller.enqueue(event({ type: "build_result", check: evt.check, passed: evt.passed }));
+              controller.enqueue(event({ type: "build_result", check: evt.check, passed: evt.passed, errorCount: evt.errorCount }));
             } else if (evt.type === "phase") {
               controller.enqueue(event({ type: "phase", phase: evt.phase, step: evt.step }));
+            } else if (evt.type === "finished") {
+              controller.enqueue(event({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs }));
+            } else if (evt.type === "cancelled") {
+              controller.enqueue(event({ type: "cancelled", reason: evt.reason }));
+            } else if (evt.type === "model_routing") {
+              controller.enqueue(event({
+                type: "model_routing",
+                model: evt.model,
+                provider: evt.provider,
+                fallbackFrom: evt.fallbackFrom,
+                category: evt.category,
+                latencyMs: evt.latencyMs,
+              }));
+            } else if (evt.type === "model_failed") {
+              controller.enqueue(event({
+                type: "model_failed",
+                model: evt.model,
+                category: evt.category,
+                message: evt.message,
+              }));
+            } else if (evt.type === "reasoning") {
+              controller.enqueue(event({ type: "reasoning", summary: evt.summary }));
+            } else if (evt.type === "status") {
+              controller.enqueue(event({ type: "status", summary: evt.summary }));
+            } else if (evt.type === "repair_attempt") {
+              controller.enqueue(event({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts }));
             }
-          }
+          });
 
-          // Stream the final text as a single chunk
+          // Run the agent loop — events stream in real-time
+          v2Result = await runAgentLoopV2(resolvedMessage, v2Transport, v2Config, streamProgress);
+
+          // Stream the final text
           assistantText = v2Result.finalText;
           controller.enqueue(event({ type: "text", text: assistantText }));
 

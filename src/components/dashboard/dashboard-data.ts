@@ -37,11 +37,11 @@ export const APPS = [
     href: "/studio?tool=chat",
   },
   {
-    id: "gallery",
-    label: "Gallery",
+    id: "showcase",
+    label: "Showcase",
     icon: Sparkles,
     color: "#ff00a0",
-    href: "/gallery",
+    href: "/showcase",
   },
   {
     id: "social",

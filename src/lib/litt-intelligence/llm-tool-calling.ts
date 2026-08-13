@@ -110,12 +110,41 @@ function getOpenRouterKey(): string {
 }
 
 /**
+ * Fallback model chain for tool-calling rounds.
+ * When the primary model fails, we try these in order.
+ * All models must support OpenRouter's native tool-calling API.
+ */
+const TOOL_CALLING_FALLBACK_MODELS = [
+  "google/gemini-2.5-flash",
+  "anthropic/claude-3.5-sonnet",
+  "openai/gpt-4o-mini",
+  "meta-llama/llama-3.3-70b-instruct",
+];
+
+/**
+ * Categorize an HTTP error for logging and fallback decisions.
+ * Never includes request bodies or auth tokens — only status + category.
+ */
+function categorizeError(status: number | null, _message: string): string {
+  if (status === null) return "network_error";
+  if (status === 401 || status === 403) return "auth_error";
+  if (status === 404) return "model_not_found";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "provider_error";
+  if (status === 400) return "bad_request";
+  return `http_${status}`;
+}
+
+/**
  * Call OpenRouter with native tool calling support.
  * Non-streaming — used for tool-call rounds in the agent loop.
  *
  * If the model returns tool_calls, they are parsed and returned.
  * If the model returns text only (no tool_calls), toolCalls is empty.
  * We NEVER parse text to extract fake tool calls.
+ *
+ * Fallback: if the primary model fails, we try a chain of fallback models.
+ * Each attempt is logged with provider, model, latency, and failure category.
  */
 export async function callLLMWithTools(
   systemPrompt: string,
@@ -130,92 +159,136 @@ export async function callLLMWithTools(
   },
 ): Promise<LLMToolCallResponse> {
   const key = getOpenRouterKey();
-  if (!key) throw new Error("OPENROUTER_API_KEY not set");
+  if (!key) throw new Error("OPENROUTER_API_KEY not set — cannot make tool-calling LLM calls");
 
-  const model = options?.model ?? "google/gemini-2.5-flash";
+  const primaryModel = options?.model ?? "google/gemini-2.5-flash";
   const openRouterTools = toOpenRouterTools(tools);
   const toolIdMap = buildToolIdReverseMap(tools);
 
-  const body: Record<string, unknown> = {
-    model,
-    stream: false,
-    messages: [
-      { role: "system", content: systemPrompt } as OpenRouterMessage,
-      ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
-    ],
-    temperature: options?.temperature ?? 0.15,
-  };
+  // Build the attempt chain: primary model first, then fallbacks (deduped)
+  const attemptChain = [primaryModel, ...TOOL_CALLING_FALLBACK_MODELS.filter((m) => m !== primaryModel)];
 
-  if (options?.maxTokens) body.max_tokens = options.maxTokens;
-  if (openRouterTools.length > 0) {
-    body.tools = openRouterTools;
-    body.tool_choice = options?.toolChoice ?? "auto";
-  }
+  const failures: Array<{ model: string; status: number | null; category: string; latencyMs: number; message: string }> = [];
 
-  const t0 = Date.now();
-  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-      "HTTP-Referer": SITE_URL,
-      "X-Title": "LiTT",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`OpenRouter tool-call failed (${res.status}): ${txt.slice(0, 300)}`);
-  }
-
-  const data = await res.json();
-  const choice = data.choices?.[0];
-  if (!choice) {
-    return { text: "", toolCalls: [], finishReason: "empty", model: data.model ?? model };
-  }
-
-  const text: string = choice.message?.content ?? "";
-  const rawToolCalls = choice.message?.tool_calls ?? [];
-  const finishReason: string = choice.finish_reason ?? "stop";
-
-  const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw: {
-    id: string;
-    function: { name: string; arguments: string };
-  }) => {
-    let inputs: Record<string, unknown> = {};
-    try {
-      inputs = JSON.parse(raw.function.arguments);
-    } catch {
-      inputs = {};
-    }
-    return {
-      toolCallId: raw.id,
-      toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
-      inputs,
+  for (const model of attemptChain) {
+    const body: Record<string, unknown> = {
+      model,
+      stream: false,
+      messages: [
+        { role: "system", content: systemPrompt } as OpenRouterMessage,
+        ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenRouterMessage),
+      ],
+      temperature: options?.temperature ?? 0.15,
     };
-  });
 
-  const result: LLMToolCallResponse = {
-    text,
-    toolCalls,
-    finishReason,
-    model: data.model ?? model,
-  };
+    if (options?.maxTokens) body.max_tokens = options.maxTokens;
+    if (openRouterTools.length > 0) {
+      body.tools = openRouterTools;
+      body.tool_choice = options?.toolChoice ?? "auto";
+    }
 
-  logLLMCall({
-    prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-    systemPrompt,
-    output: text,
-    provider: "openrouter",
-    model: result.model,
-    latencyMs: Date.now() - t0,
-    failover: [],
-    metadata: options?.evalMetadata ?? {},
-  });
+    const t0 = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+          "HTTP-Referer": SITE_URL,
+          "X-Title": "LiTT",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (err) {
+      const latencyMs = Date.now() - t0;
+      const msg = err instanceof Error ? err.message : String(err);
+      const category = categorizeError(null, msg);
+      failures.push({ model, status: null, category, latencyMs, message: msg });
+      // Network/timeout errors are retryable — try next model
+      continue;
+    }
 
-  return result;
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      const latencyMs = Date.now() - t0;
+      const category = categorizeError(res.status, txt);
+      failures.push({ model, status: res.status, category, latencyMs, message: txt.slice(0, 200) });
+
+      // Log the failed attempt
+      logLLMCall({
+        prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+        systemPrompt,
+        output: "",
+        provider: "openrouter",
+        model,
+        latencyMs,
+        failover: failures.slice(0, -1).map((f) => f.model),
+        metadata: { ...options?.evalMetadata ?? {}, failureCategory: category } as LLMCallMetadata,
+      });
+
+      // Non-retryable errors (400 bad request) — skip to next model
+      // Retryable errors (429, 5xx, network) — also skip to next model
+      continue;
+    }
+
+    const data = await res.json();
+    const choice = data.choices?.[0];
+    if (!choice) {
+      // Empty response — try next model
+      failures.push({ model, status: res.status, category: "empty_response", latencyMs: Date.now() - t0, message: "No choices in response" });
+      continue;
+    }
+
+    const text: string = choice.message?.content ?? "";
+    const rawToolCalls = choice.message?.tool_calls ?? [];
+    const finishReason: string = choice.finish_reason ?? "stop";
+
+    const toolCalls: ToolCallRequest[] = rawToolCalls.map((raw: {
+      id: string;
+      function: { name: string; arguments: string };
+    }) => {
+      let inputs: Record<string, unknown> = {};
+      try {
+        inputs = JSON.parse(raw.function.arguments);
+      } catch {
+        inputs = {};
+      }
+      return {
+        toolCallId: raw.id,
+        toolId: toolIdMap.get(raw.function.name) ?? toToolDefinitionId(raw.function.name),
+        inputs,
+      };
+    });
+
+    const result: LLMToolCallResponse = {
+      text,
+      toolCalls,
+      finishReason,
+      model: data.model ?? model,
+    };
+
+    logLLMCall({
+      prompt: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+      systemPrompt,
+      output: text,
+      provider: "openrouter",
+      model: result.model,
+      latencyMs: Date.now() - t0,
+      failover: failures.map((f) => f.model),
+      metadata: options?.evalMetadata ?? {},
+    });
+
+    return result;
+  }
+
+  // All models failed — throw with structured failure info (no secrets)
+  const failureSummary = failures.map((f) => `${f.model}(${f.category}, ${f.latencyMs}ms)`).join("; ");
+  throw new Error(
+    `All tool-calling models failed. Attempts: ${failureSummary}. ` +
+    `Last error: ${failures[failures.length - 1]?.message ?? "unknown"}`,
+  );
 }
 
 // ─── Format tool results for LLM ──────────────────────────────────

@@ -43,6 +43,8 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
 import { apiFetch, type ApiJson } from "@/lib/api-response";
+import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { useStudioContext } from "../context/StudioContext";
 
 type Workspace = {
   id: string;
@@ -420,6 +422,7 @@ const VISUAL_STYLE_CARDS = [
 
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
+  const { setActiveAssetId } = useStudioContext();
 
   /* ── Prompt state ── */
   const [prompt, setPrompt] = useState("");
@@ -1041,6 +1044,8 @@ export default function ImageTool() {
         const thumbUrl = data.thumbUrl as string | undefined;
         const isFree = data.free === true;
         const dataCost = typeof data.cost === "number" ? data.cost : 0;
+        const assetId = data.assetId as string | null | undefined;
+        const assetPersistenceFailed = data.assetPersistenceFailed === true;
 
         setHistory((prev) =>
           prev.map((g) =>
@@ -1071,6 +1076,21 @@ export default function ImageTool() {
           `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}`,
         );
         refreshWallet().catch(() => {});
+
+        // Notify the Asset Lake that a new persistent asset exists.
+        // The server already created a generation_jobs row — the
+        // Assets panel just needs to refresh to pick it up.
+        // Only notify if persistence actually succeeded.
+        if (!assetPersistenceFailed) {
+          notifyAssetsChanged();
+        }
+
+        // Auto-select the newly generated asset as the active asset.
+        // Do NOT auto-select if persistence failed — there is no
+        // canonical asset to select.
+        if (assetId && !assetPersistenceFailed) {
+          setActiveAssetId(assetId);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Generation failed";
         addLog("error", `[${i + 1}/${batchSize}] ${msg}`);

@@ -3,6 +3,9 @@ import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob } from "@/lib/generation/jobs";
+import { resolveInternalUserId } from "@/lib/generation/identity";
+import { uploadAudio } from "@/lib/r2";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -15,6 +18,9 @@ export async function POST(req: NextRequest) {
       { error: "Gemini API key not configured" },
       { status: 500 },
     );
+
+  // Resolve Clerk ID → internal public.users.id UUID for generation_jobs.
+  const internalUserId = await resolveInternalUserId(userId);
 
   try {
     const { operationName } = await req.json();
@@ -70,11 +76,59 @@ export async function POST(req: NextRequest) {
         });
         refunded = true;
       }
+
+      // Mark the generation job as failed.
+      // Uses internal UUID for lookup, NOT the Clerk ID.
+      if (internalUserId) {
+        const genJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
+        if (genJob) {
+          await failGenerationJob(genJob.id, "Video generation failed — no video output");
+        }
+      }
+    }
+
+    // If the operation succeeded, persist the video to R2 and complete
+    // the generation_jobs row so it becomes visible in the Asset Lake.
+    let durableUrl: string | null = null;
+    let assetId: string | null = null;
+    if (updated.done && videoUri) {
+      try {
+        // Download the video from Google's signed URL and upload to R2.
+        const videoResponse = await fetch(videoUri);
+        if (videoResponse.ok) {
+          const buffer = Buffer.from(await videoResponse.arrayBuffer());
+          const filename = `veo-${operationName.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+          const saved = await uploadAudio(userId, filename, buffer, "video/mp4", "video");
+          durableUrl = saved.publicUrl;
+
+          // Complete the persistent generation_jobs row.
+          // Uses internal UUID for lookup, NOT the Clerk ID.
+          if (internalUserId) {
+            const genJob = await getGenerationJobByProviderJobId(internalUserId, operationName);
+            if (genJob) {
+              await updateGenerationJobMetadata(genJob.id, {
+                durableUrl: saved.publicUrl,
+                contentType: "video/mp4",
+                storageKey: saved.storageKey,
+              });
+              await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+              assetId = `generation_job:${genJob.id}`;
+            }
+          }
+        }
+      } catch {
+        // If R2 persistence fails, fall back to the Google signed URL.
+        // The generation job remains in "generating" state — it will
+        // not appear in Asset Lake until a durable URL is available.
+        durableUrl = videoUri;
+      }
     }
 
     return NextResponse.json({
       done: updated.done,
-      videoUri,
+      videoUri: durableUrl ?? videoUri,
+      saved: durableUrl !== null,
+      assetId,
       refunded,
       cost: job.cost,
     });

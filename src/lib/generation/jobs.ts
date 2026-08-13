@@ -106,6 +106,29 @@ export async function getGenerationJobByRequestId(
 }
 
 /**
+ * Get a generation job by provider job ID.
+ * Used by video status routes to find the generation_jobs row
+ * associated with a provider operation/task.
+ */
+export async function getGenerationJobByProviderJobId(
+  userId: string,
+  providerJobId: string,
+): Promise<GenerationJob | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("generation_jobs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("provider_job_id", providerJobId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToJob(data);
+}
+
+/**
  * Update a generation job's status.
  */
 export async function updateGenerationJobStatus(
@@ -164,6 +187,34 @@ export async function completeGenerationJob(
     actualProviderCostCents,
     refundStatus: "none",
   });
+}
+
+/**
+ * Update a generation job's metadata by merging new keys into the
+ * existing JSONB metadata field. This is used by video status routes
+ * to add the durable URL after the video is persisted to R2.
+ */
+export async function updateGenerationJobMetadata(
+  jobId: string,
+  metadataUpdates: Record<string, unknown>,
+): Promise<void> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+
+  // Fetch existing metadata first.
+  const { data } = await admin
+    .from("generation_jobs")
+    .select("metadata")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  const existingMetadata = (data?.metadata as Record<string, unknown>) ?? {};
+  const merged = { ...existingMetadata, ...metadataUpdates };
+
+  await admin
+    .from("generation_jobs")
+    .update({ metadata: merged })
+    .eq("id", jobId);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

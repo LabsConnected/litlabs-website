@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { FileCode, FileType2, FileJson, type LucideIcon } from "lucide-react";
+import { useEffect, useCallback, useState } from "react";
+import { FileCode, FileType2, FileJson, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, type LucideIcon } from "lucide-react";
 import { ComponentPalette } from "./ComponentPalette";
 import { CanvasStage } from "./CanvasStage";
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -165,16 +165,22 @@ export function VisualCanvasBuilder() {
 
   const typeMeta = getProjectTypeMeta(projectType);
 
+  // Collapsible palette/inspector — overlays instead of permanently consuming width
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+
   // HTML/CSS/JS mode — render the file editor with live preview
   if (typeMeta.editor === "html") {
     return (
-      <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
-        {/* Left: Project type selector (narrow) */}
+      <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
         <div className="flex flex-1 overflow-hidden">
-          <div className="shrink-0" style={{ width: 200 }}>
-            <ProjectTypeSelector />
-            <HtmlFileList />
-          </div>
+          {/* Left: Project type selector (narrow) — collapsible */}
+          {paletteOpen && (
+            <div className="shrink-0" style={{ width: 200 }}>
+              <ProjectTypeSelector />
+              <HtmlFileList />
+            </div>
+          )}
           {/* Center+Right: HTML editor with code + preview */}
           <HtmlProjectEditor />
         </div>
@@ -207,24 +213,70 @@ export function VisualCanvasBuilder() {
 
   // Website / App / Component mode — the visual canvas builder
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
-      {/* Top toolbar */}
-      <CanvasToolbar />
+    <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+      {/* Top toolbar with palette/inspector toggle buttons */}
+      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1" style={{ borderColor: "var(--studio-border)" }}>
+        <CanvasToolbar />
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setPaletteOpen((v) => !v)}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
+          style={{ color: paletteOpen ? "var(--litt-primary)" : "var(--text-muted)" }}
+          aria-label={paletteOpen ? "Hide palette" : "Show palette"}
+          aria-pressed={paletteOpen}
+        >
+          {paletteOpen ? <PanelLeftClose size={12} className="pointer-events-none" /> : <PanelLeftOpen size={12} className="pointer-events-none" />}
+          Components
+        </button>
+        <button
+          type="button"
+          onClick={() => setInspectorOpen((v) => !v)}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
+          style={{ color: inspectorOpen ? "var(--litt-primary)" : "var(--text-muted)" }}
+          aria-label={inspectorOpen ? "Hide inspector" : "Show inspector"}
+          aria-pressed={inspectorOpen}
+        >
+          {inspectorOpen ? <PanelRightClose size={12} className="pointer-events-none" /> : <PanelRightOpen size={12} className="pointer-events-none" />}
+          Inspector
+        </button>
+      </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left: Project type selector + Component Palette */}
-        <div className="shrink-0" style={{ width: 200 }}>
-          <ProjectTypeSelector />
-          <ComponentPalette />
-        </div>
+      {/* Canvas area — palette and inspector are overlays, not permanent columns */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Palette overlay — left side, absolute positioned */}
+        {paletteOpen && (
+          <div
+            className="absolute left-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-r"
+            style={{
+              width: 200,
+              backgroundColor: "rgba(10,11,16,0.95)",
+              borderColor: "var(--studio-border)",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <ProjectTypeSelector />
+            <ComponentPalette />
+          </div>
+        )}
 
-        {/* Center: Canvas Stage */}
+        {/* Center: Canvas Stage — always full width */}
         <CanvasStage />
 
-        {/* Right: Properties Panel */}
-        <div className="shrink-0" style={{ width: 280 }}>
-          <PropertiesPanel />
-        </div>
+        {/* Inspector overlay — right side, absolute positioned */}
+        {inspectorOpen && (
+          <div
+            className="absolute right-0 top-0 bottom-0 z-20 shrink-0 overflow-y-auto border-l"
+            style={{
+              width: 280,
+              backgroundColor: "rgba(10,11,16,0.95)",
+              borderColor: "var(--studio-border)",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <PropertiesPanel />
+          </div>
+        )}
       </div>
     </div>
   );

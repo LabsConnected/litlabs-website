@@ -80,6 +80,16 @@ export const TOOL_NAMES = [
   "github_search_code",
   "github_list_pull_requests",
   "github_read_file",
+  // ── Growth Engine — campaign generation, approval, manual publishing.
+  // Phase 1a: all providers in manual mode (no paid API calls).
+  // LiTT generates platform-native content, the user approves, posts by
+  // hand, and records the result via growth_mark_published.
+  "growth_create_campaign",
+  "growth_generate_content",
+  "growth_list_drafts",
+  "growth_rewrite_post",
+  "growth_approve_post",
+  "growth_mark_published",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 

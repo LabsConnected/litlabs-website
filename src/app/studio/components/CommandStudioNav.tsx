@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import {
   LayoutGrid,
   Shapes,
@@ -73,17 +72,8 @@ export default function CommandStudioNav({
           borderRight: "1px solid var(--studio-border)",
         }}
       >
-        {/* User avatar — Clerk UserButton for account access */}
-        <div className="mb-1 flex h-9 w-9 items-center justify-center">
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "h-9 w-9 rounded-xl",
-                userButtonPopoverCard: "rounded-xl border",
-              },
-            }}
-          />
-        </div>
+        {/* Clerk UserButton removed — account access is now in the unified
+            AppShell sidebar (Wallet, Settings, Profile). */}
 
         {/* Divider between logo and nav items */}
         <div

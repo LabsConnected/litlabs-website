@@ -4,11 +4,16 @@ import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
+import { resolveInternalUserId } from "@/lib/generation/identity";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Resolve Clerk ID → internal public.users.id UUID for generation_jobs.
+  const internalUserId = await resolveInternalUserId(userId);
 
   try {
     const { taskId, saveToR2 = true } = await req.json();
@@ -41,6 +46,26 @@ export async function POST(req: NextRequest) {
       try {
         const buffer = await downloadVideo(result.videoUrl);
         const saved = await uploadAudio(userId, `happyhorse-${taskId}.mp4`, buffer, "video/mp4", "video");
+
+        // Complete the persistent generation_jobs row with the durable URL
+        // so the video becomes visible in the Asset Lake.
+        // Uses internal UUID for lookup, NOT the Clerk ID.
+        let assetId: string | null = null;
+        if (internalUserId) {
+          const genJob = await getGenerationJobByProviderJobId(internalUserId, taskId);
+          if (genJob) {
+            // Update metadata with the durable R2 URL first.
+            await updateGenerationJobMetadata(genJob.id, {
+              durableUrl: saved.publicUrl,
+              contentType: "video/mp4",
+              storageKey: saved.storageKey,
+            });
+            // Then mark the job as completed.
+            await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+            assetId = `generation_job:${genJob.id}`;
+          }
+        }
+
         return NextResponse.json({
           done: true,
           taskStatus: result.taskStatus,
@@ -48,6 +73,7 @@ export async function POST(req: NextRequest) {
           storageKey: saved.storageKey,
           saved: true,
           cost: job.cost,
+          assetId,
         });
       } catch (saveErr) {
         // If R2 save fails, return the temporary Alibaba URL so the user
