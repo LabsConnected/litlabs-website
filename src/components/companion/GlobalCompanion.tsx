@@ -57,12 +57,12 @@ function derivePageContext(pathname: string, authenticated: boolean): CompanionC
     if (gameId) activeEntity = { type: "game", id: gameId, name: gameId };
   } else if (route.startsWith("/games")) {
     pageTitle = "Games";
-  } else if (route.startsWith("/gallery/")) {
-    pageTitle = "Gallery";
+  } else if (route.startsWith("/showcase/")) {
+    pageTitle = "Showcase";
     const itemId = route.split("/")[2];
     if (itemId) activeEntity = { type: "gallery_item", id: itemId, name: itemId };
-  } else if (route.startsWith("/gallery")) {
-    pageTitle = "Gallery";
+  } else if (route.startsWith("/showcase")) {
+    pageTitle = "Showcase";
   } else if (route.startsWith("/marketplace/")) {
     pageTitle = "Marketplace";
     const itemId = route.split("/")[2];
@@ -117,7 +117,7 @@ const GUEST_DESTINATIONS = [
   { terms: ["studio", "build", "create", "start", "app", "website"], href: "/studio", label: "Explore Studio", reply: "Studio is where LiTT turns an idea into a plan, real files, a preview, and—after approval—a deployment." },
   { terms: ["market", "agent", "tool", "plugin"], href: "/marketplace", label: "Browse Marketplace", reply: "Marketplace is where you can discover agents, tools, workflows, and creative packs for LiTT and Spark." },
   { terms: ["community", "discover", "social", "people"], href: "/discover", label: "Visit Community", reply: "Community is the public discovery space for creations, builders, and shared work." },
-  { terms: ["gallery", "creation", "art", "image"], href: "/gallery", label: "Open Gallery", reply: "Gallery showcases created media and finished work from across LiTTree." },
+  { terms: ["showcase", "gallery", "creation", "art", "image", "portfolio"], href: "/showcase", label: "Open Showcase", reply: "Showcase is the canonical place for everything you've created or want to feature — AI builds, sites, artwork, architecture, case studies, games, and published creations." },
   { terms: ["game", "retro", "play"], href: "/games", label: "Explore Games", reply: "The Games area includes LiTTree's cloud, DOS, and retro experiences." },
   { terms: ["demo", "example", "workflow", "show me", "tour"], href: "/showcase", label: "See product demos", reply: "The product demos walk through complete missions—from idea and planning to files, approval, and launch." },
   { terms: ["sign in", "login", "account"], href: "/sign-in", label: "Sign in", reply: "Sign in to resume your projects, memory, files, agents, and deployment history." },
@@ -131,7 +131,7 @@ function guestNavigationReply(text: string, currentPage: string) {
   return {
     href: "/showcase",
     label: "Take the product tour",
-    reply: `You're on ${currentPage}. I can guide you to Studio, pricing, product demos, Marketplace, Community, Gallery, Games, sign-in, or free signup. Try asking “show me how it works” or “where do I build an app?”`,
+    reply: `You're on ${currentPage}. I can guide you to Studio, pricing, product demos, Marketplace, Community, Showcase, Games, sign-in, or free signup. Try asking “show me how it works” or “where do I build an app?”`,
   };
 }
 

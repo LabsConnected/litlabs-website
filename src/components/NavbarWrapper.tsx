@@ -12,7 +12,7 @@ import { BrandLogo } from "@/components/branding/BrandLogo";
 const desktopLinks = [
   ["Dashboard", "/dashboard"],
   ["Studio", "/studio"],
-  ["Gallery", "/gallery"],
+  ["Showcase", "/showcase"],
   ["Games", "/games"],
   ["Discover", "/discover"],
   ["Marketplace", "/marketplace"],

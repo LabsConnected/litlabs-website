@@ -58,7 +58,7 @@ const leftNavLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: Bot },
   { href: "/studio", label: "Studio", icon: Wand2 },
-  { href: "/gallery", label: "Gallery", icon: Sparkles },
+  { href: "/showcase", label: "Showcase", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
   { href: "/games", label: "Games", icon: Gamepad2 },
   { href: "/discover", label: "Discover", icon: MessageCircle },
@@ -79,7 +79,7 @@ const AgentsIcon = agentsLink.icon;
 /* ------------------------------------------------------------------ */
 const mobileDrawerGroups = [
   { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
-  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
+  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/showcase", label: "Showcase", icon: Sparkles }] },
   { label: "Discover", links: [{ href: "/discover", label: "Discover Feed", icon: MessageCircle }, { href: "/marketplace", label: "Marketplace", icon: ShoppingBag }] },
   { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
   { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },

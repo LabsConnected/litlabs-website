@@ -274,9 +274,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
     });
     await waitFor(() => expect(screen.getByTestId("builder-tool")).toBeTruthy());
-    // Click the Chat tab (formerly Work) — should go back to conversation
-    const workTab = screen.getByRole("button", { name: /^Chat$/i });
-    fireEvent.click(workTab);
+    // Route back to chat via the switch-tool event
+    act(() => {
+      window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
+    });
     await waitFor(() => {
       expect(screen.queryByTestId("builder-tool")).toBeNull();
     });
