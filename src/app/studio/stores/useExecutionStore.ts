@@ -436,6 +436,7 @@ export function feedSSEEventToExecutionStore(
         summary: `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,
         step: evt.totalSteps ?? evt.step,
       });
+      s.setPhase("done");
       s.collapseLowLevel();
       break;
 
@@ -444,6 +445,7 @@ export function feedSSEEventToExecutionStore(
         type: "cancelled",
         summary: evt.reason ?? "Cancelled",
       });
+      s.setPhase("cancelled");
       break;
 
     case "model_routing":
