@@ -681,6 +681,27 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
   const { setActiveSection } = useSettingsStore();
   const [micStatus, setMicStatus] = useState<"unknown" | "available" | "denied" | "error">("unknown");
 
+  // Read existing permission state via Permissions API (no prompt).
+  // Never call getUserMedia automatically on mount — that would trigger
+  // a browser permission popup just by opening Settings.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions) return;
+    let active = true;
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((result) => {
+        if (!active) return;
+        if (result.state === "granted") setMicStatus("available");
+        else if (result.state === "denied") setMicStatus("denied");
+        else setMicStatus("unknown");
+      })
+      .catch(() => {
+        // Permissions API not supported — leave as "unknown"
+      });
+    return () => { active = false; };
+  }, []);
+
+  // Only called when the user explicitly clicks "Test microphone"
   const checkMic = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -690,8 +711,6 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
       setMicStatus("denied");
     }
   }, []);
-
-  useEffect(() => { void checkMic(); }, [checkMic]);
 
   const connectedProviders = capabilities.connectedProviders;
   const hasGitHub = connectedProviders.includes("repository");
@@ -1710,7 +1729,34 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     }
   }, []);
 
-  useEffect(() => { void testMic(); void testCamera(); }, [testMic, testCamera]);
+  // Read existing permission state via Permissions API (no prompt).
+  // Never call getUserMedia automatically on mount — that would trigger
+  // both mic and camera permission popups just by rendering this section.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions) return;
+    let active = true;
+    const queryMic = navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((r) => {
+        if (!active) return;
+        if (r.state === "granted") setMicStatus("available");
+        else if (r.state === "denied") setMicStatus("denied");
+      })
+      .catch(() => {});
+    const queryCam = navigator.permissions
+      .query({ name: "camera" as PermissionName })
+      .then((r) => {
+        if (!active) return;
+        if (r.state === "granted") setCameraStatus("available");
+        else if (r.state === "denied") setCameraStatus("denied");
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      void queryMic;
+      void queryCam;
+    };
+  }, []);
 
   const previewVoice = useCallback(async (agentId: "litt" | "spark") => {
     setVoicePreviewing(agentId);

@@ -30,6 +30,7 @@ import {
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
+import { useLittHealth } from "@/hooks/useLittHealth";
 import {
   APP_NAV_SECTIONS,
   APP_NAV_BOTTOM,
@@ -55,6 +56,7 @@ function DesktopSidebar({
   const { balance } = useWallet();
   const { isSignedIn } = useClerkAuth();
   const { user } = useAppUser();
+  const littHealth = useLittHealth();
   const [plan, setPlan] = useState("Free");
 
   useEffect(() => {
@@ -132,19 +134,32 @@ function DesktopSidebar({
 
       {/* Bottom — status + utility items + collapse */}
       <div className="shrink-0 border-t px-2 py-2.5" style={{ borderColor: `${T.borderColor}15` }}>
-        {/* LiTT Online + BITS */}
+        {/* LiTT health + BITS — truthful status derived from real health check */}
         <div
           className={`mb-2 ${collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between rounded-lg border px-2.5 py-2"}`}
           style={!collapsed ? { borderColor: `${T.borderColor}15`, background: `${T.boxBg}50` } : undefined}
         >
-          {/* Online indicator */}
+          {/* Health indicator — derived from /api/health */}
           <div className={`flex items-center gap-1.5 ${collapsed ? "justify-center" : ""}`}>
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              {littHealth.pulse && (
+                <span
+                  className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                  style={{ backgroundColor: littHealth.color }}
+                />
+              )}
+              <span
+                className="relative inline-flex h-2 w-2 rounded-full"
+                style={{ backgroundColor: littHealth.color }}
+              />
             </span>
             {!collapsed && (
-              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400">LiTT Online</span>
+              <span
+                className="text-[9px] font-black uppercase tracking-wider"
+                style={{ color: littHealth.color }}
+              >
+                {littHealth.label}
+              </span>
             )}
           </div>
           {/* BITS */}

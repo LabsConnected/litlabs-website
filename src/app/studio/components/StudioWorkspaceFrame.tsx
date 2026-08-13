@@ -54,6 +54,7 @@ const INSPECTOR_TABS: { id: InspectorTab; label: string; icon: typeof ClipboardL
 ];
 
 const DRAWER_TABS: { id: DrawerTab; label: string; icon: typeof Activity }[] = [
+  { id: "activity", label: "Activity", icon: Activity },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "media", label: "Media", icon: Music },
 ];

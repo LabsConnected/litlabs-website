@@ -272,7 +272,7 @@ export function CenterStage({
               {
                 label: "Music",
                 icon: Mic,
-                href: "/dashboard?app=music",
+                href: "/studio?tool=music",
                 color: "#8b5cf6",
               },
             ].map((action) => {
@@ -342,7 +342,7 @@ export function CenterStage({
               {[
                 { label: "Image #42", href: "/gallery" },
                 { label: "Agent Forge", href: "/studio?tool=agents" },
-                { label: "Music Project", href: "/dashboard?app=music" },
+                { label: "Music Project", href: "/studio?tool=music" },
               ].map((item) => (
                 <Link
                   key={item.label}
