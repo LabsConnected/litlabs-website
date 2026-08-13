@@ -84,6 +84,17 @@ export default function DesignCanvas() {
     document.addEventListener("mouseup", onEnd);
     document.addEventListener("touchmove", onTouchMove, { passive: false });
     document.addEventListener("touchend", onEnd);
+
+    // Cleanup: if component unmounts mid-drag, clear body styles and
+    // remove listeners so text inputs don't stay broken.
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onEnd);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
   }, [splitPct]);
 
   // Persist split percentage

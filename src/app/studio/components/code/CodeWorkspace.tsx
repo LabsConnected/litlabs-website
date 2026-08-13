@@ -410,6 +410,16 @@ export function CodeWorkspace({
   // Keyboard: Ctrl+S to save, Ctrl+W to close tab
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable) {
+        // Allow Ctrl+S/Ctrl+W even in inputs — but only for code editor,
+        // not for regular text fields. Monaco sets contentEditable on its
+        // textarea, so we check for the .xterm and .monaco-editor classes.
+        if (!target.closest(".monaco-editor") && !target.closest(".xterm")) {
+          return;
+        }
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "s" && activeTab) {
         e.preventDefault();
         void saveFile(activeTab);

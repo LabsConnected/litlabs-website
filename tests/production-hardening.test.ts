@@ -264,3 +264,71 @@ describe("Resize handles are wired", () => {
     expect(content).toContain("onSplitDragStart");
   });
 });
+
+// ─── Text input bug fix — body userSelect cleanup ────────────────
+
+describe("Text input bug — resize hooks clean up body styles", () => {
+  it("useResizableWidth clears body.userSelect on cleanup", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/hooks/useResizableWidth.ts"),
+      "utf-8",
+    );
+    // The effect cleanup MUST clear userSelect, not just the onEnd handler
+    expect(content).toContain('document.body.style.userSelect = ""');
+  });
+
+  it("useResizableWidth clears body styles on mount (safety)", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/hooks/useResizableWidth.ts"),
+      "utf-8",
+    );
+    // Safety: clear stuck styles on mount
+    expect(content).toContain('document.body.style.userSelect === "none"');
+  });
+
+  it("DesignCanvas cleans up body styles on unmount", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/tools/DesignCanvas.tsx"),
+      "utf-8",
+    );
+    // The drag effect must have a cleanup return
+    expect(content).toContain('document.body.style.userSelect = ""');
+  });
+
+  it("CommandStudio clears stuck body styles on mount", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/components/CommandStudio.tsx"),
+      "utf-8",
+    );
+    expect(content).toContain('document.body.style.userSelect === "none"');
+  });
+
+  it("VisualCanvasBuilder keyboard handler guards input fields", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/components/canvas/builder/VisualCanvasBuilder.tsx"),
+      "utf-8",
+    );
+    expect(content).toContain('target.tagName === "INPUT"');
+    expect(content).toContain('target.tagName === "TEXTAREA"');
+  });
+
+  it("StudioWorkspaceFrame keyboard handler guards input fields", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const content = fs.readFileSync(
+      path.resolve("src/app/studio/components/StudioWorkspaceFrame.tsx"),
+      "utf-8",
+    );
+    expect(content).toContain('target?.tagName === "INPUT"');
+  });
+});

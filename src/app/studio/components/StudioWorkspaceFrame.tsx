@@ -452,6 +452,11 @@ export function StudioDrawer({
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't intercept if typing in an input/textarea/contentEditable
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable) {
+        return;
+      }
       // Don't intercept if xterm has focus
       const activeEl = document.activeElement;
       if (activeEl?.closest(".xterm")) return;

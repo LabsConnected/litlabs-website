@@ -189,6 +189,19 @@ function CommandStudioContent() {
   const [missionMode, setMissionMode] = useState<MissionMode>((initial.mode as MissionMode) ?? "overview");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
+
+  // Safety: clear any stuck body styles from resize handles that didn't
+  // clean up properly. This is the #1 cause of "can't type in text fields"
+  // bugs — a drag handler sets userSelect="none" on body and never clears it.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (document.body.style.userSelect === "none") {
+      document.body.style.userSelect = "";
+    }
+    if (document.body.style.cursor && document.body.style.cursor !== "") {
+      document.body.style.cursor = "";
+    }
+  }, []);
   // Dynamic Work surface — not derived from initial.legacyTool after init.
   const [workSurface, setWorkSurface] = useState<WorkSurface>(
     initial.legacyTool === "build" ? "builder" : "conversation",

@@ -60,6 +60,16 @@ export function useResizableWidth({
 
   // Load persisted width on mount
   useEffect(() => {
+    // Safety: clear any stuck body styles from a previous drag that
+    // didn't clean up properly (e.g., component unmounted mid-drag).
+    if (typeof document !== "undefined") {
+      if (document.body.style.userSelect === "none") {
+        document.body.style.userSelect = "";
+      }
+      if (document.body.style.cursor === "col-resize" || document.body.style.cursor === "row-resize") {
+        document.body.style.cursor = "";
+      }
+    }
     if (!storageKey || typeof window === "undefined") return;
     try {
       const stored = localStorage.getItem(storageKey);
@@ -149,6 +159,12 @@ export function useResizableWidth({
       document.removeEventListener("mouseup", onEnd);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onEnd);
+      // CRITICAL: Clear body styles on cleanup too, not just on mouseup.
+      // If the effect re-runs or component unmounts mid-drag, the body
+      // would otherwise keep userSelect="none" and cursor="col-resize"
+      // forever, breaking all text inputs on the page.
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
     };
   }, [isDragging, direction, minWidth, maxWidth]);
 
