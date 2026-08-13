@@ -41,6 +41,8 @@ export interface ContextDrawerProps {
   assetsContent: ReactNode;
   /** Inspector tab content — rendered as a slot from the parent */
   inspectorContent: ReactNode;
+  /** Width in pixels when open (controlled by parent via useResizableWidth) */
+  width?: number;
 }
 
 const TABS: { id: ContextDrawerTab; label: string; icon: typeof Folder }[] = [
@@ -57,7 +59,9 @@ export default function ContextDrawer({
   filesContent,
   assetsContent,
   inspectorContent,
+  width = 320,
 }: ContextDrawerProps) {
+  const pxWidth = `${width}px`;
   return (
     <>
       {/* Mobile backdrop — only present while open */}
@@ -76,9 +80,11 @@ export default function ContextDrawer({
           fixed inset-y-0 right-0 z-40 flex flex-col overflow-hidden border-l
           transition-[width] duration-150 ease-out
           lg:relative lg:z-auto lg:inset-auto
-          ${open ? "w-[min(92vw,300px)]" : "pointer-events-none w-0 border-transparent lg:w-0"}
+          ${open ? "" : "pointer-events-none w-0 border-transparent lg:w-0"}
         `}
         style={{
+          width: open ? pxWidth : undefined,
+          maxWidth: "92vw",
           backgroundColor: "var(--studio-surface)",
           borderColor: open ? "var(--studio-border)" : "transparent",
           backdropFilter: "blur(12px)",
@@ -89,7 +95,7 @@ export default function ContextDrawer({
         aria-hidden={!open}
       >
         {/* Inner content — fixed width so it doesn't reflow while collapsing */}
-        <div className="flex h-full w-[min(92vw,300px)] flex-col overflow-hidden">
+        <div className="flex h-full flex-col overflow-hidden" style={{ width: pxWidth, maxWidth: "92vw" }}>
           {/* Tab header */}
           <div
             className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"

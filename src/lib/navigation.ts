@@ -84,7 +84,7 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     label: "Create",
     items: [
       { label: "Create", href: "/studio?tool=image", icon: Sparkles },
-      { label: "Music", href: "/dashboard?app=music", icon: Music },
+      { label: "Music", href: "/studio?tool=music", icon: Music },
       { label: "Showcase", href: "/showcase", icon: Image },
     ],
   },
@@ -136,7 +136,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Create", href: "/studio?tool=chat", icon: Sparkles },
       { label: "Image", href: "/studio?tool=image", icon: Image },
       { label: "Video", href: "/studio?tool=video", icon: Video },
-      { label: "Music", href: "/dashboard?app=music", icon: Music },
+      { label: "Music", href: "/studio?tool=music", icon: Music },
       { label: "Workflow Forge", href: "/studio?tool=pipeline", icon: Workflow },
     ],
   },
@@ -224,7 +224,7 @@ export const AI_SUGGESTIONS = [
 
 export const QUICK_CREATE_ITEMS = [
   { label: "Create Image", href: "/studio?tool=image", icon: Image },
-  { label: "Create Music", href: "/dashboard?app=music", icon: Music },
+  { label: "Create Music", href: "/studio?tool=music", icon: Music },
   { label: "Create Video", href: "/studio?tool=video", icon: Video },
   { label: "Create Agent", href: "/studio?tool=agents", icon: Bot },
   { label: "Create Workflow", href: "/studio?tool=pipeline", icon: Layers },

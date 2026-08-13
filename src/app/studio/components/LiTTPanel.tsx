@@ -37,13 +37,15 @@ interface LiTTPanelProps {
   /** Controlled active tab */
   activeTab: LiTTTab;
   onTabChange: (tab: LiTTTab) => void;
-  /** Collapsed (64px ambient HUD) vs expanded (320px) */
+  /** Collapsed (64px ambient HUD) vs expanded (resizable) */
   collapsed: boolean;
   onCollapse: () => void;
   onExpand: () => void;
   /** Truthful voice/mic state for the collapsed HUD */
   voiceConnected?: boolean;
   microphoneStatus?: DeviceStatus;
+  /** Expanded width in pixels (controlled by parent via useResizableWidth) */
+  expandedWidth?: number;
 }
 
 export default function LiTTPanel({
@@ -56,13 +58,14 @@ export default function LiTTPanel({
   onExpand,
   voiceConnected,
   microphoneStatus,
+  expandedWidth = 320,
 }: LiTTPanelProps) {
   return (
     <aside
       className="hidden h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out lg:flex"
       style={{
-        width: collapsed ? 64 : 320,
-        maxWidth: collapsed ? 64 : "30vw",
+        width: collapsed ? 64 : expandedWidth,
+        maxWidth: collapsed ? 64 : "40vw",
         backgroundColor: "var(--studio-surface)",
         borderRight: "1px solid var(--studio-border)",
         backdropFilter: "blur(12px)",

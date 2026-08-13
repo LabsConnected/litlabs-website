@@ -9,6 +9,7 @@ import {
   AudioLines,
   Music,
   Globe,
+  FolderOpen,
 } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -41,6 +42,8 @@ import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-co
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
 import { useViewportTier } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
+import ResizeHandle from "./shell/ResizeHandle";
+import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import StudioProjectFiles from "./StudioProjectFiles";
@@ -296,6 +299,24 @@ function CommandStudioContent() {
     // No auto-collapse — expanded by default on all desktop tiers.
   }, [viewportTier]);
 
+  // Resizable pane widths — persisted to localStorage, clamped to min/max.
+  // LiTT: 280–480px expanded, 64px collapsed (collapsed handled separately).
+  const littResize = useResizableWidth({
+    storageKey: "littree:studio:litt-width",
+    defaultWidth: 320,
+    minWidth: 280,
+    maxWidth: 480,
+    direction: "left",
+  });
+  // Context Drawer: 280–480px open, 0px closed (closed handled by `open` prop).
+  const contextResize = useResizableWidth({
+    storageKey: "littree:studio:context-width",
+    defaultWidth: 320,
+    minWidth: 280,
+    maxWidth: 480,
+    direction: "right",
+  });
+
   // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
   const CONTEXT_OPEN_KEY = "littree:studio:context-open";
   const CONTEXT_TAB_KEY = "littree:studio:context-tab";
@@ -361,6 +382,28 @@ function CommandStudioContent() {
     } else {
       setLittCollapsed(false);
     }
+  }, [isMobileLitt]);
+
+  // Listen for "Ask LiTT" events from Canvas and other surfaces.
+  // Expands the canonical left LiTT, switches to Chat, and optionally
+  // pre-fills the composer with context from the requesting surface.
+  // This replaces the duplicate LiTTCopilotPanel that used to live inside
+  // the Canvas Properties panel (one LiTT, not two).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { context?: string; prompt?: string } | undefined;
+      if (isMobileLitt) {
+        setMobileLittOpen(true);
+      } else {
+        setLittCollapsed(false);
+      }
+      setLittActiveTab("chat");
+      if (detail?.prompt) {
+        setComposerValue(detail.prompt);
+      }
+    };
+    window.addEventListener("studio:ask-litt", handler);
+    return () => window.removeEventListener("studio:ask-litt", handler);
   }, [isMobileLitt]);
 
   // Context drawer open helpers — both are OPEN actions (switch tab +
@@ -1063,17 +1106,31 @@ function CommandStudioContent() {
               hasn't measured yet; render nothing for a tick rather than
               guess, to avoid a flash of the wrong tier's chrome. */}
           {viewportTier !== null && !isMobileLitt && (
-            <LiTTPanel
-              collapsed={littCollapsed}
-              onCollapse={() => setLittCollapsed(true)}
-              onExpand={() => setLittCollapsed(false)}
-              activeTab={littActiveTab}
-              onTabChange={setLittActiveTab}
-              voiceConnected={liveSession.isLive}
-              microphoneStatus={liveSession.indicators.microphone}
-              chatContent={littChatContent}
-              liveContent={littLiveContent}
-            />
+            <>
+              <LiTTPanel
+                collapsed={littCollapsed}
+                onCollapse={() => setLittCollapsed(true)}
+                onExpand={() => setLittCollapsed(false)}
+                activeTab={littActiveTab}
+                onTabChange={setLittActiveTab}
+                voiceConnected={liveSession.isLive}
+                microphoneStatus={liveSession.indicators.microphone}
+                chatContent={littChatContent}
+                liveContent={littLiveContent}
+                expandedWidth={littResize.width}
+              />
+              {/* Resize handle — only visible when LiTT is expanded */}
+              {!littCollapsed && (
+                <ResizeHandle
+                  onDragStart={littResize.onDragStart}
+                  onReset={littResize.reset}
+                  isDragging={littResize.isDragging}
+                  direction="left"
+                  ariaLabel="Resize LiTT panel"
+                  testId="litt-resize-handle"
+                />
+              )}
+            </>
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
@@ -1122,22 +1179,33 @@ function CommandStudioContent() {
                 );
               })}
 
+              {/* Visual divider — separates workspace stages from context controls.
+                  Files is NOT a workspace stage; it opens the right Context Drawer. */}
+              <div
+                className="mx-1 h-5 w-px shrink-0"
+                style={{ backgroundColor: "rgba(155,77,255,0.15)" }}
+                aria-hidden
+              />
+
               {/* Files toggle — opens Context Drawer on the right, on the
                   Files tab specifically (Phase C2.1). Only highlighted
                   when the drawer is open AND showing Files — it must not
-                  light up while Inspector happens to be the active tab. */}
+                  light up while Inspector happens to be the active tab.
+                  Visually distinguished from workspace stages via folder icon
+                  and muted styling — it is a context control, not a stage. */}
               <button
                 type="button"
                 onClick={handleFilesButtonClick}
-                className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${filesButtonActive ? "glass-active" : ""}`}
+                className={`relative flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-bold transition-all ${filesButtonActive ? "glass-active" : ""}`}
                 style={{
                   color: filesButtonActive ? "var(--text-main)" : "var(--text-dim)",
                   backgroundColor: filesButtonActive ? "var(--purple-soft)" : "transparent",
                 }}
-                aria-label="Files"
+                aria-label="Files — open context drawer"
                 aria-pressed={filesButtonActive}
                 data-testid="workspace-tab-files"
               >
+                <FolderOpen size={13} className="pointer-events-none" style={{ opacity: 0.7 }} />
                 Files
                 {filesButtonActive && (
                   <span
@@ -1290,11 +1358,23 @@ function CommandStudioContent() {
               Fully controlled: CommandStudio owns contextDrawerTab as the
               single source of truth (Phase C2.1 — no internal drawer
               state duplicating this). */}
+          {/* Resize handle — only visible when drawer is open on desktop */}
+          {contextDrawerOpen && !isMobileLitt && (
+            <ResizeHandle
+              onDragStart={contextResize.onDragStart}
+              onReset={contextResize.reset}
+              isDragging={contextResize.isDragging}
+              direction="right"
+              ariaLabel="Resize context drawer"
+              testId="context-resize-handle"
+            />
+          )}
           <ContextDrawer
             open={contextDrawerOpen}
             activeTab={contextDrawerTab}
             onTabChange={setContextDrawerTab}
             onClose={() => setContextDrawerOpen(false)}
+            width={contextResize.width}
             filesContent={
               <div className="flex h-full flex-col overflow-hidden">
                 <div

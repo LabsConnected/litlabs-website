@@ -41,6 +41,12 @@ interface CanvasBuilderStore {
   leftPanelTab: "build" | "blocks" | "components" | "assets" | "layers";
   rightPanelTab: "properties" | "litt";
 
+  // Save state — truthful persistence tracking
+  saveState: "local" | "dirty" | "saving" | "saved" | "error";
+  serverCanvasId: string | null;
+  setSaveState: (state: "local" | "dirty" | "saving" | "saved" | "error") => void;
+  setServerCanvasId: (id: string | null) => void;
+
   // Project type system
   projectType: ProjectType;
   htmlProject: HtmlProject;
@@ -87,6 +93,19 @@ function saveToStorage(doc: CanvasDocument) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
   } catch {}
+}
+
+/**
+ * Save to localStorage AND mark the document as dirty (unsaved to server).
+ * Used by all mutation actions so the save badge stays truthful.
+ */
+function saveAndMarkDirty(doc: CanvasDocument) {
+  saveToStorage(doc);
+  // Mark as dirty unless we're already in "saving" state
+  const current = useCanvasBuilderStore.getState();
+  if (current.saveState !== "saving") {
+    useCanvasBuilderStore.setState({ saveState: "dirty" });
+  }
 }
 
 function saveProjectTypeToStorage(type: ProjectType) {
@@ -211,6 +230,12 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
   leftPanelTab: "build",
   rightPanelTab: "properties",
 
+  // Save state — starts as "local" (localStorage only, not server-persisted)
+  saveState: "local",
+  serverCanvasId: null,
+  setSaveState: (state) => set({ saveState: state }),
+  setServerCanvasId: (id) => set({ serverCanvasId: id }),
+
   // Project type system — load persisted project type from localStorage
   // (HTML project files are managed by useHtmlProjectSync, not here)
   projectType: loadProjectTypeFromStorage() ?? "website",
@@ -243,10 +268,12 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
 
   saveDocument: () => {
     saveToStorage(get().document);
+    // Mark as saved locally — server save is a separate explicit action
+    set({ saveState: get().serverCanvasId ? "saved" : "local" });
   },
 
   setDocument: (doc) => {
-    set({ document: doc });
+    set({ document: doc, saveState: "dirty" });
     saveToStorage(doc);
   },
 
@@ -281,7 +308,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
 
     pushHistory(set, get, newDoc, `Add ${node.type}`);
     set({ document: newDoc, selectedNodeId: node.id });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   removeNode: (nodeId) => {
@@ -320,7 +347,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     pushHistory(set, get, newDoc, `Delete ${node.type}`);
     const wasSelected = get().selectedNodeId === nodeId;
     set({ document: newDoc, ...(wasSelected ? { selectedNodeId: null } : {}) });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   moveNode: (nodeId, newParentId, index) => {
@@ -375,7 +402,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
 
     pushHistory(set, get, newDoc, `Move ${node.type}`);
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   updateNodeProps: (nodeId, props) => {
@@ -395,7 +422,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     };
     pushHistory(set, get, newDoc, `Update ${node.type} props`);
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   updateNodeStyles: (nodeId, styles) => {
@@ -415,7 +442,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     };
     pushHistory(set, get, newDoc, `Update ${node.type} styles`);
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   updateNodeMetadata: (nodeId, metadata) => {
@@ -433,7 +460,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
       updatedAt: Date.now(),
     };
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   duplicateNode: (nodeId) => {
@@ -456,7 +483,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     };
     pushHistory(set, get, newDoc, `Duplicate ${node.type}`);
     set({ document: newDoc, selectedNodeId: cloned.id });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   copyNode: (nodeId) => {
@@ -478,7 +505,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     const newNodes = { ...doc.nodes, ...clonedNodes };
     const newDoc = { ...doc, nodes: newNodes, version: doc.version + 1, updatedAt: Date.now() };
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   undo: () => {
@@ -487,7 +514,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     const newIndex = historyIndex - 1;
     const entry = history[newIndex];
     set({ document: entry.document, historyIndex: newIndex, selectedNodeId: null });
-    saveToStorage(entry.document);
+    saveAndMarkDirty(entry.document);
   },
 
   redo: () => {
@@ -496,7 +523,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     const newIndex = historyIndex + 1;
     const entry = history[newIndex];
     set({ document: entry.document, historyIndex: newIndex, selectedNodeId: null });
-    saveToStorage(entry.document);
+    saveAndMarkDirty(entry.document);
   },
 
   setDragSource: (source) => set({ dragSource: source }),
@@ -548,7 +575,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
     };
     pushHistory(set, get, newDoc, `Add ${template.label} section`);
     set({ document: newDoc, selectedNodeId: section.id });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   nudgeNode: (nodeId, dx, dy) => {
@@ -573,7 +600,7 @@ export const useCanvasBuilderStore = create<CanvasBuilderStore>((set, get) => ({
       updatedAt: Date.now(),
     };
     set({ document: newDoc });
-    saveToStorage(newDoc);
+    saveAndMarkDirty(newDoc);
   },
 
   getNodePath: (nodeId) => {
