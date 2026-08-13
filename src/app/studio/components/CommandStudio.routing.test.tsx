@@ -773,8 +773,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("exactly one LiTTLiveActivity instance is rendered", () => {
       render(<CommandStudio />);
-      // The Live activity component is always mounted (preserved across
-      // collapse); there must be exactly one instance in the DOM.
+      // The Live activity component is always mounted in the LiTT panel
+      // (preserved across collapse); there must be exactly one instance.
+      // The Work tab in the ContextDrawer shows a lightweight summary
+      // (LiTTWorkSummary), NOT a second LiTTLiveActivity instance.
       const liveActivities = screen.getAllByTestId("litt-live-activity");
       expect(liveActivities.length).toBe(1);
     });

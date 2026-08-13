@@ -11,6 +11,7 @@ import {
   Globe,
   FolderOpen,
   Palette,
+  Activity,
 } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -343,13 +344,13 @@ function CommandStudioContent() {
     }
   });
   const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
-    if (typeof window === "undefined") return "files";
+    if (typeof window === "undefined") return "work";
     try {
       const stored = localStorage.getItem(CONTEXT_TAB_KEY);
-      if (stored === "inspector" || stored === "assets") return stored;
-      return "files";
+      if (stored === "work" || stored === "files" || stored === "inspector" || stored === "assets") return stored;
+      return "work";
     } catch {
-      return "files";
+      return "work";
     }
   });
   useEffect(() => {
@@ -448,6 +449,21 @@ function CommandStudioContent() {
     }
     setContextDrawerTab("files");
   }, [contextDrawerOpen, contextDrawerTab]);
+
+  const handleWorkButtonClick = useCallback(() => {
+    if (!contextDrawerOpen) {
+      setContextDrawerTab("work");
+      setContextDrawerOpen(true);
+      return;
+    }
+    if (contextDrawerTab === "work") {
+      setContextDrawerOpen(false);
+      return;
+    }
+    setContextDrawerTab("work");
+  }, [contextDrawerOpen, contextDrawerTab]);
+
+  const workButtonActive = contextDrawerOpen && contextDrawerTab === "work";
 
   // Keyboard shortcut: Ctrl+Shift+A opens LiTT Activity (Live).
   useEffect(() => {
@@ -589,6 +605,20 @@ function CommandStudioContent() {
   }, []);
 
   const [creatingProject, setCreatingProject] = useState(false);
+
+  // Auto-reveal Work tab when LiTT starts executing, without stealing focus.
+  // When the agent becomes busy, switch the right rail to the Work tab so
+  // the user can see live execution. This does NOT call .focus() on any
+  // element — the user's current focus (e.g., the composer) is preserved.
+  const prevBusyRef = useRef(false);
+  useEffect(() => {
+    const isBusy = conversation.busy || creatingProject;
+    if (isBusy && !prevBusyRef.current) {
+      setContextDrawerTab("work");
+      setContextDrawerOpen(true);
+    }
+    prevBusyRef.current = isBusy;
+  }, [conversation.busy, creatingProject]);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
     // The canonical controller provisions a starter project and conversation
@@ -1195,12 +1225,44 @@ function CommandStudioContent() {
               })}
 
               {/* Visual divider — separates workspace stages from context controls.
-                  Files is NOT a workspace stage; it opens the right Context Drawer. */}
+                  Work and Files are NOT workspace stages; they open the right
+                  Context Drawer. Work shows LiTT's live execution activity.
+                  Files shows the project file tree. */}
               <div
                 className="mx-1 h-5 w-px shrink-0"
                 style={{ backgroundColor: "rgba(155,77,255,0.15)" }}
                 aria-hidden
               />
+
+              {/* Work toggle — opens Context Drawer on the right, on the
+                  Work tab. Shows LiTT's live execution: tool calls, file
+                  edits, commands, checks, previews. This is where users
+                  watch their agent work in real time. */}
+              <button
+                type="button"
+                onClick={handleWorkButtonClick}
+                className={`relative flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-bold transition-all ${workButtonActive ? "glass-active" : ""}`}
+                style={{
+                  color: workButtonActive ? "var(--text-main)" : "var(--text-dim)",
+                  backgroundColor: workButtonActive ? "var(--purple-soft)" : "transparent",
+                }}
+                aria-label="Work — view LiTT live activity"
+                aria-pressed={workButtonActive}
+                data-testid="workspace-tab-work"
+              >
+                <Activity size={13} className="pointer-events-none" style={{ opacity: 0.7 }} />
+                Work
+                {workButtonActive && (
+                  <span
+                    className="absolute -bottom-px left-2 right-2 h-0.5 rounded-full"
+                    style={{
+                      background: "var(--purple)",
+                      boxShadow: "0 0 6px rgba(139,92,246,0.5)",
+                    }}
+                    aria-hidden
+                  />
+                )}
+              </button>
 
               {/* Files toggle — opens Context Drawer on the right, on the
                   Files tab specifically (Phase C2.1). Only highlighted
@@ -1400,6 +1462,13 @@ function CommandStudioContent() {
             onTabChange={setContextDrawerTab}
             onClose={() => setContextDrawerOpen(false)}
             width={contextResize.width}
+            workContent={
+              <LiTTWorkSummary
+                busy={conversation.busy || creatingProject}
+                messages={conversation.messages}
+                onOpenLiveTab={() => setLittActiveTab("live")}
+              />
+            }
             filesContent={
               <div className="flex h-full flex-col overflow-hidden">
                 <div
@@ -1834,5 +1903,111 @@ function ScreenDock({ pos, onClose, onMove }: { pos: DockPosition; onClose: () =
     <DockFrame pos={pos} label="Screen" onClose={onClose} onMove={onMove}>
       <ScreenTool />
     </DockFrame>
+  );
+}
+
+// ─── LiTT Work Summary ──────────────────────────────────────────
+// Compact live execution summary for the right-side Work tab.
+// Shows working state, recent tool calls, file edits, and a link to
+// open the full Live activity in the LiTT panel.
+// Does NOT duplicate the LiTTLiveActivity component — this is a
+// lightweight summary derived from the conversation messages.
+function LiTTWorkSummary({
+  busy,
+  messages,
+  onOpenLiveTab,
+}: {
+  busy: boolean;
+  messages: import("../stores/useStudioAgentStore").ChatMessage[];
+  onOpenLiveTab: () => void;
+}) {
+  // Count recent assistant messages with actions (tool calls / canvas actions)
+  const recentActions = messages
+    .filter((m) => m.role === "assistant" && m.actions && m.actions.length > 0)
+    .slice(-5)
+    .flatMap((m) => m.actions ?? []);
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Header — working state indicator */}
+      <div
+        className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5"
+        style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,9,22,0.6)" }}
+      >
+        <div
+          className={`h-2 w-2 rounded-full ${busy ? "animate-pulse" : ""}`}
+          style={{
+            backgroundColor: busy ? "var(--litt-primary)" : "var(--text-muted)",
+            boxShadow: busy ? "0 0 6px var(--litt-primary)" : "none",
+          }}
+        />
+        <span
+          className="text-[11px] font-black uppercase tracking-[0.12em]"
+          style={{ color: busy ? "var(--litt-primary)" : "var(--text-secondary)" }}
+        >
+          {busy ? "Working" : "Idle"}
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onOpenLiveTab}
+          className="rounded-md px-2 py-1 text-[10px] font-bold transition hover:bg-white/10"
+          style={{ color: "var(--text-muted)" }}
+          aria-label="Open full Live activity in LiTT panel"
+        >
+          Full Live →
+        </button>
+      </div>
+
+      {/* Body — scrollable summary */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        {busy && (
+          <div className="mb-3 flex items-center gap-2">
+            <div
+              className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
+              style={{ borderColor: "var(--litt-primary)", borderTopColor: "transparent" }}
+            />
+            <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
+              LiTT is executing...
+            </span>
+          </div>
+        )}
+
+        {/* Recent actions */}
+        {recentActions.length > 0 && (
+          <div className="mb-3">
+            <div
+              className="mb-1.5 text-[10px] font-black uppercase tracking-[0.1em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Recent Actions
+            </div>
+            {recentActions.slice(-8).map((action, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 py-0.5 text-[11px] font-mono"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <span style={{ color: "var(--litt-primary)" }}>→</span>
+                <span className="truncate">{action.type}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!busy && recentActions.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 py-8">
+            <Activity size={24} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
+            <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+              No active work
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text-muted)", opacity: 0.6 }}>
+              Send a message to LiTT to start
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
