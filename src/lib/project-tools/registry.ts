@@ -1215,6 +1215,16 @@ import {
   toolGithubSearchCode, toolGithubListPullRequests, toolGithubReadFile,
 } from "@/lib/project-tools/extended-handlers";
 
+// ─── Growth Engine tool handlers (imported from separate file) ──
+import {
+  toolGrowthCreateCampaign,
+  toolGrowthGenerateContent,
+  toolGrowthListDrafts,
+  toolGrowthRewritePost,
+  toolGrowthApprovePost,
+  toolGrowthMarkPublished,
+} from "@/lib/project-tools/growth-handlers";
+
 // ─── Registry ───────────────────────────────────────────────────
 
 /**
@@ -1271,6 +1281,13 @@ export const PROJECT_TOOLS: Record<string, {
   github_search_code: { handler: toolGithubSearchCode, metadata: { projectScoped: false, mutating: false, readOnly: true } },
   github_list_pull_requests: { handler: toolGithubListPullRequests, metadata: { projectScoped: true, mutating: false, readOnly: true } },
   github_read_file: { handler: toolGithubReadFile, metadata: { projectScoped: true, mutating: false, readOnly: true } },
+  // Growth Engine — Phase 1a (manual mode, no paid API calls)
+  growth_create_campaign: { handler: toolGrowthCreateCampaign, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  growth_generate_content: { handler: toolGrowthGenerateContent, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  growth_list_drafts: { handler: toolGrowthListDrafts, metadata: { projectScoped: false, mutating: false, readOnly: true } },
+  growth_rewrite_post: { handler: toolGrowthRewritePost, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  growth_approve_post: { handler: toolGrowthApprovePost, metadata: { projectScoped: false, mutating: true, readOnly: false } },
+  growth_mark_published: { handler: toolGrowthMarkPublished, metadata: { projectScoped: false, mutating: true, readOnly: false } },
 };
 
 /**
