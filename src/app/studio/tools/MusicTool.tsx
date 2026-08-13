@@ -48,6 +48,7 @@ import {
   Moon,
 } from "lucide-react";
 import { apiFetch, type ApiJson } from "@/lib/api-response";
+import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
 import TrackCard from "../components/music/TrackCard";
 
 const MUSIC_LBC_COST = {
@@ -401,6 +402,10 @@ export default function MusicTool() {
   useEffect(() => {
     if (status === "completed") {
       void refresh();
+      // Notify the Asset Lake that new persistent music tracks exist.
+      // The server already created music_tracks rows — the Assets
+      // panel just needs to refresh to pick them up.
+      notifyAssetsChanged();
     }
   }, [status, refresh]);
 

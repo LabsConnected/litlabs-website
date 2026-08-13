@@ -13,6 +13,10 @@
  * - Does NOT duplicate routing
  * - Does NOT create another global state store
  *
+ * The creator kind is derived SOLELY from StudioContext — there is no
+ * competing `creator` prop. If StudioContext.creator is null, the host
+ * is not mounted (the caller must guard against this).
+ *
  * The existing creators (ImageTool, VideoTool, MusicTool, AudioTool,
  * DesignCanvas, SpaceTool) are rendered as children. They can opt-in
  * to asset registration via the useAssetRegistration hook.
@@ -25,7 +29,7 @@ import type { CreatorKind } from "@/app/studio/lib/studio-destinations";
 // ─── Creator host context ────────────────────────────────────────
 
 export interface StudioCreatorHostContextValue {
-  /** The canonical creator kind for this host. */
+  /** The canonical creator kind for this host (from StudioContext). */
   creator: CreatorKind;
   /** Project ID from StudioContext (null if no project). */
   projectId: string | null;
@@ -52,19 +56,27 @@ export function useCreatorHost(): StudioCreatorHostContextValue {
 // ─── Provider ────────────────────────────────────────────────────
 
 export interface StudioCreatorHostProps {
-  /** The canonical creator kind. */
-  creator: CreatorKind;
   /** The existing creator implementation to render. */
   children: ReactNode;
 }
 
 /**
  * StudioCreatorHost — wraps a creator implementation with canonical
- * Studio context. The creator can access context via useStudioContext()
- * or useCreatorHost().
+ * Studio context. The creator kind is read from StudioContext; there
+ * is no competing `creator` prop.
+ *
+ * If StudioContext.creator is null, this throws — callers must guard
+ * against mounting the host when no creator is active.
  */
-export function StudioCreatorHost({ creator, children }: StudioCreatorHostProps) {
-  const { projectId, sessionId } = useStudioContext();
+export function StudioCreatorHost({ children }: StudioCreatorHostProps) {
+  const { projectId, sessionId, creator } = useStudioContext();
+
+  if (!creator) {
+    throw new Error(
+      "StudioCreatorHost requires an active creator in StudioContext. " +
+        "Do not mount the host when creator is null.",
+    );
+  }
 
   const value: StudioCreatorHostContextValue = {
     creator,

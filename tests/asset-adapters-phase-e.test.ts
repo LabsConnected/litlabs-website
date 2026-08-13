@@ -222,6 +222,41 @@ describe("generation_jobs adapter", () => {
       const asset = generationJobToStudioAsset(job);
       expect(asset!.name).toBe("My Generated Image");
     });
+
+    it("reads projectId from metadata when present (E.1.8)", () => {
+      const job = makeGenerationJob({
+        metadata: {
+          durableUrl: "https://cdn.litlabs.net/img.png",
+          projectId: "proj-uuid-001",
+        },
+      });
+      const asset = generationJobToStudioAsset(job);
+      expect(asset).not.toBeNull();
+      expect(asset!.projectId).toBe("proj-uuid-001");
+    });
+
+    it("returns null projectId when metadata has no projectId (E.1.8)", () => {
+      const job = makeGenerationJob({
+        metadata: {
+          durableUrl: "https://cdn.litlabs.net/img.png",
+        },
+      });
+      const asset = generationJobToStudioAsset(job);
+      expect(asset).not.toBeNull();
+      expect(asset!.projectId).toBeNull();
+    });
+
+    it("returns null projectId when metadata projectId is empty string", () => {
+      const job = makeGenerationJob({
+        metadata: {
+          durableUrl: "https://cdn.litlabs.net/img.png",
+          projectId: "",
+        },
+      });
+      const asset = generationJobToStudioAsset(job);
+      expect(asset).not.toBeNull();
+      expect(asset!.projectId).toBeNull();
+    });
   });
 
   describe("generationJobsToStudioAssets (batch)", () => {

@@ -127,9 +127,18 @@ export function generationJobToStudioAsset(
   const mimeType = extractMimeType(job);
   const durationSeconds = extractDurationSeconds(job);
 
+  // generation_jobs has no project_id column. Project association is
+  // stored in metadata.projectId when provided during registration.
+  // If no project binding exists, null is correct.
+  const meta = job.metadata as Record<string, unknown>;
+  const projectId =
+    typeof meta.projectId === "string" && meta.projectId.length > 0
+      ? meta.projectId
+      : null;
+
   const asset: StudioAsset = {
     id: buildCanonicalId("generation_job", job.id),
-    projectId: null, // generation_jobs has no project_id column
+    projectId,
     kind,
     source: "generated" as AssetSource,
     name: deriveName(job),

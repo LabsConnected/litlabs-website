@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { listStudioAssets } from "@/lib/assets/repository";
-import { registerStudioAsset } from "@/lib/assets/registration";
+import { registerStudioAsset, isRegisterableAssetKind, type RegisterableAssetKind } from "@/lib/assets/registration";
 import { isAssetKind, type AssetKind } from "@/lib/assets/types";
 
 export const dynamic = "force-dynamic";
@@ -104,22 +104,26 @@ export async function GET(req: NextRequest) {
  *
  * Register a creator output as an asset in the Asset Lake.
  *
- * This is the WRITE/REGISTRATION seam for creator outputs that are
- * currently browser-only or not yet in a source the Asset Lake can read.
- * It creates a generation_jobs record with the durable URL and metadata,
- * making the asset visible to the READ adapter.
+ * This is the WRITE/REGISTRATION seam for creator outputs that have
+ * a durable URL but are NOT already in a source the Asset Lake can read.
  *
- * For outputs already in generation_jobs (e.g., Image generation), no
- * separate registration is needed — the READ adapter picks them up.
+ * For outputs already in generation_jobs (Image) or music_tracks (Music),
+ * no separate registration is needed — the READ adapters pick them up.
  *
- * Request body:
- *   kind        — required: image, video, music, audio
- *   url         — required: durable URL of the asset
- *   thumbnailUrl, mimeType, provider, model, prompt,
- *   width, height, durationSeconds, costCredits — optional metadata
- *   projectId   — optional, verified server-side
- *   requestId   — optional idempotency key
- *   metadata    — optional additional metadata
+ * Registerable kinds: image, video, music, audio.
+ * design, code, and game are NOT registerable via this endpoint.
+ *
+ * Required fields (no fabricated provenance):
+ *   kind      — image, video, music, or audio
+ *   url       — durable HTTP(S) URL (blob: and data: rejected)
+ *   provider  — real provider name (e.g., "fal", "veo", "gemini")
+ *   model     — real model name
+ *   prompt    — real generation prompt
+ *
+ * Optional fields:
+ *   thumbnailUrl, mimeType, width, height, durationSeconds,
+ *   costCredits (default 0), projectId (verified), requestId,
+ *   metadata (reserved keys protected from override)
  *
  * Response:
  *   { asset: StudioAsset, replayed: boolean }
@@ -137,32 +141,76 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  // Validate required fields.
+  // Validate kind — must be a RegisterableAssetKind, not just any AssetKind.
   const kind = body.kind;
-  if (typeof kind !== "string" || !isAssetKind(kind)) {
+  if (typeof kind !== "string") {
     return NextResponse.json(
-      { error: `Invalid or missing 'kind'. Valid values: image, video, music, audio, design, code, game.` },
+      { error: "Missing 'kind'. Registerable values: image, video, music, audio." },
+      { status: 400 },
+    );
+  }
+  if (!isRegisterableAssetKind(kind)) {
+    return NextResponse.json(
+      { error: `Kind '${kind}' is not registerable via POST /api/assets. Registerable values: image, video, music, audio. design, code, and game require a different persistence strategy.` },
       { status: 400 },
     );
   }
 
+  // Validate URL — must be a durable HTTP(S) URL.
   const url = body.url;
-  if (typeof url !== "string" || !url.startsWith("http")) {
+  if (typeof url !== "string" || !url) {
     return NextResponse.json(
-      { error: "Invalid or missing 'url'. Must be a valid HTTP(S) URL." },
+      { error: "Missing 'url'. Must be a durable HTTP(S) URL." },
+      { status: 400 },
+    );
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return NextResponse.json(
+        { error: `URL scheme '${parsed.protocol}' is not accepted. Must be HTTP(S). blob: and data: URLs are not durable.` },
+        { status: 400 },
+      );
+    }
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid 'url'. Must be a valid HTTP(S) URL." },
+      { status: 400 },
+    );
+  }
+
+  // Validate required provenance — no fabrication.
+  const provider = body.provider;
+  if (typeof provider !== "string" || !provider) {
+    return NextResponse.json(
+      { error: "Missing 'provider'. Real provider name is required — no fabricated provenance." },
+      { status: 400 },
+    );
+  }
+  const model = body.model;
+  if (typeof model !== "string" || !model) {
+    return NextResponse.json(
+      { error: "Missing 'model'. Real model name is required — no fabricated provenance." },
+      { status: 400 },
+    );
+  }
+  const prompt = body.prompt;
+  if (typeof prompt !== "string" || !prompt) {
+    return NextResponse.json(
+      { error: "Missing 'prompt'. Real generation prompt is required — no fabricated provenance." },
       { status: 400 },
     );
   }
 
   // Build registration input with type-safe optional fields.
   const input = {
-    kind: kind as AssetKind,
+    kind: kind as RegisterableAssetKind,
     url,
+    provider,
+    model,
+    prompt,
     thumbnailUrl: typeof body.thumbnailUrl === "string" ? body.thumbnailUrl : undefined,
     mimeType: typeof body.mimeType === "string" ? body.mimeType : undefined,
-    provider: typeof body.provider === "string" ? body.provider : undefined,
-    model: typeof body.model === "string" ? body.model : undefined,
-    prompt: typeof body.prompt === "string" ? body.prompt : undefined,
     width: typeof body.width === "number" ? body.width : undefined,
     height: typeof body.height === "number" ? body.height : undefined,
     durationSeconds: typeof body.durationSeconds === "number" ? body.durationSeconds : undefined,

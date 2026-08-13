@@ -5,27 +5,44 @@
  * outputs as assets in the Asset Lake.
  *
  * This is the WRITE seam that creators call after a successful
- * generation. It posts to /api/assets and returns the canonical
- * StudioAsset.
+ * PERSISTENT generation with a durable URL. It posts to /api/assets
+ * and returns the canonical StudioAsset.
+ *
+ * Truthfulness rules (Phase E.1):
+ * - provider, model, and prompt are REQUIRED — no fabricated provenance.
+ * - url must be a durable HTTP(S) URL — blob: and data: are rejected.
+ * - Only registerable kinds (image, video, music, audio) are accepted.
+ * - Do NOT call this for browser-only temporary previews.
  *
  * Usage:
  *   const { register, loading, error } = useAssetRegistration();
- *   const { asset } = await register({ kind: "image", url, provider, ... });
+ *   const { asset } = await register({
+ *     kind: "image",
+ *     url: durableUrl,
+ *     provider: "fal",
+ *     model: "flux-1-schnell",
+ *     prompt: "A neon city skyline at dusk",
+ *   });
  */
 
 import { useState, useCallback } from "react";
 import { useStudioContext } from "@/app/studio/context/StudioContext";
 import { notifyAssetsChanged } from "@/app/studio/hooks/useAssetsRefresh";
-import type { AssetKind, StudioAsset } from "@/lib/assets/types";
+import type { StudioAsset } from "@/lib/assets/types";
+import type { RegisterableAssetKind } from "@/lib/assets/registration";
 
 export interface RegisterAssetParams {
-  kind: AssetKind;
+  kind: RegisterableAssetKind;
+  /** Durable HTTP(S) URL — blob: and data: are rejected. */
   url: string;
+  /** Real provider name — REQUIRED, no fabrication. */
+  provider: string;
+  /** Real model name — REQUIRED, no fabrication. */
+  model: string;
+  /** Real generation prompt — REQUIRED, no fabrication. */
+  prompt: string;
   thumbnailUrl?: string;
   mimeType?: string;
-  provider?: string;
-  model?: string;
-  prompt?: string;
   width?: number;
   height?: number;
   durationSeconds?: number;
@@ -57,11 +74,11 @@ export function useAssetRegistration(): UseAssetRegistrationResult {
         const body: Record<string, unknown> = {
           kind: params.kind,
           url: params.url,
+          provider: params.provider,
+          model: params.model,
+          prompt: params.prompt,
           ...(params.thumbnailUrl && { thumbnailUrl: params.thumbnailUrl }),
           ...(params.mimeType && { mimeType: params.mimeType }),
-          ...(params.provider && { provider: params.provider }),
-          ...(params.model && { model: params.model }),
-          ...(params.prompt && { prompt: params.prompt }),
           ...(params.width && { width: params.width }),
           ...(params.height && { height: params.height }),
           ...(params.durationSeconds && { durationSeconds: params.durationSeconds }),

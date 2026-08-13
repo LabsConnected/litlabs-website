@@ -146,7 +146,14 @@ async function fetchGenerationJobs(
 
 /**
  * Fetch the authenticated user's own music_tracks and convert to StudioAssets.
- * Constructs the audio URL from the R2 storage key via the tracks API pattern.
+ * Constructs audio URLs from the R2 storage key:
+ *   - Public tracks: public R2 URL via getPublicAudioUrl()
+ *   - Private/unlisted tracks: signed R2 URL via getSignedAudioUrl()
+ *
+ * This ensures ALL owned tracks are visible in Asset Lake, not just public
+ * ones. Private tracks get time-limited signed URLs (1 hour) that are
+ * valid for the owner. The signed URL mechanism reuses the existing
+ * authenticated playback path — no public exposure of private audio.
  */
 async function fetchMusicTracks(
   internalUserId: string,
@@ -154,9 +161,6 @@ async function fetchMusicTracks(
 ): Promise<StudioAsset[]> {
   if (!supabaseAdmin) return [];
 
-  // Query music_tracks with a join to get the audio URL.
-  // The audio_url is constructed server-side from the R2 storage key.
-  // For the Asset Lake, we query the tracks and construct URLs.
   const { data, error } = await supabaseAdmin
     .from("music_tracks")
     .select(`
@@ -171,37 +175,52 @@ async function fetchMusicTracks(
 
   if (error || !data) return [];
 
-  // Construct audio URLs from storage keys.
-  // Public tracks use the public R2 URL; private tracks need signed URLs.
-  // For the Asset Lake read layer, we construct public URLs for public tracks
-  // and skip private tracks that need signed URLs (the /api/music/tracks
-  // endpoint handles signed URL generation for playback).
   const tracks = data as MusicTrackRow[];
-  const tracksWithUrls = tracks.map((track) => {
-    // Construct URL from R2 storage key for public tracks.
-    // Private tracks are handled by the music tracks API for playback.
-    if (track.visibility === "public") {
-      const r2PublicUrl = constructR2PublicUrl(track.audio_storage_key);
-      return { ...track, audio_url: r2PublicUrl };
-    }
-    // For private/unlisted tracks, we still include them but without
-    // a playable URL — the Assets panel can show metadata and the
-    // music player handles signed URL generation on demand.
-    return { ...track, audio_url: null };
-  });
+
+  // Resolve audio URLs for each track.
+  // Public tracks get public URLs; private/unlisted get signed URLs.
+  // Signed URL generation is async, so we resolve in parallel.
+  const tracksWithUrls = await Promise.all(
+    tracks.map(async (track) => {
+      const audioUrl = await resolveTrackAudioUrlForAssetLake(
+        internalUserId,
+        track.audio_storage_key,
+        track.visibility,
+      );
+      return { ...track, audio_url: audioUrl };
+    }),
+  );
 
   return musicTracksToStudioAssets(tracksWithUrls);
 }
 
 /**
- * Construct a public R2 URL from a storage key.
- * Returns null if the R2 configuration is incomplete.
+ * Resolve a playable audio URL for a music track in the Asset Lake.
+ *
+ * - Public tracks: use getPublicAudioUrl() (no ownership check needed).
+ * - Private/unlisted tracks: use getSignedAudioUrl() with ownership
+ *   validation. The signed URL expires in 1 hour.
+ *
+ * Returns null if URL resolution fails (R2 not configured, etc.).
+ * Never fabricates a URL or makes private tracks public.
  */
-function constructR2PublicUrl(storageKey: string): string | null {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const publicBucket = process.env.NEXT_PUBLIC_R2_PUBLIC_BUCKET;
-  if (!accountId || !publicBucket) return null;
-  return `https://${accountId}.r2.dev/${publicBucket}/${storageKey}`;
+async function resolveTrackAudioUrlForAssetLake(
+  internalUserId: string,
+  storageKey: string,
+  visibility: "private" | "unlisted" | "public",
+): Promise<string | null> {
+  try {
+    if (visibility === "public") {
+      const { getPublicAudioUrl } = await import("@/lib/r2");
+      return getPublicAudioUrl(storageKey);
+    }
+    // Private/unlisted: generate a signed URL with ownership validation.
+    const { getSignedAudioUrl } = await import("@/lib/r2");
+    return await getSignedAudioUrl(internalUserId, storageKey, 3600);
+  } catch {
+    // R2 not configured or ownership validation failed.
+    return null;
+  }
 }
 
 /**
@@ -378,10 +397,13 @@ export async function getStudioAsset(
     }
 
     const track = data as MusicTrackRow;
-    // Construct URL for public tracks.
-    if (track.visibility === "public") {
-      track.audio_url = constructR2PublicUrl(track.audio_storage_key);
-    }
+    // Resolve audio URL: public tracks get public URL,
+    // private/unlisted get signed URL with ownership validation.
+    track.audio_url = await resolveTrackAudioUrlForAssetLake(
+      internalUserId,
+      track.audio_storage_key,
+      track.visibility,
+    );
     const { musicTrackToStudioAsset } = await import("./adapters/music-track");
     return { asset: musicTrackToStudioAsset(track), error: null };
   }

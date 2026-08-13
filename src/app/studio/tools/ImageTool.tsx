@@ -43,6 +43,7 @@ import GenerationHistoryCard from "../components/GenerationHistoryCard";
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
 import { apiFetch, type ApiJson } from "@/lib/api-response";
+import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
 
 type Workspace = {
   id: string;
@@ -1071,6 +1072,11 @@ export default function ImageTool() {
           `[${i + 1}/${batchSize}] ✓ Done · ${isFree ? "FREE" : dataCost + " 🪙"}`,
         );
         refreshWallet().catch(() => {});
+
+        // Notify the Asset Lake that a new persistent asset exists.
+        // The server already created a generation_jobs row — the
+        // Assets panel just needs to refresh to pick it up.
+        notifyAssetsChanged();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Generation failed";
         addLog("error", `[${i + 1}/${batchSize}] ${msg}`);

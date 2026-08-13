@@ -1235,9 +1235,13 @@ function CommandStudioContent() {
                   </div>
                 ) : WorkspaceComponent ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-                    <StudioCreatorHost creator={studioCreator ?? "image"}>
+                    {studioCreator ? (
+                      <StudioCreatorHost>
+                        <WorkspaceComponent projectId={capabilities.projectId} />
+                      </StudioCreatorHost>
+                    ) : (
                       <WorkspaceComponent projectId={capabilities.projectId} />
-                    </StudioCreatorHost>
+                    )}
                   </div>
                 ) : (
                   <StudioUnavailableSurface

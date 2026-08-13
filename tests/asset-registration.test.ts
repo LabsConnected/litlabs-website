@@ -6,6 +6,12 @@ import { NextRequest } from "next/server";
  *
  * These tests mock the auth and registration layers to verify
  * the API contract without hitting real databases or providers.
+ *
+ * Phase E.1 contract changes:
+ * - Only RegisterableAssetKind (image, video, music, audio) accepted.
+ * - design, code, game are rejected at the API level (400).
+ * - provider, model, prompt are REQUIRED — no fabricated provenance.
+ * - URL must be durable HTTP(S) — blob: and data: rejected.
  */
 
 // Mock auth before importing the route.
@@ -16,6 +22,9 @@ vi.mock("@/lib/auth", () => ({
 // Mock registration before importing the route.
 vi.mock("@/lib/assets/registration", () => ({
   registerStudioAsset: vi.fn(),
+  isRegisterableAssetKind: vi.fn((kind: string) =>
+    ["image", "video", "music", "audio"].includes(kind),
+  ),
 }));
 
 // Mock the repository read (not used in POST, but imported).
@@ -38,6 +47,14 @@ function makeReq(body: Record<string, unknown>): NextRequest {
   });
 }
 
+const VALID_INPUT = {
+  kind: "image",
+  url: "https://cdn.litlabs.net/img.png",
+  provider: "fal",
+  model: "flux-1-schnell",
+  prompt: "A neon city skyline at dusk",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -45,33 +62,85 @@ beforeEach(() => {
 describe("POST /api/assets — registration endpoint", () => {
   it("rejects unauthenticated requests", async () => {
     mockAuth.mockResolvedValue({ userId: null } as never);
-    const res = await POST(makeReq({ kind: "image", url: "https://example.com/img.png" }));
+    const res = await POST(makeReq(VALID_INPUT));
     expect(res.status).toBe(401);
   });
 
   it("rejects missing kind", async () => {
     mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
-    const res = await POST(makeReq({ url: "https://example.com/img.png" }));
+    const res = await POST(makeReq({ ...VALID_INPUT, kind: undefined }));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain("kind");
   });
 
-  it("rejects invalid kind", async () => {
+  it("rejects non-registerable kind (design)", async () => {
     mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
-    const res = await POST(makeReq({ kind: "invalid", url: "https://example.com/img.png" }));
+    const res = await POST(makeReq({ ...VALID_INPUT, kind: "design" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("not registerable");
+  });
+
+  it("rejects non-registerable kind (code)", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, kind: "code" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-registerable kind (game)", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, kind: "game" }));
     expect(res.status).toBe(400);
   });
 
   it("rejects missing url", async () => {
     mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
-    const res = await POST(makeReq({ kind: "image" }));
+    const res = await POST(makeReq({ ...VALID_INPUT, url: undefined }));
     expect(res.status).toBe(400);
   });
 
-  it("rejects non-HTTP url", async () => {
+  it("rejects blob: url", async () => {
     mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
-    const res = await POST(makeReq({ kind: "image", url: "blob:abc123" }));
+    const res = await POST(makeReq({ ...VALID_INPUT, url: "blob:abc123" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("HTTP");
+  });
+
+  it("rejects data: url", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, url: "data:image/png;base64,abc" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects missing provider (no fabricated provenance)", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, provider: undefined }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("provider");
+  });
+
+  it("rejects missing model (no fabricated provenance)", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, model: undefined }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("model");
+  });
+
+  it("rejects missing prompt (no fabricated provenance)", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, prompt: undefined }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("prompt");
+  });
+
+  it("rejects empty-string provider", async () => {
+    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
+    const res = await POST(makeReq({ ...VALID_INPUT, provider: "" }));
     expect(res.status).toBe(400);
   });
 
@@ -102,12 +171,7 @@ describe("POST /api/assets — registration endpoint", () => {
       replayed: false,
     } as never);
 
-    const res = await POST(makeReq({
-      kind: "image",
-      url: "https://cdn.litlabs.net/img.png",
-      provider: "fal",
-      prompt: "A neon city",
-    }));
+    const res = await POST(makeReq(VALID_INPUT));
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.asset.id).toBe("generation_job:abc-123");
@@ -130,11 +194,7 @@ describe("POST /api/assets — registration endpoint", () => {
       replayed: true,
     } as never);
 
-    const res = await POST(makeReq({
-      kind: "image",
-      url: "https://cdn.litlabs.net/img.png",
-      requestId: "existing-req-001",
-    }));
+    const res = await POST(makeReq({ ...VALID_INPUT, requestId: "existing-req-001" }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.replayed).toBe(true);
@@ -148,27 +208,8 @@ describe("POST /api/assets — registration endpoint", () => {
       replayed: false,
     } as never);
 
-    const res = await POST(makeReq({
-      kind: "image",
-      url: "https://cdn.litlabs.net/img.png",
-      projectId: "someone-elses-project",
-    }));
+    const res = await POST(makeReq({ ...VALID_INPUT, projectId: "someone-elses-project" }));
     expect(res.status).toBe(403);
-  });
-
-  it("returns 400 for non-generation kind (design)", async () => {
-    mockAuth.mockResolvedValue({ userId: "clerk-123" } as never);
-    mockRegister.mockResolvedValue({
-      asset: null,
-      error: "Asset kind 'design' is not a generation modality. Use a different persistence strategy.",
-      replayed: false,
-    } as never);
-
-    const res = await POST(makeReq({
-      kind: "design",
-      url: "https://cdn.litlabs.net/design.html",
-    }));
-    expect(res.status).toBe(400);
   });
 
   it("passes projectId to registration", async () => {
@@ -179,11 +220,7 @@ describe("POST /api/assets — registration endpoint", () => {
       replayed: false,
     } as never);
 
-    await POST(makeReq({
-      kind: "image",
-      url: "https://cdn.litlabs.net/img.png",
-      projectId: "proj-001",
-    }));
+    await POST(makeReq({ ...VALID_INPUT, projectId: "proj-001" }));
 
     expect(mockRegister).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "proj-001" }),
@@ -200,13 +237,11 @@ describe("POST /api/assets — registration endpoint", () => {
     } as never);
 
     await POST(makeReq({
+      ...VALID_INPUT,
       kind: "video",
       url: "https://cdn.litlabs.net/video.mp4",
       thumbnailUrl: "https://cdn.litlabs.net/thumb.jpg",
       mimeType: "video/mp4",
-      provider: "veo",
-      model: "veo-3.1",
-      prompt: "A cat playing piano",
       width: 1920,
       height: 1080,
       durationSeconds: 5,
@@ -220,9 +255,6 @@ describe("POST /api/assets — registration endpoint", () => {
         url: "https://cdn.litlabs.net/video.mp4",
         thumbnailUrl: "https://cdn.litlabs.net/thumb.jpg",
         mimeType: "video/mp4",
-        provider: "veo",
-        model: "veo-3.1",
-        prompt: "A cat playing piano",
         width: 1920,
         height: 1080,
         durationSeconds: 5,
