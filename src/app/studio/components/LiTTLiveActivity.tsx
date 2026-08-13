@@ -571,6 +571,14 @@ function getEventConfig(event: ExecutionEvent): {
       return { icon: XCircle, color: "var(--error)" };
     case "reasoning":
       return { icon: Circle, color: "var(--text-muted)" };
+    case "status":
+      return { icon: Activity, color: "var(--text-secondary)" };
+    case "model_routing":
+      return { icon: GitBranch, color: event.fallbackFrom ? "#e3b341" : "var(--text-secondary)" };
+    case "model_failed":
+      return { icon: XCircle, color: "var(--error)" };
+    case "repair_attempt":
+      return { icon: RotateCcw, color: "#e3b341", spin: true };
     default:
       return { icon: Circle, color: "var(--text-muted)" };
   }

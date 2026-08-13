@@ -194,8 +194,9 @@ export async function runAgentLoopV2(
 
     stepsUsed++;
     localProgress.emit({ type: "phase", phase: "call_llm", step: stepsUsed });
+    localProgress.emit({ type: "status", summary: `Step ${stepsUsed}: reasoning with ${cfg.model ?? "default model"}` });
 
-    // Call LLM with tools
+    // Call LLM with tools (with automatic fallback)
     let llmResponse;
     try {
       llmResponse = await callLLMWithTools(
@@ -209,15 +210,45 @@ export async function runAgentLoopV2(
           evalMetadata: cfg.evalMetadata,
         },
       );
+      // Emit model routing event so LiTT Live shows which model was actually used
+      localProgress.emit({
+        type: "model_routing",
+        model: llmResponse.model,
+        provider: "openrouter",
+        fallbackFrom: cfg.model && llmResponse.model !== cfg.model ? cfg.model : undefined,
+      });
     } catch (err) {
-      finalText = `I encountered an error while reasoning: ${err instanceof Error ? err.message : String(err)}`;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Emit model failure event with sanitized error (no secrets)
+      localProgress.emit({
+        type: "model_failed",
+        model: cfg.model ?? "default",
+        category: "all_fallbacks_exhausted",
+        message: errMsg.slice(0, 200),
+      });
+      finalText = `I encountered an error while reasoning: ${errMsg}`;
       break;
     }
 
     // If no tool calls, we're done — the LLM produced a final answer
     if (llmResponse.toolCalls.length === 0) {
       finalText = llmResponse.text;
+      // Emit a reasoning summary so LiTT Live shows the final reasoning step
+      if (llmResponse.text) {
+        localProgress.emit({
+          type: "reasoning",
+          summary: llmResponse.text.slice(0, 150),
+        });
+      }
       break;
+    }
+
+    // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
+    if (llmResponse.text) {
+      localProgress.emit({
+        type: "reasoning",
+        summary: llmResponse.text.slice(0, 150),
+      });
     }
 
     // Add assistant message with tool calls to conversation

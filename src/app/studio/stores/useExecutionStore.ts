@@ -40,7 +40,11 @@ export interface ExecutionEvent {
     | "approval_resolved"
     | "finished"
     | "cancelled"
-    | "reasoning";
+    | "reasoning"
+    | "status"
+    | "model_routing"
+    | "model_failed"
+    | "repair_attempt";
   /** Human-readable summary (NOT chain-of-thought) */
   summary: string;
   /** Tool ID for tool events */
@@ -70,6 +74,16 @@ export interface ExecutionEvent {
   filePath?: string;
   /** Associated diff (for edit operations) */
   diff?: string;
+  /** Model name for model_routing events */
+  model?: string;
+  /** Provider for model_routing events */
+  provider?: string;
+  /** Fallback source model for model_routing events */
+  fallbackFrom?: string;
+  /** Failure category for model_failed events */
+  category?: string;
+  /** Error message for model_failed events (sanitized, no secrets) */
+  message?: string;
 }
 
 export interface PendingApproval {
@@ -333,6 +347,15 @@ export function feedSSEEventToExecutionStore(
     phase?: string;
     step?: number;
     durationMs?: number;
+    totalSteps?: number;
+    totalDurationMs?: number;
+    model?: string;
+    provider?: string;
+    fallbackFrom?: string;
+    category?: string;
+    message?: string;
+    attempt?: number;
+    maxAttempts?: number;
   },
   store = useExecutionStore,
 ) {
@@ -410,8 +433,8 @@ export function feedSSEEventToExecutionStore(
     case "finished":
       s.addEvent({
         type: "finished",
-        summary: `Completed in ${evt.step ?? 0} steps`,
-        step: evt.step,
+        summary: `Completed in ${evt.totalSteps ?? evt.step ?? 0} steps`,
+        step: evt.totalSteps ?? evt.step,
       });
       s.collapseLowLevel();
       break;
@@ -420,6 +443,51 @@ export function feedSSEEventToExecutionStore(
       s.addEvent({
         type: "cancelled",
         summary: evt.reason ?? "Cancelled",
+      });
+      break;
+
+    case "model_routing":
+      s.addEvent({
+        type: "model_routing",
+        summary: evt.fallbackFrom
+          ? `Switched to ${evt.model} (fallback from ${evt.fallbackFrom})`
+          : `Using ${evt.model}`,
+        model: evt.model,
+        provider: evt.provider,
+        fallbackFrom: evt.fallbackFrom,
+        category: evt.category,
+        durationMs: evt.durationMs,
+      });
+      break;
+
+    case "model_failed":
+      s.addEvent({
+        type: "model_failed",
+        summary: `Model ${evt.model} failed: ${evt.category}`,
+        model: evt.model,
+        category: evt.category,
+        message: evt.message,
+      });
+      break;
+
+    case "reasoning":
+      s.addEvent({
+        type: "reasoning",
+        summary: evt.summary ?? "",
+      });
+      break;
+
+    case "status":
+      s.addEvent({
+        type: "status",
+        summary: evt.summary ?? "",
+      });
+      break;
+
+    case "repair_attempt":
+      s.addEvent({
+        type: "repair_attempt",
+        summary: `Repair attempt ${evt.attempt}/${evt.maxAttempts}`,
       });
       break;
   }

@@ -162,4 +162,82 @@ describe("LiTTLiveActivity", () => {
     fireEvent.click(screen.getByText("Stop"));
     expect(onStop).toHaveBeenCalledOnce();
   });
+
+  // ── New event type tests (regression for runtime plumbing fixes) ──
+
+  it("renders model_routing events from SSE", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      feedSSEEventToExecutionStore({
+        type: "model_routing",
+        model: "google/gemini-2.5-flash",
+        provider: "openrouter",
+        fallbackFrom: "openai/gpt-4o",
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText(/Switched to google\/gemini-2.5-flash/)).toBeTruthy();
+  });
+
+  it("renders model_failed events from SSE", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      feedSSEEventToExecutionStore({
+        type: "model_failed",
+        model: "openai/gpt-4o",
+        category: "all_fallbacks_exhausted",
+        message: "All models failed",
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText(/Model openai\/gpt-4o failed/)).toBeTruthy();
+  });
+
+  it("renders reasoning/status summary events from SSE", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      feedSSEEventToExecutionStore({
+        type: "reasoning",
+        summary: "Inspecting project structure to find landing page components",
+      });
+      feedSSEEventToExecutionStore({
+        type: "status",
+        summary: "Step 1: reasoning with google/gemini-2.5-flash",
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText("Inspecting project structure to find landing page components")).toBeTruthy();
+    expect(screen.getByText("Step 1: reasoning with google/gemini-2.5-flash")).toBeTruthy();
+  });
+
+  it("renders repair_attempt events from SSE", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      feedSSEEventToExecutionStore({
+        type: "repair_attempt",
+        attempt: 1,
+        maxAttempts: 3,
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText("Repair attempt 1/3")).toBeTruthy();
+  });
+
+  it("model_routing without fallback shows 'Using' instead of 'Switched to'", () => {
+    act(() => {
+      useExecutionStore.getState().startRun();
+      feedSSEEventToExecutionStore({
+        type: "model_routing",
+        model: "google/gemini-2.5-flash",
+        provider: "openrouter",
+      });
+    });
+
+    render(<LiTTLiveActivity />);
+    expect(screen.getByText(/Using google\/gemini-2.5-flash/)).toBeTruthy();
+  });
 });

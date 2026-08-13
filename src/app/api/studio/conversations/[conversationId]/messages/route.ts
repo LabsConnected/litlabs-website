@@ -537,6 +537,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               controller.enqueue(event({ type: "finished", totalSteps: evt.totalSteps, totalDurationMs: evt.totalDurationMs }));
             } else if (evt.type === "cancelled") {
               controller.enqueue(event({ type: "cancelled", reason: evt.reason }));
+            } else if (evt.type === "model_routing") {
+              controller.enqueue(event({
+                type: "model_routing",
+                model: evt.model,
+                provider: evt.provider,
+                fallbackFrom: evt.fallbackFrom,
+                category: evt.category,
+                latencyMs: evt.latencyMs,
+              }));
+            } else if (evt.type === "model_failed") {
+              controller.enqueue(event({
+                type: "model_failed",
+                model: evt.model,
+                category: evt.category,
+                message: evt.message,
+              }));
+            } else if (evt.type === "reasoning") {
+              controller.enqueue(event({ type: "reasoning", summary: evt.summary }));
+            } else if (evt.type === "status") {
+              controller.enqueue(event({ type: "status", summary: evt.summary }));
+            } else if (evt.type === "repair_attempt") {
+              controller.enqueue(event({ type: "repair_attempt", attempt: evt.attempt, maxAttempts: evt.maxAttempts }));
             }
           });
 

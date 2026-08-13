@@ -19,7 +19,11 @@ export type ProgressEvent =
   | { type: "build_result"; check: string; passed: boolean; errorCount?: number }
   | { type: "repair_attempt"; attempt: number; maxAttempts: number }
   | { type: "finished"; totalSteps: number; totalDurationMs: number }
-  | { type: "cancelled"; reason: string };
+  | { type: "cancelled"; reason: string }
+  | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number }
+  | { type: "model_failed"; model: string; category: string; message: string }
+  | { type: "reasoning"; summary: string }
+  | { type: "status"; summary: string };
 
 export type AgentLoopPhase =
   | "idle"
