@@ -21,11 +21,84 @@ export type StudioDestination =
   | "missions"
   | "more";
 
+/**
+ * Canonical Ultra Vision workspace stages — the permanent top-level
+ * workspace modes presented in the product. These map onto the existing
+ * legacy `StudioMode` internals without breaking persisted URLs or
+ * localStorage keys.
+ *
+ *   plan    -> work   (LiTT conversation / planning surface)
+ *   canvas  -> files  (visual canvas builder)
+ *   code    -> code   (Monaco code editor)
+ *   preview -> preview (app preview iframe)
+ */
+export type WorkspaceStage = "plan" | "canvas" | "code" | "preview";
+
+/**
+ * Canonical Ultra Vision creator taxonomy — the seven creator surfaces.
+ * These map onto the existing legacy destination/mode system.
+ *
+ * "environment" is the internal identifier; the UI label is "360°".
+ * "design" currently routes through the Studio destination but is
+ * canonically a creator kind. "game" has routing capability but no
+ * visible tab until GameCreatorTool is functional.
+ */
+export type CreatorKind =
+  | "image"
+  | "video"
+  | "music"
+  | "audio"
+  | "design"
+  | "game"
+  | "environment";
+
+/** Map a canonical WorkspaceStage to the legacy StudioMode internal. */
+export function workspaceStageToMode(stage: WorkspaceStage): StudioMode {
+  switch (stage) {
+    case "plan":
+      return "work";
+    case "canvas":
+      return "files";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+  }
+}
+
+/** Reverse: map a legacy StudioMode back to a canonical WorkspaceStage. */
+export function modeToWorkspaceStage(mode: StudioMode): WorkspaceStage | null {
+  switch (mode) {
+    case "work":
+      return "plan";
+    case "files":
+      return "canvas";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+    // "design" has no WorkspaceStage mapping — it's a creator, not a stage.
+    default:
+      return null;
+  }
+}
+
+/** UI labels for canonical creator kinds. */
+export const CREATOR_KIND_LABELS: Record<CreatorKind, string> = {
+  image: "Image",
+  video: "Video",
+  music: "Music",
+  audio: "Audio",
+  design: "Design",
+  game: "Game",
+  environment: "360°",
+};
+
 /** Internal workspace modes inside the Studio destination. */
 export type StudioMode = "work" | "preview" | "code" | "files" | "design";
 
 /** Internal tabs inside the Create destination. */
-export type CreateMode = "image" | "video" | "audio" | "music" | "environment";
+export type CreateMode = "image" | "video" | "audio" | "music" | "environment" | "game";
 
 /** Internal tabs inside the More destination. */
 export type MoreMode =
@@ -106,6 +179,9 @@ export function mapLegacyToolToDestination(
     // redirect to Create / Image so old bookmarks don't 404.
     case "color":
       return { destination: "create", legacyTool: "image", mode: "image" };
+    // Game creator — routing slot only, no visible tab until tool is functional.
+    case "game":
+      return { destination: "create", legacyTool: "game", mode: "game" };
 
     // Assets
     case "assets":
@@ -160,6 +236,7 @@ export function destinationToLegacyTool(
       if (mode === "audio") return "audio";
       if (mode === "music") return "music";
       if (mode === "environment") return "space";
+      if (mode === "game") return "game";
       return "image";
     case "assets":
       return "assets";

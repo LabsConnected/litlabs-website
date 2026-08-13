@@ -659,6 +659,7 @@ function CommandStudioContent() {
     if (destination === "studio") {
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
+      if (studioMode === "design") return "design";
       if (studioMode === "preview") return "preview";
       // Work mode: dynamic surface state, not initial URL
       return workSurface === "builder" ? "build" : null;

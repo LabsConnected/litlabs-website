@@ -83,7 +83,7 @@ export const APP_NAV_SECTIONS: NavSection[] = [
     id: "create",
     label: "Create",
     items: [
-      { label: "Create", href: "/studio?tool=chat", icon: Sparkles },
+      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
       { label: "Music", href: "/dashboard?app=music", icon: Music },
       { label: "Showcase", href: "/showcase", icon: Image },
     ],

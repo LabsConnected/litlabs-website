@@ -42,6 +42,14 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Showcase");
     });
 
+    it("Create nav item links to /studio?tool=image (not chat)", () => {
+      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
+      expect(create).toBeDefined();
+      const createItem = create!.items.find((i) => i.label === "Create");
+      expect(createItem).toBeDefined();
+      expect(createItem!.href).toBe("/studio?tool=image");
+    });
+
     it("Explore section has Games, Discover, Marketplace", () => {
       const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
       expect(explore).toBeDefined();

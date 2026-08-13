@@ -4,6 +4,11 @@ import {
   destinationToLegacyTool,
   DESTINATION_LABELS,
   type StudioDestination,
+  type WorkspaceStage,
+  type CreatorKind,
+  workspaceStageToMode,
+  modeToWorkspaceStage,
+  CREATOR_KIND_LABELS,
 } from "./studio-destinations";
 
 describe("studio-destinations", () => {
@@ -97,6 +102,13 @@ describe("studio-destinations", () => {
       expect(result.mode).toBe("environment");
     });
 
+    it("maps game to Create / Game (routing slot, no visible tab yet)", () => {
+      const result = mapLegacyToolToDestination("game");
+      expect(result.destination).toBe("create");
+      expect(result.legacyTool).toBe("game");
+      expect(result.mode).toBe("game");
+    });
+
     it("maps more tools to More with correct modes", () => {
       expect(mapLegacyToolToDestination("plugins").destination).toBe("more");
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
@@ -129,6 +141,7 @@ describe("studio-destinations", () => {
       expect(destinationToLegacyTool("create", "audio")).toBe("audio");
       expect(destinationToLegacyTool("create", "music")).toBe("music");
       expect(destinationToLegacyTool("create", "environment")).toBe("space");
+      expect(destinationToLegacyTool("create", "game")).toBe("game");
     });
 
     it("round-trips Assets and Agents", () => {
@@ -162,6 +175,74 @@ describe("studio-destinations", () => {
       expect(DESTINATION_LABELS.agents).toBe("Agents");
       expect(DESTINATION_LABELS.missions).toBe("Missions");
       expect(DESTINATION_LABELS.more).toBe("More");
+    });
+  });
+
+  describe("WorkspaceStage", () => {
+    it("maps plan to work", () => {
+      expect(workspaceStageToMode("plan")).toBe("work");
+    });
+
+    it("maps canvas to files", () => {
+      expect(workspaceStageToMode("canvas")).toBe("files");
+    });
+
+    it("maps code to code", () => {
+      expect(workspaceStageToMode("code")).toBe("code");
+    });
+
+    it("maps preview to preview", () => {
+      expect(workspaceStageToMode("preview")).toBe("preview");
+    });
+
+    it("reverse-maps work to plan", () => {
+      expect(modeToWorkspaceStage("work")).toBe("plan");
+    });
+
+    it("reverse-maps files to canvas", () => {
+      expect(modeToWorkspaceStage("files")).toBe("canvas");
+    });
+
+    it("reverse-maps code to code", () => {
+      expect(modeToWorkspaceStage("code")).toBe("code");
+    });
+
+    it("reverse-maps preview to preview", () => {
+      expect(modeToWorkspaceStage("preview")).toBe("preview");
+    });
+
+    it("returns null for design (design is a creator, not a stage)", () => {
+      expect(modeToWorkspaceStage("design")).toBeNull();
+    });
+  });
+
+  describe("CreatorKind", () => {
+    it("includes exactly the seven canonical creators", () => {
+      const expectedKinds: CreatorKind[] = [
+        "image",
+        "video",
+        "music",
+        "audio",
+        "design",
+        "game",
+        "environment",
+      ];
+      expectedKinds.forEach((kind) => {
+        expect(CREATOR_KIND_LABELS[kind]).toBeTruthy();
+      });
+      expect(Object.keys(CREATOR_KIND_LABELS)).toHaveLength(7);
+    });
+
+    it("labels environment as 360°", () => {
+      expect(CREATOR_KIND_LABELS.environment).toBe("360°");
+    });
+
+    it("labels design as Design", () => {
+      expect(CREATOR_KIND_LABELS.design).toBe("Design");
+    });
+
+    it("labels game as Game", () => {
+      expect(CREATOR_KIND_LABELS.game).toBe("Game");
     });
   });
 });
