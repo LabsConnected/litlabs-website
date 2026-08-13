@@ -130,6 +130,7 @@ async function fetchUserMedia(
 async function fetchGenerationJobs(
   internalUserId: string,
   limit: number,
+  projectId?: string,
 ): Promise<StudioAsset[]> {
   if (!supabaseAdmin) return [];
   const { data, error } = await supabaseAdmin
@@ -141,7 +142,15 @@ async function fetchGenerationJobs(
     .limit(limit);
 
   if (error || !data) return [];
-  return generationJobsToStudioAssets(data as unknown as GenerationJob[]);
+  const assets = generationJobsToStudioAssets(data as unknown as GenerationJob[]);
+
+  // When a projectId filter is active, exclude assets explicitly bound
+  // to a DIFFERENT project. Assets with no project binding (null) are
+  // always included — they are user-scoped, not project-scoped.
+  if (projectId) {
+    return assets.filter((a) => a.projectId === null || a.projectId === projectId);
+  }
+  return assets;
 }
 
 /**
@@ -158,6 +167,7 @@ async function fetchGenerationJobs(
 async function fetchMusicTracks(
   internalUserId: string,
   limit: number,
+  projectId?: string,
 ): Promise<StudioAsset[]> {
   if (!supabaseAdmin) return [];
 
@@ -175,7 +185,14 @@ async function fetchMusicTracks(
 
   if (error || !data) return [];
 
-  const tracks = data as MusicTrackRow[];
+  let tracks = data as MusicTrackRow[];
+
+  // When a projectId filter is active, exclude tracks explicitly bound
+  // to a DIFFERENT project. Tracks with no project binding (null) are
+  // always included — they are user-scoped, not project-scoped.
+  if (projectId) {
+    tracks = tracks.filter((t) => t.project_id === null || t.project_id === projectId);
+  }
 
   // Resolve audio URLs for each track.
   // Public tracks get public URLs; private/unlisted get signed URLs.
@@ -268,11 +285,13 @@ export async function listStudioAssets(
         results.push(...userAssets);
 
         // Also fetch generation_jobs (user's own completed jobs).
-        const jobAssets = await fetchGenerationJobs(internalUserId, limit);
+        // When a projectId is active, exclude jobs bound to other projects.
+        const jobAssets = await fetchGenerationJobs(internalUserId, limit, opts.projectId);
         results.push(...jobAssets);
 
         // Also fetch music_tracks (user's own tracks).
-        const musicAssets = await fetchMusicTracks(internalUserId, limit);
+        // When a projectId is active, exclude tracks bound to other projects.
+        const musicAssets = await fetchMusicTracks(internalUserId, limit, opts.projectId);
         results.push(...musicAssets);
       }
     } catch {

@@ -4,6 +4,7 @@ import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth(req);
@@ -41,6 +42,21 @@ export async function POST(req: NextRequest) {
       try {
         const buffer = await downloadVideo(result.videoUrl);
         const saved = await uploadAudio(userId, `happyhorse-${taskId}.mp4`, buffer, "video/mp4", "video");
+
+        // Complete the persistent generation_jobs row with the durable URL
+        // so the video becomes visible in the Asset Lake.
+        const genJob = await getGenerationJobByProviderJobId(userId, taskId);
+        if (genJob) {
+          // Update metadata with the durable R2 URL first.
+          await updateGenerationJobMetadata(genJob.id, {
+            durableUrl: saved.publicUrl,
+            contentType: "video/mp4",
+            storageKey: saved.storageKey,
+          });
+          // Then mark the job as completed.
+          await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+        }
+
         return NextResponse.json({
           done: true,
           taskStatus: result.taskStatus,

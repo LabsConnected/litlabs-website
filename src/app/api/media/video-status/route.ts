@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
+import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
+import { uploadAudio } from "@/lib/r2";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -70,11 +72,51 @@ export async function POST(req: NextRequest) {
         });
         refunded = true;
       }
+
+      // Mark the generation job as failed.
+      const genJob = await getGenerationJobByProviderJobId(userId, operationName);
+      if (genJob) {
+        const { failGenerationJob } = await import("@/lib/generation/jobs");
+        await failGenerationJob(genJob.id, "Video generation failed — no video output");
+      }
+    }
+
+    // If the operation succeeded, persist the video to R2 and complete
+    // the generation_jobs row so it becomes visible in the Asset Lake.
+    let durableUrl: string | null = null;
+    if (updated.done && videoUri) {
+      try {
+        // Download the video from Google's signed URL and upload to R2.
+        const videoResponse = await fetch(videoUri);
+        if (videoResponse.ok) {
+          const buffer = Buffer.from(await videoResponse.arrayBuffer());
+          const filename = `veo-${operationName.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+          const saved = await uploadAudio(userId, filename, buffer, "video/mp4", "video");
+          durableUrl = saved.publicUrl;
+
+          // Complete the persistent generation_jobs row.
+          const genJob = await getGenerationJobByProviderJobId(userId, operationName);
+          if (genJob) {
+            await updateGenerationJobMetadata(genJob.id, {
+              durableUrl: saved.publicUrl,
+              contentType: "video/mp4",
+              storageKey: saved.storageKey,
+            });
+            await completeGenerationJob(genJob.id, `generation_job:${genJob.id}`);
+          }
+        }
+      } catch {
+        // If R2 persistence fails, fall back to the Google signed URL.
+        // The generation job remains in "generating" state — it will
+        // not appear in Asset Lake until a durable URL is available.
+        durableUrl = videoUri;
+      }
     }
 
     return NextResponse.json({
       done: updated.done,
-      videoUri,
+      videoUri: durableUrl ?? videoUri,
+      saved: durableUrl !== null,
       refunded,
       cost: job.cost,
     });

@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import { apiFetch, type ApiJson } from "@/lib/api-response";
 import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
+import { useStudioContext } from "../context/StudioContext";
 import TrackCard from "../components/music/TrackCard";
 
 const MUSIC_LBC_COST = {
@@ -96,6 +97,7 @@ type CreateTab = "quick" | "custom" | "remix" | "upload";
 export default function MusicTool() {
   const { resolvedColors: T } = useTheme();
   const accent = T.accentColor || "#a855f7";
+  const { setActiveAssetId } = useStudioContext();
   const {
     status,
     progress,
@@ -406,8 +408,13 @@ export default function MusicTool() {
       // The server already created music_tracks rows — the Assets
       // panel just needs to refresh to pick them up.
       notifyAssetsChanged();
+      // Auto-select the first generated track as the active asset.
+      // The canonical Asset Lake ID for music is music_track:<id>.
+      if (genTracks.length > 0 && genTracks[0].id) {
+        setActiveAssetId(`music_track:${genTracks[0].id}`);
+      }
     }
-  }, [status, refresh]);
+  }, [status, refresh, genTracks, setActiveAssetId]);
 
   const isBusy = isGenerating || ["queued", "claimed", "preparing", "generating", "processing"].includes(status);
 

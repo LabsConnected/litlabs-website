@@ -89,6 +89,10 @@ type GenerationResponse = {
   cost: number;
   free: boolean;
   balance: number | null;
+  /** Canonical generation_jobs ID for Asset Lake auto-selection. */
+  generationJobId?: string | null;
+  /** Canonical Asset Lake ID (generation_job:<id>) for auto-selection. */
+  assetId?: string | null;
 };
 
 type GenerationErrorResponse = {
@@ -1175,6 +1179,7 @@ async function handler(req: NextRequest) {
   }
 
   // ── Record generation job (durable, queryable) ─────────────────
+  let generationJobId: string | null = null;
   try {
     const jobId = crypto.randomUUID();
     await createGenerationJob({
@@ -1188,7 +1193,8 @@ async function handler(req: NextRequest) {
       littBitsCharged: usedCost,
       metadata: { durableUrl, durationMs: Date.now() - startTime },
     });
-    await completeGenerationJob(jobId, null, usedCostResult.providerCostCents);
+    await completeGenerationJob(jobId, `generation_job:${jobId}`, usedCostResult.providerCostCents);
+    generationJobId = jobId;
   } catch {
     // Best-effort — don't fail the response if job recording fails
   }
@@ -1209,6 +1215,8 @@ async function handler(req: NextRequest) {
       cost: usedCost,
       free: usedProvider.free,
       balance: newBalance,
+      generationJobId,
+      assetId: generationJobId ? `generation_job:${generationJobId}` : null,
     } satisfies GenerationResponse,
     {
       status: 200,

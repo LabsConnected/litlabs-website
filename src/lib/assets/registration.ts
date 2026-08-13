@@ -99,7 +99,13 @@ export interface RegisterAssetInput {
   height?: number;
   /** Audio/video duration in seconds. */
   durationSeconds?: number;
-  /** Cost in LiTTBits. Defaults to 0 (truthful — no charge for this path). */
+  /**
+   * Cost in LiTTBits charged by the generation provider.
+   * - If provided (including 0), the value is stored truthfully.
+   * - If omitted, the cost is UNKNOWN — stored as 0 in generation_jobs
+   *   (NOT NULL constraint) but flagged in metadata.costUnknown=true
+   *   so consumers can distinguish "free" from "cost not reported."
+   */
   costCredits?: number;
   /** Project to associate with (optional, verified). */
   projectId?: string;
@@ -260,6 +266,10 @@ export async function registerStudioAsset(
   // Build metadata: client metadata FIRST, then authoritative fields LAST
   // to prevent client override of reserved keys.
   const clientMetadata = sanitizeClientMetadata(input.metadata);
+  // Cost truthfulness: distinguish "cost not provided" from "cost is zero."
+  // generation_jobs.litt_bits_charged is NOT NULL, so we store 0 when
+  // unknown — but flag it in metadata so consumers can tell the difference.
+  const costUnknown = input.costCredits === undefined;
   const metadata: Record<string, unknown> = {
     ...clientMetadata,
     durableUrl: input.url,
@@ -269,6 +279,7 @@ export async function registerStudioAsset(
     ...(input.height && { height: input.height }),
     ...(input.durationSeconds && { durationSeconds: input.durationSeconds }),
     ...(input.projectId && { projectId: input.projectId }),
+    ...(costUnknown && { costUnknown: true }),
   };
 
   // Create the generation_jobs record with real provenance.

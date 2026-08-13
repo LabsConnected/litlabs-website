@@ -21,6 +21,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { apiFetch, readApiResponse, type ApiJson } from "@/lib/api-response";
+import { notifyAssetsChanged } from "../hooks/useAssetsRefresh";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -477,6 +478,11 @@ export default function VideoTool() {
           setCurrent((prev) => prev?.id === id ? { ...prev, status: "complete", videoUrl } : prev);
           setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "complete", videoUrl } : g));
           refreshWallet().catch(() => {});
+
+          // Notify the Asset Lake that a new persistent video asset exists.
+          // The server has created a generation_jobs row with the durable URL.
+          notifyAssetsChanged();
+
           break;
         }
         if (statusData.done && !statusData[videoUrlKey]) {

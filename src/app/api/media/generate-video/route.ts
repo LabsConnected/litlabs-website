@@ -168,6 +168,32 @@ async function handler(req: NextRequest) {
           refunded: false,
         });
 
+        // Create a persistent generation_jobs row so this video
+        // generation is visible in the Asset Lake once completed.
+        // The status route will mark it completed with the durable URL.
+        const genJobId = crypto.randomUUID();
+        await createGenerationJob({
+          id: genJobId,
+          userId,
+          modality: "video",
+          provider: "alibaba",
+          model,
+          prompt: prompt?.trim() ?? "",
+          requestId,
+          littBitsCharged: cost,
+          metadata: {
+            providerJobId: result.taskId,
+            videoJobId: jobId,
+            aspectRatio,
+            resolution,
+            duration: Number(duration),
+          },
+        });
+        // Mark as generating — the status route completes it.
+        await updateGenerationJobStatus(genJobId, "generating", {
+          providerJobId: result.taskId,
+        });
+
         return NextResponse.json({
           provider: "alibaba",
           taskId: result.taskId,
@@ -269,6 +295,32 @@ async function handler(req: NextRequest) {
         createdAt: Date.now(),
         charged: true,
         refunded: false,
+      });
+
+      // Create a persistent generation_jobs row so this video
+      // generation is visible in the Asset Lake once completed.
+      // The status route will mark it completed with the durable URL.
+      const genJobId = crypto.randomUUID();
+      await createGenerationJob({
+        id: genJobId,
+        userId,
+        modality: "video",
+        provider: "veo",
+        model,
+        prompt: prompt.trim(),
+        requestId,
+        littBitsCharged: cost,
+        metadata: {
+          providerJobId: operation.name,
+          videoJobId: jobId,
+          aspectRatio,
+          resolution,
+          duration: Number(duration),
+        },
+      });
+      // Mark as generating — the status route completes it.
+      await updateGenerationJobStatus(genJobId, "generating", {
+        providerJobId: operation.name,
       });
 
       return NextResponse.json({

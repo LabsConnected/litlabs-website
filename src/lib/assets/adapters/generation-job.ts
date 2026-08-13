@@ -151,7 +151,7 @@ export function generationJobToStudioAsset(
     width,
     height,
     durationSeconds,
-    costCredits: job.littBitsCharged || undefined,
+    costCredits: job.littBitsCharged,
     createdAt: job.createdAt,
     updatedAt: job.completedAt ?? undefined,
     visibility: "private", // generation jobs are user-private by default
