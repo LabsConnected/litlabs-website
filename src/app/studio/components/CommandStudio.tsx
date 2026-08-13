@@ -542,9 +542,12 @@ function CommandStudioContent() {
         await refreshCapabilities();
       }
       return result;
-    } catch {
-      // Restore the typed message so the user doesn't lose input
+    } catch (err) {
+      // Restore the typed message so the user doesn't lose input, and
+      // surface the error so the user knows why their message didn't send.
       setComposerValue(value);
+      console.error("[Studio] Composer send failed:", err);
+      return { accepted: false, persisted: false, errorKind: "network" as const };
     }
   }, [conversation, capabilities.projectId, refreshCapabilities]);
 
@@ -552,8 +555,11 @@ function CommandStudioContent() {
     setComposerValue(prompt);
   }, []);
 
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
+
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);
+    setProjectCreateError(null);
     try {
       const token = await getToken?.();
       const res = await fetch("/api/studio-projects", {
@@ -571,6 +577,8 @@ function CommandStudioContent() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        const msg = (err as { error?: string }).error || `Failed to create project (${res.status})`;
+        setProjectCreateError(msg);
         console.error("[handleStartBlank] Failed to create project:", err);
         return;
       }
@@ -596,6 +604,8 @@ function CommandStudioContent() {
       setStudioMode("work");
       setWorkSurface("conversation");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error while creating project.";
+      setProjectCreateError(msg);
       console.error("[handleStartBlank] Error:", err);
     } finally {
       setCreatingProject(false);
@@ -858,7 +868,7 @@ function CommandStudioContent() {
         onStartBlank={handleStartBlank}
         onConnectRepo={handleConnectRepo}
       />
-      {(conversation.requiresReauth || conversation.sendError) && (
+      {(conversation.requiresReauth || conversation.sendError || projectCreateError) && (
         <div
           className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
           style={{
@@ -870,13 +880,13 @@ function CommandStudioContent() {
           <span className="min-w-0 flex-1 font-medium">
             {conversation.requiresReauth
               ? "Your session expired. Sign in again to continue."
-              : conversation.sendError}
+              : conversation.sendError ?? projectCreateError}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            {!conversation.requiresReauth && conversation.sendError && (
+            {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
               <button
                 type="button"
-                onClick={() => conversation.clearSendError()}
+                onClick={() => { conversation.clearSendError(); setProjectCreateError(null); }}
                 className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
                 aria-label="Dismiss error"
               >

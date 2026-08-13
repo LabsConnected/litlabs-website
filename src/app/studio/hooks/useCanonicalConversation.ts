@@ -465,15 +465,20 @@ export function useCanonicalConversation({
             const conv = s.getSelectedConversation();
             if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
               try {
-                await fetch(`/api/studio/conversations/${convId}`, {
+                const res = await fetch(`/api/studio/conversations/${convId}`, {
                   method: "DELETE",
                   credentials: "include",
                   headers: await authHeaders(),
                 });
+                if (!res.ok) {
+                  setSendError("Failed to delete conversation. Please try again.");
+                  return { accepted: false, persisted: false };
+                }
                 s.setConversations(s.conversations.filter((c) => c.id !== convId));
                 s.selectConversation(null);
               } catch {
-                // Non-fatal
+                setSendError("Network error while deleting conversation.");
+                return { accepted: false, persisted: false };
               }
             }
             return { accepted: true, persisted: true };
@@ -482,15 +487,19 @@ export function useCanonicalConversation({
             const convId = s.selectedConversationId;
             if (localCommand.title && convId) {
               try {
-                await fetch(`/api/studio/conversations/${convId}`, {
+                const res = await fetch(`/api/studio/conversations/${convId}`, {
                   method: "PATCH",
                   credentials: "include",
                   headers: await authHeaders(true),
                   body: JSON.stringify({ expectedRevision: s.revision, patch: { title: localCommand.title } }),
                 });
-                s.setConversations(s.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
+                if (res.ok) {
+                  s.setConversations(s.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
+                } else {
+                  setSendError("Failed to rename conversation.");
+                }
               } catch {
-                // Non-fatal
+                setSendError("Network error while renaming conversation.");
               }
             }
             return { accepted: true, persisted: true };
