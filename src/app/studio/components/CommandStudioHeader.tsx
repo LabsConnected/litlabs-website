@@ -19,7 +19,6 @@ import {
   Bell,
   Bot,
   PanelRightOpen,
-  PanelRightClose,
   Activity,
   MoreHorizontal,
   Plus,
@@ -54,7 +53,7 @@ export default function CommandStudioHeader({
   branch,
   onPreviewAction,
   onOpenActivityAction,
-  activityRailOpen = false,
+  activityVisible = false,
   onOpenTerminalAction,
   onOpenInspectorAction,
   onProjectSelectAction,
@@ -70,9 +69,13 @@ export default function CommandStudioHeader({
 }: {
   branch?: string;
   onPreviewAction?: () => void;
+  /** Opens LiTT -> Live (execution activity). This is an OPEN action,
+   *  not a toggle — clicking it always ensures Live is visible. */
   onOpenActivityAction?: () => void;
-  /** Whether the right Activity rail is currently open. */
-  activityRailOpen?: boolean;
+  /** Truthful: LiTT -> Live is actually visible right now (expanded on
+   *  desktop/laptop, or the mobile sheet open, AND the Live tab active).
+   *  Used only for styling — it does not gate the click handler. */
+  activityVisible?: boolean;
   onOpenTerminalAction?: () => void;
   onOpenInspectorAction?: () => void;
   onProjectSelectAction?: (projectId: string) => void;
@@ -351,35 +354,34 @@ export default function CommandStudioHeader({
         <PanelRightOpen size={13} className="pointer-events-none" />
       </button>
 
-      {/* Activity — toggles the right Activity rail (not a second drawer) */}
+      {/* Activity — opens LiTT -> Live. This is an OPEN action: clicking
+          it always ensures Live is visible (expands LiTT if collapsed
+          on desktop/laptop, or opens the mobile sheet on mobile). It
+          does not collapse/hide LiTT — use the LiTT panel's own
+          collapse control for that. */}
       <button
         type="button"
         onClick={onOpenActivityAction}
-        aria-pressed={activityRailOpen}
-        aria-label={activityRailOpen ? "Hide Activity" : "Show Activity"}
-        title={activityRailOpen ? "Hide Activity" : "Show Activity"}
+        aria-label="Open Activity"
+        title="Open Activity"
         data-testid="activity-toggle"
-        data-active={activityRailOpen}
+        data-active={activityVisible}
         className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
         style={{
-          borderColor: activityRailOpen
+          borderColor: activityVisible
             ? "rgba(155,77,255,.45)"
             : "var(--studio-border)",
-          backgroundColor: activityRailOpen
+          backgroundColor: activityVisible
             ? "rgba(155,77,255,.12)"
             : "var(--studio-surface)",
-          color: activityRailOpen
+          color: activityVisible
             ? "var(--spark-primary)"
             : "var(--text-secondary)",
         }}
       >
-        {activityRailOpen ? (
-          <PanelRightClose size={13} className="pointer-events-none" />
-        ) : (
-          <Activity size={13} className="pointer-events-none" />
-        )}
+        <Activity size={13} className="pointer-events-none" />
         <span className="hidden xl:inline pointer-events-none">
-          {activityRailOpen ? "Hide Activity" : "Show Activity"}
+          Activity
         </span>
       </button>
 

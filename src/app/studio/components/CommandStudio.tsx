@@ -219,44 +219,14 @@ function CommandStudioContent() {
     }
   }, [searchParams]);
 
-  // ── Unified side panel manager ────────────────────────────────────
-  // Only ONE side panel may be open at a time. Opening one closes the
-  // others. The canvas immediately reclaims width when a panel closes.
-  // New users start with no side panel. The last choice persists.
-  type StudioSidePanel = "none" | "activity" | "inspector" | "settings";
-  const SIDE_PANEL_STORAGE_KEY = "littree:studio:side-panel";
-  const [sidePanel, setSidePanel] = useState<StudioSidePanel>(() => {
-    if (typeof window === "undefined") return "none";
-    try {
-      const stored = localStorage.getItem(SIDE_PANEL_STORAGE_KEY);
-      if (stored === "activity" || stored === "inspector" || stored === "settings") return stored;
-      return "none";
-    } catch {
-      return "none";
-    }
-  });
-
-  // Backwards-compat: if old activity-rail-open key was "true", migrate
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const oldKey = localStorage.getItem("littree:studio:activity-rail-open");
-      if (oldKey === "true" && sidePanel === "none") {
-        setSidePanel("activity");
-        localStorage.removeItem("littree:studio:activity-rail-open");
-      }
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [sidePanel]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDE_PANEL_STORAGE_KEY, sidePanel);
-    } catch {
-      // Ignore unavailable storage.
-    }
-  }, [sidePanel]);
+  // Phase C2.2: the old "unified side panel manager" (StudioSidePanel /
+  // littree:studio:side-panel / littree:studio:activity-rail-open) has
+  // been removed. It stopped driving any rendered UI once the LiTT
+  // panel and Context Drawer became the canonical shell state in C2/
+  // C2.1 — it was a ghost state machine that some call sites still
+  // wrote to, silently doing nothing. Those call sites now use the
+  // real Context Drawer / LiTT state directly (see
+  // handleOpenContextInspector, littCollapsed, littActiveTab below).
 
   // LiTT panel — always present on desktop/laptop, expand/collapse.
   // Phase C2: moved from right to left. Phase C2.1: viewport-tier aware
@@ -355,16 +325,35 @@ function CommandStudioContent() {
   }, [contextDrawerTab]);
 
   // Derived booleans for downstream components (must be after state declarations)
-  const activityRailOpen = !littCollapsed;
+  // Truthful "Activity" visibility (Phase C2.2). Activity means "LiTT ->
+  // Live is actually visible right now" — NOT merely "LiTT is expanded".
+  // LiTT can be expanded while showing Chat, in which case Activity must
+  // read as not-visible.
+  const activityVisible = isMobileLitt
+    ? mobileLittOpen && littActiveTab === "live"
+    : !littCollapsed && littActiveTab === "live";
   // Files workspace-tab button only lights up when the drawer is open
   // AND actually showing Files — never merely because the drawer is
   // open on Inspector (Phase C2.1 fix).
   const filesButtonActive = contextDrawerOpen && contextDrawerTab === "files";
 
-  // Toggle helpers for header compatibility
-  const handleToggleActivity = useCallback(() => {
-    setLittCollapsed((v) => !v);
-  }, []);
+  // Activity is an OPEN action, not a collapse/expand toggle (Phase
+  // C2.2 fix). It always ensures LiTT -> Live is visible:
+  //   desktop/laptop: switch to Live, expand LiTT if collapsed.
+  //   mobile: switch to Live, open the LiTT mobile sheet.
+  // It never merely flips littCollapsed — that conflated "LiTT
+  // expanded/collapsed" with "Activity visible", which could report
+  // Activity as open while LiTT was actually showing Chat, or do
+  // nothing visible at all on mobile (the desktop rail isn't rendered
+  // there, so toggling littCollapsed had no visible effect).
+  const handleOpenActivity = useCallback(() => {
+    setLittActiveTab("live");
+    if (isMobileLitt) {
+      setMobileLittOpen(true);
+    } else {
+      setLittCollapsed(false);
+    }
+  }, [isMobileLitt]);
 
   // Context drawer open helpers — both are OPEN actions (switch tab +
   // ensure open), never a toggle-closed. Only the drawer's own close
@@ -395,7 +384,7 @@ function CommandStudioContent() {
     setContextDrawerTab("files");
   }, [contextDrawerOpen, contextDrawerTab]);
 
-  // Keyboard shortcut: Ctrl+Shift+A toggles the LiTT panel collapse.
+  // Keyboard shortcut: Ctrl+Shift+A opens LiTT Activity (Live).
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -404,12 +393,12 @@ function CommandStudioContent() {
         event.key.toLowerCase() === "a"
       ) {
         event.preventDefault();
-        handleToggleActivity();
+        handleOpenActivity();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleToggleActivity]);
+  }, [handleOpenActivity]);
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [cameraStatus, setCameraStatus] = useState<string>("idle");
@@ -457,23 +446,23 @@ function CommandStudioContent() {
       }
     }
     if (mapped.openInspector) {
-      setSidePanel("inspector");
+      handleOpenContextInspector();
       setInspectorTab(mapped.openInspector);
     }
     setPendingCommand(command);
-  }, [capabilities.terminalStatus]);
+  }, [capabilities.terminalStatus, handleOpenContextInspector]);
 
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
     onRouteToolAction: handleRouteTool,
     onRouteInspectorAction: (tab) => {
       setInspectorTab(tab);
-      setSidePanel("inspector");
+      handleOpenContextInspector();
     },
     onRunHealthChecks: () => {
       // Open the checks panel and trigger run-all
       setInspectorTab("checks");
-      setSidePanel("inspector");
+      handleOpenContextInspector();
       setHealthRunTrigger((n) => n + 1);
     },
     serverProjectId: capabilities.projectId,
@@ -981,8 +970,8 @@ function CommandStudioContent() {
         <CommandStudioHeader
           branch={contextLine.branch}
           onPreviewAction={handlePreview}
-          onOpenActivityAction={handleToggleActivity}
-          activityRailOpen={activityRailOpen}
+          onOpenActivityAction={handleOpenActivity}
+          activityVisible={activityVisible}
           onOpenTerminalAction={handleOpenTerminal}
           onOpenInspectorAction={handleOpenContextInspector}
           onProjectSelectAction={handleSelectProject}

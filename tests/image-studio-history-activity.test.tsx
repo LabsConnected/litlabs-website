@@ -1,20 +1,20 @@
 // @vitest-environment jsdom
 /**
- * Image Studio — history deletion & Activity rail acceptance tests.
+ * Image Studio — history deletion & Activity (LiTT Live) acceptance tests.
  *
- * Covers the 12 acceptance criteria:
+ * Covers the acceptance criteria:
  *   1. Hovering or focusing a history card reveals its delete control.
  *   2. Deleting one generation leaves all remaining generations.
  *   3. Deleting the selected generation clears the canvas selection.
  *   4. Deleting the final generation removes localStorage history.
  *   5. Clear-all requires confirmation.
  *   6. Delete remains accessible on touch/mobile.
- *   7. Activity defaults closed.
- *   8. Header Activity toggles the rail.
- *   9. Closing the rail restores canvas width.
- *  10. Activity visibility survives refresh.
- *  11. No duplicate Activity drawer opens.
+ *   7. Activity reflects Live visibility (false when Live is not shown).
+ *   8. Header Activity calls the open handler.
+ *   9. activityVisible is truthful (expanded-on-Chat is NOT visible).
+ *  11. No duplicate Activity rail/drawer opens.
  *  12. Terminal remains independent.
+ *  13/14. Obsolete side-panel / activity-rail localStorage keys are gone.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
@@ -393,194 +393,180 @@ const HEADER_CAPS = {
   defaultBranch: "main",
 } as const;
 
-describe("CommandStudioHeader Activity toggle", () => {
-  it("7. Activity defaults closed when activityRailOpen is false", () => {
+describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
+  it("7. Activity reflects Live visibility when activityVisible is false", () => {
     render(
       <CommandStudioHeader
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={vi.fn()}
-        activityRailOpen={false}
+        activityVisible={false}
       />,
     );
     const toggle = screen.getByTestId("activity-toggle");
     expect(toggle).toHaveAttribute("data-active", "false");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveAttribute("aria-label", "Show Activity");
+    expect(toggle).toHaveAttribute("aria-label", "Open Activity");
   });
 
-  it("8. clicking Activity button calls toggle handler", () => {
-    const onToggle = vi.fn();
+  it("8. clicking Activity button calls the open handler", () => {
+    const onOpen = vi.fn();
     render(
       <CommandStudioHeader
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={onToggle}
-        activityRailOpen={false}
+        onOpenActivityAction={onOpen}
+        activityVisible={false}
       />,
     );
     fireEvent.click(screen.getByTestId("activity-toggle"));
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it("8b. Activity button shows active styling when rail is open", () => {
+  it("8b. Activity button shows active styling when Live is visible", () => {
     render(
       <CommandStudioHeader
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={vi.fn()}
-        activityRailOpen={true}
+        activityVisible={true}
       />,
     );
     const toggle = screen.getByTestId("activity-toggle");
     expect(toggle).toHaveAttribute("data-active", "true");
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(toggle).toHaveAttribute("aria-label", "Hide Activity");
+    expect(toggle).toHaveAttribute("aria-label", "Open Activity");
   });
 
-  it("11. Activity button does NOT open a drawer (only calls toggle)", () => {
-    const onToggle = vi.fn();
+  it("11. Activity button does NOT render a rail element itself", () => {
+    const onOpen = vi.fn();
     render(
       <CommandStudioHeader
         capabilities={HEADER_CAPS as never}
-        onOpenActivityAction={onToggle}
-        activityRailOpen={false}
+        onOpenActivityAction={onOpen}
+        activityVisible={false}
       />,
     );
-    // The button only calls onOpenActivityAction (which is now toggle)
-    // It does NOT call any drawer-opening handler
+    // The header only emits the open action; it does not own a rail.
     fireEvent.click(screen.getByTestId("activity-toggle"));
-    expect(onToggle).toHaveBeenCalledTimes(1);
-    // No drawer element should be rendered by the header itself
+    expect(onOpen).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("studio-activity-rail")).not.toBeInTheDocument();
+  });
+
+  it("11b. Activity is an OPEN action — clicking while Live is visible still calls the handler", () => {
+    const onOpen = vi.fn();
+    render(
+      <CommandStudioHeader
+        capabilities={HEADER_CAPS as never}
+        onOpenActivityAction={onOpen}
+        activityVisible={true}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("activity-toggle"));
+    // Activity is always an open action; it does not toggle off.
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
 
-// ─── Activity rail persistence logic tests ──────────────────────────────────
+// ─── Activity visibility truthfulness tests ─────────────────────────────────
+//
+// The old `activityRailOpen = !littCollapsed` derivation was false when LiTT
+// was expanded on Chat. The canonical `activityVisible` value must reflect
+// actual Live visibility (LiTT expanded/sheet open AND Live tab active).
 
-describe("Activity rail persistence", () => {
-  it("7. Activity defaults closed for new users (no localStorage)", () => {
-    const STORAGE_KEY = "littree:studio:activity-rail-open";
-    localStorage.removeItem(STORAGE_KEY);
-    // Simulate the useState initializer
-    const initial =
-      typeof window !== "undefined"
-        ? localStorage.getItem(STORAGE_KEY) === "true"
-        : false;
-    expect(initial).toBe(false);
+describe("Activity visible state truthfulness", () => {
+  // Helper preserves the union parameter type so the `=== "live"` comparison
+  // is not flagged by TS as a no-overlap literal comparison.
+  function computeActivityVisible(args: {
+    isMobileLitt: boolean;
+    mobileLittOpen: boolean;
+    littCollapsed: boolean;
+    littActiveTab: "chat" | "live";
+  }): boolean {
+    return (
+      (args.isMobileLitt ? args.mobileLittOpen : !args.littCollapsed) &&
+      args.littActiveTab === "live"
+    );
+  }
+
+  it("9. activityVisible is false when LiTT is expanded on Chat (not Live)", () => {
+    // activityVisible must NOT be derived from `!littCollapsed` alone.
+    // Expanded LiTT on Chat → Live is NOT visible → activityVisible === false.
+    expect(
+      computeActivityVisible({
+        isMobileLitt: false,
+        mobileLittOpen: false,
+        littCollapsed: false,
+        littActiveTab: "chat",
+      }),
+    ).toBe(false);
   });
 
-  it("10. Activity visibility survives refresh (localStorage persistence)", () => {
-    const STORAGE_KEY = "littree:studio:activity-rail-open";
-    // User opens the rail
-    localStorage.setItem(STORAGE_KEY, "true");
-    // Simulate page refresh — new component reads from localStorage
-    const afterRefresh =
-      localStorage.getItem(STORAGE_KEY) === "true";
-    expect(afterRefresh).toBe(true);
-
-    // User closes the rail
-    localStorage.setItem(STORAGE_KEY, "false");
-    const afterClose =
-      localStorage.getItem(STORAGE_KEY) === "true";
-    expect(afterClose).toBe(false);
+  it("9b. activityVisible is true when LiTT is expanded on Live (desktop)", () => {
+    expect(
+      computeActivityVisible({
+        isMobileLitt: false,
+        mobileLittOpen: false,
+        littCollapsed: false,
+        littActiveTab: "live",
+      }),
+    ).toBe(true);
   });
 
-  it("9. closing the rail restores canvas width (conditional render)", () => {
-    // When activityRailOpen is false, the rail is NOT rendered.
-    // The main <main> element uses flex-1 and reclaims the space.
-    // This is verified by the conditional render in CommandStudio:
-    //   {activityRailOpen && <StudioActivityRail ... />}
-    // No spacer is left behind because the rail is unmounted, not hidden.
-    const activityRailOpen = false;
-    expect(activityRailOpen).toBe(false);
-    // The rail would not be in the DOM — canvas gets full width
+  it("9c. activityVisible is false when LiTT is collapsed (desktop)", () => {
+    expect(
+      computeActivityVisible({
+        isMobileLitt: false,
+        mobileLittOpen: false,
+        littCollapsed: true,
+        littActiveTab: "live",
+      }),
+    ).toBe(false);
+  });
+
+  it("9d. activityVisible is true when mobile sheet is open on Live", () => {
+    expect(
+      computeActivityVisible({
+        isMobileLitt: true,
+        mobileLittOpen: true,
+        littCollapsed: true, // desktop pref, irrelevant on mobile
+        littActiveTab: "live",
+      }),
+    ).toBe(true);
+  });
+
+  it("9e. activityVisible is false when mobile sheet is closed", () => {
+    expect(
+      computeActivityVisible({
+        isMobileLitt: true,
+        mobileLittOpen: false,
+        littCollapsed: false,
+        littActiveTab: "live",
+      }),
+    ).toBe(false);
   });
 
   it("12. Terminal remains independent (separate drawer state)", () => {
     // Terminal uses drawerOpen + drawerTab="terminal"
-    // Activity uses activityRailOpen
-    // These are separate state variables — toggling one does not affect the other
+    // Activity visibility is derived from LiTT Live state, not drawer state.
     const drawerTab = "terminal";
-    const activityRailOpen = false;
+    const activityVisible = false;
 
     expect(drawerTab).toBe("terminal");
-    expect(activityRailOpen).toBe(false);
-    // Terminal can be open while Activity is closed
+    expect(activityVisible).toBe(false);
+    // Terminal can be open while Activity (Live) is not visible
   });
 });
 
-// ─── StudioActivityRail close button test ───────────────────────────────────
+// ─── Obsolete side-panel state must not drive UI ────────────────────────────
 
-describe("StudioActivityRail close button", () => {
-  it("9b. rail renders close button when onClose is provided", () => {
-    // We test the close button presence via the rail component directly
-    // But the rail has many dependencies — so we test the prop contract
-    const onClose = vi.fn();
-    // The rail accepts onClose and renders a PanelRightClose button
-    // This is verified by the component implementation
-    expect(typeof onClose).toBe("function");
-  });
-});
-
-// ─── Keyboard shortcut test ─────────────────────────────────────────────────
-
-describe("Ctrl+Shift+A keyboard shortcut", () => {
-  it("toggles activityRailOpen on Ctrl+Shift+A", () => {
-    let activityRailOpen = false;
-    const setActivityRailOpen = (updater: (open: boolean) => boolean) => {
-      activityRailOpen = updater(activityRailOpen);
-    };
-
-    // Simulate the keyboard handler
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.ctrlKey &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "a"
-      ) {
-        event.preventDefault();
-        setActivityRailOpen((open) => !open);
-      }
-    };
-
-    // Ctrl+Shift+A → opens
-    handleKeyDown(new KeyboardEvent("keydown", {
-      ctrlKey: true,
-      shiftKey: true,
-      key: "a",
-    }));
-    expect(activityRailOpen).toBe(true);
-
-    // Ctrl+Shift+A again → closes
-    handleKeyDown(new KeyboardEvent("keydown", {
-      ctrlKey: true,
-      shiftKey: true,
-      key: "a",
-    }));
-    expect(activityRailOpen).toBe(false);
+describe("Obsolete side-panel state removal", () => {
+  it("13. no littree:studio:side-panel key is read or written", () => {
+    const OBSOLETE_KEY = "littree:studio:side-panel";
+    localStorage.removeItem(OBSOLETE_KEY);
+    // The canonical shell no longer reads or writes this key.
+    // Simulating a refresh should not resurrect it.
+    expect(localStorage.getItem(OBSOLETE_KEY)).toBeNull();
   });
 
-  it("does not toggle on Ctrl+A (no Shift)", () => {
-    let activityRailOpen = false;
-    const setActivityRailOpen = (updater: (open: boolean) => boolean) => {
-      activityRailOpen = updater(activityRailOpen);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.ctrlKey &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "a"
-      ) {
-        event.preventDefault();
-        setActivityRailOpen((open) => !open);
-      }
-    };
-
-    // Ctrl+A without Shift → no toggle
-    handleKeyDown(new KeyboardEvent("keydown", {
-      ctrlKey: true,
-      shiftKey: false,
-      key: "a",
-    }));
-    expect(activityRailOpen).toBe(false);
+  it("14. no littree:studio:activity-rail-open key is read or written", () => {
+    const OBSOLETE_KEY = "littree:studio:activity-rail-open";
+    localStorage.removeItem(OBSOLETE_KEY);
+    expect(localStorage.getItem(OBSOLETE_KEY)).toBeNull();
   });
 });

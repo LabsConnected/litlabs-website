@@ -682,5 +682,105 @@ describe("CommandStudio — mounted Work-surface routing", () => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
+
+    // ─── Phase C2.2: Activity → LiTT Live semantics ───────────────────────
+    //
+    // Activity is now an OPEN action that targets LiTT → Live.
+    // It must NOT collapse/expand the whole LiTT assistant, and its
+    // visible (pressed) state must truthfully reflect whether Live is
+    // actually on screen — not merely whether the LiTT rail is expanded.
+
+    it("Activity button is present and is an open action (not a collapse toggle)", () => {
+      render(<CommandStudio />);
+      const activityBtn = screen.getByTestId("activity-toggle");
+      expect(activityBtn).toBeTruthy();
+      // Default desktop state: LiTT expanded on Chat → Live NOT visible.
+      expect(activityBtn).toHaveAttribute("data-active", "false");
+      expect(activityBtn).toHaveAttribute("aria-label", "Open Activity");
+    });
+
+    it("Activity opens Live on desktop when LiTT is expanded on Chat", () => {
+      render(<CommandStudio />);
+      // Default: Chat is active, Live is not.
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+      act(() => {
+        fireEvent.click(screen.getByTestId("activity-toggle"));
+      });
+      // Activity must switch the LiTT tab to Live.
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+      // And the Activity button must now truthfully reflect Live visibility.
+      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
+    });
+
+    it("Activity expands a collapsed LiTT and activates Live (desktop)", () => {
+      render(<CommandStudio />);
+      // Collapse LiTT first.
+      act(() => {
+        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
+      });
+      expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
+      // Activity must expand the rail AND switch to Live.
+      act(() => {
+        fireEvent.click(screen.getByTestId("activity-toggle"));
+      });
+      expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
+    });
+
+    it("Activity visible state is false while LiTT is expanded on Chat (not Live)", () => {
+      render(<CommandStudio />);
+      // LiTT is expanded (desktop default), but on Chat.
+      expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+      // The old `activityRailOpen = !littCollapsed` would have been TRUE here,
+      // which was a lie. The new `activityVisible` must be FALSE.
+      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "false");
+    });
+
+    it("Activity opens the mobile LiTT sheet and selects Live (mobile)", () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      render(<CommandStudio />);
+      // Mobile: no desktop rail.
+      expect(screen.queryByTestId("litt-panel")).toBeNull();
+      // Activity must open the mobile sheet, NOT mutate littCollapsed.
+      act(() => {
+        fireEvent.click(screen.getByTestId("activity-toggle"));
+      });
+      expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
+      // And Live must be the active tab inside the sheet.
+      expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true");
+      // Activity button reflects truthful Live visibility on mobile.
+      expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
+    });
+
+    it("Activity does not silently mutate littCollapsed on mobile", () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      // Store the desktop collapse preference before Activity.
+      localStorage.setItem("littree:studio:litt-collapsed", "false");
+      render(<CommandStudio />);
+      act(() => {
+        fireEvent.click(screen.getByTestId("activity-toggle"));
+      });
+      // The desktop-specific collapse preference must be untouched.
+      expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
+    });
+
+    it("exactly one LiTTLiveActivity instance is rendered", () => {
+      render(<CommandStudio />);
+      // The Live activity component is always mounted (preserved across
+      // collapse); there must be exactly one instance in the DOM.
+      const liveActivities = screen.getAllByTestId("litt-live-activity");
+      expect(liveActivities.length).toBe(1);
+    });
+
+    it("no obsolete side-panel localStorage keys are written on mount", () => {
+      localStorage.removeItem("littree:studio:side-panel");
+      localStorage.removeItem("littree:studio:activity-rail-open");
+      render(<CommandStudio />);
+      expect(localStorage.getItem("littree:studio:side-panel")).toBeNull();
+      expect(localStorage.getItem("littree:studio:activity-rail-open")).toBeNull();
+    });
   });
 });
