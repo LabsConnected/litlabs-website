@@ -10,7 +10,9 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 import { YouTubePlayerShell } from "@/components/youtube/YouTubePlayerShell";
 
-// Routes that render minimal chrome (no navbar / footer)
+// Routes that render minimal chrome (no navbar / footer).
+// Only truly public pages: auth, legal, docs, pricing, and marketing.
+// Authenticated product pages (games, showcase, marketplace) use AppShell.
 const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
@@ -20,11 +22,6 @@ const BARE_PUBLIC_PATHS = [
   "/cookies",
   "/docs",
   "/pricing",
-  "/showcase",
-  "/marketplace",
-  "/gallery",
-  "/games",
-  "/social",
   "/hire",
 ];
 

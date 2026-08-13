@@ -7,15 +7,10 @@ import {
   ChevronRight,
   CheckCircle2,
   XCircle,
-  Clock,
   Loader2,
   GitBranch,
-  FileText,
   Edit3,
-  Terminal,
-  Monitor,
   Shield,
-  Zap,
   Circle,
   PanelRightClose,
   AlertTriangle,
@@ -23,7 +18,6 @@ import {
   Eye,
   EyeOff,
   Trash2,
-  Check,
 } from "lucide-react";
 import {
   useExecutionStore,
@@ -88,7 +82,6 @@ export default function LiTTLiveActivity({
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
-  const toolCalls = useExecutionStore((s) => s.toolCalls);
   const changesSummary = useExecutionStore((s) => s.changesSummary);
   const collapseEvent = useExecutionStore((s) => s.collapseEvent);
   const collapseLowLevel = useExecutionStore((s) => s.collapseLowLevel);
