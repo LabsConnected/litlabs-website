@@ -40,6 +40,7 @@ import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
   destinationToLegacyTool,
+  workspaceStageToMode,
   type StudioDestination,
   type StudioMode,
   type CreateMode,
@@ -47,6 +48,7 @@ import {
   type MissionMode,
   type InspectorTab,
   type DrawerTab,
+  type WorkspaceStage,
 } from "../lib/studio-destinations";
 import type { StudioTool } from "./StudioSidebar";
 
@@ -56,6 +58,7 @@ import type { StudioTool } from "./StudioSidebar";
 const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
 const VisualCanvasBuilder = dynamic(() => import("./canvas/builder/VisualCanvasBuilder").then((m) => m.VisualCanvasBuilder), { ssr: false });
 const CodeWorkspace = dynamic(() => import("./code/CodeWorkspace").then((m) => m.CodeWorkspace), { ssr: false });
+const StudioPlanSurface = dynamic(() => import("./StudioPlanSurface"), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -679,17 +682,21 @@ function CommandStudioContent() {
   }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
+  const isPlan = destination === "studio" && studioMode === "work" && workSurface !== "builder";
   const isCanvas = destination === "studio" && studioMode === "files";
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
 
-  // Primary workspace tabs — Canvas | Code | Preview only.
+  // Primary workspace tabs — canonical Ultra Vision stages.
+  // Plan | Canvas | Code | Preview
+  // These map through workspaceStageToMode() to legacy StudioMode internals.
   // Chat lives inside the LiTT right panel (Chat | Live tabs).
   // Files/Components live in the contextual left drawer.
-  const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
-    { id: "canvas", label: "Canvas", destination: "studio", mode: "files" },
-    { id: "code", label: "Code", destination: "studio", mode: "code" },
-    { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
+  const workspaceTabs: { id: WorkspaceStage; label: string }[] = [
+    { id: "plan", label: "Plan" },
+    { id: "canvas", label: "Canvas" },
+    { id: "code", label: "Code" },
+    { id: "preview", label: "Preview" },
   ];
 
     // Create secondary tabs — visible only when Create is active
@@ -752,22 +759,18 @@ function CommandStudioContent() {
                 borderColor: "rgba(155,77,255,0.1)",
               }}
             >
-              {primaryTabs.map((t) => {
-                const isActive = t.destination === "studio"
-                  ? destination === "studio" && studioMode === t.mode
-                  : destination === t.destination;
+              {workspaceTabs.map((t) => {
+                const tabMode = workspaceStageToMode(t.id);
+                const isActive = destination === "studio" && studioMode === tabMode
+                  && (t.id !== "plan" || workSurface !== "builder");
                 return (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => {
-                      if (t.destination === "studio") {
-                        setDestination("studio");
-                        setStudioMode(t.mode as StudioMode);
-                        if (t.mode === "work") setWorkSurface("conversation");
-                      } else {
-                        setDestination(t.destination);
-                      }
+                      setDestination("studio");
+                      setStudioMode(tabMode);
+                      if (t.id === "plan") setWorkSurface("conversation");
                     }}
                     className={`relative rounded-md px-3 py-1.5 text-[13px] font-bold transition-all ${isActive ? "glass-active" : ""}`}
                     style={{
@@ -775,6 +778,7 @@ function CommandStudioContent() {
                       backgroundColor: isActive ? "var(--purple-soft)" : "transparent",
                     }}
                     aria-label={t.label}
+                    data-testid={`workspace-tab-${t.id}`}
                   >
                     {t.label}
                     {isActive && (
@@ -899,7 +903,21 @@ function CommandStudioContent() {
               )}
 
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {isCanvas ? (
+                {isPlan ? (
+                  <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <StudioPlanSurface
+                      capabilities={capabilities}
+                      modelLabel={modelLabel}
+                      onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
+                      onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
+                      onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
+                      onOpenTerminal={handleOpenTerminal}
+                      onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+                      onOpenFiles={() => setFilesPanelOpen(true)}
+                      onRollback={handleRollback}
+                    />
+                  </div>
+                ) : isCanvas ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <VisualCanvasBuilder />
                   </div>

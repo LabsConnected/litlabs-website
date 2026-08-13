@@ -4,8 +4,12 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 // ── Mocks ────────────────────────────────────────────────────────────
 // We mock the heavy dependencies so CommandStudio can mount in jsdom.
 
+// Stable URLSearchParams — must be the same reference across re-renders
+// so the useEffect([searchParams]) doesn't reset state on every render.
+const stableSearchParams = new URLSearchParams("tool=chat");
+
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams("tool=chat"),
+  useSearchParams: () => stableSearchParams,
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => "/studio",
 }));
@@ -154,11 +158,17 @@ vi.mock("../stores/useStudioAgentStore", () => ({
   useStudioAgentStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       activeAgentId: "litt",
+      activeAgentMode: "standard",
+      activeAgentInstanceId: null,
+      executionMode: "plan",
       setActiveAgent: vi.fn(),
+      setActiveAgentMode: vi.fn(),
+      setActiveAgentInstance: vi.fn(),
+      setExecutionMode: vi.fn(),
     }),
   AGENT_META: {
-    litt: { displayName: "LiTT", systemPrompt: "", avatar: "" },
-    spark: { displayName: "Spark", systemPrompt: "", avatar: "" },
+    litt: { displayName: "LiTT", systemPrompt: "", avatar: "", role: "", tag: "", placeholder: "", minimumPlan: "free", description: "", starterActions: [], color: "#4dff62" },
+    spark: { displayName: "Spark", systemPrompt: "", avatar: "", role: "", tag: "", placeholder: "", minimumPlan: "free", description: "", starterActions: [], color: "#9b4dff" },
   },
   STUDIO_AGENTS: [
     { displayName: "LiTT", systemPrompt: "", avatar: "" },
@@ -197,6 +207,40 @@ vi.mock("../stores/useStudioModelStore", () => ({
       fallbackNotice: null,
       setFallbackNotice: vi.fn(),
       providerHealth: {},
+    }),
+}));
+
+vi.mock("../stores/useExecutionStore", () => ({
+  useExecutionStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      events: [],
+      phase: "idle",
+      isRunning: false,
+      currentStep: 0,
+      pendingApproval: null,
+      checkpoint: null,
+      toolCalls: [],
+      changesSummary: null,
+      startRun: vi.fn(),
+      endRun: vi.fn(),
+      addEvent: vi.fn(),
+      setPhase: vi.fn(),
+      setPendingApproval: vi.fn(),
+      resolveApproval: vi.fn(),
+      setCheckpoint: vi.fn(),
+      collapseEvent: vi.fn(),
+      collapseLowLevel: vi.fn(),
+      clearEvents: vi.fn(),
+      reset: vi.fn(),
+    }),
+}));
+
+vi.mock("../stores/useConversationStore", () => ({
+  useConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      conversations: [],
+      selectedConversationId: null,
+      selectConversation: vi.fn(),
     }),
 }));
 
@@ -298,6 +342,84 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     });
     await waitFor(() => {
       expect(screen.queryByTestId("builder-tool")).toBeNull();
+    });
+  });
+
+  describe("canonical workspace tabs", () => {
+    it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", () => {
+      render(<CommandStudio />);
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
+    });
+
+    it("Plan tab is active when ?tool=chat (legacy work mode)", () => {
+      render(<CommandStudio />);
+      const planBtn = screen.getByTestId("workspace-tab-plan");
+      expect(planBtn.className).toContain("glass-active");
+    });
+
+    it("clicking Canvas switches to canvas stage", async () => {
+      render(<CommandStudio />);
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      act(() => {
+        fireEvent.click(canvasBtn);
+      });
+      await waitFor(() => {
+        expect(canvasBtn.className).toContain("glass-active");
+      });
+    });
+
+    it("clicking Code switches to code stage", async () => {
+      render(<CommandStudio />);
+      const codeBtn = screen.getByTestId("workspace-tab-code");
+      act(() => {
+        fireEvent.click(codeBtn);
+      });
+      await waitFor(() => {
+        expect(codeBtn.className).toContain("glass-active");
+      });
+    });
+
+    it("clicking Preview switches to preview stage", async () => {
+      render(<CommandStudio />);
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      act(() => {
+        fireEvent.click(previewBtn);
+      });
+      await waitFor(() => {
+        expect(previewBtn.className).toContain("glass-active");
+      });
+    });
+
+    it("clicking Plan returns to plan stage from another stage", async () => {
+      render(<CommandStudio />);
+      // Go to Code first
+      act(() => {
+        fireEvent.click(screen.getByTestId("workspace-tab-code"));
+      });
+      // Then back to Plan
+      const planBtn = screen.getByTestId("workspace-tab-plan");
+      act(() => {
+        fireEvent.click(planBtn);
+      });
+      await waitFor(() => {
+        expect(planBtn.className).toContain("glass-active");
+      });
+    });
+
+    it("Files button remains independently toggleable", () => {
+      render(<CommandStudio />);
+      const filesBtn = screen.getByRole("button", { name: "Files" });
+      expect(filesBtn).toBeTruthy();
+      // Files should not be active by default
+      expect(filesBtn.className).not.toContain("glass-active");
+      // Toggle it on
+      act(() => {
+        fireEvent.click(filesBtn);
+      });
+      expect(filesBtn.className).toContain("glass-active");
     });
   });
 });
