@@ -3,14 +3,15 @@
 /**
  * ContextDrawer — right-side contextual panel.
  *
- * Tabs: Files | Inspector
+ * Tabs: Files | Assets | Inspector
  *
  * Reuses existing StudioProjectFiles and StudioInspector content.
+ * The Assets tab is backed by the real Asset Lake facade.
  * Does NOT duplicate data or logic.
  *
  * Fully controlled by the parent (CommandStudio) — this component owns
  * NO tab state of its own. This keeps localStorage persistence, the
- * Files/Inspector button styling, and the actual visible tab in sync
+ * Files/Assets/Inspector button styling, and the actual visible tab in sync
  * at all times (Phase C2.1 fix).
  *
  * Stays mounted at width 0 when closed on desktop so StudioProjectFiles
@@ -21,9 +22,9 @@
  */
 
 import { type ReactNode } from "react";
-import { Folder, ClipboardList, PanelRightClose } from "lucide-react";
+import { Folder, ClipboardList, PanelRightClose, ImageIcon } from "lucide-react";
 
-export type ContextDrawerTab = "files" | "inspector";
+export type ContextDrawerTab = "files" | "assets" | "inspector";
 
 export interface ContextDrawerProps {
   /** Whether the drawer is open */
@@ -36,12 +37,15 @@ export interface ContextDrawerProps {
   onClose: () => void;
   /** Files tab content — rendered as a slot from the parent */
   filesContent: ReactNode;
+  /** Assets tab content — rendered as a slot from the parent */
+  assetsContent: ReactNode;
   /** Inspector tab content — rendered as a slot from the parent */
   inspectorContent: ReactNode;
 }
 
 const TABS: { id: ContextDrawerTab; label: string; icon: typeof Folder }[] = [
   { id: "files", label: "Files", icon: Folder },
+  { id: "assets", label: "Assets", icon: ImageIcon },
   { id: "inspector", label: "Inspector", icon: ClipboardList },
 ];
 
@@ -51,6 +55,7 @@ export default function ContextDrawer({
   onTabChange,
   onClose,
   filesContent,
+  assetsContent,
   inspectorContent,
 }: ContextDrawerProps) {
   return (
@@ -145,6 +150,17 @@ export default function ContextDrawer({
               data-testid="context-files-panel"
             >
               {filesContent}
+            </div>
+            <div
+              className="absolute inset-0 flex flex-col overflow-hidden"
+              style={{
+                visibility: open && activeTab === "assets" ? "visible" : "hidden",
+                pointerEvents: open && activeTab === "assets" ? "auto" : "none",
+              }}
+              data-active={open && activeTab === "assets"}
+              data-testid="context-assets-panel"
+            >
+              {assetsContent}
             </div>
             <div
               className="absolute inset-0 flex flex-col overflow-hidden"

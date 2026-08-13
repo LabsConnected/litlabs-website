@@ -22,6 +22,7 @@ describe("ContextDrawer (real component)", () => {
       onTabChange,
       onClose,
       filesContent: <div data-testid="files-slot">Files content</div>,
+      assetsContent: <div data-testid="assets-slot">Assets content</div>,
       inspectorContent: <div data-testid="inspector-slot">Inspector content</div>,
       ...overrides,
     };
@@ -80,6 +81,7 @@ describe("ContextDrawer (real component)", () => {
         onTabChange={onTabChange}
         onClose={onClose}
         filesContent={<div data-testid="files-slot" />}
+        assetsContent={<div data-testid="assets-slot" />}
         inspectorContent={<div data-testid="inspector-slot" />}
       />,
     );
@@ -91,6 +93,7 @@ describe("ContextDrawer (real component)", () => {
         onTabChange={onTabChange}
         onClose={onClose}
         filesContent={<div data-testid="files-slot" />}
+        assetsContent={<div data-testid="assets-slot" />}
         inspectorContent={<div data-testid="inspector-slot" />}
       />,
     );

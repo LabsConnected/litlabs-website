@@ -34,7 +34,10 @@ import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
 import LiTTPanel from "./LiTTPanel";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
-import ContextDrawer from "./context/ContextDrawer";
+import ContextDrawer, { type ContextDrawerTab } from "./context/ContextDrawer";
+import AssetsPanel from "./context/AssetsPanel";
+import { StudioContextProvider, useStudioContext } from "../context/StudioContext";
+import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { useViewportTier } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import { useExecutionStore } from "../stores/useExecutionStore";
@@ -123,6 +126,35 @@ function AgentVoiceSync() {
       : "litt";
     setVoiceAgent(voiceAgent);
   }, [activeAgentId, setVoiceAgent]);
+  return null;
+}
+
+/**
+ * StudioContextSync — invisible bridge that pushes authoritative routing
+ * state into the StudioContextProvider's internal state.
+ *
+ * This component renders nothing. It exists so that when CommandStudio's
+ * own state (destination, studioMode, createMode, conversation, project)
+ * changes via user interaction or URL sync, the canonical StudioContext
+ * reflects those changes without the provider needing to be re-mounted
+ * (which would lose activeFile/activeAssetId).
+ */
+function StudioContextSync({
+  projectId,
+  sessionId,
+  workspaceMode,
+  creator,
+}: {
+  projectId: string | null;
+  sessionId: string;
+  workspaceMode: import("@/app/studio/lib/studio-destinations").WorkspaceStage;
+  creator: import("@/app/studio/lib/studio-destinations").CreatorKind | null;
+}) {
+  const ctx = useStudioContext();
+  useEffect(() => { ctx._setProjectId(projectId); }, [projectId, ctx]);
+  useEffect(() => { ctx._setSessionId(sessionId); }, [sessionId, ctx]);
+  useEffect(() => { ctx._setWorkspaceMode(workspaceMode); }, [workspaceMode, ctx]);
+  useEffect(() => { ctx._setCreator(creator); }, [creator, ctx]);
   return null;
 }
 
@@ -300,13 +332,14 @@ function CommandStudioContent() {
       return false;
     }
   });
-  const [contextDrawerTab, setContextDrawerTab] = useState<"files" | "inspector">(() => {
-    if (typeof window === "undefined") return "files" as const;
+  const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
+    if (typeof window === "undefined") return "files";
     try {
       const stored = localStorage.getItem(CONTEXT_TAB_KEY);
-      return stored === "inspector" ? "inspector" : "files" as const;
+      if (stored === "inspector" || stored === "assets") return stored;
+      return "files";
     } catch {
-      return "files" as const;
+      return "files";
     }
   });
   useEffect(() => {
@@ -953,7 +986,44 @@ function CommandStudioContent() {
     />
   );
 
+  // ── Phase D: canonical StudioContext ──────────────────────────────
+  // Derive the canonical context values from the authoritative routing
+  // state. The provider adapts existing state — it does NOT duplicate it.
+  const studioWorkspaceMode = deriveWorkspaceStage(destination, studioMode) ?? "plan";
+  const studioCreator = deriveCreator(destination, studioMode, createMode);
+  const studioSessionId = conversation.selectedConversationId
+    ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
+
   return (
+    <StudioContextProvider
+      initialProjectId={capabilities.projectId ?? null}
+      initialSessionId={studioSessionId}
+      initialWorkspaceMode={studioWorkspaceMode}
+      initialCreator={studioCreator}
+      onWorkspaceModeChange={(mode) => {
+        const mapped = workspaceStageToMode(mode);
+        setStudioMode(mapped);
+        setDestination("studio");
+      }}
+      onCreatorChange={(c) => {
+        if (c === null) return;
+        // Delegate to existing routing: create-mode creators go through
+        // the Create destination; "design" goes through Studio/design.
+        if (c === "design") {
+          setStudioMode("design");
+          setDestination("studio");
+        } else {
+          setCreateMode(c as CreateMode);
+          setDestination("create");
+        }
+      }}
+    >
+      <StudioContextSync
+        projectId={capabilities.projectId ?? null}
+        sessionId={studioSessionId}
+        workspaceMode={studioWorkspaceMode}
+        creator={studioCreator}
+      />
     <>
       <AgentVoiceSync />
 
@@ -1255,6 +1325,9 @@ function CommandStudioContent() {
                 </div>
               </div>
             }
+            assetsContent={
+              <AssetsPanel projectId={capabilities.projectId} />
+            }
             inspectorContent={
               <StudioInspector
                 embedded
@@ -1414,6 +1487,7 @@ function CommandStudioContent() {
       )}
 
     </>
+    </StudioContextProvider>
   );
 }
 
