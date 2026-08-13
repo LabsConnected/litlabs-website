@@ -32,8 +32,10 @@ import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import LiTTLiveActivity from "./LiTTLiveActivity";
+import LiTTPanel from "./LiTTPanel";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import StudioProjectFiles from "./StudioProjectFiles";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
   mapLegacyToolToDestination,
@@ -503,6 +505,30 @@ function CommandStudioContent() {
     setDrawerTab("terminal");
   }, []);
 
+  // Real rollback: call restore_checkpoint via the Studio API (git reset --hard <sha>).
+  // Falls back to opening Terminal if no checkpoint or API call fails.
+  const handleRollback = useCallback(async () => {
+    const ckpt = useExecutionStore.getState().checkpoint;
+    if (!ckpt?.gitSha || !capabilities.projectId) {
+      handleOpenTerminal();
+      return;
+    }
+    try {
+      const res = await fetch("/api/studio/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: capabilities.projectId, sha: ckpt.gitSha }),
+      });
+      if (res.ok) {
+        void refreshCapabilities();
+      } else {
+        handleOpenTerminal();
+      }
+    } catch {
+      handleOpenTerminal();
+    }
+  }, [capabilities.projectId, handleOpenTerminal, refreshCapabilities]);
+
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
     repo: capabilities.repositoryName ?? undefined,
@@ -657,12 +683,10 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
 
-  // Primary workspace tabs — Chat | Canvas | Code | Preview.
-  // Files is no longer a primary tab — it's a collapsible left panel.
-  // Chat = studio/work, Canvas = studio/files (CanvasPanel), Code = studio/code,
-  // Preview = studio/preview
+  // Primary workspace tabs — Canvas | Code | Preview only.
+  // Chat lives inside the LiTT right panel (Chat | Live tabs).
+  // Files/Components live in the contextual left drawer.
   const primaryTabs: { id: string; label: string; destination: StudioDestination; mode?: StudioMode | CreateMode }[] = [
-    { id: "chat", label: "Chat", destination: "studio", mode: "work" },
     { id: "canvas", label: "Canvas", destination: "studio", mode: "files" },
     { id: "code", label: "Code", destination: "studio", mode: "code" },
     { id: "preview", label: "Preview", destination: "studio", mode: "preview" },
@@ -860,54 +884,22 @@ function CommandStudioContent() {
                     </button>
                   </div>
                   <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                    <StudioInspector
-                      open={true}
-                      onToggle={() => setFilesPanelOpen(false)}
-                      activeTab="files"
-                      onTabChange={() => {}}
-                      data={{
-                        capabilities,
-                        modelLabel,
-                        modelHealth,
-                        activeAgentName: AGENT_META[conversation.activeAgentId]?.displayName ?? conversation.activeAgentId,
-                        destination,
-                        surface: studioMode,
-                        messages: conversation.messages,
-                        busy: conversation.busy,
-                        workspaceRevision,
-                        healthRunTrigger,
-                        onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                        onWorkspacePrepared: () => { void refreshCapabilities(); },
-                      }}
+                    <StudioProjectFiles
+                      projectId={capabilities.projectId}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                      workspaceStatus={capabilities.workspaceStatus}
+                      writeAccess={capabilities.writeAccess}
+                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
                     />
                   </div>
                 </div>
               )}
 
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {isStudioWorkConversation ? (
-                  <StudioWorkSurface
-                    messages={conversation.messages}
-                    busy={conversation.busy}
-                    loading={conversation.loading}
-                    activeAgentId={conversation.activeAgentId}
-                    fallbackNotice={conversation.fallbackNotice}
-                    onRouteToolAction={handleRouteTool}
-                    onRegenerateAction={conversation.regenerate}
-                    onEmptyAction={handleEmptyAction}
-                    onSelectConversation={handleSelectConversation}
-                    hasProject={projectReady}
-                    projectName={capabilities.projectName}
-                    sourceType={capabilities.sourceType}
-                    githubInstalled={capabilities.githubInstalled}
-                    capabilities={capabilities}
-                    modelHealth={modelHealth}
-                    modelLabel={modelLabel}
-                    displayName={profileDisplayName}
-                    onStartBlank={handleStartBlank}
-                    onConnectRepo={handleConnectRepo}
-                  />
-                ) : isCanvas ? (
+                {isCanvas ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <VisualCanvasBuilder />
                   </div>
@@ -980,170 +972,141 @@ function CommandStudioContent() {
                 />
               )}
             </StudioDrawer>
-
-            {/* Bottom status bar — preview status, context info, selected code indicator */}
-            {isStudioWorkConversation && (
-              <div
-                className="flex shrink-0 items-center gap-3 border-t px-3 py-1 text-[10px] font-medium overflow-hidden whitespace-nowrap"
-                style={{
-                  borderColor: "var(--studio-border)",
-                  backgroundColor: "var(--studio-surface)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                {conversation.busy ? (
-                  <span className="flex items-center gap-1.5" style={{ color: "var(--spark-primary)" }}>
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: "var(--spark-primary)" }} />
-                    Refreshing preview…
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} />
-                    Preview ready
-                  </span>
-                )}
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span>Context: {conversation.messages.length} {conversation.messages.length === 1 ? "file" : "files"}</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span>Preview :8443</span>
-                <div className="flex-1" />
-                <span className="hidden sm:inline" style={{ color: "var(--text-secondary)" }}>Selected code</span>
-              </div>
-            )}
-
-            {/* Persistent composer — visible at all times in Studio/Work conversation */}
-            {/* Reauthentication banner — visible when session expires during Studio use.
-                Disables the composer and offers a real recovery action. */}
-            {isStudioWorkConversation && (conversation.requiresReauth || conversation.sendError) && (
-              <div
-                className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
-                style={{
-                  borderColor: "rgba(239,68,68,0.3)",
-                  backgroundColor: "rgba(239,68,68,0.08)",
-                  color: "#fca5a5",
-                }}
-              >
-                <span className="min-w-0 flex-1 font-medium">
-                  {conversation.requiresReauth
-                    ? "Your session expired. Sign in again to continue."
-                    : conversation.sendError}
-                </span>
-                <div className="flex shrink-0 items-center gap-2">
-                  {!conversation.requiresReauth && conversation.sendError && (
-                    <button
-                      type="button"
-                      onClick={() => conversation.clearSendError()}
-                      className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
-                      aria-label="Dismiss error"
-                    >
-                      ✕
-                    </button>
-                  )}
-                  {conversation.requiresReauth ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        conversation.clearRequiresReauth();
-                        window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
-                      }}
-                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                    >
-                      Sign in again
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => window.location.reload()}
-                      className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
-                    >
-                      Refresh session
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {isStudioWorkConversation && (
-              <CommandComposer
-                value={composerValue}
-                onChange={setComposerValue}
-                onSend={handleComposerSend}
-                onCancel={conversation.cancel}
-                busy={conversation.busy || creatingProject}
-                disabled={conversation.requiresReauth}
-                onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                onToggleLive={() => setLivePanelOpen((v) => !v)}
-                liveActive={livePanelOpen && liveSession.isLive}
-                contextLine={contextLine}
-                executionMode={executionMode}
-                onExecutionModeChange={setExecutionMode}
-              />
-            )}
-
-            {/* Keyboard shortcuts footer — visible in Studio/Work conversation */}
-            {isStudioWorkConversation && (
-              <div
-                className="hidden shrink-0 items-center justify-center gap-3 border-t px-3 py-1 text-[10px] font-medium md:flex"
-                style={{
-                  borderColor: "var(--studio-border)",
-                  backgroundColor: "var(--studio-surface)",
-                  color: "var(--text-muted)",
-                }}
-                aria-hidden
-              >
-                <span><kbd className="font-mono">⌘↵</kbd> send</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span><kbd className="font-mono">⌘K</kbd> command palette</span>
-                <span style={{ color: "var(--studio-border-strong)" }}>·</span>
-                <span><kbd className="font-mono">Esc</kbd> close overlay</span>
-              </div>
-            )}
           </main>
 
-          {/* LiTT Live Activity panel — right side, shows real-time execution.
-              Replaces the old StudioActivityRail. Visible while LiTT works
-              regardless of which center tab is active. */}
+          {/* LiTT Panel — right side. One agent, two views: Chat | Live.
+              Chat = conversation transcript + composer
+              Live = real-time execution telemetry
+              Both tabs share the same conversation/execution state. */}
           {littLiveOpen && (
-            <LiTTLiveActivity
+            <LiTTPanel
               onClose={() => setLittLiveOpen(false)}
-              onOpenFile={(_filePath) => {
-                setDestination("studio");
-                setStudioMode("code");
-              }}
-              onOpenDiff={() => {
-                setDrawerOpen(true);
-                setDrawerTab("activity");
-              }}
-              onOpenCheck={() => {
-                setDrawerOpen(true);
-                setDrawerTab("terminal");
-              }}
-              onOpenTerminal={handleOpenTerminal}
-              onStop={() => {
-                conversation.cancel();
-                useExecutionStore.getState().endRun("cancelled");
-              }}
-              onRollback={() => {
-                // Rollback is a future feature — for now, just open the terminal
-                // so the user can manually git checkout the checkpoint SHA
-                handleOpenTerminal();
-              }}
-              onResolveApproval={(decision) => {
-                // Approval resolution: call the paused run API, then regenerate
-                const pending = useExecutionStore.getState().pendingApproval;
-                if (pending?.pausedRunId && conversation.selectedConversationId) {
-                  void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ decision }),
-                  }).then(() => {
-                    useExecutionStore.getState().resolveApproval(decision);
-                    conversation.regenerate();
-                  });
-                } else {
-                  useExecutionStore.getState().resolveApproval(decision);
-                }
-              }}
+              chatContent={
+                <>
+                  <StudioWorkSurface
+                    messages={conversation.messages}
+                    busy={conversation.busy}
+                    loading={conversation.loading}
+                    activeAgentId={conversation.activeAgentId}
+                    fallbackNotice={conversation.fallbackNotice}
+                    onRouteToolAction={handleRouteTool}
+                    onRegenerateAction={conversation.regenerate}
+                    onEmptyAction={handleEmptyAction}
+                    onSelectConversation={handleSelectConversation}
+                    hasProject={projectReady}
+                    projectName={capabilities.projectName}
+                    sourceType={capabilities.sourceType}
+                    githubInstalled={capabilities.githubInstalled}
+                    capabilities={capabilities}
+                    modelHealth={modelHealth}
+                    modelLabel={modelLabel}
+                    displayName={profileDisplayName}
+                    onStartBlank={handleStartBlank}
+                    onConnectRepo={handleConnectRepo}
+                  />
+                  {(conversation.requiresReauth || conversation.sendError) && (
+                    <div
+                      className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+                      style={{
+                        borderColor: "rgba(239,68,68,0.3)",
+                        backgroundColor: "rgba(239,68,68,0.08)",
+                        color: "#fca5a5",
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 font-medium">
+                        {conversation.requiresReauth
+                          ? "Your session expired. Sign in again to continue."
+                          : conversation.sendError}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {!conversation.requiresReauth && conversation.sendError && (
+                          <button
+                            type="button"
+                            onClick={() => conversation.clearSendError()}
+                            className="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                            aria-label="Dismiss error"
+                          >
+                            ✕
+                          </button>
+                        )}
+                        {conversation.requiresReauth ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              conversation.clearRequiresReauth();
+                              window.location.href = "/sign-in?redirect_url=" + encodeURIComponent(window.location.pathname + window.location.search);
+                            }}
+                            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                          >
+                            Sign in again
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => window.location.reload()}
+                            className="whitespace-nowrap rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                          >
+                            Refresh session
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <CommandComposer
+                    value={composerValue}
+                    onChange={setComposerValue}
+                    onSend={handleComposerSend}
+                    onCancel={conversation.cancel}
+                    busy={conversation.busy || creatingProject}
+                    disabled={conversation.requiresReauth}
+                    onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
+                    onToggleLive={() => setLivePanelOpen((v) => !v)}
+                    liveActive={livePanelOpen && liveSession.isLive}
+                    contextLine={contextLine}
+                    executionMode={executionMode}
+                    onExecutionModeChange={setExecutionMode}
+                  />
+                </>
+              }
+              liveContent={
+                <LiTTLiveActivity
+                  onOpenFile={(_filePath) => {
+                    setDestination("studio");
+                    setStudioMode("code");
+                  }}
+                  onOpenDiff={() => {
+                    setDrawerOpen(true);
+                    setDrawerTab("activity");
+                  }}
+                  onOpenCheck={() => {
+                    setDrawerOpen(true);
+                    setDrawerTab("terminal");
+                  }}
+                  onOpenTerminal={handleOpenTerminal}
+                  onStop={() => {
+                    conversation.cancel();
+                    useExecutionStore.getState().endRun("cancelled");
+                  }}
+                  onRollback={() => {
+                    handleOpenTerminal();
+                  }}
+                  onResolveApproval={(decision) => {
+                    const pending = useExecutionStore.getState().pendingApproval;
+                    if (pending?.pausedRunId && conversation.selectedConversationId) {
+                      void fetch(`/api/studio/conversations/${conversation.selectedConversationId}/approvals/${pending.pausedRunId}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ decision }),
+                      }).then(() => {
+                        useExecutionStore.getState().resolveApproval(decision);
+                        conversation.regenerate();
+                      });
+                    } else {
+                      useExecutionStore.getState().resolveApproval(decision);
+                    }
+                  }}
+                />
+              }
             />
           )}
         </div>

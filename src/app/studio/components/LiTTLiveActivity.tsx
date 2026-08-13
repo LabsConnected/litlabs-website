@@ -127,15 +127,8 @@ export default function LiTTLiveActivity({
   ).length;
 
   return (
-    <aside
-      className="flex h-full shrink-0 flex-col overflow-hidden border-l"
-      style={{
-        width: "var(--studio-rail-w, 340px)",
-        maxWidth: "85vw",
-        backgroundColor: "var(--studio-surface)",
-        borderLeft: "1px solid var(--studio-border)",
-        backdropFilter: "blur(12px)",
-      }}
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden"
       data-testid="litt-live-activity"
     >
       {/* ── Header ── */}
@@ -330,7 +323,7 @@ export default function LiTTLiveActivity({
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 

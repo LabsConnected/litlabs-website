@@ -185,13 +185,8 @@ export default function CommandStudioHeader({
       }}
       data-testid="studio-header"
     >
-      {/* LiTT Studio logo — single instance, text hidden on mobile via CSS */}
-      <BrandLogo
-        href="/dashboard"
-        size={30}
-        showText
-        className="[&>span]:hidden md:[&>span]:inline"
-      />
+      {/* Brand logo removed — AppShell sidebar already establishes brand identity.
+          Studio header focuses on project, branch, workspace status, and actions. */}
 
       <StudioProjectPicker
         projectId={capabilities.projectId}
