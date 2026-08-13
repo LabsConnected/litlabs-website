@@ -1036,4 +1036,112 @@ src/lib/litt-intelligence/agent-loop-v2.ts
 
 ---
 
+## 19. Implementation Clarifications (Locked 2026-08-13)
+
+These four clarifications are part of the contract. They resolve ambiguities an
+implementation agent would otherwise have to guess. They do **not** change the
+architecture, phases, locked UI requirements, or acceptance goal.
+
+### 19.1 Creator / Canvas Handler Clarification
+
+Some Station Actions have existing backing handlers and some do not.
+
+- When an existing handler/provider exists, **adapt it** behind the Station
+  Action interface.
+- When no handler exists — particularly `image.generate`, `video.generate`,
+  `music.generate`, `audio.*`, `canvas.*` and other creator/canvas actions
+  identified by the capability audit — treat the capability as a **NEW
+  IMPLEMENTATION** behind the Station Action interface.
+- **Do not** create placeholder actions that report success without a real
+  provider/handler. A station action with no backing implementation must either
+  fail explicitly (`{ success: false, errorCode: "not_implemented" }`) or be
+  omitted from the registry until its handler is built.
+
+This means Phase 2.1 (Image station actions) and the canvas/music/video/audio
+actions are **new capability builds**, not pure wire-ups of existing
+`project-tools/registry.ts` handlers. Plan accordingly.
+
+### 19.2 Headless / Voice Navigation Semantics
+
+`StationExecutionContext.navigateToStation()` is **optional presentation
+behavior**, not a required side effect of executing an action.
+
+| Execution context | `navigateToStation()` behavior |
+|-------------------|-------------------------------|
+| Studio with active UI subscriber | Navigate / follow LiTT normally (respects Follow mode) |
+| Voice / phone / headless | **No-op** for navigation; the underlying station action still executes |
+
+`StationExecutionContext.reportLiveState()` is **NOT a no-op** in any context.
+
+- It must continue emitting runtime/activity state in all execution paths.
+- In voice/phone contexts, meaningful state changes **may** be translated into
+  spoken status updates (TTS), e.g. "Switching to the browser now." This is
+  optional per state change but the emission itself is mandatory.
+- Headless callers that have no TTS sink still receive the emitted state for
+  logging/audit.
+
+### 19.3 Execution Identity
+
+**Do not** use `LITTLABS_VAPI_OWNER_CLERK_ID` as the universal LiTT AUTO
+identity. Baking a single-owner environment variable into the architecture
+breaks the moment LiTT acts for another user or project.
+
+Every execution must carry an explicit **actor/owner identity** derived from the
+`ProjectSession` or execution grant:
+
+```text
+ProjectSession.userId / ownerUserId
+    ↓
+StationExecutionContext.actorUserId
+```
+
+| Channel | Actor identity |
+|---------|---------------|
+| Authenticated Studio | The current authenticated session user |
+| Voice / Vapi | Resolved configured voice owner; `LITTLABS_VAPI_OWNER_CLERK_ID` may be used as the **voice-channel fallback only** |
+| Unattended AUTO | The owner/user that granted the automation for that project/session |
+
+All permission, project, memory, file, deployment, and approval checks use this
+explicit execution identity — never a global env var as the implicit actor.
+
+`StationExecutionContext` is amended to include:
+
+```typescript
+export interface StationExecutionContext {
+  // ...existing fields...
+  /** The explicit actor/owner identity for this execution. */
+  actorUserId: string;
+}
+```
+
+### 19.4 Browser Live View Implementation Gate
+
+The existing job-based browser executor (`browser-job-executor.ts`) does **not**
+by itself satisfy Browser Station Live View (§4, §5).
+
+Browser Live View requires:
+
+- **Persistent Playwright/CDP browser session** (not a one-shot job that
+  returns a snapshot and closes)
+- **Realtime session lifecycle** — open, keep-alive, user takeover/release,
+  clean teardown
+- **Streamed visual/state updates** into Studio (frames or DOM snapshots via
+  WebSocket / equivalent realtime transport)
+- **User takeover/release controls** where supported
+- **DOM/accessibility actions remain authoritative** over coordinate clicking
+  (per §4.1 — use CDP selectors, not screen coordinates)
+
+Treat this as a **dedicated implementation/spike gate** before Phase 3 Browser
+Station is considered complete. If the persistent-session + realtime-transport
+spike does not pass, Phase 3 is blocked regardless of other Phase 3 work.
+
+**Phase 3 acceptance gate (additional):**
+- [ ] Persistent CDP session stays open across multiple LiTT actions without
+      re-launching the browser
+- [ ] Visual updates stream into Studio at usable latency (<1s perceived)
+- [ ] User can take over the browser from LiTT and release it back
+- [ ] Session tears down cleanly on station exit / project switch
+
+---
+
 This contract is LOCKED. Implement exactly what is described. Ask before deviating.
