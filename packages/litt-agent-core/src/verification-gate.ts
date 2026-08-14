@@ -48,7 +48,6 @@ import * as fs from "fs";
 import * as path from "path";
 import type {
   ToolStatus,
-  RuntimeEvent,
   RuntimeEventEmitter,
   ShellExecutor,
 } from "./types.js";

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useConversationStore } from "@/app/studio/stores/useConversationStore";
+import { useConversationStore } from "@/app/(app)/studio/stores/useConversationStore";
 
 /**
  * P0.5: Regression test — Live transcript persistence must NOT
@@ -15,7 +15,7 @@ import { useConversationStore } from "@/app/studio/stores/useConversationStore";
 const mockSend = vi.fn();
 const mockLoadMessages = vi.fn();
 
-vi.mock("@/app/studio/hooks/useCanonicalConversation", () => ({
+vi.mock("@/app/(app)/studio/hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: () => ({
     messages: [],
     busy: false,

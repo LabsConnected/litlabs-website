@@ -416,7 +416,7 @@ describe("chargeAgentRun (billing)", () => {
 
 describe("Studio agent store (scenario 19, 20)", () => {
   it("exposes only LiTT and Spark in the studio selector (2 agents)", async () => {
-    const { STUDIO_AGENTS } = await import("@/app/studio/stores/useStudioAgentStore");
+    const { STUDIO_AGENTS } = await import("@/app/(app)/studio/stores/useStudioAgentStore");
     expect(STUDIO_AGENTS).toHaveLength(2);
     const ids = STUDIO_AGENTS.map((a) => a.id);
     expect(ids).toContain("litt");
@@ -427,7 +427,7 @@ describe("Studio agent store (scenario 19, 20)", () => {
   });
 
   it("each studio agent has minimumPlan for gating", async () => {
-    const { STUDIO_AGENTS } = await import("@/app/studio/stores/useStudioAgentStore");
+    const { STUDIO_AGENTS } = await import("@/app/(app)/studio/stores/useStudioAgentStore");
     for (const a of STUDIO_AGENTS) {
       expect(a.minimumPlan).toBeDefined();
       expect(a.starterActions.length).toBeGreaterThanOrEqual(3);
@@ -435,7 +435,7 @@ describe("Studio agent store (scenario 19, 20)", () => {
   });
 
   it("LiTT and Spark remain working with starter plan (scenario 20)", async () => {
-    const { AGENT_META } = await import("@/app/studio/stores/useStudioAgentStore");
+    const { AGENT_META } = await import("@/app/(app)/studio/stores/useStudioAgentStore");
     expect(AGENT_META.litt.displayName).toBe("LiTT");
     expect(AGENT_META.spark.displayName).toBe("Spark");
     expect(AGENT_META.litt.minimumPlan).toBe("starter");

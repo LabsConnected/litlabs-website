@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import type { CreatorKind, WorkspaceStage } from "@/app/studio/lib/studio-destinations";
-import { CREATOR_KIND_LABELS } from "@/app/studio/lib/studio-destinations";
-import { deriveCreator, deriveWorkspaceStage } from "@/app/studio/context/derive-studio-context";
+import type { CreatorKind, WorkspaceStage } from "@/app/(app)/studio/lib/studio-destinations";
+import { CREATOR_KIND_LABELS } from "@/app/(app)/studio/lib/studio-destinations";
+import { deriveCreator, deriveWorkspaceStage } from "@/app/(app)/studio/context/derive-studio-context";
 import type { AssetKind } from "@/lib/assets/types";
 import { ASSET_KINDS, isAssetKind } from "@/lib/assets/types";
 import { ASSET_SOURCE_PREFIXES } from "@/lib/assets/types";

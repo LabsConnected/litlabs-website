@@ -9,7 +9,7 @@ import { BrandLogo } from "@/components/branding/BrandLogo";
 const NAV_LINKS = [
   { label: "Studio", href: "/studio" },
   { label: "Missions", href: "/studio?tool=workflows" },
-  { label: "Marketplace", href: "/marketplace" },
+  { label: "Marketplace", href: "/marketplace", badge: "Beta" },
   { label: "Pricing", href: "/pricing" },
   { label: "How it works", href: "#how" },
   { label: "Docs", href: "/docs" },
@@ -53,6 +53,11 @@ export function LandingHeader() {
                 className="transition hover:text-white"
               >
                 {l.label}
+                {"badge" in l && l.badge && (
+                  <span className="ml-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-300">
+                    {l.badge}
+                  </span>
+                )}
               </Link>
             ),
           )}
@@ -90,9 +95,14 @@ export function LandingHeader() {
                   key={l.label}
                   href={l.href}
                   onClick={() => setOpen(false)}
-                  className="rounded-lg px-3 py-2.5 text-sm font-medium text-neutral-300 transition hover:bg-white/5 hover:text-white"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-neutral-300 transition hover:bg-white/5 hover:text-white"
                 >
                   {l.label}
+                  {"badge" in l && l.badge && (
+                    <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-300">
+                      {l.badge}
+                    </span>
+                  )}
                 </Link>
               ),
             )}

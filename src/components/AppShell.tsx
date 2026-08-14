@@ -17,7 +17,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -26,6 +26,12 @@ import {
   Search,
   Menu,
   Plus,
+  ChevronUp,
+  LogOut,
+  User as UserIcon,
+  Wallet as WalletIcon,
+  Settings as SettingsIcon,
+  UserCircle,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
@@ -41,6 +47,288 @@ import {
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 
+/* ─── Identity Dock ────────────────────────────────────────────────── */
+
+/**
+ * IdentityDock — the bottom-of-sidebar account/identity tray.
+ *
+ * Shows the Clerk avatar + name + role. Clicking opens a styled dropdown
+ * with Profile / Wallet / Settings / Account / Sign out.
+ *
+ * Signed-out state shows "Sign in" and "Create account" links.
+ *
+ * When the sidebar is collapsed, only the avatar (with status dot) is
+ * shown. Clicking the avatar opens the same dropdown.
+ */
+function IdentityDock({ collapsed }: { collapsed: boolean }) {
+  const T = useTheme().resolvedColors;
+  const { isSignedIn, isLoaded, signOut } = useClerkAuth();
+  const { user } = useAppUser();
+  const [plan, setPlan] = useState("Free");
+  const [open, setOpen] = useState(false);
+  const dockRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.id) return;
+    let active = true;
+    fetch(`/api/users/${user.id}/plan`)
+      .then((r) => (r.ok ? r.json() : { plan: "free" }))
+      .then((data) => { if (active && data.plan) setPlan(data.plan); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [isSignedIn, user?.id]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (dockRef.current && !dockRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // ── Signed-out state ──
+  if (isLoaded && !isSignedIn) {
+    if (collapsed) {
+      return (
+        <div className="flex justify-center">
+          <Link
+            href="/sign-in"
+            className="grid h-9 w-9 place-items-center rounded-lg transition hover:bg-white/5"
+            style={{ color: T.textMuted }}
+            aria-label="Sign in"
+            title="Sign in"
+          >
+            <UserIcon size={18} />
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-1">
+        <Link
+          href="/sign-in"
+          className="flex h-9 items-center justify-center gap-2 rounded-xl border text-xs font-bold transition hover:bg-white/5"
+          style={{ borderColor: `${T.accentColor}30`, color: T.textColor }}
+        >
+          Sign in
+        </Link>
+        <Link
+          href="/sign-up"
+          className="flex h-9 items-center justify-center gap-2 rounded-xl text-xs font-bold transition hover:bg-white/5"
+          style={{ color: T.textMuted }}
+        >
+          Create account
+        </Link>
+      </div>
+    );
+  }
+
+  // ── Loading state ──
+  if (!isLoaded || !user) {
+    if (collapsed) {
+      return (
+        <div className="flex justify-center">
+          <div className="h-9 w-9 animate-pulse rounded-full" style={{ background: `${T.borderColor}20` }} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2.5 rounded-xl border px-2.5 py-2" style={{ borderColor: `${T.borderColor}15` }}>
+        <div className="h-8 w-8 animate-pulse rounded-full" style={{ background: `${T.borderColor}20` }} />
+        <div className="flex-1 space-y-1">
+          <div className="h-2.5 w-20 animate-pulse rounded" style={{ background: `${T.borderColor}20` }} />
+          <div className="h-2 w-12 animate-pulse rounded" style={{ background: `${T.borderColor}15` }} />
+        </div>
+      </div>
+    );
+  }
+
+  const displayName = user.firstName || user.fullName || user.username || "User";
+  const email = user.primaryEmailAddress?.emailAddress ?? "";
+  const role = plan === "owner" ? "Owner" : plan === "pro" ? "Pro" : "Free";
+  const roleColor = role === "Owner" ? T.accentColor : role === "Pro" ? "#a78bfa" : T.textMuted;
+  const avatarUrl = user.imageUrl;
+
+  const menuItems = [
+    { label: "Profile", href: "/profile", icon: UserCircle },
+    { label: "Wallet", href: "/wallet", icon: WalletIcon },
+    { label: "Settings", href: "/settings", icon: SettingsIcon },
+  ];
+
+  if (collapsed) {
+    return (
+      <div ref={dockRef} className="relative flex justify-center">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="relative h-9 w-9 overflow-hidden rounded-full border-2 transition hover:opacity-80"
+          style={{ borderColor: `${T.accentColor}40` }}
+          aria-label={`${displayName} — open account menu`}
+          title={displayName}
+        >
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+          ) : (
+            <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          {/* Online status dot */}
+          <span
+            className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2"
+            style={{ background: "#22c55e", borderColor: T.bgColor }}
+          />
+        </button>
+        {open && (
+          <div
+            className="absolute bottom-0 left-full ml-2 z-50 w-56 rounded-xl border p-1.5 shadow-2xl"
+            style={{ borderColor: `${T.borderColor}30`, background: `${T.bgColor}f8`, backdropFilter: "blur(16px)" }}
+          >
+            <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
+            <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
+            <IdentityMenuDivider T={T} />
+            <IdentityMenuSignOut T={T} onClick={() => { setOpen(false); void signOut(); }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={dockRef} className="relative">
+      {/* Trigger — avatar + name + role + chevron */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 transition hover:bg-white/5"
+        style={{ borderColor: open ? `${T.accentColor}30` : `${T.borderColor}15`, background: open ? `${T.accentColor}08` : "transparent" }}
+        aria-label="Open account menu"
+        aria-expanded={open}
+      >
+        {/* Avatar */}
+        <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full border" style={{ borderColor: `${T.accentColor}30` }}>
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+          ) : (
+            <div className="grid h-full w-full place-items-center text-xs font-bold" style={{ background: `${T.accentColor}20`, color: T.accentColor }}>
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </div>
+        {/* Name + role */}
+        <div className="flex min-w-0 flex-1 flex-col text-left">
+          <span className="truncate text-xs font-bold" style={{ color: T.textColor }}>
+            {displayName}
+          </span>
+          <span className="text-[9px] font-black uppercase tracking-wider" style={{ color: roleColor }}>
+            {role}
+          </span>
+        </div>
+        <ChevronUp
+          size={14}
+          className={`shrink-0 transition-transform duration-200 ${open ? "" : "rotate-180"}`}
+          style={{ color: T.textMuted }}
+        />
+      </button>
+
+      {/* Dropdown menu */}
+      {open && (
+        <div
+          className="absolute bottom-full left-0 right-0 mb-1.5 z-50 rounded-xl border p-1.5 shadow-2xl"
+          style={{ borderColor: `${T.borderColor}30`, background: `${T.bgColor}f8`, backdropFilter: "blur(16px)" }}
+        >
+          {/* Header — full name + email + role badge */}
+          <IdentityMenuHeader name={displayName} email={email} role={role} roleColor={roleColor} T={T} />
+          {/* Menu items */}
+          <IdentityMenuItems items={menuItems} T={T} onClick={() => setOpen(false)} />
+          {/* Divider */}
+          <IdentityMenuDivider T={T} />
+          {/* Sign out */}
+          <IdentityMenuSignOut T={T} onClick={() => { setOpen(false); void signOut(); }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IdentityMenuHeader({
+  name, email, role, roleColor, T,
+}: {
+  name: string; email: string; role: string; roleColor: string;
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+}) {
+  return (
+    <div className="mb-1.5 rounded-lg px-2.5 py-2" style={{ background: `${T.borderColor}08` }}>
+      <div className="text-xs font-bold truncate" style={{ color: T.textColor }}>{name}</div>
+      {email && (
+        <div className="text-[10px] truncate" style={{ color: T.textMuted }}>{email}</div>
+      )}
+      <div className="mt-1 text-[9px] font-black uppercase tracking-wider" style={{ color: roleColor }}>
+        {role}
+      </div>
+    </div>
+  );
+}
+
+function IdentityMenuItems({
+  items, T, onClick,
+}: {
+  items: { label: string; href: string; icon: typeof UserCircle }[];
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+  onClick: () => void;
+}) {
+  return (
+    <div className="space-y-0.5">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.label}
+            href={item.href}
+            onClick={onClick}
+            className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
+            style={{ color: T.textMuted }}
+          >
+            <Icon size={14} className="shrink-0" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function IdentityMenuDivider({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  return <div className="my-1 h-px" style={{ background: `${T.borderColor}15` }} />;
+}
+
+function IdentityMenuSignOut({
+  T, onClick,
+}: {
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-red-500/10"
+      style={{ color: "#ef4444" }}
+    >
+      <LogOut size={14} className="shrink-0" />
+      Sign out
+    </button>
+  );
+}
+
 /* ─── Desktop Sidebar ──────────────────────────────────────────────── */
 
 function DesktopSidebar({
@@ -54,20 +342,7 @@ function DesktopSidebar({
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { balance } = useWallet();
-  const { isSignedIn } = useClerkAuth();
-  const { user } = useAppUser();
   const littHealth = useLittHealth();
-  const [plan, setPlan] = useState("Free");
-
-  useEffect(() => {
-    if (!isSignedIn || !user?.id) return;
-    let active = true;
-    fetch(`/api/users/${user.id}/plan`)
-      .then((r) => (r.ok ? r.json() : { plan: "free" }))
-      .then((data) => { if (active && data.plan) setPlan(data.plan); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, [isSignedIn, user?.id]);
 
   const checkActive = useCallback(
     (href: string) => isAppNavActive(pathname, searchParams, href),
@@ -132,7 +407,7 @@ function DesktopSidebar({
         ))}
       </nav>
 
-      {/* Bottom — status + utility items + collapse */}
+      {/* Bottom — status + utility items + identity dock */}
       <div className="shrink-0 border-t px-2 py-2.5" style={{ borderColor: `${T.borderColor}15` }}>
         {/* LiTT health + BITS — truthful status derived from real health check */}
         <div
@@ -170,7 +445,7 @@ function DesktopSidebar({
           )}
         </div>
 
-        {/* Utility items */}
+        {/* Utility items — Wallet + Settings (Profile is in the identity dock) */}
         <div className="space-y-0.5">
           {APP_NAV_BOTTOM.map((item) => (
             <DesktopNavItem
@@ -181,6 +456,11 @@ function DesktopSidebar({
               T={T}
             />
           ))}
+        </div>
+
+        {/* Identity dock — Clerk avatar + name + role + account menu */}
+        <div className={`mt-2 ${collapsed ? "" : "border-t pt-2"}`} style={{ borderColor: `${T.borderColor}10` }}>
+          <IdentityDock collapsed={collapsed} />
         </div>
       </div>
     </aside>
@@ -344,7 +624,7 @@ function MobileDrawer({
             </div>
           ))}
 
-          {/* Bottom items */}
+          {/* Bottom items — Wallet + Settings (Profile is in the identity dock) */}
           <div className="mb-3">
             <div
               className="mb-2 px-2 text-[8px] font-black uppercase tracking-[.2em]"
@@ -380,12 +660,12 @@ function MobileDrawer({
           </div>
         </nav>
 
-        {/* Status footer */}
+        {/* Status footer + identity dock */}
         <div
-          className="shrink-0 border-t px-4 py-3"
+          className="shrink-0 border-t px-3 py-3"
           style={{ borderColor: `${T.borderColor}15` }}
         >
-          <div className="flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between rounded-lg border px-2.5 py-2" style={{ borderColor: `${T.borderColor}15`, background: `${T.boxBg}50` }}>
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
@@ -397,6 +677,8 @@ function MobileDrawer({
               {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
             </span>
           </div>
+          {/* Identity dock — same component as desktop, always expanded in mobile drawer */}
+          <IdentityDock collapsed={false} />
         </div>
       </div>
     </div>

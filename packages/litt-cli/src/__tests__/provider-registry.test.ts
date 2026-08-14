@@ -3,22 +3,35 @@
  *
  * Tests the real multi-model LiTT provider layer:
  *   1. Credential-aware discovery (don't show models whose provider isn't configured)
- *   2. Health status (READY / NO KEY / RATE LIMITED / DOWN)
+ *   2. Health status (READY / UNVERIFIED / NO KEY / RATE LIMITED / DOWN)
  *   3. Fallback chain (if model A fails → try model B)
  *   4. Persistence (prefs survive closing and reopening litt)
  *   5. Credential-aware routing (don't route to unavailable models)
  *   6. BYOK vs LiTT Credits distinction
+ *   7. Source truth (servedBy — OpenRouter vs direct)
+ *   8. Capability registry + task classification
+ *   9. Context-aware routing (reject too-small context)
+ *   10. Per-task overrides from prefs
+ *   11. Cost model + budget routing math
+ *   12. Routing telemetry + /route explain
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   ProviderRegistry,
   FallbackExecutor,
+  RoutingEngine,
+  TelemetryStore,
   hasCredential,
   credentialSource,
+  resolveServedBy,
   loadModelPrefs,
   saveModelPrefs,
   getDefaultPrefsPath,
+  getModelCost,
+  estimateRunCost,
+  CAPABILITY_LABELS,
+  TASK_REQUIREMENTS,
   type ModelPrefs,
   type ModelProvider,
 } from "../lib/provider-registry.js";
@@ -140,15 +153,50 @@ describe("ProviderRegistry", () => {
     expect(anthropic!.models).toHaveLength(0);
   });
 
-  it("reports ready for OpenRouter when key is set", async () => {
+  it("reports ready or unverified for OpenRouter when key is set", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
     const openrouter = registry.getProviderStatus("openrouter");
     expect(openrouter).not.toBeNull();
-    // Health might be "ready" or "unknown" depending on network
-    expect(["ready", "unknown", "down"]).toContain(openrouter!.health);
+    // Health is "ready" (proven) or "unverified" (routable but health check didn't pass)
+    expect(["ready", "unverified", "down"]).toContain(openrouter!.health);
     expect(openrouter!.hasCredential).toBe(true);
+  });
+
+  it("UNKNOWN is not READY — unverified is routable but not proven", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const anthropic = registry.getProviderStatus("anthropic");
+    expect(anthropic).not.toBeNull();
+    // Anthropic has no direct health URL, so it's "unverified" not "ready"
+    // (unless OpenRouter health check passed, in which case it's still
+    // served by OpenRouter, not directly tested as Anthropic)
+    if (anthropic!.health === "unverified") {
+      // Models are routable but not proven
+      expect(anthropic!.models.length).toBeGreaterThan(0);
+      expect(anthropic!.models.every((m) => m.proven === false)).toBe(true);
+    }
+  });
+
+  it("servedBy shows OpenRouter when only OpenRouter key is set", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const anthropic = registry.getProviderStatus("anthropic");
+    expect(anthropic).not.toBeNull();
+    // Claude is served by OpenRouter, not directly by Anthropic
+    expect(anthropic!.servedBy).toBe("openrouter");
+  });
+
+  it("servedBy shows direct provider when direct key is set", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const anthropic = registry.getProviderStatus("anthropic");
+    expect(anthropic).not.toBeNull();
+    expect(anthropic!.servedBy).toBe("anthropic");
   });
 
   it("Anthropic models available via OpenRouter even without direct key", async () => {
@@ -158,11 +206,10 @@ describe("ProviderRegistry", () => {
     const anthropic = registry.getProviderStatus("anthropic");
     expect(anthropic).not.toBeNull();
     expect(anthropic!.hasCredential).toBe(true);
-    // Models should be discovered (health might be unknown since no direct API check)
     expect(anthropic!.models.length).toBeGreaterThan(0);
   });
 
-  it("getAvailableModels returns only models from ready/unknown providers", async () => {
+  it("getAvailableModels returns only models from ready/unverified providers", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
@@ -173,6 +220,15 @@ describe("ProviderRegistry", () => {
     const google = available.find(m => m.provider === "Google");
     // Google is covered by OpenRouter, so it should be available
     expect(google).toBeDefined();
+  });
+
+  it("getProvenModels excludes unverified providers", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const proven = registry.getProvenModels();
+    // Only models from providers with health === "ready"
+    expect(proven.length).toBeLessThanOrEqual(registry.getAvailableModels().length);
   });
 
   it("isModelAvailable returns false for models with no credentialed provider", async () => {
@@ -188,6 +244,13 @@ describe("ProviderRegistry", () => {
     await registry.refresh();
     // OpenRouter can route to any model
     expect(registry.isModelAvailable("anthropic/claude-sonnet-4.6")).toBe(true);
+  });
+
+  it("getModelServedBy returns openrouter when only OpenRouter key set", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    expect(registry.getModelServedBy("anthropic/claude-sonnet-4.6")).toBe("openrouter");
   });
 
   it("getUnavailableReason explains why a model is unavailable", async () => {
@@ -470,5 +533,309 @@ describe("BYOK vs LiTT Credits", () => {
     const openai = registry.getProviderStatus("openai");
     expect(openai!.health).toBe("no-key");
     expect(openai!.provider.credentialType).toBe("byok");
+  });
+});
+
+// ─── Source truth tests ────────────────────────────────────────────
+
+describe("Source truth (servedBy)", () => {
+  it("resolveServedBy returns openrouter when only OpenRouter key set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const provider: ModelProvider = {
+      id: "anthropic",
+      label: "Anthropic",
+      credentialType: "byok",
+      envKey: "ANTHROPIC_API_KEY",
+      altEnvKeys: ["OPENROUTER_API_KEY"],
+    };
+    expect(resolveServedBy(provider)).toBe("openrouter");
+  });
+
+  it("resolveServedBy returns direct provider when direct key set", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const provider: ModelProvider = {
+      id: "anthropic",
+      label: "Anthropic",
+      credentialType: "byok",
+      envKey: "ANTHROPIC_API_KEY",
+      altEnvKeys: ["OPENROUTER_API_KEY"],
+    };
+    expect(resolveServedBy(provider)).toBe("anthropic");
+  });
+
+  it("resolveServedBy returns local for local providers", () => {
+    const provider: ModelProvider = {
+      id: "local",
+      label: "Local",
+      credentialType: "local",
+    };
+    expect(resolveServedBy(provider)).toBe("local");
+  });
+});
+
+// ─── Capability registry tests ─────────────────────────────────────
+
+describe("Capability registry", () => {
+  it("CAPABILITY_LABELS has all capabilities", () => {
+    expect(CAPABILITY_LABELS.coding).toBe("Coding");
+    expect(CAPABILITY_LABELS.reasoning).toBe("Reasoning");
+    expect(CAPABILITY_LABELS.vision).toBe("Vision");
+    expect(CAPABILITY_LABELS.tools).toBe("Tool Use");
+    expect(CAPABILITY_LABELS.longContext).toBe("Long Context");
+    expect(CAPABILITY_LABELS.fast).toBe("Fast");
+    expect(CAPABILITY_LABELS.local).toBe("Local");
+    expect(CAPABILITY_LABELS.structuredOutput).toBe("Structured Output");
+  });
+
+  it("TASK_REQUIREMENTS maps task types to required capabilities", () => {
+    expect(TASK_REQUIREMENTS.coding).toContain("coding");
+    expect(TASK_REQUIREMENTS.coding).toContain("tools");
+    expect(TASK_REQUIREMENTS.reasoning).toContain("reasoning");
+    expect(TASK_REQUIREMENTS.vision).toContain("vision");
+    expect(TASK_REQUIREMENTS.local).toContain("local");
+    expect(TASK_REQUIREMENTS.general).toEqual([]);
+  });
+});
+
+// ─── Routing engine tests ──────────────────────────────────────────
+
+describe("RoutingEngine", () => {
+  it("classifies coding tasks", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    expect(engine.classifyTask("fix this TypeScript bug")).toBe("coding");
+    expect(engine.classifyTask("implement a new function")).toBe("coding");
+    expect(engine.classifyTask("refactor the auth module")).toBe("coding");
+  });
+
+  it("classifies reasoning tasks", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    expect(engine.classifyTask("design the execution architecture")).toBe("reasoning");
+    expect(engine.classifyTask("analyze this complex system")).toBe("reasoning");
+  });
+
+  it("classifies vision tasks", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    expect(engine.classifyTask("inspect this screenshot")).toBe("vision");
+    expect(engine.classifyTask("reproduce this UI from the image")).toBe("vision");
+  });
+
+  it("classifies local/private tasks", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    expect(engine.classifyTask("don't send any code off this machine")).toBe("local");
+    expect(engine.classifyTask("keep it local and offline")).toBe("local");
+  });
+
+  it("classifies fast tasks (short requests)", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    expect(engine.classifyTask("make button blue")).toBe("fast");
+  });
+
+  it("produces telemetry with full routing decision", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    const { choice, telemetry } = engine.route("fix this TypeScript bug", null, null, "auto");
+    expect(telemetry.taskType).toBe("coding");
+    expect(telemetry.selectedModel).toBe(choice.id);
+    expect(telemetry.servedBy).toBeDefined();
+    expect(telemetry.estimatedCost).toBeGreaterThan(0);
+    expect(telemetry.candidates.length).toBeGreaterThan(0);
+    expect(telemetry.timestamp).toBeGreaterThan(0);
+  });
+
+  it("per-task override takes priority over auto routing", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const prefs: ModelPrefs = {
+      routingMode: "auto",
+      selectedModel: null,
+      capabilityOverrides: { coding: "anthropic/claude-sonnet-4.6" },
+      lastUsedModel: null,
+      showFallbackNotifications: true,
+    };
+    const engine = new RoutingEngine(registry, prefs, MODEL_CATALOG);
+    const { choice } = engine.route("fix this bug", null, null, "auto");
+    expect(choice.id).toBe("anthropic/claude-sonnet-4.6");
+  });
+
+  it("budget mode picks cheapest capable model mathematically", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const engine = new RoutingEngine(registry, { routingMode: "budget", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    // Pass explicit available list including local model (which might be down in real health check)
+    const allIds = MODEL_CATALOG.map(m => m.id);
+    const { choice, telemetry } = engine.route("fix this bug", allIds, null, "budget");
+    // Should pick the cheapest model with coding capability
+    const codingModels = MODEL_CATALOG.filter(m => m.strengths.includes("coding"));
+    const cheapest = [...codingModels].sort((a, b) =>
+      (getModelCost(a.id).inputPer1M + getModelCost(a.id).outputPer1M) -
+      (getModelCost(b.id).inputPer1M + getModelCost(b.id).outputPer1M)
+    )[0];
+    expect(choice.id).toBe(cheapest.id);
+  });
+
+  it("context-aware routing rejects models with too-small context", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
+    // Pass explicit available list including local model
+    const allIds = MODEL_CATALOG.map(m => m.id);
+    // Qwen3-Coder has 32K context — should be rejected for large context
+    // Use a coding task that implies reading the entire repository
+    const longRequest = "fix this bug by reading all the files in the entire repository and understanding the whole project structure";
+    const { telemetry } = engine.route(longRequest, allIds, null, "auto");
+    // Qwen3-Coder should be in rejected list (32K < estimated 50K+ context)
+    const qwenRejected = telemetry.rejected.find(r => r.modelId === "qwen/qwen3-coder");
+    expect(qwenRejected).toBeDefined();
+    expect(qwenRejected!.reason).toContain("Context too small");
+  });
+});
+
+// ─── Cost model tests ──────────────────────────────────────────────
+
+describe("Cost model", () => {
+  it("getModelCost returns cost for known models", () => {
+    const cost = getModelCost("anthropic/claude-sonnet-4.6");
+    expect(cost.inputPer1M).toBeGreaterThan(0);
+    expect(cost.outputPer1M).toBeGreaterThan(0);
+    expect(cost.paymentModel).toBe("byok");
+  });
+
+  it("getModelCost returns default for unknown models", () => {
+    const cost = getModelCost("unknown/model");
+    expect(cost.inputPer1M).toBeGreaterThan(0);
+    expect(cost.paymentModel).toBe("byok");
+  });
+
+  it("local model has zero cost", () => {
+    const cost = getModelCost("qwen/qwen3-coder");
+    expect(cost.inputPer1M).toBe(0);
+    expect(cost.outputPer1M).toBe(0);
+  });
+
+  it("estimateRunCost calculates correctly", () => {
+    // Claude Sonnet: $3/1M input, $15/1M output
+    // 100K input + 10K output = 0.3 + 0.15 = $0.45
+    const cost = estimateRunCost("anthropic/claude-sonnet-4.6", 100_000, 10_000);
+    expect(cost).toBeCloseTo(0.45, 2);
+  });
+
+  it("estimateRunCost for local model is zero", () => {
+    const cost = estimateRunCost("qwen/qwen3-coder", 100_000, 10_000);
+    expect(cost).toBe(0);
+  });
+});
+
+// ─── Telemetry store tests ─────────────────────────────────────────
+
+describe("TelemetryStore", () => {
+  it("stores and retrieves telemetry records", () => {
+    const store = new TelemetryStore();
+    const telemetry = {
+      request: "test",
+      taskType: "coding" as const,
+      routingMode: "auto",
+      estimatedContextTokens: 5000,
+      requiredCapabilities: ["coding" as const, "tools" as const],
+      candidates: ["model-a"],
+      rejected: [],
+      selectedModel: "model-a",
+      servedBy: "openrouter",
+      credentialSource: "OPENROUTER_API_KEY",
+      fallbackAttempts: [],
+      estimatedCost: 0.01,
+      actualCost: null,
+      timestamp: Date.now(),
+    };
+    store.record(telemetry);
+    expect(store.getLast()?.selectedModel).toBe("model-a");
+  });
+
+  it("retains max 50 records", () => {
+    const store = new TelemetryStore();
+    for (let i = 0; i < 60; i++) {
+      store.record({
+        request: `test-${i}`,
+        taskType: "general" as const,
+        routingMode: "auto",
+        estimatedContextTokens: 1000,
+        requiredCapabilities: [],
+        candidates: [],
+        rejected: [],
+        selectedModel: `model-${i}`,
+        servedBy: "openrouter",
+        credentialSource: "OPENROUTER_API_KEY",
+        fallbackAttempts: [],
+        estimatedCost: 0.01,
+        actualCost: null,
+        timestamp: Date.now(),
+      });
+    }
+    expect(store.getAll().length).toBe(50);
+  });
+
+  it("clear empties the store", () => {
+    const store = new TelemetryStore();
+    store.record({
+      request: "test",
+      taskType: "general" as const,
+      routingMode: "auto",
+      estimatedContextTokens: 1000,
+      requiredCapabilities: [],
+      candidates: [],
+      rejected: [],
+      selectedModel: "model-a",
+      servedBy: "openrouter",
+      credentialSource: "OPENROUTER_API_KEY",
+      fallbackAttempts: [],
+      estimatedCost: 0.01,
+      actualCost: null,
+      timestamp: Date.now(),
+    });
+    store.clear();
+    expect(store.getLast()).toBeNull();
+  });
+});
+
+// ─── Async refresh tests ───────────────────────────────────────────
+
+describe("Async health refresh", () => {
+  it("refreshAsync does not block", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    // Should return immediately
+    registry.refreshAsync();
+    // Statuses might be empty (first call) — that's OK
+    expect(registry.isCacheFresh()).toBe(false);
+  });
+
+  it("isCacheFresh returns true after refresh", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    expect(registry.isCacheFresh()).toBe(true);
+  });
+
+  it("getAvailableModelIds returns array of IDs", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-test";
+    const registry = new ProviderRegistry(MODEL_CATALOG);
+    await registry.refresh();
+    const ids = registry.getAvailableModelIds();
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).toContain("anthropic/claude-sonnet-4.6");
   });
 });

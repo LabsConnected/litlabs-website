@@ -35,7 +35,6 @@ import type {
   ShellExecutor,
   ShellExecuteOptions,
   ShellResult,
-  ToolResult,
   ToolStatus,
 } from "../types.js";
 import type { CheckResult, VerificationCheckId } from "../verification-gate.js";
@@ -148,8 +147,8 @@ function makeGate(
   opts: {
     store?: RuntimeStore | null;
     emitter?: RuntimeEventEmitter | null;
-    browserVerifier?: any;
-    config?: any;
+    browserVerifier?: MockBrowserVerifier | null;
+    config?: import("../verification-gate.js").VerificationConfig;
   } = {},
 ): VerificationGate {
   const executor = new CommandExecutor(shell, opts.store ?? null, opts.emitter ?? null);

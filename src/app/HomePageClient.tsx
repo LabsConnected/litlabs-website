@@ -7,7 +7,6 @@ import { useEffect } from "react";
 import { ArrowRight, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
-import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { RealCreations } from "@/components/landing/RealCreations";
 import { WhyDifferent } from "@/components/landing/WhyDifferent";
@@ -118,7 +117,34 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
-            <MissionSequence />
+            <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-[#090b12] shadow-[0_35px_100px_rgba(0,0,0,.65)]">
+              <video
+                className="aspect-[16/10] w-full object-cover motion-reduce:hidden"
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster="/brand/litt-alive-poster.webp"
+                aria-label="LiTT, the LiTTree creative operator"
+              >
+                <source src="/brand/litt-alive.mp4" type="video/mp4" />
+              </video>
+              <div className="relative hidden aspect-[16/10] w-full motion-reduce:block">
+                <Image src="/brand/litt-alive-poster.webp" alt="LiTT, the LiTTree creative operator" fill priority sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover" />
+              </div>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-[#03050a] via-[#03050a]/75 to-transparent px-5 pb-5 pt-16">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/25 bg-black/65 px-3 py-1.5 text-[10px] font-black uppercase tracking-[.15em] text-[#a8ff2f] backdrop-blur-xl"><span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f] shadow-[0_0_10px_#a8ff2f]" />LiTT · Operator online</span>
+                  <span className="rounded-full border border-white/12 bg-black/65 px-3 py-1.5 text-[10px] font-bold text-white/65 backdrop-blur-xl">Official character media</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px] font-bold text-white/55">
+              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#65f4ff]">REAL FILES</span>Project workspace</div>
+              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#a8ff2f]">REAL TERMINAL</span>Execute + verify</div>
+              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#b58cff]">HUMAN CONTROL</span>Approval gates</div>
+            </div>
           </div>
         </div>
       </section>
@@ -131,11 +157,11 @@ function LandingPage() {
               Not a chat. An operating system.
             </div>
             <h2 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em] sm:text-5xl">
-              Explore the workflow.
+              See how the operating loop works.
             </h2>
             <p className="mt-5 text-lg leading-8 text-white/50">
-              Click through each stage to see exactly how LiTTree takes a project
-              from prompt to deployment.
+              This guided product demonstration mirrors implemented LiTT surfaces:
+              missions, project files, preview, approval gates, and deployment preparation.
             </p>
           </div>
           <div className="mt-12">
@@ -208,12 +234,11 @@ function LandingPage() {
               See the workflow
             </div>
             <h2 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em] sm:text-5xl">
-              Product demonstrations.
+              Real product surfaces and media.
             </h2>
             <p className="mt-5 text-lg leading-8 text-white/50">
-              These are illustrative simulations showing how LiTTree takes a prompt
-              through mission, plan, build, and result. Each demo walks through the
-              complete workflow.
+              Every item below comes from the repository or a live product catalog.
+              Internal samples are labeled as samples, and third-party games retain attribution.
             </p>
           </div>
           <div className="mt-12">

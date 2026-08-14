@@ -51,7 +51,7 @@ function holoFromEvent(event: LifecycleEvent): HoloState | null {
     case "tool.cancelled": return "CANCELLED";
     case "tool.timeout": return "TIMEOUT";
     case "run.completed":
-      return (event.data.status as string) === "success" ? "SUCCESS" :
+      return (event.data.status as string) === "success" ? "COMPLETE" :
              (event.data.status as string) === "cancelled" ? "CANCELLED" :
              (event.data.status as string) === "timeout" ? "TIMEOUT" : "FAILED";
     default: return null;
@@ -79,11 +79,11 @@ export function useEventBridge(
 
     switch (event.type) {
       case "run.started":
-        entry = makeEntry("run.started", `run started: ${event.data.command ?? "command"}`, event);
+        entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event);
         store.actions.setCurrentRunId(event.runId);
         break;
       case "tool.started":
-        entry = makeEntry("tool.started", `tool: ${event.data.tool ?? "unknown"}`, event);
+        entry = makeEntry("tool.started", `${event.data.tool ?? "unknown"}`, event);
         break;
       case "tool.stdout":
         entry = makeEntry("tool.stdout", String(event.data.chunk ?? ""), event, "stdout");
@@ -92,7 +92,7 @@ export function useEventBridge(
         entry = makeEntry("tool.stderr", String(event.data.chunk ?? ""), event, "stderr");
         break;
       case "tool.completed":
-        entry = makeEntry("tool.completed", `${event.data.tool ?? "tool"} (${event.data.durationMs ?? 0}ms)`, event);
+        entry = makeEntry("tool.completed", `${event.data.tool ?? "tool"} · ${event.data.durationMs ?? 0}ms`, event);
         break;
       case "tool.failed":
         entry = makeEntry("tool.failed", `${event.data.tool ?? "tool"} — ${event.data.error ?? "error"}`, event);
@@ -101,14 +101,14 @@ export function useEventBridge(
         entry = makeEntry("tool.cancelled", `${event.data.tool ?? "tool"}`, event);
         break;
       case "tool.timeout":
-        entry = makeEntry("tool.timeout", `${event.data.tool ?? "tool"} (${event.data.timeoutMs ?? 0}ms)`, event);
+        entry = makeEntry("tool.timeout", `${event.data.tool ?? "tool"} · ${event.data.timeoutMs ?? 0}ms`, event);
         break;
       case "run.completed": {
         const status = event.data.status as string ?? "unknown";
-        const duration = event.data.durationMs as number ?? 0;
+        const seconds = ((event.data.durationMs as number ?? 0) / 1000).toFixed(1);
         entry = makeEntry(
           status === "success" ? "run.completed" : "run.failed",
-          `run ${status} (${duration}ms)`,
+          `${status} · ${seconds}s`,
           event,
         );
         store.actions.setCurrentRunId(null);
@@ -127,7 +127,7 @@ export function useEventBridge(
     if (holo) {
       store.actions.setHoloState(holo);
       // Auto-return to IDLE after terminal states (except APPROVAL which stays)
-      if (holo === "SUCCESS" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
+      if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
         setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
       }
     }

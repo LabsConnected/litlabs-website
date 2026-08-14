@@ -100,11 +100,11 @@ export const APP_NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-/* Bottom-of-sidebar utility items (always visible) */
+/* Bottom-of-sidebar utility items (always visible).
+   Profile is NOT here — it lives inside the identity dock's account menu. */
 export const APP_NAV_BOTTOM: NavItem[] = [
   { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "Settings", href: "/settings", icon: Settings },
-  { label: "Profile", href: "/profile", icon: User },
 ];
 
 /* Mobile bottom bar — uses same canonical data, simplified to 5 slots */

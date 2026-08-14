@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseBuilderLocalCommand } from "@/app/studio/lib/builder-command-router";
+import { parseBuilderLocalCommand } from "@/app/(app)/studio/lib/builder-command-router";
 import { CommandRouter, createShellExecutor } from "@litt/agent-core";
 import { RuntimeStore, createInitialState } from "@litt/agent-core";
 import type { ShellExecutor, ShellResult, ShellExecuteOptions, ToolResult } from "@litt/agent-core";

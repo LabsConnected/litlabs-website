@@ -9,8 +9,8 @@
  * stale parent references.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { useCanvasBuilderStore } from "@/app/studio/components/canvas/builder/store";
-import { createEmptyDocument, createNode, type CanvasDocument } from "@/app/studio/components/canvas/builder/types";
+import { useCanvasBuilderStore } from "@/app/(app)/studio/components/canvas/builder/store";
+import { createEmptyDocument, createNode, type CanvasDocument } from "@/app/(app)/studio/components/canvas/builder/types";
 
 const STORAGE_KEY = "litt:canvasBuilder:document";
 

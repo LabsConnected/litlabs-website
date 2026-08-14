@@ -2720,6 +2720,62 @@ main {
   }
 }
 
+/* ── Landing hero V3 animations (moved from inline <style> for reliability) ── */
+@keyframes litt-breath {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+@keyframes litt-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+@keyframes litt-hud-scan {
+  0%, 100% { opacity: 0.2; transform: translateX(-20px); }
+  50%      { opacity: 0.6; transform: translateX(20px); }
+}
+@keyframes litt-particle-drift {
+  0%, 100% { opacity: 0.2; transform: translateY(0) translateX(0); }
+  25%      { opacity: 0.5; transform: translateY(-12px) translateX(6px); }
+  50%      { opacity: 0.3; transform: translateY(-6px) translateX(-4px); }
+  75%      { opacity: 0.4; transform: translateY(-10px) translateX(8px); }
+}
+@keyframes litt-card-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="litt-breath"],
+  [style*="litt-float"],
+  [style*="litt-hud-scan"],
+  [style*="litt-particle-drift"],
+  [style*="litt-card-float"] { animation: none !important; }
+}
+
+/* ── Landing background animations (moved from inline <style> for reliability) ── */
+@keyframes litt-bg-grid-drift {
+  0%   { background-position: 0 0, 0 0; }
+  100% { background-position: 56px 56px, 56px 56px; }
+}
+@keyframes litt-bg-breath-cyan {
+  0%, 100% { opacity: 0.7; transform: translateX(-50%) scale(1); }
+  50%      { opacity: 1;   transform: translateX(-50%) scale(1.06); }
+}
+@keyframes litt-bg-breath-fuchsia {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+@keyframes litt-bg-breath-violet {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 0.9; transform: scale(1.05); }
+}
+@keyframes litt-bg-breath-amber {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 0.85; transform: scale(1.07); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="litt-bg-"] { animation: none !important; }
+}
+
 @keyframes litt-breathe {
   0%,
   100% {

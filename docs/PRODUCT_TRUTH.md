@@ -89,13 +89,13 @@ Rules:
 
 ### Creator Beta
 
-- **Price:** $7/month during beta (later $15/month)
+- **Price:** $15/month during beta (standard price: $25/month)
 - **LiTTBits:** 6,000 after each successful monthly billing event
 - **Projects:** 5 active projects
 
 ### Pro Builder Beta
 
-- **Price:** $19/month during beta (later $39/month)
+- **Price:** $39/month during beta (standard price: $49/month)
 - **LiTTBits:** 20,000 after each successful monthly billing event
 - **Projects:** 25 active projects
 

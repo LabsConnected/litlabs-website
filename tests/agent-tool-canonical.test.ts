@@ -19,7 +19,7 @@ import * as path from "path";
 describe("AgentTool canonicalization", () => {
   const toolPath = path.resolve(
     __dirname,
-    "../src/app/studio/tools/AgentTool.tsx",
+    "../src/app/(app)/studio/tools/AgentTool.tsx",
   );
   const source = fs.readFileSync(toolPath, "utf-8");
 

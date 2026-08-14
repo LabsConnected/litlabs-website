@@ -141,38 +141,98 @@ export function LandingHeroV3() {
           </div>
 
           {/* ══════════ RIGHT: LiTT character + product proof ══════════ */}
-          <div className="relative flex flex-col items-center">
-            {/* LiTT character with breathing glow */}
-            <div className="relative flex items-center justify-center">
-              {/* Breathing glow halo */}
+          {/* Desktop: mascot is absolutely positioned right, cards layered over lower body only.
+              Mobile: mascot and cards stack vertically, no overlap. */}
+          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[760px]">
+            {/* ── LiTT mascot — base visual layer (z-1) ── */}
+            <div
+              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-0 lg:top-0 lg:z-[1]"
+              style={{ minHeight: "min(520px, 60vh)" }}
+            >
+              {/* Helmet glow ring — behind the head, breathing */}
               <div
-                className="pointer-events-none absolute inset-0 rounded-full blur-3xl"
+                className="pointer-events-none absolute left-1/2 top-[6%] h-[200px] w-[200px] -translate-x-1/2 rounded-full blur-2xl"
                 style={{
                   background:
-                    "radial-gradient(circle at 50% 45%, rgba(168,85,247,0.35) 0%, rgba(52,211,153,0.12) 40%, transparent 70%)",
-                  animation: "litt-breath 4s ease-in-out infinite",
+                    "radial-gradient(circle, rgba(168,85,247,0.45) 0%, rgba(52,211,153,0.15) 50%, transparent 70%)",
+                  animation: "litt-breath 7s ease-in-out infinite",
                 }}
               />
-              {/* LiTT character */}
+              {/* Ambient bloom — full body, softer */}
               <div
-                className="relative z-10"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
+                style={{
+                  background:
+                    "radial-gradient(circle at 50% 40%, rgba(168,85,247,0.18) 0%, rgba(52,211,153,0.06) 45%, transparent 70%)",
+                }}
+              />
+              {/* Floating HUD line around the head */}
+              <div className="pointer-events-none absolute left-1/2 top-[4%] -translate-x-1/2 motion-reduce:hidden">
+                <div
+                  className="h-[1px] w-[180px] bg-gradient-to-r from-transparent via-violet-400/30 to-transparent"
+                  style={{ animation: "litt-hud-scan 3s ease-in-out infinite" }}
+                />
+              </div>
+              {/* Second HUD scan line — lower, different timing for depth */}
+              <div className="pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 motion-reduce:hidden">
+                <div
+                  className="h-[1px] w-[140px] bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent"
+                  style={{ animation: "litt-hud-scan 4.5s ease-in-out infinite reverse" }}
+                />
+              </div>
+              {/* Faint HUD data particles around LiTT — 5 floating dots */}
+              <div className="pointer-events-none absolute inset-0 motion-reduce:hidden">
+                <div
+                  className="absolute left-[18%] top-[22%] h-1 w-1 rounded-full bg-violet-400/40"
+                  style={{ animation: "litt-particle-drift 7s ease-in-out infinite" }}
+                />
+                <div
+                  className="absolute right-[14%] top-[30%] h-1 w-1 rounded-full bg-cyan-400/30"
+                  style={{ animation: "litt-particle-drift 9s ease-in-out infinite 1s" }}
+                />
+                <div
+                  className="absolute left-[22%] top-[45%] h-0.5 w-0.5 rounded-full bg-emerald-400/30"
+                  style={{ animation: "litt-particle-drift 8s ease-in-out infinite 2s" }}
+                />
+                <div
+                  className="absolute right-[20%] top-[50%] h-1 w-1 rounded-full bg-violet-400/25"
+                  style={{ animation: "litt-particle-drift 10s ease-in-out infinite 0.5s" }}
+                />
+                <div
+                  className="absolute left-[30%] top-[60%] h-0.5 w-0.5 rounded-full bg-cyan-400/20"
+                  style={{ animation: "litt-particle-drift 11s ease-in-out infinite 3s" }}
+                />
+              </div>
+              {/* LiTT character — full silhouette, big, object-contain object-bottom */}
+              <div
+                className="relative flex items-end justify-center"
                 style={{ animation: "litt-float 6s ease-in-out infinite" }}
               >
-                <Image
-                  src="/brand/litt-mascot-hero.png"
-                  alt="LiTT — the AI creative operating system character"
-                  width={320}
-                  height={400}
-                  priority
-                  className="h-auto w-[240px] md:w-[280px] lg:w-[300px] drop-shadow-[0_8px_40px_rgba(168,85,247,0.3)]"
-                />
+                <div
+                  className="relative w-[260px] sm:w-[320px] lg:w-[380px]"
+                  style={{ height: "min(540px, 60vh)" }}
+                >
+                  <Image
+                    src="/brand/litt-mascot-hero.png"
+                    alt="LiTT — the AI creative operating system character, full body with helmet, visor, headphones, and streetwear"
+                    fill
+                    priority
+                    sizes="(max-width: 640px) 260px, (max-width: 1024px) 320px, 380px"
+                    className="object-contain object-bottom drop-shadow-[0_8px_40px_rgba(168,85,247,0.3)]"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Product proof: layered micro-panels */}
-            <div className="relative z-20 mt-[-30px] w-full max-w-md lg:mt-[-40px]">
+            {/* ── Product proof cards — layered IN FRONT of mascot lower body only (z-3) ── */}
+            {/* Desktop: absolute, starts at ~45% down so helmet/upper body is visible above.
+                Mobile: stacks below mascot naturally. */}
+            <div className="relative z-[3] -mt-2 w-full max-w-md lg:absolute lg:bottom-0 lg:left-1/2 lg:max-w-[440px] lg:-translate-x-1/2">
               {/* Real Studio screenshot — primary proof */}
-              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a14] shadow-[0_8px_60px_rgba(0,0,0,0.6)]">
+              <div
+                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a14] shadow-[0_8px_60px_rgba(0,0,0,0.6)] transition-all duration-500 hover:border-violet-400/20 hover:shadow-[0_12px_80px_rgba(168,85,247,0.15)]"
+                style={{ animation: "litt-card-float 8s ease-in-out infinite" }}
+              >
                 {/* Window chrome */}
                 <div className="flex items-center gap-2 border-b border-white/6 bg-[#0d0d18] px-4 py-2.5">
                   <div className="flex gap-1.5">
@@ -183,9 +243,9 @@ export function LandingHeroV3() {
                   <span className="ml-2 text-[9px] font-mono font-bold uppercase tracking-widest text-neutral-500">
                     studio.litlabs.net
                   </span>
-                  <span className="ml-auto flex items-center gap-1 text-[9px] font-mono text-emerald-400">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 motion-reduce:hidden" />
-                    LIVE
+                  <span className="ml-auto flex items-center gap-1 text-[9px] font-mono text-violet-400">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 motion-reduce:hidden" />
+                    LiTT IN ACTION
                   </span>
                 </div>
 
@@ -279,10 +339,16 @@ export function LandingHeroV3() {
                     <span className="text-neutral-600">$</span> litt run git status --short
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-cyan-400">M</span> src/app/landing/page.tsx
+                    <span className="text-cyan-400">M</span> src/app/(marketing)/page.tsx
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-emerald-400">✓</span> run_1786691 · success · 415ms
+                    <span className="text-emerald-400">A</span> src/lib/verify.ts
+                  </div>
+                  <div className="text-neutral-500">
+                    <span className="text-emerald-400">A</span> src/__tests__/verify.test.ts
+                  </div>
+                  <div className="text-neutral-500">
+                    <span className="text-emerald-400">✓</span> run_8f2a1 · success · 415ms
                   </div>
                   <div className="text-violet-400">
                     <span className="text-neutral-600">$</span>{" "}
@@ -295,7 +361,8 @@ export function LandingHeroV3() {
         </div>
       </div>
 
-      {/* ── Hero-local animations ── */}
+      {/* Hero-local animations — inline <style> to bypass Tailwind v4 purge.
+          Respects prefers-reduced-motion. */}
       <style>{`
         @keyframes litt-breath {
           0%, 100% { opacity: 0.6; transform: scale(1); }
@@ -305,8 +372,26 @@ export function LandingHeroV3() {
           0%, 100% { transform: translateY(0); }
           50%      { transform: translateY(-8px); }
         }
+        @keyframes litt-hud-scan {
+          0%, 100% { opacity: 0.2; transform: translateX(-20px); }
+          50%      { opacity: 0.6; transform: translateX(20px); }
+        }
+        @keyframes litt-particle-drift {
+          0%, 100% { opacity: 0.2; transform: translateY(0) translateX(0); }
+          25%      { opacity: 0.5; transform: translateY(-12px) translateX(6px); }
+          50%      { opacity: 0.3; transform: translateY(-6px) translateX(-4px); }
+          75%      { opacity: 0.4; transform: translateY(-10px) translateX(8px); }
+        }
+        @keyframes litt-card-float {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-4px); }
+        }
         @media (prefers-reduced-motion: reduce) {
-          .litt-breath, .litt-float { animation: none !important; }
+          [style*="litt-breath"],
+          [style*="litt-float"],
+          [style*="litt-hud-scan"],
+          [style*="litt-particle-drift"],
+          [style*="litt-card-float"] { animation: none !important; }
         }
       `}</style>
     </section>

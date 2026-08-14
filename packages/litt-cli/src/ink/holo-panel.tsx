@@ -1,47 +1,186 @@
 /**
- * LiTTHoloPanel — large reactive LiTT identity centerpiece.
+ * LiTTHoloPanel — the LiTT identity centerpiece.
  *
- * The holo reacts to HoloState:
- *   IDLE       — calm ◇ with slow pulse
- *   THINKING   — spinning ◈ with "Understanding request"
- *   PLANNING   — spinning ◈ with planning steps
- *   APPROVAL   — ⚠ with approval prompt
- *   RUNNING    — ▶ with execution steps + progress bar
- *   VERIFYING  — ✦ with verification steps
- *   SUCCESS    — ✓ READY TO SHIP
- *   FAILED     — ✗ failed
- *   CANCELLED  — ⊘ cancelled
- *   TIMEOUT    — ⏱ timeout
+ * LiTT has a recognizable face/head rendered in ASCII art.
+ * The face changes expression based on the runtime state:
  *
- * The panel shows a bordered box with LiTT's symbol, state label,
- * and when active, a checklist of mission steps + progress bar.
+ *   IDLE          — calm, eyes open, slow breathing pulse
+ *   UNDERSTANDING — eyes focused, thinking dots
+ *   PLANNING      — eyes narrowed, planning spinner
+ *   READING       — eyes scanning, reading indicator
+ *   EDITING       — eyes focused, editing indicator
+ *   RUNNING       — eyes wide, execution animation
+ *   TESTING       — eyes focused, testing indicator
+ *   VERIFYING     — eyes checking, verification spinner
+ *   APPROVAL      — eyes questioning, warning
+ *   COMPLETE      — eyes happy, success glow
+ *   FAILED        — eyes X, error state
+ *   CANCELLED     — eyes closed, cancelled
+ *   TIMEOUT       — eyes clock, timeout
+ *
+ * The panel also shows:
+ *   - Active model during execution
+ *   - Mission step checklist with progress bar
+ *   - Elapsed time
  */
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import { Spinner } from "./spinner.js";
+import { COLORS, stateColor } from "./colors.js";
 import type { HoloState } from "./cockpit-store.js";
 
-const HOLO_CONFIG: Record<HoloState, { icon: string; color: string; label: string; spinner: boolean }> = {
-  IDLE: { icon: "◇", color: "magenta", label: "READY", spinner: false },
-  THINKING: { icon: "◈", color: "cyan", label: "THINKING", spinner: true },
-  APPROVAL: { icon: "⚠", color: "yellow", label: "APPROVAL REQUIRED", spinner: false },
-  RUNNING: { icon: "▶", color: "cyan", label: "RUNNING", spinner: true },
-  VERIFYING: { icon: "✦", color: "cyan", label: "VERIFYING", spinner: true },
-  SUCCESS: { icon: "✓", color: "green", label: "READY TO SHIP", spinner: false },
-  FAILED: { icon: "✗", color: "red", label: "FAILED", spinner: false },
-  CANCELLED: { icon: "⊘", color: "yellow", label: "CANCELLED", spinner: false },
-  TIMEOUT: { icon: "⏱", color: "yellow", label: "TIMEOUT", spinner: false },
+// ─── LiTT face expressions ──────────────────────────────────────────
+
+/**
+ * Each face is a 3-line ASCII art.
+ * The face is the visual identity — it should be instantly recognizable.
+ */
+const FACES: Record<string, string[]> = {
+  // Calm — eyes open, gentle smile
+  IDLE: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │    ╰╯    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Focused — eyes dot, thinking
+  UNDERSTANDING: [
+    "    ╭──────────╮    ",
+    "    │  •    •  │    ",
+    "    │    ╰╯    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Planning — eyes narrowed
+  PLANNING: [
+    "    ╭──────────╮    ",
+    "    │  ‿    ‿  │    ",
+    "    │    ╰╯    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Reading — eyes scanning
+  READING: [
+    "    ╭──────────╮    ",
+    "    │  ←    →  │    ",
+    "    │    ╰╯    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Editing — eyes focused
+  EDITING: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │   ▄▄▄    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Running — eyes wide, active
+  RUNNING: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │    ◆    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Testing — eyes checking
+  TESTING: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │   ✓✓    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Verifying — eyes checking carefully
+  VERIFYING: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │   ✦✦    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Approval — questioning
+  APPROVAL: [
+    "    ╭──────────╮    ",
+    "    │  ◉    ◉  │    ",
+    "    │    ⚠     │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Complete — happy
+  COMPLETE: [
+    "    ╭──────────╮    ",
+    "    │  ^    ^  │    ",
+    "    │    ╰╯    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Failed — X eyes
+  FAILED: [
+    "    ╭──────────╮    ",
+    "    │  ✗    ✗  │    ",
+    "    │    ╯╰    │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Cancelled — eyes closed
+  CANCELLED: [
+    "    ╭──────────╮    ",
+    "    │  ─    ─  │    ",
+    "    │    ─     │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
+  // Timeout — clock eyes
+  TIMEOUT: [
+    "    ╭──────────╮    ",
+    "    │  ⏱   ⏱  │    ",
+    "    │    ─     │    ",
+    "    ╰────┬┬────╯    ",
+    "        ◇◇          ",
+  ],
 };
 
+const STATE_LABELS: Record<string, string> = {
+  IDLE: "READY",
+  UNDERSTANDING: "UNDERSTANDING",
+  PLANNING: "PLANNING",
+  READING: "READING",
+  EDITING: "EDITING",
+  RUNNING: "RUNNING",
+  TESTING: "TESTING",
+  VERIFYING: "VERIFYING",
+  APPROVAL: "APPROVAL",
+  COMPLETE: "COMPLETE",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+  TIMEOUT: "TIMEOUT",
+};
+
+// Mission steps — the full lifecycle
 const MISSION_STEPS = [
-  "Understanding request",
-  "Reading project",
-  "Planning changes",
-  "Editing",
-  "Testing",
-  "Verifying",
+  { label: "Understand", states: ["UNDERSTANDING"] },
+  { label: "Inspect", states: ["READING"] },
+  { label: "Plan", states: ["PLANNING"] },
+  { label: "Edit", states: ["EDITING"] },
+  { label: "Execute", states: ["RUNNING"] },
+  { label: "Test", states: ["TESTING"] },
+  { label: "Verify", states: ["VERIFYING"] },
+  { label: "Complete", states: ["COMPLETE"] },
 ];
+
+/** Determine which steps are done/active based on holo state */
+function getStepProgress(state: HoloState): { done: number; active: number } {
+  const order = ["UNDERSTANDING", "READING", "PLANNING", "EDITING", "RUNNING", "TESTING", "VERIFYING", "COMPLETE"];
+  const idx = order.indexOf(state);
+  if (state === "IDLE") return { done: 0, active: -1 };
+  if (state === "FAILED" || state === "CANCELLED" || state === "TIMEOUT") return { done: 6, active: -1 };
+  if (state === "COMPLETE") return { done: 8, active: -1 };
+  if (idx < 0) return { done: 0, active: -1 };
+  return { done: idx, active: idx };
+}
 
 function ProgressBar({ progress, color }: { progress: number; color: string }): React.ReactElement {
   const total = 16;
@@ -56,117 +195,143 @@ function ProgressBar({ progress, color }: { progress: number; color: string }): 
   );
 }
 
-export interface LiTTHoloPanelProps {
-  state: HoloState;
-  /** Active model name (what the runtime is actually using) */
-  activeModel?: string | null;
-  /** Routing reason (why this model was chosen) */
-  routingReason?: string | null;
+/** Breathing animation — subtle pulse for idle state */
+function useBreathing(active: boolean): number {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setFrame(f => (f + 1) % 4), 800);
+    return () => clearInterval(timer);
+  }, [active]);
+  return frame;
 }
 
-export function LiTTHoloPanel({ state, activeModel, routingReason }: LiTTHoloPanelProps): React.ReactElement {
-  const config = HOLO_CONFIG[state] ?? HOLO_CONFIG.IDLE;
+export interface LiTTHoloPanelProps {
+  state: HoloState;
+  activeModel?: string | null;
+  routingReason?: string | null;
+  /** Mission start time for elapsed display */
+  missionStartedAt?: number | null;
+}
 
-  // Determine which steps are done based on state
-  const stepProgress: Record<string, number> = {
-    IDLE: 0,
-    THINKING: 1,
-    RUNNING: 3,
-    VERIFYING: 5,
-    SUCCESS: 6,
-    FAILED: 3,
-    CANCELLED: 0,
-    TIMEOUT: 0,
-  };
-  const currentStep = stepProgress[state] ?? 0;
-  const progressPct = Math.round((currentStep / MISSION_STEPS.length) * 100);
+export function LiTTHoloPanel({ state, activeModel, routingReason, missionStartedAt }: LiTTHoloPanelProps): React.ReactElement {
+  const color = stateColor(state);
+  const face = FACES[state] ?? FACES.IDLE;
+  const label = STATE_LABELS[state] ?? state;
+  const isWorking = state === "UNDERSTANDING" || state === "PLANNING" || state === "READING"
+    || state === "EDITING" || state === "RUNNING" || state === "TESTING" || state === "VERIFYING";
+  const isIdle = state === "IDLE";
+  const breathFrame = useBreathing(isIdle);
+
+  // Elapsed time
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(missionStartedAt);
+  useEffect(() => { startRef.current = missionStartedAt; }, [missionStartedAt]);
+  useEffect(() => {
+    if (!isWorking || !startRef.current) return;
+    const timer = setInterval(() => {
+      if (startRef.current) {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isWorking]);
+
+  const { done, active: activeStep } = getStepProgress(state);
+  const progressPct = Math.round((done / MISSION_STEPS.length) * 100);
+  const showSteps = isWorking || state === "COMPLETE";
+
+  // Breathing dots for idle
+  const breathDots = ["·  ◇  ·", "· ◇◇ ·", "·  ◇  ·", "·   ·  ·"];
+  const idleLine = breathDots[breathFrame];
 
   return (
     <Box
       borderStyle="round"
-      borderColor={config.color}
-      paddingX={2}
-      paddingY={1}
+      borderColor={color}
+      paddingX={1}
+      paddingY={0}
       flexDirection="column"
-      minWidth={28}
-      width={28}
+      minWidth={26}
+      width={26}
     >
-      {/* LiTT symbol + spinner */}
-      <Box justifyContent="center" marginBottom={0}>
-        {config.spinner ? (
-          <Text color={config.color} bold>
-            <Spinner type="pulse" color={config.color} />  {config.icon} LiTT {config.icon}
-          </Text>
-        ) : (
-          <Text color={config.color} bold>
-            {config.icon} LiTT {config.icon}
-          </Text>
-        )}
+      {/* LiTT face — the visual identity */}
+      <Box flexDirection="column" justifyContent="center" alignItems="center">
+        {face.map((line, i) => (
+          <Box key={i} justifyContent="center">
+            <Text color={color} bold={state === "COMPLETE" || state === "FAILED"}>{line}</Text>
+          </Box>
+        ))}
       </Box>
 
-      {/* State label */}
-      <Box justifyContent="center">
-        <Text color={config.color} bold>{config.label}</Text>
-      </Box>
-
-      {/* Orb visual — subtle geometric presence */}
+      {/* Name + state */}
       <Box justifyContent="center" marginTop={0}>
-        {config.spinner ? (
-          <Text color={config.color} dimColor>
-            <Spinner type="dots" color={config.color} />
-          </Text>
-        ) : state === "IDLE" ? (
-          <Text color={config.color} dimColor>·  ◇  ·</Text>
-        ) : state === "SUCCESS" ? (
-          <Text color="green" bold>✓  ◇  ✓</Text>
-        ) : state === "FAILED" ? (
-          <Text color="red" bold>✗  ◇  ✗</Text>
-        ) : (
-          <Text color={config.color} dimColor>·  {config.icon}  ·</Text>
-        )}
+        <Text color={COLORS.brand} bold>◇ LiTT ◇</Text>
+      </Box>
+      <Box justifyContent="center">
+        <Text color={color} bold>{label}</Text>
       </Box>
 
-      {/* Active model during execution */}
-      {(state === "THINKING" || state === "RUNNING" || state === "VERIFYING") && activeModel && (
-        <Box flexDirection="column" marginTop={1} justifyContent="center">
-          <Text dimColor>Using: </Text>
-          <Text color="blue" bold>{activeModel}</Text>
-          {routingReason && <Text dimColor> {routingReason}</Text>}
+      {/* Idle breathing animation */}
+      {isIdle && (
+        <Box justifyContent="center" marginTop={0}>
+          <Text color={COLORS.brand} dimColor>{idleLine}</Text>
         </Box>
       )}
 
-      {/* Mission steps (only when active) */}
-      {(state === "THINKING" || state === "RUNNING" || state === "VERIFYING" || state === "SUCCESS") && (
+      {/* Working spinner */}
+      {isWorking && (
+        <Box justifyContent="center" marginTop={0}>
+          <Text color={color}>
+            <Spinner type="dots" color={color} />
+          </Text>
+        </Box>
+      )}
+
+      {/* Active model during execution */}
+      {isWorking && activeModel && (
+        <Box flexDirection="column" marginTop={1} justifyContent="center">
+          <Text color={COLORS.info} bold>{activeModel}</Text>
+        </Box>
+      )}
+
+      {/* Mission steps checklist */}
+      {showSteps && (
         <Box flexDirection="column" marginTop={1}>
           {MISSION_STEPS.map((step, idx) => {
-            const done = idx < currentStep;
-            const active = idx === currentStep && state !== "SUCCESS";
-            const icon = done ? "✓" : active ? "●" : "○";
-            const color = done ? "green" : active ? config.color : "gray";
+            const isDone = idx < done;
+            const isActive = idx === activeStep;
+            const icon = isDone ? "✓" : isActive ? "●" : "○";
+            const stepColor = isDone ? COLORS.success : isActive ? color : COLORS.secondary;
             return (
-              <Box key={step}>
-                <Text color={color}>{icon} </Text>
-                <Text color={color} dimColor={!done && !active}>{step}</Text>
+              <Box key={step.label}>
+                <Text color={stepColor}>{icon} </Text>
+                <Text color={stepColor} dimColor={!isDone && !isActive}>{step.label}</Text>
               </Box>
             );
           })}
-          {state !== "SUCCESS" && (
+          {state !== "COMPLETE" && (
             <Box marginTop={1}>
-              <ProgressBar progress={progressPct} color={config.color} />
+              <ProgressBar progress={progressPct} color={color} />
+            </Box>
+          )}
+          {isWorking && startRef.current && (
+            <Box marginTop={0}>
+              <Text dimColor>{elapsed}s</Text>
             </Box>
           )}
         </Box>
       )}
 
-      {/* Success state */}
-      {state === "SUCCESS" && (
+      {/* Complete state */}
+      {state === "COMPLETE" && (
         <Box justifyContent="center" marginTop={1}>
-          <Text color="green" bold>✓ READY TO SHIP</Text>
+          <Text color={COLORS.success} bold>✓ READY TO SHIP</Text>
         </Box>
       )}
 
       {/* Idle hint */}
-      {state === "IDLE" && (
+      {isIdle && (
         <Box justifyContent="center" marginTop={1}>
           <Text dimColor>Waiting for instruction</Text>
         </Box>

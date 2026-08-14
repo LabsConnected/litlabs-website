@@ -16,6 +16,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import { COLORS } from "./colors.js";
 import type { HoloState, LocalRuntimeState, RemoteRuntimeState } from "./cockpit-store.js";
 
 export type SubsystemStatus = "online" | "ready" | "idle" | "running" | "error" | "offline";
@@ -51,12 +52,12 @@ function statusIcon(status: SubsystemStatus): string {
 
 function statusColor(status: SubsystemStatus): string {
   switch (status) {
-    case "online": return "green";
-    case "ready": return "green";
-    case "running": return "cyan";
-    case "error": return "red";
-    case "offline": return "gray";
-    default: return "yellow";
+    case "online": return COLORS.success;
+    case "ready": return COLORS.success;
+    case "running": return COLORS.working;
+    case "error": return COLORS.error;
+    case "offline": return COLORS.secondary;
+    default: return COLORS.warning;
   }
 }
 
@@ -85,9 +86,11 @@ export function Subsystems({ selected, onSelect, localRuntime, remoteRuntime, ho
     {
       id: "agent",
       label: "AGENT",
-      status: holoState === "THINKING" || holoState === "RUNNING" ? "running"
-        : holoState === "VERIFYING" ? "running"
-        : holoState === "SUCCESS" ? "ready"
+      status: holoState === "UNDERSTANDING" || holoState === "PLANNING"
+        || holoState === "READING" || holoState === "EDITING"
+        || holoState === "RUNNING" || holoState === "TESTING"
+        || holoState === "VERIFYING" ? "running"
+        : holoState === "COMPLETE" ? "ready"
         : holoState === "FAILED" ? "error"
         : holoState === "IDLE" ? "idle"
         : "idle",
@@ -129,7 +132,7 @@ export function Subsystems({ selected, onSelect, localRuntime, remoteRuntime, ho
           <Box key={card.id}>
             <Box width={14}>
               <Text
-                color={isSelected ? "magenta" : "gray"}
+                color={isSelected ? COLORS.brand : COLORS.secondary}
                 bold={isSelected}
                 underline={isSelected}
               >

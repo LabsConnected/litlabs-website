@@ -5,7 +5,7 @@
  * conversation store — they never reconstruct text from the rendered DOM.
  */
 
-import type { ChatMessage } from "@/app/studio/stores/useStudioAgentStore";
+import type { ChatMessage } from "@/app/(app)/studio/stores/useStudioAgentStore";
 
 /**
  * Convert markdown to plain text by stripping formatting syntax without

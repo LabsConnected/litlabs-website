@@ -12,6 +12,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import { COLORS } from "./colors.js";
 
 export interface HeaderProps {
   project: string;
@@ -36,16 +37,8 @@ export function Header({
   connected, localRuntime, remoteRuntime, mode, compact,
 }: HeaderProps): React.ReactElement {
   const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
-  const localColor = localRuntime === "ready" ? "green" : localRuntime === "error" ? "red" : "yellow";
+  const localColor = localRuntime === "ready" ? COLORS.success : localRuntime === "error" ? COLORS.error : COLORS.warning;
   const localLabel = localRuntime === "ready" ? "READY" : localRuntime === "error" ? "ERROR" : "STARTING";
-
-  const cloudIcon = remoteRuntime === "connected" ? "●" : "○";
-  const cloudColor = remoteRuntime === "connected" ? "green" : "gray";
-  const cloudLabel = remoteRuntime === "connected" ? "CONNECTED"
-    : remoteRuntime === "connecting" ? "CONNECTING"
-    : remoteRuntime === "reconnecting" ? "RECONNECTING"
-    : remoteRuntime === "error" ? "ERROR"
-    : "NOT CONNECTED";
 
   const shortRoot = projectRoot.length > 45 ? "..." + projectRoot.slice(-42) : projectRoot;
 
@@ -54,13 +47,11 @@ export function Header({
     return (
       <Box flexDirection="column">
         <Box>
-          <Text bold color="magenta">⚡ LiTT</Text>
+          <Text bold color={COLORS.brand}>⚡ LiTT</Text>
           <Text dimColor>  {project}  </Text>
-          <Text color="yellow">{branch}</Text>
+          <Text color={COLORS.warning}>{branch}</Text>
           <Text dimColor>  </Text>
           <Text color={localColor}>{localIcon} LOCAL</Text>
-          <Text dimColor>  </Text>
-          <Text color={cloudColor}>{cloudIcon} CLOUD</Text>
         </Box>
         <Text dimColor>────────────────────────────────────────────────────────────</Text>
       </Box>
@@ -71,61 +62,50 @@ export function Header({
     <Box flexDirection="column">
       {/* Brand line */}
       <Box>
-        <Text bold color="magenta">⚡ LiTT CODE</Text>
+        <Text bold color={COLORS.brand}>⚡ LiTT CODE</Text>
         <Text dimColor>  </Text>
-        <Text color="cyan" dimColor>BUILD</Text>
+        <Text color={COLORS.working} dimColor>BUILD</Text>
         <Text dimColor> • </Text>
-        <Text color="cyan" dimColor>DEBUG</Text>
+        <Text color={COLORS.working} dimColor>DEBUG</Text>
         <Text dimColor> • </Text>
-        <Text color="cyan" dimColor>TEST</Text>
+        <Text color={COLORS.working} dimColor>TEST</Text>
         <Text dimColor> • </Text>
-        <Text color="cyan" dimColor>SHIP</Text>
+        <Text color={COLORS.working} dimColor>SHIP</Text>
       </Box>
 
       {/* Separator */}
       <Text dimColor>────────────────────────────────────────────────────────────</Text>
 
-      {/* Project context */}
+      {/* Project + Branch on one line */}
       <Box>
-        <Text dimColor bold>PROJECT   </Text>
-        <Text color="cyan" bold>{project}</Text>
-      </Box>
-      <Box>
-        <Text dimColor bold>BRANCH    </Text>
-        <Text color="yellow">{branch}</Text>
-      </Box>
-      <Box>
-        <Text dimColor bold>PATH      </Text>
-        <Text dimColor>{shortRoot}</Text>
+        <Text dimColor bold>PROJECT </Text>
+        <Text color={COLORS.working} bold>{project}</Text>
+        <Text dimColor>   </Text>
+        <Text dimColor bold>BRANCH </Text>
+        <Text color={COLORS.warning}>{branch}</Text>
       </Box>
 
-      {/* Brain / Active / Provider — the three model concepts */}
-      <Box marginTop={0}>
-        <Text dimColor bold>BRAIN     </Text>
-        <Text color="magenta" bold>{brain}</Text>
-        <Text dimColor>  Ctrl+M</Text>
-      </Box>
+      {/* Brain + Active on one line */}
       <Box>
-        <Text dimColor bold>ACTIVE    </Text>
-        <Text color={activeModel ? "blue" : "gray"}>
-          {activeModel ?? "Waiting for task"}
+        <Text dimColor bold>BRAIN   </Text>
+        <Text color={COLORS.brand} bold>{brain}</Text>
+        <Text dimColor>  Ctrl+M</Text>
+        <Text dimColor>   </Text>
+        <Text dimColor bold>ACTIVE </Text>
+        <Text color={activeModel ? COLORS.info : COLORS.secondary}>
+          {activeModel ?? "Waiting"}
         </Text>
       </Box>
-      <Box>
-        <Text dimColor bold>PROVIDER  </Text>
-        <Text color="cyan" dimColor>{source}</Text>
-      </Box>
 
-      {/* Mode + Local/Cloud status */}
+      {/* Provider + Mode + Local on one line (Cloud is in status bar) */}
       <Box>
-        <Text dimColor bold>MODE      </Text>
-        <Text color="magenta">{mode.toUpperCase()}</Text>
-        <Text dimColor>    </Text>
-        <Text dimColor bold>LOCAL   </Text>
+        <Text dimColor bold>PROVIDER </Text>
+        <Text color={COLORS.working} dimColor>{source}</Text>
+        <Text dimColor>   </Text>
+        <Text dimColor bold>MODE </Text>
+        <Text color={COLORS.brand}>{mode.toUpperCase()}</Text>
+        <Text dimColor>   </Text>
         <Text color={localColor}>{localIcon} {localLabel}</Text>
-        <Text dimColor>    </Text>
-        <Text dimColor bold>CLOUD   </Text>
-        <Text color={cloudColor}>{cloudIcon} {cloudLabel}</Text>
       </Box>
 
       <Text dimColor>────────────────────────────────────────────────────────────</Text>

@@ -1,12 +1,23 @@
 /**
- * CommandPalette — quick action launcher (Ctrl+K).
+ * CommandPalette — LiTT Actions palette (Ctrl+K).
  *
- * Shows all available slash commands and actions. User navigates
- * with arrow keys and selects with Enter. Esc cancels.
+ * Quick action launcher with fuzzy filtering.
+ * Purple brand color, LiTT identity.
+ *
+ * Keyboard:
+ *   ↑↓       — navigate
+ *   Enter    — select (works on all terminals)
+ *   type     — filter
+ *   Esc      — close
+ *
+ * Uses the OverlayManager — no direct useInput call.
  */
 
 import React, { useState, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
+import { useOverlayKeyboard } from "./overlay-manager.js";
+import { isEnter, isEscape, isUpArrow, isDownArrow, isBackspace, isPrintable } from "./keyboard-utils.js";
+import { COLORS } from "./colors.js";
 
 export interface PaletteAction {
   id: string;
@@ -26,49 +37,53 @@ export function CommandPalette({ actions, onSelect, onCancel }: CommandPalettePr
   const [query, setQuery] = useState("");
 
   const filtered = query
-    ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.id.toLowerCase().includes(query.toLowerCase()))
+    ? actions.filter(a =>
+        a.label.toLowerCase().includes(query.toLowerCase()) ||
+        a.id.toLowerCase().includes(query.toLowerCase()))
     : actions;
 
-  useInput(useCallback((input, key) => {
-    if (key.upArrow) {
+  // Keyboard handler — registered with OverlayManager
+  useOverlayKeyboard("command-palette", useCallback((input, key) => {
+    if (isUpArrow(key)) {
       setSelectedIdx(prev => Math.max(0, prev - 1));
-    } else if (key.downArrow) {
+    } else if (isDownArrow(key)) {
       setSelectedIdx(prev => Math.min(filtered.length - 1, prev + 1));
-    } else if (key.return) {
+    } else if (isEnter(key, input)) {
       if (filtered[selectedIdx]) onSelect(filtered[selectedIdx]);
-    } else if (key.escape) {
+    } else if (isEscape(key, input)) {
       onCancel();
-    } else if (key.backspace || key.delete) {
+    } else if (isBackspace(key)) {
       setQuery(prev => prev.slice(0, -1));
       setSelectedIdx(0);
-    } else if (input && !key.ctrl && !key.meta && input.length === 1) {
+    } else if (isPrintable(input, key)) {
       setQuery(prev => prev + input);
       setSelectedIdx(0);
     }
   }, [filtered, selectedIdx, onSelect, onCancel]));
 
-  // Group by category
   const categories = [...new Set(filtered.map(a => a.category))];
   let flatIdx = 0;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+      {/* Title */}
       <Box marginBottom={1}>
-        <Text bold color="magenta">COMMAND PALETTE</Text>
-        {query && <Text dimColor> — filter: "{query}"</Text>}
+        <Text bold color={COLORS.brand}>LiTT ACTIONS</Text>
+        {query && <Text dimColor> — {query}</Text>}
       </Box>
+
+      {/* Actions grouped by category */}
       {categories.map(category => (
         <Box key={category} flexDirection="column">
-          <Text dimColor bold>{category}</Text>
           {filtered.filter(a => a.category === category).map(action => {
             const idx = flatIdx++;
             const isSelected = idx === selectedIdx;
             return (
               <Box key={action.id}>
-                <Text color={isSelected ? "magenta" : undefined}>
+                <Text color={isSelected ? COLORS.brand : undefined}>
                   {isSelected ? ">" : " "}
                 </Text>
-                <Text color={isSelected ? "magenta" : "white"} bold={isSelected}>
+                <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}>
                   {" "}{action.label}
                 </Text>
                 {action.shortcut && <Text dimColor> ({action.shortcut})</Text>}
@@ -77,29 +92,30 @@ export function CommandPalette({ actions, onSelect, onCancel }: CommandPalettePr
           })}
         </Box>
       ))}
+
       {filtered.length === 0 && <Text dimColor>No matches</Text>}
+
+      {/* Footer */}
       <Box marginTop={1}>
-        <Text dimColor>↑↓ navigate · type to filter · Enter select · Esc cancel</Text>
+        <Text dimColor>↑↓ navigate · type to filter · Enter select · Esc close</Text>
       </Box>
     </Box>
   );
 }
 
 export const DEFAULT_ACTIONS: PaletteAction[] = [
-  { id: "/build", label: "Build project", category: "Project", shortcut: "" },
-  { id: "/check", label: "Typecheck", category: "Project" },
+  { id: "/build", label: "Build project", category: "Project" },
+  { id: "/debug", label: "Debug — diagnose issue", category: "Project" },
   { id: "/test", label: "Run tests", category: "Project" },
-  { id: "/verify", label: "Run verification gate", category: "Project" },
-  { id: "/diff", label: "Show git diff", category: "Git" },
-  { id: "/status", label: "Show git status", category: "Git" },
-  { id: "/inspect", label: "Inspect project", category: "Project" },
-  { id: "/run", label: "Run arbitrary command", category: "Execution" },
-  { id: "/model", label: "Select model", category: "Settings", shortcut: "Ctrl+M" },
-  { id: "/mode plan", label: "Switch to PLAN mode", category: "Settings" },
-  { id: "/mode act", label: "Switch to ACT mode", category: "Settings" },
-  { id: "/mode auto", label: "Switch to AUTO mode", category: "Settings" },
+  { id: "/verify", label: "Full verification", category: "Project" },
+  { id: "/diff", label: "Show changes", category: "Git" },
+  { id: "/status", label: "Runtime/project status", category: "Git" },
+  { id: "/model", label: "Quick model switch", category: "Brain", shortcut: "Ctrl+M" },
+  { id: "/models", label: "Model center", category: "Brain" },
+  { id: "/route", label: "Routing information", category: "Brain" },
+  { id: "/doctor", label: "Diagnose LiTT", category: "System" },
+  { id: "/ship", label: "Verify + prepare release", category: "Project" },
   { id: "/clear", label: "Clear activity", category: "UI" },
-  { id: "/help", label: "Show help", category: "UI" },
-  { id: "/litt", label: "Return to LiTT conversation", category: "UI" },
-  { id: "/exit", label: "Exit cockpit", category: "UI" },
+  { id: "/help", label: "Commands", category: "UI" },
+  { id: "/exit", label: "Exit", category: "UI" },
 ];

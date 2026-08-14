@@ -4,8 +4,8 @@ import "@testing-library/jest-dom";
 import {
   StudioContextProvider,
   useStudioContext,
-} from "@/app/studio/context/StudioContext";
-import type { WorkspaceStage, CreatorKind } from "@/app/studio/lib/studio-destinations";
+} from "@/app/(app)/studio/context/StudioContext";
+import type { WorkspaceStage, CreatorKind } from "@/app/(app)/studio/lib/studio-destinations";
 
 // ─── Test helpers ────────────────────────────────────────────────
 
@@ -342,17 +342,17 @@ describe("useStudioContext error handling", () => {
 
 describe("deriveCreator / deriveWorkspaceStage", () => {
   it("deriveCreator returns null for studio/work (Plan)", async () => {
-    const { deriveCreator } = await import("@/app/studio/context/derive-studio-context");
+    const { deriveCreator } = await import("@/app/(app)/studio/context/derive-studio-context");
     expect(deriveCreator("studio", "work", null)).toBeNull();
   });
 
   it("deriveCreator returns 'design' for studio/design", async () => {
-    const { deriveCreator } = await import("@/app/studio/context/derive-studio-context");
+    const { deriveCreator } = await import("@/app/(app)/studio/context/derive-studio-context");
     expect(deriveCreator("studio", "design", null)).toBe("design");
   });
 
   it("deriveCreator returns the createMode for create destination", async () => {
-    const { deriveCreator } = await import("@/app/studio/context/derive-studio-context");
+    const { deriveCreator } = await import("@/app/(app)/studio/context/derive-studio-context");
     expect(deriveCreator("create", null, "image")).toBe("image");
     expect(deriveCreator("create", null, "video")).toBe("video");
     expect(deriveCreator("create", null, "music")).toBe("music");
@@ -360,13 +360,13 @@ describe("deriveCreator / deriveWorkspaceStage", () => {
   });
 
   it("deriveWorkspaceStage returns null for non-studio destinations", async () => {
-    const { deriveWorkspaceStage } = await import("@/app/studio/context/derive-studio-context");
+    const { deriveWorkspaceStage } = await import("@/app/(app)/studio/context/derive-studio-context");
     expect(deriveWorkspaceStage("create", null)).toBeNull();
     expect(deriveWorkspaceStage("assets", null)).toBeNull();
   });
 
   it("deriveWorkspaceStage maps studio modes correctly", async () => {
-    const { deriveWorkspaceStage } = await import("@/app/studio/context/derive-studio-context");
+    const { deriveWorkspaceStage } = await import("@/app/(app)/studio/context/derive-studio-context");
     expect(deriveWorkspaceStage("studio", "work")).toBe("plan");
     expect(deriveWorkspaceStage("studio", "files")).toBe("canvas");
     expect(deriveWorkspaceStage("studio", "code")).toBe("code");

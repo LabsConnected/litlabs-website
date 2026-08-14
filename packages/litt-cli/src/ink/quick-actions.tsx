@@ -7,6 +7,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import { COLORS } from "./colors.js";
 
 const ACTIONS = ["/build", "/debug", "/test", "/diff", "/status", "/ship"];
 
@@ -17,7 +18,7 @@ export function QuickActions(): React.ReactElement {
       <Box gap={1}>
         {ACTIONS.map((action, idx) => (
           <Box key={action}>
-            <Text color="cyan">{action}</Text>
+            <Text color={COLORS.working}>{action}</Text>
             {idx < ACTIONS.length - 1 && <Text dimColor>   </Text>}
           </Box>
         ))}

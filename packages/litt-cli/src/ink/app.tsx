@@ -19,10 +19,12 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
+import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
+import { isEnter, isEscape, isCtrl } from "./keyboard-utils.js";
 import { Header } from "./header.js";
 import { Subsystems } from "./subsystems.js";
 import { LiTTHoloPanel } from "./holo-panel.js";
@@ -45,9 +47,24 @@ import type { RuntimeClient } from "../lib/runtime-client.js";
 
 type LayoutMode = "full" | "medium" | "compact";
 
+/**
+ * Layout thresholds based on actual row budget.
+ *
+ * Reserved rows (always visible):
+ *   Header:       ~4 rows (compact) to ~10 rows (full)
+ *   Mission:      ~3 rows
+ *   Activity:     ~5 rows (shrinks in compact)
+ *   Prompt:       ~2 rows
+ *   Status bar:   ~3 rows
+ *   Separators:   ~2 rows
+ *
+ * FULL    >= 42 rows  — everything visible
+ * MEDIUM  30-41 rows  — hide files, quick actions; compact header
+ * COMPACT < 30 rows   — hide holo, subsystems, files, quick actions; minimal header
+ */
 function getLayoutMode(rows: number): LayoutMode {
-  if (rows >= 38) return "full";
-  if (rows >= 24) return "medium";
+  if (rows >= 42) return "full";
+  if (rows >= 30) return "medium";
   return "compact";
 }
 
@@ -73,7 +90,7 @@ export function CockpitApp({
   const store = useCockpitStore();
   const { stdout } = useStdout();
   useEventBridge(client, store, sessionBridge);
-  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit() });
+  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
 
   // Responsive layout — track terminal size
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => getLayoutMode(stdout?.rows ?? 40));
@@ -89,6 +106,13 @@ export function CockpitApp({
   const activeModel = store.state.activeModel;
   const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
+  // Initialize store branch from prop (once)
+  useEffect(() => {
+    if (branch && branch !== "unknown" && store.state.branch === "unknown") {
+      store.actions.setBranch(branch);
+    }
+  }, [branch, store]);
+
   // Seed startup activity (only once, when local runtime becomes ready)
   useEffect(() => {
     if (store.state.localRuntime === "ready" && store.state.activityLog.length === 0) {
@@ -102,37 +126,44 @@ export function CockpitApp({
     }
   }, [store.state.localRuntime, store.state.activityLog.length, project, modelReady, store]);
 
-  // Global keyboard shortcuts — ONLY consume Ctrl+M/K/L/C.
-  // All printable characters MUST fall through to TextInput.
-  // This is critical: do not act on any key that isn't a shortcut.
-  useInput(useCallback((input, key) => {
-    // Only handle ctrl shortcuts and escape — nothing else
-    if (!key.ctrl && !key.escape) return;
-    if (store.state.overlay !== "none") return;
-
-    if (key.ctrl && input === "c") {
+  // App-level shortcut handler — ONLY handles Ctrl+M/K/L/C and Ctrl+C.
+  // This is passed to the OverlayKeyboardProvider, which dispatches it
+  // ONLY when no overlay owns the keyboard. All printable characters
+  // fall through to TextInput in the CommandDock.
+  const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
+    if (isCtrl(input, key, "c")) {
       if (store.state.holoState === "APPROVAL") {
         approvalBridge.cancel();
         store.actions.clearApproval();
         store.actions.setHoloState("IDLE");
-      } else if (store.state.holoState === "RUNNING" || store.state.holoState === "THINKING") {
+      } else if (store.state.isProcessing
+        || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
+        || store.state.holoState === "PLANNING"
+        || store.state.holoState === "READING" || store.state.holoState === "EDITING"
+        || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
         session.cancel().catch(() => {});
+        store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
-        store.actions.setMission(null);
+        store.actions.clearMission();
       } else {
         exit();
       }
-    } else if (key.ctrl && input === "m") {
+    } else if (isCtrl(input, key, "m")) {
       store.actions.setOverlay("model-picker");
-    } else if (key.ctrl && input === "k") {
+    } else if (isCtrl(input, key, "k")) {
       store.actions.setOverlay("command-palette");
-    } else if (key.ctrl && input === "l") {
+    } else if (isCtrl(input, key, "l")) {
       store.actions.setHoloState("IDLE");
-      store.actions.setMission(null);
+      store.actions.clearMission();
     }
-  }, [session, store, approvalBridge, exit]));
+  }, [session, store, approvalBridge, exit]);
 
-  const disabled = store.state.holoState === "RUNNING" || store.state.holoState === "THINKING" || store.state.holoState === "APPROVAL"
+  const disabled = store.state.isProcessing
+    || store.state.holoState === "RUNNING"
+    || store.state.holoState === "UNDERSTANDING"
+    || store.state.holoState === "PLANNING" || store.state.holoState === "READING"
+    || store.state.holoState === "EDITING" || store.state.holoState === "TESTING"
+    || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL"
     || store.state.overlay !== "none";
 
   const handleModelSelect = useCallback((selected: ModelChoice) => {
@@ -161,16 +192,28 @@ export function CockpitApp({
     submit(action.id);
   }, [store, submit]);
 
+  // Debug key callback — writes key info to Activity (NOT console.log)
+  const handleDebugKey = useCallback((info: string) => {
+    store.actions.addActivity({
+      id: `act_${Date.now()}_key`,
+      ts: Date.now(),
+      type: "info",
+      tag: "KEY",
+      text: info,
+    });
+  }, [store]);
+
   // Show overlays on top, hide the main content
   const overlayOpen = store.state.overlay !== "none";
 
   return (
+    <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
     <Box flexDirection="column">
-      {/* Header — always visible, but compact mode shows less */}
+      {/* Header — always visible, compact in medium/compact mode */}
       <Header
         project={project}
         projectRoot={cwd}
-        branch={branch}
+        branch={store.state.branch}
         brain={brain}
         activeModel={activeModel}
         source={source}
@@ -178,7 +221,7 @@ export function CockpitApp({
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={mode}
-        compact={layoutMode === "compact"}
+        compact={layoutMode !== "full"}
       />
 
       {/* Overlays take over the screen when open */}
@@ -211,13 +254,14 @@ export function CockpitApp({
         </>
       ) : (
         <>
-          {/* Holo + Subsystems — hide in compact mode */}
-          {layoutMode !== "compact" && (
+          {/* Holo + Subsystems — only in full layout (collapses first) */}
+          {layoutMode === "full" && (
             <Box flexDirection="row" gap={2}>
               <LiTTHoloPanel
                 state={store.state.holoState}
                 activeModel={store.state.activeModel}
                 routingReason={store.state.mission}
+                missionStartedAt={store.state.missionState?.startedAt ?? null}
               />
               <Box flexDirection="column">
                 <Subsystems
@@ -233,30 +277,42 @@ export function CockpitApp({
           )}
 
           {/* Mission section — always visible */}
-          <MissionSection holoState={store.state.holoState} mission={store.state.mission} />
+          <MissionSection
+            holoState={store.state.holoState}
+            mission={store.state.mission}
+            missionState={store.state.missionState}
+            lastCompletedMission={store.state.lastCompletedMission}
+          />
 
-          {/* Approval UX (when needed) */}
+          {/* Approval UX (when needed) — registers as keyboard owner */}
           {store.state.approvalPrompt && (
             <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
           )}
 
-          {/* Activity stream — always visible */}
-          <ActivityStream entries={store.state.activityLog} />
+          {/* Activity stream — always visible, shrinks in compact mode */}
+          <ActivityStream
+            entries={store.state.activityLog}
+            maxEntries={layoutMode === "full" ? 10 : layoutMode === "medium" ? 6 : 4}
+          />
 
           {/* Files info — hide in medium/compact */}
-          {layoutMode === "full" && <FilesInfo modified={gitModified} untracked={gitUntracked} />}
+          {layoutMode === "full" && (
+            <FilesInfo
+              modified={gitModified}
+              untracked={gitUntracked}
+              missionFiles={store.state.missionState?.filesTouched ?? []}
+            />
+          )}
 
           {/* Quick actions — hide in medium/compact */}
           {layoutMode === "full" && <QuickActions />}
 
           {/* Command dock — ALWAYS visible */}
-          <Box marginTop={0}>
-            <Text dimColor>────────────────────────────────────────────────────────────</Text>
-          </Box>
           <CommandDock
             history={store.state.commandHistory}
             onSubmit={submit}
             onNavigateHistory={store.actions.navigateHistory}
+            onDebugKey={handleDebugKey}
             disabled={disabled}
           />
 
@@ -274,5 +330,6 @@ export function CockpitApp({
         </>
       )}
     </Box>
+    </OverlayKeyboardProvider>
   );
 }

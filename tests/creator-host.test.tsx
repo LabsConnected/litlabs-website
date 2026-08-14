@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { render, renderHook } from "@testing-library/react";
-import { StudioContextProvider } from "@/app/studio/context/StudioContext";
-import { StudioCreatorHost, useCreatorHost } from "@/app/studio/components/creators/StudioCreatorHost";
-import type { CreatorKind } from "@/app/studio/lib/studio-destinations";
-import type { WorkspaceStage } from "@/app/studio/lib/studio-destinations";
+import { StudioContextProvider } from "@/app/(app)/studio/context/StudioContext";
+import { StudioCreatorHost, useCreatorHost } from "@/app/(app)/studio/components/creators/StudioCreatorHost";
+import type { CreatorKind } from "@/app/(app)/studio/lib/studio-destinations";
+import type { WorkspaceStage } from "@/app/(app)/studio/lib/studio-destinations";
 
 /**
  * Phase E.1 — StudioCreatorHost tests.

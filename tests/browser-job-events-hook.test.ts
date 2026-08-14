@@ -17,7 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useBrowserJobEvents } from "@/app/studio/hooks/useBrowserJobEvents";
+import { useBrowserJobEvents } from "@/app/(app)/studio/hooks/useBrowserJobEvents";
 
 // ─── EventSource Mock ───────────────────────────────────────────
 

@@ -20,7 +20,7 @@
  * The same runId, toolCallId, and operation digest flow through.
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   runAgentLoop,
   ToolRegistry,
@@ -35,8 +35,10 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
-import { routeModel, routingReason, brainLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
-import { detectProject } from "../lib/utils.js";
+import { routeModel, routingReason, brainLabel, routingModeLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
+import { ProviderRegistry, TelemetryStore } from "../lib/provider-registry.js";
+import { classifyIntent, type Intent } from "../lib/intent.js";
+import { execSync } from "child_process";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
   "/build": { toolId: "project.build", args: () => ({ command: "pnpm", args: ["build"] }) },
@@ -47,41 +49,61 @@ const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { c
   "/run": { toolId: "project.run", args: (input) => ({ command: input[0] ?? "", args: input.slice(1) }) },
 };
 
+// classifyIntent is imported from ../lib/intent.js (extracted for testability)
+
 /**
- * Intent boundary — classify user input as conversation vs mission.
- *
- * conversation — casual chat, questions, greetings, short messages
- * mission      — tasks that require tools/execution (fix, build, test, etc)
+ * Detect if a text chunk is raw tool_call/json markup that should
+ * NOT be added to the activity feed. The model streams back fenced
+ * code blocks containing tool calls — these are internal protocol,
+ * not user-visible content.
  */
-function classifyIntent(input: string): "conversation" | "mission" {
-  const lower = input.toLowerCase().trim();
-
-  // Short messages (under ~15 chars) are usually conversation
-  if (lower.length < 15 && !lower.includes("fix") && !lower.includes("run") && !lower.includes("build")) {
-    return "conversation";
+function isToolCallMarkup(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Fenced code blocks: ```tool_call, ```json, ```tool_result
+  if (trimmed.startsWith("```tool_call") || trimmed.startsWith("```json")
+    || trimmed.startsWith("```tool_result") || trimmed.startsWith("```tool")
+    || trimmed === "```" || trimmed.startsWith("```")) {
+    return true;
   }
-
-  // Greetings / casual
-  const casual = ["hi", "hello", "hey", "whats up", "what's up", "sup", "yo",
-    "thanks", "thank you", "ok", "okay", "cool", "nice", "bye", "goodbye",
-    "how are you", "who are you", "what are you", "what can you do",
-    "help me", "what do you do"];
-  if (casual.some(c => lower === c || lower.startsWith(c + " "))) {
-    return "conversation";
+  // Raw JSON tool call fragments
+  if (trimmed.startsWith('{"tool"') || trimmed.startsWith('{"name"')
+    || trimmed.startsWith('{"command"') || trimmed.startsWith('{"type"')) {
+    return true;
   }
+  // Closing fence
+  if (trimmed === "```") return true;
+  return false;
+}
 
-  // Mission triggers — words that imply action
-  const missionTriggers = ["fix", "build", "test", "run", "deploy", "ship",
-    "implement", "create", "add", "remove", "delete", "edit", "change",
-    "refactor", "debug", "inspect", "analyze", "verify", "check", "install",
-    "update", "upgrade", "migrate", "optimize", "find", "search", "replace",
-    "write", "generate", "scaffold", "init", "setup", "configure"];
-  if (missionTriggers.some(t => lower.includes(t))) {
-    return "mission";
+/**
+ * Refresh the git branch from the same cwd the tools use.
+ * This ensures the header branch matches what project.status reports.
+ */
+function refreshBranch(cwd: string): string {
+  try {
+    const branch = execSync("git branch --show-current", {
+      cwd, encoding: "utf-8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    return branch || "unknown";
+  } catch {
+    return "unknown";
   }
+}
 
-  // Default: short questions are conversation, longer requests are missions
-  return lower.length > 30 ? "mission" : "conversation";
+/**
+ * Truncate text for activity feed conciseness.
+ */
+function truncateActivity(text: string, max = 80): string {
+  const single = text.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  if (single.length <= max) return single;
+  return single.slice(0, max - 1) + "…";
+}
+
+/** Truncate text for activity feed conciseness */
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + "…";
 }
 
 /**
@@ -121,7 +143,7 @@ async function runVerify(
     });
 
     if (result.proven) {
-      store.actions.setHoloState("SUCCESS");
+      store.actions.setHoloState("COMPLETE");
       setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
     } else {
       store.actions.setHoloState("FAILED");
@@ -144,9 +166,21 @@ export interface CockpitControllerOptions {
   store: CockpitStore;
   approvalBridge: ApprovalBridge;
   onExit?: () => void;
+  /** Canonical project name (from the same detectProject() call as branch) */
+  projectName?: string;
+  /** Canonical git branch (from the same detectProject() call as the header) */
+  branch?: string;
 }
 
-export function useCockpitController({ session, store, approvalBridge, onExit }: CockpitControllerOptions) {
+export function useCockpitController({ session, store, approvalBridge, onExit, projectName, branch }: CockpitControllerOptions) {
+  // Owner/dev mode: persistent registry + telemetry for /route and /providers
+  const providerRegistryRef = useRef<ProviderRegistry | null>(null);
+  const telemetryStoreRef = useRef<TelemetryStore | null>(null);
+  if (!providerRegistryRef.current) providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
+  if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
+  const providerRegistry = providerRegistryRef.current;
+  const telemetryStore = telemetryStoreRef.current;
+
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us.
   useEffect(() => {
@@ -171,6 +205,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
     // Handle special commands
     if (input === "/clear") {
       store.actions.setHoloState("IDLE");
+      store.actions.clearMission();
       return;
     }
     if (input === "/help") {
@@ -178,7 +213,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         id: `act_${Date.now()}`,
         ts: Date.now(),
         type: "help",
-        text: "Commands: /build /check /test /verify /diff /status /run /ask /clear /help",
+        text: "Commands: /build /check /test /verify /diff /status /run /model /models /litt /palette /route /providers /clear /help",
       });
       return;
     }
@@ -224,6 +259,110 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
       return;
     }
 
+    // ─── Owner/dev mode: /route ─────────────────────────────
+    if (input === "/route explain") {
+      const last = telemetryStore.getLast();
+      if (!last) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "info",
+          text: "No routing decisions yet. Run a mission first.",
+        });
+      } else {
+        store.actions.addActivity({ id: `act_${Date.now()}_0`, ts: Date.now(), type: "info", text: `TASK        ${last.taskType}` });
+        store.actions.addActivity({ id: `act_${Date.now()}_1`, ts: Date.now(), type: "info", text: `BRAIN       ${last.routingMode.toUpperCase()}` });
+        store.actions.addActivity({ id: `act_${Date.now()}_2`, ts: Date.now(), type: "info", text: `CONTEXT     ~${Math.round(last.estimatedContextTokens / 1000)}K tokens` });
+        store.actions.addActivity({ id: `act_${Date.now()}_3`, ts: Date.now(), type: "info", text: `REQUIRES    ${last.requiredCapabilities.join(", ") || "none"}` });
+        if (last.rejected.length > 0) {
+          store.actions.addActivity({ id: `act_${Date.now()}_4`, ts: Date.now(), type: "info", text: "REJECTED" });
+          for (const r of last.rejected) {
+            store.actions.addActivity({ id: `act_${Date.now()}_r_${r.modelId}`, ts: Date.now(), type: "info", text: `  ${r.modelId.padEnd(20)} ${r.reason}` });
+          }
+        }
+        store.actions.addActivity({ id: `act_${Date.now()}_5`, ts: Date.now(), type: "info", text: "SELECTED" });
+        store.actions.addActivity({ id: `act_${Date.now()}_6`, ts: Date.now(), type: "info", text: `  ${last.selectedModel}` });
+        store.actions.addActivity({ id: `act_${Date.now()}_7`, ts: Date.now(), type: "info", text: `  via ${last.servedBy} · ${last.credentialSource}` });
+        store.actions.addActivity({ id: `act_${Date.now()}_8`, ts: Date.now(), type: "info", text: `  Est. cost: $${last.estimatedCost.toFixed(4)}` });
+      }
+      return;
+    }
+    if (input.startsWith("/route force ")) {
+      const modelId = input.slice(13).trim();
+      store.actions.setSelectedModel(modelId);
+      store.actions.setRoutingMode("fixed");
+      store.actions.addActivity({
+        id: `act_${Date.now()}`,
+        ts: Date.now(),
+        type: "info",
+        text: `Route forced: ${modelId} (fixed mode)`,
+      });
+      return;
+    }
+    if (input === "/route candidates") {
+      const last = telemetryStore.getLast();
+      if (!last) {
+        store.actions.addActivity({ id: `act_${Date.now()}`, ts: Date.now(), type: "info", text: "No routing decisions yet." });
+      } else {
+        store.actions.addActivity({ id: `act_${Date.now()}_0`, ts: Date.now(), type: "info", text: `Candidates (${last.candidates.length}):` });
+        for (const c of last.candidates) {
+          const rejected = last.rejected.find(r => r.modelId === c);
+          store.actions.addActivity({
+            id: `act_${Date.now()}_c_${c}`,
+            ts: Date.now(),
+            type: "info",
+            text: `  ${c.padEnd(28)}${rejected ? " ✗ " + rejected.reason : " ✓"}`,
+          });
+        }
+      }
+      return;
+    }
+    if (input === "/route") {
+      // Show current routing configuration (not just telemetry)
+      const mode = store.state.routingMode;
+      const selected = store.state.selectedModel;
+      const routed = routeModel(mode, selected, "general task");
+      const reason = routingReason(routed, "general task");
+      const servedBy = providerRegistry.getModelServedBy(routed.id) ?? "unknown";
+      const fallback = providerRegistry.getFallbackChain(routed.id, "coding");
+      const fallbackLabel = fallback.length > 1 ? fallback[1].label : "none";
+
+      store.actions.addActivity({ id: `act_${Date.now()}_r0`, ts: Date.now(), type: "info", tag: "ROUTE", text: `BRAIN        ${routingModeLabel(mode)}` });
+      store.actions.addActivity({ id: `act_${Date.now()}_r1`, ts: Date.now() + 1, type: "info", tag: "ROUTE", text: `ACTIVE       ${routed.label}` });
+      store.actions.addActivity({ id: `act_${Date.now()}_r2`, ts: Date.now() + 2, type: "info", tag: "ROUTE", text: `PROVIDER     ${servedBy}` });
+      store.actions.addActivity({ id: `act_${Date.now()}_r3`, ts: Date.now() + 3, type: "info", tag: "ROUTE", text: `REASON       ${reason}` });
+      store.actions.addActivity({ id: `act_${Date.now()}_r4`, ts: Date.now() + 4, type: "info", tag: "ROUTE", text: `FALLBACK     ${fallbackLabel}` });
+      store.actions.addActivity({ id: `act_${Date.now()}_r5`, ts: Date.now() + 5, type: "info", tag: "INFO", text: "Also: /route explain · /route force <model> · /route candidates" });
+      return;
+    }
+
+    // ─── Owner/dev mode: /providers ─────────────────────────
+    if (input === "/providers health") {
+      store.actions.addActivity({ id: `act_${Date.now()}_0`, ts: Date.now(), type: "info", text: "Provider Health:" });
+      for (const status of providerRegistry.getProviderStatuses()) {
+        const healthLabel = status.health.toUpperCase();
+        const credLabel = status.hasCredential ? "✓" : "✗";
+        const latency = status.latencyMs !== null ? ` ${status.latencyMs}ms` : "";
+        const servedVia = status.servedBy !== status.provider.id ? ` (via ${status.servedBy})` : "";
+        store.actions.addActivity({
+          id: `act_${Date.now()}_p_${status.provider.id}`,
+          ts: Date.now(),
+          type: "info",
+          text: `  ${status.provider.label.padEnd(12)} ${healthLabel.padEnd(14)} cred:${credLabel}${latency}${servedVia}`,
+        });
+      }
+      return;
+    }
+    if (input === "/providers") {
+      store.actions.addActivity({
+        id: `act_${Date.now()}`,
+        ts: Date.now(),
+        type: "info",
+        text: "Provider commands: /providers health",
+      });
+      return;
+    }
+
     // Slash command → gateway
     if (input.startsWith("/")) {
       const parts = input.split(/\s+/);
@@ -266,7 +405,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         // At this point, approval (if needed) has already been resolved
         // through the bridge. The result reflects the actual outcome.
         if (result.result.success) {
-          store.actions.setHoloState("SUCCESS");
+          store.actions.setHoloState("COMPLETE");
           setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
         } else if (result.result.status === "cancelled") {
           store.actions.setHoloState("CANCELLED");
@@ -295,85 +434,137 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
     // Bare text (non-slash) goes directly to the agent runtime.
     // No /ask required — the cockpit IS LiTT.
     //
-    // Intent boundary:
-    //   conversation — casual chat, questions, greetings
-    //   mission      — tasks that require tools/execution
-    //   command      — slash commands (handled above)
+    // Intent boundary (three types):
+    //   chat     — casual conversation, questions, greetings.
+    //              Does NOT start a mission or progress bar.
+    //   mission  — tasks that require tools/execution.
+    //              Starts the full agent lifecycle with progress + steps.
+    //   command  — slash commands (handled above)
     const intent = classifyIntent(input);
     const isMission = intent === "mission";
 
     if (hasOpenRouterKey()) {
-      store.actions.setHoloState("THINKING");
-      store.actions.setMission(isMission ? input : null);
+      // CHAT intent — casual response, no mission lifecycle
+      if (!isMission) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "agent.chat",
+          tag: "CHAT",
+          text: truncate(input, 40),
+        });
+        store.actions.setHoloState("UNDERSTANDING");
+        try {
+          const projectRoot = session.getCwd();
+          const tools = new ToolRegistry();
+          const shell = createShellExecutor(projectRoot);
+          const agentStore = new RuntimeStore();
+          const executor = new CommandExecutor(shell, agentStore);
+          const gateway = new ExecutionGateway({
+            tools, shell, executor, store: agentStore,
+            projectId: projectRoot,
+            onApprovalRequired: (req, risk) => approvalBridge.request(req, risk),
+          });
+          const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
+          store.actions.addActivity({
+            id: `act_${Date.now()}_route`,
+            ts: Date.now(),
+            type: "info",
+            tag: "ROUTE",
+            text: `${routed.label}`,
+          });
+          store.actions.setActiveModel(routed.label);
+          const model = new OpenRouterModelProvider({ model: routed.id });
+          const result = await runAgentLoop(input, {
+            model, tools, shell, gateway,
+            cwd: projectRoot, userId: "cli-user",
+            mode: session.getMode(), maxRounds: 4,
+            projectContext: { name: projectName ?? "chat", root: projectRoot, branch: branch ?? "unknown" },
+            store: agentStore,
+            onModelStream: (event) => {
+              if (event.type === "delta") {
+                store.actions.addActivity({
+                  id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  ts: Date.now(), type: "agent.delta", text: event.text,
+                });
+              }
+            },
+            emitter: () => {},
+          });
+          if (model.activeModel) store.actions.setActiveModel(model.activeModel);
+          const seconds = (result.durationMs / 1000).toFixed(1);
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
+            tag: "DONE",
+            text: `LiTT responded · ${seconds}s`,
+          });
+          // Chat does NOT go through COMPLETE state — just return to IDLE
+          store.actions.setHoloState("IDLE");
+        } catch (err) {
+          store.actions.addActivity({
+            id: `act_${Date.now()}_err`,
+            ts: Date.now(), type: "error", tag: "ERROR",
+            text: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          store.actions.setHoloState("FAILED");
+          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        }
+        return;
+      }
+
+      // MISSION intent — full agent lifecycle with progress + steps
+      store.actions.startMission(input);
+      store.actions.setHoloState("UNDERSTANDING");
       store.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),
-        type: isMission ? "agent.request" : "agent.chat",
-        text: isMission ? `MISSION: ${input}` : `LiTT ❯ ${input}`,
+        type: "agent.request",
+        tag: "THINK",
+        text: "Understanding request",
       });
 
       try {
-        // Build the agent loop with the session's gateway and tools
-        const project = detectProject();
+        // Use canonical project info passed from the cockpit command —
+        // same detectProject() call as the header. No re-detection.
         const projectRoot = session.getCwd();
         const tools = new ToolRegistry();
         const shell = createShellExecutor(projectRoot);
         const agentStore = new RuntimeStore();
         const executor = new CommandExecutor(shell, agentStore);
         const gateway = new ExecutionGateway({
-          tools,
-          shell,
-          executor,
-          store: agentStore,
+          tools, shell, executor, store: agentStore,
           projectId: projectRoot,
           onApprovalRequired: (req, risk) => approvalBridge.request(req, risk),
         });
 
-        // Use selected model if set, otherwise resolve from config
-        // Route the model based on the user's routing mode preference
-        const routed = routeModel(
-          store.state.routingMode,
-          store.state.selectedModel,
-          input,
-        );
-
-        // Show routing decision in activity
-        const reason = routingReason(routed, input);
+        const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
         store.actions.addActivity({
-          id: `act_${Date.now()}`,
+          id: `act_${Date.now()}_route`,
           ts: Date.now(),
           type: "info",
-          text: `Brain: ${brainLabel(store.state.routingMode, store.state.selectedModel)} → ${routed.label} (${reason})`,
+          tag: "ROUTE",
+          text: `${routed.label}`,
         });
-
-        // Set as active model in the store
         store.actions.setActiveModel(routed.label);
-
-        // Create the model provider with the routed model
         const model = new OpenRouterModelProvider({ model: routed.id });
 
         const result = await runAgentLoop(input, {
-          model,
-          tools,
-          shell,
-          gateway,
-          cwd: projectRoot,
-          userId: "cli-user",
-          mode: session.getMode(),
-          maxRounds: 10,
+          model, tools, shell, gateway,
+          cwd: projectRoot, userId: "cli-user",
+          mode: session.getMode(), maxRounds: 10,
           projectContext: {
-            name: String(project.packageJson?.name ?? "unnamed"),
-            root: project.rootDir,
-            branch: project.gitBranch ?? "unknown",
+            name: projectName ?? "unnamed",
+            root: projectRoot,
+            branch: branch ?? "unknown",
           },
           store: agentStore,
           onModelStream: (event) => {
             if (event.type === "delta") {
               store.actions.addActivity({
                 id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                ts: Date.now(),
-                type: "agent.delta",
-                text: event.text,
+                ts: Date.now(), type: "agent.delta", text: event.text,
               });
             }
           },
@@ -382,18 +573,37 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
               id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               ts: chunk.ts,
               type: chunk.stream === "stderr" ? "tool.stderr" : "tool.stdout",
-              text: chunk.text,
-              stream: chunk.stream,
+              text: chunk.text, stream: chunk.stream,
             });
           },
           emitter: (event: RuntimeEvent) => {
             if (event.subtype === "agent_tool_call") {
               const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+              // Track mission lifecycle based on tool type
+              if (toolId.includes("read") || toolId.includes("inspect")) {
+                store.actions.setHoloState("READING");
+                store.actions.updateMissionState("READING");
+              } else if (toolId.includes("edit") || toolId.includes("write")) {
+                store.actions.setHoloState("EDITING");
+                store.actions.updateMissionState("EDITING");
+              } else if (toolId.includes("build") || toolId.includes("run")) {
+                store.actions.setHoloState("RUNNING");
+                store.actions.updateMissionState("RUNNING");
+                store.actions.addMissionCommand(toolId);
+              } else if (toolId.includes("test")) {
+                store.actions.setHoloState("TESTING");
+                store.actions.updateMissionState("TESTING");
+                store.actions.addMissionCommand(toolId);
+              } else if (toolId.includes("verify") || toolId.includes("check")) {
+                store.actions.setHoloState("VERIFYING");
+                store.actions.updateMissionState("VERIFYING");
+              }
               store.actions.addActivity({
                 id: `act_${Date.now()}`,
                 ts: Date.now(),
                 type: "tool.started",
-                text: `○ Tool call: ${toolId}`,
+                tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : "RUN",
+                text: truncate(toolId, 40),
               });
             } else if (event.subtype === "agent_tool_result") {
               const success = (event.data as { success?: boolean }).success;
@@ -401,40 +611,40 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
                 id: `act_${Date.now()}`,
                 ts: Date.now(),
                 type: success ? "tool.completed" : "tool.failed",
-                text: success ? "✓ Tool result" : "✗ Tool failed",
+                tag: success ? "PASS" : "FAIL",
+                text: success ? "ok" : "failed",
               });
             }
           },
         });
 
-        // Update active model with what the runtime actually used
-        if (model.activeModel) {
-          store.actions.setActiveModel(model.activeModel);
-        }
+        if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
+        const seconds = (result.durationMs / 1000).toFixed(1);
         store.actions.addActivity({
-          id: `act_${Date.now()}`,
+          id: `act_${Date.now()}_done`,
           ts: Date.now(),
           type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-          text: `LiTT ■ completed (${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`,
+          tag: result.termination === "complete" ? "DONE" : "STOP",
+          text: `Mission ${result.termination === "complete" ? "complete" : "stopped"} · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
         });
 
-        store.actions.setHoloState(result.termination === "complete" ? "SUCCESS" : "IDLE");
-        // Retain activeModel — don't clear it after completion.
-        // The user should see what model was last used.
-        setTimeout(() => {
+        // Mission complete — set COMPLETE state (retained for display)
+        if (result.termination === "complete") {
+          store.actions.setHoloState("COMPLETE");
+          store.actions.updateMissionState("COMPLETE");
+        } else {
           store.actions.setHoloState("IDLE");
-          store.actions.setMission(null);
-        }, 1500);
+          store.actions.clearMission();
+        }
       } catch (err) {
         store.actions.addActivity({
-          id: `act_${Date.now()}`,
-          ts: Date.now(),
-          type: "error",
+          id: `act_${Date.now()}_err`,
+          ts: Date.now(), type: "error", tag: "ERROR",
           text: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
         });
         store.actions.setHoloState("FAILED");
-        setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        store.actions.updateMissionState("FAILED");
       }
       return;
     }
