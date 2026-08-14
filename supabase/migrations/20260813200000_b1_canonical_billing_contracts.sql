@@ -45,16 +45,24 @@ ALTER TABLE public.credit_ledger
 
 ALTER TABLE public.credit_ledger
   DROP CONSTRAINT IF EXISTS credit_ledger_entry_type_check;
-ALTER TABLE public.credit_ledger
-  DROP CONSTRAINT IF EXISTS credit_ledger_entry_type_check;
 
-ALTER TABLE public.credit_ledger
-  ADD CONSTRAINT credit_ledger_entry_type_check CHECK (
-    entry_type IS NULL OR entry_type IN (
-      'GRANT', 'PURCHASE', 'PROMO', 'RESERVE', 'SETTLE',
-      'RELEASE', 'REFUND', 'ADJUSTMENT', 'EXPIRATION'
-    )
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'credit_ledger_entry_type_check'
+      AND conrelid = 'public.credit_ledger'::regclass
+  ) THEN
+    ALTER TABLE public.credit_ledger
+      ADD CONSTRAINT credit_ledger_entry_type_check CHECK (
+        entry_type IS NULL OR entry_type IN (
+          'GRANT', 'PURCHASE', 'PROMO', 'RESERVE', 'SETTLE',
+          'RELEASE', 'REFUND', 'ADJUSTMENT', 'EXPIRATION'
+        )
+      );
+  END IF;
+END;
+$$;
 
 -- Add new bucket values
 -- Existing constraint only allows: monthly, purchased, beta_promotional
