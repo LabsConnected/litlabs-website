@@ -233,7 +233,7 @@ export function CommandDock({
         <Text dimColor> </Text>
       )}
       {history.length === 0 && !disabled && !showAc && (
-        <Text dimColor> / for commands · Esc to clear</Text>
+        <Text dimColor> / commands · ↑↓ history · Esc clear</Text>
       )}
     </Box>
   );

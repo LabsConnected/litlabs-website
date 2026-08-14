@@ -54,15 +54,26 @@ export function StatusBar({
 
   const localIcon = localRuntime === "ready" ? "●" : "○";
   const localColor = localRuntime === "ready" ? COLORS.success : COLORS.warning;
-  const cloudIcon = remoteRuntime === "connected" ? "●" : "○";
-  const cloudColor = remoteRuntime === "connected" ? COLORS.success : COLORS.secondary;
+  // Cloud: ● only when connected. ○ when offline — semantically hollow.
+  // Dim the entire cloud segment when offline so it reads as inactive.
+  const cloudConnected = remoteRuntime === "connected";
+  const cloudIcon = cloudConnected ? "●" : "○";
+  const cloudColor = cloudConnected ? COLORS.success : COLORS.secondary;
   const sColor = stateColor(holoState);
   const modelShort = shortModelName(activeModel);
 
+  // Calculate available width for model name — never wrap
+  // Fixed parts: "● LOCAL READY · " = ~16 chars, holoState ~12 chars
+  const fixedPartLen = 16 + (narrow ? 0 : 14) + String(holoState).length + 3;
+  const modelMaxLen = Math.max(8, width - fixedPartLen - 4);
+  const modelDisplay = modelShort
+    ? (modelShort.length > modelMaxLen ? modelShort.slice(0, modelMaxLen - 1) + "…" : modelShort)
+    : "";
+
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text dimColor>────────────────────────────────────────────────────────────</Text>
-      {/* Line 1: status — fits in one line */}
+      <Text dimColor>{"─".repeat(Math.min(width, 60))}</Text>
+      {/* Line 1: status — fits in one line, never wraps */}
       <Box>
         <Text color={localColor}>{localIcon}</Text>
         <Text dimColor> LOCAL </Text>
@@ -73,8 +84,8 @@ export function StatusBar({
         {!narrow && <Text color={cloudColor}>{remoteRuntime === "connected" ? "ONLINE" : "OFFLINE"}</Text>}
         {!narrow && <Text dimColor> · </Text>}
         <Text color={sColor}>{holoState}</Text>
-        {modelShort && <Text dimColor> · </Text>}
-        {modelShort && <Text color={COLORS.info}>{modelShort}</Text>}
+        {modelDisplay && <Text dimColor> · </Text>}
+        {modelDisplay && <Text color={COLORS.info}>{modelDisplay}</Text>}
       </Box>
       {/* Line 2: keyboard help — compact */}
       <Text dimColor>

@@ -56,7 +56,10 @@ export interface ActivityEntry {
   tag?: string;
   runId?: string;
   toolCallId?: string;
+  /** Display text — truncated for the feed. */
   text: string;
+  /** Full untruncated text — preserved for /activity, /run <id>, debugging. */
+  fullText?: string;
   stream?: "stdout" | "stderr";
 }
 
@@ -163,7 +166,13 @@ export function useCockpitStore() {
   const [branch, setBranch] = useState<string>("unknown");
 
   const addActivity = useCallback((entry: ActivityEntry) => {
-    setActivityLog((prev) => [...prev.slice(-200), entry]);
+    // Bound the store: keep last 200 entries, and cap fullText at 4KB
+    // to prevent giant stdout streams from growing memory forever.
+    const MAX_FULLTEXT = 4096;
+    const bounded: ActivityEntry = entry.fullText && entry.fullText.length > MAX_FULLTEXT
+      ? { ...entry, fullText: entry.fullText.slice(0, MAX_FULLTEXT) + "\n…[truncated]" }
+      : entry;
+    setActivityLog((prev) => [...prev.slice(-200), bounded]);
   }, []);
 
   /** Start a new mission */

@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
+import { execSync } from "child_process";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
@@ -106,12 +107,24 @@ export function CockpitApp({
   const activeModel = store.state.activeModel;
   const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
-  // Initialize store branch from prop (once)
+  // Initialize store branch from prop, then refresh from the same cwd
+  // the tools use. This ensures the header branch matches what
+  // project.status and other git tools report — one source of truth.
   useEffect(() => {
-    if (branch && branch !== "unknown" && store.state.branch === "unknown") {
+    if (branch && branch !== "unknown") {
       store.actions.setBranch(branch);
     }
-  }, [branch, store]);
+    // Refresh from session cwd — same directory tools execute in
+    try {
+      const fresh = execSync("git branch --show-current", {
+        cwd: session.getCwd(), encoding: "utf-8", timeout: 3000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+      if (fresh) store.actions.setBranch(fresh);
+    } catch {
+      // git not available or not a git repo — keep prop branch
+    }
+  }, [branch, session, store]);
 
   // Seed startup activity (only once, when local runtime becomes ready)
   useEffect(() => {

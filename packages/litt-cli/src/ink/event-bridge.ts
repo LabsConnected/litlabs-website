@@ -30,6 +30,7 @@ function makeEntry(
   text: string,
   event: LifecycleEvent,
   stream?: "stdout" | "stderr",
+  fullText?: string,
 ): ActivityEntry {
   return {
     id: `act_${++entryCounter}`,
@@ -38,6 +39,7 @@ function makeEntry(
     runId: event.runId,
     toolCallId: event.toolCallId,
     text,
+    fullText: fullText ?? text,
     stream,
   };
 }
@@ -85,12 +87,16 @@ export function useEventBridge(
       case "tool.started":
         entry = makeEntry("tool.started", `${event.data.tool ?? "unknown"}`, event);
         break;
-      case "tool.stdout":
-        entry = makeEntry("tool.stdout", String(event.data.chunk ?? ""), event, "stdout");
+      case "tool.stdout": {
+        const chunk = String(event.data.chunk ?? "");
+        entry = makeEntry("tool.stdout", chunk.length > 60 ? chunk.slice(0, 59) + "…" : chunk, event, "stdout", chunk);
         break;
-      case "tool.stderr":
-        entry = makeEntry("tool.stderr", String(event.data.chunk ?? ""), event, "stderr");
+      }
+      case "tool.stderr": {
+        const chunk = String(event.data.chunk ?? "");
+        entry = makeEntry("tool.stderr", chunk.length > 60 ? chunk.slice(0, 59) + "…" : chunk, event, "stderr", chunk);
         break;
+      }
       case "tool.completed":
         entry = makeEntry("tool.completed", `${event.data.tool ?? "tool"} · ${event.data.durationMs ?? 0}ms`, event);
         break;

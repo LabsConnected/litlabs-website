@@ -213,7 +213,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         id: `act_${Date.now()}`,
         ts: Date.now(),
         type: "help",
-        text: "Commands: /build /check /test /verify /diff /status /run /model /models /litt /palette /route /providers /clear /help",
+        text: "Commands: /build /check /test /verify /diff /status /run /model /models /litt /palette /activity /route /providers /clear /help",
       });
       return;
     }
@@ -256,6 +256,35 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
     }
     if (input === "/palette") {
       store.actions.setOverlay("command-palette");
+      return;
+    }
+    if (input === "/activity") {
+      // Show full (untruncated) activity log for debugging.
+      // Filters out tool-call markup that was intentionally excluded
+      // from the normal feed — /activity is for human-readable debug,
+      // not raw model protocol internals.
+      const log = store.state.activityLog;
+      if (log.length === 0) {
+        store.actions.addActivity({ id: `act_${Date.now()}`, ts: Date.now(), type: "info", text: "No activity recorded yet." });
+      } else {
+        const recent = log.slice(-20);
+        for (const entry of recent) {
+          // Skip stream entries (stdout/stderr/delta) — they're noisy
+          // and their fullText may contain raw protocol chunks.
+          if (entry.type === "tool.stdout" || entry.type === "tool.stderr" || entry.type === "agent.delta") continue;
+          const time = new Date(entry.ts).toLocaleTimeString();
+          const tag = entry.tag ?? entry.type;
+          const full = entry.fullText ?? entry.text;
+          store.actions.addActivity({
+            id: `act_${Date.now()}_act_${entry.id}`,
+            ts: Date.now(),
+            type: "info",
+            tag: "DEBUG",
+            text: `${time} ${tag}: ${truncateActivity(full, 80)}`,
+            fullText: `${time} [${tag}] (${entry.type})\n${full}`,
+          });
+        }
+      }
       return;
     }
 
@@ -405,6 +434,11 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         // At this point, approval (if needed) has already been resolved
         // through the bridge. The result reflects the actual outcome.
         if (result.result.success) {
+          // Refresh branch after git-changing commands (e.g. /run git switch)
+          if (command === "git" || cmd === "/status" || cmd === "/diff") {
+            const freshBranch = refreshBranch(session.getCwd());
+            if (freshBranch !== "unknown") store.actions.setBranch(freshBranch);
+          }
           store.actions.setHoloState("COMPLETE");
           setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
         } else if (result.result.status === "cancelled") {
@@ -444,18 +478,31 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
     const isMission = intent === "mission";
 
     if (hasOpenRouterKey()) {
-      // CHAT intent — casual response, no mission lifecycle
+      // CHAT intent — casual response, no mission lifecycle.
+      // CHAT uses isProcessing (not holoState) to block the composer.
+      // holoState stays IDLE throughout — CHAT never enters mission
+      // states like UNDERSTANDING/PLANNING/etc.
       if (!isMission) {
+        // Refresh branch from the same cwd the tools use — ensures
+        // the header branch matches what project.status reports.
+        const projectRoot = session.getCwd();
+        const freshBranch = refreshBranch(projectRoot);
+        if (freshBranch !== "unknown") {
+          store.actions.setBranch(freshBranch);
+        }
+
         store.actions.addActivity({
           id: `act_${Date.now()}`,
           ts: Date.now(),
           type: "agent.chat",
           tag: "CHAT",
-          text: truncate(input, 40),
+          text: truncateActivity(input, 40),
+          fullText: input,
         });
-        store.actions.setHoloState("UNDERSTANDING");
+        // CHAT sets isProcessing, NOT holoState=UNDERSTANDING.
+        // holoState stays IDLE — CHAT is not a mission.
+        store.actions.setIsProcessing(true);
         try {
-          const projectRoot = session.getCwd();
           const tools = new ToolRegistry();
           const shell = createShellExecutor(projectRoot);
           const agentStore = new RuntimeStore();
@@ -475,39 +522,91 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           });
           store.actions.setActiveModel(routed.label);
           const model = new OpenRouterModelProvider({ model: routed.id });
+
+          // Track tool calls for structured activity events.
+          // CHAT can call tools (e.g. project.status) but does NOT
+          // progress through mission lifecycle states.
+          let chatToolCallCount = 0;
+          let chatResponseText = "";
+
           const result = await runAgentLoop(input, {
             model, tools, shell, gateway,
             cwd: projectRoot, userId: "cli-user",
             mode: session.getMode(), maxRounds: 4,
-            projectContext: { name: projectName ?? "chat", root: projectRoot, branch: branch ?? "unknown" },
+            projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
             store: agentStore,
             onModelStream: (event) => {
               if (event.type === "delta") {
+                // Filter out raw tool_call/json markup — never dump
+                // model protocol internals to the activity feed.
+                if (isToolCallMarkup(event.text)) return;
+                // Accumulate clean response text for a single summary event
+                chatResponseText += event.text;
+              }
+            },
+            onToolStream: (chunk: StreamChunk) => {
+              // Only show stderr in activity — stdout is too noisy
+              if (chunk.stream === "stderr") {
                 store.actions.addActivity({
                   id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                  ts: Date.now(), type: "agent.delta", text: event.text,
+                  ts: chunk.ts,
+                  type: "tool.stderr",
+                  text: truncateActivity(chunk.text, 60),
+                  fullText: chunk.text,
+                  stream: chunk.stream,
                 });
               }
             },
-            emitter: () => {},
+            emitter: (event: RuntimeEvent) => {
+              // CHAT tool calls get structured events but NO mission state changes
+              if (event.subtype === "agent_tool_call") {
+                chatToolCallCount++;
+                const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+                const toolCallId = (event.data as { toolCallId?: string }).toolCallId ?? `tc_${chatToolCallCount}`;
+                store.actions.addActivity({
+                  id: `act_${Date.now()}_tc`,
+                  ts: Date.now(),
+                  type: "tool.started",
+                  tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : toolId.includes("status") ? "STATUS" : "RUN",
+                  text: toolId,
+                  toolCallId,
+                });
+              } else if (event.subtype === "agent_tool_result") {
+                const success = (event.data as { success?: boolean }).success;
+                const toolCallId = (event.data as { toolCallId?: string }).toolCallId;
+                store.actions.addActivity({
+                  id: `act_${Date.now()}_tr`,
+                  ts: Date.now(),
+                  type: success ? "tool.completed" : "tool.failed",
+                  tag: success ? "PASS" : "FAIL",
+                  text: success ? "Tool completed" : "Tool failed",
+                  toolCallId,
+                });
+              }
+            },
           });
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
           const seconds = (result.durationMs / 1000).toFixed(1);
+          // Single concise DONE event — not raw response body
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
             type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-            tag: "DONE",
-            text: `LiTT responded · ${seconds}s`,
+            tag: "CHAT",
+            text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
-          // Chat does NOT go through COMPLETE state — just return to IDLE
-          store.actions.setHoloState("IDLE");
+          // CHAT complete — clear isProcessing, holoState stays IDLE
+          store.actions.setIsProcessing(false);
         } catch (err) {
+          const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
             ts: Date.now(), type: "error", tag: "ERROR",
-            text: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
+            text: truncateActivity(errText, 60),
+            fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
           });
+          // Clear processing on failure too — composer must return to editable
+          store.actions.setIsProcessing(false);
           store.actions.setHoloState("FAILED");
           setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
         }
@@ -515,6 +614,13 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
       }
 
       // MISSION intent — full agent lifecycle with progress + steps
+      // Refresh branch from the same cwd the tools use
+      const projectRoot = session.getCwd();
+      const freshBranch = refreshBranch(projectRoot);
+      if (freshBranch !== "unknown") {
+        store.actions.setBranch(freshBranch);
+      }
+
       store.actions.startMission(input);
       store.actions.setHoloState("UNDERSTANDING");
       store.actions.addActivity({
@@ -526,9 +632,6 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
       });
 
       try {
-        // Use canonical project info passed from the cockpit command —
-        // same detectProject() call as the header. No re-detection.
-        const projectRoot = session.getCwd();
         const tools = new ToolRegistry();
         const shell = createShellExecutor(projectRoot);
         const agentStore = new RuntimeStore();
@@ -550,6 +653,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         store.actions.setActiveModel(routed.label);
         const model = new OpenRouterModelProvider({ model: routed.id });
 
+        let missionToolCallCount = 0;
+
         const result = await runAgentLoop(input, {
           model, tools, shell, gateway,
           cwd: projectRoot, userId: "cli-user",
@@ -557,28 +662,35 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           projectContext: {
             name: projectName ?? "unnamed",
             root: projectRoot,
-            branch: branch ?? "unknown",
+            branch: freshBranch ?? branch ?? "unknown",
           },
           store: agentStore,
           onModelStream: (event) => {
-            if (event.type === "delta") {
+            // Model prose (deltas) do NOT go into the activity feed.
+            // Activity shows only structured operator events:
+            // THINK, ROUTE, READ, EDIT, RUN, PASS, FAIL, DONE.
+            // The response text belongs in a conversation area, not
+            // duplicated as streaming deltas in the operator feed.
+          },
+          onToolStream: (chunk: StreamChunk) => {
+            // Tool stdout/stderr — only show stderr lines (errors are
+            // operationally relevant). stdout is too noisy for the feed.
+            if (chunk.stream === "stderr") {
               store.actions.addActivity({
                 id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                ts: Date.now(), type: "agent.delta", text: event.text,
+                ts: chunk.ts,
+                type: "tool.stderr",
+                text: truncateActivity(chunk.text, 60),
+                fullText: chunk.text,
+                stream: chunk.stream,
               });
             }
           },
-          onToolStream: (chunk: StreamChunk) => {
-            store.actions.addActivity({
-              id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              ts: chunk.ts,
-              type: chunk.stream === "stderr" ? "tool.stderr" : "tool.stdout",
-              text: chunk.text, stream: chunk.stream,
-            });
-          },
           emitter: (event: RuntimeEvent) => {
             if (event.subtype === "agent_tool_call") {
+              missionToolCallCount++;
               const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+              const toolCallId = (event.data as { toolCallId?: string }).toolCallId ?? `tc_${missionToolCallCount}`;
               // Track mission lifecycle based on tool type
               if (toolId.includes("read") || toolId.includes("inspect")) {
                 store.actions.setHoloState("READING");
@@ -586,6 +698,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
               } else if (toolId.includes("edit") || toolId.includes("write")) {
                 store.actions.setHoloState("EDITING");
                 store.actions.updateMissionState("EDITING");
+                store.actions.addMissionFile(toolId);
               } else if (toolId.includes("build") || toolId.includes("run")) {
                 store.actions.setHoloState("RUNNING");
                 store.actions.updateMissionState("RUNNING");
@@ -599,20 +712,23 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                 store.actions.updateMissionState("VERIFYING");
               }
               store.actions.addActivity({
-                id: `act_${Date.now()}`,
+                id: `act_${Date.now()}_tc`,
                 ts: Date.now(),
                 type: "tool.started",
-                tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : "RUN",
-                text: truncate(toolId, 40),
+                tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : toolId.includes("status") ? "STATUS" : toolId.includes("verify") || toolId.includes("check") ? "VERIFY" : "RUN",
+                text: toolId,
+                toolCallId,
               });
             } else if (event.subtype === "agent_tool_result") {
               const success = (event.data as { success?: boolean }).success;
+              const toolCallId = (event.data as { toolCallId?: string }).toolCallId;
               store.actions.addActivity({
-                id: `act_${Date.now()}`,
+                id: `act_${Date.now()}_tr`,
                 ts: Date.now(),
                 type: success ? "tool.completed" : "tool.failed",
                 tag: success ? "PASS" : "FAIL",
-                text: success ? "ok" : "failed",
+                text: success ? "Tool completed" : "Tool failed",
+                toolCallId,
               });
             }
           },
@@ -621,12 +737,14 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
         const seconds = (result.durationMs / 1000).toFixed(1);
+        const doneText = `Mission ${result.termination === "complete" ? "complete" : "stopped"} · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`;
         store.actions.addActivity({
           id: `act_${Date.now()}_done`,
           ts: Date.now(),
           type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
           tag: result.termination === "complete" ? "DONE" : "STOP",
-          text: `Mission ${result.termination === "complete" ? "complete" : "stopped"} · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
+          text: doneText,
+          fullText: `${doneText}\nRounds: ${result.rounds}\nTool calls: ${result.toolCalls.length}\nDuration: ${result.durationMs}ms\nTermination: ${result.termination}`,
         });
 
         // Mission complete — set COMPLETE state (retained for display)
@@ -638,10 +756,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           store.actions.clearMission();
         }
       } catch (err) {
+        const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
         store.actions.addActivity({
           id: `act_${Date.now()}_err`,
           ts: Date.now(), type: "error", tag: "ERROR",
-          text: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
+          text: truncateActivity(errText, 60),
+          fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");

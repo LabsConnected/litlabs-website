@@ -2,10 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Play } from "lucide-react";
+import { ArrowRight, Play, Folder, FileCode, ChevronRight, Circle, CheckCircle2, Loader2, Terminal as TerminalIcon } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────────
- * LandingHeroV3 — Pass 1
+ * LandingHeroV3 — Pass 2: Scaled composition, LiTT as operator
  *
  * Messaging hierarchy:
  *   Eyebrow:   The AI Creative Operating System
@@ -15,10 +15,12 @@ import { ArrowRight, Play } from "lucide-react";
  *              testing, remembering, and shipping real projects.
  *
  * Composition:
- *   - LiTT character above fold (left on desktop, centered on mobile)
- *   - Real Studio screenshot + micro-panels (Mission / Runtime / Terminal)
- *   - Nearly-black base with purple ambient bloom + LiTT-green accent
- *   - Restrained animation: breathing glow, floating, state pulse
+ *   - LiTT character behind the Studio interface (z-1)
+ *   - Real Studio product frame on top (z-3) with file tree + canvas
+ *   - Mission / Runtime / Terminal panels below — readable, not microscopic
+ *   - Container: max-w-[1500px], small gutters, hero fills viewport
+ *   - Headline: clamp(48px, 5vw, 94px) — dominant
+ *   - CTAs: 56px high, 16px text — premium
  *   - Respects prefers-reduced-motion
  * ──────────────────────────────────────────────────────────────────── */
 
@@ -38,33 +40,46 @@ const RUNTIME_SERVICES = [
   { label: "AGENT", status: "WORKING", color: "text-orange-300" },
 ] as const;
 
+const FILE_TREE = [
+  { name: "src/", type: "folder", depth: 0 },
+  { name: "components/", type: "folder", depth: 1 },
+  { name: "Hero.tsx", type: "file", depth: 2, active: true },
+  { name: "Studio.tsx", type: "file", depth: 2 },
+  { name: "app/", type: "folder", depth: 1 },
+  { name: "dashboard.tsx", type: "file", depth: 2 },
+  { name: "assets/", type: "folder", depth: 1 },
+  { name: "litt-mascot.png", type: "file", depth: 2 },
+] as const;
+
 export function LandingHeroV3() {
   return (
-    <section className="relative z-10 px-4 pt-16 pb-12 md:pt-24 md:pb-16 lg:pt-28">
+    <section className="relative z-10 px-6 pt-6 pb-10 md:px-10 md:pt-10 md:pb-14 lg:pt-14">
       {/* ── Ambient depth layer (hero-local) ── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         {/* Purple ambient bloom — upper left */}
-        <div className="absolute -top-20 -left-20 h-[500px] w-[500px] rounded-full bg-violet-600/12 blur-[140px]" />
+        <div className="absolute -top-20 -left-20 h-[600px] w-[600px] rounded-full bg-violet-600/12 blur-[160px]" />
+        {/* Cyan glow — behind LiTT (right side) */}
+        <div className="absolute -top-10 right-[5%] h-[500px] w-[500px] rounded-full bg-cyan-500/8 blur-[150px]" />
         {/* LiTT-green accent — lower right */}
         <div className="absolute -bottom-32 -right-20 h-[400px] w-[400px] rounded-full bg-emerald-500/8 blur-[130px]" />
         {/* Subtle workspace grid */}
         <div
-          className="absolute inset-0 opacity-[0.025]"
+          className="absolute inset-0 opacity-[0.03]"
           style={{
             backgroundImage:
               "linear-gradient(rgba(168,85,247,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(168,85,247,0.6) 1px, transparent 1px)",
             backgroundSize: "48px 48px",
             maskImage:
-              "radial-gradient(ellipse 70% 60% at 50% 35%, black 20%, transparent 75%)",
+              "radial-gradient(ellipse 80% 70% at 50% 35%, black 20%, transparent 80%)",
             WebkitMaskImage:
-              "radial-gradient(ellipse 70% 60% at 50% 35%, black 20%, transparent 75%)",
+              "radial-gradient(ellipse 80% 70% at 50% 35%, black 20%, transparent 80%)",
           }}
         />
       </div>
 
       {/* ── Hero grid: text + product proof ── */}
-      <div className="relative mx-auto max-w-7xl">
-        <div className="grid items-center gap-8 lg:grid-cols-[1.1fr_1fr] lg:gap-12">
+      <div className="relative mx-auto max-w-[1500px]">
+        <div className="grid items-center gap-6 lg:grid-cols-[1fr_1.25fr] lg:gap-10">
           {/* ══════════ LEFT: Messaging + CTAs ══════════ */}
           <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
             {/* Eyebrow */}
@@ -76,15 +91,25 @@ export function LandingHeroV3() {
               The AI Creative Operating System
             </div>
 
-            {/* Primary headline */}
-            <h1 className="text-5xl font-black leading-[1.02] tracking-tight text-white md:text-6xl lg:text-7xl">
+            {/* Primary headline — dominant scale */}
+            <h1
+              className="font-black text-white"
+              style={{
+                fontSize: "clamp(40px, 5vw, 94px)",
+                lineHeight: 0.95,
+                letterSpacing: "-0.045em",
+              }}
+            >
               Bring the idea.
             </h1>
 
-            {/* Secondary headline */}
+            {/* Secondary headline — gradient */}
             <h2
-              className="mt-1 text-4xl font-black leading-[1.05] tracking-tight md:text-5xl lg:text-6xl"
+              className="mt-2 font-black"
               style={{
+                fontSize: "clamp(32px, 4vw, 72px)",
+                lineHeight: 0.98,
+                letterSpacing: "-0.035em",
                 background: "linear-gradient(110deg, #a855f7 0%, #c084fc 50%, #34d399 100%)",
                 WebkitBackgroundClip: "text",
                 backgroundClip: "text",
@@ -94,8 +119,11 @@ export function LandingHeroV3() {
               LiTT helps you build the rest.
             </h2>
 
-            {/* Support copy */}
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-neutral-400 md:text-lg">
+            {/* Support copy — readable, bounded */}
+            <p
+              className="mt-6 max-w-[600px] leading-[1.6] text-neutral-400"
+              style={{ fontSize: "clamp(16px, 1.1vw, 20px)" }}
+            >
               One intelligent workspace for{" "}
               <span className="font-semibold text-neutral-200">planning</span>,{" "}
               <span className="font-semibold text-neutral-200">coding</span>,{" "}
@@ -105,26 +133,26 @@ export function LandingHeroV3() {
               <span className="font-semibold text-neutral-200">shipping</span> real projects.
             </p>
 
-            {/* CTAs */}
-            <div className="mt-7 flex flex-col items-center gap-3 sm:flex-row lg:items-start">
+            {/* CTAs — premium, 56px high */}
+            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row lg:items-start">
               <Link
                 href="/sign-up"
-                className="group inline-flex items-center gap-2.5 rounded-2xl bg-white px-8 py-3.5 text-sm font-black text-black shadow-[0_0_40px_rgba(168,85,247,0.25)] transition hover:shadow-[0_0_60px_rgba(168,85,247,0.4)]"
+                className="group inline-flex h-[56px] items-center gap-2.5 rounded-2xl bg-white px-8 text-base font-black text-black shadow-[0_0_40px_rgba(168,85,247,0.25)] transition hover:shadow-[0_0_60px_rgba(168,85,247,0.45)] hover:scale-[1.02]"
               >
                 Start Building Free
-                <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
                 href="/studio"
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/12 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-violet-400/30 hover:bg-white/8"
+                className="inline-flex h-[56px] items-center gap-2.5 rounded-2xl border border-white/12 bg-white/5 px-7 text-base font-semibold text-white backdrop-blur-md transition hover:border-violet-400/30 hover:bg-white/8 hover:scale-[1.02]"
               >
-                <Play size={13} className="text-violet-300" />
+                <Play size={16} className="text-violet-300" />
                 Watch LiTT Work
               </Link>
             </div>
 
             {/* Trust line */}
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-neutral-500 lg:justify-start">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-neutral-500 lg:justify-start">
               <span className="flex items-center gap-1.5">
                 <span className="h-1 w-1 rounded-full bg-emerald-400" />
                 Free during beta
@@ -140,43 +168,51 @@ export function LandingHeroV3() {
             </div>
           </div>
 
-          {/* ══════════ RIGHT: LiTT character + product proof ══════════ */}
-          {/* Desktop: mascot is absolutely positioned right, cards layered over lower body only.
-              Mobile: mascot and cards stack vertically, no overlap. */}
-          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[760px]">
+          {/* ══════════ RIGHT: LiTT + Studio operating environment ══════════ */}
+          {/* LiTT is the base layer (z-1), Studio UI floats on top (z-3).
+              On mobile, everything stacks vertically. */}
+          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[680px]">
             {/* ── LiTT mascot — base visual layer (z-1) ── */}
             <div
-              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-0 lg:top-0 lg:z-[1]"
-              style={{ minHeight: "min(520px, 60vh)" }}
+              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[-2%] lg:top-0 lg:z-[1]"
+              style={{ minHeight: "min(560px, 65vh)" }}
             >
               {/* Helmet glow ring — behind the head, breathing */}
               <div
-                className="pointer-events-none absolute left-1/2 top-[6%] h-[200px] w-[200px] -translate-x-1/2 rounded-full blur-2xl"
+                className="pointer-events-none absolute left-1/2 top-[8%] h-[260px] w-[260px] -translate-x-1/2 rounded-full blur-2xl"
                 style={{
                   background:
-                    "radial-gradient(circle, rgba(168,85,247,0.45) 0%, rgba(52,211,153,0.15) 50%, transparent 70%)",
+                    "radial-gradient(circle, rgba(168,85,247,0.5) 0%, rgba(52,211,153,0.18) 50%, transparent 70%)",
                   animation: "litt-breath 7s ease-in-out infinite",
+                }}
+              />
+              {/* Cyan glow — connects LiTT to the environment */}
+              <div
+                className="pointer-events-none absolute left-1/2 top-[20%] h-[300px] w-[300px] -translate-x-1/2 rounded-full blur-3xl"
+                style={{
+                  background:
+                    "radial-gradient(circle, rgba(34,211,238,0.12) 0%, transparent 65%)",
                 }}
               />
               {/* Ambient bloom — full body, softer */}
               <div
-                className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
                 style={{
                   background:
                     "radial-gradient(circle at 50% 40%, rgba(168,85,247,0.18) 0%, rgba(52,211,153,0.06) 45%, transparent 70%)",
                 }}
               />
               {/* Floating HUD line around the head */}
-              <div className="pointer-events-none absolute left-1/2 top-[4%] -translate-x-1/2 motion-reduce:hidden">
+              <div className="pointer-events-none absolute left-1/2 top-[6%] -translate-x-1/2 motion-reduce:hidden">
                 <div
-                  className="h-[1px] w-[180px] bg-gradient-to-r from-transparent via-violet-400/30 to-transparent"
+                  className="h-[1px] w-[220px] bg-gradient-to-r from-transparent via-violet-400/30 to-transparent"
                   style={{ animation: "litt-hud-scan 3s ease-in-out infinite" }}
                 />
               </div>
               {/* Second HUD scan line — lower, different timing for depth */}
-              <div className="pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 motion-reduce:hidden">
+              <div className="pointer-events-none absolute left-1/2 top-[20%] -translate-x-1/2 motion-reduce:hidden">
                 <div
-                  className="h-[1px] w-[140px] bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent"
+                  className="h-[1px] w-[170px] bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent"
                   style={{ animation: "litt-hud-scan 4.5s ease-in-out infinite reverse" }}
                 />
               </div>
@@ -203,89 +239,137 @@ export function LandingHeroV3() {
                   style={{ animation: "litt-particle-drift 11s ease-in-out infinite 3s" }}
                 />
               </div>
-              {/* LiTT character — full silhouette, big, object-contain object-bottom */}
+              {/* LiTT character — 1.5x larger, head + upper body visible */}
               <div
                 className="relative flex items-end justify-center"
                 style={{ animation: "litt-float 6s ease-in-out infinite" }}
               >
                 <div
-                  className="relative w-[260px] sm:w-[320px] lg:w-[380px]"
-                  style={{ height: "min(540px, 60vh)" }}
+                  className="relative w-[300px] sm:w-[400px] lg:w-[560px]"
+                  style={{ height: "min(620px, 72vh)" }}
                 >
                   <Image
                     src="/brand/litt-mascot-hero.png"
                     alt="LiTT — the AI creative operating system character, full body with helmet, visor, headphones, and streetwear"
                     fill
                     priority
-                    sizes="(max-width: 640px) 260px, (max-width: 1024px) 320px, 380px"
+                    sizes="(max-width: 640px) 300px, (max-width: 1024px) 400px, 560px"
                     className="object-contain object-bottom drop-shadow-[0_8px_40px_rgba(168,85,247,0.3)]"
                   />
                 </div>
               </div>
             </div>
 
-            {/* ── Product proof cards — layered IN FRONT of mascot lower body only (z-3) ── */}
-            {/* Desktop: absolute, starts at ~45% down so helmet/upper body is visible above.
-                Mobile: stacks below mascot naturally. */}
-            <div className="relative z-[3] -mt-2 w-full max-w-md lg:absolute lg:bottom-0 lg:left-1/2 lg:max-w-[440px] lg:-translate-x-1/2">
-              {/* Real Studio screenshot — primary proof */}
+            {/* ── Studio operating environment — on top of LiTT (z-3) ── */}
+            {/* Desktop: absolute, positioned to overlap LiTT's lower body while
+                leaving head + shoulders visible above. Mobile: stacks below. */}
+            <div className="relative z-[3] mt-4 w-full max-w-[560px] lg:absolute lg:bottom-0 lg:left-1/2 lg:max-w-[620px] lg:-translate-x-1/2">
+              {/* ── Studio product frame — real product UI ── */}
               <div
-                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a14] shadow-[0_8px_60px_rgba(0,0,0,0.6)] transition-all duration-500 hover:border-violet-400/20 hover:shadow-[0_12px_80px_rgba(168,85,247,0.15)]"
+                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a14] shadow-[0_12px_80px_rgba(0,0,0,0.7)] transition-all duration-500 hover:border-violet-400/20 hover:shadow-[0_16px_100px_rgba(168,85,247,0.2)]"
                 style={{ animation: "litt-card-float 8s ease-in-out infinite" }}
               >
                 {/* Window chrome */}
-                <div className="flex items-center gap-2 border-b border-white/6 bg-[#0d0d18] px-4 py-2.5">
+                <div className="flex items-center gap-2 border-b border-white/6 bg-[#0d0d18] px-4 py-3">
                   <div className="flex gap-1.5">
-                    <div className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
-                    <div className="h-2.5 w-2.5 rounded-full bg-amber-500/60" />
-                    <div className="h-2.5 w-2.5 rounded-full bg-emerald-500/60" />
+                    <div className="h-3 w-3 rounded-full bg-red-500/60" />
+                    <div className="h-3 w-3 rounded-full bg-amber-500/60" />
+                    <div className="h-3 w-3 rounded-full bg-emerald-500/60" />
                   </div>
-                  <span className="ml-2 text-[9px] font-mono font-bold uppercase tracking-widest text-neutral-500">
+                  <span className="ml-2 text-[10px] font-mono font-bold uppercase tracking-widest text-neutral-500">
                     studio.litlabs.net
                   </span>
-                  <span className="ml-auto flex items-center gap-1 text-[9px] font-mono text-violet-400">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 motion-reduce:hidden" />
+                  <span className="ml-auto flex items-center gap-1.5 text-[10px] font-mono text-violet-400">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-violet-400 motion-reduce:hidden" />
                     LiTT IN ACTION
                   </span>
                 </div>
 
-                {/* Real Studio screenshot */}
-                <div className="relative aspect-[1798/875] w-full overflow-hidden">
-                  <Image
-                    src="/studio/creative-engine-hero.png"
-                    alt="LiTT Studio — the real creative engine interface"
-                    fill
-                    sizes="(max-width: 1024px) 100vw, 480px"
-                    className="object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a14] via-transparent to-transparent" />
+                {/* Studio body — file tree + canvas + LiTT activity */}
+                <div className="flex" style={{ height: "clamp(280px, 32vh, 380px)" }}>
+                  {/* File tree sidebar */}
+                  <div className="hidden w-[160px] shrink-0 border-r border-white/6 bg-[#08080f] p-2 sm:block">
+                    <div className="mb-2 px-2 text-[9px] font-black uppercase tracking-widest text-neutral-600">
+                      Files
+                    </div>
+                    {FILE_TREE.map((item) => (
+                      <div
+                        key={item.name}
+                        className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] ${
+                          item.active
+                            ? "bg-violet-500/15 text-violet-300"
+                            : "text-neutral-400"
+                        }`}
+                        style={{ paddingLeft: `${8 + item.depth * 12}px` }}
+                      >
+                        {item.type === "folder" ? (
+                          <Folder size={11} className="shrink-0 text-neutral-500" />
+                        ) : (
+                          <FileCode size={11} className="shrink-0 text-neutral-500" />
+                        )}
+                        <span className="truncate">{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Canvas / preview area */}
+                  <div className="relative flex-1 overflow-hidden bg-[#0a0a14]">
+                    {/* Preview header */}
+                    <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
+                      <ChevronRight size={12} className="text-neutral-600" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                        Canvas / Preview
+                      </span>
+                      <span className="ml-auto text-[9px] font-mono text-emerald-400">
+                        ● live
+                      </span>
+                    </div>
+                    {/* Preview content — actual generated result */}
+                    <div className="relative h-full">
+                      <Image
+                        src="/studio/creative-engine-hero.png"
+                        alt="LiTT Studio — the real creative engine interface with generated output"
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 620px"
+                        className="object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a14] via-transparent to-transparent" />
+                      {/* LiTT building indicator — overlay */}
+                      <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg border border-violet-400/20 bg-[#0a0a14]/90 px-3 py-2 backdrop-blur-sm">
+                        <Loader2 size={14} className="animate-spin text-violet-400 motion-reduce:hidden" />
+                        <span className="text-[11px] font-bold text-violet-300">
+                          LiTT building interface…
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Micro-panels: Mission + Runtime (below screenshot) */}
+              {/* ── Mission + Runtime panels — readable ── */}
               <div className="mt-3 grid grid-cols-2 gap-3">
                 {/* Mission panel */}
-                <div className="rounded-xl border border-white/8 bg-[#0a0a14]/90 p-3.5 backdrop-blur-sm">
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400 motion-reduce:hidden" />
-                    <span className="text-[8px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                <div className="rounded-xl border border-white/8 bg-[#0a0a14]/90 p-4 backdrop-blur-sm">
+                  <div className="mb-2.5 flex items-center gap-1.5">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400 motion-reduce:hidden" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
                       LiTT Mission
                     </span>
                   </div>
-                  <div className="mb-2 text-[10px] font-bold text-neutral-300">
+                  <div className="mb-3 text-xs font-bold text-neutral-300">
                     Build the launch experience.
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     {MISSION_STEPS.map((step) => (
-                      <div key={step.label} className="flex items-center gap-1.5 text-[9px]">
+                      <div key={step.label} className="flex items-center gap-2 text-[11px]">
                         {step.state === "done" && (
-                          <span className="text-emerald-400">✓</span>
+                          <CheckCircle2 size={12} className="shrink-0 text-emerald-400" />
                         )}
                         {step.state === "active" && (
-                          <span className="text-orange-400 motion-reduce:hidden">●</span>
+                          <Loader2 size={12} className="shrink-0 animate-spin text-orange-400 motion-reduce:hidden" />
                         )}
                         {step.state === "pending" && (
-                          <span className="text-neutral-700">○</span>
+                          <Circle size={12} className="shrink-0 text-neutral-700" />
                         )}
                         <span
                           className={
@@ -304,19 +388,19 @@ export function LandingHeroV3() {
                 </div>
 
                 {/* Runtime panel */}
-                <div className="rounded-xl border border-white/8 bg-[#0a0a14]/90 p-3.5 backdrop-blur-sm">
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 motion-reduce:hidden" />
-                    <span className="text-[8px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                <div className="rounded-xl border border-white/8 bg-[#0a0a14]/90 p-4 backdrop-blur-sm">
+                  <div className="mb-2.5 flex items-center gap-1.5">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400 motion-reduce:hidden" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
                       Runtime
                     </span>
                   </div>
-                  <div className="mb-1.5 text-[10px] font-bold text-emerald-400">ONLINE</div>
-                  <div className="space-y-1.5">
+                  <div className="mb-2.5 text-sm font-bold text-emerald-400">ONLINE</div>
+                  <div className="space-y-2">
                     {RUNTIME_SERVICES.map((svc) => (
                       <div
                         key={svc.label}
-                        className="flex items-center justify-between text-[9px] font-mono"
+                        className="flex items-center justify-between text-[11px] font-mono"
                       >
                         <span className="font-bold text-neutral-400">{svc.label}</span>
                         <span className={svc.color}>{svc.status}</span>
@@ -326,29 +410,30 @@ export function LandingHeroV3() {
                 </div>
               </div>
 
-              {/* Terminal strip */}
-              <div className="mt-3 rounded-xl border border-white/8 bg-[#06060e]/95 p-3 font-mono backdrop-blur-sm">
-                <div className="mb-1.5 flex items-center gap-1.5">
-                  <span className="text-[8px] font-black uppercase tracking-[0.18em] text-neutral-600">
+              {/* ── Terminal — legitimate proof surface ── */}
+              <div className="mt-3 rounded-xl border border-white/8 bg-[#06060e]/95 p-4 font-mono backdrop-blur-sm">
+                <div className="mb-2 flex items-center gap-1.5">
+                  <TerminalIcon size={12} className="text-neutral-600" />
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-600">
                     Terminal
                   </span>
-                  <span className="ml-auto text-[8px] text-neutral-700">bash</span>
+                  <span className="ml-auto text-[10px] text-neutral-700">bash</span>
                 </div>
-                <div className="space-y-0.5 text-[9px] leading-relaxed">
+                <div className="space-y-0.5 text-[11px] leading-relaxed">
                   <div className="text-emerald-400">
-                    <span className="text-neutral-600">$</span> litt run git status --short
+                    <span className="text-neutral-600">$</span> litt run build
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-cyan-400">M</span> src/app/(marketing)/page.tsx
+                    <span className="text-emerald-400">✓</span> workspace loaded
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-emerald-400">A</span> src/lib/verify.ts
+                    <span className="text-emerald-400">✓</span> components generated
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-emerald-400">A</span> src/__tests__/verify.test.ts
+                    <span className="text-emerald-400">✓</span> tests passed
                   </div>
                   <div className="text-neutral-500">
-                    <span className="text-emerald-400">✓</span> run_8f2a1 · success · 415ms
+                    <span className="text-emerald-400">✓</span> production ready
                   </div>
                   <div className="text-violet-400">
                     <span className="text-neutral-600">$</span>{" "}
