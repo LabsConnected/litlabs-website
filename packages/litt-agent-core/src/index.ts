@@ -128,3 +128,17 @@ export type { ActionRisk as ActionRiskAlias } from "./contracts/policy.js";
 // New code should use ModelProvider from types.ts instead.
 // Marked for removal once cli/ migrates to the canonical core.
 export { askLiTTCode, handleLiTTCodeCommand } from "./compat.js";
+
+// Agent loop — canonical agent execution through the shared runtime
+export {
+  runAgentLoop,
+  parseToolCall,
+  stripToolCallBlocks,
+  buildDefaultSystemPrompt,
+} from "./agent-loop.js";
+export type {
+  AgentLoopOptions,
+  AgentLoopResult,
+  AgentToolCallRecord,
+  ParsedToolCall,
+} from "./agent-loop.js";
