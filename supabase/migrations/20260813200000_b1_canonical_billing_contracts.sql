@@ -44,6 +44,11 @@ ALTER TABLE public.credit_ledger
 -- `entry_type` is the canonical type (GRANT, PURCHASE, RESERVE, SETTLE, etc.)
 
 ALTER TABLE public.credit_ledger
+  DROP CONSTRAINT IF EXISTS credit_ledger_entry_type_check;
+ALTER TABLE public.credit_ledger
+  DROP CONSTRAINT IF EXISTS credit_ledger_entry_type_check;
+
+ALTER TABLE public.credit_ledger
   ADD CONSTRAINT credit_ledger_entry_type_check CHECK (
     entry_type IS NULL OR entry_type IN (
       'GRANT', 'PURCHASE', 'PROMO', 'RESERVE', 'SETTLE',
