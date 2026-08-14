@@ -25,6 +25,9 @@ test.describe("Navigation @public", () => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
 
+    // Wait for nav to render — Clerk hydration may delay nav rendering
+    await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+
     // Find all nav links — try data-testid first, then fall back to nav a[href]
     let navLinks = page.locator('[data-testid^="nav-"]');
     let count = await navLinks.count();
