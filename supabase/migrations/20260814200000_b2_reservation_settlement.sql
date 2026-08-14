@@ -72,6 +72,7 @@ CREATE INDEX IF NOT EXISTS credit_reservations_run_id
 -- RLS: deny anon and authenticated (same as credit_ledger)
 ALTER TABLE public.credit_reservations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS credit_reservations_deny_anon ON public.credit_reservations;
 CREATE POLICY credit_reservations_deny_anon
   ON public.credit_reservations
   FOR ALL
@@ -79,6 +80,7 @@ CREATE POLICY credit_reservations_deny_anon
   USING (false)
   WITH CHECK (false);
 
+DROP POLICY IF EXISTS credit_reservations_deny_authenticated ON public.credit_reservations;
 CREATE POLICY credit_reservations_deny_authenticated
   ON public.credit_reservations
   FOR ALL

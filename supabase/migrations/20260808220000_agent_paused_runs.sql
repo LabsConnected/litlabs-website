@@ -32,16 +32,19 @@ CREATE TABLE IF NOT EXISTS agent_paused_runs (
 -- Row Level Security: users can only see their own paused runs
 ALTER TABLE agent_paused_runs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS agent_paused_runs_owner_select ON agent_paused_runs;
 CREATE POLICY agent_paused_runs_owner_select
   ON agent_paused_runs
   FOR SELECT
   USING (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS agent_paused_runs_owner_insert ON agent_paused_runs;
 CREATE POLICY agent_paused_runs_owner_insert
   ON agent_paused_runs
   FOR INSERT
   WITH CHECK (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS agent_paused_runs_owner_update ON agent_paused_runs;
 CREATE POLICY agent_paused_runs_owner_update
   ON agent_paused_runs
   FOR UPDATE

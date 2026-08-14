@@ -191,22 +191,29 @@ ALTER TABLE public.model_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_events ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own steps, executions, usage, and audit events
+DROP POLICY IF EXISTS "agent_steps_owner_select" ON public.agent_steps;
 CREATE POLICY "agent_steps_owner_select" ON public.agent_steps
   FOR SELECT USING (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
+DROP POLICY IF EXISTS "agent_steps_owner_insert" ON public.agent_steps;
 CREATE POLICY "agent_steps_owner_insert" ON public.agent_steps
   FOR INSERT WITH CHECK (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
 
+DROP POLICY IF EXISTS "tool_definitions_public_select" ON public.tool_definitions;
 CREATE POLICY "tool_definitions_public_select" ON public.tool_definitions
   FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "tool_executions_owner_select" ON public.tool_executions;
 CREATE POLICY "tool_executions_owner_select" ON public.tool_executions
   FOR SELECT USING (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
+DROP POLICY IF EXISTS "tool_executions_owner_insert" ON public.tool_executions;
 CREATE POLICY "tool_executions_owner_insert" ON public.tool_executions
   FOR INSERT WITH CHECK (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
 
+DROP POLICY IF EXISTS "model_usage_owner_select" ON public.model_usage;
 CREATE POLICY "model_usage_owner_select" ON public.model_usage
   FOR SELECT USING (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
 
+DROP POLICY IF EXISTS "audit_events_owner_select" ON public.audit_events;
 CREATE POLICY "audit_events_owner_select" ON public.audit_events
   FOR SELECT USING (user_id = (select id from public.users where clerk_id = auth.jwt() ->> 'sub'));
 

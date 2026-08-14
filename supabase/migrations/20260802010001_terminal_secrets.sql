@@ -42,19 +42,23 @@ CREATE INDEX IF NOT EXISTS idx_terminal_secrets_project_id ON terminal_secrets(p
 -- RLS: Users can only access their own secrets
 ALTER TABLE terminal_secrets ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS terminal_secrets_owner_select ON terminal_secrets;
 CREATE POLICY terminal_secrets_owner_select
   ON terminal_secrets FOR SELECT
   USING (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_secrets_owner_insert ON terminal_secrets;
 CREATE POLICY terminal_secrets_owner_insert
   ON terminal_secrets FOR INSERT
   WITH CHECK (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_secrets_owner_update ON terminal_secrets;
 CREATE POLICY terminal_secrets_owner_update
   ON terminal_secrets FOR UPDATE
   USING (auth.jwt() ->> 'sub' = user_id)
   WITH CHECK (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_secrets_owner_delete ON terminal_secrets;
 CREATE POLICY terminal_secrets_owner_delete
   ON terminal_secrets FOR DELETE
   USING (auth.jwt() ->> 'sub' = user_id);
@@ -68,6 +72,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_terminal_secrets_updated_at ON terminal_secrets;
 CREATE TRIGGER trigger_terminal_secrets_updated_at
   BEFORE UPDATE ON terminal_secrets
   FOR EACH ROW

@@ -78,10 +78,13 @@ CREATE TABLE IF NOT EXISTS public.reception_config (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+DROP POLICY IF EXISTS reception_config_owner_select ON public.reception_config;
 CREATE POLICY reception_config_owner_select ON public.reception_config
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_config_owner_insert ON public.reception_config;
 CREATE POLICY reception_config_owner_insert ON public.reception_config
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_config_owner_update ON public.reception_config;
 CREATE POLICY reception_config_owner_update ON public.reception_config
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -136,12 +139,16 @@ CREATE TABLE IF NOT EXISTS public.reception_services (
 CREATE INDEX IF NOT EXISTS idx_reception_services_owner ON public.reception_services(owner_id);
 CREATE INDEX IF NOT EXISTS idx_reception_services_active ON public.reception_services(active, sort_order);
 
+DROP POLICY IF EXISTS reception_services_owner_select ON public.reception_services;
 CREATE POLICY reception_services_owner_select ON public.reception_services
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_services_owner_insert ON public.reception_services;
 CREATE POLICY reception_services_owner_insert ON public.reception_services
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_services_owner_update ON public.reception_services;
 CREATE POLICY reception_services_owner_update ON public.reception_services
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_services_owner_delete ON public.reception_services;
 CREATE POLICY reception_services_owner_delete ON public.reception_services
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -180,12 +187,16 @@ CREATE TABLE IF NOT EXISTS public.reception_staff_hours (
 
 CREATE INDEX IF NOT EXISTS idx_reception_staff_owner ON public.reception_staff_hours(owner_id);
 
+DROP POLICY IF EXISTS reception_staff_owner_select ON public.reception_staff_hours;
 CREATE POLICY reception_staff_owner_select ON public.reception_staff_hours
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_staff_owner_insert ON public.reception_staff_hours;
 CREATE POLICY reception_staff_owner_insert ON public.reception_staff_hours
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_staff_owner_update ON public.reception_staff_hours;
 CREATE POLICY reception_staff_owner_update ON public.reception_staff_hours
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_staff_owner_delete ON public.reception_staff_hours;
 CREATE POLICY reception_staff_owner_delete ON public.reception_staff_hours
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -245,12 +256,16 @@ CREATE INDEX IF NOT EXISTS idx_reception_bookings_date ON public.reception_booki
 CREATE INDEX IF NOT EXISTS idx_reception_bookings_status ON public.reception_bookings(status);
 CREATE INDEX IF NOT EXISTS idx_reception_bookings_customer ON public.reception_bookings(customer_email);
 
+DROP POLICY IF EXISTS reception_bookings_owner_select ON public.reception_bookings;
 CREATE POLICY reception_bookings_owner_select ON public.reception_bookings
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_bookings_owner_insert ON public.reception_bookings;
 CREATE POLICY reception_bookings_owner_insert ON public.reception_bookings
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_bookings_owner_update ON public.reception_bookings;
 CREATE POLICY reception_bookings_owner_update ON public.reception_bookings
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_bookings_owner_delete ON public.reception_bookings;
 CREATE POLICY reception_bookings_owner_delete ON public.reception_bookings
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -312,12 +327,16 @@ CREATE INDEX IF NOT EXISTS idx_reception_leads_status ON public.reception_leads(
 CREATE INDEX IF NOT EXISTS idx_reception_leads_email ON public.reception_leads(email);
 CREATE INDEX IF NOT EXISTS idx_reception_leads_created ON public.reception_leads(created_at DESC);
 
+DROP POLICY IF EXISTS reception_leads_owner_select ON public.reception_leads;
 CREATE POLICY reception_leads_owner_select ON public.reception_leads
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_leads_owner_insert ON public.reception_leads;
 CREATE POLICY reception_leads_owner_insert ON public.reception_leads
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_leads_owner_update ON public.reception_leads;
 CREATE POLICY reception_leads_owner_update ON public.reception_leads
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_leads_owner_delete ON public.reception_leads;
 CREATE POLICY reception_leads_owner_delete ON public.reception_leads
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -366,12 +385,16 @@ CREATE INDEX IF NOT EXISTS idx_reception_escalations_owner ON public.reception_e
 CREATE INDEX IF NOT EXISTS idx_reception_escalations_status ON public.reception_escalations(status, urgency);
 CREATE INDEX IF NOT EXISTS idx_reception_escalations_created ON public.reception_escalations(created_at DESC);
 
+DROP POLICY IF EXISTS reception_escalations_owner_select ON public.reception_escalations;
 CREATE POLICY reception_escalations_owner_select ON public.reception_escalations
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_escalations_owner_insert ON public.reception_escalations;
 CREATE POLICY reception_escalations_owner_insert ON public.reception_escalations
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_escalations_owner_update ON public.reception_escalations;
 CREATE POLICY reception_escalations_owner_update ON public.reception_escalations
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_escalations_owner_delete ON public.reception_escalations;
 CREATE POLICY reception_escalations_owner_delete ON public.reception_escalations
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
@@ -401,8 +424,10 @@ CREATE INDEX IF NOT EXISTS idx_reception_events_owner ON public.reception_events
 CREATE INDEX IF NOT EXISTS idx_reception_events_type ON public.reception_events(event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reception_events_conversation ON public.reception_events(conversation_id);
 
+DROP POLICY IF EXISTS reception_events_owner_select ON public.reception_events;
 CREATE POLICY reception_events_owner_select ON public.reception_events
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS reception_events_owner_insert ON public.reception_events;
 CREATE POLICY reception_events_owner_insert ON public.reception_events
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
 

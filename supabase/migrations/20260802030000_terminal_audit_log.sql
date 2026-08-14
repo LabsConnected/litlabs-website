@@ -40,6 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_terminal_audit_created_at ON terminal_audit_log(c
 -- RLS: Users can only see their own audit entries
 ALTER TABLE terminal_audit_log ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS terminal_audit_owner_select ON terminal_audit_log;
 CREATE POLICY terminal_audit_owner_select
   ON terminal_audit_log FOR SELECT
   USING (auth.jwt() ->> 'sub' = user_id);

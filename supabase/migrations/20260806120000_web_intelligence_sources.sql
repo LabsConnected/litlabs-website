@@ -130,21 +130,29 @@ ALTER TABLE public.web_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.web_monitors ENABLE ROW LEVEL SECURITY;
 
 -- Owners can CRUD their own sources
+DROP POLICY IF EXISTS web_sources_owner_select ON public.web_sources;
 CREATE POLICY web_sources_owner_select ON public.web_sources
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_sources_owner_insert ON public.web_sources;
 CREATE POLICY web_sources_owner_insert ON public.web_sources
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_sources_owner_update ON public.web_sources;
 CREATE POLICY web_sources_owner_update ON public.web_sources
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_sources_owner_delete ON public.web_sources;
 CREATE POLICY web_sources_owner_delete ON public.web_sources
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');
 
 -- Owners can CRUD their own monitors
+DROP POLICY IF EXISTS web_monitors_owner_select ON public.web_monitors;
 CREATE POLICY web_monitors_owner_select ON public.web_monitors
   FOR SELECT USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_monitors_owner_insert ON public.web_monitors;
 CREATE POLICY web_monitors_owner_insert ON public.web_monitors
   FOR INSERT WITH CHECK (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_monitors_owner_update ON public.web_monitors;
 CREATE POLICY web_monitors_owner_update ON public.web_monitors
   FOR UPDATE USING (owner_id = auth.jwt() ->> 'sub');
+DROP POLICY IF EXISTS web_monitors_owner_delete ON public.web_monitors;
 CREATE POLICY web_monitors_owner_delete ON public.web_monitors
   FOR DELETE USING (owner_id = auth.jwt() ->> 'sub');

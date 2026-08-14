@@ -118,8 +118,10 @@ CREATE INDEX IF NOT EXISTS credit_grants_expires
   ON public.credit_grants(expires_at) WHERE expires_at IS NOT NULL;
 
 ALTER TABLE public.credit_grants ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS credit_grants_deny_anon ON public.credit_grants;
 CREATE POLICY credit_grants_deny_anon
   ON public.credit_grants FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS credit_grants_deny_authenticated ON public.credit_grants;
 CREATE POLICY credit_grants_deny_authenticated
   ON public.credit_grants FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -186,8 +188,10 @@ CREATE INDEX IF NOT EXISTS usage_events_started_at
   ON public.usage_events(started_at DESC);
 
 ALTER TABLE public.usage_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS usage_events_deny_anon ON public.usage_events;
 CREATE POLICY usage_events_deny_anon
   ON public.usage_events FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS usage_events_deny_authenticated ON public.usage_events;
 CREATE POLICY usage_events_deny_authenticated
   ON public.usage_events FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -212,8 +216,10 @@ CREATE INDEX IF NOT EXISTS cost_events_usage_event_id
   ON public.cost_events(usage_event_id);
 
 ALTER TABLE public.cost_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_events_deny_anon ON public.cost_events;
 CREATE POLICY cost_events_deny_anon
   ON public.cost_events FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS cost_events_deny_authenticated ON public.cost_events;
 CREATE POLICY cost_events_deny_authenticated
   ON public.cost_events FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -243,8 +249,10 @@ CREATE INDEX IF NOT EXISTS rating_events_pricing_version
   ON public.rating_events(pricing_version_id);
 
 ALTER TABLE public.rating_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rating_events_deny_anon ON public.rating_events;
 CREATE POLICY rating_events_deny_anon
   ON public.rating_events FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS rating_events_deny_authenticated ON public.rating_events;
 CREATE POLICY rating_events_deny_authenticated
   ON public.rating_events FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -276,8 +284,10 @@ CREATE INDEX IF NOT EXISTS pricing_catalog_capability
   ON public.pricing_catalog(capability);
 
 ALTER TABLE public.pricing_catalog ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pricing_catalog_deny_anon ON public.pricing_catalog;
 CREATE POLICY pricing_catalog_deny_anon
   ON public.pricing_catalog FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS pricing_catalog_deny_authenticated ON public.pricing_catalog;
 CREATE POLICY pricing_catalog_deny_authenticated
   ON public.pricing_catalog FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -300,8 +310,10 @@ CREATE TABLE IF NOT EXISTS public.pricing_versions (
 );
 
 ALTER TABLE public.pricing_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pricing_versions_deny_anon ON public.pricing_versions;
 CREATE POLICY pricing_versions_deny_anon
   ON public.pricing_versions FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS pricing_versions_deny_authenticated ON public.pricing_versions;
 CREATE POLICY pricing_versions_deny_authenticated
   ON public.pricing_versions FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -323,8 +335,10 @@ CREATE TABLE IF NOT EXISTS public.exchange_rate_versions (
 );
 
 ALTER TABLE public.exchange_rate_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS exchange_rate_versions_deny_anon ON public.exchange_rate_versions;
 CREATE POLICY exchange_rate_versions_deny_anon
   ON public.exchange_rate_versions FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS exchange_rate_versions_deny_authenticated ON public.exchange_rate_versions;
 CREATE POLICY exchange_rate_versions_deny_authenticated
   ON public.exchange_rate_versions FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
@@ -357,8 +371,10 @@ CREATE INDEX IF NOT EXISTS spend_controls_user_active
   ON public.spend_controls(user_id) WHERE active = true;
 
 ALTER TABLE public.spend_controls ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS spend_controls_deny_anon ON public.spend_controls;
 CREATE POLICY spend_controls_deny_anon
   ON public.spend_controls FOR ALL TO anon USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS spend_controls_deny_authenticated ON public.spend_controls;
 CREATE POLICY spend_controls_deny_authenticated
   ON public.spend_controls FOR ALL TO authenticated USING (false) WITH CHECK (false);
 

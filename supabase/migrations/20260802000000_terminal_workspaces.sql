@@ -48,19 +48,23 @@ CREATE INDEX IF NOT EXISTS idx_terminal_workspaces_last_active ON terminal_works
 -- RLS: Users can only access their own workspaces
 ALTER TABLE terminal_workspaces ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS terminal_workspaces_owner_select ON terminal_workspaces;
 CREATE POLICY terminal_workspaces_owner_select
   ON terminal_workspaces FOR SELECT
   USING (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_workspaces_owner_insert ON terminal_workspaces;
 CREATE POLICY terminal_workspaces_owner_insert
   ON terminal_workspaces FOR INSERT
   WITH CHECK (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_workspaces_owner_update ON terminal_workspaces;
 CREATE POLICY terminal_workspaces_owner_update
   ON terminal_workspaces FOR UPDATE
   USING (auth.jwt() ->> 'sub' = user_id)
   WITH CHECK (auth.jwt() ->> 'sub' = user_id);
 
+DROP POLICY IF EXISTS terminal_workspaces_owner_delete ON terminal_workspaces;
 CREATE POLICY terminal_workspaces_owner_delete
   ON terminal_workspaces FOR DELETE
   USING (auth.jwt() ->> 'sub' = user_id);
@@ -77,6 +81,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_terminal_workspaces_updated_at ON terminal_workspaces;
 CREATE TRIGGER trigger_terminal_workspaces_updated_at
   BEFORE UPDATE ON terminal_workspaces
   FOR EACH ROW
