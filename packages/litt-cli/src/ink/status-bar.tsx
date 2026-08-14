@@ -1,7 +1,8 @@
 /**
- * StatusBar — connection, cwd, execution state, context/model, current run.
+ * StatusBar — bottom status line with runtime indicators.
  *
- * Reads from CockpitStore + RuntimeClient. No business logic.
+ * Shows local/remote indicators, cwd, holo state, model, runId,
+ * and keyboard shortcut hints.
  */
 
 import React from "react";
@@ -28,18 +29,18 @@ export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoSta
   const shortRun = runId ? `run:${runId.slice(-8)}` : "no active run";
 
   return (
-    <Box marginTop={1}>
-      <Text color={localColor}>{localIcon}</Text>
-      <Text dimColor> L │ </Text>
-      <Text color={remoteColor}>{remoteIcon}</Text>
-      <Text dimColor> R │ </Text>
-      <Text color="cyan">{shortCwd}</Text>
-      <Text dimColor> │ </Text>
-      <Text color="blue">{holoState.toLowerCase()}</Text>
-      <Text dimColor> │ </Text>
-      <Text color="magenta">{model}</Text>
-      <Text dimColor> │ </Text>
-      <Text dimColor>{shortRun}</Text>
+    <Box flexDirection="column" marginTop={1}>
+      <Text dimColor>────────────────────────────────────────────────────────────</Text>
+      <Box>
+        <Text color={localColor}>{localIcon}</Text>
+        <Text dimColor> LOCAL   </Text>
+        <Text color={remoteColor}>{remoteIcon}</Text>
+        <Text dimColor> REMOTE   </Text>
+        <Text color="blue">{holoState.toLowerCase()}</Text>
+        <Text dimColor>   </Text>
+        <Text dimColor>{shortRun}</Text>
+      </Box>
+      <Text dimColor>Ctrl+M model · Ctrl+K actions · Ctrl+C cancel · Ctrl+L clear · Esc close</Text>
     </Box>
   );
 }

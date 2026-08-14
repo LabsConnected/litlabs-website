@@ -1,27 +1,42 @@
 /**
  * CockpitApp — the Ink cockpit composition root.
  *
- * Composition only. No business logic. No execution.
- * Everything executable goes through ExecutionGateway via the controller.
- *
  * Architecture:
  *   Ink UI → RuntimeSession → ExecutionGateway → Executor → Events → Ink UI
+ *
+ * Layout (top to bottom):
+ *   ⚡ LiTT CODE header (branded)
+ *   ┌─────────────┐  Subsystem cards (independent truth)
+ *   │  ◇ LiTT ◇   │  RUNTIME  ● ONLINE
+ *   │  [ pulse ]   │  TERMINAL ● READY
+ *   │  THINKING    │  MEMORY   ● READY
+ *   └─────────────┘  AGENT    ● IDLE
+ *   CURRENT MISSION
+ *   ACTIVITY (live event stream)
+ *   FILES (git status)
+ *   QUICK ACTIONS
+ *   litt ❯ command dock
+ *   status bar + keyboard help
  */
 
 import React, { useCallback } from "react";
-import { Box, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { Header } from "./header.js";
 import { Subsystems } from "./subsystems.js";
 import { LiTTHoloPanel } from "./holo-panel.js";
+import { MissionSection } from "./mission-section.js";
 import { ActivityStream } from "./activity-stream.js";
+import { FilesInfo } from "./files-info.js";
+import { QuickActions } from "./quick-actions.js";
 import { CommandDock } from "./command-dock.js";
 import { ApprovalUX } from "./approval-ux.js";
 import { StatusBar } from "./status-bar.js";
 import { ModelPicker, DEFAULT_MODELS } from "./model-picker.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
+import { hasOpenRouterKey } from "../lib/model-provider.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -36,22 +51,25 @@ export interface CockpitAppProps {
   branch: string;
   model: string;
   cwd: string;
+  mode: string;
+  gitModified: number;
+  gitUntracked: number;
 }
 
-export function CockpitApp({ session, client, approvalBridge, sessionBridge, project, branch, model, cwd }: CockpitAppProps): React.ReactElement {
+export function CockpitApp({
+  session, client, approvalBridge, sessionBridge,
+  project, branch, model, cwd, mode, gitModified, gitUntracked,
+}: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
   useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit() });
 
-  // Effective model: selected model overrides the default
   const effectiveModel = store.state.selectedModel ?? model;
+  const modelReady = hasOpenRouterKey();
 
-  // Ctrl+C cancels active run or pending approval (first press), exits (second press when idle)
-  // Ctrl+M opens model picker
-  // Ctrl+K opens command palette
+  // Global keyboard shortcuts
   useInput(useCallback((input, key) => {
-    // Don't handle Ctrl shortcuts when an overlay is open — let the overlay handle input
     if (store.state.overlay !== "none") return;
 
     if (key.ctrl && input === "c") {
@@ -62,6 +80,7 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
       } else if (store.state.holoState === "RUNNING" || store.state.holoState === "THINKING") {
         session.cancel().catch(() => {});
         store.actions.setHoloState("IDLE");
+        store.actions.setMission(null);
       } else {
         exit();
       }
@@ -69,13 +88,16 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
       store.actions.setOverlay("model-picker");
     } else if (key.ctrl && input === "k") {
       store.actions.setOverlay("command-palette");
+    } else if (key.ctrl && input === "l") {
+      // Clear activity log
+      store.actions.setHoloState("IDLE");
+      store.actions.setMission(null);
     }
   }, [session, store, approvalBridge, exit]));
 
   const disabled = store.state.holoState === "RUNNING" || store.state.holoState === "THINKING" || store.state.holoState === "APPROVAL"
     || store.state.overlay !== "none";
 
-  // Handle model picker selection
   const handleModelSelect = useCallback((selected: typeof DEFAULT_MODELS[number]) => {
     store.actions.setSelectedModel(selected.id);
     store.actions.setOverlay("none");
@@ -87,10 +109,8 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
     });
   }, [store]);
 
-  // Handle command palette selection
   const handlePaletteSelect = useCallback((action: typeof DEFAULT_ACTIONS[number]) => {
     store.actions.setOverlay("none");
-    // Route the selected action through the normal submit flow
     submit(action.id);
   }, [store, submit]);
 
@@ -104,14 +124,33 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
         connected={store.state.connected}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
+        mode={mode}
       />
+
+      {/* Holo + Subsystems side by side */}
       <Box flexDirection="row" gap={2}>
         <LiTTHoloPanel state={store.state.holoState} />
-        <Subsystems selected={store.state.selectedPanel} onSelect={store.actions.setSelectedPanel} />
+        <Box flexDirection="column">
+          <Subsystems
+            selected={store.state.selectedPanel}
+            onSelect={(p) => store.actions.setSelectedPanel(p as import("./cockpit-store.js").CockpitPanel)}
+            localRuntime={store.state.localRuntime}
+            remoteRuntime={store.state.remoteRuntime}
+            holoState={store.state.holoState}
+            modelReady={modelReady}
+          />
+        </Box>
       </Box>
+
+      {/* Mission section */}
+      <MissionSection holoState={store.state.holoState} mission={store.state.mission} />
+
+      {/* Approval UX (when needed) */}
       {store.state.approvalPrompt && (
         <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
       )}
+
+      {/* Overlays */}
       {store.state.overlay === "model-picker" && (
         <ModelPicker
           models={DEFAULT_MODELS}
@@ -127,13 +166,28 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
           onCancel={() => store.actions.setOverlay("none")}
         />
       )}
+
+      {/* Activity stream */}
       <ActivityStream entries={store.state.activityLog} />
+
+      {/* Files info */}
+      <FilesInfo modified={gitModified} untracked={gitUntracked} />
+
+      {/* Quick actions */}
+      <QuickActions />
+
+      {/* Command dock */}
+      <Box marginTop={0}>
+        <Text dimColor>────────────────────────────────────────────────────────────</Text>
+      </Box>
       <CommandDock
         history={store.state.commandHistory}
         onSubmit={submit}
         onNavigateHistory={store.actions.navigateHistory}
         disabled={disabled}
       />
+
+      {/* Status bar */}
       <StatusBar
         connected={store.state.connected}
         localRuntime={store.state.localRuntime}

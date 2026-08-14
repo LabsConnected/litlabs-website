@@ -1,12 +1,8 @@
 /**
- * ActivityStream — consumes canonical runtime events only.
+ * ActivityStream — live event stream with icons, timestamps.
  *
- * Renders the activity log with timestamps, runId, toolCallId,
- * stdout/stderr streaming, approval events, and credential state.
- *
- * This component NEVER invents events. Every entry comes from
- * the CockpitStore's activityLog, which is populated by the
- * event bridge from RuntimeClient lifecycle events.
+ * Consumes canonical runtime events only. Every entry comes from
+ * the CockpitStore's activityLog, populated by the event bridge.
  */
 
 import React from "react";
@@ -14,7 +10,11 @@ import { Box, Text } from "ink";
 import type { ActivityEntry } from "./cockpit-store.js";
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString();
+  const d = new Date(ts);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${s}`;
 }
 
 function shortId(id?: string): string {
@@ -31,6 +31,8 @@ function entryColor(entry: ActivityEntry): string {
     case "tool.failed": return "red";
     case "tool.cancelled": return "yellow";
     case "tool.timeout": return "yellow";
+    case "tool.stdout": return "gray";
+    case "tool.stderr": return "red";
     case "run.completed": return "green";
     case "run.failed": return "red";
     case "approval.required": return "yellow";
@@ -40,6 +42,13 @@ function entryColor(entry: ActivityEntry): string {
     case "credential.ready": return "green";
     case "credential.denied": return "red";
     case "agent.thinking": return "cyan";
+    case "agent.request": return "magenta";
+    case "agent.delta": return "white";
+    case "agent.complete": return "green";
+    case "agent.stopped": return "yellow";
+    case "model.changed": return "magenta";
+    case "error": return "red";
+    case "info": return "cyan";
     default: return "gray";
   }
 }
@@ -52,6 +61,8 @@ function entryIcon(entry: ActivityEntry): string {
     case "tool.failed": return "✗";
     case "tool.cancelled": return "⊘";
     case "tool.timeout": return "⏱";
+    case "tool.stdout": return "│";
+    case "tool.stderr": return "│";
     case "run.completed": return "■";
     case "run.failed": return "■";
     case "approval.required": return "⚠";
@@ -61,35 +72,38 @@ function entryIcon(entry: ActivityEntry): string {
     case "credential.ready": return "✓";
     case "credential.denied": return "✗";
     case "agent.thinking": return "◈";
+    case "agent.request": return "❯";
+    case "agent.delta": return " ";
+    case "agent.complete": return "■";
+    case "agent.stopped": return "■";
+    case "model.changed": return "◆";
+    case "error": return "✗";
+    case "info": return "·";
     default: return "·";
   }
 }
 
 export function ActivityStream({ entries }: { entries: ActivityEntry[] }): React.ReactElement {
-  const visible = entries.slice(-15);
+  const visible = entries.slice(-12);
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      <Text bold color="gray">Activity</Text>
+      <Text bold color="gray">ACTIVITY</Text>
       {visible.length === 0 ? (
-        <Text dimColor> No activity yet</Text>
+        <Text dimColor> No activity yet — type a command or ask LiTT something.</Text>
       ) : (
         visible.map((entry) => {
           const color = entryColor(entry);
           const icon = entryIcon(entry);
           const time = formatTime(entry.ts);
           const run = shortId(entry.runId);
-          const tool = shortId(entry.toolCallId);
-          const tags = run ? `[${run}]` : "";
-          const toolTag = tool ? `[${tool}]` : "";
 
           return (
             <Box key={entry.id}>
+              <Text dimColor>{time}  </Text>
               <Text color={color}>{icon} </Text>
-              <Text dimColor>{time} </Text>
-              {tags && <Text dimColor>{tags} </Text>}
-              {toolTag && <Text dimColor>{toolTag} </Text>}
-              <Text color={color}>{entry.text}</Text>
+              {run && <Text dimColor>[{run}] </Text>}
+              <Text color={color} dimColor={entry.type === "tool.stdout" || entry.type === "agent.delta"}>{entry.text}</Text>
             </Box>
           );
         })

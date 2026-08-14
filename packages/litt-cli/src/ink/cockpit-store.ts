@@ -73,6 +73,7 @@ export function useCockpitStore() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>("none");
+  const [mission, setMission] = useState<string | null>(null);
 
   const addActivity = useCallback((entry: ActivityEntry) => {
     setActivityLog((prev) => [...prev.slice(-200), entry]);
@@ -126,6 +127,7 @@ export function useCockpitStore() {
       currentRunId,
       selectedModel,
       overlay,
+      mission,
     },
     actions: {
       setSelectedPanel,
@@ -141,6 +143,7 @@ export function useCockpitStore() {
       setCurrentRunId,
       setSelectedModel,
       setOverlay,
+      setMission,
     },
   };
 }

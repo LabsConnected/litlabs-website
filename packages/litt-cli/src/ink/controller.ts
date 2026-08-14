@@ -254,6 +254,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
     // No /ask required — the cockpit IS LiTT.
     if (hasOpenRouterKey()) {
       store.actions.setHoloState("THINKING");
+      store.actions.setMission(input);
       store.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),
@@ -350,7 +351,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         });
 
         store.actions.setHoloState(result.termination === "complete" ? "SUCCESS" : "IDLE");
-        setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+        setTimeout(() => {
+          store.actions.setHoloState("IDLE");
+          store.actions.setMission(null);
+        }, 1500);
       } catch (err) {
         store.actions.addActivity({
           id: `act_${Date.now()}`,

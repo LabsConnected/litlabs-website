@@ -115,6 +115,11 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     return result.result.success ? 0 : 1;
   }
 
+  // Parse git status for file counts
+  const gitStatus = project.gitStatus ?? "";
+  const gitModified = (gitStatus.match(/^.M/gm) ?? []).length;
+  const gitUntracked = (gitStatus.match(/^\?\?/gm) ?? []).length;
+
   // Launch the Ink cockpit
   const { waitUntilExit } = render(
     React.createElement(CockpitApp, {
@@ -126,6 +131,9 @@ export async function cockpitCommand(args: string[]): Promise<number> {
       branch: project.gitBranch ?? "unknown",
       model,
       cwd: projectRoot,
+      mode: session.getMode(),
+      gitModified,
+      gitUntracked,
     }),
   );
 
