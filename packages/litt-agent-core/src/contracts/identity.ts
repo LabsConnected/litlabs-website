@@ -107,6 +107,108 @@ export type ExecutionMode = "plan" | "act" | "auto";
  */
 export type InteractionMode = "interactive" | "headless";
 
+// ─── Authentication strength ──────────────────────────────────────
+
+/**
+ * How strongly a principal was authenticated.
+ *
+ * This is a SEPARATE dimension from ActorKind and CapabilityGrant.
+ * A service principal may have `standard` strength (mTLS), while a
+ * user principal may have `mfa` strength (password + TOTP).
+ *
+ * Privileged operations may require a minimum authentication strength.
+ * The credential broker and policy engine consult this before
+ * granting access.
+ *
+ *   none:     unauthenticated (anonymous / pre-auth)
+ *   weak:     single-factor, short-lived (e.g. magic link without verification)
+ *   standard: single-factor authenticated (password, service token, API key)
+ *   strong:   multi-factor or hardware-backed (passkey, WebAuthn, mTLS + token)
+ *   mfa:      explicit multi-factor authentication completed
+ */
+export type AuthenticationStrength =
+  | "none"
+  | "weak"
+  | "standard"
+  | "strong"
+  | "mfa";
+
+// ─── Principal ─────────────────────────────────────────────────────
+
+/**
+ * The type of principal making a request.
+ *
+ * This mirrors ActorKind but is named for the principal-concept used
+ * in identity contexts and credential broker requests. A Principal is
+ * a verified or unverified identity; trust is determined by
+ * AuthenticationStrength + CapabilityGrant verification, not by the
+ * principal type alone.
+ */
+export type PrincipalType = ActorKind;
+
+// ─── Identity context ──────────────────────────────────────────────
+
+/**
+ * The full identity context for a request.
+ *
+ * This is what the credential broker and policy engine evaluate before
+ * granting access. It binds:
+ *   - WHO is making the request (principalId + principalType)
+ *   - WHAT session they are in (sessionId)
+ *   - WHICH tenant/workspace they belong to
+ *   - HOW strongly they were authenticated
+ *
+ * IdentityContext alone is NOT authorization. It must be combined with
+ * a verified CapabilityGrant and a PolicyDecision before credentials
+ * are resolved.
+ *
+ * Callers CANNOT self-assign authentication strength. The strength is
+ * set by the authentication boundary (Clerk, service mesh, etc.) and
+ * verified by the identity resolver before it enters this context.
+ */
+export interface IdentityContext {
+  /** Unique principal ID (e.g. Clerk userId, service ID, agent ID) */
+  principalId: string;
+  /** What kind of principal: user | agent | service | system */
+  principalType: PrincipalType;
+  /** Session ID this identity belongs to (may be null for one-shot calls) */
+  sessionId: string | null;
+  /** Tenant / organization ID */
+  tenantId: string;
+  /** Workspace ID if scoped to a workspace */
+  workspaceId: string | null;
+  /** Project ID if scoped to a project */
+  projectId: string | null;
+  /** How strongly this principal was authenticated */
+  authenticationStrength: AuthenticationStrength;
+  /** ISO timestamp when the identity context was established */
+  establishedAt: string;
+}
+
+// ─── Runtime identity ──────────────────────────────────────────────
+
+/**
+ * The complete identity for a single runtime execution.
+ *
+ * Combines:
+ *   - RunIdentity (the execution context: runId, mode, project, etc.)
+ *   - IdentityContext (the verified principal context)
+ *
+ * This is what flows through the credential broker, policy engine,
+ * and execution capsule. It is the canonical "who is running this"
+ * object.
+ *
+ * RuntimeIdentity is constructed by the identity resolver, NOT by
+ * callers. Callers provide claims; the resolver verifies them and
+ * produces a RuntimeIdentity. This prevents self-escalation.
+ */
+export interface RuntimeIdentity {
+  /** The run context */
+  run: RunIdentity;
+  /** The verified principal context */
+  identity: IdentityContext;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────
 
 /**
@@ -151,4 +253,96 @@ export function systemActor(
     agentId: null,
     label: label ?? systemId,
   };
+}
+
+// ─── Identity context helpers ─────────────────────────────────────
+
+/**
+ * Build an IdentityContext from an ActorIdentity.
+ *
+ * The caller MUST supply the authentication strength — it is NOT
+ * derived from the actor. This prevents a caller from constructing
+ * a high-trust identity context without going through the auth boundary.
+ *
+ * The authentication boundary (Clerk, service mesh, etc.) sets the
+ * strength. This helper just packages it.
+ */
+export function buildIdentityContext(
+  actor: ActorIdentity,
+  authenticationStrength: AuthenticationStrength,
+  options?: {
+    sessionId?: string | null;
+    workspaceId?: string | null;
+    projectId?: string | null;
+  },
+): IdentityContext {
+  return {
+    principalId: actor.actorId,
+    principalType: actor.kind,
+    sessionId: options?.sessionId ?? null,
+    tenantId: actor.tenantId,
+    workspaceId: options?.workspaceId ?? null,
+    projectId: options?.projectId ?? null,
+    authenticationStrength,
+    establishedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Build a RuntimeIdentity from a RunIdentity and IdentityContext.
+ *
+ * This is the canonical "who is running this" object. It should be
+ * constructed by the identity resolver after verification, not by
+ * untrusted callers.
+ */
+export function buildRuntimeIdentity(
+  run: RunIdentity,
+  identity: IdentityContext,
+): RuntimeIdentity {
+  return { run, identity };
+}
+
+/**
+ * Minimum authentication strength required for a given risk tier.
+ *
+ * This is a DEFAULT policy, not the final word. The policy engine
+ * may impose stricter requirements.
+ *
+ *   low:      standard (any authenticated principal)
+ *   medium:   standard
+ *   high:     strong (MFA or hardware-backed)
+ *   critical: mfa (explicit multi-factor)
+ */
+export function minAuthStrengthForRisk(
+  risk: "low" | "medium" | "high" | "critical",
+): AuthenticationStrength {
+  switch (risk) {
+    case "low":
+      return "standard";
+    case "medium":
+      return "standard";
+    case "high":
+      return "strong";
+    case "critical":
+      return "mfa";
+  }
+}
+
+/**
+ * Check whether an authentication strength meets or exceeds a minimum.
+ *
+ * Strength ordering: none < weak < standard < strong < mfa
+ */
+export function meetsAuthStrength(
+  actual: AuthenticationStrength,
+  required: AuthenticationStrength,
+): boolean {
+  const order: AuthenticationStrength[] = [
+    "none",
+    "weak",
+    "standard",
+    "strong",
+    "mfa",
+  ];
+  return order.indexOf(actual) >= order.indexOf(required);
 }

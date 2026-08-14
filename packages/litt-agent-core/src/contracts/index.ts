@@ -32,11 +32,19 @@ export type {
   RunIdentity,
   ExecutionMode,
   InteractionMode,
+  AuthenticationStrength,
+  PrincipalType,
+  IdentityContext,
+  RuntimeIdentity,
 } from "./identity.js";
 export {
   generateRunId,
   serviceActor,
   systemActor,
+  buildIdentityContext,
+  buildRuntimeIdentity,
+  minAuthStrengthForRisk,
+  meetsAuthStrength,
 } from "./identity.js";
 
 // Policy
