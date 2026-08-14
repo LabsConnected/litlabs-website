@@ -79,6 +79,16 @@ export { RuntimeStore, createInitialState } from "./state.js";
 export { CommandExecutor, createCommandExecutor } from "./command-executor.js";
 export type { CommandExecutorOptions, CommandExecutorResult } from "./command-executor.js";
 
+// ExecutionGateway — the ONE canonical execution authority (P0 fix)
+export { ExecutionGateway, createExecutionGateway } from "./execution-gateway.js";
+export type {
+  ExecutionGatewayOptions,
+  ExecutionRequest,
+  ExecutionIdentity,
+  GatewayResult,
+  GatewayExecutionCapsule,
+} from "./execution-gateway.js";
+
 // Structured execution boundary
 export {
   runCommand as runCommandSecure,

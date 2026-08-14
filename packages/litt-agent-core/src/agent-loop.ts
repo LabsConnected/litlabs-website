@@ -44,6 +44,8 @@ import type {
 } from "./types.js";
 import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
+import type { CommandExecutor } from "./command-executor.js";
+import type { ExecutionGateway } from "./execution-gateway.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -56,6 +58,26 @@ export interface AgentLoopOptions {
   shell: ShellExecutor;
   /** The shared RuntimeStore — same instance as CommandExecutor */
   store?: RuntimeStore | null;
+  /**
+   * The ExecutionGateway — the ONE canonical execution authority.
+   * If provided, ALL tool calls route through the gateway, which enforces:
+   *   - Identity verification
+   *   - Grant verification
+   *   - Policy decision (PLAN/ACT/AUTO mode + capability classification)
+   *   - Approval enforcement
+   *   - Credential lease
+   *
+   * Architecture when provided (CANONICAL):
+   *   runAgentLoop → ExecutionGateway → CommandExecutor → runCommand() → ShellExecutor
+   *   runAgentLoop → ExecutionGateway → ToolRegistry → ToolHandler → ShellExecutor
+   *
+   * Architecture when NOT provided (TEST ONLY — never production):
+   *   runAgentLoop → ToolRegistry.execute() → ToolHandler → ShellExecutor
+   *   (bypasses ALL security — only for unit tests with mock tools)
+   */
+  gateway?: ExecutionGateway | null;
+  /** @deprecated Use gateway instead. Kept for backward compatibility. */
+  executor?: CommandExecutor | null;
   /** System prompt (prepended to the conversation) */
   systemPrompt?: string;
   /** Working directory for tool execution */
@@ -68,6 +90,8 @@ export interface AgentLoopOptions {
   emitter?: RuntimeEventEmitter;
   /** Optional stream callback for live model output */
   onModelStream?: (event: ModelStreamEvent) => void;
+  /** Optional stream callback for live tool output (when using CommandExecutor) */
+  onToolStream?: (chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void;
   /** Permission mode */
   mode?: "plan" | "act" | "auto";
 }
@@ -263,17 +287,68 @@ export async function runAgentLoop(
       );
     }
 
-    // Dispatch through the shared ToolRegistry
-    // The ToolRegistry uses the same ShellExecutor as the CommandExecutor
+    // Dispatch the tool call through the ExecutionGateway.
+    //
+    // The gateway is the ONE canonical execution authority. It enforces:
+    //   - Identity verification
+    //   - Grant verification
+    //   - Policy decision (PLAN/ACT/AUTO + capability classification)
+    //   - Approval enforcement
+    //   - Credential lease
+    //
+    // For project.run: gateway → CommandExecutor → runCommand() (hardened)
+    // For other tools: gateway → ToolRegistry → handler (after policy check)
+    //
+    // The legacy ToolRegistry.execute() bypass is ONLY available when no
+    // gateway is provided — this is for unit tests with mock tools only.
+    // In production, the gateway MUST be provided.
     const toolStartTime = Date.now();
     let result: ToolResult;
     try {
-      result = await options.tools.execute(toolCall.toolId, {
-        cwd: options.cwd,
-        projectId: null,
-        userId: options.userId ?? null,
-        shell: options.shell,
-      }, toolCall.inputs);
+      if (options.gateway) {
+        // ─── CANONICAL path: ExecutionGateway ───
+        const gwResult = await options.gateway.execute({
+          toolId: toolCall.toolId,
+          inputs: toolCall.inputs,
+          cwd: options.cwd,
+          mode: options.mode ?? "act",
+          identity: {
+            tenantId: "agent-tenant",
+            userId: options.userId ?? "agent-user",
+            actorId: options.userId ?? "agent-user",
+            trusted: false, // model-originated execution is untrusted
+            interaction: "interactive",
+          },
+          runId: `agent_${toolCallId}`,
+          toolCallId,
+          onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
+        });
+        result = gwResult.result;
+      } else if (options.executor) {
+        // ─── Deprecated: direct CommandExecutor (for backward compat) ───
+        const cmdResult = await options.executor.execute(
+          toolEntry.definition.name,
+          extractArgsFromToolCall(toolEntry.definition.name, toolCall.inputs),
+          {
+            cwd: options.cwd,
+            mode: options.mode,
+            runId: `agent_${toolCallId}`,
+            toolCallId,
+            commandLabel: toolEntry.definition.name,
+            onStream: options.onToolStream,
+          },
+        );
+        result = cmdResult.result;
+      } else {
+        // ─── TEST ONLY: direct ToolRegistry.execute() (no security) ───
+        // This bypasses ALL security boundaries. Only for unit tests.
+        result = await options.tools.execute(toolCall.toolId, {
+          cwd: options.cwd,
+          projectId: null,
+          userId: options.userId ?? null,
+          shell: options.shell,
+        }, toolCall.inputs);
+      }
     } catch (err) {
       result = {
         status: "failed",
@@ -381,4 +456,45 @@ To call a tool, output a tool call block in this exact format:
 After receiving the tool result, you can either call another tool or
 provide a final text answer. Be concise and actionable. If a tool fails,
 explain what went wrong and suggest next steps.`;
+}
+
+// ─── Helper: extract args from tool call for CommandExecutor ───────
+
+/**
+ * Map a tool call's inputs to the args array expected by CommandExecutor.
+ *
+ * The CommandExecutor takes (command, args[]) where command is the
+ * executable name and args are the structured arguments. For project
+ * tools, the tool name IS the command (e.g. "status" → "git status").
+ *
+ * For the "run" tool, the inputs contain { command, args } which map
+ * directly to the CommandExecutor's parameters.
+ */
+function extractArgsFromToolCall(toolName: string, inputs: Record<string, unknown>): string[] {
+  // For project.run, the inputs contain the actual command and args
+  if (toolName === "run") {
+    const cmd = typeof inputs.command === "string" ? inputs.command : "";
+    const cmdArgs = Array.isArray(inputs.args)
+      ? inputs.args.filter((a): a is string => typeof a === "string")
+      : [];
+    // CommandExecutor.execute() takes (command, args) separately,
+    // but we're passing the tool name as the command and the actual
+    // command+args as the args array. The runCommand() boundary will
+    // interpret this correctly.
+    return [cmd, ...cmdArgs];
+  }
+
+  // For other tools, pass the inputs as key=value pairs
+  // The tool handlers will interpret these
+  const result: string[] = [];
+  for (const [key, value] of Object.entries(inputs)) {
+    if (typeof value === "string") {
+      result.push(`--${key}`, value);
+    } else if (typeof value === "boolean" && value) {
+      result.push(`--${key}`);
+    } else if (typeof value === "number") {
+      result.push(`--${key}`, String(value));
+    }
+  }
+  return result;
 }

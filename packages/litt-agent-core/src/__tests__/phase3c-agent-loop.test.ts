@@ -327,4 +327,56 @@ describe("Agent Loop", () => {
     assert.equal(result.toolCalls[1].toolId, "project.branch");
     assert.equal(result.rounds, 3);
   });
+
+  // ─── CommandExecutor routing ─────────────────────────────────────
+
+  it("routes through CommandExecutor when provided (hardened path)", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+    const { CommandExecutor } = await import("../command-executor.js");
+    const executor = new CommandExecutor(shell, store, () => {});
+
+    // Track that CommandExecutor.execute() was called
+    let executorCalled = false;
+    const originalExecute = executor.execute.bind(executor);
+    executor.execute = async (...args: Parameters<typeof originalExecute>) => {
+      executorCalled = true;
+      return originalExecute(...args);
+    };
+
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.run", "inputs": { "command": "git", "args": ["log", "--oneline", "-1"] } }\n```',
+      "The command ran successfully through the hardened boundary.",
+    ]);
+
+    const result = await runAgentLoop("Run git log", {
+      model, tools, shell, store, executor, cwd: process.cwd(),
+    });
+
+    assert.equal(result.termination, "complete");
+    assert.ok(executorCalled, "CommandExecutor.execute() must be called when executor is provided");
+    assert.equal(result.toolCalls.length, 1);
+  });
+
+  it("bypasses CommandExecutor when not provided (legacy path)", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = createDefaultRegistry();
+
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      "Done.",
+    ]);
+
+    // No executor provided — should use ToolRegistry.execute() directly
+    const result = await runAgentLoop("Check status", {
+      model, tools, shell, store, cwd: process.cwd(),
+      // executor: undefined — legacy path
+    });
+
+    assert.equal(result.termination, "complete");
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].toolId, "project.status");
+  });
 });
