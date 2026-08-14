@@ -116,8 +116,8 @@ function getOpenRouterKey(): string {
  */
 const TOOL_CALLING_FALLBACK_MODELS = [
   "google/gemini-2.5-flash",
-  "anthropic/claude-3.5-sonnet",
-  "openai/gpt-4o-mini",
+  "openai/gpt-5.6-luna",
+  "anthropic/claude-sonnet-4.6",
   "meta-llama/llama-3.3-70b-instruct",
 ];
 
