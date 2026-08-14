@@ -19,6 +19,7 @@ import { render } from "ink";
 import React from "react";
 import { CockpitApp } from "../ink/app.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
+import { SessionEventBridge } from "../ink/session-event-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
 import { detectProject, fail, header, c } from "../lib/utils.js";
@@ -49,16 +50,22 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   const projectRoot = project.rootDir;
 
   // Create the ApprovalBridge — connects gateway approval callbacks to the UI.
-  // The bridge only carries the human's boolean decision.
-  // The gateway remains sole authority for VerifiedApproval creation.
   const approvalBridge = new ApprovalBridge();
 
+  // Create the SessionEventBridge — connects local RuntimeSession events
+  // to the cockpit UI. When terminal-server is unavailable, the local
+  // session IS the runtime, and its events flow through this bridge.
+  const sessionBridge = new SessionEventBridge();
+
   // Create the RuntimeSession — owns the gateway, executor, store.
-  // The approval bridge is wired into the gateway via onApprovalRequired.
+  // Wire both bridges: approval callbacks → ApprovalBridge,
+  // runtime events → SessionEventBridge (for local event flow).
   const session = createRuntimeSession({
     cwd: projectRoot,
     mode: "act",
     onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
+    onEvent: (event) => sessionBridge.onEvent(event),
+    onStream: (chunk) => sessionBridge.onStream(chunk),
   });
   session.installSigintHandler();
 
@@ -102,6 +109,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
       session,
       client,
       approvalBridge,
+      sessionBridge,
       project: String(project.packageJson?.name ?? "unnamed"),
       branch: project.gitBranch ?? "unknown",
       model,

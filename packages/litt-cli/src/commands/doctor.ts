@@ -149,7 +149,21 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   // Summary
   header("Summary");
   console.log(`${label("Platform:")} ${value(process.platform)} ${value(process.arch, c.dim)}`);
-  console.log(`${label("Shell:")} ${value(process.env.SHELL ?? process.env.ComSpec ?? "unknown")}`);
+
+  // Detect host shell (not just ComSpec which is always cmd.exe on Windows)
+  let hostShell = "unknown";
+  if (process.env.SHELL) {
+    hostShell = process.env.SHELL;
+  } else if (process.env.PSModulePath) {
+    hostShell = "powershell";
+  } else if (process.env.ComSpec) {
+    hostShell = process.env.ComSpec;
+  }
+  // Execution shell (what ShellExecutor uses for child processes)
+  const execShell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL ?? "sh";
+  const shellNote = hostShell !== execShell ? ` (exec: ${execShell})` : "";
+  console.log(`${label("Shell:")} ${value(hostShell)}${c.dim}${shellNote}${c.reset}`);
+
   console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
   console.log(`${label("Package:")} ${value(CLI_PACKAGE_NAME, c.dim)}`);
   console.log(`${c.dim}Upgrade: npm install -g ${CLI_PACKAGE_NAME}@latest${c.reset}`);

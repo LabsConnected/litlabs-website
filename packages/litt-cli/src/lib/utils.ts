@@ -4,7 +4,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -80,10 +80,12 @@ export interface ProjectInfo {
   hasGit: boolean;
   gitBranch: string | null;
   gitStatus: string | null;
+  gitRemote: string | null;
   hasTsConfig: boolean;
   framework: string | null;
   packageManager: string | null;
   rootDir: string;
+  dirName: string;
 }
 
 export function detectProject(dir = process.cwd()): ProjectInfo {
@@ -135,6 +137,7 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
        null)
     : null;
   const gitStatus = hasGit ? exec("git status --short", { cwd: rootDir }).stdout || null : null;
+  const gitRemote = hasGit ? exec("git remote get-url origin", { cwd: rootDir }).stdout || null : null;
 
   const hasTsConfig = existsSync(join(rootDir, "tsconfig.json"));
 
@@ -167,10 +170,12 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     hasGit,
     gitBranch,
     gitStatus,
+    gitRemote,
     hasTsConfig,
     framework,
     packageManager,
     rootDir,
+    dirName: basename(rootDir),
   };
 }
 

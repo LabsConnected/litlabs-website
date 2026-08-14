@@ -21,6 +21,7 @@ import { useCallback, useEffect } from "react";
 import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
+import type { SessionEventBridge } from "./session-event-bridge.js";
 
 let entryCounter = 0;
 
@@ -70,6 +71,7 @@ function isHeartbeatFresh(state: RuntimeState | null): boolean {
 export function useEventBridge(
   client: RuntimeClient | null,
   store: CockpitStore,
+  sessionBridge: SessionEventBridge | null,
 ): void {
   const onLifecycle = useCallback((event: LifecycleEvent) => {
     // Map event to activity entry
@@ -155,17 +157,27 @@ export function useEventBridge(
   }, [store, client]);
 
   useEffect(() => {
-    if (!client) return;
     const cleanups: Array<() => void> = [];
 
-    cleanups.push(client.onLifecycle(onLifecycle));
-    cleanups.push(client.onConnectionChange(onConnection as (conn: import("../lib/runtime-client.js").ConnectionState) => void));
-    cleanups.push(client.onState(onState));
+    // Subscribe to local session events (always available — the local
+    // RuntimeSession IS the runtime when terminal-server is down)
+    if (sessionBridge) {
+      cleanups.push(sessionBridge.subscribe(onLifecycle));
+      // Local mode: the session is always "connected" to itself
+      store.actions.setConnected(true);
+    }
+
+    // Subscribe to remote client events (terminal-server, if available)
+    if (client) {
+      cleanups.push(client.onLifecycle(onLifecycle));
+      cleanups.push(client.onConnectionChange(onConnection as (conn: import("../lib/runtime-client.js").ConnectionState) => void));
+      cleanups.push(client.onState(onState));
+    }
 
     return () => {
       for (const cleanup of cleanups) {
         try { cleanup(); } catch { /* ignore */ }
       }
     };
-  }, [client, onLifecycle, onConnection, onState]);
+  }, [client, sessionBridge, onLifecycle, onConnection, onState, store]);
 }

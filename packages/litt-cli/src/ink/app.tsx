@@ -21,6 +21,7 @@ import { CommandDock } from "./command-dock.js";
 import { ApprovalUX } from "./approval-ux.js";
 import { StatusBar } from "./status-bar.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
+import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
 
@@ -28,16 +29,17 @@ export interface CockpitAppProps {
   session: RuntimeSession;
   client: RuntimeClient | null;
   approvalBridge: ApprovalBridge;
+  sessionBridge: SessionEventBridge;
   project: string;
   branch: string;
   model: string;
   cwd: string;
 }
 
-export function CockpitApp({ session, client, approvalBridge, project, branch, model, cwd }: CockpitAppProps): React.ReactElement {
+export function CockpitApp({ session, client, approvalBridge, sessionBridge, project, branch, model, cwd }: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
-  useEventBridge(client, store);
+  useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit() });
 
   // Ctrl+C cancels active run or pending approval (first press), exits (second press when idle)
