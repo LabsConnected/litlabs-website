@@ -32,11 +32,17 @@ import { runCommand } from "./commands/run.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
-import { cockpitCommand } from "./commands/cockpit.js";
 import { dispatchRemote } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { ok, fail, header, c } from "./lib/utils.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
+
+// Lazy-loaded commands that pull in heavy dependencies (Ink/React).
+// These are only imported when the user actually runs them, so
+// `litt doctor` / `litt run` / etc. don't need Ink installed.
+type CommandHandler = (args: string[], session?: RuntimeSession) => Promise<number>;
+const lazyCockpit = async (): Promise<CommandHandler> =>
+  (await import("./commands/cockpit.js")).cockpitCommand;
 
 const VERSION = "0.1.0";
 
@@ -46,7 +52,7 @@ const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build"]
 /** Commands that use the RuntimeSession (shared runtime truth). */
 const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
 
-const COMMANDS: Record<string, (args: string[], session?: RuntimeSession) => Promise<number>> = {
+const COMMANDS: Record<string, CommandHandler> = {
   doctor: doctorCommand,
   version: versionCommand,
   status: statusCommand,
@@ -58,8 +64,11 @@ const COMMANDS: Record<string, (args: string[], session?: RuntimeSession) => Pro
   inspect: inspectCommand,
   ask: askCommand,
   explain: explainCommand,
-  cockpit: cockpitCommand,
+  // cockpit is lazy-loaded below (heavy Ink/React dependency)
 };
+
+/** Commands that require lazy loading (heavy deps like Ink/React) */
+const LAZY_COMMANDS = new Set(["cockpit"]);
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
@@ -105,7 +114,13 @@ async function main(): Promise<number> {
     return await runRemote(command, rest);
   }
 
-  const handler = COMMANDS[command];
+  // Resolve handler — lazy-load heavy commands (Ink/React) on demand
+  let handler: CommandHandler | undefined;
+  if (LAZY_COMMANDS.has(command)) {
+    handler = await lazyCockpit();
+  } else {
+    handler = COMMANDS[command];
+  }
   if (!handler) {
     console.error(`Unknown command: ${command}`);
     console.error("Run 'litt --help' for available commands.");

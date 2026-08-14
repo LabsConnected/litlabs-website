@@ -12,6 +12,9 @@
 
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const CLI_VERSION = "0.1.0";
 
@@ -84,17 +87,42 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     warn("Not a git repository");
   }
 
-  // Environment
+  // Environment — CLI-relevant only (not web-app env vars)
   header("Environment");
   const envVars = [
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-    "NEXT_PUBLIC_SUPABASE_URL",
     "OPENROUTER_API_KEY",
-    "GEMINI_API_KEY",
+    "LITT_TERMINAL_URL",
+    "LITT_MODE",
   ];
   for (const envVar of envVars) {
     if (process.env[envVar]) ok(`${envVar}: set`);
     else warn(`${envVar}: not set`);
+  }
+
+  // First-run config detection
+  header("First-Run Config");
+  const littHome = process.env.LITT_HOME ?? path.join(os.homedir(), ".litt");
+  const configExists = fs.existsSync(path.join(littHome, "config.json"));
+  if (configExists) {
+    ok(`Config: ${path.join(littHome, "config.json")}`);
+  } else {
+    warn(`No config found at ${littHome}`);
+    console.log(`${c.dim}  Run 'litt' to start first-run setup.${c.reset}`);
+  }
+
+  // Terminal-server connectivity (optional)
+  header("Terminal Server");
+  const terminalUrl = process.env.LITT_TERMINAL_URL ?? "http://127.0.0.1:4001";
+  try {
+    const response = await fetch(`${terminalUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    if (response.ok) {
+      ok(`Terminal server: reachable at ${terminalUrl}`);
+    } else {
+      warn(`Terminal server: responded ${response.status} at ${terminalUrl}`);
+    }
+  } catch {
+    warn(`Terminal server: not reachable at ${terminalUrl}`);
+    console.log(`${c.dim}  (Optional — only needed for --remote and cockpit)${c.reset}`);
   }
 
   // Runtime identity — proves which executable/build/runtime the user is running
