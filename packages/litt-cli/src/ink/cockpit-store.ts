@@ -57,6 +57,9 @@ export interface CockpitUIState {
   currentRunId: string | null;
 }
 
+/** Overlay type — which modal/picker is open */
+export type Overlay = "none" | "model-picker" | "command-palette";
+
 export function useCockpitStore() {
   const [selectedPanel, setSelectedPanel] = useState<CockpitPanel>("runtime");
   const [holoState, setHoloState] = useState<HoloState>("IDLE");
@@ -68,6 +71,8 @@ export function useCockpitStore() {
   const [localRuntime, setLocalRuntime] = useState<LocalRuntimeState>("starting");
   const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntimeState>("offline");
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<Overlay>("none");
 
   const addActivity = useCallback((entry: ActivityEntry) => {
     setActivityLog((prev) => [...prev.slice(-200), entry]);
@@ -119,6 +124,8 @@ export function useCockpitStore() {
       localRuntime,
       remoteRuntime,
       currentRunId,
+      selectedModel,
+      overlay,
     },
     actions: {
       setSelectedPanel,
@@ -132,6 +139,8 @@ export function useCockpitStore() {
       setLocalRuntime,
       setRemoteRuntime,
       setCurrentRunId,
+      setSelectedModel,
+      setOverlay,
     },
   };
 }

@@ -21,10 +21,21 @@
  */
 
 import { useCallback, useEffect } from "react";
+import {
+  runAgentLoop,
+  ToolRegistry,
+  createShellExecutor,
+  CommandExecutor,
+  RuntimeStore,
+  ExecutionGateway,
+  type RuntimeEvent,
+  type StreamChunk,
+} from "@litt/agent-core";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
-import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
+import { detectProject } from "../lib/utils.js";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
   "/build": { toolId: "project.build", args: () => ({ command: "pnpm", args: ["build"] }) },
@@ -151,6 +162,25 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
       await runVerify(session, store);
       return;
     }
+    if (input === "/model") {
+      store.actions.setOverlay("model-picker");
+      return;
+    }
+    if (input === "/litt") {
+      // Return to main LiTT conversation mode — just clear state
+      store.actions.setHoloState("IDLE");
+      store.actions.addActivity({
+        id: `act_${Date.now()}`,
+        ts: Date.now(),
+        type: "info",
+        text: "LiTT conversation mode — type anything to talk to LiTT.",
+      });
+      return;
+    }
+    if (input === "/palette") {
+      store.actions.setOverlay("command-palette");
+      return;
+    }
 
     // Slash command → gateway
     if (input.startsWith("/")) {
@@ -219,11 +249,118 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
       return;
     }
 
-    // Natural language → agent loop (if API key available)
+    // Natural language → LiTT agent loop
+    // Bare text (non-slash) goes directly to the agent runtime.
+    // No /ask required — the cockpit IS LiTT.
     if (hasOpenRouterKey()) {
       store.actions.setHoloState("THINKING");
-      // The agent loop is invoked by the caller — we just set state
-      // The actual agent invocation happens in app.tsx via onAgentRequest
+      store.actions.addActivity({
+        id: `act_${Date.now()}`,
+        ts: Date.now(),
+        type: "agent.request",
+        text: `LiTT ❯ ${input}`,
+      });
+
+      try {
+        // Build the agent loop with the session's gateway and tools
+        const project = detectProject();
+        const projectRoot = session.getCwd();
+        const tools = new ToolRegistry();
+        const shell = createShellExecutor(projectRoot);
+        const agentStore = new RuntimeStore();
+        const executor = new CommandExecutor(shell, agentStore);
+        const gateway = new ExecutionGateway({
+          tools,
+          shell,
+          executor,
+          store: agentStore,
+          projectId: projectRoot,
+          onApprovalRequired: (req, risk) => approvalBridge.request(req, risk),
+        });
+
+        // Use selected model if set, otherwise resolve from config
+        const modelId = store.state.selectedModel ?? undefined;
+        const model = new OpenRouterModelProvider({ model: modelId });
+
+        const result = await runAgentLoop(input, {
+          model,
+          tools,
+          shell,
+          gateway,
+          cwd: projectRoot,
+          userId: "cli-user",
+          mode: session.getMode(),
+          maxRounds: 10,
+          projectContext: {
+            name: String(project.packageJson?.name ?? "unnamed"),
+            root: project.rootDir,
+            branch: project.gitBranch ?? "unknown",
+          },
+          store: agentStore,
+          onModelStream: (event) => {
+            if (event.type === "delta") {
+              store.actions.addActivity({
+                id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                ts: Date.now(),
+                type: "agent.delta",
+                text: event.text,
+              });
+            }
+          },
+          onToolStream: (chunk: StreamChunk) => {
+            store.actions.addActivity({
+              id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              ts: chunk.ts,
+              type: chunk.stream === "stderr" ? "tool.stderr" : "tool.stdout",
+              text: chunk.text,
+              stream: chunk.stream,
+            });
+          },
+          emitter: (event: RuntimeEvent) => {
+            if (event.subtype === "agent_tool_call") {
+              const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+              store.actions.addActivity({
+                id: `act_${Date.now()}`,
+                ts: Date.now(),
+                type: "tool.started",
+                text: `○ Tool call: ${toolId}`,
+              });
+            } else if (event.subtype === "agent_tool_result") {
+              const success = (event.data as { success?: boolean }).success;
+              store.actions.addActivity({
+                id: `act_${Date.now()}`,
+                ts: Date.now(),
+                type: success ? "tool.completed" : "tool.failed",
+                text: success ? "✓ Tool result" : "✗ Tool failed",
+              });
+            }
+          },
+        });
+
+        // Update model state with the actually-used model
+        if (model.activeModel) {
+          store.actions.setSelectedModel(model.activeModel);
+        }
+
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
+          text: `LiTT ■ completed (${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`,
+        });
+
+        store.actions.setHoloState(result.termination === "complete" ? "SUCCESS" : "IDLE");
+        setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+      } catch (err) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "error",
+          text: `Agent error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        store.actions.setHoloState("FAILED");
+        setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+      }
       return;
     }
 
@@ -232,9 +369,9 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "info",
-      text: "Set OPENROUTER_API_KEY for agent mode. Use /commands for direct execution.",
+      text: "Set OPENROUTER_API_KEY to talk to LiTT. Use /commands for direct execution.",
     });
-  }, [session, store, onExit]);
+  }, [session, store, onExit, approvalBridge]);
 
   const handleApproval = useCallback(async (approved: boolean) => {
     const prompt = store.state.approvalPrompt;

@@ -49,6 +49,7 @@ export function Header({ project, projectRoot, branch, model, connected, localRu
       <Box>
         <Text dimColor>Model: </Text>
         <Text color="blue">{model}</Text>
+        <Text dimColor> [Ctrl+M change]</Text>
         <Text dimColor> │ Local: </Text>
         <Text color={localColor}>{localIcon} {localLabel}</Text>
         <Text dimColor> │ Remote: </Text>

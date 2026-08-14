@@ -18,9 +18,11 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 
 const SLASH_COMMANDS = [
-  "/build", "/check", "/test", "/diff", "/status", "/inspect",
+  "/build", "/check", "/test", "/verify", "/diff", "/status", "/inspect",
   "/run", "/ask", "/explain", "/doctor", "/clear", "/help",
+  "/model", "/litt", "/palette",
   "/mode plan", "/mode act", "/mode auto",
+  "/exit", "/quit",
 ];
 
 export interface CommandDockProps {
