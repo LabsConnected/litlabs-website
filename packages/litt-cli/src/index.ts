@@ -35,6 +35,7 @@ import { explainCommand } from "./commands/explain.js";
 import { dispatchRemote } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { ok, fail, header, c } from "./lib/utils.js";
+import { CLI_VERSION } from "./lib/version.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
@@ -44,7 +45,7 @@ type CommandHandler = (args: string[], session?: RuntimeSession) => Promise<numb
 const lazyCockpit = async (): Promise<CommandHandler> =>
   (await import("./commands/cockpit.js")).cockpitCommand;
 
-const VERSION = "0.1.0";
+const VERSION = CLI_VERSION;
 
 /** Commands that can be dispatched remotely through terminal-server */
 const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build"]);
@@ -138,7 +139,24 @@ async function main(): Promise<number> {
   try {
     return await handler(rest, session);
   } catch (error) {
-    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${c.red}Error:${c.reset} ${message}`);
+
+    // Provide helpful hints for common errors
+    if (message.includes("OPENROUTER_API_KEY")) {
+      console.error(`${c.dim}  Get an API key at https://openrouter.ai and set it:${c.reset}`);
+      console.error(`${c.dim}  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
+    } else if (message.includes("TERMINAL_INTERNAL_SERVICE_KEY")) {
+      console.error(`${c.dim}  --remote requires a terminal-server running with TERMINAL_INTERNAL_SERVICE_KEY set.${c.reset}`);
+      console.error(`${c.dim}  Run without --remote for local execution.${c.reset}`);
+    } else if (message.includes("ENOENT") || message.includes("not found")) {
+      console.error(`${c.dim}  The command was not found. Check that it's installed and in your PATH.${c.reset}`);
+    }
+
+    // Show stack trace only with --debug
+    if (process.env.LITT_DEBUG === "1" && error instanceof Error && error.stack) {
+      console.error(`${c.dim}\n${error.stack}${c.reset}`);
+    }
     return 1;
   }
 }

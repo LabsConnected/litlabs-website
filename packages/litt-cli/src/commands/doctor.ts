@@ -12,11 +12,10 @@
 
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-
-const CLI_VERSION = "0.1.0";
 
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
@@ -147,6 +146,8 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   console.log(`${label("Platform:")} ${value(process.platform)} ${value(process.arch, c.dim)}`);
   console.log(`${label("Shell:")} ${value(process.env.SHELL ?? process.env.ComSpec ?? "unknown")}`);
   console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
+  console.log(`${label("Package:")} ${value(CLI_PACKAGE_NAME, c.dim)}`);
+  console.log(`${c.dim}Upgrade: npm install -g ${CLI_PACKAGE_NAME}@latest${c.reset}`);
 
   return 0;
 }
