@@ -199,6 +199,7 @@ describe("Phase 1 — Credential lease safety", () => {
       issuedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       renewable: true,
+      origin: "byok",
       secretRef: "broker://github/abc123/lease-1",
     };
 
@@ -226,6 +227,7 @@ describe("Phase 1 — Credential lease safety", () => {
       issuedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       renewable: false,
+      origin: "platform_owned",
       secretRef: "broker://openrouter/abc123/lease-1",
     };
 
@@ -246,29 +248,34 @@ describe("Phase 1 — Credential lease safety", () => {
       resourceScope: ["project:proj-1"],
       audience: "api.vercel.com",
       durationSeconds: 3600,
+      projectId: "proj-1",
     };
     assert.equal(req.provider, "vercel");
     assert.equal(req.scopes[0], "deploy:preview");
   });
 
-  it("CredentialBroker interface is defined", () => {
+  it("CredentialBroker interface is defined with SEC-2 resolve/lease/revoke/audit", () => {
     // Type-level check: CredentialBroker is a valid interface
     const broker: CredentialBroker = {
-      acquire: async () => ({
-        leaseId: "lease-1",
-        provider: "github",
-        runId: "run-1",
-        actorId: "user:abc",
-        capabilityGrantId: "grant-1",
-        scopes: ["repo:read"],
-        resourceScope: [],
-        audience: "github.com",
-        issuedAt: new Date().toISOString(),
-        expiresAt: new Date().toISOString(),
-        renewable: true,
-        secretRef: "broker://github/abc/lease-1",
+      resolve: async () => ({
+        status: "allowed",
+        lease: {
+          leaseId: "lease-1",
+          provider: "github",
+          runId: "run-1",
+          actorId: "user:abc",
+          capabilityGrantId: "grant-1",
+          scopes: ["repo:read"],
+          resourceScope: [],
+          audience: "github.com",
+          issuedAt: new Date().toISOString(),
+          expiresAt: new Date().toISOString(),
+          renewable: true,
+          origin: "byok",
+          secretRef: "broker://github/abc/lease-1",
+        },
       }),
-      renew: async (leaseId: string) => ({
+      lease: async (leaseId: string) => ({
         leaseId,
         provider: "github",
         runId: "run-1",
@@ -280,15 +287,18 @@ describe("Phase 1 — Credential lease safety", () => {
         issuedAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
         renewable: true,
+        origin: "byok",
         secretRef: "broker://github/abc/lease-1",
       }),
       revoke: async () => {},
       revokeRun: async () => {},
+      audit: async () => [],
     };
-    assert.ok(broker.acquire);
-    assert.ok(broker.renew);
+    assert.ok(broker.resolve);
+    assert.ok(broker.lease);
     assert.ok(broker.revoke);
     assert.ok(broker.revokeRun);
+    assert.ok(broker.audit);
   });
 });
 

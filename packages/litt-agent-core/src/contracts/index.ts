@@ -79,9 +79,16 @@ export {
 
 // Credential
 export type {
+  CredentialRef,
+  CredentialOrigin,
+  CredentialScope,
   CredentialLease,
   CredentialRequest,
   CredentialBroker,
+  CredentialAuditEvent,
+  CredentialMaterializer,
+  MaterializedCredential,
+  BrokerResolution,
   CredentialAuthType,
 } from "./credential.js";
 
