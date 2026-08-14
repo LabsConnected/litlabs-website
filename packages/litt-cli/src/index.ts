@@ -21,7 +21,6 @@
  *   --mode <mode>  Permission mode: plan, act, or auto (default: act)
  */
 
-import { parseArgs } from "node:util";
 import { doctorCommand } from "./commands/doctor.js";
 import { versionCommand } from "./commands/version.js";
 import { statusCommand } from "./commands/status.js";
@@ -187,7 +186,7 @@ async function runRemote(command: string, _args: string[]): Promise<number> {
   header(`${command} (remote)`);
   try {
     const result = await dispatchRemote(command, undefined, {
-      cwd: process.cwd(),
+      cwd: detectProject().rootDir,
     });
 
     if (!result.ok) {
