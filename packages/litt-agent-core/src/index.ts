@@ -91,6 +91,30 @@ export type {
   ApprovalProvider as ExecutionApprovalProvider,
 } from "./execution.js";
 
+// ─── Canonical Contracts ──────────────────────────────────────────
+// The ONE source of truth for LiTT execution/security vocabulary.
+// Other systems (litt-kernel, litt-intelligence, terminal-server) must
+// import from here, not duplicate these types.
+export * from "./contracts/index.js";
+
+// ─── Compatibility adapters ───────────────────────────────────────
+// Map existing types to canonical contracts without breaking callers.
+// These aliases let old code continue compiling while new code uses
+// the canonical types from ./contracts/.
+
+// MissionMode (execution.ts) → canonical ExecutionMode
+export type { ExecutionMode as MissionModeAlias } from "./contracts/identity.js";
+
+// ApprovalLevel (types.ts) → canonical PolicyEffect
+// Old: "allow" | "ask" | "deny"
+// New: "allow" | "deny" | "require_approval"
+// "ask" maps to "require_approval"
+export type { PolicyEffect as ApprovalLevelAlias } from "./contracts/policy.js";
+
+// ActionRisk (litt-kernel) → canonical ActionRisk
+// Already aligned: "low" | "medium" | "high" | "critical"
+export type { ActionRisk as ActionRiskAlias } from "./contracts/policy.js";
+
 // Compatibility exports — preserves askLiTTCode/handleLiTTCodeCommand
 // for existing callers (cli/src/litt-code-cli.tsx, cli/src/ui/App.tsx).
 // New code should use ModelProvider from types.ts instead.
