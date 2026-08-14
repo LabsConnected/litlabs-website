@@ -4,7 +4,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -87,7 +87,40 @@ export interface ProjectInfo {
 }
 
 export function detectProject(dir = process.cwd()): ProjectInfo {
-  const rootDir = resolve(dir);
+  // Walk upward to find the project root.
+  // Resolution order:
+  //   1. Walk up looking for .git or pnpm-workspace.yaml (true project root)
+  //   2. Walk up looking for package.json (may be a workspace package)
+  //   3. Fall back to the starting directory
+  let rootDir = resolve(dir);
+
+  // First pass: look for .git or pnpm-workspace.yaml
+  let searchDir = resolve(dir);
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(searchDir, ".git")) ||
+        existsSync(join(searchDir, "pnpm-workspace.yaml"))) {
+      rootDir = searchDir;
+      break;
+    }
+    const parent = dirname(searchDir);
+    if (parent === searchDir) break;
+    searchDir = parent;
+  }
+
+  // If no .git found, second pass: look for package.json
+  if (rootDir === resolve(dir) && !existsSync(join(rootDir, ".git"))) {
+    searchDir = resolve(dir);
+    for (let i = 0; i < 20; i++) {
+      if (existsSync(join(searchDir, "package.json"))) {
+        rootDir = searchDir;
+        break;
+      }
+      const parent = dirname(searchDir);
+      if (parent === searchDir) break;
+      searchDir = parent;
+    }
+  }
+
   const pkgPath = join(rootDir, "package.json");
   const hasPackageJson = existsSync(pkgPath);
   const packageJson = hasPackageJson

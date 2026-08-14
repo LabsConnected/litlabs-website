@@ -54,11 +54,13 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   }
 
   // Full agent path: RuntimeSession → ExecutionGateway → runAgentLoop
-  const sess = session ?? createRuntimeSession({ cwd: process.cwd(), mode: "act" });
+  // Use the detected project root (walks upward from cwd)
+  const projectRoot = project.rootDir;
+  const sess = session ?? createRuntimeSession({ cwd: projectRoot, mode: "act" });
   sess.installSigintHandler();
 
   const store = new RuntimeStore();
-  const shell = createShellExecutor(process.cwd());
+  const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
   const tools = new ToolRegistry();
   const gateway = new ExecutionGateway({
@@ -66,7 +68,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     shell,
     executor,
     store,
-    projectId: project.rootDir,
+    projectId: projectRoot,
   });
 
   const model = new OpenRouterModelProvider();
@@ -79,7 +81,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       tools,
       shell,
       gateway,
-      cwd: process.cwd(),
+      cwd: projectRoot,
       userId: "cli-user",
       mode: "act",
       maxRounds: 5,

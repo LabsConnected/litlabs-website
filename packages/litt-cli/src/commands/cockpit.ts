@@ -4,11 +4,15 @@
  * Launches the Ink-based cockpit UI. All execution routes through
  * ExecutionGateway. The cockpit itself never executes anything.
  *
+ * Project detection walks upward from cwd — the user can launch
+ * from any subdirectory and LiTT finds the project root.
+ *
  * Approval flow:
  *   ExecutionGateway → onApprovalRequired → ApprovalBridge → Ink UI
  *   → human decides → ApprovalBridge.decide() → gateway continues
  *
- * Usage:  litt cockpit
+ * Usage:  litt           (bare — defaults to cockpit)
+ *         litt cockpit
  */
 
 import { render } from "ink";
@@ -20,12 +24,20 @@ import { RuntimeClient } from "../lib/runtime-client.js";
 import { detectProject, fail, header } from "../lib/utils.js";
 
 export async function cockpitCommand(args: string[]): Promise<number> {
+  // Auto-detect project root by walking upward from cwd.
+  // The user can be in any subdirectory — LiTT finds the root.
   const project = detectProject();
 
   if (!project.hasPackageJson) {
-    fail("No package.json found. Run this command from your project root.");
+    fail("No package.json found. LiTT needs a project to work with.");
+    fail("Navigate to a project directory and try again.");
     return 1;
   }
+
+  // Use the detected root consistently across the entire chain:
+  //   detected root → RuntimeSession.cwd → ExecutionGateway projectId
+  //   → ShellExecutor cwd → ToolContext workspace
+  const projectRoot = project.rootDir;
 
   // Create the ApprovalBridge — connects gateway approval callbacks to the UI.
   // The bridge only carries the human's boolean decision.
@@ -35,7 +47,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   // Create the RuntimeSession — owns the gateway, executor, store.
   // The approval bridge is wired into the gateway via onApprovalRequired.
   const session = createRuntimeSession({
-    cwd: process.cwd(),
+    cwd: projectRoot,
     mode: "act",
     onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
   });
@@ -60,7 +72,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     const result = await gateway.execute({
       toolId: "project.run",
       inputs: { command: args[0], args: args.slice(1) },
-      cwd: process.cwd(),
+      cwd: projectRoot,
       mode: session.getMode(),
       identity: {
         tenantId: "cli-tenant",
@@ -84,7 +96,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
       project: String(project.packageJson?.name ?? "unnamed"),
       branch: project.gitBranch ?? "unknown",
       model,
-      cwd: process.cwd(),
+      cwd: projectRoot,
     }),
   );
 

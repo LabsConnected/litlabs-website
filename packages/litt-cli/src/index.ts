@@ -35,7 +35,7 @@ import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
 import { dispatchRemote } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
-import { ok, fail, header, c } from "./lib/utils.js";
+import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
 
@@ -103,18 +103,22 @@ async function main(): Promise<number> {
     finalArgs = [...cleanArgs.slice(0, modeIdx), ...cleanArgs.slice(modeIdx + 2)];
   }
 
-  const command = finalArgs[0];
-  const rest = finalArgs.slice(1);
+  const requestedCommand = finalArgs[0];
 
-  if (!command || command === "--help" || command === "-h") {
+  // --help / -h always prints help (never launches cockpit)
+  if (requestedCommand === "--help" || requestedCommand === "-h") {
     printHelp();
     return 0;
   }
 
-  if (command === "--version" || command === "-v") {
+  if (requestedCommand === "--version" || requestedCommand === "-v") {
     console.log(`litt ${VERSION}`);
     return 0;
   }
+
+  // Bare `litt` (no command) defaults to cockpit — the interactive experience
+  const command = requestedCommand ?? "cockpit";
+  const rest = requestedCommand ? finalArgs.slice(1) : [];
 
   // --remote: dispatch through terminal-server's canonical CommandRouter
   if (useRemote) {
@@ -138,10 +142,13 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // Create a shared RuntimeSession for session commands
+  // Create a shared RuntimeSession for session commands.
+  // Use the detected project root (walks upward from cwd) — not process.cwd()
+  // directly — so the user can run commands from any subdirectory.
   let session: RuntimeSession | undefined;
   if (SESSION_COMMANDS.has(command)) {
-    session = createRuntimeSession({ cwd: process.cwd(), mode });
+    const project = detectProject();
+    session = createRuntimeSession({ cwd: project.rootDir, mode });
     // Install Ctrl+C handler for all session commands
     session.installSigintHandler();
   }
@@ -207,7 +214,9 @@ function printHelp(): void {
   console.log(`
 LiTT CLI v${VERSION} — AI operating system for your terminal
 
-Usage: litt <command> [options]
+Usage: litt [command] [options]
+
+  Bare 'litt' launches the interactive cockpit.
 
 Commands:
   doctor     Check system health (Node, Git, pnpm, network, auth)
@@ -230,6 +239,7 @@ Options:
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
 
 Examples:
+  litt                     (launch interactive cockpit)
   litt doctor
   litt status
   litt diff
