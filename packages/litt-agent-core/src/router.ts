@@ -163,6 +163,58 @@ export class CommandRouter {
   }
 
   /**
+   * Debug — run tests with verbose output for diagnosis.
+   * Same as test() but flags verbose mode in the tool args.
+   */
+  async debug(): Promise<CommandResult> {
+    const result = await this.execWithTracking("debug", "project.test", { verbose: true });
+    return { command: "debug", result };
+  }
+
+  /**
+   * Ship — compound command: check → test → build.
+   * Stops at first failure. Only succeeds if all three pass.
+   * This is the "pre-flight check" before deployment.
+   */
+  async ship(): Promise<CommandResult> {
+    const steps: Array<{ name: string; result: ToolResult }> = [];
+    const stepNames = ["check", "test", "build"];
+
+    for (const name of stepNames) {
+      if (this.store) {
+        this.store.setPhase("verifying");
+      }
+      const result = await this.execWithTracking(`ship:${name}`, `project.${name === "check" ? "check" : name}`, {});
+      steps.push({ name, result });
+      if (!result.success) {
+        if (this.store) {
+          this.store.setPhase("failed");
+        }
+        return {
+          command: "ship",
+          result: {
+            success: false,
+            message: `ship failed at step "${name}": ${result.message}`,
+            data: { steps, failedAt: name },
+          },
+        };
+      }
+    }
+
+    if (this.store) {
+      this.store.setPhase("complete");
+    }
+    return {
+      command: "ship",
+      result: {
+        success: true,
+        message: "ship passed: check ✓, test ✓, build ✓",
+        data: { steps },
+      },
+    };
+  }
+
+  /**
    * Dispatch a command by name.
    * Used by CLI entry points.
    */
@@ -179,6 +231,8 @@ export class CommandRouter {
       case "check": return this.check();
       case "test": return this.test();
       case "build": return this.build();
+      case "debug": return this.debug();
+      case "ship": return this.ship();
       default:
         return {
           command,

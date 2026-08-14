@@ -12,6 +12,10 @@
  *   litt inspect   — Deep repo inspection (framework, scripts, deploy)
  *   litt ask       — Ask LiTT a question about your project
  *   litt explain   — Pipe errors/diffs and get actionable advice
+ *
+ * Options:
+ *   --remote       Dispatch through terminal-server's canonical CommandRouter
+ *                  (shares the same RuntimeStore as Studio Web — same runId)
  */
 
 import { parseArgs } from "node:util";
@@ -25,8 +29,13 @@ import { buildCommand } from "./commands/build.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
+import { dispatchRemote } from "./lib/remote.js";
+import { ok, fail, header, c } from "./lib/utils.js";
 
 const VERSION = "0.1.0";
+
+/** Commands that can be dispatched remotely through terminal-server */
+const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build"]);
 
 const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   doctor: doctorCommand,
@@ -43,8 +52,16 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const command = args[0];
-  const rest = args.slice(1);
+
+  // Extract --remote flag (can appear anywhere before or after command)
+  const remoteIdx = args.indexOf("--remote");
+  const useRemote = remoteIdx !== -1;
+  const cleanArgs = remoteIdx !== -1
+    ? [...args.slice(0, remoteIdx), ...args.slice(remoteIdx + 1)]
+    : args;
+
+  const command = cleanArgs[0];
+  const rest = cleanArgs.slice(1);
 
   if (!command || command === "--help" || command === "-h") {
     printHelp();
@@ -54,6 +71,15 @@ async function main(): Promise<number> {
   if (command === "--version" || command === "-v") {
     console.log(`litt ${VERSION}`);
     return 0;
+  }
+
+  // --remote: dispatch through terminal-server's canonical CommandRouter
+  if (useRemote) {
+    if (!REMOTEABLE_COMMANDS.has(command)) {
+      console.error(`--remote is only supported for: ${[...REMOTEABLE_COMMANDS].join(", ")}`);
+      return 1;
+    }
+    return await runRemote(command, rest);
   }
 
   const handler = COMMANDS[command];
@@ -67,6 +93,38 @@ async function main(): Promise<number> {
     return await handler(rest);
   } catch (error) {
     console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+}
+
+/**
+ * Dispatch a command through terminal-server's canonical CommandRouter.
+ * The same CommandRouter that Studio Web uses — so CLI and Studio share
+ * the same RuntimeStore, same runId, same Socket.IO broadcasts.
+ */
+async function runRemote(command: string, _args: string[]): Promise<number> {
+  header(`${command} (remote)`);
+  try {
+    const result = await dispatchRemote(command, undefined, {
+      cwd: process.cwd(),
+    });
+
+    if (!result.ok) {
+      fail(result.result.result.message);
+      const stderr = result.result.result.data?.stderr as string | undefined;
+      if (stderr) console.log(`${c.gray}${stderr}${c.reset}`);
+      return 1;
+    }
+
+    ok(result.result.result.message);
+    const stdout = result.result.result.data?.stdout as string | undefined;
+    if (stdout) console.log(`${c.gray}${stdout}${c.reset}`);
+
+    // Show runId for cross-surface verification
+    console.log(`${c.gray}runId: ${result.runId}${c.reset}`);
+    return 0;
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
     return 1;
   }
 }
@@ -92,6 +150,7 @@ Commands:
 Options:
   -h, --help     Show this help
   -v, --version  Show version
+  --remote       Dispatch through terminal-server (shared RuntimeStore with Studio)
 
 Examples:
   litt doctor
@@ -101,6 +160,7 @@ Examples:
   litt check
   litt test
   litt build
+  litt build --remote    (Studio sees the same run)
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"
