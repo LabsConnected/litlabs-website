@@ -46,6 +46,10 @@ import {
   type VerifiedApproval,
   toVerifiedApproval,
   type ApprovalDecision,
+  ExecutionGateway,
+  type ExecutionRequest,
+  ToolRegistry,
+  createShellExecutor,
 } from "@litt/agent-core";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -279,32 +283,69 @@ export class CliAgentLoop {
       };
     }
 
-    // 3. Execute through CommandExecutor (the hardened boundary)
-    //    This goes through: CommandExecutor → runCommand() → ShellExecutor
+    // 3. Execute through the ExecutionGateway (the ONE canonical authority)
+    //    This goes through: ExecutionGateway → CommandExecutor → runCommand() → ShellExecutor
     //    No spawn/exec/execFile bypass — everything goes through this path.
-    //    We use session.getExecutor() directly to pass the agent run's
-    //    runId (constant across all steps) and per-step toolCallId.
-    const executor = this.session.getExecutor();
-    const execResult = await executor.execute(step.command, step.args, {
+    //    The gateway enforces identity, grant, policy, approval, and credential
+    //    checks before dispatching to CommandExecutor.
+    //
+    //    For shell commands, we use the "project.run" tool which the gateway
+    //    routes through CommandExecutor → runCommand() (the hardened boundary).
+    const gateway = this.getOrCreateGateway();
+    const gwResult = await gateway.execute({
+      toolId: "project.run",
+      inputs: { command: step.command, args: step.args },
       cwd: this.session.getState().project?.root ?? process.cwd(),
       mode: this.mode,
+      identity: {
+        tenantId: this.tenantId,
+        userId: this.userId,
+        actorId: this.userId,
+        trusted: false, // CLI agent loop is untrusted — must go through gateway
+        interaction: "interactive",
+      },
       runId: this.currentRunId!,
       toolCallId,
-      label: step.label ?? step.command,
       timeoutMs: step.timeoutMs,
       onStream: this.onStream ?? undefined,
+      // The CLI agent loop already performed approval via checkApproval().
+      // Pass preApproved=true so the gateway skips its own approval check
+      // (which would fail because the gateway has no synchronous handler).
+      // The gateway still enforces policy (PLAN mode rejects, dangerous
+      // denied in AUTO) — only the approval step is skipped.
+      preApproved: approved,
     });
 
     return {
       step,
-      result: execResult.result,
-      runId: execResult.runId,
-      toolCallId: execResult.toolCallId,
-      status: execResult.status,
-      durationMs: execResult.durationMs,
+      result: gwResult.result,
+      runId: gwResult.runId,
+      toolCallId: gwResult.toolCallId,
+      status: gwResult.result.status,
+      durationMs: gwResult.durationMs,
       risk,
-      approved: true,
+      approved: gwResult.approved,
     };
+  }
+
+  // ─── Gateway management ─────────────────────────────────────────
+
+  private _gateway: ExecutionGateway | null = null;
+
+  private getOrCreateGateway(): ExecutionGateway {
+    if (this._gateway) return this._gateway;
+    // The gateway needs a ShellExecutor and ToolRegistry.
+    // The session owns the CommandExecutor which internally has the shell.
+    // We create a new shell for the gateway's ToolRegistry (for non-project.run
+    // tools), but project.run goes through the session's CommandExecutor.
+    const cwd = this.session.getState().project?.root ?? process.cwd();
+    this._gateway = new ExecutionGateway({
+      tools: new ToolRegistry(),
+      shell: createShellExecutor(cwd),
+      executor: this.session.getExecutor(),
+      projectId: this.projectId,
+    });
+    return this._gateway;
   }
 
   /**

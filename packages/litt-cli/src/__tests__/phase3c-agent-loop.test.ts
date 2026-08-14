@@ -115,9 +115,12 @@ describe("AgentLoop", () => {
   // ─── Cancellation ─────────────────────────────────────────────
 
   it("cancellation stops the current tool and agent run cleanly", async () => {
-    // node is arbitrary_code (elevated) — use AUTO mode to auto-approve
-    const autoSession = createSession("auto");
-    const loop = createLoop(autoSession, { mode: "auto" });
+    // node is arbitrary_code (elevated) — use ACT mode with approval handler
+    const actSession = createSession("act");
+    const loop = createLoop(actSession, {
+      mode: "act",
+      onApprovalRequired: async () => true, // approve the elevated node command
+    });
 
     // Start a long-running agent run
     const runPromise = loop.run([
@@ -139,9 +142,12 @@ describe("AgentLoop", () => {
   // ─── Timeout vs failure ───────────────────────────────────────
 
   it("timeout does not become generic failure", async () => {
-    // node is arbitrary_code (elevated) — use AUTO mode to auto-approve
-    const autoSession = createSession("auto");
-    const loop = createLoop(autoSession, { mode: "auto" });
+    // node is arbitrary_code (elevated) — use ACT mode with approval handler
+    const actSession = createSession("act");
+    const loop = createLoop(actSession, {
+      mode: "act",
+      onApprovalRequired: async () => true, // approve the elevated node command
+    });
     const result = await loop.run([
       { index: 0, toolCallId: "", command: "node", args: ["-e", "setInterval(()=>{},10000)"], timeoutMs: 500 },
     ]);
@@ -262,13 +268,18 @@ describe("AgentLoop", () => {
       onApprovalRequired: async () => true, // always approve
     });
 
-    // pnpm install is workspace_edit (elevated) — handler approves
-    // We use a dry-run-ish command that won't actually modify much
+    // git config is workspace_edit (elevated) — handler approves.
+    // The CLI's checkApproval() approves interactively, then passes
+    // preApproved=true to the gateway. The gateway skips its own
+    // approval check (the CLI already did it) and allows the command.
+    // This is the canonical flow: CLI handles human approval → gateway
+    // trusts the pre-approval → execution proceeds.
     const result = await loop.run([
       { index: 0, toolCallId: "", command: "git", args: ["config", "--local", "test.key", "test-value"] },
     ]);
 
-    // git config is workspace_edit (elevated) — should be approved
+    // The command should succeed — the human approved it
+    expect(result.status).toBe("success");
     expect(result.steps[0].approved).toBe(true);
   });
 
@@ -289,15 +300,22 @@ describe("AgentLoop", () => {
 
   // ─── AUTO mode ────────────────────────────────────────────────
 
-  it("AUTO mode auto-approves elevated commands", async () => {
+  it("AUTO mode auto-approves elevated commands (with grant)", async () => {
+    // AUTO mode: the CLI's checkApproval() auto-approves elevated
+    // commands (no human needed). It passes preApproved=true to the
+    // gateway, which skips its own approval check.
+    // The gateway still enforces policy: dangerous commands are denied
+    // even with preApproved (the gateway checks policy BEFORE approval).
     const autoSession = createSession("auto");
     const loop = createLoop(autoSession, { mode: "auto" });
 
-    // git config is workspace_edit (elevated) — auto-approved in AUTO mode
+    // git config is workspace_edit (elevated) — auto-approved in AUTO
     const result = await loop.run([
       { index: 0, toolCallId: "", command: "git", args: ["config", "--local", "test.key2", "test-value2"] },
     ]);
 
+    // Elevated commands are auto-approved in AUTO mode via preApproved
+    expect(result.status).toBe("success");
     expect(result.steps[0].approved).toBe(true);
   });
 
