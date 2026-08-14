@@ -1,17 +1,10 @@
 /**
- * Agent billing failure-path tests.
+ * Agent billing tests — canonical reserve_bits → settle_bits/release_bits flow.
  *
- * Tests that reserveCredits and settleRun handle all failure modes correctly:
- * - Missing reserve_credits RPC → 503
- * - Permission denied → 503
- * - Database timeout → 503
- * - Insufficient balance → 402
- * - Run-row insert failure after reservation → refund + 500
- * - Refund failure → reconciliation record
- * - Settlement failure → reconciliation record
- * - Duplicate idempotency key belonging to another user → 403
- * - Duplicate idempotency key belonging to another agent instance → 403
- * - Successful reserve/settle
+ * B2 migration: tests the new canonical billing RPCs.
+ * - reserveCredits calls reserve_bits RPC
+ * - settleRun calls settle_bits (completed) or release_bits (failed/cancelled)
+ * - Idempotency, insufficient balance, DB errors, reconciliation records
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,12 +12,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock supabaseAdmin before importing the module
 const mockRpc = vi.fn();
 const mockFrom = vi.fn();
-const mockSelect = vi.fn();
-const mockInsert = vi.fn();
-const mockUpdate = vi.fn();
-const mockEq = vi.fn();
-const mockMaybeSingle = vi.fn();
-const mockSingle = vi.fn();
 
 vi.mock("@/lib/supabase", () => ({
   supabaseAdmin: {
@@ -46,48 +33,116 @@ const baseCtx = {
   agentInstanceId: "agent_instance_456",
   agentId: "agent_789",
   agentVersionId: null,
-  idempotencyKey: "idem_key_001",
+  idempotencyKey: "idem_key_001_at_least_8",
 };
 
-function setupFromChain(result: { data: unknown; error: unknown }) {
-  mockFrom.mockReturnValue({
-    select: mockSelect,
-    insert: mockInsert,
-    update: mockUpdate,
+// Helper: mock from("users").select("id").eq("clerk_id", ...).maybeSingle()
+function mockUserFound(userId = "user-uuid") {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === "billing_reconciliations") {
+      return { insert: vi.fn().mockReturnValue({}) };
+    }
+    if (table === "users") {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: userId }, error: null }),
+          }),
+        }),
+      };
+    }
+    // agent_runs
+    return {
+      insert: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: { id: "new-run-id" }, error: null }),
+        }),
+      }),
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      }),
+      select: vi.fn(),
+    };
   });
-  mockSelect.mockReturnValue({
-    eq: mockEq,
-    maybeSingle: mockMaybeSingle,
-  });
-  mockInsert.mockReturnValue({
-    select: mockSelect,
-  });
-  mockUpdate.mockReturnValue({
-    eq: mockEq,
-  });
-  mockEq.mockReturnValue({
-    maybeSingle: mockMaybeSingle,
-    single: mockSingle,
-  });
-  mockMaybeSingle.mockResolvedValue(result);
-  mockSingle.mockResolvedValue(result);
 }
 
-describe("reserveCredits — fail-closed behavior", () => {
+// Helper: mock from("users") returns null (user not found)
+function mockUserNotFound() {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === "billing_reconciliations") {
+      return { insert: vi.fn().mockReturnValue({}) };
+    }
+    return {
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        }),
+      }),
+      insert: vi.fn(),
+      update: vi.fn(),
+    };
+  });
+}
+
+// Helper: mock agent_runs insert fails
+function mockAgentRunsInsertFails() {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === "billing_reconciliations") {
+      return { insert: vi.fn().mockReturnValue({}) };
+    }
+    if (table === "users") {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: "user-uuid" }, error: null }),
+          }),
+        }),
+      };
+    }
+    // agent_runs insert fails
+    return {
+      insert: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: "23502", message: "null violation" },
+          }),
+        }),
+      }),
+      update: vi.fn(),
+      select: vi.fn(),
+    };
+  });
+}
+
+// Helper: mock settleRun chains (agent_runs update + billing_reconciliations)
+function mockSettleChains(updateError: unknown = null) {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === "billing_reconciliations") {
+      return { insert: vi.fn().mockReturnValue({}) };
+    }
+    // agent_runs update
+    return {
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: updateError }),
+      }),
+      select: vi.fn(),
+      insert: vi.fn(),
+    };
+  });
+}
+
+describe("reserveCredits — canonical reserve_bits flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns 402 for insufficient balance", async () => {
+    mockUserFound();
     mockRpc.mockResolvedValue({
-      error: { message: "insufficient balance: have 0, need 10" },
+      data: { success: false, reason: "insufficient_balance", available_after: 0 },
+      error: null,
     });
-
-    // No existing run
-    setupFromChain({ data: null, error: null });
-    // User found
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid" }, error: null });
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(false);
@@ -95,14 +150,12 @@ describe("reserveCredits — fail-closed behavior", () => {
     expect(result.error).toContain("Insufficient");
   });
 
-  it("returns 503 when reserve_credits RPC is missing (function not found)", async () => {
+  it("returns 503 when reserve_bits RPC errors", async () => {
+    mockUserFound();
     mockRpc.mockResolvedValue({
-      error: { message: "Could not find the function public.reserve_credits in the schema cache" },
+      data: null,
+      error: { message: "Could not find the function public.reserve_bits" },
     });
-
-    setupFromChain({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid" }, error: null });
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(false);
@@ -111,13 +164,11 @@ describe("reserveCredits — fail-closed behavior", () => {
   });
 
   it("returns 503 on permission denied", async () => {
+    mockUserFound();
     mockRpc.mockResolvedValue({
-      error: { message: "permission denied for function reserve_credits" },
+      data: null,
+      error: { message: "permission denied for function reserve_bits" },
     });
-
-    setupFromChain({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid" }, error: null });
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(false);
@@ -125,13 +176,11 @@ describe("reserveCredits — fail-closed behavior", () => {
   });
 
   it("returns 503 on database timeout", async () => {
+    mockUserFound();
     mockRpc.mockResolvedValue({
+      data: null,
       error: { message: "canceling statement due to statement timeout" },
     });
-
-    setupFromChain({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid" }, error: null });
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(false);
@@ -139,312 +188,275 @@ describe("reserveCredits — fail-closed behavior", () => {
   });
 
   it("returns 404 when user not found", async () => {
-    setupFromChain({ data: null, error: null });
-    // No existing run
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    // User not found
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    mockUserNotFound();
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(false);
     expect(result.status).toBe(404);
   });
 
-  it("returns 403 when idempotency key belongs to another user", async () => {
-    // Existing run found
-    mockFrom.mockReturnValue({
-      select: mockSelect,
-      insert: mockInsert,
-      update: mockUpdate,
-    });
-    mockSelect.mockReturnValue({
-      eq: mockEq,
-      maybeSingle: mockMaybeSingle,
-    });
-    // First call: find existing run by idempotency key
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { id: "run-1", status: "completed", credits_charged: 5 },
+  it("succeeds when reserve_bits and agent_runs insert both work", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true,
+        reservation_id: "res-uuid-123",
+        available_after: 90,
+        reason: "reserved",
+      },
       error: null,
-    });
-    // Second call: fetch run details
-    mockEq.mockReturnValue({
-      maybeSingle: mockMaybeSingle,
-    });
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { user_id: "other-user-uuid", agent_instance_id: "agent_instance_456", conversation_id: null },
-      error: null,
-    });
-    // Third call: fetch user clerk_id
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { clerk_id: "clerk_different_user" },
-      error: null,
-    });
-
-    const result = await reserveCredits(baseCtx, 10);
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe(403);
-    expect(result.error).toContain("another user");
-  });
-
-  it("returns 403 when idempotency key belongs to another agent instance", async () => {
-    mockFrom.mockReturnValue({
-      select: mockSelect,
-      insert: mockInsert,
-      update: mockUpdate,
-    });
-    mockSelect.mockReturnValue({
-      eq: mockEq,
-      maybeSingle: mockMaybeSingle,
-    });
-    // Existing run found
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { id: "run-1", status: "completed", credits_charged: 5 },
-      error: null,
-    });
-    mockEq.mockReturnValue({
-      maybeSingle: mockMaybeSingle,
-    });
-    // Run details — same user, different agent
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { user_id: "user-uuid", agent_instance_id: "different_agent", conversation_id: null },
-      error: null,
-    });
-    // User clerk_id matches
-    mockMaybeSingle.mockResolvedValueOnce({
-      data: { clerk_id: "clerk_user_123" },
-      error: null,
-    });
-
-    const result = await reserveCredits(baseCtx, 10);
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe(403);
-    expect(result.error).toContain("another agent instance");
-  });
-
-  it("refunds reservation when run-row insert fails after successful reservation", async () => {
-    // Reserve succeeds
-    mockRpc.mockResolvedValueOnce({ error: null });
-    // Refund called after insert fails
-    mockRpc.mockResolvedValueOnce({ error: null });
-
-    // Track call count for from() to return different chains
-    let fromCallCount = 0;
-    mockFrom.mockImplementation((table: string) => {
-      fromCallCount++;
-      if (table === "billing_reconciliations") {
-        return { insert: vi.fn().mockReturnValue({}) };
-      }
-      // First call: from("agent_runs").select(...).eq("idempotency_key", ...).maybeSingle()
-      if (fromCallCount === 1) {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-            }),
-          }),
-          insert: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      // Second call: from("users").select("id").eq("clerk_id", ...).maybeSingle()
-      if (fromCallCount === 2) {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "user-uuid" }, error: null }),
-            }),
-          }),
-          insert: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      // Third call: from("agent_runs").insert({...}).select("id").single()
-      if (fromCallCount === 3) {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: null,
-                error: { code: "23502", message: "null violation" },
-              }),
-            }),
-          }),
-          select: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      return { insert: vi.fn(), select: vi.fn(), update: vi.fn() };
-    });
-
-    const result = await reserveCredits(baseCtx, 10);
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe(500);
-    // Refund was attempted
-    expect(mockRpc).toHaveBeenCalledWith("refund_credits", expect.objectContaining({ p_credits: 10 }));
-  });
-
-  it("succeeds when reservation and insert both work", async () => {
-    // Reserve succeeds
-    mockRpc.mockResolvedValue({ error: null });
-
-    let fromCallCount = 0;
-    mockFrom.mockImplementation((table: string) => {
-      fromCallCount++;
-      if (table === "billing_reconciliations") {
-        return { insert: vi.fn().mockReturnValue({}) };
-      }
-      // First call: existing run check
-      if (fromCallCount === 1) {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-            }),
-          }),
-          insert: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      // Second call: user lookup
-      if (fromCallCount === 2) {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: { id: "user-uuid" }, error: null }),
-            }),
-          }),
-          insert: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      // Third call: insert agent_runs
-      if (fromCallCount === 3) {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: { id: "new-run-id" },
-                error: null,
-              }),
-            }),
-          }),
-          select: vi.fn(),
-          update: vi.fn(),
-        };
-      }
-      return { insert: vi.fn(), select: vi.fn(), update: vi.fn() };
     });
 
     const result = await reserveCredits(baseCtx, 10);
     expect(result.ok).toBe(true);
     expect(result.runId).toBe("new-run-id");
+    expect(result.reservationId).toBe("res-uuid-123");
     expect(result.reservedCredits).toBe(10);
+  });
+
+  it("calls reserve_bits with correct parameters", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: { success: true, reservation_id: "res-1", available_after: 90, reason: "reserved" },
+      error: null,
+    });
+
+    await reserveCredits(baseCtx, 10);
+    expect(mockRpc).toHaveBeenCalledWith("reserve_bits", expect.objectContaining({
+      p_user_id: "user-uuid",
+      p_amount: 10,
+      p_idempotency_key: baseCtx.idempotencyKey,
+      p_usage_type: "agent_run",
+    }));
+  });
+
+  it("releases reservation when agent_runs insert fails after successful reserve", async () => {
+    mockAgentRunsInsertFails();
+    // reserve_bits succeeds
+    mockRpc.mockResolvedValueOnce({
+      data: { success: true, reservation_id: "res-uuid-fail", available_after: 90, reason: "reserved" },
+      error: null,
+    });
+    // release_bits succeeds
+    mockRpc.mockResolvedValueOnce({
+      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      error: null,
+    });
+
+    const result = await reserveCredits(baseCtx, 10);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(500);
+    // release_bits was called
+    expect(mockRpc).toHaveBeenCalledWith("release_bits", expect.objectContaining({
+      p_reservation_id: "res-uuid-fail",
+    }));
+  });
+
+  it("handles idempotent retry (already_reserved)", async () => {
+    mockUserFound();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true,
+        reservation_id: "res-existing",
+        available_after: 90,
+        reason: "already_reserved",
+      },
+      error: null,
+    });
+
+    const result = await reserveCredits(baseCtx, 10);
+    expect(result.ok).toBe(true);
+    expect(result.reservationId).toBe("res-existing");
   });
 });
 
-describe("settleRun — failure handling", () => {
+describe("settleRun — canonical settle_bits/release_bits flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  // Helper: build a supabase.from() mock that handles all chains settleRun uses:
-  // 1. from("agent_runs").update({...}).eq("id", runId) — update run row
-  // 2. from("agent_runs").select("agent_instance_id").eq("id", runId).maybeSingle() — fetch instance
-  // 3. from("user_agents").update({...}).eq("id", instanceId) — update last_active
-  // 4. from("billing_reconciliations").insert({...}) — reconciliation record
-  function setupSettleMocks(opts: {
-    updateError?: unknown;
-    refundError?: unknown;
-    agentInstanceId?: string;
-  } = {}) {
-    const updateResult = opts.updateError ? { error: opts.updateError } : { error: null };
-    const selectResult = { data: { agent_instance_id: opts.agentInstanceId ?? "agent_instance_456" }, error: null };
-
-    mockFrom.mockImplementation((table: string) => {
-      if (table === "billing_reconciliations") {
-        return {
-          insert: vi.fn().mockReturnValue({}),
-        };
-      }
-      // agent_runs or user_agents
-      return {
-        update: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue(updateResult),
-        }),
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            maybeSingle: vi.fn().mockResolvedValue(selectResult),
-          }),
-        }),
-        insert: vi.fn().mockReturnValue({}),
-      };
+  it("calls settle_bits on completed run with actual cost", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true,
+        settled_amount: 5,
+        released_amount: 5,
+        available_after: 95,
+        reason: "settled",
+      },
+      error: null,
     });
-
-    mockRpc.mockResolvedValue(
-      opts.refundError
-        ? { error: opts.refundError }
-        : { error: null },
-    );
-  }
-
-  it("creates reconciliation record when refund fails", async () => {
-    setupSettleMocks({ refundError: { message: "refund_credits function not found" } });
-
-    const result = await settleRun("run-1", {
-      inputTokens: 100,
-      outputTokens: 50,
-      actualCredits: 3,
-      status: "completed",
-    }, 10);
-
-    // Refund was attempted (creditsToRefund = 10 - 3 = 7)
-    expect(mockRpc).toHaveBeenCalledWith("refund_credits", expect.objectContaining({ p_credits: 7 }));
-  });
-
-  it("refunds all reserved credits on failed run", async () => {
-    setupSettleMocks();
-
-    const result = await settleRun("run-1", {
-      inputTokens: 100,
-      outputTokens: 0,
-      actualCredits: 0,
-      status: "failed",
-      error: "Model error",
-    }, 10);
-
-    // Failed run charges 0, refunds all 10
-    expect(mockRpc).toHaveBeenCalledWith("refund_credits", expect.objectContaining({ p_credits: 10 }));
-    expect(result.creditsCharged).toBe(0);
-    expect(result.creditsRefunded).toBe(10);
-  });
-
-  it("refunds all reserved credits on cancelled run", async () => {
-    setupSettleMocks();
-
-    const result = await settleRun("run-1", {
-      inputTokens: 0,
-      outputTokens: 0,
-      actualCredits: 0,
-      status: "cancelled",
-    }, 10);
-
-    expect(mockRpc).toHaveBeenCalledWith("refund_credits", expect.objectContaining({ p_credits: 10 }));
-    expect(result.creditsCharged).toBe(0);
-  });
-
-  it("charges only actual cost and refunds difference on completed run", async () => {
-    setupSettleMocks();
 
     const result = await settleRun("run-1", {
       inputTokens: 200,
       outputTokens: 100,
       actualCredits: 5,
       status: "completed",
-    }, 10);
+    }, 10, "res-uuid-123");
 
-    // Charges 5, refunds 5
-    expect(mockRpc).toHaveBeenCalledWith("refund_credits", expect.objectContaining({ p_credits: 5 }));
+    expect(mockRpc).toHaveBeenCalledWith("settle_bits", expect.objectContaining({
+      p_reservation_id: "res-uuid-123",
+      p_actual_amount: 5,
+      p_overage_policy: "reject",
+    }));
     expect(result.creditsCharged).toBe(5);
     expect(result.creditsRefunded).toBe(5);
+  });
+
+  it("calls release_bits on failed run", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      error: null,
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 0,
+      outputTokens: 0,
+      actualCredits: 0,
+      status: "failed",
+      error: "Model error",
+    }, 10, "res-uuid-123");
+
+    expect(mockRpc).toHaveBeenCalledWith("release_bits", expect.objectContaining({
+      p_reservation_id: "res-uuid-123",
+    }));
+    expect(result.creditsCharged).toBe(0);
+    expect(result.creditsRefunded).toBe(10);
+  });
+
+  it("calls release_bits on cancelled run", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      error: null,
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 0,
+      outputTokens: 0,
+      actualCredits: 0,
+      status: "cancelled",
+    }, 10, "res-uuid-123");
+
+    expect(mockRpc).toHaveBeenCalledWith("release_bits", expect.objectContaining({
+      p_reservation_id: "res-uuid-123",
+    }));
+    expect(result.creditsCharged).toBe(0);
+  });
+
+  it("releases reservation on completed run with 0 actual cost (free run)", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: { success: true, released_amount: 10, available_after: 100, reason: "released" },
+      error: null,
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 100,
+      outputTokens: 50,
+      actualCredits: 0,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    // Should release since actual cost is 0
+    expect(mockRpc).toHaveBeenCalledWith("release_bits", expect.objectContaining({
+      p_reservation_id: "res-uuid-123",
+    }));
+    expect(result.creditsCharged).toBe(0);
+    expect(result.creditsRefunded).toBe(10);
+  });
+
+  it("creates reconciliation record when settle_bits fails", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { message: "settle_bits function not found" },
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 100,
+      outputTokens: 50,
+      actualCredits: 3,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    // Reconciliation record was attempted (billing_reconciliations insert)
+    expect(mockFrom).toHaveBeenCalledWith("billing_reconciliations");
+  });
+
+  it("creates reconciliation record when release_bits fails", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { message: "release_bits function not found" },
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 0,
+      outputTokens: 0,
+      actualCredits: 0,
+      status: "failed",
+    }, 10, "res-uuid-123");
+
+    expect(mockFrom).toHaveBeenCalledWith("billing_reconciliations");
+  });
+
+  it("handles settle_bits returning failure (overage rejected)", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: false,
+        settled_amount: 0,
+        released_amount: 0,
+        available_after: 90,
+        reason: "overage_rejected",
+      },
+      error: null,
+    });
+
+    const result = await settleRun("run-1", {
+      inputTokens: 200,
+      outputTokens: 100,
+      actualCredits: 15, // more than reserved 10
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    // Overage was rejected — reconciliation record created
+    expect(mockFrom).toHaveBeenCalledWith("billing_reconciliations");
+  });
+
+  it("handles null reservationId gracefully (no RPC call)", async () => {
+    mockSettleChains();
+
+    const result = await settleRun("run-1", {
+      inputTokens: 100,
+      outputTokens: 50,
+      actualCredits: 5,
+      status: "completed",
+    }, 10, null);
+
+    // No settle_bits or release_bits call when reservationId is null
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(result.creditsCharged).toBe(0);
+  });
+
+  it("updates agent_runs row with final status", async () => {
+    mockSettleChains();
+    mockRpc.mockResolvedValue({
+      data: { success: true, settled_amount: 5, released_amount: 5, available_after: 95, reason: "settled" },
+      error: null,
+    });
+
+    await settleRun("run-1", {
+      inputTokens: 200,
+      outputTokens: 100,
+      actualCredits: 5,
+      status: "completed",
+    }, 10, "res-uuid-123");
+
+    // agent_runs update was called
+    expect(mockFrom).toHaveBeenCalledWith("agent_runs");
   });
 });

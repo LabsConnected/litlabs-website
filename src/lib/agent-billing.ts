@@ -1,15 +1,21 @@
 /**
- * Agent billing — reserve → execute → settle/refund flow.
+ * Agent billing — canonical reserve → execute → settle/release flow.
  *
- * Every marketplace agent execution follows this flow:
- *   1. reserveCredits() — atomically reserve estimated credits BEFORE the
- *      model call. Returns 402 if balance is insufficient.
- *   2. Execute the model call (caller's responsibility).
- *   3. settleRun() — settle the actual cost and refund unused reserved
- *      credits. If the model call failed, refund all reserved credits.
+ * B2 migration: replaces the broken reserve_credits/refund_credits RPCs
+ * (which never existed in production) with the canonical:
+ *
+ *   reserve_bits  → hold BITS against available balance
+ *   execute       → caller runs the model/agent
+ *   settle_bits   → debit actual cost, release remainder
+ *   release_bits  → cancel reservation (execution failed)
+ *
+ * The RPCs are BITS-denominated and exchange-rate-agnostic.
+ * The conversion from provider cost to BITS happens in the
+ * application layer (agent-registry cost policies), before calling
+ * reserve_bits.
  *
  * A charge failure NEVER silently returns a successful output.
- * The caller must check the return value of reserveCredits() and abort
+ * The caller MUST check the return value of reserveCredits() and abort
  * if it returns { ok: false, status: 402 }.
  */
 
@@ -30,27 +36,33 @@ export interface AgentRunContext {
 export interface ReserveResult {
   ok: boolean;
   runId: string | null;
+  /** The reservation ID from reserve_bits RPC. */
+  reservationId: string | null;
   /** HTTP status code for the error (402 = insufficient, 500 = DB error). */
   status?: number;
   error?: string;
-  /** The number of credits reserved. */
+  /** The number of BITS reserved. */
   reservedCredits: number;
 }
 
 export interface SettleResult {
   ok: boolean;
   runId: string;
+  reservationId: string | null;
   creditsCharged: number;
   creditsRefunded: number;
 }
 
 /**
- * Reserve credits BEFORE the model call.
+ * Reserve BITS BEFORE the model call.
  *
- * 1. Creates an agent_runs row with status='running'.
- * 2. Atomically reserves estimated credits from the user's balance.
- * 3. Returns 402 if the user doesn't have enough credits.
+ * Flow:
+ *   1. Resolve internal user ID from Clerk ID.
+ *   2. Call reserve_bits RPC to atomically hold BITS against available balance.
+ *   3. Create an agent_runs row with status='running' and the reservation ID.
+ *   4. Return the reservation ID for later settlement/release.
  *
+ * If the run-row insert fails after reservation, release the reservation.
  * The caller MUST check the return value and abort if ok=false.
  */
 export async function reserveCredits(
@@ -58,46 +70,7 @@ export async function reserveCredits(
   estimatedCredits: number,
 ): Promise<ReserveResult> {
   if (!supabaseAdmin) {
-    return { ok: false, runId: null, status: 503, error: "DB unavailable", reservedCredits: 0 };
-  }
-
-  // Check for existing run with the same idempotency key (retry safety)
-  const { data: existing } = await supabaseAdmin
-    .from("agent_runs")
-    .select("id, status, credits_charged")
-    .eq("idempotency_key", ctx.idempotencyKey)
-    .maybeSingle();
-
-  if (existing) {
-    // Idempotent retry — validate that this run belongs to the same
-    // user, agent instance, and conversation before reusing it.
-    const { data: existingRun } = await supabaseAdmin
-      .from("agent_runs")
-      .select("user_id, agent_instance_id, conversation_id")
-      .eq("id", existing.id)
-      .maybeSingle();
-
-    if (existingRun) {
-      // Look up the clerk_id for this run's user to verify ownership
-      const { data: existingUser } = await supabaseAdmin
-        .from("users")
-        .select("clerk_id")
-        .eq("id", existingRun.user_id)
-        .maybeSingle();
-
-      if (existingUser?.clerk_id !== ctx.clerkId) {
-        return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another user", reservedCredits: 0 };
-      }
-      if (existingRun.agent_instance_id !== ctx.agentInstanceId) {
-        return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another agent instance", reservedCredits: 0 };
-      }
-    }
-
-    return {
-      ok: true,
-      runId: existing.id,
-      reservedCredits: existing.credits_charged || 0,
-    };
+    return { ok: false, runId: null, reservationId: null, status: 503, error: "DB unavailable", reservedCredits: 0 };
   }
 
   // Resolve internal user ID
@@ -108,111 +81,123 @@ export async function reserveCredits(
     .maybeSingle();
 
   if (!user) {
-    return { ok: false, runId: null, status: 404, error: "User not found", reservedCredits: 0 };
+    return { ok: false, runId: null, reservationId: null, status: 404, error: "User not found", reservedCredits: 0 };
   }
 
-  // Check balance and reserve credits atomically
+  // Reserve BITS via the canonical RPC
+  let reservationId: string | null = null;
   if (estimatedCredits > 0) {
-    const { error: reserveError } = await supabaseAdmin.rpc("reserve_credits", {
+    const { data: reserveData, error: reserveError } = await supabaseAdmin.rpc("reserve_bits", {
       p_user_id: user.id,
-      p_credits: estimatedCredits,
+      p_amount: estimatedCredits,
+      p_idempotency_key: ctx.idempotencyKey,
+      p_run_id: ctx.idempotencyKey,
+      p_usage_type: "agent_run",
+      p_reference_type: "agent_instance",
+      p_reference_id: ctx.agentInstanceId,
+      p_description: `Agent run: ${ctx.agentInstanceId}`,
     });
 
     if (reserveError) {
-      // Check if it's an insufficient-balance error (402)
-      if (reserveError.message.includes("insufficient")) {
-        return {
-          ok: false,
-          runId: null,
-          status: 402,
-          error: "Insufficient LiTTBits balance",
-          reservedCredits: 0,
-        };
-      }
-      // Any other RPC error (missing function, permission denied,
-      // schema mismatch, timeout, database unavailable) must ABORT.
-      // Never proceed with the model call unless reservation is confirmed.
-      console.error(`[agent-billing] reserve_credits FAILED — aborting run. Error: ${reserveError.message}`);
+      console.error(`[agent-billing] reserve_bits FAILED — aborting run. Error: ${reserveError.message}`);
       return {
         ok: false,
         runId: null,
+        reservationId: null,
         status: 503,
         error: `Credit reservation failed: ${reserveError.message}`,
         reservedCredits: 0,
       };
     }
+
+    if (!reserveData?.success) {
+      const reason = reserveData?.reason ?? "unknown";
+      if (reason === "insufficient_balance") {
+        return {
+          ok: false,
+          runId: null,
+          reservationId: null,
+          status: 402,
+          error: "Insufficient LiTTBits balance",
+          reservedCredits: 0,
+        };
+      }
+      // Idempotent retry — reservation already exists
+      if (reason === "already_reserved") {
+        reservationId = reserveData.reservation_id;
+        // Fall through to create/find the run row
+      } else {
+        return {
+          ok: false,
+          runId: null,
+          reservationId: null,
+          status: 503,
+          error: `Credit reservation failed: ${reason}`,
+          reservedCredits: 0,
+        };
+      }
+    } else {
+      reservationId = reserveData.reservation_id;
+    }
   }
 
-  // Create the agent_runs row
+  // Create the agent_runs row (using production schema columns)
   const { data: runRow, error: runError } = await supabaseAdmin
     .from("agent_runs")
     .insert({
       user_id: user.id,
-      agent_instance_id: ctx.agentInstanceId,
-      agent_id: ctx.agentId,
-      agent_version_id: ctx.agentVersionId,
-      conversation_id: ctx.conversationId ?? null,
-      message_id: ctx.messageId ?? null,
-      idempotency_key: ctx.idempotencyKey,
-      model: ctx.model ?? null,
-      provider: ctx.provider ?? null,
-      credits_charged: estimatedCredits, // reserved amount
+      agent_name: ctx.agentInstanceId,
+      task: ctx.idempotencyKey,
       status: "running",
-      started_at: new Date().toISOString(),
+      agent_mode: ctx.model ?? "default",
+      input: {
+        agent_id: ctx.agentId,
+        agent_version_id: ctx.agentVersionId,
+        conversation_id: ctx.conversationId ?? null,
+        message_id: ctx.messageId ?? null,
+        model: ctx.model ?? null,
+        provider: ctx.provider ?? null,
+        idempotency_key: ctx.idempotencyKey,
+        reservation_id: reservationId,
+        estimated_credits: estimatedCredits,
+      },
     })
     .select("id")
     .single();
 
   if (runError) {
-    if (runError.code === "23505") {
-      // Duplicate key race — fetch existing and validate ownership
-      const { data: race } = await supabaseAdmin
-        .from("agent_runs")
-        .select("id, credits_charged, user_id, agent_instance_id")
-        .eq("idempotency_key", ctx.idempotencyKey)
-        .maybeSingle();
-      if (race) {
-        // Validate ownership before reusing
-        const { data: raceUser } = await supabaseAdmin
-          .from("users")
-          .select("clerk_id")
-          .eq("id", race.user_id)
-          .maybeSingle();
-        if (raceUser?.clerk_id !== ctx.clerkId) {
-          return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another user", reservedCredits: 0 };
-        }
-        if (race.agent_instance_id !== ctx.agentInstanceId) {
-          return { ok: false, runId: null, status: 403, error: "Idempotency key belongs to another agent instance", reservedCredits: 0 };
-        }
-        return { ok: true, runId: race.id, reservedCredits: race.credits_charged || 0 };
-      }
-      return { ok: false, runId: null, status: 500, error: "Duplicate key but existing run not found", reservedCredits: 0 };
-    }
-    // Run-row insert failed — refund the reservation if it was made
-    if (estimatedCredits > 0) {
-      const { error: refundErr } = await supabaseAdmin.rpc("refund_credits", {
-        p_run_id: null,
-        p_credits: estimatedCredits,
+    // Run-row insert failed — release the reservation if it was made
+    if (reservationId && estimatedCredits > 0) {
+      const { error: releaseErr } = await supabaseAdmin.rpc("release_bits", {
+        p_reservation_id: reservationId,
+        p_idempotency_key: ctx.idempotencyKey + ":release-on-insert-fail",
       });
-      if (refundErr) {
-        console.error(`[agent-billing] CRITICAL: run insert failed AND refund failed. User ${ctx.clerkId} may have lost ${estimatedCredits} credits. Error: ${refundErr.message}`);
-        await createReconciliationRecord(ctx, estimatedCredits, "refund_after_insert_failure", refundErr.message);
+      if (releaseErr) {
+        console.error(
+          `[agent-billing] CRITICAL: run insert failed AND release failed. ` +
+          `User ${ctx.clerkId} may have ${estimatedCredits} BITS stuck in reservation ${reservationId}. ` +
+          `Error: ${releaseErr.message}`,
+        );
+        await createReconciliationRecord(ctx, estimatedCredits, "release_after_insert_failure", releaseErr.message, reservationId);
       }
     }
-    return { ok: false, runId: null, status: 500, error: runError.message, reservedCredits: 0 };
+    return { ok: false, runId: null, reservationId: null, status: 500, error: runError.message, reservedCredits: 0 };
   }
 
-  return { ok: true, runId: runRow.id, reservedCredits: estimatedCredits };
+  return { ok: true, runId: runRow.id, reservationId, reservedCredits: estimatedCredits };
 }
 
 /**
  * Settle a run after the model call completes.
  *
- * 1. If actual cost < reserved credits, refund the difference.
- * 2. Update the agent_runs row with final token counts and status.
- * 3. Update the agent instance's last_active_at.
+ * Flow:
+ *   1. If status='completed': call settle_bits with actual cost.
+ *      - If actual < reserved: settle_bits releases the difference automatically.
+ *      - If actual > reserved: settle_bits with overage_policy='reject' (default).
+ *   2. If status='failed' or 'cancelled': call release_bits to return all reserved BITS.
+ *   3. Update the agent_runs row with final status and output.
  *
- * If the model call failed, refund ALL reserved credits and mark as failed.
+ * The reservationId from reserveCredits() MUST be passed through.
  */
 export async function settleRun(
   runId: string,
@@ -224,73 +209,111 @@ export async function settleRun(
     error?: string;
   },
   reservedCredits: number,
+  reservationId: string | null,
 ): Promise<SettleResult> {
   if (!supabaseAdmin) {
-    return { ok: false, runId, creditsCharged: 0, creditsRefunded: 0 };
+    return { ok: false, runId, reservationId, creditsCharged: 0, creditsRefunded: 0 };
   }
 
-  const creditsToCharge = result.status === "completed" ? result.actualCredits : 0;
-  const creditsToRefund = Math.max(0, reservedCredits - creditsToCharge);
+  let creditsCharged = 0;
+  let creditsRefunded = 0;
 
-  // Refund unused credits
-  if (creditsToRefund > 0) {
-    const { error: refundError } = await supabaseAdmin.rpc("refund_credits", {
-      p_run_id: runId,
-      p_credits: creditsToRefund,
+  if (result.status === "completed" && reservationId && result.actualCredits > 0) {
+    // Settle: debit actual cost, release remainder
+    const { data: settleData, error: settleError } = await supabaseAdmin.rpc("settle_bits", {
+      p_reservation_id: reservationId,
+      p_actual_amount: result.actualCredits,
+      p_idempotency_key: runId + ":settle",
+      p_overage_policy: "reject",
+      p_description: `Agent run settled: ${runId}`,
     });
 
-    if (refundError) {
-      console.error(`[agent-billing] CRITICAL: refund_credits failed for run ${runId}. Credits to refund: ${creditsToRefund}. Error: ${refundError.message}`);
-      await createReconciliationRecord({
-        clerkId: "",
-        agentInstanceId: "",
-        agentId: null,
-        agentVersionId: null,
-        idempotencyKey: runId,
-      }, creditsToRefund, "refund_failed", refundError.message);
+    if (settleError) {
+      console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
+      await createReconciliationRecord(
+        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+        result.actualCredits,
+        "settle_failed",
+        settleError.message,
+        reservationId,
+      );
+    } else if (settleData?.success) {
+      creditsCharged = settleData.settled_amount;
+      creditsRefunded = settleData.released_amount;
+    } else {
+      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleData?.reason}`);
+      await createReconciliationRecord(
+        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+        result.actualCredits,
+        "settle_rejected",
+        settleData?.reason ?? "unknown",
+        reservationId,
+      );
+    }
+  } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
+    // Release: execution failed, return all reserved BITS
+    const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+      p_reservation_id: reservationId,
+      p_idempotency_key: runId + ":release",
+    });
+
+    if (releaseError) {
+      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError.message}`);
+      await createReconciliationRecord(
+        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+        reservedCredits,
+        "release_failed",
+        releaseError.message,
+        reservationId,
+      );
+    } else {
+      creditsRefunded = reservedCredits;
+    }
+  } else if (result.status === "completed" && result.actualCredits === 0) {
+    // Free run — nothing to settle, but release the reservation if one was made
+    if (reservationId && reservedCredits > 0) {
+      const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+        p_reservation_id: reservationId,
+        p_idempotency_key: runId + ":release-free",
+      });
+      if (releaseError) {
+        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError.message}`);
+      } else {
+        creditsRefunded = reservedCredits;
+      }
     }
   }
 
-  // Update the agent_runs row
+  // Update the agent_runs row (using production schema columns)
   const { error: updateError } = await supabaseAdmin
     .from("agent_runs")
     .update({
-      input_tokens: result.inputTokens,
-      output_tokens: result.outputTokens,
-      credits_charged: creditsToCharge,
       status: result.status,
-      error: result.error ?? null,
-      completed_at: new Date().toISOString(),
+      output: {
+        input_tokens: result.inputTokens,
+        output_tokens: result.outputTokens,
+        credits_charged: creditsCharged,
+        credits_refunded: creditsRefunded,
+        reservation_id: reservationId,
+        error: result.error ?? null,
+      },
+      updated_at: new Date().toISOString(),
     })
     .eq("id", runId);
 
   if (updateError) {
     console.error(`[agent-billing] CRITICAL: agent_runs update failed for run ${runId}. Error: ${updateError.message}`);
-    await createReconciliationRecord({
-      clerkId: "",
-      agentInstanceId: "",
-      agentId: null,
-      agentVersionId: null,
-      idempotencyKey: runId,
-    }, creditsToCharge, "settlement_update_failed", updateError.message);
-    return { ok: false, runId, creditsCharged: creditsToCharge, creditsRefunded: 0 };
+    await createReconciliationRecord(
+      { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+      creditsCharged,
+      "settlement_update_failed",
+      updateError.message,
+      reservationId,
+    );
+    return { ok: false, runId, reservationId, creditsCharged, creditsRefunded: 0 };
   }
 
-  // Update the agent instance's last_active_at
-  const { data: run } = await supabaseAdmin
-    .from("agent_runs")
-    .select("agent_instance_id")
-    .eq("id", runId)
-    .maybeSingle();
-
-  if (run?.agent_instance_id) {
-    void supabaseAdmin
-      .from("user_agents")
-      .update({ last_active_at: new Date().toISOString() })
-      .eq("id", run.agent_instance_id);
-  }
-
-  return { ok: true, runId, creditsCharged: creditsToCharge, creditsRefunded: creditsToRefund };
+  return { ok: true, runId, reservationId, creditsCharged, creditsRefunded };
 }
 
 /**
@@ -327,20 +350,26 @@ export async function completeAgentRun(
     status: "completed" | "failed" | "cancelled";
     error?: string;
   },
+  reservationId?: string | null,
 ): Promise<{ runId: string; ok: boolean; creditsCharged: number }> {
-  const settleResult = await settleRun(runId, {
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-    actualCredits: result.creditsCharged,
-    status: result.status,
-    error: result.error,
-  }, result.creditsCharged);
+  const settleResult = await settleRun(
+    runId,
+    {
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      actualCredits: result.creditsCharged,
+      status: result.status,
+      error: result.error,
+    },
+    result.creditsCharged,
+    reservationId ?? null,
+  );
 
   return { runId, ok: settleResult.ok, creditsCharged: settleResult.creditsCharged };
 }
 
 /**
- * Create a reconciliation record when settlement or refund fails.
+ * Create a reconciliation record when settlement or release fails.
  * This ensures failed financial operations are tracked and can be retried.
  */
 async function createReconciliationRecord(
@@ -348,6 +377,7 @@ async function createReconciliationRecord(
   credits: number,
   reason: string,
   errorMessage: string,
+  reservationId?: string | null,
 ): Promise<void> {
   if (!supabaseAdmin) return;
   try {

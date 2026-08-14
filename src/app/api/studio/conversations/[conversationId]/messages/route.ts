@@ -451,6 +451,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // 11.5. Reserve credits BEFORE the model call (marketplace agents only)
   let agentRunId: string | null = null;
   let reservedCredits = 0;
+  let reservationId: string | null = null;
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -486,6 +487,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
     agentRunId = reserveResult.runId;
     reservedCredits = reserveResult.reservedCredits;
+    reservationId = reserveResult.reservationId;
   }
 
   const category = (body.category as ModelCategory | undefined) ?? "auto";
@@ -611,7 +613,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: "completed",
-            }, reservedCredits);
+            }, reservedCredits, reservationId);
           }
 
           void persistMemory(
@@ -706,7 +708,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: "completed",
-            }, reservedCredits);
+            }, reservedCredits, reservationId);
           }
 
           void persistMemory(
@@ -759,7 +761,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             actualCredits: 0,
             status: "failed",
             error: err instanceof Error ? err.message : "LLM provider unavailable",
-          }, reservedCredits);
+          }, reservedCredits, reservationId);
         }
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
         studioLog("message:failed", {
