@@ -40,14 +40,7 @@ import {
   classifyCommand,
   type RiskAssessment,
   type MissionMode,
-  RuntimeApprovalProvider,
-  type ApprovalContext,
-  type ApprovalRequestInput,
-  type VerifiedApproval,
-  toVerifiedApproval,
-  type ApprovalDecision,
   ExecutionGateway,
-  type ExecutionRequest,
   ToolRegistry,
   createShellExecutor,
 } from "@litt/agent-core";
@@ -136,7 +129,6 @@ export class CliAgentLoop {
   private readonly onStream: AgentStreamHandler | null;
   private readonly onEvent: AgentEventHandler | null;
   private readonly onApprovalRequired: AgentApprovalHandler | null;
-  private readonly approvalProvider: RuntimeApprovalProvider;
   private readonly tenantId: string;
   private readonly userId: string;
   private readonly projectId: string;
@@ -154,7 +146,6 @@ export class CliAgentLoop {
     this.onStream = options.onStream ?? null;
     this.onEvent = options.onEvent ?? null;
     this.onApprovalRequired = options.onApprovalRequired ?? null;
-    this.approvalProvider = new RuntimeApprovalProvider();
     this.tenantId = options.tenantId ?? "cli-tenant";
     this.userId = options.userId ?? "cli-user";
     this.projectId = options.projectId ?? "cli-project";
@@ -256,41 +247,29 @@ export class CliAgentLoop {
 
   /**
    * Execute a single step through the hardened pipeline.
+   *
+   * The gateway OWNS the full approval flow. The CLI does NOT do its own
+   * approval check — it passes the interactive callback to the gateway,
+   * which calls it via SEC-4's requestApproval() → decide() → verifyApproval().
    */
   private async executeStep(step: AgentStep): Promise<AgentStepResult> {
     const toolCallId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // 1. Risk classification — no bypass for agent-originated execution
+    // Risk classification for the step result (informational — the gateway
+    // does its own classification internally)
     const risk = classifyCommand(step.command, step.args, this.session.getState().project?.root ?? process.cwd());
 
-    // 2. Approval check — if the command is elevated/dangerous and mode requires it
-    const approved = await this.checkApproval(step, risk);
-    if (!approved) {
-      return {
-        step,
-        result: {
-          status: "failed",
-          success: false,
-          message: `Approval denied for ${risk.level} command: ${step.command} ${step.args.join(" ")}`,
-          data: { risk, reason: "approval_denied" },
-        },
-        runId: this.currentRunId!,
-        toolCallId,
-        status: "failed",
-        durationMs: 0,
-        risk,
-        approved: false,
-      };
-    }
-
-    // 3. Execute through the ExecutionGateway (the ONE canonical authority)
-    //    This goes through: ExecutionGateway → CommandExecutor → runCommand() → ShellExecutor
-    //    No spawn/exec/execFile bypass — everything goes through this path.
-    //    The gateway enforces identity, grant, policy, approval, and credential
-    //    checks before dispatching to CommandExecutor.
+    // Execute through the ExecutionGateway (the ONE canonical authority)
+    // This goes through: ExecutionGateway → CommandExecutor → runCommand() → ShellExecutor
+    // No spawn/exec/execFile bypass — everything goes through this path.
+    // The gateway enforces identity, grant, policy, approval, and credential
+    // checks before dispatching to CommandExecutor.
     //
-    //    For shell commands, we use the "project.run" tool which the gateway
-    //    routes through CommandExecutor → runCommand() (the hardened boundary).
+    // For shell commands, we use the "project.run" tool which the gateway
+    // routes through CommandExecutor → runCommand() (the hardened boundary).
+    //
+    // Approval: the gateway calls onApprovalRequired() (passed in the
+    // constructor) when policy requires it. No preApproved bypass.
     const gateway = this.getOrCreateGateway();
     const gwResult = await gateway.execute({
       toolId: "project.run",
@@ -308,12 +287,6 @@ export class CliAgentLoop {
       toolCallId,
       timeoutMs: step.timeoutMs,
       onStream: this.onStream ?? undefined,
-      // The CLI agent loop already performed approval via checkApproval().
-      // Pass preApproved=true so the gateway skips its own approval check
-      // (which would fail because the gateway has no synchronous handler).
-      // The gateway still enforces policy (PLAN mode rejects, dangerous
-      // denied in AUTO) — only the approval step is skipped.
-      preApproved: approved,
     });
 
     return {
@@ -344,6 +317,25 @@ export class CliAgentLoop {
       shell: createShellExecutor(cwd),
       executor: this.session.getExecutor(),
       projectId: this.projectId,
+      // Pass the CLI's interactive approval callback to the gateway.
+      // The gateway OWNS the full SEC-4 approval flow:
+      //   requestApproval() → onApprovalRequired() → decide() → verifyApproval() → VerifiedApproval
+      // The CLI does NOT do its own approval check — the gateway is the sole authority.
+      onApprovalRequired: this.onApprovalRequired
+        ? async (request, risk) => {
+            // Adapt the gateway's (ExecutionRequest, RiskAssessment) signature
+            // to the CLI's (AgentStep, RiskAssessment) signature
+            const step: AgentStep = {
+              index: -1,
+              toolCallId: request.toolCallId ?? "",
+              command: typeof request.inputs.command === "string" ? request.inputs.command : "",
+              args: Array.isArray(request.inputs.args)
+                ? request.inputs.args.filter((a): a is string => typeof a === "string")
+                : [],
+            };
+            return this.onApprovalRequired!(step, risk as RiskAssessment);
+          }
+        : null,
     });
     return this._gateway;
   }
@@ -351,141 +343,13 @@ export class CliAgentLoop {
   /**
    * Check if a step requires approval and handle it.
    *
-   * This integrates with the RuntimeApprovalProvider from SEC-4.
-   * In AUTO mode, dangerous commands are denied (no bypass).
-   * In PLAN mode, all mutations are rejected by runCommand() already.
-   * In ACT mode, elevated commands require approval.
+   * REMOVED: checkApproval() — the gateway now OWNS the full SEC-4
+   * approval flow. The CLI passes its interactive callback to the
+   * gateway constructor, which calls it via:
+   *   requestApproval() → onApprovalRequired() → decide() → verifyApproval()
+   *   → VerifiedApproval → capsule.approval
+   * No boolean bypass. No second approval path.
    */
-  private async checkApproval(step: AgentStep, risk: RiskAssessment): Promise<boolean> {
-    // Safe commands never need approval
-    if (risk.level === "safe") {
-      return true;
-    }
-
-    // PLAN mode: mutations are rejected by runCommand() — but we also
-    // reject here to avoid even attempting the execution.
-    if (this.mode === "plan" && risk.mutating) {
-      return false;
-    }
-
-    // AUTO mode: dangerous commands are always denied (no bypass)
-    if (this.mode === "auto" && risk.level === "dangerous") {
-      return false;
-    }
-
-    // ACT mode: elevated commands need approval
-    // AUTO mode: elevated commands are allowed (auto-approve)
-    if (this.mode === "auto" && risk.level === "elevated") {
-      return true; // auto-approve elevated in AUTO mode
-    }
-
-    // ACT mode with elevated/dangerous: need explicit approval
-    if (this.onApprovalRequired) {
-      // Use the RuntimeApprovalProvider for cryptographic binding
-      const approvalInput: ApprovalRequestInput = {
-        tenantId: this.tenantId,
-        userId: this.userId,
-        runId: this.currentRunId!,
-        projectId: this.projectId,
-        toolId: step.command,
-        operation: {
-          tenantId: this.tenantId,
-          userId: this.userId,
-          actorId: this.userId,
-          runId: this.currentRunId!,
-          toolId: step.command,
-          action: `${step.command} ${step.args.join(" ")}`,
-          resourceScope: [`workspace:${this.projectId}`],
-          environment: "development",
-          normalizedInput: { command: step.command, args: step.args, cwd: process.cwd() },
-        },
-        risk: risk.level === "dangerous" ? "critical" : "high",
-        scope: "once",
-      };
-
-      const approvalContext: ApprovalContext = {
-        executionMode: this.mode,
-        interaction: "interactive",
-        tenantId: this.tenantId,
-      };
-
-      const record = await this.approvalProvider.requestApproval(approvalInput, approvalContext);
-
-      if (record.status === "denied") {
-        return false;
-      }
-
-      if (record.status === "pending") {
-        // Ask the human via the callback
-        const humanApproved = await this.onApprovalRequired(step, risk);
-        const decision: ApprovalDecision = {
-          approvalId: record.approvalId,
-          decision: humanApproved ? "approve" : "deny",
-          approverActorId: this.userId,
-          approverUserId: this.userId,
-        };
-
-        const decided = this.approvalProvider.decide(decision);
-
-        if (decided.status !== "approved") {
-          return false;
-        }
-
-        // Verify the approval cryptographically
-        const verification = this.approvalProvider.verifyApproval(
-          decided,
-          {
-            tenantId: this.tenantId,
-            userId: this.userId,
-            actorId: this.userId,
-            runId: this.currentRunId!,
-            toolId: step.command,
-            action: `${step.command} ${step.args.join(" ")}`,
-            resourceScope: [`workspace:${this.projectId}`],
-            environment: "development",
-            normalizedInput: { command: step.command, args: step.args, cwd: process.cwd() },
-          },
-          {
-            tenantId: this.tenantId,
-            userId: this.userId,
-            runId: this.currentRunId!,
-          },
-        );
-
-        if (verification.status !== "valid") {
-          return false;
-        }
-
-        // Promote to VerifiedApproval (the only way to get one)
-        try {
-          const verified: VerifiedApproval = toVerifiedApproval(verification);
-          // verified is now the cryptographic proof — but we don't need
-          // to pass it to CommandExecutor because runCommand() does its
-          // own approval check via the approvalProvider option.
-          // The important thing is that we went through the full
-          // approval chain here.
-          void verified; // verified approval confirmed
-        } catch {
-          return false;
-        }
-      }
-
-      return true;
-    }
-
-    // No approval handler provided:
-    // - dangerous → deny (fail closed)
-    // - elevated in ACT mode → deny (fail closed)
-    if (risk.level === "dangerous") {
-      return false;
-    }
-    if (this.mode === "act" && risk.level === "elevated") {
-      return false;
-    }
-
-    // Default: allow (shouldn't reach here for dangerous/elevated in ACT)
-    return true;
-  }
 }
 
 // ─── Helper: create an agent loop from a RuntimeSession ───────────

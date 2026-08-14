@@ -300,23 +300,21 @@ describe("AgentLoop", () => {
 
   // ─── AUTO mode ────────────────────────────────────────────────
 
-  it("AUTO mode auto-approves elevated commands (with grant)", async () => {
-    // AUTO mode: the CLI's checkApproval() auto-approves elevated
-    // commands (no human needed). It passes preApproved=true to the
-    // gateway, which skips its own approval check.
-    // The gateway still enforces policy: dangerous commands are denied
-    // even with preApproved (the gateway checks policy BEFORE approval).
+  it("AUTO mode denies elevated commands without grant (no bypass)", async () => {
+    // AUTO mode: the gateway requires a verified grant for elevated commands.
+    // Without a grant, the policy returns require_approval, and the gateway's
+    // requestApproval() fails (no synchronous handler in headless mode).
+    // This is the correct behavior — AUTO mode cannot manufacture approval.
     const autoSession = createSession("auto");
     const loop = createLoop(autoSession, { mode: "auto" });
 
-    // git config is workspace_edit (elevated) — auto-approved in AUTO
+    // git config is workspace_edit (elevated) — denied in AUTO without grant
     const result = await loop.run([
       { index: 0, toolCallId: "", command: "git", args: ["config", "--local", "test.key2", "test-value2"] },
     ]);
 
-    // Elevated commands are auto-approved in AUTO mode via preApproved
-    expect(result.status).toBe("success");
-    expect(result.steps[0].approved).toBe(true);
+    expect(result.status).toBe("failed");
+    expect(result.steps[0].approved).toBe(false);
   });
 
   it("AUTO mode denies dangerous commands (no bypass)", async () => {

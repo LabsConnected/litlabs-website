@@ -79,8 +79,8 @@ import {
 } from "./contracts/grant-verifier.js";
 import type { CapabilityGrant, VerifiedCapabilityGrant } from "./contracts/capability.js";
 import type { PolicyEffect, ActionRisk, Environment } from "./contracts/policy.js";
-import type { ExecutionMode, InteractionMode, RuntimeIdentity } from "./contracts/identity.js";
-import type { CredentialLease } from "./contracts/credential.js";
+import type { ExecutionMode, InteractionMode, RuntimeIdentity, RunIdentity, IdentityContext } from "./contracts/identity.js";
+import type { CredentialLease, CredentialBroker, CredentialRequest } from "./contracts/credential.js";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -120,13 +120,6 @@ export interface ExecutionRequest {
   timeoutMs?: number;
   /** Optional stream callback */
   onStream?: (chunk: StreamChunk) => void;
-  /**
-   * Optional pre-verified approval. If provided, the gateway skips its
-   * own approval check. This is used when the caller (e.g. CLI agent loop)
-   * has already performed the approval interactively and wants to pass
-   * the verified result to the gateway.
-   */
-  preApproved?: boolean;
 }
 
 /** The result of a gateway execution. */
@@ -231,6 +224,13 @@ export interface ExecutionGatewayOptions {
    * If not provided, pending approvals are denied (fail closed).
    */
   onApprovalRequired?: ((request: ExecutionRequest, risk: RiskAssessment | null) => Promise<boolean>) | null;
+  /**
+   * Optional credential broker (SEC-5).
+   * When provided, the gateway resolves credential leases for tools
+   * that declare credential requirements (via metadata.requiresCredentials).
+   * When not provided, tools requiring credentials are denied.
+   */
+  credentialBroker?: CredentialBroker | null;
 }
 
 // ─── ExecutionGateway ─────────────────────────────────────────────
@@ -245,6 +245,7 @@ export class ExecutionGateway {
   private readonly _grantVerifier: GrantVerifier | null;
   private readonly _projectId: string;
   private readonly _onApprovalRequired: ((request: ExecutionRequest, risk: RiskAssessment | null) => Promise<boolean>) | null;
+  private readonly _credentialBroker: CredentialBroker | null;
 
   constructor(options: ExecutionGatewayOptions) {
     this._tools = options.tools;
@@ -256,6 +257,7 @@ export class ExecutionGateway {
     this._grantVerifier = options.grantVerifier ?? null;
     this._projectId = options.projectId ?? "default";
     this._onApprovalRequired = options.onApprovalRequired ?? null;
+    this._credentialBroker = options.credentialBroker ?? null;
   }
 
   /**
@@ -348,31 +350,118 @@ export class ExecutionGateway {
       return this.deny(runId, toolCallId, t0, reason, risk, false, grantVerified);
     }
 
+    // ─── 4b. Identity trust enforcement ───────────────────────
+    // An untrusted identity (model/agent) cannot claim elevated or
+    // destructive capabilities without a verified grant. This check
+    // runs AFTER policy evaluation so that:
+    //   - PLAN mutations are denied by policy (not here)
+    //   - AUTO dangerous is denied by policy (not here)
+    //   - ACT elevated goes to require_approval (not denied here)
+    // This only blocks when policy says "allow" but the capability
+    // tier is dangerous/destructive/external_action and the caller
+    // is untrusted with no verified grant.
+    if (policyEffect === "allow" && !request.identity.trusted && !grantVerified) {
+      const requestedTier = this.getCapabilityTier(request, metadata);
+      if (requestedTier === "arbitrary_code" || requestedTier === "destructive" || requestedTier === "external_action") {
+        return this.deny(
+          runId, toolCallId, t0,
+          `Untrusted identity cannot execute ${requestedTier} capability without a verified grant`,
+          risk, false, false,
+        );
+      }
+    }
+
     // ─── 5. Approval enforcement ───────────────────────────────
+    // The gateway OWNS the full SEC-4 approval flow:
+    //   requestApproval() → onApprovalRequired() → decide() → verifyApproval() → VerifiedApproval
+    // No boolean substitute. No caller saying "trust me, I approved it."
     let approved = false;
     let verifiedApproval: VerifiedApproval | null = null;
 
     if (policyEffect === "require_approval") {
-      // If the caller pre-approved (e.g. CLI agent loop with interactive
-      // approval handler), skip the gateway's own approval check.
-      if (request.preApproved) {
-        approved = true;
-      } else {
-        const approvalResult = await this.requestApproval(request, runId, toolCallId, risk, metadata);
-        if (!approvalResult) {
-          return this.deny(
-            runId, toolCallId, t0,
-            "Approval denied or not available",
-            risk, false, grantVerified,
-            "require_approval",
-          );
-        }
-        approved = true;
-        // approvalResult is a boolean; verifiedApproval stays null
-        // (the actual VerifiedApproval object is not available here)
+      const approvalResult = await this.requestApproval(request, runId, toolCallId, risk, metadata);
+      if (!approvalResult) {
+        return this.deny(
+          runId, toolCallId, t0,
+          "Approval denied or not available",
+          risk, false, grantVerified,
+          "require_approval",
+        );
       }
+      // approvalResult is a VerifiedApproval — the cryptographic proof
+      verifiedApproval = approvalResult;
+      approved = true;
     } else if (policyEffect === "allow") {
       approved = true;
+    }
+
+    // ─── 5b. Invariant: require_approval MUST produce a VerifiedApproval ─
+    // No boolean substitute can bypass this. If policy required approval
+    // but we don't have a VerifiedApproval object, deny immediately.
+    if (policyEffect === "require_approval" && !verifiedApproval) {
+      return this.deny(
+        runId, toolCallId, t0,
+        "Policy required approval but no VerifiedApproval was produced",
+        risk, false, grantVerified,
+        "require_approval",
+      );
+    }
+
+    // ─── 5c. Credential lease resolution (SEC-5) ───────────────
+    // If the tool declares credential requirements, resolve leases
+    // BEFORE capsule creation. A credential-required tool with zero
+    // valid leases is denied. The leases are attached to the capsule.
+    let credentialLeases: CredentialLease[] = [];
+    if (metadata.requiresCredentials && metadata.requiresCredentials.length > 0) {
+      if (!this._credentialBroker) {
+        return this.deny(
+          runId, toolCallId, t0,
+          "Tool requires credentials but no credential broker is configured",
+          risk, approved, grantVerified,
+        );
+      }
+      if (!verifiedGrant) {
+        return this.deny(
+          runId, toolCallId, t0,
+          "Tool requires credentials but no verified grant was provided",
+          risk, approved, grantVerified,
+        );
+      }
+      for (const req of metadata.requiresCredentials) {
+        const credentialRequest: CredentialRequest = {
+          provider: req.provider,
+          runId,
+          actorId: request.identity.actorId,
+          capabilityGrantId: verifiedGrant.grant.grantId,
+          scopes: req.scopes,
+          resourceScope: [`workspace:${this._projectId}`],
+          audience: req.audience,
+          durationSeconds: 300, // 5-minute default lease
+          projectId: this._projectId,
+        };
+        try {
+          const runtimeIdentity = this.buildRuntimeIdentity(request, runId);
+          const resolution = await this._credentialBroker.resolve(
+            runtimeIdentity,
+            verifiedGrant,
+            credentialRequest,
+          );
+          if (resolution.status === "denied") {
+            return this.deny(
+              runId, toolCallId, t0,
+              `Credential lease denied for ${req.provider}: ${resolution.reason}`,
+              risk, approved, grantVerified,
+            );
+          }
+          credentialLeases.push(resolution.lease);
+        } catch (err) {
+          return this.deny(
+            runId, toolCallId, t0,
+            `Credential broker error for ${req.provider}: ${err instanceof Error ? err.message : String(err)}`,
+            risk, approved, grantVerified,
+          );
+        }
+      }
     }
 
     // ─── 6. Create GatewayExecutionCapsule ────────────────────
@@ -384,12 +473,13 @@ export class ExecutionGateway {
       toolCallId,
       verifiedGrant,
       verifiedApproval,
+      credentialLeases,
     );
 
     // ─── 7. Verify capsule before dispatch ─────────────────────
     // This is the final gate. Even if all prior checks passed,
     // the capsule verification catches any inconsistency.
-    const capsuleVerification = this.verifyCapsule(capsule, request);
+    const capsuleVerification = this.verifyCapsule(capsule, request, policyEffect);
     if (!capsuleVerification.valid) {
       return this.deny(
         runId, toolCallId, t0,
@@ -508,6 +598,7 @@ export class ExecutionGateway {
     toolCallId: string,
     grant: VerifiedCapabilityGrant | null,
     approval: VerifiedApproval | null,
+    credentialLeases: CredentialLease[],
   ): GatewayExecutionCapsule {
     const now = Date.now();
     const capsuleTtlMs = 60_000; // capsules expire after 60 seconds
@@ -517,7 +608,7 @@ export class ExecutionGateway {
       identity: request.identity,
       grant,
       approval,
-      credentialLeases: [], // SEC-5 leases would be attached here in full integration
+      credentialLeases,
       runId,
       toolCallId,
       capability: request.toolId,
@@ -543,6 +634,7 @@ export class ExecutionGateway {
   private verifyCapsule(
     capsule: GatewayExecutionCapsule,
     request: ExecutionRequest,
+    policyEffect: PolicyEffect,
   ): { valid: boolean; reason: string | null } {
     // 1. Expiry check
     if (Date.now() > capsule.expiresAt) {
@@ -584,7 +676,13 @@ export class ExecutionGateway {
       }
     }
 
-    // 7. Approval validity (if approval present)
+    // 7. Approval validity — if policy required approval, the capsule
+    //    MUST have a VerifiedApproval. No boolean substitute accepted.
+    if (policyEffect === "require_approval" && !capsule.approval) {
+      return { valid: false, reason: "capsule_missing_required_approval" };
+    }
+
+    // 8. If approval is present, verify it's still valid
     if (capsule.approval) {
       // VerifiedApproval.status is always "valid" (promoted via toVerifiedApproval)
       if (capsule.approval.status !== "valid") {
@@ -820,6 +918,37 @@ export class ExecutionGateway {
     };
   }
 
+  // ─── Runtime identity construction ───────────────────────────────
+
+  /**
+   * Build a RuntimeIdentity from an ExecutionIdentity for the credential broker.
+   * The broker requires the full RuntimeIdentity (run + identity context).
+   */
+  private buildRuntimeIdentity(request: ExecutionRequest, runId: string): RuntimeIdentity {
+    const run: RunIdentity = {
+      runId,
+      tenantId: request.identity.tenantId,
+      userId: request.identity.userId,
+      conversationId: null,
+      projectId: this._projectId,
+      missionId: null,
+      executionMode: request.mode as ExecutionMode,
+      interaction: request.identity.interaction,
+      createdAt: new Date().toISOString(),
+    };
+    const identity: IdentityContext = {
+      principalId: request.identity.userId,
+      principalType: request.identity.trusted ? "service" : "user",
+      sessionId: null,
+      tenantId: request.identity.tenantId,
+      workspaceId: null,
+      projectId: this._projectId,
+      authenticationStrength: "standard",
+      establishedAt: new Date().toISOString(),
+    };
+    return { run, identity };
+  }
+
   // ─── Denial helper ──────────────────────────────────────────────
 
   private deny(
@@ -879,6 +1008,43 @@ export class ExecutionGateway {
       return `Elevated command (${risk.capability}) requires approval in ACT mode`;
     }
     return "Policy denied execution";
+  }
+
+  // ─── Capability tier resolution ──────────────────────────────────
+
+  /**
+   * Resolve the capability tier for an execution request.
+   *
+   * For shell commands (project.run), the tier comes from the risk
+   * assessment's capability field. For other tools, it's derived from
+   * the tool metadata (mutating → workspace_edit, read-only → read_only).
+   */
+  private getCapabilityTier(
+    request: ExecutionRequest,
+    metadata: ToolMetadata,
+  ): CapabilityTier {
+    if (request.toolId === "project.run") {
+      const command = typeof request.inputs.command === "string" ? request.inputs.command : "";
+      const args = Array.isArray(request.inputs.args)
+        ? request.inputs.args.filter((a): a is string => typeof a === "string")
+        : [];
+      const risk = classifyCommand(command, args, request.cwd);
+      // Map risk level to capability tier
+      if (risk.level === "dangerous") {
+        // Dangerous commands are external_action or destructive
+        if (risk.capability.includes("rm") || risk.capability.includes("del") || risk.capability.includes("format")) {
+          return "destructive";
+        }
+        return "external_action";
+      }
+      if (risk.level === "elevated") {
+        return "arbitrary_code";
+      }
+      return "read_only";
+    }
+    // Non-shell tools
+    if (metadata.mutating) return "workspace_edit";
+    return "read_only";
   }
 
   // ─── Event emission ─────────────────────────────────────────────

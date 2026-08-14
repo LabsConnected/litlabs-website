@@ -134,6 +134,18 @@ export interface ToolMetadata {
   projectScoped: boolean;
   mutating: boolean;
   readOnly: boolean;
+  /**
+   * Optional credential requirements (SEC-5).
+   * If provided, the ExecutionGateway resolves credential leases
+   * before dispatching the tool. Each entry specifies a provider
+   * and the scopes needed.
+   * A tool with requiresCredentials cannot execute without valid leases.
+   */
+  requiresCredentials?: Array<{
+    provider: string;
+    scopes: string[];
+    audience: string | null;
+  }>;
 }
 
 export interface ToolEntry {
