@@ -134,7 +134,7 @@ export interface GrantIntegrity {
 // ─── Grant verification status ────────────────────────────────────
 
 /**
- * The result of verifying a capability grant.
+ * The status of a grant verification attempt.
  *
  * Produced by GrantVerifier, NOT serialized inside the grant itself.
  * An attacker-controlled incoming grant cannot self-assign "verified".
@@ -146,35 +146,71 @@ export interface GrantIntegrity {
 export type GrantVerificationStatus = "unverified" | "verified" | "invalid";
 
 /**
- * A capability grant that has been verified by a GrantVerifier.
+ * The full result of a grant verification attempt — a discriminated union.
  *
- * This type is the ONLY type that should be accepted at trust boundaries
- * requiring verified privileges. A raw CapabilityGrant must never be
- * trusted merely because it exists or has an integrity field.
+ * This is what GrantVerifier.verify() returns. It covers all three outcomes
+ * (unverified, verified, invalid) and is NOT trusted at privileged boundaries.
  *
  * Flow:
  *   CapabilityGrant (claims, possibly from untrusted source)
  *     ↓
  *   GrantVerifier.verify(grant)
  *     ↓
+ *   GrantVerificationResult (unverified | verified | invalid)
+ *     ↓
+ *   if verified → extract VerifiedCapabilityGrant
+ *     ↓
  *   VerifiedCapabilityGrant (trusted, safe to use at boundaries)
+ */
+export type GrantVerificationResult =
+  | {
+      status: "verified";
+      grant: CapabilityGrant;
+      verifiedBy: string;
+      verifiedAt: string;
+      keyId?: string;
+    }
+  | {
+      status: "unverified";
+      grant: CapabilityGrant;
+      reason?: string;
+    }
+  | {
+      status: "invalid";
+      grant: CapabilityGrant;
+      failureReason: string;
+    };
+
+/**
+ * A capability grant that has been CRYPTOGRAPHICALLY VERIFIED.
  *
- * Phase 1: GrantVerifier is a simple in-process trust check.
- * Phase 2/3: GrantVerifier performs cryptographic signature validation.
+ * This type is structurally impossible to construct without a successful
+ * verification — `status` is locked to `"verified"`. An unverified or
+ * invalid grant CANNOT be assigned to this type.
+ *
+ * This is the ONLY type that should be accepted at trust boundaries
+ * requiring verified privileges:
+ *
+ *   function executePrivilegedAction(grant: VerifiedCapabilityGrant) {}
+ *
+ * An invalid/unverified grant cannot structurally enter that API.
+ *
+ * Phase 1: in-process grants produce GrantVerificationResult with
+ * status="unverified". They do NOT magically become VerifiedCapabilityGrant.
+ * Phase 2/3: GrantVerifier performs cryptographic signature validation
+ * and returns status="verified" only when the signature is valid.
  */
 export interface VerifiedCapabilityGrant {
+  /** Locked to "verified" — this is the type-level guarantee */
+  status: "verified";
   /** The original grant claims */
   grant: CapabilityGrant;
-  /** Verification result */
-  verification: GrantVerificationStatus;
   /** Who verified the grant (e.g. "litt-kernel", "grant-verifier-v1") */
   verifiedBy: string;
   /** ISO timestamp of verification */
   verifiedAt: string;
   /** Key ID used for verification, if cryptographic */
-  keyId: string | null;
-  /** Reason if verification failed */
-  failureReason: string | null;
+  keyId?: string;
 }
 
 // ─── Grant budget ─────────────────────────────────────────────────

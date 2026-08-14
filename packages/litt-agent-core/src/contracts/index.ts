@@ -60,6 +60,7 @@ export type {
   GrantBudget,
   GrantIntegrity,
   GrantVerificationStatus,
+  GrantVerificationResult,
   VerifiedCapabilityGrant,
   CapabilityHealth,
   CapabilityHealthLabel,

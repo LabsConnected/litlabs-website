@@ -35,6 +35,7 @@ import {
   type CapabilityHealth,
   type GrantIntegrity,
   type GrantVerificationStatus,
+  type GrantVerificationResult,
   type VerifiedCapabilityGrant,
   deriveHealthLabel,
   // Credential
@@ -642,7 +643,7 @@ describe("Phase 1 — Grant verification: integrity does not imply trust", () =>
     // It must go through a GrantVerifier before being trusted.
   });
 
-  it("VerifiedCapabilityGrant is a separate type produced by verifier, not self-assigned", () => {
+  it("VerifiedCapabilityGrant locks status to 'verified' — cannot hold unverified or invalid", () => {
     const grant: CapabilityGrant = {
       grantId: "grant-1",
       tenantId: "tenant-1",
@@ -664,21 +665,20 @@ describe("Phase 1 — Grant verification: integrity does not imply trust", () =>
       policyVersion: "1.0.0",
     };
 
-    // VerifiedCapabilityGrant wraps the grant with verification metadata
-    // that is produced by the verifier, not by the grant itself.
+    // VerifiedCapabilityGrant can ONLY be constructed with status="verified".
+    // This is the type-level guarantee: an unverified or invalid grant
+    // cannot structurally enter a privileged boundary.
     const verified: VerifiedCapabilityGrant = {
+      status: "verified",
       grant,
-      verification: "verified",
       verifiedBy: "grant-verifier-v1",
       verifiedAt: new Date().toISOString(),
       keyId: "key-2026-01",
-      failureReason: null,
     };
 
-    assert.equal(verified.verification, "verified");
+    assert.equal(verified.status, "verified");
     assert.equal(verified.grant.grantId, "grant-1");
     assert.equal(verified.verifiedBy, "grant-verifier-v1");
-    assert.equal(verified.failureReason, null);
   });
 
   it("GrantVerificationStatus has three states: unverified, verified, invalid", () => {
@@ -689,7 +689,56 @@ describe("Phase 1 — Grant verification: integrity does not imply trust", () =>
     assert.ok(statuses.includes("invalid"));
   });
 
-  it("a failed verification produces invalid status with failure reason", () => {
+  it("GrantVerificationResult is a discriminated union covering all three outcomes", () => {
+    const grant: CapabilityGrant = {
+      grantId: "grant-test",
+      tenantId: "tenant-1",
+      userId: "abc123",
+      actorId: "user:abc123",
+      runId: "run-1",
+      projectId: null,
+      workspaceId: null,
+      capabilities: ["files:read"],
+      resourceScope: ["workspace:ws-1"],
+      networkScope: [],
+      riskTier: "low",
+      approvalId: null,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      audience: "litt-kernel",
+      nonce: "nonce-1",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
+    };
+
+    // Verified result
+    const verifiedResult: GrantVerificationResult = {
+      status: "verified",
+      grant,
+      verifiedBy: "grant-verifier-v1",
+      verifiedAt: new Date().toISOString(),
+      keyId: "key-2026-01",
+    };
+    assert.equal(verifiedResult.status, "verified");
+
+    // Unverified result (Phase 1 default)
+    const unverifiedResult: GrantVerificationResult = {
+      status: "unverified",
+      grant,
+      reason: "in-process trust, no cryptographic verification",
+    };
+    assert.equal(unverifiedResult.status, "unverified");
+
+    // Invalid result
+    const invalidResult: GrantVerificationResult = {
+      status: "invalid",
+      grant,
+      failureReason: "grant expired",
+    };
+    assert.equal(invalidResult.status, "invalid");
+  });
+
+  it("a failed verification produces GrantVerificationResult with invalid status, not VerifiedCapabilityGrant", () => {
     const grant: CapabilityGrant = {
       grantId: "grant-expired",
       tenantId: "tenant-1",
@@ -716,23 +765,21 @@ describe("Phase 1 — Grant verification: integrity does not imply trust", () =>
       },
     };
 
-    const rejected: VerifiedCapabilityGrant = {
+    // A failed verification returns GrantVerificationResult, NOT VerifiedCapabilityGrant.
+    // VerifiedCapabilityGrant cannot hold status="invalid".
+    const rejected: GrantVerificationResult = {
+      status: "invalid",
       grant,
-      verification: "invalid",
-      verifiedBy: "grant-verifier-v1",
-      verifiedAt: new Date().toISOString(),
-      keyId: "key-2026-01",
       failureReason: "grant expired",
     };
 
-    assert.equal(rejected.verification, "invalid");
-    assert.equal(rejected.failureReason, "grant expired");
+    assert.equal(rejected.status, "invalid");
+    if (rejected.status === "invalid") {
+      assert.equal(rejected.failureReason, "grant expired");
+    }
   });
 
-  it("Phase 1 in-process grants default to unverified status", () => {
-    // In Phase 1, grants are in-process trusted server objects.
-    // They don't have cryptographic verification yet.
-    // The default verification status is "unverified" — not "verified".
+  it("Phase 1 in-process grants produce unverified GrantVerificationResult, not VerifiedCapabilityGrant", () => {
     const phase1Grant: CapabilityGrant = {
       grantId: "grant-phase1",
       tenantId: "tenant-1",
@@ -755,19 +802,65 @@ describe("Phase 1 — Grant verification: integrity does not imply trust", () =>
       // No integrity field — Phase 1 in-process
     };
 
-    // Phase 1 default: unverified (trusted by process boundary, not crypto)
-    const phase1Verified: VerifiedCapabilityGrant = {
+    // Phase 1: in-process grants are "unverified" — they do NOT become
+    // VerifiedCapabilityGrant. They produce a GrantVerificationResult
+    // with status="unverified".
+    const phase1Result: GrantVerificationResult = {
+      status: "unverified",
       grant: phase1Grant,
-      verification: "unverified",
-      verifiedBy: "in-process-trust",
-      verifiedAt: new Date().toISOString(),
-      keyId: null,
-      failureReason: null,
+      reason: "in-process trust, no cryptographic verification",
     };
 
-    assert.equal(phase1Verified.verification, "unverified");
-    assert.equal(phase1Verified.keyId, null);
+    assert.equal(phase1Result.status, "unverified");
     assert.ok(!phase1Grant.integrity);
+    // This result cannot be assigned to VerifiedCapabilityGrant
+    // because status is "unverified", not "verified".
+  });
+
+  it("only verified GrantVerificationResult can be narrowed to VerifiedCapabilityGrant", () => {
+    const grant: CapabilityGrant = {
+      grantId: "grant-verified",
+      tenantId: "tenant-1",
+      userId: "abc123",
+      actorId: "user:abc123",
+      runId: "run-1",
+      projectId: null,
+      workspaceId: null,
+      capabilities: ["git:push"],
+      resourceScope: ["workspace:ws-1"],
+      networkScope: ["github.com"],
+      riskTier: "high",
+      approvalId: "appr-1",
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      audience: "litt-kernel",
+      nonce: "nonce-123",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
+      integrity: {
+        algorithm: "Ed25519",
+        keyId: "key-2026-01",
+        signature: "valid-signature",
+      },
+    };
+
+    const result: GrantVerificationResult = {
+      status: "verified",
+      grant,
+      verifiedBy: "grant-verifier-v1",
+      verifiedAt: new Date().toISOString(),
+      keyId: "key-2026-01",
+    };
+
+    // Only when status === "verified" can we extract a VerifiedCapabilityGrant
+    if (result.status === "verified") {
+      const trusted: VerifiedCapabilityGrant = result;
+      assert.equal(trusted.status, "verified");
+      assert.equal(trusted.grant.grantId, "grant-verified");
+      assert.equal(trusted.verifiedBy, "grant-verifier-v1");
+    } else {
+      assert.fail("should have been verified");
+    }
   });
 });
 
