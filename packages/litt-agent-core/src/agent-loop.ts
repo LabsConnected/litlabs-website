@@ -46,6 +46,7 @@ import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
+import type { VerificationGate, VerificationResult } from "./verification-gate.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -96,6 +97,25 @@ export interface AgentLoopOptions {
   onToolStream?: (chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void;
   /** Permission mode */
   mode?: "plan" | "act" | "auto";
+  /**
+   * Optional VerificationGate — the runtime truth boundary.
+   *
+   * When provided, the loop enforces the single most important rule:
+   *   COMPLETE ≠ model says done
+   *   COMPLETE = runtime proved it passed
+   *
+   * When the model returns a final answer (no tool call), the loop runs
+   * the gate. If the gate proves the project passes, termination becomes
+   * "complete". If the gate fails, the failure is fed back to the model
+   * as a repair request — the model must fix the failures and try again.
+   * The loop only terminates with "verification_failed" if it runs out
+   * of rounds while the gate is still not proven.
+   *
+   * Without a gate, the loop keeps its original behavior (model "done"
+   * = "complete"). This preserves backward compatibility for tests and
+   * surfaces that don't yet wire the gate.
+   */
+  verificationGate?: VerificationGate | null;
 }
 
 export interface AgentLoopResult {
@@ -109,8 +129,22 @@ export interface AgentLoopResult {
   durationMs: number;
   /** Model usage info */
   usage: { total_tokens: number };
-  /** Why the loop terminated */
-  termination: "complete" | "max_rounds" | "error" | "cancelled";
+  /**
+   * Why the loop terminated.
+   *   complete:             model gave a final answer AND (no gate configured OR gate proven)
+   *   verification_failed:  a gate is configured and it could not be proven before max_rounds
+   *   max_rounds:           hit the round limit for reasons other than verification
+   *   error:                model call failed
+   *   cancelled:            loop was cancelled
+   */
+  termination: "complete" | "verification_failed" | "max_rounds" | "error" | "cancelled";
+  /**
+   * The canonical verification result, if a gate was configured.
+   * `verification.proven === true` is the ONLY honest signal that the
+   * mission is COMPLETE. Callers MUST check this, not `termination`,
+   * when a gate is in use.
+   */
+  verification?: VerificationResult;
 }
 
 export interface AgentToolCallRecord {
@@ -185,6 +219,9 @@ export async function runAgentLoop(
   const toolCalls: AgentToolCallRecord[] = [];
   let rounds = 0;
   let totalTokens = 0;
+  // Last verification result from the gate (if configured). Returned in
+  // the result so callers can inspect why COMPLETE was not proven.
+  let lastVerification: VerificationResult | undefined;
 
   // Build the system prompt with tool definitions
   const toolDefs = options.tools.list();
@@ -237,16 +274,85 @@ export async function runAgentLoop(
     const toolCall = parseToolCall(modelContent);
 
     if (!toolCall) {
-      // No tool call — this is the final answer
+      // No tool call — the model claims it is done.
+      //
+      // THE CRITICAL V1 RULE:
+      //   COMPLETE ≠ model says done
+      //   COMPLETE = runtime proved it passed
+      //
+      // If a VerificationGate is configured, we run it here. Only if the
+      // gate proves the project passes do we terminate with "complete".
+      // If the gate fails, we feed the failures back to the model as a
+      // repair request and continue the loop — the model must actually
+      // fix the failures and reach a state the runtime can prove.
       const cleanContent = stripToolCallBlocks(modelContent);
-      return {
-        content: cleanContent,
-        toolCalls,
-        rounds,
-        durationMs: Date.now() - startTime,
-        usage: { total_tokens: totalTokens },
-        termination: "complete",
-      };
+
+      if (!options.verificationGate) {
+        // No gate — preserve original behavior (model "done" = complete)
+        return {
+          content: cleanContent,
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "complete",
+        };
+      }
+
+      // Run the gate — the runtime truth boundary.
+      const verification = await options.verificationGate.verify();
+      lastVerification = verification;
+
+      if (verification.proven) {
+        // The runtime PROVED it. This is the only honest "complete".
+        return {
+          content: cleanContent,
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "complete",
+          verification,
+        };
+      }
+
+      // Gate failed — feed the failures back to the model for repair.
+      // This is the V1 observe-failures → repair loop.
+      if (options.emitter) {
+        options.emitter({
+          type: "litt_event",
+          subtype: "verification_failed_repair",
+          ts: Date.now(),
+          data: {
+            runId: verification.runId,
+            message: verification.message,
+            failedChecks: verification.checks
+              .filter((c) => c.status !== "skipped" && c.status !== "success")
+              .map((c) => ({ id: c.id, status: c.status, message: c.message, stderr: c.stderr })),
+          },
+        });
+      }
+
+      messages.push({ role: "assistant", content: modelContent });
+      messages.push({
+        role: "user",
+        content:
+          `Verification gate result: NOT PROVEN. The runtime ran the project's ` +
+          `checks and at least one failed. You are NOT done.\n\n${verification.message}\n\n` +
+          `Failed checks:\n` +
+          verification.checks
+            .filter((c) => c.status !== "skipped" && c.status !== "success")
+            .map((c) => {
+              const detail = c.stderr ? `\n--- stderr ---\n${c.stderr.slice(0, 4000)}` : "";
+              const out = c.stdout ? `\n--- stdout ---\n${c.stdout.slice(0, 2000)}` : "";
+              return `- ${c.id}: ${c.status} — ${c.message}${detail}${out}`;
+            })
+            .join("\n") +
+          `\n\nFix the failures above, then say you are done only after the ` +
+          `verification gate passes. Do not claim completion until the runtime proves it.`,
+      });
+      // Continue the loop — the model gets a chance to repair.
+      continue;
     }
 
     // Look up the tool in the registry
@@ -412,18 +518,29 @@ export async function runAgentLoop(
   }
 
   if (rounds >= maxRounds && termination === "complete") {
-    termination = "max_rounds";
+    // If a gate is configured, hitting max rounds means we never reached
+    // a runtime-proven COMPLETE — that is a verification failure, not a
+    // benign max_rounds. The single most important rule: COMPLETE must
+    // be proved by the runtime, not claimed by the model.
+    if (options.verificationGate) {
+      termination = "verification_failed";
+    } else {
+      termination = "max_rounds";
+    }
   }
 
   return {
     content: termination === "max_rounds"
       ? "I reached the maximum number of tool-call rounds without a final answer."
-      : "",
+      : termination === "verification_failed"
+        ? "I could not get the verification gate to pass within the round limit. The mission is NOT runtime-proven COMPLETE."
+        : "",
     toolCalls,
     rounds,
     durationMs: Date.now() - startTime,
     usage: { total_tokens: totalTokens },
     termination,
+    verification: lastVerification,
   };
 }
 

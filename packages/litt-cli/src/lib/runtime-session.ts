@@ -28,6 +28,7 @@ import {
   CommandRouter,
   ExecutionGateway,
   ToolRegistry,
+  VerificationGate,
   type RuntimeEvent,
   type RuntimeState,
   type ShellExecutor,
@@ -36,6 +37,9 @@ import {
   type CommandExecutorResult,
   type ExecutionRequest,
   type RiskAssessment,
+  type VerificationResult,
+  type VerificationConfig,
+  type BrowserVerifier,
 } from "@litt/agent-core";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -96,6 +100,7 @@ export class RuntimeSession {
   private _executor: CommandExecutor;
   private _router: CommandRouter;
   private _gateway: ExecutionGateway | null = null;
+  private _verificationGate: VerificationGate | null = null;
   private _cwd: string;
   private _mode: "plan" | "act" | "auto";
   private _onEvent: ((event: RuntimeEvent) => void) | null;
@@ -185,6 +190,50 @@ export class RuntimeSession {
       onApprovalRequired: this._onApprovalRequired,
     });
     return this._gateway;
+  }
+
+  /**
+   * Get the VerificationGate — the runtime truth boundary.
+   *
+   * THE SINGLE MOST IMPORTANT RULE:
+   *   COMPLETE ≠ model says done
+   *   COMPLETE = runtime proved it passed
+   *
+   * The gate runs the project's configured checks (typecheck/test/build,
+   * auto-detected from package.json; browser if configured) through the
+   * SAME hardened CommandExecutor as everything else. Created lazily.
+   *
+   * @param config  Optional per-project config. If omitted, auto-detects.
+   * @param browserVerifier  Optional browser verifier (injected by the
+   *                         surface that owns the browser).
+   */
+  getVerificationGate(
+    config?: VerificationConfig,
+    browserVerifier?: BrowserVerifier | null,
+  ): VerificationGate {
+    if (this._verificationGate && !config && !browserVerifier) return this._verificationGate;
+    this._verificationGate = new VerificationGate({
+      executor: this._executor,
+      shell: this._shell,
+      store: this._store,
+      emitter: (event) => this._handleEvent(event),
+      cwd: this._cwd,
+      browserVerifier: browserVerifier ?? null,
+      config: config ?? {},
+    });
+    return this._verificationGate;
+  }
+
+  /**
+   * Run the verification gate and return the canonical result.
+   * `proven === true` is the ONLY honest signal that a mission is COMPLETE.
+   */
+  async verify(
+    config?: VerificationConfig,
+    browserVerifier?: BrowserVerifier | null,
+  ): Promise<VerificationResult> {
+    const gate = this.getVerificationGate(config, browserVerifier);
+    return gate.verify();
   }
 
   /**

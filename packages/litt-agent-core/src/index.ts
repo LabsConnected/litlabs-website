@@ -152,3 +152,14 @@ export type {
   AgentToolCallRecord,
   ParsedToolCall,
 } from "./agent-loop.js";
+
+// VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)
+export { VerificationGate, createVerificationGate, assertComplete } from "./verification-gate.js";
+export type {
+  VerificationCheckId,
+  VerificationConfig,
+  CheckResult,
+  VerificationResult,
+  BrowserVerifier,
+  VerificationGateOptions,
+} from "./verification-gate.js";

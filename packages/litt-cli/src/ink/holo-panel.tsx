@@ -9,6 +9,7 @@
  *   THINKING   — model is generating
  *   APPROVAL   — gateway requires human approval
  *   RUNNING    — tool executing
+ *   VERIFYING  — verification gate running (runtime-proved COMPLETE check)
  *   SUCCESS    — run completed successfully
  *   FAILED     — run failed
  *   CANCELLED  — run was cancelled
@@ -24,6 +25,7 @@ const HOLO_CONFIG: Record<HoloState, { icon: string; color: string; label: strin
   THINKING: { icon: "◈", color: "cyan", label: "thinking" },
   APPROVAL: { icon: "⚠", color: "yellow", label: "approval required" },
   RUNNING: { icon: "▶", color: "blue", label: "running" },
+  VERIFYING: { icon: "✦", color: "magenta", label: "verifying" },
   SUCCESS: { icon: "✓", color: "green", label: "success" },
   FAILED: { icon: "✗", color: "red", label: "failed" },
   CANCELLED: { icon: "⊘", color: "yellow", label: "cancelled" },

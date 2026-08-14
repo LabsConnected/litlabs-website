@@ -13,7 +13,7 @@
 import { useState, useCallback, useEffect } from "react";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
-export type HoloState = "IDLE" | "THINKING" | "APPROVAL" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED" | "TIMEOUT";
+export type HoloState = "IDLE" | "THINKING" | "APPROVAL" | "RUNNING" | "VERIFYING" | "SUCCESS" | "FAILED" | "CANCELLED" | "TIMEOUT";
 
 export interface ApprovalPrompt {
   runId: string;

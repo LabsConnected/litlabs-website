@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect } from "react";
 import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
+import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
 
 let entryCounter = 0;
@@ -54,6 +55,16 @@ function holoFromEvent(event: LifecycleEvent): HoloState | null {
              (event.data.status as string) === "timeout" ? "TIMEOUT" : "FAILED";
     default: return null;
   }
+}
+
+/** Heartbeat TTL — if heartbeat is older than this, runtime is stale */
+const HEARTBEAT_TTL_MS = 30_000; // 2x typical 15s interval
+
+/** Check if a runtime state has a fresh heartbeat */
+function isHeartbeatFresh(state: RuntimeState | null): boolean {
+  if (!state?.heartbeat) return false;
+  const age = Date.now() - state.heartbeat.lastHeartbeatAt;
+  return age < HEARTBEAT_TTL_MS && state.heartbeat.failures < state.heartbeat.maxFailures;
 }
 
 export function useEventBridge(
@@ -120,9 +131,28 @@ export function useEventBridge(
     }
   }, [store]);
 
+  // Connection state: online requires BOTH socket connection AND fresh heartbeat.
+  // A stale heartbeat with a connected socket means the server is not responding
+  // to heartbeats — that's degraded/offline, not online.
   const onConnection = useCallback((state: string) => {
-    store.actions.setConnected(state === "connected");
-  }, [store]);
+    if (state !== "connected") {
+      store.actions.setConnected(false);
+      return;
+    }
+    // Socket connected — but also check heartbeat freshness
+    const runtimeState = client?.getState() ?? null;
+    store.actions.setConnected(isHeartbeatFresh(runtimeState));
+  }, [store, client]);
+
+  // Also re-evaluate connection when runtime state updates (heartbeat may go stale)
+  const onState = useCallback((state: RuntimeState) => {
+    // If socket is connected but heartbeat is stale, mark as not connected
+    if (client?.is_connected() && !isHeartbeatFresh(state)) {
+      store.actions.setConnected(false);
+    } else if (client?.is_connected() && isHeartbeatFresh(state)) {
+      store.actions.setConnected(true);
+    }
+  }, [store, client]);
 
   useEffect(() => {
     if (!client) return;
@@ -130,11 +160,12 @@ export function useEventBridge(
 
     cleanups.push(client.onLifecycle(onLifecycle));
     cleanups.push(client.onConnectionChange(onConnection as (conn: import("../lib/runtime-client.js").ConnectionState) => void));
+    cleanups.push(client.onState(onState));
 
     return () => {
       for (const cleanup of cleanups) {
         try { cleanup(); } catch { /* ignore */ }
       }
     };
-  }, [client, onLifecycle, onConnection]);
+  }, [client, onLifecycle, onConnection, onState]);
 }

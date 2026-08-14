@@ -54,6 +54,7 @@ export interface LifecycleEvent {
 export type LifecycleListener = (event: LifecycleEvent) => void;
 export type StateListener = (state: RuntimeState) => void;
 export type ConnectionListener = (state: ConnectionState) => void;
+export type ErrorListener = (error: { code: string; message: string }) => void;
 
 // ─── Token minting (matches terminal-server/auth.ts) ──────────────
 
@@ -110,6 +111,7 @@ export class RuntimeClient {
     lifecycle: new Set<LifecycleListener>(),
     state: new Set<StateListener>(),
     connection: new Set<ConnectionListener>(),
+    error: new Set<ErrorListener>(),
   };
 
   private readonly terminalUrl: string;
@@ -123,6 +125,12 @@ export class RuntimeClient {
     this.internalKey = options.internalKey ?? process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
     this.userId = options.userId ?? "cli-user";
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
+
+    // Install a permanent error listener so Socket.IO 'error' events
+    // never crash the process via Node's unhandled-error behavior.
+    // This is a safety net — actual error handling goes through
+    // emitRuntimeError() → onError listeners.
+    this.listeners.error.add(() => { /* safety net — prevents crash */ });
   }
 
   // ─── Connection ────────────────────────────────────────────────
@@ -475,12 +483,19 @@ export class RuntimeClient {
         headers: { "X-Internal-Service-Key": this.internalKey },
         signal: AbortSignal.timeout(5000),
       });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        this.emitRuntimeError("FALLBACK_POLL_FAILED", `Fallback poll failed — server returned ${response.status}`);
+        return null;
+      }
       const state = await response.json() as RuntimeState;
       this.state = state;
       this.notifyStateListeners();
       return state;
-    } catch {
+    } catch (err) {
+      this.emitRuntimeError(
+        "FALLBACK_POLL_FAILED",
+        `Fallback poll failed — ${err instanceof Error ? err.message : "server unreachable"}`,
+      );
       return null;
     }
   }
@@ -604,6 +619,11 @@ export class RuntimeClient {
     return () => this.listeners.connection.delete(listener);
   }
 
+  onError(listener: ErrorListener): () => void {
+    this.listeners.error.add(listener);
+    return () => this.listeners.error.delete(listener);
+  }
+
   private notifyLifecycleListeners(event: LifecycleEvent): void {
     for (const listener of this.listeners.lifecycle) {
       try { listener(event); } catch { /* listener errors don't crash the client */ }
@@ -621,6 +641,18 @@ export class RuntimeClient {
     this.connectionState = state;
     for (const listener of this.listeners.connection) {
       try { listener(state); } catch { /* listener errors don't crash the client */ }
+    }
+  }
+
+  /**
+   * Emit a typed runtime error. NEVER use Node EventEmitter's 'error' event —
+   * Node crashes the process if 'error' is emitted with no listener.
+   * This method uses a custom 'runtime.error' channel instead.
+   */
+  private emitRuntimeError(code: string, message: string): void {
+    const error = { code, message };
+    for (const listener of this.listeners.error) {
+      try { listener(error); } catch { /* listener errors don't crash the client */ }
     }
   }
 

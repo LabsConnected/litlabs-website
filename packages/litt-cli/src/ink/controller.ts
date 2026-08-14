@@ -35,6 +35,61 @@ const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { c
   "/run": { toolId: "project.run", args: (input) => ({ command: input[0] ?? "", args: input.slice(1) }) },
 };
 
+/**
+ * /verify — run the VerificationGate (the runtime truth boundary).
+ * COMPLETE = runtime proved it passed, not the model claiming done.
+ * Runs typecheck/test/build (auto-detected from package.json) and
+ * reports whether the project is honestly proven.
+ */
+async function runVerify(
+  session: RuntimeSession,
+  store: CockpitStore,
+): Promise<void> {
+  store.actions.setHoloState("VERIFYING");
+  store.actions.addActivity({
+    id: `act_${Date.now()}`,
+    ts: Date.now(),
+    type: "info",
+    text: "Running verification gate — runtime truth, not model claims.",
+  });
+
+  try {
+    const result = await session.verify();
+    for (const check of result.checks) {
+      const label = check.id.charAt(0).toUpperCase() + check.id.slice(1);
+      store.actions.addActivity({
+        id: `act_${Date.now()}_${check.id}`,
+        ts: Date.now(),
+        type: check.status === "success" ? "info" : check.status === "skipped" ? "info" : "error",
+        text: `${label}: ${check.status.toUpperCase()} — ${check.message}`,
+      });
+    }
+    store.actions.addActivity({
+      id: `act_${Date.now()}_summary`,
+      ts: Date.now(),
+      type: result.proven ? "info" : "error",
+      text: result.message,
+    });
+
+    if (result.proven) {
+      store.actions.setHoloState("SUCCESS");
+      setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+    } else {
+      store.actions.setHoloState("FAILED");
+      setTimeout(() => store.actions.setHoloState("IDLE"), 2500);
+    }
+  } catch (err) {
+    store.actions.addActivity({
+      id: `act_${Date.now()}`,
+      ts: Date.now(),
+      type: "error",
+      text: `Verification error: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    store.actions.setHoloState("FAILED");
+    setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+  }
+}
+
 export interface CockpitControllerOptions {
   session: RuntimeSession;
   store: CockpitStore;
@@ -74,7 +129,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         id: `act_${Date.now()}`,
         ts: Date.now(),
         type: "help",
-        text: "Commands: /build /check /test /diff /status /run /ask /clear /help",
+        text: "Commands: /build /check /test /verify /diff /status /run /ask /clear /help",
       });
       return;
     }
@@ -90,6 +145,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
     }
     if (input === "/exit" || input === "/quit") {
       onExit?.();
+      return;
+    }
+    if (input === "/verify") {
+      await runVerify(session, store);
       return;
     }
 
