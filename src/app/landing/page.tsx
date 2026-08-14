@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { LandingHeader } from "./_components/LandingHeader";
-import { LandingHero } from "./_components/LandingHero";
+import { LandingHeroV3 } from "./_components/LandingHeroV3";
+import { LandingOneContext } from "./_components/LandingOneContext";
 import { LandingLogos } from "./_components/LandingLogos";
 import { LandingComparison } from "./_components/LandingComparison";
 import { LandingHowItWorks } from "./_components/LandingHowItWorks";
@@ -26,7 +27,8 @@ export default function ModernLandingPage() {
       <LandingBackground />
       <LandingHeader />
       <main className="relative z-10">
-        <LandingHero />
+        <LandingHeroV3 />
+        <LandingOneContext />
         <LandingLogos />
         <LandingComparison />
         <LandingHowItWorks />

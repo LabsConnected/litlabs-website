@@ -287,7 +287,6 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       { source: "/creator", destination: "/dashboard", permanent: true },
-      { source: "/landing", destination: "/", permanent: true },
       { source: "/login", destination: "/sign-in", permanent: true },
     ];
   },
