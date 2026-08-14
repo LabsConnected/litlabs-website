@@ -53,7 +53,7 @@ function statusColor(status: SubsystemStatus): string {
   switch (status) {
     case "online": return "green";
     case "ready": return "green";
-    case "running": return "blue";
+    case "running": return "cyan";
     case "error": return "red";
     case "offline": return "gray";
     default: return "yellow";
@@ -101,6 +101,14 @@ export function Subsystems({ selected, onSelect, localRuntime, remoteRuntime, ho
       id: "gateway",
       label: "GATEWAY",
       status: localRuntime === "ready" ? "ready" : "offline",
+    },
+    {
+      id: "cloud",
+      label: "CLOUD",
+      status: remoteRuntime === "connected" ? "online"
+        : remoteRuntime === "connecting" || remoteRuntime === "reconnecting" ? "idle"
+        : remoteRuntime === "error" ? "error"
+        : "offline",
     },
     {
       id: "credentials",

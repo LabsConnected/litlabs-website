@@ -48,6 +48,43 @@ const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { c
 };
 
 /**
+ * Intent boundary — classify user input as conversation vs mission.
+ *
+ * conversation — casual chat, questions, greetings, short messages
+ * mission      — tasks that require tools/execution (fix, build, test, etc)
+ */
+function classifyIntent(input: string): "conversation" | "mission" {
+  const lower = input.toLowerCase().trim();
+
+  // Short messages (under ~15 chars) are usually conversation
+  if (lower.length < 15 && !lower.includes("fix") && !lower.includes("run") && !lower.includes("build")) {
+    return "conversation";
+  }
+
+  // Greetings / casual
+  const casual = ["hi", "hello", "hey", "whats up", "what's up", "sup", "yo",
+    "thanks", "thank you", "ok", "okay", "cool", "nice", "bye", "goodbye",
+    "how are you", "who are you", "what are you", "what can you do",
+    "help me", "what do you do"];
+  if (casual.some(c => lower === c || lower.startsWith(c + " "))) {
+    return "conversation";
+  }
+
+  // Mission triggers — words that imply action
+  const missionTriggers = ["fix", "build", "test", "run", "deploy", "ship",
+    "implement", "create", "add", "remove", "delete", "edit", "change",
+    "refactor", "debug", "inspect", "analyze", "verify", "check", "install",
+    "update", "upgrade", "migrate", "optimize", "find", "search", "replace",
+    "write", "generate", "scaffold", "init", "setup", "configure"];
+  if (missionTriggers.some(t => lower.includes(t))) {
+    return "mission";
+  }
+
+  // Default: short questions are conversation, longer requests are missions
+  return lower.length > 30 ? "mission" : "conversation";
+}
+
+/**
  * /verify — run the VerificationGate (the runtime truth boundary).
  * COMPLETE = runtime proved it passed, not the model claiming done.
  * Runs typecheck/test/build (auto-detected from package.json) and
@@ -257,14 +294,22 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
     // Natural language → LiTT agent loop
     // Bare text (non-slash) goes directly to the agent runtime.
     // No /ask required — the cockpit IS LiTT.
+    //
+    // Intent boundary:
+    //   conversation — casual chat, questions, greetings
+    //   mission      — tasks that require tools/execution
+    //   command      — slash commands (handled above)
+    const intent = classifyIntent(input);
+    const isMission = intent === "mission";
+
     if (hasOpenRouterKey()) {
       store.actions.setHoloState("THINKING");
-      store.actions.setMission(input);
+      store.actions.setMission(isMission ? input : null);
       store.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),
-        type: "agent.request",
-        text: `LiTT ❯ ${input}`,
+        type: isMission ? "agent.request" : "agent.chat",
+        text: isMission ? `MISSION: ${input}` : `LiTT ❯ ${input}`,
       });
 
       try {
@@ -375,6 +420,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         });
 
         store.actions.setHoloState(result.termination === "complete" ? "SUCCESS" : "IDLE");
+        // Retain activeModel — don't clear it after completion.
+        // The user should see what model was last used.
         setTimeout(() => {
           store.actions.setHoloState("IDLE");
           store.actions.setMission(null);

@@ -26,8 +26,8 @@ const HOLO_CONFIG: Record<HoloState, { icon: string; color: string; label: strin
   IDLE: { icon: "◇", color: "magenta", label: "READY", spinner: false },
   THINKING: { icon: "◈", color: "cyan", label: "THINKING", spinner: true },
   APPROVAL: { icon: "⚠", color: "yellow", label: "APPROVAL REQUIRED", spinner: false },
-  RUNNING: { icon: "▶", color: "blue", label: "RUNNING", spinner: true },
-  VERIFYING: { icon: "✦", color: "magenta", label: "VERIFYING", spinner: true },
+  RUNNING: { icon: "▶", color: "cyan", label: "RUNNING", spinner: true },
+  VERIFYING: { icon: "✦", color: "cyan", label: "VERIFYING", spinner: true },
   SUCCESS: { icon: "✓", color: "green", label: "READY TO SHIP", spinner: false },
   FAILED: { icon: "✗", color: "red", label: "FAILED", spinner: false },
   CANCELLED: { icon: "⊘", color: "yellow", label: "CANCELLED", spinner: false },
@@ -107,6 +107,23 @@ export function LiTTHoloPanel({ state, activeModel, routingReason }: LiTTHoloPan
       {/* State label */}
       <Box justifyContent="center">
         <Text color={config.color} bold>{config.label}</Text>
+      </Box>
+
+      {/* Orb visual — subtle geometric presence */}
+      <Box justifyContent="center" marginTop={0}>
+        {config.spinner ? (
+          <Text color={config.color} dimColor>
+            <Spinner type="dots" color={config.color} />
+          </Text>
+        ) : state === "IDLE" ? (
+          <Text color={config.color} dimColor>·  ◇  ·</Text>
+        ) : state === "SUCCESS" ? (
+          <Text color="green" bold>✓  ◇  ✓</Text>
+        ) : state === "FAILED" ? (
+          <Text color="red" bold>✗  ◇  ✗</Text>
+        ) : (
+          <Text color={config.color} dimColor>·  {config.icon}  ·</Text>
+        )}
       </Box>
 
       {/* Active model during execution */}

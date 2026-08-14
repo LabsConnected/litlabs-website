@@ -26,7 +26,7 @@ function entryColor(entry: ActivityEntry): string {
   if (entry.stream === "stderr") return "red";
   switch (entry.type) {
     case "run.started": return "cyan";
-    case "tool.started": return "blue";
+    case "tool.started": return "cyan";
     case "tool.completed": return "green";
     case "tool.failed": return "red";
     case "tool.cancelled": return "yellow";
@@ -38,17 +38,18 @@ function entryColor(entry: ActivityEntry): string {
     case "approval.required": return "yellow";
     case "approval.granted": return "green";
     case "approval.denied": return "red";
-    case "credential.resolving": return "blue";
+    case "credential.resolving": return "cyan";
     case "credential.ready": return "green";
     case "credential.denied": return "red";
     case "agent.thinking": return "cyan";
     case "agent.request": return "magenta";
-    case "agent.delta": return "white";
+    case "agent.chat": return "magenta";
+    case "agent.delta": return "gray";
     case "agent.complete": return "green";
     case "agent.stopped": return "yellow";
     case "model.changed": return "magenta";
     case "error": return "red";
-    case "info": return "cyan";
+    case "info": return "gray";
     default: return "gray";
   }
 }
@@ -73,6 +74,7 @@ function entryIcon(entry: ActivityEntry): string {
     case "credential.denied": return "✗";
     case "agent.thinking": return "◈";
     case "agent.request": return "❯";
+    case "agent.chat": return "❯";
     case "agent.delta": return " ";
     case "agent.complete": return "■";
     case "agent.stopped": return "■";
@@ -87,8 +89,8 @@ export function ActivityStream({ entries }: { entries: ActivityEntry[] }): React
   const visible = entries.slice(-12);
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      <Text bold color="gray">ACTIVITY</Text>
+    <Box flexDirection="column" borderStyle="single" borderColor="magenta" paddingX={1}>
+      <Text bold color="magenta">ACTIVITY</Text>
       {visible.length === 0 ? (
         <Text dimColor> No activity yet — type a command or ask LiTT something.</Text>
       ) : (

@@ -1,8 +1,8 @@
 /**
- * StatusBar — bottom status line with runtime indicators.
+ * StatusBar — bottom status bar with runtime state + keyboard help.
  *
- * Shows local/remote indicators, cwd, holo state, model, runId,
- * and keyboard shortcut hints.
+ * Uses Local/Cloud semantics (not Local/Remote).
+ * Cloud being offline is normal — local execution is the default.
  */
 
 import React from "react";
@@ -20,24 +20,34 @@ export interface StatusBarProps {
   runId: string | null;
 }
 
-export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoState, brain, activeModel, runId }: StatusBarProps): React.ReactElement {
+export function StatusBar({
+  connected, localRuntime, remoteRuntime, cwd, holoState, brain, activeModel, runId,
+}: StatusBarProps): React.ReactElement {
   const localIcon = localRuntime === "ready" ? "●" : "○";
   const localColor = localRuntime === "ready" ? "green" : "yellow";
-  const remoteIcon = remoteRuntime === "connected" ? "●" : "○";
-  const remoteColor = remoteRuntime === "connected" ? "green" : "gray";
+  const cloudIcon = remoteRuntime === "connected" ? "●" : "○";
+  const cloudColor = remoteRuntime === "connected" ? "green" : "gray";
 
-  const shortCwd = cwd.length > 30 ? "..." + cwd.slice(-27) : cwd;
   const shortRun = runId ? `run:${runId.slice(-8)}` : "no active run";
+  const stateColor = holoState === "RUNNING" || holoState === "THINKING" ? "cyan"
+    : holoState === "SUCCESS" ? "green"
+    : holoState === "FAILED" ? "red"
+    : holoState === "APPROVAL" ? "yellow"
+    : "gray";
 
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text dimColor>────────────────────────────────────────────────────────────</Text>
       <Box>
         <Text color={localColor}>{localIcon}</Text>
-        <Text dimColor> LOCAL   </Text>
-        <Text color={remoteColor}>{remoteIcon}</Text>
-        <Text dimColor> REMOTE   </Text>
-        <Text color="blue">{holoState.toLowerCase()}</Text>
+        <Text dimColor> LOCAL </Text>
+        <Text color={localColor}>{localRuntime === "ready" ? "READY" : localRuntime.toUpperCase()}</Text>
+        <Text dimColor>   </Text>
+        <Text color={cloudColor}>{cloudIcon}</Text>
+        <Text dimColor> CLOUD </Text>
+        <Text color={cloudColor}>{remoteRuntime === "connected" ? "CONNECTED" : "NOT CONNECTED"}</Text>
+        <Text dimColor>   </Text>
+        <Text color={stateColor}>{holoState.toLowerCase()}</Text>
         <Text dimColor>   </Text>
         <Text dimColor>{shortRun}</Text>
       </Box>
@@ -47,7 +57,7 @@ export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoSta
         {activeModel && <Text dimColor> → </Text>}
         {activeModel && <Text color="blue">{activeModel}</Text>}
       </Box>
-      <Text dimColor>Ctrl+M model · Ctrl+K actions · Ctrl+C cancel · Ctrl+L clear · Esc close</Text>
+      <Text dimColor>Ctrl+M Model · Ctrl+K Actions · Ctrl+C Cancel · Ctrl+L Clear · Esc Close</Text>
     </Box>
   );
 }

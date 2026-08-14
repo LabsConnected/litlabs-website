@@ -1,26 +1,25 @@
 /**
  * CockpitApp — the Ink cockpit composition root.
  *
- * Architecture:
- *   Ink UI → RuntimeSession → ExecutionGateway → Executor → Events → Ink UI
+ * Priority order (what must always be visible):
+ *   1. Header (compact in small terminals)
+ *   2. LiTT state (holo)
+ *   3. Current mission
+ *   4. Activity
+ *   5. Prompt (ALWAYS visible)
+ *   6. Status bar
  *
- * Layout (top to bottom):
- *   ⚡ LiTT CODE header (branded)
- *   ┌─────────────┐  Subsystem cards (independent truth)
- *   │  ◇ LiTT ◇   │  RUNTIME  ● ONLINE
- *   │  [ pulse ]   │  TERMINAL ● READY
- *   │  THINKING    │  MEMORY   ● READY
- *   └─────────────┘  AGENT    ● IDLE
- *   CURRENT MISSION
- *   ACTIVITY (live event stream)
- *   FILES (git status)
- *   QUICK ACTIONS
- *   litt ❯ command dock
- *   status bar + keyboard help
+ * Files / quick actions / extra telemetry collapse first
+ * when the terminal is too short.
+ *
+ * Input system:
+ *   Global useInput ONLY consumes Ctrl+M/K/L/C and Esc.
+ *   All printable characters fall through to TextInput.
+ *   After overlay closes, focus returns to the prompt.
  */
 
-import React, { useCallback } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import React, { useCallback, useEffect, useState } from "react";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
@@ -38,11 +37,19 @@ import { ModelPicker } from "./model-picker.js";
 import { ModelCenter } from "./model-center.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
-import { brainLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
+import { brainLabel, type ModelChoice } from "../lib/model-routing.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
+
+type LayoutMode = "full" | "medium" | "compact";
+
+function getLayoutMode(rows: number): LayoutMode {
+  if (rows >= 38) return "full";
+  if (rows >= 24) return "medium";
+  return "compact";
+}
 
 export interface CockpitAppProps {
   session: RuntimeSession;
@@ -64,22 +71,43 @@ export function CockpitApp({
 }: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
+  const { stdout } = useStdout();
   useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit() });
 
-  const effectiveModel = store.state.selectedModel ?? model;
-  const modelReady = hasOpenRouterKey();
+  // Responsive layout — track terminal size
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => getLayoutMode(stdout?.rows ?? 40));
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => setLayoutMode(getLayoutMode(stdout.rows ?? 40));
+    stdout.on("resize", onResize);
+    return () => { stdout.off("resize", onResize); };
+  }, [stdout]);
 
-  // Three model concepts:
-  //   BRAIN  = user preference (LiTT Auto, Fixed, Budget, Max)
-  //   ACTIVE = what the runtime actually used (null until first run)
-  //   SOURCE = provider + credential status
+  const modelReady = hasOpenRouterKey();
   const brain = brainLabel(store.state.routingMode, store.state.selectedModel);
   const activeModel = store.state.activeModel;
   const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
-  // Global keyboard shortcuts
+  // Seed startup activity (only once, when local runtime becomes ready)
+  useEffect(() => {
+    if (store.state.localRuntime === "ready" && store.state.activityLog.length === 0) {
+      const now = Date.now();
+      store.actions.addActivity({ id: `act_${now}_0`, ts: now, type: "info", text: `Project detected: ${project}` });
+      store.actions.addActivity({ id: `act_${now}_1`, ts: now + 1, type: "info", text: `Runtime initialized` });
+      if (modelReady) {
+        store.actions.addActivity({ id: `act_${now}_2`, ts: now + 2, type: "info", text: `Provider: OpenRouter • BYOK ✓` });
+      }
+      store.actions.addActivity({ id: `act_${now}_3`, ts: now + 3, type: "info", text: `LiTT ready` });
+    }
+  }, [store.state.localRuntime, store.state.activityLog.length, project, modelReady, store]);
+
+  // Global keyboard shortcuts — ONLY consume Ctrl+M/K/L/C.
+  // All printable characters MUST fall through to TextInput.
+  // This is critical: do not act on any key that isn't a shortcut.
   useInput(useCallback((input, key) => {
+    // Only handle ctrl shortcuts and escape — nothing else
+    if (!key.ctrl && !key.escape) return;
     if (store.state.overlay !== "none") return;
 
     if (key.ctrl && input === "c") {
@@ -99,7 +127,6 @@ export function CockpitApp({
     } else if (key.ctrl && input === "k") {
       store.actions.setOverlay("command-palette");
     } else if (key.ctrl && input === "l") {
-      // Clear activity log
       store.actions.setHoloState("IDLE");
       store.actions.setMission(null);
     }
@@ -134,8 +161,12 @@ export function CockpitApp({
     submit(action.id);
   }, [store, submit]);
 
+  // Show overlays on top, hide the main content
+  const overlayOpen = store.state.overlay !== "none";
+
   return (
     <Box flexDirection="column">
+      {/* Header — always visible, but compact mode shows less */}
       <Header
         project={project}
         projectRoot={cwd}
@@ -147,92 +178,101 @@ export function CockpitApp({
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={mode}
+        compact={layoutMode === "compact"}
       />
 
-      {/* Holo + Subsystems side by side */}
-      <Box flexDirection="row" gap={2}>
-        <LiTTHoloPanel
-          state={store.state.holoState}
-          activeModel={store.state.activeModel}
-          routingReason={store.state.mission}
-        />
-        <Box flexDirection="column">
-          <Subsystems
-            selected={store.state.selectedPanel}
-            onSelect={(p) => store.actions.setSelectedPanel(p as import("./cockpit-store.js").CockpitPanel)}
+      {/* Overlays take over the screen when open */}
+      {overlayOpen ? (
+        <>
+          {store.state.overlay === "model-picker" && (
+            <ModelPicker
+              selectedModelId={store.state.selectedModel}
+              routingMode={store.state.routingMode}
+              onSelectModel={handleModelSelect}
+              onSelectRoutingMode={handleRoutingModeSelect}
+              onCancel={() => store.actions.setOverlay("none")}
+            />
+          )}
+          {store.state.overlay === "model-center" && (
+            <ModelCenter
+              routingMode={store.state.routingMode}
+              selectedModelId={store.state.selectedModel}
+              hasApiKey={modelReady}
+              onCancel={() => store.actions.setOverlay("none")}
+            />
+          )}
+          {store.state.overlay === "command-palette" && (
+            <CommandPalette
+              actions={DEFAULT_ACTIONS}
+              onSelect={handlePaletteSelect}
+              onCancel={() => store.actions.setOverlay("none")}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* Holo + Subsystems — hide in compact mode */}
+          {layoutMode !== "compact" && (
+            <Box flexDirection="row" gap={2}>
+              <LiTTHoloPanel
+                state={store.state.holoState}
+                activeModel={store.state.activeModel}
+                routingReason={store.state.mission}
+              />
+              <Box flexDirection="column">
+                <Subsystems
+                  selected={store.state.selectedPanel}
+                  onSelect={(p) => store.actions.setSelectedPanel(p as import("./cockpit-store.js").CockpitPanel)}
+                  localRuntime={store.state.localRuntime}
+                  remoteRuntime={store.state.remoteRuntime}
+                  holoState={store.state.holoState}
+                  modelReady={modelReady}
+                />
+              </Box>
+            </Box>
+          )}
+
+          {/* Mission section — always visible */}
+          <MissionSection holoState={store.state.holoState} mission={store.state.mission} />
+
+          {/* Approval UX (when needed) */}
+          {store.state.approvalPrompt && (
+            <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
+          )}
+
+          {/* Activity stream — always visible */}
+          <ActivityStream entries={store.state.activityLog} />
+
+          {/* Files info — hide in medium/compact */}
+          {layoutMode === "full" && <FilesInfo modified={gitModified} untracked={gitUntracked} />}
+
+          {/* Quick actions — hide in medium/compact */}
+          {layoutMode === "full" && <QuickActions />}
+
+          {/* Command dock — ALWAYS visible */}
+          <Box marginTop={0}>
+            <Text dimColor>────────────────────────────────────────────────────────────</Text>
+          </Box>
+          <CommandDock
+            history={store.state.commandHistory}
+            onSubmit={submit}
+            onNavigateHistory={store.actions.navigateHistory}
+            disabled={disabled}
+          />
+
+          {/* Status bar — always visible */}
+          <StatusBar
+            connected={store.state.connected}
             localRuntime={store.state.localRuntime}
             remoteRuntime={store.state.remoteRuntime}
+            cwd={cwd}
             holoState={store.state.holoState}
-            modelReady={modelReady}
+            brain={brain}
+            activeModel={activeModel}
+            runId={store.state.currentRunId}
           />
-        </Box>
-      </Box>
-
-      {/* Mission section */}
-      <MissionSection holoState={store.state.holoState} mission={store.state.mission} />
-
-      {/* Approval UX (when needed) */}
-      {store.state.approvalPrompt && (
-        <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
+        </>
       )}
-
-      {/* Overlays */}
-      {store.state.overlay === "model-picker" && (
-        <ModelPicker
-          selectedModelId={store.state.selectedModel}
-          routingMode={store.state.routingMode}
-          onSelectModel={handleModelSelect}
-          onSelectRoutingMode={handleRoutingModeSelect}
-          onCancel={() => store.actions.setOverlay("none")}
-        />
-      )}
-      {store.state.overlay === "model-center" && (
-        <ModelCenter
-          routingMode={store.state.routingMode}
-          selectedModelId={store.state.selectedModel}
-          hasApiKey={modelReady}
-          onCancel={() => store.actions.setOverlay("none")}
-        />
-      )}
-      {store.state.overlay === "command-palette" && (
-        <CommandPalette
-          actions={DEFAULT_ACTIONS}
-          onSelect={handlePaletteSelect}
-          onCancel={() => store.actions.setOverlay("none")}
-        />
-      )}
-
-      {/* Activity stream */}
-      <ActivityStream entries={store.state.activityLog} />
-
-      {/* Files info */}
-      <FilesInfo modified={gitModified} untracked={gitUntracked} />
-
-      {/* Quick actions */}
-      <QuickActions />
-
-      {/* Command dock */}
-      <Box marginTop={0}>
-        <Text dimColor>────────────────────────────────────────────────────────────</Text>
-      </Box>
-      <CommandDock
-        history={store.state.commandHistory}
-        onSubmit={submit}
-        onNavigateHistory={store.actions.navigateHistory}
-        disabled={disabled}
-      />
-
-      {/* Status bar */}
-      <StatusBar
-        connected={store.state.connected}
-        localRuntime={store.state.localRuntime}
-        remoteRuntime={store.state.remoteRuntime}
-        cwd={cwd}
-        holoState={store.state.holoState}
-        brain={brain}
-        activeModel={activeModel}
-        runId={store.state.currentRunId}
-      />
     </Box>
   );
 }
