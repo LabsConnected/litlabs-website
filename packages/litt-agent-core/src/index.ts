@@ -77,8 +77,9 @@ export { RuntimeStore, createInitialState } from "./state.js";
 export {
   runCommand as runCommandSecure,
   runShellCommand,
-  assessRisk,
-  detectShellInjection,
+  classifyCommand,
+  inspectScriptBody,
+  resolvePackageScript,
   redactSecrets,
   ExecutionError,
 } from "./execution.js";
@@ -86,6 +87,7 @@ export type {
   MissionMode,
   RiskLevel,
   RiskAssessment,
+  CapabilityTier,
   ExecutionOptions,
   ExecutionErrorCode,
   ApprovalProvider as ExecutionApprovalProvider,

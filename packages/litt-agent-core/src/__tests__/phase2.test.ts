@@ -131,42 +131,54 @@ describe("Phase 2B — runScript (package manager detection)", () => {
 });
 
 describe("Phase 2C — CommandRouter check/test/build", () => {
-  it("router.check() runs typecheck on agent-core", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const router = new CommandRouter(shell, { cwd: pkgDir });
-    const result = await router.check();
-    assert.equal(result.command, "check");
-    assert.equal(result.result.success, true);
-    assert.equal(result.result.data.exitCode, 0);
+  // Use temp projects with simple scripts instead of real pnpm typecheck/test/build
+  // on agent-core itself. Running real commands on the package under test causes
+  // recursive test execution (router.test → pnpm test → this suite again) and
+  // file-lock contention on dist/ under repeated stress runs.
+  it("router.check() runs typecheck script", async () => {
+    const tmp = makeTempProject("ok-check", { typecheck: "node -e \"process.exit(0)\"" });
+    try {
+      const shell = createShellExecutor(tmp);
+      const router = new CommandRouter(shell, { cwd: tmp });
+      const result = await router.check();
+      assert.equal(result.command, "check");
+      assert.equal(result.result.success, true);
+      assert.equal(result.result.data.exitCode, 0);
+    } finally { cleanup(tmp); }
   });
 
-  it("router.test() runs tests on agent-core", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const router = new CommandRouter(shell, { cwd: pkgDir });
-    const result = await router.test();
-    assert.equal(result.command, "test");
-    assert.equal(result.result.success, true);
+  it("router.test() runs test script", async () => {
+    const tmp = makeTempProject("ok-test", { test: "node -e \"process.exit(0)\"" });
+    try {
+      const shell = createShellExecutor(tmp);
+      const router = new CommandRouter(shell, { cwd: tmp });
+      const result = await router.test();
+      assert.equal(result.command, "test");
+      assert.equal(result.result.success, true);
+    } finally { cleanup(tmp); }
   });
 
-  it("router.build() runs build on agent-core", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const router = new CommandRouter(shell, { cwd: pkgDir });
-    const result = await router.build();
-    assert.equal(result.command, "build");
-    assert.equal(result.result.success, true);
+  it("router.build() runs build script", async () => {
+    const tmp = makeTempProject("ok-build", { build: "node -e \"process.exit(0)\"" });
+    try {
+      const shell = createShellExecutor(tmp);
+      const router = new CommandRouter(shell, { cwd: tmp });
+      const result = await router.build();
+      assert.equal(result.command, "build");
+      assert.equal(result.result.success, true);
+    } finally { cleanup(tmp); }
   });
 
   it("router.dispatch('check') matches router.check()", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const router = new CommandRouter(shell, { cwd: pkgDir });
-    const direct = await router.check();
-    const dispatched = await router.dispatch("check");
-    assert.equal(direct.command, dispatched.command);
-    assert.equal(direct.result.success, dispatched.result.success);
+    const tmp = makeTempProject("ok-dispatch", { typecheck: "node -e \"process.exit(0)\"" });
+    try {
+      const shell = createShellExecutor(tmp);
+      const router = new CommandRouter(shell, { cwd: tmp });
+      const direct = await router.check();
+      const dispatched = await router.dispatch("check");
+      assert.equal(direct.command, dispatched.command);
+      assert.equal(direct.result.success, dispatched.result.success);
+    } finally { cleanup(tmp); }
   });
 });
 
