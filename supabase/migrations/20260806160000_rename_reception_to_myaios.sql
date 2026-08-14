@@ -49,6 +49,9 @@ BEGIN
   DROP POLICY IF EXISTS "reception_config_owner_update" ON public.myaios_config;
   DROP POLICY IF EXISTS "reception_config_owner_insert" ON public.myaios_config;
   DROP POLICY IF EXISTS "reception_config_service_role_all" ON public.myaios_config;
+  DROP POLICY IF EXISTS "myaios_config_owner_select" ON public.myaios_config;
+  DROP POLICY IF EXISTS "myaios_config_owner_update" ON public.myaios_config;
+  DROP POLICY IF EXISTS "myaios_config_owner_insert" ON public.myaios_config;
 
   -- Create new policies
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_config' AND schemaname = 'public') THEN
@@ -69,6 +72,10 @@ BEGIN
   DROP POLICY IF EXISTS "reception_services_owner_insert" ON public.myaios_services;
   DROP POLICY IF EXISTS "reception_services_owner_delete" ON public.myaios_services;
   DROP POLICY IF EXISTS "reception_services_service_role_all" ON public.myaios_services;
+  DROP POLICY IF EXISTS "myaios_services_owner_select" ON public.myaios_services;
+  DROP POLICY IF EXISTS "myaios_services_owner_insert" ON public.myaios_services;
+  DROP POLICY IF EXISTS "myaios_services_owner_update" ON public.myaios_services;
+  DROP POLICY IF EXISTS "myaios_services_owner_delete" ON public.myaios_services;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_services' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_services_owner_select" ON public.myaios_services
@@ -89,6 +96,9 @@ BEGIN
   DROP POLICY IF EXISTS "reception_bookings_owner_insert" ON public.myaios_bookings;
   DROP POLICY IF EXISTS "reception_bookings_owner_update" ON public.myaios_bookings;
   DROP POLICY IF EXISTS "reception_bookings_service_role_all" ON public.myaios_bookings;
+  DROP POLICY IF EXISTS "myaios_bookings_owner_select" ON public.myaios_bookings;
+  DROP POLICY IF EXISTS "myaios_bookings_owner_insert" ON public.myaios_bookings;
+  DROP POLICY IF EXISTS "myaios_bookings_owner_update" ON public.myaios_bookings;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_bookings' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_bookings_owner_select" ON public.myaios_bookings
@@ -107,6 +117,9 @@ BEGIN
   DROP POLICY IF EXISTS "reception_leads_owner_insert" ON public.myaios_leads;
   DROP POLICY IF EXISTS "reception_leads_owner_update" ON public.myaios_leads;
   DROP POLICY IF EXISTS "reception_leads_service_role_all" ON public.myaios_leads;
+  DROP POLICY IF EXISTS "myaios_leads_owner_select" ON public.myaios_leads;
+  DROP POLICY IF EXISTS "myaios_leads_owner_insert" ON public.myaios_leads;
+  DROP POLICY IF EXISTS "myaios_leads_owner_update" ON public.myaios_leads;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_leads' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_leads_owner_select" ON public.myaios_leads
@@ -125,6 +138,9 @@ BEGIN
   DROP POLICY IF EXISTS "reception_escalations_owner_insert" ON public.myaios_escalations;
   DROP POLICY IF EXISTS "reception_escalations_owner_update" ON public.myaios_escalations;
   DROP POLICY IF EXISTS "reception_escalations_service_role_all" ON public.myaios_escalations;
+  DROP POLICY IF EXISTS "myaios_escalations_owner_select" ON public.myaios_escalations;
+  DROP POLICY IF EXISTS "myaios_escalations_owner_insert" ON public.myaios_escalations;
+  DROP POLICY IF EXISTS "myaios_escalations_owner_update" ON public.myaios_escalations;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_escalations' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_escalations_owner_select" ON public.myaios_escalations
@@ -142,6 +158,8 @@ BEGIN
   DROP POLICY IF EXISTS "reception_events_owner_select" ON public.myaios_events;
   DROP POLICY IF EXISTS "reception_events_owner_insert" ON public.myaios_events;
   DROP POLICY IF EXISTS "reception_events_service_role_all" ON public.myaios_events;
+  DROP POLICY IF EXISTS "myaios_events_owner_select" ON public.myaios_events;
+  DROP POLICY IF EXISTS "myaios_events_owner_insert" ON public.myaios_events;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_events' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_events_owner_select" ON public.myaios_events
@@ -157,6 +175,8 @@ BEGIN
   DROP POLICY IF EXISTS "reception_staff_hours_owner_select" ON public.myaios_staff_hours;
   DROP POLICY IF EXISTS "reception_staff_hours_owner_update" ON public.myaios_staff_hours;
   DROP POLICY IF EXISTS "reception_staff_hours_service_role_all" ON public.myaios_staff_hours;
+  DROP POLICY IF EXISTS "myaios_staff_hours_owner_select" ON public.myaios_staff_hours;
+  DROP POLICY IF EXISTS "myaios_staff_hours_owner_update" ON public.myaios_staff_hours;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'myaios_staff_hours' AND schemaname = 'public') THEN
     CREATE POLICY "myaios_staff_hours_owner_select" ON public.myaios_staff_hours
