@@ -9,6 +9,14 @@
  *
  * The user talks to LiTT, not "Claude" or "GPT."
  * Claude/GPT/Gemini/Qwen are interchangeable engines underneath LiTT.
+ *
+ * CREDENTIAL-AWARE ROUTING:
+ *   routeModel() now accepts an optional list of available model IDs.
+ *   If provided, it only routes to models in that list. Models whose
+ *   provider isn't configured are never selected.
+ *
+ *   If no available list is provided, it falls back to the full catalog
+ *   (for backward compatibility and tests).
  */
 
 import type { RoutingMode } from "../ink/cockpit-store.js";
@@ -111,40 +119,49 @@ export const MODEL_CATALOG: ModelChoice[] = [
  * @param mode — the user's routing preference
  * @param selectedModel — the user's explicitly selected model (for "fixed")
  * @param request — the user's request text (for "auto" routing)
+ * @param availableModelIds — IDs of models whose providers are credentialed + healthy.
+ *   If provided, routing only selects from these. If null/empty, uses full catalog.
  * @returns the chosen ModelChoice
  */
 export function routeModel(
   mode: RoutingMode,
   selectedModel: string | null,
   request: string,
+  availableModelIds?: string[] | null,
 ): ModelChoice {
-  const catalog = MODEL_CATALOG;
+  // Filter catalog to available models if credential info provided
+  const catalog = availableModelIds && availableModelIds.length > 0
+    ? MODEL_CATALOG.filter(m => availableModelIds.includes(m.id))
+    : MODEL_CATALOG;
 
-  // Fixed: always use the selected model
+  // If no models available, fall back to full catalog (let the provider
+  // error at runtime rather than crashing the UI)
+  const effectiveCatalog = catalog.length > 0 ? catalog : MODEL_CATALOG;
+
+  // Fixed: always use the selected model (if available)
   if (mode === "fixed" && selectedModel) {
-    const found = catalog.find(m => m.id === selectedModel);
+    const found = effectiveCatalog.find(m => m.id === selectedModel);
     if (found) return found;
+    // Selected model not available — fall through to auto
   }
 
   // Budget: cheapest capable model
   if (mode === "budget") {
-    // For coding tasks, use a coding-capable cheap model
     if (isCodingTask(request)) {
-      return catalog.find(m => m.id === "qwen/qwen3-coder") ??
-             catalog.find(m => m.strengths.includes("coding")) ??
-             catalog[1];
+      return effectiveCatalog.find(m => m.id === "qwen/qwen3-coder") ??
+             effectiveCatalog.find(m => m.strengths.includes("coding")) ??
+             effectiveCatalog[0];
     }
-    // For simple questions, use the cheapest
-    return [...catalog].sort((a, b) => a.cost - b.cost)[0];
+    return [...effectiveCatalog].sort((a, b) => a.cost - b.cost)[0];
   }
 
   // Max: strongest available model
   if (mode === "max") {
-    return [...catalog].sort((a, b) => b.power - a.power)[0];
+    return [...effectiveCatalog].sort((a, b) => b.power - a.power)[0];
   }
 
   // Auto: LiTT analyzes the request and picks the best model
-  return autoRoute(request, selectedModel);
+  return autoRoute(request, selectedModel, effectiveCatalog);
 }
 
 /**
@@ -158,44 +175,52 @@ export function routeModel(
  *   huge context       → high-context model
  *   offline/private    → local model
  */
-function autoRoute(request: string, selectedModel: string | null): ModelChoice {
+function autoRoute(request: string, selectedModel: string | null, catalog: ModelChoice[]): ModelChoice {
   const lower = request.toLowerCase();
-  const catalog = MODEL_CATALOG;
 
-  // If user selected a specific model, respect it as a preference
+  // If user selected a specific model, respect it as a preference (if available)
   if (selectedModel && selectedModel !== "openrouter/auto") {
     const found = catalog.find(m => m.id === selectedModel);
     if (found) return found;
   }
 
-  // Architecture/deep reasoning → Opus
+  // Architecture/deep reasoning → Opus (if available)
   if (lower.includes("architect") || lower.includes("design") ||
       lower.includes("refactor") || lower.includes("complex") ||
       lower.includes("reason") || lower.includes("analyze")) {
-    return catalog.find(m => m.id === "anthropic/claude-opus-4.6") ?? catalog[1];
+    return catalog.find(m => m.id === "anthropic/claude-opus-4.6") ??
+           catalog.find(m => m.strengths.includes("reasoning")) ??
+           catalog[0];
   }
 
-  // Coding tasks → Codex or Sonnet
+  // Coding tasks → Codex or Sonnet (whichever is available)
   if (isCodingTask(request)) {
     return catalog.find(m => m.id === "openai/gpt-5.6-codex") ??
            catalog.find(m => m.id === "anthropic/claude-sonnet-4.6") ??
-           catalog[1];
+           catalog.find(m => m.strengths.includes("coding")) ??
+           catalog[0];
   }
 
-  // Image/vision → Gemini
+  // Image/vision → Gemini (if available)
   if (lower.includes("image") || lower.includes("screenshot") ||
       lower.includes("visual") || lower.includes("diagram")) {
-    return catalog.find(m => m.id === "google/gemini-3-pro") ?? catalog[1];
+    return catalog.find(m => m.id === "google/gemini-3-pro") ??
+           catalog.find(m => m.strengths.includes("vision")) ??
+           catalog[0];
   }
 
-  // Large context → Gemini
+  // Large context → Gemini (if available)
   if (lower.includes("large") || lower.includes("entire repo") ||
       lower.includes("whole project") || lower.includes("all files")) {
-    return catalog.find(m => m.id === "google/gemini-3-pro") ?? catalog[1];
+    return catalog.find(m => m.id === "google/gemini-3-pro") ??
+           catalog.find(m => m.strengths.includes("large-context")) ??
+           catalog[0];
   }
 
-  // Simple questions → Sonnet (fast + strong)
-  return catalog.find(m => m.id === "anthropic/claude-sonnet-4.6") ?? catalog[1];
+  // Simple questions → Sonnet (fast + strong, if available)
+  return catalog.find(m => m.id === "anthropic/claude-sonnet-4.6") ??
+         catalog.find(m => m.strengths.includes("fast")) ??
+         catalog[0];
 }
 
 function isCodingTask(request: string): boolean {
