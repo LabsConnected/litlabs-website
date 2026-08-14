@@ -49,6 +49,7 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
+import { dispatchCommand, isSupportedCommand, type CommandRequest } from "./command-bridge";
 
 // ─── Service-to-service auth ───────────────────────────────────
 // Internal endpoints (under /internal/*) use a shared secret via
@@ -214,6 +215,30 @@ app.get("/health/live", (_req, res) => {
 // can poll this or use Socket.IO for realtime updates.
 app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedRequest, res: Response) => {
   res.json(getRuntimeState());
+});
+
+// ─── Command bridge endpoint ──────────────────────────────────────
+// POST /internal/command — dispatch a canonical CommandRouter command.
+// Both Studio Web and `litt --remote` hit this endpoint.
+// The CommandRouter updates the RuntimeStore, which broadcasts to all
+// Socket.IO clients (Studio, CLI, PowerShell).
+app.post("/internal/command", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body as CommandRequest;
+  if (!body?.command || typeof body.command !== "string") {
+    res.status(400).json({ error: "Missing 'command' field" });
+    return;
+  }
+  if (!isSupportedCommand(body.command)) {
+    res.status(400).json({ error: `Unsupported command: ${body.command}` });
+    return;
+  }
+  try {
+    const result = await dispatchCommand(body);
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
 });
 
 app.get("/health/ready", async (_req, res) => {

@@ -34,7 +34,38 @@ import {
 } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 import { useExecutionStore, type ExecutionPhase } from "../../stores/useExecutionStore";
+import { useLiTTRuntime } from "@/hooks/useLiTTRuntime";
 import type { DeviceStatus } from "@/lib/litt/live/types";
+
+/**
+ * Map canonical RuntimeStore phases (from terminal-server via Socket.IO)
+ * to the execution store phase vocabulary used by the HUD.
+ *
+ * RuntimeStore phases: idle, thinking, planning, editing, running, testing,
+ *   browsing, verifying, waiting_approval, complete, failed
+ *
+ * When the RuntimeStore is in an active state (running/testing/verifying/etc.),
+ * it takes priority over the chat-based execution store — because it reflects
+ * a real deterministic command execution from CommandRouter.
+ */
+function runtimePhaseToExecutionPhase(
+  runtimePhase: string,
+): ExecutionPhase | null {
+  switch (runtimePhase) {
+    case "running": return "editing";       // command is executing
+    case "testing": return "testing";
+    case "verifying": return "verifying";
+    case "planning": return "planning";
+    case "editing": return "editing";
+    case "thinking": return "planning";
+    case "browsing": return "inspecting";
+    case "waiting_approval": return "awaiting_approval";
+    case "complete": return "done";
+    case "failed": return "cancelled";
+    case "idle": return null;               // idle = let execution store decide
+    default: return null;
+  }
+}
 
 const PHASE_ICON: Record<ExecutionPhase, ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>> = {
   idle: Circle,
@@ -79,9 +110,21 @@ export default function LiTTAmbientHUD({
   voiceConnected,
   microphoneStatus,
 }: LiTTAmbientHUDProps) {
-  const phase = useExecutionStore((s) => s.phase);
-  const isRunning = useExecutionStore((s) => s.isRunning);
+  const execPhase = useExecutionStore((s) => s.phase);
+  const execRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+
+  // Canonical RuntimeStore from terminal-server (Socket.IO)
+  // Takes priority when a deterministic command is running.
+  const { state: runtimeState, connected: runtimeConnected } = useLiTTRuntime();
+  const runtimePhase = runtimeState?.phase ?? "idle";
+  const runtimeActiveCommand = runtimeState?.activeCommand ?? null;
+  const runtimeLastResult = runtimeState?.lastResult ?? null;
+
+  // Merge: RuntimeStore phase takes priority when active
+  const mergedRuntimePhase = runtimePhaseToExecutionPhase(runtimePhase);
+  const phase = mergedRuntimePhase ?? execPhase;
+  const isRunning = execRunning || runtimeActiveCommand !== null || runtimePhase === "running";
 
   const PhaseIcon = PHASE_ICON[phase] ?? Circle;
   const phaseColor = PHASE_COLOR[phase] ?? "var(--text-muted)";

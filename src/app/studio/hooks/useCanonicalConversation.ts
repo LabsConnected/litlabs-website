@@ -514,8 +514,76 @@ export function useCanonicalConversation({
               "  /clear — Clear the screen (messages stay on server)",
               "  /terminal — Open the terminal",
               "  /help — Show this help",
+              "",
+              "LiTT Runtime Commands (same as CLI):",
+              "  /status — Show project status (git, branch, changes)",
+              "  /diff — Show uncommitted changes",
+              "  /check — Run TypeScript typecheck",
+              "  /test — Run test suite",
+              "  /build — Run production build",
+              "  /debug — Run tests with verbose output",
+              "  /ship — Run check → test → build (pre-flight)",
             ].join("\n"));
             return { accepted: true, persisted: true };
+          case "runtime": {
+            // Runtime commands route through the canonical CommandRouter
+            // via the web command bridge → terminal-server → agent-core.
+            // This is the SAME implementation as `litt status/diff/check/test/build`.
+            const cmd = localCommand.command;
+            addLocalMessage(`Running \`/${cmd}\` via canonical CommandRouter…`);
+
+            try {
+              const res = await fetch("/api/studio/command", {
+                method: "POST",
+                credentials: "include",
+                headers: await authHeaders(true),
+                body: JSON.stringify({
+                  command: cmd,
+                  args: localCommand.args ? { query: localCommand.args } : undefined,
+                }),
+              });
+              const payload = await res.json().catch(() => null) as {
+                ok?: boolean;
+                runId?: string;
+                error?: string;
+                result?: {
+                  command?: string;
+                  result?: { success?: boolean; message?: string; data?: Record<string, unknown> };
+                  project?: { name?: string; branch?: string | null; root?: string };
+                };
+              } | null;
+
+              if (!res.ok || !payload) {
+                addLocalMessage(`❌ \`${cmd}\` failed: ${payload?.error ?? "No response from terminal server"}`);
+              } else {
+                const r = payload.result?.result;
+                const success = payload.ok ?? r?.success ?? false;
+                const message = r?.message ?? "";
+                const projectName = payload.result?.project?.name ?? "";
+                const branch = payload.result?.project?.branch ?? "";
+
+                // Format output based on command type
+                let output: string;
+                if (cmd === "status") {
+                  output = [
+                    `**${projectName || "Project"}** ${branch ? `\`${branch}\`` : ""}`,
+                    "",
+                    message,
+                  ].filter(Boolean).join("\n");
+                } else if (cmd === "diff") {
+                  output = message || "(no changes)";
+                } else {
+                  const status = success ? "✅ PASS" : "❌ FAIL";
+                  output = `${status} — \`${cmd}\`\n${message}`;
+                }
+                addLocalMessage(output);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Network error";
+              addLocalMessage(`❌ \`${cmd}\` error: ${msg}`);
+            }
+            return { accepted: true, persisted: true };
+          }
           default:
             return { accepted: true, persisted: true };
         }
