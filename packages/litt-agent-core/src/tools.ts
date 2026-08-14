@@ -25,6 +25,10 @@ import {
   readFile,
   searchFiles,
   inspectPackageJson,
+  runTypecheck,
+  runTest,
+  runBuild,
+  runCommand,
 } from "./project.js";
 
 // ─── Tool Definitions ─────────────────────────────────────────────
@@ -121,6 +125,45 @@ const INSPECT_PKG_DEF: ToolDefinition = {
   readOnly: true,
 };
 
+const CHECK_DEF: ToolDefinition = {
+  id: "project.check",
+  name: "check",
+  description: "Run typecheck (tsc --noEmit or package.json typecheck script)",
+  inputSchema: { type: "object", properties: {} },
+  readOnly: true,
+};
+
+const TEST_DEF: ToolDefinition = {
+  id: "project.test",
+  name: "test",
+  description: "Run tests via the project's test script",
+  inputSchema: { type: "object", properties: {} },
+  readOnly: true,
+};
+
+const BUILD_DEF: ToolDefinition = {
+  id: "project.build",
+  name: "build",
+  description: "Run build via the project's build script",
+  inputSchema: { type: "object", properties: {} },
+  readOnly: true,
+};
+
+const RUN_DEF: ToolDefinition = {
+  id: "project.run",
+  name: "run",
+  description: "Run an arbitrary command in the project directory",
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "Command to run" },
+      args: { type: "array", items: { type: "string" }, description: "Arguments" },
+    },
+    required: ["command"],
+  },
+  readOnly: true,
+};
+
 // ─── Tool Handlers ────────────────────────────────────────────────
 
 const READ_ONLY_META: ToolMetadata = {
@@ -186,6 +229,27 @@ const inspectPkgHandler: ToolHandler = async (ctx) => {
   return inspectPackageJson(ctx.shell, ctx.cwd);
 };
 
+const checkHandler: ToolHandler = async (ctx) => {
+  return runTypecheck(ctx.shell, ctx.cwd);
+};
+
+const testHandler: ToolHandler = async (ctx) => {
+  return runTest(ctx.shell, ctx.cwd);
+};
+
+const buildHandler: ToolHandler = async (ctx) => {
+  return runBuild(ctx.shell, ctx.cwd);
+};
+
+const runHandler: ToolHandler = async (ctx, args) => {
+  const command = typeof args.command === "string" ? args.command : "";
+  if (!command) {
+    return { success: false, message: "Missing required arg: command", data: {} };
+  }
+  const cmdArgs = Array.isArray(args.args) ? args.args.filter((a): a is string => typeof a === "string") : [];
+  return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd });
+};
+
 // ─── Registry ─────────────────────────────────────────────────────
 
 const ENTRIES: Record<string, ToolEntry> = {
@@ -197,6 +261,10 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.read_file": { definition: READ_FILE_DEF, handler: readFileHandler, metadata: READ_ONLY_META },
   "project.search": { definition: SEARCH_DEF, handler: searchHandler, metadata: READ_ONLY_META },
   "project.inspect_package": { definition: INSPECT_PKG_DEF, handler: inspectPkgHandler, metadata: READ_ONLY_META },
+  "project.check": { definition: CHECK_DEF, handler: checkHandler, metadata: READ_ONLY_META },
+  "project.test": { definition: TEST_DEF, handler: testHandler, metadata: READ_ONLY_META },
+  "project.build": { definition: BUILD_DEF, handler: buildHandler, metadata: READ_ONLY_META },
+  "project.run": { definition: RUN_DEF, handler: runHandler, metadata: READ_ONLY_META },
 };
 
 export class ToolRegistry {

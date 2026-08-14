@@ -420,6 +420,127 @@ export async function inspectPackageJson(
   }
 }
 
+// ─── Terminal Execution ───────────────────────────────────────────
+
+/**
+ * Run a command in the project directory and return structured output.
+ *
+ * This is the canonical terminal execution function. It uses the shell
+ * executor (execFile, no shell-string) for cross-platform safety.
+ *
+ * Returns stdout, stderr, exit code, and duration.
+ */
+export async function runCommand(
+  shell: ShellExecutor,
+  command: string,
+  args: string[],
+  options?: { cwd?: string; timeoutMs?: number },
+): Promise<ToolResult> {
+  const cwd = options?.cwd ?? shell.cwd;
+  const timeoutMs = options?.timeoutMs ?? 120_000;
+
+  const result = await shell.execute({ command, args, cwd, timeoutMs });
+
+  return {
+    success: result.ok,
+    message: result.ok
+      ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
+      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`,
+    data: {
+      command,
+      args,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      truncated: result.truncated,
+    },
+  };
+}
+
+/**
+ * Run an npm/pnpm script from package.json.
+ * Detects the package manager (pnpm > yarn > npm) and runs the script.
+ */
+export async function runScript(
+  shell: ShellExecutor,
+  scriptName: string,
+  cwd?: string,
+): Promise<ToolResult> {
+  const root = cwd ?? shell.cwd;
+  const pkgPath = path.join(root, "package.json");
+
+  if (!fs.existsSync(pkgPath)) {
+    return { success: false, message: "No package.json found", data: {} };
+  }
+
+  let pkg: { scripts?: Record<string, string> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+  } catch {
+    return { success: false, message: "Failed to parse package.json", data: {} };
+  }
+
+  if (!pkg.scripts?.[scriptName]) {
+    const available = Object.keys(pkg.scripts ?? {});
+    return {
+      success: false,
+      message: `No "${scriptName}" script in package.json. Available: ${available.join(", ") || "none"}`,
+      data: { availableScripts: available },
+    };
+  }
+
+  // Detect package manager
+  const hasPnpm = fs.existsSync(path.join(root, "pnpm-lock.yaml"));
+  const hasYarn = fs.existsSync(path.join(root, "yarn.lock"));
+  const pm = hasPnpm ? "pnpm" : hasYarn ? "yarn" : "npm";
+
+  return runCommand(shell, pm, ["run", scriptName], { cwd: root });
+}
+
+/**
+ * Run typecheck via the project's typecheck script or tsc --noEmit.
+ */
+export async function runTypecheck(
+  shell: ShellExecutor,
+  cwd?: string,
+): Promise<ToolResult> {
+  const root = cwd ?? shell.cwd;
+  const pkgPath = path.join(root, "package.json");
+
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      if (pkg.scripts?.typecheck) {
+        return runScript(shell, "typecheck", root);
+      }
+    } catch { /* fall through to tsc */ }
+  }
+
+  // Fallback: run tsc --noEmit directly
+  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root });
+}
+
+/**
+ * Run tests via the project's test script.
+ */
+export async function runTest(
+  shell: ShellExecutor,
+  cwd?: string,
+): Promise<ToolResult> {
+  return runScript(shell, "test", cwd ?? shell.cwd);
+}
+
+/**
+ * Run build via the project's build script.
+ */
+export async function runBuild(
+  shell: ShellExecutor,
+  cwd?: string,
+): Promise<ToolResult> {
+  return runScript(shell, "build", cwd ?? shell.cwd);
+}
+
 // ─── Path Safety ──────────────────────────────────────────────────
 
 const BLOCKED_PATH_PATTERNS: readonly RegExp[] = [

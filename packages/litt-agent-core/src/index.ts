@@ -53,6 +53,11 @@ export {
   searchFiles,
   inspectPackageJson,
   isSafePath,
+  runCommand,
+  runScript,
+  runTypecheck,
+  runTest,
+  runBuild,
 } from "./project.js";
 
 // Tool registry

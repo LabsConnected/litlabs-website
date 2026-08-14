@@ -100,6 +100,21 @@ export class CommandRouter {
     return { command: "inspect_package", result };
   }
 
+  async check(): Promise<CommandResult> {
+    const result = await this.registry.execute("project.check", this.ctx(), {});
+    return { command: "check", result };
+  }
+
+  async test(): Promise<CommandResult> {
+    const result = await this.registry.execute("project.test", this.ctx(), {});
+    return { command: "test", result };
+  }
+
+  async build(): Promise<CommandResult> {
+    const result = await this.registry.execute("project.build", this.ctx(), {});
+    return { command: "build", result };
+  }
+
   /**
    * Dispatch a command by name.
    * Used by CLI entry points.
@@ -114,6 +129,9 @@ export class CommandRouter {
       case "read_file": return this.readFile(typeof args?.path === "string" ? args.path : "");
       case "search": return this.search(typeof args?.query === "string" ? args.query : "");
       case "inspect_package": return this.inspectPackage();
+      case "check": return this.check();
+      case "test": return this.test();
+      case "build": return this.build();
       default:
         return {
           command,
