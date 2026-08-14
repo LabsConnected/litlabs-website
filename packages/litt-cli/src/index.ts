@@ -4,7 +4,8 @@
  * Commands:
  *   litt doctor    — Check system health (Node, Git, pnpm, network, auth)
  *   litt version   — Show CLI version
- *   litt status    — Show project + auth + git status
+ *   litt status    — Show project + git status (via @litt/agent-core)
+ *   litt diff      — Show git diff (via @litt/agent-core)
  *   litt inspect   — Deep repo inspection (framework, scripts, deploy)
  *   litt ask       — Ask LiTT a question about your project
  *   litt explain   — Pipe errors/diffs and get actionable advice
@@ -14,6 +15,7 @@ import { parseArgs } from "node:util";
 import { doctorCommand } from "./commands/doctor.js";
 import { versionCommand } from "./commands/version.js";
 import { statusCommand } from "./commands/status.js";
+import { diffCommand } from "./commands/diff.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
@@ -24,6 +26,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
   doctor: doctorCommand,
   version: versionCommand,
   status: statusCommand,
+  diff: diffCommand,
   inspect: inspectCommand,
   ask: askCommand,
   explain: explainCommand,
@@ -68,7 +71,8 @@ Usage: litt <command> [options]
 Commands:
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version
-  status     Show project + auth + git status
+  status     Show project + git status (via @litt/agent-core)
+  diff       Show git diff (via @litt/agent-core)
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice
@@ -80,6 +84,8 @@ Options:
 Examples:
   litt doctor
   litt status
+  litt diff
+  litt diff --staged
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"

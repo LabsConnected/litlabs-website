@@ -1,7 +1,7 @@
 {
   "name": "@litt/agent-core",
   "version": "0.1.0",
-  "description": "Shared agent core for LiTT Code",
+  "description": "Platform-independent LiTT agent core — no React, Next.js, Clerk, or Supabase",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,11 +16,13 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx src/__tests__/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.23.1"
   },
   "engines": {
     "node": ">=22"
