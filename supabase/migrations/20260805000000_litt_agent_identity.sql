@@ -36,9 +36,18 @@ ALTER TABLE public.agent_runs
   CHECK (agent_mode IN ('standard', 'builder', 'research', 'spark'));
 
 -- Migrate existing runs: spark slug → spark mode
-UPDATE public.agent_runs
-SET agent_mode = 'spark'
-WHERE agent_slug = 'spark' AND agent_mode = 'standard';
+-- (agent_slug may not exist on agent_runs in all deployment paths)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'agent_runs' AND column_name = 'agent_slug'
+  ) THEN
+    UPDATE public.agent_runs
+    SET agent_mode = 'spark'
+    WHERE agent_slug = 'spark' AND agent_mode = 'standard';
+  END IF;
+END $$;
 
 -- ─── agent_steps: add agent_mode ──────────────────────────────────
 ALTER TABLE public.agent_steps

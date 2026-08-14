@@ -190,6 +190,9 @@ importers:
       '@clerk/testing':
         specifier: ^2.2.15
         version: 2.2.15(@playwright/test@1.62.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@litt/agent-core':
+        specifier: workspace:*
+        version: link:packages/litt-agent-core
       '@playwright/test':
         specifier: ^1.62.0
         version: 1.62.0
@@ -12065,6 +12068,14 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@20.19.43)(lightningcss@1.32.0)(terser@5.49.2)
 
+  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.49.2))':
+    dependencies:
+      '@vitest/spy': 2.1.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.49.2)
+
   '@vitest/pretty-format@2.1.9':
     dependencies:
       tinyrainbow: 1.2.0
@@ -17346,7 +17357,7 @@ snapshots:
   vitest@2.1.9(@types/node@22.20.1)(jsdom@25.0.1(bufferutil@4.1.0))(lightningcss@1.32.0)(terser@5.49.2):
     dependencies:
       '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@20.19.43)(lightningcss@1.32.0)(terser@5.49.2))
+      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.49.2))
       '@vitest/pretty-format': 2.1.9
       '@vitest/runner': 2.1.9
       '@vitest/snapshot': 2.1.9

@@ -37,6 +37,11 @@ jobs:
         env:
           CI: true
 
+      - name: Build @litt/agent-core
+        run: pnpm --filter @litt/agent-core build
+        env:
+          CI: true
+
       - name: Type check
         run: npx tsc --noEmit
 

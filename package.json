@@ -121,6 +121,7 @@
     "@types/react-dom": "^19",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.2",
+    "@litt/agent-core": "workspace:*",
     "concurrently": "^10.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",

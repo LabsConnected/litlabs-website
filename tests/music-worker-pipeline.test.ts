@@ -118,7 +118,7 @@ describe("Music worker pipeline — stuck-at-5% fix", () => {
   describe("P0: Durable claim RPC (FOR UPDATE SKIP LOCKED)", () => {
     const migrationPath = path.resolve(
       __dirname,
-      "../supabase/migrations/20260812000000_music_claim_rpc.sql",
+      "../supabase/migrations/20260812000001_music_claim_rpc.sql",
     );
     const source = fs.readFileSync(migrationPath, "utf-8");
 
