@@ -106,7 +106,7 @@ function getSharedSocket(url: string, token?: string | null): Socket {
 
   const auth = token ? { token } : {};
   sharedSocket = io(url, {
-    transports: ["websocket", "polling"],
+    transports: ["websocket"],
     reconnection: true,
     reconnectionDelay: 1000,
     auth,
@@ -157,7 +157,8 @@ function computeFreshness(
 
 export function useLiTTRuntime(options?: {
   url?: string;
-  token?: string | null;
+  /** Auth token for terminal server. undefined = not yet loaded (wait). null = no auth. string = auth. */
+  token?: string | null | undefined;
   pollIntervalMs?: number;
 }): UseLiTTRuntimeResult {
   const wsUrl =
@@ -177,7 +178,17 @@ export function useLiTTRuntime(options?: {
   const socketRef = useRef<Socket | null>(null);
 
   // Connect / disconnect
+  // Wait for token before connecting — connecting without auth causes 401s.
+  // If no token is provided (null), we still connect (for test/dev without auth).
+  // If a token is explicitly undefined, we skip connection.
   useEffect(() => {
+    // If token was explicitly set to undefined (vs null), don't connect yet
+    // null = "no token provided, connect anyway" (for dev without auth)
+    // undefined = "token not yet loaded, wait"
+    // string = "token loaded, connect with auth"
+    const shouldConnect = token !== undefined;
+    if (!shouldConnect) return;
+
     refCount++;
     const socket = getSharedSocket(wsUrl, token ?? undefined);
     socketRef.current = socket;
@@ -230,6 +241,10 @@ export function useLiTTRuntime(options?: {
     }
 
     return () => {
+      // If we returned early (no token), there's nothing to clean up
+      if (!shouldConnect || !socketRef.current) return;
+
+      const socket = socketRef.current;
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
