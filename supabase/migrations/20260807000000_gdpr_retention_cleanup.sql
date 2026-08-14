@@ -21,7 +21,7 @@ RETURNS TABLE(
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-AS $$
+AS $func$
 DECLARE
   v_audit_deleted BIGINT := 0;
   v_rate_deleted BIGINT := 0;
@@ -39,7 +39,7 @@ BEGIN
 
   RETURN QUERY SELECT v_audit_deleted, v_rate_deleted;
 END;
-$$;
+$func$;
 
 -- Grant execute to service role (used by API routes)
 GRANT EXECUTE ON FUNCTION public.purge_expired_data() TO service_role;
@@ -49,7 +49,7 @@ GRANT EXECUTE ON FUNCTION public.purge_expired_data() TO service_role;
 -- block silently does nothing — call purge_expired_data() from an
 -- external scheduler or API route instead.
 
-DO $$
+DO $do$
 BEGIN
   -- Check if pg_cron extension exists
   IF EXISTS (
@@ -59,7 +59,7 @@ BEGIN
     PERFORM cron.schedule(
       'gdpr-retention-cleanup',
       '0 * * * *',
-      $$SELECT public.purge_expired_data();$$
+      $cron$SELECT public.purge_expired_data();$cron$
     );
     RAISE NOTICE 'pg_cron: scheduled hourly GDPR retention cleanup';
   ELSE
@@ -69,7 +69,7 @@ EXCEPTION
   WHEN OTHERS THEN
     RAISE NOTICE 'pg_cron scheduling skipped: %', SQLERRM;
 END;
-$$;
+$do$;
 
 -- ─── Documentation comment ─────────────────────────────────────────
 COMMENT ON FUNCTION public.purge_expired_data() IS

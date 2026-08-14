@@ -80,44 +80,12 @@ CREATE INDEX IF NOT EXISTS credit_ledger_pricing_version
   ON public.credit_ledger(pricing_version) WHERE pricing_version IS NOT NULL;
 
 -- ═══════════════════════════════════════════════════════════════════════
--- 2. credit_reservations — reservation lifecycle tracking
+-- 2. credit_reservations — MOVED to B2 (20260814200000)
 -- ═══════════════════════════════════════════════════════════════════════
-
-CREATE TABLE IF NOT EXISTS public.credit_reservations (
-  reservation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  run_id UUID,
-  estimated_bits INTEGER NOT NULL CHECK (estimated_bits > 0),
-  actual_bits INTEGER,
-  released_bits INTEGER,
-  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN (
-    'PENDING', 'SETTLED', 'RELEASED', 'EXPIRED', 'FAILED'
-  )),
-  idempotency_key TEXT NOT NULL,
-  pricing_version TEXT,
-  exchange_rate_version TEXT,
-  billability_cause TEXT,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  settled_at TIMESTAMPTZ,
-  released_at TIMESTAMPTZ,
-  metadata JSONB
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS credit_reservations_idempotency_key_unique
-  ON public.credit_reservations(idempotency_key);
-CREATE INDEX IF NOT EXISTS credit_reservations_user_id
-  ON public.credit_reservations(user_id);
-CREATE INDEX IF NOT EXISTS credit_reservations_user_status
-  ON public.credit_reservations(user_id, status);
-CREATE INDEX IF NOT EXISTS credit_reservations_expires
-  ON public.credit_reservations(expires_at) WHERE status = 'PENDING';
-
-ALTER TABLE public.credit_reservations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY credit_reservations_deny_anon
-  ON public.credit_reservations FOR ALL TO anon USING (false) WITH CHECK (false);
-CREATE POLICY credit_reservations_deny_authenticated
-  ON public.credit_reservations FOR ALL TO authenticated USING (false) WITH CHECK (false);
+-- The credit_reservations table and its RPCs (reserve_bits, settle_bits,
+-- release_bits) are defined in the B2 migration with a different schema.
+-- B1's version was never applied to production and has been removed to
+-- avoid schema conflicts during migration replay.
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- 3. credit_grants — per-grant tracking with priority and expiration
