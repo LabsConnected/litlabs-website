@@ -121,7 +121,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         const result = await gateway.execute({
           toolId: mapping.toolId,
           inputs: { command, args },
-          cwd: process.cwd(),
+          cwd: session.getCwd(),
           mode: session.getMode(),
           identity: {
             tenantId: "cli-tenant",

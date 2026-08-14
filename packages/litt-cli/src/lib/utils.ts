@@ -128,7 +128,12 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     : null;
 
   const hasGit = existsSync(join(rootDir, ".git"));
-  const gitBranch = hasGit ? exec("git rev-parse --abbrev-ref HEAD", { cwd: rootDir }).stdout || null : null;
+  // Use --show-current (more reliable on Windows) with --abbrev-ref fallback
+  const gitBranch = hasGit
+    ? (exec("git branch --show-current", { cwd: rootDir }).stdout ||
+       exec("git rev-parse --abbrev-ref HEAD", { cwd: rootDir }).stdout ||
+       null)
+    : null;
   const gitStatus = hasGit ? exec("git status --short", { cwd: rootDir }).stdout || null : null;
 
   const hasTsConfig = existsSync(join(rootDir, "tsconfig.json"));
