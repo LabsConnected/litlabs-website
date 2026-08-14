@@ -17,7 +17,7 @@ export interface LittConfig {
   createdAt: string;
   /** Default mode: plan, act, or auto */
   defaultMode: "plan" | "act" | "auto";
-  /** Default model (or "heuristic" if no API key) */
+  /** Default model profile (auto = LiTT routes based on task) */
   defaultModel: string;
   /** Whether the user has completed first-run */
   initialized: boolean;
@@ -27,7 +27,7 @@ const DEFAULT_CONFIG: LittConfig = {
   version: 1,
   createdAt: new Date().toISOString(),
   defaultMode: "act",
-  defaultModel: "heuristic",
+  defaultModel: "auto",
   initialized: true,
 };
 
@@ -68,10 +68,13 @@ export function ensureConfig(): LittConfig {
   }
 
   // Write default config
+  // Model truth: OPENROUTER_API_KEY means OpenRouter is available as a
+  // provider — it does NOT mean Claude (or any specific model) is selected.
+  // The default model is resolved at runtime via resolveConfiguredModel().
   const config: LittConfig = {
     ...DEFAULT_CONFIG,
     createdAt: new Date().toISOString(),
-    defaultModel: process.env.OPENROUTER_API_KEY ? "claude-sonnet-4.6" : "heuristic",
+    defaultModel: "auto",
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");

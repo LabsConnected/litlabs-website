@@ -62,7 +62,15 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
 
   return (
     <Box flexDirection="column">
-      <Header project={project} branch={branch} model={model} connected={store.state.connected} />
+      <Header
+        project={project}
+        projectRoot={cwd}
+        branch={branch}
+        model={model}
+        connected={store.state.connected}
+        localRuntime={store.state.localRuntime}
+        remoteRuntime={store.state.remoteRuntime}
+      />
       <Box flexDirection="row" gap={2}>
         <LiTTHoloPanel state={store.state.holoState} />
         <Subsystems selected={store.state.selectedPanel} onSelect={store.actions.setSelectedPanel} />
@@ -79,6 +87,8 @@ export function CockpitApp({ session, client, approvalBridge, sessionBridge, pro
       />
       <StatusBar
         connected={store.state.connected}
+        localRuntime={store.state.localRuntime}
+        remoteRuntime={store.state.remoteRuntime}
         cwd={cwd}
         holoState={store.state.holoState}
         model={model}

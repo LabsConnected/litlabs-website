@@ -133,45 +133,68 @@ export function useEventBridge(
     }
   }, [store]);
 
-  // Connection state: online requires BOTH socket connection AND fresh heartbeat.
-  // A stale heartbeat with a connected socket means the server is not responding
-  // to heartbeats — that's degraded/offline, not online.
+  // Remote connection state: maps RuntimeClient ConnectionState to
+  // the cockpit's remoteRuntime field. This is INDEPENDENT of local runtime.
+  // Local runtime readiness is set once on mount — it does not flap.
   const onConnection = useCallback((state: string) => {
-    if (state !== "connected") {
-      store.actions.setConnected(false);
-      return;
+    // Map ConnectionState → RemoteRuntimeState
+    switch (state) {
+      case "connected":
+        // Socket connected — also check heartbeat freshness
+        store.actions.setRemoteRuntime("connected");
+        // Update legacy connected flag for backward compat
+        store.actions.setConnected(isHeartbeatFresh(client?.getState() ?? null));
+        break;
+      case "connecting":
+        store.actions.setRemoteRuntime("connecting");
+        store.actions.setConnected(false);
+        break;
+      case "reconnecting":
+        store.actions.setRemoteRuntime("reconnecting");
+        store.actions.setConnected(false);
+        break;
+      case "error":
+        store.actions.setRemoteRuntime("error");
+        store.actions.setConnected(false);
+        break;
+      default:
+        store.actions.setRemoteRuntime("offline");
+        store.actions.setConnected(false);
     }
-    // Socket connected — but also check heartbeat freshness
-    const runtimeState = client?.getState() ?? null;
-    store.actions.setConnected(isHeartbeatFresh(runtimeState));
   }, [store, client]);
 
-  // Also re-evaluate connection when runtime state updates (heartbeat may go stale)
+  // Re-evaluate remote connection when runtime state updates (heartbeat may go stale)
   const onState = useCallback((state: RuntimeState) => {
-    // If socket is connected but heartbeat is stale, mark as not connected
-    if (client?.is_connected() && !isHeartbeatFresh(state)) {
-      store.actions.setConnected(false);
-    } else if (client?.is_connected() && isHeartbeatFresh(state)) {
-      store.actions.setConnected(true);
+    if (client?.is_connected()) {
+      store.actions.setConnected(isHeartbeatFresh(state));
+      if (!isHeartbeatFresh(state)) {
+        store.actions.setRemoteRuntime("error");
+      }
     }
   }, [store, client]);
 
   useEffect(() => {
     const cleanups: Array<() => void> = [];
 
-    // Subscribe to local session events (always available — the local
-    // RuntimeSession IS the runtime when terminal-server is down)
+    // Local runtime: the RuntimeSession is always available.
+    // This proves LOCAL readiness only — it does NOT fabricate remote connectivity.
     if (sessionBridge) {
       cleanups.push(sessionBridge.subscribe(onLifecycle));
-      // Local mode: the session is always "connected" to itself
+      store.actions.setLocalRuntime("ready");
+      // Legacy connected flag: true only because local runtime is ready.
+      // Remote connectivity is tracked separately in remoteRuntime.
       store.actions.setConnected(true);
     }
 
-    // Subscribe to remote client events (terminal-server, if available)
+    // Remote runtime: subscribe to terminal-server events if available.
+    // This is INDEPENDENT — remote being offline does not affect local readiness.
     if (client) {
       cleanups.push(client.onLifecycle(onLifecycle));
       cleanups.push(client.onConnectionChange(onConnection as (conn: import("../lib/runtime-client.js").ConnectionState) => void));
       cleanups.push(client.onState(onState));
+    } else {
+      // No remote client — explicitly mark remote as offline
+      store.actions.setRemoteRuntime("offline");
     }
 
     return () => {

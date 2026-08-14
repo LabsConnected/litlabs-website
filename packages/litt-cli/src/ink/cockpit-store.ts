@@ -34,6 +34,13 @@ export interface ActivityEntry {
   stream?: "stdout" | "stderr";
 }
 
+/**
+ * Runtime connectivity — each layer is independent truth.
+ * Local runtime being ready does NOT imply remote is connected.
+ */
+export type LocalRuntimeState = "starting" | "ready" | "error";
+export type RemoteRuntimeState = "offline" | "connecting" | "connected" | "reconnecting" | "error";
+
 export interface CockpitUIState {
   selectedPanel: CockpitPanel;
   holoState: HoloState;
@@ -41,7 +48,12 @@ export interface CockpitUIState {
   historyIndex: number;
   approvalPrompt: ApprovalPrompt | null;
   activityLog: ActivityEntry[];
+  /** @deprecated Use localRuntime + remoteRuntime for granular truth */
   connected: boolean;
+  /** Local RuntimeSession readiness — always available */
+  localRuntime: LocalRuntimeState;
+  /** Remote terminal-server connection state — independent of local */
+  remoteRuntime: RemoteRuntimeState;
   currentRunId: string | null;
 }
 
@@ -53,6 +65,8 @@ export function useCockpitStore() {
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [connected, setConnected] = useState(false);
+  const [localRuntime, setLocalRuntime] = useState<LocalRuntimeState>("starting");
+  const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntimeState>("offline");
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   const addActivity = useCallback((entry: ActivityEntry) => {
@@ -102,6 +116,8 @@ export function useCockpitStore() {
       approvalPrompt,
       activityLog,
       connected,
+      localRuntime,
+      remoteRuntime,
       currentRunId,
     },
     actions: {
@@ -113,6 +129,8 @@ export function useCockpitStore() {
       setApprovalPrompt,
       clearApproval,
       setConnected,
+      setLocalRuntime,
+      setRemoteRuntime,
       setCurrentRunId,
     },
   };
