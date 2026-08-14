@@ -72,13 +72,23 @@ $$;
 ALTER TABLE public.credit_ledger
   DROP CONSTRAINT IF EXISTS credit_ledger_balance_bucket_check;
 
-ALTER TABLE public.credit_ledger
-  ADD CONSTRAINT credit_ledger_balance_bucket_check CHECK (
-    balance_bucket IN (
-      'monthly', 'purchased', 'beta_promotional',
-      'compensation', 'enterprise_commit', 'admin'
-    )
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'credit_ledger_balance_bucket_check'
+      AND conrelid = 'public.credit_ledger'::regclass
+  ) THEN
+    ALTER TABLE public.credit_ledger
+      ADD CONSTRAINT credit_ledger_balance_bucket_check CHECK (
+        balance_bucket IN (
+          'monthly', 'purchased', 'beta_promotional',
+          'compensation', 'enterprise_commit', 'admin'
+        )
+      );
+  END IF;
+END;
+$$;
 
 -- Indexes for correlation queries
 CREATE INDEX IF NOT EXISTS credit_ledger_run_id
