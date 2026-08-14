@@ -164,14 +164,12 @@ describe("Billing — reserve → settle flow", () => {
     const { reserveCredits } = await import("@/lib/agent-billing");
 
     // Mock chain:
-    // 1. from("agent_runs").select().eq().maybeSingle() — no existing run
-    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    // 2. from("users").select().eq().maybeSingle() — user exists
+    // 1. from("users").select().eq().maybeSingle() — user exists
     mockMaybeSingle.mockResolvedValueOnce({ data: { id: "user-uuid-1" }, error: null });
-    // 3. rpc("reserve_credits") — insufficient balance
+    // 2. rpc("reserve_bits") — insufficient balance (B2 contract)
     mockRpc.mockResolvedValueOnce({
-      data: null,
-      error: { message: "insufficient balance: have 0, need 5" } as never,
+      data: { success: false, reason: "insufficient_balance" } as never,
+      error: null,
     });
 
     const result = await reserveCredits(
