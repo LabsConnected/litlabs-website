@@ -33,7 +33,7 @@ const PUBLIC_ROUTES = [
   { path: "/cookies", name: "Cookies", expectedText: /Cookie|cookie/i },
   { path: "/showcase", name: "Showcase", expectedText: /Showcase|project|Project|Gallery/i },
   { path: "/voice", name: "Voice", expectedText: /Voice|voice|speak|Speak|Studio|Sign/i },
-  { path: "/sign-up", name: "Signup", expectedText: /Sign|sign|Create|create|free|Free|Clerk|clerk/i },
+  { path: "/sign-up", name: "Signup", expectedText: /Sign|sign|Create|create|free|Free|Clerk|clerk/i, allowRedirect: true },
   { path: "/discover", name: "Discover", expectedText: /Discover|Community|community|Creator|creator/i },
   { path: "/agents", name: "Agents", expectedText: /Agent|agent|AI/i },
   { path: "/games", name: "Games", expectedText: /Game|game|Play|play|Arcade|arcade/i },
@@ -125,7 +125,7 @@ test.describe("Site Audit — Public Routes @public", () => {
 
       const response = await page.goto(route.path, { waitUntil: "domcontentloaded" });
 
-      // 1. Status code — 200 for normal pages, 307 for redirects
+      // 1. Status code — 200 for normal pages, 307/302 for redirects
       const status = response?.status() ?? 0;
       if (route.redirectsTo) {
         expect(status === 200 || status === 307 || status === 302, `${route.path} should return 200 or redirect`).toBe(true);
@@ -133,15 +133,22 @@ test.describe("Site Audit — Public Routes @public", () => {
         if (status === 307 || status === 302) {
           await page.waitForURL(route.redirectsTo, { waitUntil: "domcontentloaded" });
         }
+      } else if (route.allowRedirect) {
+        // Clerk auth pages may redirect to hosted Clerk pages
+        expect(status === 200 || status === 307 || status === 302, `${route.path} should return 200 or redirect`).toBe(true);
       } else {
         expect(status, `${route.path} should return 200`).toBe(200);
       }
 
       // 2. Body content
-      await page.waitForLoadState("domcontentloaded");
-      // For redirected pages, wait for network to settle so Axe doesn't hit a destroyed context
+      // For redirected pages, wait for the destination URL and network to settle
+      // so Axe/body checks don't hit a destroyed execution context
       if (route.redirectsTo) {
+        await page.waitForURL(route.redirectsTo, { timeout: 15_000 }).catch(() => {});
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
         await page.waitForLoadState("networkidle").catch(() => {});
+      } else {
+        await page.waitForLoadState("domcontentloaded");
       }
       const bodyText = await page.locator("body").innerText();
       const bodyHtml = await page.locator("body").innerHTML();
