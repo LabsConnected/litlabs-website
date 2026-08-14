@@ -27,6 +27,13 @@ import { handleLiTTCodeCommand } from "./litt-code";
 import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
+  initRuntime,
+  runtimeCommandStart,
+  runtimeCommandEnd,
+  runtimeSetPhase,
+  getRuntimeState,
+} from "./runtime";
+import {
   prepareWorkspace,
   prepareBlankWorkspace,
   getWorkspace,
@@ -177,6 +184,12 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
+// ─── Canonical runtime authority ──────────────────────────────────
+// One RuntimeStore owns the truth. Socket.IO clients receive a full
+// snapshot on connect and incremental updates on every mutation.
+// server.ts does NOT create another parallel state object.
+initRuntime(io);
+
 interface Session {
   ptyProcess: pty.IPty;
   createdAt: Date;
@@ -194,6 +207,13 @@ app.get("/health/live", (_req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
+});
+
+// ─── Runtime state endpoint ───────────────────────────────────────
+// Returns the canonical runtime snapshot. Both PowerShell and litbit-web
+// can poll this or use Socket.IO for realtime updates.
+app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedRequest, res: Response) => {
+  res.json(getRuntimeState());
 });
 
 app.get("/health/ready", async (_req, res) => {
@@ -1140,12 +1160,16 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
+    runtimeSetPhase("thinking");
+    const cmdStart = Date.now();
     try {
       const reply = await handleLiTTCodeCommand(input);
+      runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied");
       socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
       socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
     } catch (err) {
       const message = err instanceof Error ? err.message : "LiTT failed";
+      runtimeCommandEnd("litt-code:command", false, 1, Date.now() - cmdStart, message);
       socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
     }
   });

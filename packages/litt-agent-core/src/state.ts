@@ -65,6 +65,14 @@ export class RuntimeStore {
   }
 
   /**
+   * Set or replace the event emitter.
+   * Useful for wiring the store to Socket.IO after construction.
+   */
+  setEmitter(emitter: RuntimeEventEmitter | null): void {
+    this.emitter = emitter;
+  }
+
+  /**
    * Serialize state for Socket.IO transport.
    * This is the canonical shape both surfaces receive.
    */

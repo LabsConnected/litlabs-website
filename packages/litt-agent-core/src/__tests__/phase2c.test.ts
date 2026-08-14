@@ -246,33 +246,52 @@ describe("Phase 2C — CommandRouter + RuntimeStore integration", () => {
   });
 
   it("check() updates store with command start/end", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const store = new RuntimeStore();
-    const router = new CommandRouter(shell, { cwd: pkgDir, store });
+    const os = await import("os");
+    const tmp = path.join(os.tmpdir(), `litt-2c-check-${Date.now()}`);
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "package.json"),
+      JSON.stringify({ name: "fast-check", version: "1.0.0", scripts: { typecheck: "node -e \"console.log('ok')\"" } }),
+    );
+    try {
+      const shell = createShellExecutor(tmp);
+      const store = new RuntimeStore();
+      const router = new CommandRouter(shell, { cwd: tmp, store });
 
-    await router.check();
-    const state = store.getState();
-    assert.equal(state.activeCommand, null, "activeCommand should be cleared after completion");
-    assert.ok(state.lastResult, "lastResult should be set");
-    assert.equal(state.lastResult!.command, "check");
-    // Phase should be "complete" (success) or "failed"
-    assert.ok(state.phase === "complete" || state.phase === "failed");
+      await router.check();
+      const state = store.getState();
+      assert.equal(state.activeCommand, null, "activeCommand should be cleared after completion");
+      assert.ok(state.lastResult, "lastResult should be set");
+      assert.equal(state.lastResult!.command, "check");
+      assert.ok(state.phase === "complete" || state.phase === "failed");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("check() emits command_start and command_end events", async () => {
-    const pkgDir = path.join(REPO_ROOT, "packages", "litt-agent-core");
-    const shell = createShellExecutor(pkgDir);
-    const events: RuntimeEvent[] = [];
-    const store = new RuntimeStore((e) => events.push(e));
-    const router = new CommandRouter(shell, { cwd: pkgDir, store });
+    const os = await import("os");
+    const tmp = path.join(os.tmpdir(), `litt-2c-events-${Date.now()}`);
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "package.json"),
+      JSON.stringify({ name: "fast-check2", version: "1.0.0", scripts: { typecheck: "node -e \"console.log('ok')\"" } }),
+    );
+    try {
+      const shell = createShellExecutor(tmp);
+      const events: RuntimeEvent[] = [];
+      const store = new RuntimeStore((e) => events.push(e));
+      const router = new CommandRouter(shell, { cwd: tmp, store });
 
-    await router.check();
-    const startEvents = events.filter((e) => e.type === "command_start");
-    const endEvents = events.filter((e) => e.type === "command_end");
-    assert.ok(startEvents.length >= 1, "should emit command_start");
-    assert.ok(endEvents.length >= 1, "should emit command_end");
-    assert.equal(startEvents[0].data.command, "check");
-    assert.equal(endEvents[0].data.command, "check");
+      await router.check();
+      const startEvents = events.filter((e) => e.type === "command_start");
+      const endEvents = events.filter((e) => e.type === "command_end");
+      assert.ok(startEvents.length >= 1, "should emit command_start");
+      assert.ok(endEvents.length >= 1, "should emit command_end");
+      assert.equal(startEvents[0].data.command, "check");
+      assert.equal(endEvents[0].data.command, "check");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
