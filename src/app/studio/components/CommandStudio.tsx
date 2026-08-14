@@ -18,6 +18,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
+import { LiTTRuntimeProvider } from "../context/LiTTRuntimeContext";
 import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
@@ -146,9 +147,11 @@ function AgentVoiceSync() {
  */
 export default function CommandStudio() {
   return (
-    <VoiceSessionProvider>
-      <CommandStudioContent />
-    </VoiceSessionProvider>
+    <LiTTRuntimeProvider>
+      <VoiceSessionProvider>
+        <CommandStudioContent />
+      </VoiceSessionProvider>
+    </LiTTRuntimeProvider>
   );
 }
 

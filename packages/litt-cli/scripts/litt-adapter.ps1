@@ -243,9 +243,13 @@ function Format-LiTTRuntimeState {
         $lsuccess = $last.success
         $lexit = $last.exitCode
         $ldur = $last.durationMs
+        $lrunId = $last.runId
         $lcolor = if ($lsuccess) { "Green" } else { "Red" }
         $lstatus = if ($lsuccess) { "OK" } else { "FAIL(exit=$lexit)" }
         Write-Host "  Last:    $lcmd [$lstatus] ${ldur}ms" -ForegroundColor $lcolor
+        if ($lrunId) {
+            Write-Host "  RunId:   $lrunId" -ForegroundColor DarkGray
+        }
     }
 }
 

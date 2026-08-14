@@ -24,6 +24,7 @@ import {
   type ExecutionEvent,
   type ExecutionPhase,
 } from "../stores/useExecutionStore";
+import { useStudioRuntime } from "../context/LiTTRuntimeContext";
 
 /* ─────────────────────────────────────────────────────────────────
  * LiTTLiveActivity — right-side panel showing real agent execution.
@@ -86,6 +87,14 @@ export default function LiTTLiveActivity({
   const collapseEvent = useExecutionStore((s) => s.collapseEvent);
   const collapseLowLevel = useExecutionStore((s) => s.collapseLowLevel);
   const clearEvents = useExecutionStore((s) => s.clearEvents);
+
+  // Canonical RuntimeStore from terminal-server (Socket.IO)
+  // This is the SAME state that PowerShell `litt runtime` sees.
+  const { state: runtimeState, freshness, connected: runtimeConnected } = useStudioRuntime();
+  const runtimeActiveCmd = runtimeState?.activeCommand ?? null;
+  const runtimeLastResult = runtimeState?.lastResult ?? null;
+  const runtimeRunId = runtimeActiveCmd?.runId ?? runtimeLastResult?.runId ?? null;
+  const runtimeHeartbeat = runtimeState?.heartbeat ?? null;
 
   const [elapsed, setElapsed] = useState(0);
   const [hideLowLevel, setHideLowLevel] = useState(false);
@@ -262,6 +271,74 @@ export default function LiTTLiveActivity({
           </button>
         )}
       </div>
+
+      {/* ── Canonical Runtime Status (from terminal-server RuntimeStore) ── */}
+      {(runtimeRunId || runtimeActiveCmd || runtimeLastResult || !runtimeConnected) && (
+        <div
+          className="flex shrink-0 flex-col gap-1 border-b px-3 py-1.5"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(139,92,246,0.04)" }}
+          data-testid="litt-runtime-status"
+        >
+          {/* Run identity — shared with PowerShell `litt runtime` */}
+          {runtimeRunId && (
+            <div className="flex items-center gap-1.5">
+              <span
+                className="text-[8px] font-bold uppercase tracking-wider"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Run
+              </span>
+              <span
+                className="text-[9px] font-bold tabular-nums"
+                style={{ color: "var(--litt-primary)" }}
+                data-testid="litt-runtime-runid"
+              >
+                {runtimeRunId}
+              </span>
+            </div>
+          )}
+          {/* Active command from canonical RuntimeStore */}
+          {runtimeActiveCmd && (
+            <div className="flex items-center gap-1.5">
+              <Loader2 size={9} className="animate-spin pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+              <span className="text-[9px] font-bold" style={{ color: "var(--text-secondary)" }}>
+                {runtimeActiveCmd.command}
+              </span>
+            </div>
+          )}
+          {/* Last result from canonical RuntimeStore */}
+          {runtimeLastResult && !runtimeActiveCmd && (
+            <div className="flex items-center gap-1.5">
+              {runtimeLastResult.success ? (
+                <CheckCircle2 size={9} className="pointer-events-none" style={{ color: "var(--litt-primary)" }} />
+              ) : (
+                <XCircle size={9} className="pointer-events-none" style={{ color: "var(--error)" }} />
+              )}
+              <span className="text-[9px] font-bold" style={{ color: "var(--text-secondary)" }}>
+                {runtimeLastResult.command} · {runtimeLastResult.durationMs}ms
+              </span>
+            </div>
+          )}
+          {/* Heartbeat / connection freshness */}
+          <div className="flex items-center gap-1.5">
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{
+                backgroundColor: freshness === "fresh" ? "var(--litt-primary)" : freshness === "stale" ? "#e3b341" : "var(--error)",
+                boxShadow: freshness === "fresh" ? "0 0 4px var(--litt-primary)" : "none",
+              }}
+              aria-hidden
+            />
+            <span
+              className="text-[8px] font-bold uppercase tracking-wider"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {freshness}
+              {runtimeHeartbeat && ` · hb:${runtimeHeartbeat.seq}`}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ── Scrollable Activity Feed ── */}
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 studio-scroll">
