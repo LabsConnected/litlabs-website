@@ -91,6 +91,11 @@ export type {
   BrokerResolution,
   CredentialAuthType,
 } from "./credential.js";
+export {
+  REDACTED,
+  redactString,
+  redactForAudit,
+} from "./credential.js";
 
 // Network
 export type {

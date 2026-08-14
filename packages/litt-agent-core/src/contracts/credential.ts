@@ -416,3 +416,107 @@ type ForbiddenSecretFields =
 type LeaseSafetyViolation = Extract<keyof CredentialLease, ForbiddenSecretFields>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _LeaseSchemaCheck = LeaseSafetyViolation extends never ? "schema_ok" : never;
+
+// Compile-time check: CredentialAuditEvent must also not contain secret fields.
+type AuditSafetyViolation = Extract<keyof CredentialAuditEvent, ForbiddenSecretFields>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _AuditSchemaCheck = AuditSafetyViolation extends never ? "schema_ok" : never;
+
+// ─── Redaction utility ────────────────────────────────────────────
+
+/**
+ * Patterns that indicate secret material in string values.
+ * Used by redactForAudit() to strip secrets from arbitrary objects
+ * before they enter audit logs, events, or model context.
+ */
+const SECRET_PATTERNS: readonly RegExp[] = [
+  /sk-[a-zA-Z0-9]{20,}/g,           // OpenAI-style keys
+  /ghp_[a-zA-Z0-9]{36,}/g,          // GitHub PATs
+  /gho_[a-zA-Z0-9]{36,}/g,          // GitHub OAuth tokens
+  /Bearer\s+[a-zA-Z0-9._-]{20,}/g,  // Bearer tokens
+  /eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, // JWTs
+  /AKIA[A-Z0-9]{16}/g,              // AWS access keys
+  /[a-f0-9]{40}/g,                  // 40-char hex (GitHub tokens, etc.)
+] as const;
+
+/**
+ * Redacted replacement value for detected secrets.
+ */
+export const REDACTED = "[REDACTED]";
+
+/**
+ * Redact secret material from a string value.
+ *
+ * Replaces known secret patterns with [REDACTED].
+ * This is a DEFENSE-IN-DEPTH measure — the primary protection is
+ * that secrets never enter these surfaces in the first place (via
+ * the CredentialBroker and CredentialMaterializer boundary).
+ */
+export function redactString(value: string): string {
+  let result = value;
+  for (const pattern of SECRET_PATTERNS) {
+    result = result.replace(pattern, REDACTED);
+  }
+  return result;
+}
+
+/**
+ * Redact secret material from an arbitrary object before it enters
+ * audit logs, events, model context, or serialized state.
+ *
+ * This function:
+ *   - Recursively walks the object
+ *   - Redacts string values that match secret patterns
+ *   - Redacts values of keys with secret-sounding names
+ *   - Returns a deep copy (does not mutate the input)
+ *
+ * It is a DEFENSE-IN-DEPTH measure. The primary protection is that
+ * the CredentialBroker and CredentialMaterializer never expose secrets
+ * outside the materializer callback boundary.
+ */
+export function redactForAudit<T>(value: T): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return redactString(value) as unknown as T;
+  }
+  if (typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactForAudit(item)) as unknown as T;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (isSecretKeyName(key)) {
+      result[key] = REDACTED;
+    } else {
+      result[key] = redactForAudit(val);
+    }
+  }
+  return result as unknown as T;
+}
+
+/**
+ * Check if a key name suggests it holds a secret.
+ */
+function isSecretKeyName(key: string): boolean {
+  const lower = key.toLowerCase();
+  return (
+    lower.includes("secret") ||
+    lower.includes("apikey") ||
+    lower.includes("api_key") ||
+    lower.includes("accesstoken") ||
+    lower.includes("access_token") ||
+    lower.includes("refreshtoken") ||
+    lower.includes("refresh_token") ||
+    lower.includes("password") ||
+    lower.includes("privatekey") ||
+    lower.includes("private_key") ||
+    lower.includes("clientsecret") ||
+    lower.includes("client_secret") ||
+    lower === "token" ||
+    lower === "credential"
+  );
+}
