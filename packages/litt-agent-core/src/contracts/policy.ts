@@ -20,7 +20,10 @@
  *  13. approval
  *
  * This is the ONE canonical source. The existing `ApprovalLevel` in
- * types.ts ("allow"|"ask"|"deny") is a compatibility alias for PolicyEffect.
+ * agent-core/types.ts ("allow"|"ask"|"deny") is a verified 1:1 alias
+ * for PolicyEffect ("allow"→"allow", "ask"→"require_approval",
+ * "deny"→"deny"). This is the policy OUTCOME dimension, not approval
+ * STRENGTH — those are separate (see migration map in index.ts).
  */
 
 import type { ExecutionMode, InteractionMode } from "./identity.js";

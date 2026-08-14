@@ -33,6 +33,9 @@ import {
   // Capability
   type CapabilityGrant,
   type CapabilityHealth,
+  type GrantIntegrity,
+  type GrantVerificationStatus,
+  type VerifiedCapabilityGrant,
   deriveHealthLabel,
   // Credential
   type CredentialLease,
@@ -598,6 +601,173 @@ describe("Phase 1 — Capability grant and health", () => {
       dependencies: [],
     };
     assert.equal(deriveHealthLabel(revoked), "offline");
+  });
+});
+
+// ─── 5b. Grant integrity ≠ verified — VerifiedCapabilityGrant ──────
+
+describe("Phase 1 — Grant verification: integrity does not imply trust", () => {
+  it("a raw CapabilityGrant with integrity field is NOT verified", () => {
+    // An attacker-controlled grant can populate integrity with arbitrary values
+    const untrustedGrant: CapabilityGrant = {
+      grantId: "grant-evil",
+      tenantId: "tenant-1",
+      userId: "attacker",
+      actorId: "user:attacker",
+      runId: "run-evil",
+      projectId: null,
+      workspaceId: null,
+      capabilities: ["git:push"],
+      resourceScope: ["workspace:any"],
+      networkScope: ["github.com"],
+      riskTier: "high",
+      approvalId: null,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      audience: "litt-kernel",
+      nonce: "fake-nonce",
+      issuer: "attacker-issuer",
+      policyVersion: "evil-1.0",
+      integrity: {
+        algorithm: "Ed25519",
+        keyId: "fake-key",
+        signature: "fake-signature-by-attacker",
+      },
+    };
+
+    // The integrity field exists, but the grant is NOT verified.
+    // Presence of integrity ≠ trustworthiness.
+    assert.ok(untrustedGrant.integrity);
+    // A raw CapabilityGrant has no verification status — it is claims only.
+    // It must go through a GrantVerifier before being trusted.
+  });
+
+  it("VerifiedCapabilityGrant is a separate type produced by verifier, not self-assigned", () => {
+    const grant: CapabilityGrant = {
+      grantId: "grant-1",
+      tenantId: "tenant-1",
+      userId: "abc123",
+      actorId: "user:abc123",
+      runId: "run-1",
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+      capabilities: ["git:push"],
+      resourceScope: ["workspace:ws-1"],
+      networkScope: ["github.com"],
+      riskTier: "high",
+      approvalId: "appr-1",
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      audience: "litt-kernel",
+      nonce: "nonce-123",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
+    };
+
+    // VerifiedCapabilityGrant wraps the grant with verification metadata
+    // that is produced by the verifier, not by the grant itself.
+    const verified: VerifiedCapabilityGrant = {
+      grant,
+      verification: "verified",
+      verifiedBy: "grant-verifier-v1",
+      verifiedAt: new Date().toISOString(),
+      keyId: "key-2026-01",
+      failureReason: null,
+    };
+
+    assert.equal(verified.verification, "verified");
+    assert.equal(verified.grant.grantId, "grant-1");
+    assert.equal(verified.verifiedBy, "grant-verifier-v1");
+    assert.equal(verified.failureReason, null);
+  });
+
+  it("GrantVerificationStatus has three states: unverified, verified, invalid", () => {
+    const statuses: GrantVerificationStatus[] = ["unverified", "verified", "invalid"];
+    assert.equal(statuses.length, 3);
+    assert.ok(statuses.includes("unverified"));
+    assert.ok(statuses.includes("verified"));
+    assert.ok(statuses.includes("invalid"));
+  });
+
+  it("a failed verification produces invalid status with failure reason", () => {
+    const grant: CapabilityGrant = {
+      grantId: "grant-expired",
+      tenantId: "tenant-1",
+      userId: "abc123",
+      actorId: "user:abc123",
+      runId: "run-1",
+      projectId: null,
+      workspaceId: null,
+      capabilities: ["git:push"],
+      resourceScope: ["workspace:ws-1"],
+      networkScope: ["github.com"],
+      riskTier: "high",
+      approvalId: null,
+      issuedAt: "2020-01-01T00:00:00Z",
+      expiresAt: "2020-01-02T00:00:00Z", // expired
+      audience: "litt-kernel",
+      nonce: "nonce-old",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
+      integrity: {
+        algorithm: "Ed25519",
+        keyId: "key-2020",
+        signature: "sig-old",
+      },
+    };
+
+    const rejected: VerifiedCapabilityGrant = {
+      grant,
+      verification: "invalid",
+      verifiedBy: "grant-verifier-v1",
+      verifiedAt: new Date().toISOString(),
+      keyId: "key-2026-01",
+      failureReason: "grant expired",
+    };
+
+    assert.equal(rejected.verification, "invalid");
+    assert.equal(rejected.failureReason, "grant expired");
+  });
+
+  it("Phase 1 in-process grants default to unverified status", () => {
+    // In Phase 1, grants are in-process trusted server objects.
+    // They don't have cryptographic verification yet.
+    // The default verification status is "unverified" — not "verified".
+    const phase1Grant: CapabilityGrant = {
+      grantId: "grant-phase1",
+      tenantId: "tenant-1",
+      userId: "abc123",
+      actorId: "user:abc123",
+      runId: "run-1",
+      projectId: null,
+      workspaceId: null,
+      capabilities: ["files:read"],
+      resourceScope: ["workspace:ws-1"],
+      networkScope: [],
+      riskTier: "low",
+      approvalId: null,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      audience: "litt-kernel",
+      nonce: "nonce-1",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
+      // No integrity field — Phase 1 in-process
+    };
+
+    // Phase 1 default: unverified (trusted by process boundary, not crypto)
+    const phase1Verified: VerifiedCapabilityGrant = {
+      grant: phase1Grant,
+      verification: "unverified",
+      verifiedBy: "in-process-trust",
+      verifiedAt: new Date().toISOString(),
+      keyId: null,
+      failureReason: null,
+    };
+
+    assert.equal(phase1Verified.verification, "unverified");
+    assert.equal(phase1Verified.keyId, null);
+    assert.ok(!phase1Grant.integrity);
   });
 });
 

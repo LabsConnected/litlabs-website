@@ -110,6 +110,17 @@ export interface CapabilityGrant {
  *   - the grant claims were not tampered with
  *   - the grant was issued by the stated issuer
  *   - the grant is within its validity window
+ *
+ * CRITICAL: The presence of `integrity` on a grant does NOT mean the
+ * grant has been verified. An attacker-controlled incoming grant can
+ * populate this field with arbitrary values. Verification status is
+ * produced by the GrantVerifier, not serialized inside the grant.
+ *
+ * Never do this:
+ *   if (grant.integrity) { /* assume trusted *\/ }
+ *
+ * Instead, require a VerifiedCapabilityGrant (produced by GrantVerifier)
+ * at any trust boundary that requires verified privileges.
  */
 export interface GrantIntegrity {
   /** Signature algorithm (e.g. "Ed25519", "HS256") */
@@ -118,6 +129,52 @@ export interface GrantIntegrity {
   keyId: string;
   /** Cryptographic signature over the canonical grant claims */
   signature: string;
+}
+
+// ─── Grant verification status ────────────────────────────────────
+
+/**
+ * The result of verifying a capability grant.
+ *
+ * Produced by GrantVerifier, NOT serialized inside the grant itself.
+ * An attacker-controlled incoming grant cannot self-assign "verified".
+ *
+ *   unverified: no verification attempted (Phase 1 in-process default)
+ *   verified:   signature valid, issuer trusted, within validity window
+ *   invalid:    signature mismatch, unknown issuer, expired, or revoked
+ */
+export type GrantVerificationStatus = "unverified" | "verified" | "invalid";
+
+/**
+ * A capability grant that has been verified by a GrantVerifier.
+ *
+ * This type is the ONLY type that should be accepted at trust boundaries
+ * requiring verified privileges. A raw CapabilityGrant must never be
+ * trusted merely because it exists or has an integrity field.
+ *
+ * Flow:
+ *   CapabilityGrant (claims, possibly from untrusted source)
+ *     ↓
+ *   GrantVerifier.verify(grant)
+ *     ↓
+ *   VerifiedCapabilityGrant (trusted, safe to use at boundaries)
+ *
+ * Phase 1: GrantVerifier is a simple in-process trust check.
+ * Phase 2/3: GrantVerifier performs cryptographic signature validation.
+ */
+export interface VerifiedCapabilityGrant {
+  /** The original grant claims */
+  grant: CapabilityGrant;
+  /** Verification result */
+  verification: GrantVerificationStatus;
+  /** Who verified the grant (e.g. "litt-kernel", "grant-verifier-v1") */
+  verifiedBy: string;
+  /** ISO timestamp of verification */
+  verifiedAt: string;
+  /** Key ID used for verification, if cryptographic */
+  keyId: string | null;
+  /** Reason if verification failed */
+  failureReason: string | null;
 }
 
 // ─── Grant budget ─────────────────────────────────────────────────

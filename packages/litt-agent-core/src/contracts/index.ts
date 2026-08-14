@@ -59,6 +59,8 @@ export type {
   CapabilityGrant,
   GrantBudget,
   GrantIntegrity,
+  GrantVerificationStatus,
+  VerifiedCapabilityGrant,
   CapabilityHealth,
   CapabilityHealthLabel,
 } from "./capability.js";
@@ -143,8 +145,9 @@ export {
 // ─── Legacy type migration map ────────────────────────────────────
 //
 // The following legacy types are NOT deleted. They are preserved as
-// compatibility adapters or derived values. Risk, effect, and capability
-// permission are separate dimensions and must not be collapsed.
+// compatibility adapters or derived values. Risk, effect, capability
+// permission, approval strength, and execution mode are separate
+// dimensions and must not be collapsed.
 //
 // ┌─────────────────────────────────────┬───────────────────────────────────────┬──────────────────┐
 // │ Legacy type                         │ Canonical contract                    │ Migration status │
@@ -174,16 +177,52 @@ export {
 // │ ActionRisk (litt-kernel)            │ ActionRisk (canonical)                 │ alias            │
 // │   low/medium/high/critical           │   low/medium/high/critical             │                  │
 // ├─────────────────────────────────────┼───────────────────────────────────────┼──────────────────┤
-// │ ApprovalLevel (types.ts)            │ PolicyEffect (canonical)               │ alias            │
-// │   "allow" | "ask" | "deny"           │   "allow" | "require_approval" | "deny"│                  │
+// │ ApprovalLevel (agent-core/types.ts) │ PolicyEffect (canonical)               │ alias            │
+// │   "allow" | "ask" | "deny"           │   "allow" | "require_approval" | "deny"│ (verified 1:1)  │
+// │                                     │                                       │                  │
+// │ VERIFIED: The legacy union is       │                                       │                  │
+// │   genuinely 1:1 with PolicyEffect.  │                                       │                  │
+// │   "allow"→"allow", "ask"→"require_  │                                       │                  │
+// │   approval", "deny"→"deny".         │                                       │                  │
+// │   This is NOT approval strength —   │                                       │                  │
+// │   it is the policy outcome.         │                                       │                  │
+// ├─────────────────────────────────────┼───────────────────────────────────────┼──────────────────┤
+// │ ApprovalPolicy (business-ops)       │ SEPARATE DIMENSION — approval         │ preserved        │
+// │   "none"|"explicit"|"strong_confirm"│   STRENGTH, not effect.               │                  │
+// │                                     │   NOT aliased to PolicyEffect.        │                  │
+// │                                     │   Encodes HOW STRONG an approval is.  │                  │
+// │                                     │   Future: ApprovalStrength contract.  │                  │
+// ├─────────────────────────────────────┼───────────────────────────────────────┼──────────────────┤
+// │ ApprovalPolicy (litt-intelligence)  │ SEPARATE DIMENSION — structured       │ preserved        │
+// │   { required, autoApproveReadOnly,  │   approval policy that PRODUCES a     │                  │
+// │     requireExplicitForMutations,    │   PolicyEffect, but is not itself     │                  │
+// │     neverAllow }                    │   the effect. NOT aliased.            │                  │
+// │                                     │   Future: PolicyRule contract.        │                  │
+// ├─────────────────────────────────────┼───────────────────────────────────────┼──────────────────┤
+// │ ApprovalMode (agent-work-queue)     │ SEPARATE DIMENSION — execution        │ preserved        │
+// │   "supervised"|"autonomous"|        │   MODE, not approval level.           │                  │
+// │   "ask-first"                       │   Related to ExecutionMode but        │                  │
+// │                                     │   coarser. NOT aliased.               │                  │
 // └─────────────────────────────────────┴───────────────────────────────────────┴──────────────────┘
 //
-// Three separate dimensions (do not collapse):
+// FIVE separate dimensions (do not collapse):
 //   1. Risk:       low / medium / high / critical  (how dangerous)
 //   2. Effect:     allow / require_approval / deny  (policy outcome)
 //   3. Capability: workspace.read / workspace.write / external.write /
 //                  production.deploy / ...          (what kind of operation)
+//   4. ApprovalStrength: none / explicit / strong_confirmation
+//                  (how strong an approval must be — SEPARATE from effect)
+//   5. ExecutionMode: plan / act / auto             (autonomy level)
 //
 // ToolPermissionLevel encodes dimension 3 (capability/kind) and partially
 // dimension 1 (risk). It must remain a separate concept from ActionRisk
 // and PolicyEffect.
+//
+// ApprovalPolicy (business-ops) encodes dimension 4 (approval strength).
+// It is NOT the same as PolicyEffect (dimension 2). A require_approval
+// effect can be combined with any approval strength:
+//   effect=require_approval + strength=explicit
+//   effect=require_approval + strength=strong_confirmation
+//
+// ApprovalLevel ("allow"|"ask"|"deny") IS the same as PolicyEffect —
+// it encodes dimension 2 only, not dimension 4. The alias is verified.
