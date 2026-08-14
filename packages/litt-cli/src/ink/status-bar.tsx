@@ -15,11 +15,12 @@ export interface StatusBarProps {
   remoteRuntime: string;
   cwd: string;
   holoState: HoloState;
-  model: string;
+  brain: string;
+  activeModel: string | null;
   runId: string | null;
 }
 
-export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoState, model, runId }: StatusBarProps): React.ReactElement {
+export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoState, brain, activeModel, runId }: StatusBarProps): React.ReactElement {
   const localIcon = localRuntime === "ready" ? "●" : "○";
   const localColor = localRuntime === "ready" ? "green" : "yellow";
   const remoteIcon = remoteRuntime === "connected" ? "●" : "○";
@@ -39,6 +40,12 @@ export function StatusBar({ connected, localRuntime, remoteRuntime, cwd, holoSta
         <Text color="blue">{holoState.toLowerCase()}</Text>
         <Text dimColor>   </Text>
         <Text dimColor>{shortRun}</Text>
+      </Box>
+      <Box>
+        <Text dimColor>Brain: </Text>
+        <Text color="magenta">{brain}</Text>
+        {activeModel && <Text dimColor> → </Text>}
+        {activeModel && <Text color="blue">{activeModel}</Text>}
       </Box>
       <Text dimColor>Ctrl+M model · Ctrl+K actions · Ctrl+C cancel · Ctrl+L clear · Esc close</Text>
     </Box>

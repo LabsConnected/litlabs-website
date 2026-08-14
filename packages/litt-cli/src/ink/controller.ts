@@ -35,6 +35,7 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
+import { routeModel, routingReason, brainLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
 import { detectProject } from "../lib/utils.js";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
@@ -166,6 +167,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
       store.actions.setOverlay("model-picker");
       return;
     }
+    if (input === "/models") {
+      store.actions.setOverlay("model-center");
+      return;
+    }
     if (input === "/litt") {
       // Return to main LiTT conversation mode — just clear state
       store.actions.setHoloState("IDLE");
@@ -280,8 +285,27 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
         });
 
         // Use selected model if set, otherwise resolve from config
-        const modelId = store.state.selectedModel ?? undefined;
-        const model = new OpenRouterModelProvider({ model: modelId });
+        // Route the model based on the user's routing mode preference
+        const routed = routeModel(
+          store.state.routingMode,
+          store.state.selectedModel,
+          input,
+        );
+
+        // Show routing decision in activity
+        const reason = routingReason(routed, input);
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "info",
+          text: `Brain: ${brainLabel(store.state.routingMode, store.state.selectedModel)} → ${routed.label} (${reason})`,
+        });
+
+        // Set as active model in the store
+        store.actions.setActiveModel(routed.label);
+
+        // Create the model provider with the routed model
+        const model = new OpenRouterModelProvider({ model: routed.id });
 
         const result = await runAgentLoop(input, {
           model,
@@ -338,9 +362,9 @@ export function useCockpitController({ session, store, approvalBridge, onExit }:
           },
         });
 
-        // Update model state with the actually-used model
+        // Update active model with what the runtime actually used
         if (model.activeModel) {
-          store.actions.setSelectedModel(model.activeModel);
+          store.actions.setActiveModel(model.activeModel);
         }
 
         store.actions.addActivity({

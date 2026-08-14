@@ -20,7 +20,7 @@ import TextInput from "ink-text-input";
 const SLASH_COMMANDS = [
   "/build", "/check", "/test", "/verify", "/diff", "/status", "/inspect",
   "/run", "/ask", "/explain", "/doctor", "/clear", "/help",
-  "/model", "/litt", "/palette",
+  "/model", "/models", "/litt", "/palette",
   "/mode plan", "/mode act", "/mode auto",
   "/exit", "/quit",
 ];

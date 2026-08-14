@@ -16,14 +16,19 @@ export interface HeaderProps {
   project: string;
   projectRoot: string;
   branch: string;
-  model: string;
+  /** Brain label — what the user sees as "LiTT's brain" (e.g. "LiTT Auto") */
+  brain: string;
+  /** Active model — what the runtime actually used (null until first run) */
+  activeModel: string | null;
+  /** Provider source (e.g. "Anthropic • BYOK ✓") */
+  source: string;
   connected: boolean;
   localRuntime: string;
   remoteRuntime: string;
   mode: string;
 }
 
-export function Header({ project, projectRoot, branch, model, connected, localRuntime, remoteRuntime, mode }: HeaderProps): React.ReactElement {
+export function Header({ project, projectRoot, branch, brain, activeModel, source, connected, localRuntime, remoteRuntime, mode }: HeaderProps): React.ReactElement {
   const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
   const localColor = localRuntime === "ready" ? "green" : localRuntime === "error" ? "red" : "yellow";
   const localLabel = localRuntime === "ready" ? "ONLINE" : localRuntime.toUpperCase();
@@ -36,7 +41,6 @@ export function Header({ project, projectRoot, branch, model, connected, localRu
     : remoteRuntime === "error" ? "ERROR"
     : "OFFLINE";
 
-  // Shorten root for display
   const shortRoot = projectRoot.length > 45 ? "..." + projectRoot.slice(-42) : projectRoot;
 
   return (
@@ -71,12 +75,21 @@ export function Header({ project, projectRoot, branch, model, connected, localRu
         <Text dimColor>{shortRoot}</Text>
       </Box>
 
-      {/* Model + mode + status */}
+      {/* Brain / Active / Source — the three model concepts */}
       <Box marginTop={0}>
-        <Text dimColor bold>MODEL    </Text>
-        <Text color="blue">{model}</Text>
+        <Text dimColor bold>BRAIN    </Text>
+        <Text color="magenta" bold>{brain}</Text>
         <Text dimColor> [Ctrl+M Change]</Text>
       </Box>
+      <Box>
+        <Text dimColor bold>ACTIVE   </Text>
+        <Text color={activeModel ? "blue" : "gray"}>{activeModel ?? "—"}</Text>
+        <Text dimColor>    </Text>
+        <Text dimColor bold>SOURCE   </Text>
+        <Text color="cyan" dimColor>{source}</Text>
+      </Box>
+
+      {/* Mode + status */}
       <Box>
         <Text dimColor bold>MODE     </Text>
         <Text color="magenta">{mode.toUpperCase()}</Text>

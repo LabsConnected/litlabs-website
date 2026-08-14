@@ -34,9 +34,11 @@ import { QuickActions } from "./quick-actions.js";
 import { CommandDock } from "./command-dock.js";
 import { ApprovalUX } from "./approval-ux.js";
 import { StatusBar } from "./status-bar.js";
-import { ModelPicker, DEFAULT_MODELS } from "./model-picker.js";
+import { ModelPicker } from "./model-picker.js";
+import { ModelCenter } from "./model-center.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { brainLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -68,6 +70,14 @@ export function CockpitApp({
   const effectiveModel = store.state.selectedModel ?? model;
   const modelReady = hasOpenRouterKey();
 
+  // Three model concepts:
+  //   BRAIN  = user preference (LiTT Auto, Fixed, Budget, Max)
+  //   ACTIVE = what the runtime actually used (null until first run)
+  //   SOURCE = provider + credential status
+  const brain = brainLabel(store.state.routingMode, store.state.selectedModel);
+  const activeModel = store.state.activeModel;
+  const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+
   // Global keyboard shortcuts
   useInput(useCallback((input, key) => {
     if (store.state.overlay !== "none") return;
@@ -98,14 +108,24 @@ export function CockpitApp({
   const disabled = store.state.holoState === "RUNNING" || store.state.holoState === "THINKING" || store.state.holoState === "APPROVAL"
     || store.state.overlay !== "none";
 
-  const handleModelSelect = useCallback((selected: typeof DEFAULT_MODELS[number]) => {
+  const handleModelSelect = useCallback((selected: ModelChoice) => {
     store.actions.setSelectedModel(selected.id);
     store.actions.setOverlay("none");
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "model.changed",
-      text: `Model: ${selected.label} (${selected.id})`,
+      text: `Brain: ${selected.label} (${selected.id})`,
+    });
+  }, [store]);
+
+  const handleRoutingModeSelect = useCallback((mode: typeof store.state.routingMode) => {
+    store.actions.setRoutingMode(mode);
+    store.actions.addActivity({
+      id: `act_${Date.now()}`,
+      ts: Date.now(),
+      type: "model.changed",
+      text: `Routing mode: ${mode.toUpperCase()}`,
     });
   }, [store]);
 
@@ -120,7 +140,9 @@ export function CockpitApp({
         project={project}
         projectRoot={cwd}
         branch={branch}
-        model={effectiveModel}
+        brain={brain}
+        activeModel={activeModel}
+        source={source}
         connected={store.state.connected}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
@@ -129,7 +151,11 @@ export function CockpitApp({
 
       {/* Holo + Subsystems side by side */}
       <Box flexDirection="row" gap={2}>
-        <LiTTHoloPanel state={store.state.holoState} />
+        <LiTTHoloPanel
+          state={store.state.holoState}
+          activeModel={store.state.activeModel}
+          routingReason={store.state.mission}
+        />
         <Box flexDirection="column">
           <Subsystems
             selected={store.state.selectedPanel}
@@ -153,9 +179,18 @@ export function CockpitApp({
       {/* Overlays */}
       {store.state.overlay === "model-picker" && (
         <ModelPicker
-          models={DEFAULT_MODELS}
-          activeModelId={store.state.selectedModel}
-          onSelect={handleModelSelect}
+          selectedModelId={store.state.selectedModel}
+          routingMode={store.state.routingMode}
+          onSelectModel={handleModelSelect}
+          onSelectRoutingMode={handleRoutingModeSelect}
+          onCancel={() => store.actions.setOverlay("none")}
+        />
+      )}
+      {store.state.overlay === "model-center" && (
+        <ModelCenter
+          routingMode={store.state.routingMode}
+          selectedModelId={store.state.selectedModel}
+          hasApiKey={modelReady}
           onCancel={() => store.actions.setOverlay("none")}
         />
       )}
@@ -194,7 +229,8 @@ export function CockpitApp({
         remoteRuntime={store.state.remoteRuntime}
         cwd={cwd}
         holoState={store.state.holoState}
-        model={effectiveModel}
+        brain={brain}
+        activeModel={activeModel}
         runId={store.state.currentRunId}
       />
     </Box>

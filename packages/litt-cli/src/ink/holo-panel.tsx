@@ -56,7 +56,15 @@ function ProgressBar({ progress, color }: { progress: number; color: string }): 
   );
 }
 
-export function LiTTHoloPanel({ state }: { state: HoloState }): React.ReactElement {
+export interface LiTTHoloPanelProps {
+  state: HoloState;
+  /** Active model name (what the runtime is actually using) */
+  activeModel?: string | null;
+  /** Routing reason (why this model was chosen) */
+  routingReason?: string | null;
+}
+
+export function LiTTHoloPanel({ state, activeModel, routingReason }: LiTTHoloPanelProps): React.ReactElement {
   const config = HOLO_CONFIG[state] ?? HOLO_CONFIG.IDLE;
 
   // Determine which steps are done based on state
@@ -100,6 +108,15 @@ export function LiTTHoloPanel({ state }: { state: HoloState }): React.ReactEleme
       <Box justifyContent="center">
         <Text color={config.color} bold>{config.label}</Text>
       </Box>
+
+      {/* Active model during execution */}
+      {(state === "THINKING" || state === "RUNNING" || state === "VERIFYING") && activeModel && (
+        <Box flexDirection="column" marginTop={1} justifyContent="center">
+          <Text dimColor>Using: </Text>
+          <Text color="blue" bold>{activeModel}</Text>
+          {routingReason && <Text dimColor> {routingReason}</Text>}
+        </Box>
+      )}
 
       {/* Mission steps (only when active) */}
       {(state === "THINKING" || state === "RUNNING" || state === "VERIFYING" || state === "SUCCESS") && (

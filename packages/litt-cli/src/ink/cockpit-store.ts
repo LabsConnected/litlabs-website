@@ -58,7 +58,16 @@ export interface CockpitUIState {
 }
 
 /** Overlay type — which modal/picker is open */
-export type Overlay = "none" | "model-picker" | "command-palette";
+export type Overlay = "none" | "model-picker" | "command-palette" | "model-center";
+
+/**
+ * Routing mode — how LiTT chooses models.
+ *   auto   — LiTT chooses the best model per task
+ *   fixed  — always use the selected model
+ *   budget — prefer cheapest capable model
+ *   max    — prefer strongest available model
+ */
+export type RoutingMode = "auto" | "fixed" | "budget" | "max";
 
 export function useCockpitStore() {
   const [selectedPanel, setSelectedPanel] = useState<CockpitPanel>("runtime");
@@ -72,6 +81,8 @@ export function useCockpitStore() {
   const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntimeState>("offline");
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
+  const [activeModel, setActiveModel] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>("none");
   const [mission, setMission] = useState<string | null>(null);
 
@@ -126,6 +137,8 @@ export function useCockpitStore() {
       remoteRuntime,
       currentRunId,
       selectedModel,
+      routingMode,
+      activeModel,
       overlay,
       mission,
     },
@@ -142,6 +155,8 @@ export function useCockpitStore() {
       setRemoteRuntime,
       setCurrentRunId,
       setSelectedModel,
+      setRoutingMode,
+      setActiveModel,
       setOverlay,
       setMission,
     },
