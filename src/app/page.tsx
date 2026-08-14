@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import HomePageClient from "./HomePageClient";
 import { JsonLd } from "@/components/seo/JsonLd";
 import {
   DEFAULT_DESCRIPTION,
@@ -9,17 +8,28 @@ import {
   absoluteUrl,
   buildMetadata,
 } from "@/lib/seo";
+import { LandingHeader } from "./landing/_components/LandingHeader";
+import { LandingHeroV3 } from "./landing/_components/LandingHeroV3";
+import { LandingOneContext } from "./landing/_components/LandingOneContext";
+import { LandingLogos } from "./landing/_components/LandingLogos";
+import { LandingComparison } from "./landing/_components/LandingComparison";
+import { LandingHowItWorks } from "./landing/_components/LandingHowItWorks";
+import { LandingFeatures } from "./landing/_components/LandingFeatures";
+import { LandingTreeOS } from "./landing/_components/LandingTreeOS";
+import { LandingStats } from "./landing/_components/LandingStats";
+import { LandingCTA } from "./landing/_components/LandingCTA";
+import { LandingFooter } from "./landing/_components/LandingFooter";
+import { LandingBackground } from "./landing/_components/LandingBackground";
 
 export const metadata: Metadata = {
   ...buildMetadata({
-    title: undefined,
-    description: DEFAULT_DESCRIPTION,
+    title: "Bring the idea. LiTT helps you build the rest.",
+    description:
+      "Build apps, create media, preserve project context, collaborate and ship real work from Studio. Free to join.",
     path: "/",
     index: true,
   }),
-  // Use absolute title to bypass the root template (DEFAULT_TITLE already
-  // includes the site name)
-  title: { absolute: DEFAULT_TITLE },
+  title: { absolute: "Bring the idea. LiTT helps you build the rest. | LiTTree LabStudios" },
 };
 
 const homeSchema = {
@@ -80,7 +90,22 @@ export default function HomePage() {
   return (
     <>
       <JsonLd data={homeSchema} />
-      <HomePageClient />
+      <div className="relative min-h-screen overflow-x-hidden bg-[#06060e] text-neutral-100">
+        <LandingBackground />
+        <LandingHeader />
+        <main className="relative z-10">
+          <LandingHeroV3 />
+          <LandingOneContext />
+          <LandingLogos />
+          <LandingComparison />
+          <LandingHowItWorks />
+          <LandingFeatures />
+          <LandingTreeOS />
+          <LandingStats />
+          <LandingCTA />
+        </main>
+        <LandingFooter />
+      </div>
     </>
   );
 }
