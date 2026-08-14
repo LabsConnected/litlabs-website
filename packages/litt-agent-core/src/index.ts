@@ -9,6 +9,8 @@
 export type {
   ShellResult,
   ShellExecuteOptions,
+  StreamChunk,
+  ToolStatus,
   ToolResult,
   ToolDefinition,
   ToolCallRequest,

@@ -674,10 +674,15 @@ export async function runCommand(
   const stderr = redactSecrets(result.stderr);
 
   const toolResult: ToolResult = {
-    success: result.ok,
-    message: result.ok
+    status: result.status,
+    success: result.status === "success",
+    message: result.status === "success"
       ? `${command} ${args.join(" ")} — exit 0 (${durationMs}ms)`
-      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${durationMs}ms)`,
+      : result.status === "cancelled"
+        ? `${command} ${args.join(" ")} — cancelled (${durationMs}ms)`
+        : result.status === "timeout"
+          ? `${command} ${args.join(" ")} — timeout after ${timeoutMs}ms`
+          : `${command} ${args.join(" ")} — exit ${result.exitCode} (${durationMs}ms)`,
     data: {
       command,
       args,
@@ -686,6 +691,8 @@ export async function runCommand(
       exitCode: result.exitCode,
       durationMs,
       truncated: result.truncated,
+      status: result.status,
+      pid: result.pid,
       riskLevel: risk.level,
       capability: risk.capability,
       mutating: risk.mutating,
@@ -694,7 +701,7 @@ export async function runCommand(
   };
 
   if (store) {
-    store.commandEnd(label, result.ok, result.exitCode, durationMs, toolResult.message);
+    store.commandEnd(label, result.status === "success", result.exitCode, durationMs, toolResult.message);
   }
 
   return toolResult;
@@ -708,6 +715,7 @@ export async function runShellCommand(
   _options?: ExecutionOptions,
 ): Promise<ToolResult> {
   return {
+    status: "failed",
     success: false,
     message: "Shell-string execution is disabled. Use runCommand() with structured arguments.",
     data: {
@@ -721,6 +729,7 @@ export async function runShellCommand(
 
 function executionError(err: ExecutionError): ToolResult {
   return {
+    status: "failed",
     success: false,
     message: err.message,
     data: {

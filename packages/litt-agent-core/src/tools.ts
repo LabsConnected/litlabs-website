@@ -177,6 +177,7 @@ const statusHandler: ToolHandler = async (ctx) => {
   const project = await resolveProjectContext(ctx.shell, ctx.cwd);
   const statusResult = await gitStatus(ctx.shell, ctx.cwd);
   return {
+    status: "success",
     success: true,
     message: `${project.name} on ${project.branch ?? "detached"} — ${statusResult.message}`,
     data: {
@@ -212,7 +213,7 @@ const listFilesHandler: ToolHandler = async (ctx, args) => {
 const readFileHandler: ToolHandler = async (ctx, args) => {
   const filePath = typeof args.path === "string" ? args.path : "";
   if (!filePath) {
-    return { success: false, message: "Missing required arg: path", data: {} };
+    return { status: "failed", success: false, message: "Missing required arg: path", data: {} };
   }
   return readFile(ctx.shell, filePath);
 };
@@ -220,7 +221,7 @@ const readFileHandler: ToolHandler = async (ctx, args) => {
 const searchHandler: ToolHandler = async (ctx, args) => {
   const query = typeof args.query === "string" ? args.query : "";
   if (!query) {
-    return { success: false, message: "Missing required arg: query", data: {} };
+    return { status: "failed", success: false, message: "Missing required arg: query", data: {} };
   }
   return searchFiles(ctx.shell, query);
 };
@@ -244,7 +245,7 @@ const buildHandler: ToolHandler = async (ctx) => {
 const runHandler: ToolHandler = async (ctx, args) => {
   const command = typeof args.command === "string" ? args.command : "";
   if (!command) {
-    return { success: false, message: "Missing required arg: command", data: {} };
+    return { status: "failed", success: false, message: "Missing required arg: command", data: {} };
   }
   const cmdArgs = Array.isArray(args.args) ? args.args.filter((a): a is string => typeof a === "string") : [];
   return runCommand(ctx.shell, command, cmdArgs, { cwd: ctx.cwd });
@@ -293,7 +294,7 @@ export class ToolRegistry {
   ): Promise<ToolResult> {
     const entry = this.entries[toolId];
     if (!entry) {
-      return { success: false, message: `Unknown tool: ${toolId}`, data: {} };
+      return { status: "failed", success: false, message: `Unknown tool: ${toolId}`, data: {} };
     }
     return entry.handler(ctx, args);
   }

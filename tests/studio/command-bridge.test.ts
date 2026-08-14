@@ -28,6 +28,7 @@ class MockShellExecutor implements ShellExecutor {
     const safeArgs = options.args ?? [];
     return {
       ok: true,
+      status: "success",
       stdout: `mock output for ${options.command} ${safeArgs.join(" ")}`,
       stderr: "",
       exitCode: 0,
@@ -35,9 +36,10 @@ class MockShellExecutor implements ShellExecutor {
       command: options.command,
       args: safeArgs,
       truncated: false,
+      pid: 99999,
     };
   }
-  async cancel(): Promise<void> {}
+  async cancel(): Promise<number[]> { return []; }
 }
 
 // ─── 1. Slash command parsing ─────────────────────────────────────

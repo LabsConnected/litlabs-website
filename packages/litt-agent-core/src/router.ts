@@ -196,6 +196,7 @@ export class CommandRouter {
         return {
           command: "ship",
           result: {
+            status: "failed",
             success: false,
             message: `ship failed at step "${name}": ${result.message}`,
             data: { steps, failedAt: name },
@@ -210,6 +211,7 @@ export class CommandRouter {
     return {
       command: "ship",
       result: {
+        status: "success",
         success: true,
         message: "ship passed: check ✓, test ✓, build ✓",
         data: { steps },
@@ -240,7 +242,7 @@ export class CommandRouter {
       default:
         return {
           command,
-          result: { success: false, message: `Unknown command: ${command}`, data: {} },
+          result: { status: "failed", success: false, message: `Unknown command: ${command}`, data: {} },
         };
     }
   }
