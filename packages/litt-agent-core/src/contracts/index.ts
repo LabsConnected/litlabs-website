@@ -120,6 +120,20 @@ export {
   redactForAudit,
 } from "./credential.js";
 
+// SEC-5: Production CredentialBroker
+export type {
+  StoredCredential,
+  CredentialStore,
+  BrokerContext,
+} from "./credential-broker.js";
+export {
+  ProductionCredentialBroker,
+  ProductionCredentialMaterializer,
+  InMemoryCredentialStore,
+  MaterializationError,
+  toLeaseAuditRecord,
+} from "./credential-broker.js";
+
 // Network
 export type {
   NetworkMode,
@@ -167,6 +181,21 @@ export {
   computeOperationDigest,
   isApprovalValid,
 } from "./approval.js";
+
+// SEC-4: Runtime ApprovalProvider
+export type {
+  ApprovalVerificationResult,
+  ApprovalFailureReason,
+  VerifiedApproval,
+  ApprovalDecision,
+  ApprovalContext,
+} from "./approval-runtime.js";
+export {
+  RuntimeApprovalProvider,
+  toVerifiedApproval,
+  generateApprovalNonce,
+  toAuditRecord,
+} from "./approval-runtime.js";
 
 // Capsule / Execution
 export type {
