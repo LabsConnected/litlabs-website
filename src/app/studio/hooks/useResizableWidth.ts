@@ -58,6 +58,9 @@ export function useResizableWidth({
   const dragStartWidth = useRef(0);
   const draggingRef = useRef(false);
 
+  const clamp = (w: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, w));
+
   // Load persisted width on mount
   useEffect(() => {
     // Safety: clear any stuck body styles from a previous drag that
@@ -100,9 +103,6 @@ export function useResizableWidth({
       }
     });
   }, [width, storageKey]);
-
-  const clamp = (w: number, min: number, max: number) =>
-    Math.min(max, Math.max(min, w));
 
   const setWidth = useCallback(
     (w: number) => setWidthState(clamp(w, minWidth, maxWidth)),

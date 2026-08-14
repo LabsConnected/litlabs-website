@@ -1,7 +1,8 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import nextDynamic from "next/dynamic";
+import { useEffect } from "react";
 
 const DashboardView = nextDynamic(
   () => import("@/components/DashboardView"),
@@ -10,13 +11,17 @@ const DashboardView = nextDynamic(
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const app = searchParams.get("app");
 
   // Compatibility redirect: old /dashboard?app=music bookmarks → Studio
-  if (app === "music") {
-    if (typeof window !== "undefined") {
-      window.location.href = "/studio?tool=music";
+  useEffect(() => {
+    if (app === "music") {
+      router.replace("/studio?tool=music");
     }
+  }, [app, router]);
+
+  if (app === "music") {
     return null;
   }
 

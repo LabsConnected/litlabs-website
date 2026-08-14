@@ -50,8 +50,9 @@ const eslintConfig = defineConfig([
     "OmniRoute/**",
     // Docs — not linted
     "docs/**",
-    // CommonJS scripts — require() is correct in .cjs files
+    // CommonJS scripts — require() is correct in .cjs and .js files
     "scripts/**/*.cjs",
+    "scripts/**/*.js",
     // Root level JS scripts and debug artifacts
     "*.js",
     "scripts/__smoke*.mjs",
@@ -66,6 +67,14 @@ const eslintConfig = defineConfig([
           caughtErrorsIgnorePattern: "^_",
         },
       ],
+    },
+  },
+  // Test files: relax `no-explicit-any` to warn (mocks often need any)
+  {
+    files: ["**/*.test.ts", "**/*.test.tsx", "tests/**"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "prefer-const": "warn",
     },
   },
 ]);
