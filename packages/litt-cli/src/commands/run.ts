@@ -1,9 +1,9 @@
 /**
  * litt run <command> [args...] — Run an arbitrary command through
- * the hardened CommandExecutor with live streaming and cancellation.
+ * the ExecutionGateway with live streaming and cancellation.
  *
- * This is the direct execution path:
- *   RuntimeSession → CommandExecutor → ShellExecutor
+ * Canonical path:
+ *   RuntimeSession → ExecutionGateway → CommandExecutor → ShellExecutor
  *
  * Features:
  *   - Live stdout/stderr streaming (not buffered)
@@ -11,6 +11,7 @@
  *   - Ctrl+C cancels the command (not the CLI)
  *   - litt_event broadcast
  *   - Process-tree cancellation (zero orphans)
+ *   - Policy enforcement (PLAN/ACT/AUTO)
  */
 
 import { RuntimeSession } from "../lib/runtime-session.js";
@@ -44,29 +45,52 @@ export async function runCommand(args: string[], session?: RuntimeSession): Prom
 
   header(`run: ${command} ${cmdArgs.join(" ")}`);
 
-  const run = await sess.execute(command, cmdArgs, {
-    label: command,
-    timeoutMs: 300_000, // 5 min default
+  // Route through the ExecutionGateway — the ONE canonical authority
+  const gateway = sess.getGateway();
+  const gwResult = await gateway.execute({
+    toolId: "project.run",
+    inputs: { command, args: cmdArgs },
+    cwd: process.cwd(),
+    mode: sess.getMode(),
+    identity: {
+      tenantId: "cli-tenant",
+      userId: "cli-user",
+      actorId: "cli-user",
+      trusted: false,
+      interaction: "interactive",
+    },
+    onStream: (chunk: StreamChunk) => {
+      if (chunk.stream === "stderr") {
+        process.stderr.write(chunk.text);
+      } else {
+        process.stdout.write(chunk.text);
+      }
+    },
   });
 
-  // Show runId + toolCallId
-  console.log(`\n${c.gray}runId: ${run.runId} · toolCallId: ${run.toolCallId} · status: ${run.status} · ${run.durationMs}ms${c.reset}`);
+  const runId = gwResult.runId;
+  const toolCallId = gwResult.toolCallId;
+  const status = gwResult.result.status as "success" | "failed" | "cancelled" | "timeout";
+  const durationMs = gwResult.durationMs;
 
-  if (run.status === "cancelled") {
+  // Show runId + toolCallId
+  console.log(`\n${c.gray}runId: ${runId} · toolCallId: ${toolCallId} · status: ${status} · ${durationMs}ms${c.reset}`);
+
+  if (status === "cancelled") {
     fail("Command was cancelled");
     return 130;
   }
 
-  if (run.status === "timeout") {
+  if (status === "timeout") {
     fail("Command timed out");
     return 124;
   }
 
-  if (run.status !== "success") {
-    fail(run.result.message);
+  if (status !== "success") {
+    fail(gwResult.result.message);
     return 1;
   }
 
-  ok(run.result.message);
+  ok(gwResult.result.message);
   return 0;
 }

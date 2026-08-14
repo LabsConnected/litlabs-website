@@ -350,16 +350,13 @@ export class ExecutionGateway {
       return this.deny(runId, toolCallId, t0, reason, risk, false, grantVerified);
     }
 
-    // ─── 4b. Identity trust enforcement ───────────────────────
+    // ─── 4b. Identity trust enforcement (allow path) ──────────
     // An untrusted identity (model/agent) cannot claim elevated or
     // destructive capabilities without a verified grant. This check
-    // runs AFTER policy evaluation so that:
-    //   - PLAN mutations are denied by policy (not here)
-    //   - AUTO dangerous is denied by policy (not here)
-    //   - ACT elevated goes to require_approval (not denied here)
-    // This only blocks when policy says "allow" but the capability
-    // tier is dangerous/destructive/external_action and the caller
-    // is untrusted with no verified grant.
+    // handles the "allow" path — where policy says no approval needed.
+    // The "require_approval" path is handled at step 5c (post-approval)
+    // because human approval is necessary but not sufficient for
+    // untrusted dangerous work.
     if (policyEffect === "allow" && !request.identity.trusted && !grantVerified) {
       const requestedTier = this.getCapabilityTier(request, metadata);
       if (requestedTier === "arbitrary_code" || requestedTier === "destructive" || requestedTier === "external_action") {
@@ -405,6 +402,30 @@ export class ExecutionGateway {
         risk, false, grantVerified,
         "require_approval",
       );
+    }
+
+    // ─── 5c. Post-approval trust enforcement ──────────────────
+    // Even if a human approved the action, an untrusted identity
+    // (model/agent) CANNOT execute dangerous, destructive, or
+    // external_action capabilities without a verified grant.
+    //
+    // Human approval is necessary but NOT sufficient for untrusted
+    // dangerous work. The grant represents a prior, considered
+    // delegation that the principal is allowed to perform this class
+    // of action. Without it, the human is rubber-stamping something
+    // an untrusted agent requested — which is not safe authority.
+    //
+    // This runs AFTER approval so we know the human consented, but
+    // BEFORE capsule creation so the capsule never authorizes it.
+    if (!request.identity.trusted && !grantVerified) {
+      const requestedTier = this.getCapabilityTier(request, metadata);
+      if (requestedTier === "destructive" || requestedTier === "external_action") {
+        return this.deny(
+          runId, toolCallId, t0,
+          `Untrusted identity cannot execute ${requestedTier} capability without a verified grant, even with human approval`,
+          risk, approved, false,
+        );
+      }
     }
 
     // ─── 5c. Credential lease resolution (SEC-5) ───────────────

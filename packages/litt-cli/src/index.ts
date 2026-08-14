@@ -43,9 +43,8 @@ const VERSION = "0.1.0";
 /** Commands that can be dispatched remotely through terminal-server */
 const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build"]);
 
-/** Commands that use the RuntimeSession (shared runtime truth).
- * `run` is excluded — it creates its own session with live streaming. */
-const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build"]);
+/** Commands that use the RuntimeSession (shared runtime truth). */
+const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
 
 const COMMANDS: Record<string, (args: string[], session?: RuntimeSession) => Promise<number>> = {
   doctor: doctorCommand,

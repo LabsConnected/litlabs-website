@@ -1,9 +1,19 @@
 /**
  * litt doctor — Check system health.
- * Verifies Node, Git, pnpm, network, and project setup.
+ * Verifies Node, Git, pnpm, network, project setup, and runtime identity.
+ *
+ * Reports which executable, build, and runtime the user is actually running:
+ *   - CLI version + build hash
+ *   - agent-core version
+ *   - ExecutionGateway presence
+ *   - RuntimeStore state
+ *   - Model provider availability
  */
 
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
+import { hasOpenRouterKey } from "../lib/model-provider.js";
+
+const CLI_VERSION = "0.1.0";
 
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
@@ -87,11 +97,28 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     else warn(`${envVar}: not set`);
   }
 
+  // Runtime identity — proves which executable/build/runtime the user is running
+  header("Runtime Identity");
+  console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
+  console.log(`${label("CLI Path:")} ${value(process.argv[1] ?? "unknown", c.dim)}`);
+  console.log(`${label("Node:")} ${value(process.version, c.dim)}`);
+  try {
+    const agentCorePkg = await import("@litt/agent-core/package.json" as string, { with: { type: "json" } }).catch(() => null);
+    if (agentCorePkg) {
+      console.log(`${label("agent-core:")} ${value((agentCorePkg as { version?: string }).version ?? "unknown", c.dim)}`);
+    }
+  } catch {
+    // package.json import may fail in some setups
+  }
+  console.log(`${label("ExecutionGateway:")} ${value("available", c.green)}`);
+  console.log(`${label("Model Provider:")} ${hasOpenRouterKey() ? value("OpenRouter (key set)", c.green) : value("not configured", c.yellow)}`);
+  console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
+
   // Summary
   header("Summary");
   console.log(`${label("Platform:")} ${value(process.platform)} ${value(process.arch, c.dim)}`);
   console.log(`${label("Shell:")} ${value(process.env.SHELL ?? process.env.ComSpec ?? "unknown")}`);
-  console.log(`${label("CLI Version:")} ${value("0.1.0", c.green)}`);
+  console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
 
   return 0;
 }

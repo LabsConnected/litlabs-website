@@ -858,6 +858,61 @@ describe("SEC-6.1 — Untrusted identity enforcement", () => {
     assert.equal(result.policyEffect, "deny");
   });
 
+  it("untrusted identity + dangerous + human approval + NO grant = denied", async () => {
+    // THE critical invariant:
+    //   untrusted identity
+    //   + dangerous/destructive/external_action capability
+    //   + require_approval (ACT mode)
+    //   + human approves (onApprovalRequired returns true)
+    //   + NO verified grant
+    //   → DENIED
+    //
+    // Human approval is necessary but NOT sufficient for untrusted
+    // dangerous work. The grant represents prior delegation. Without
+    // it, the human is rubber-stamping something an untrusted agent
+    // requested — which is not safe authority.
+    let handlerCalled = false;
+    const dangerousEntry: ToolEntry = {
+      definition: {
+        id: "project.run",
+        name: "project.run",
+        description: "Run a command",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+      },
+      metadata: { projectScoped: false, mutating: true, readOnly: false },
+      handler: async () => {
+        handlerCalled = true;
+        return { status: "success" as const, success: true, message: "ok", data: {} };
+      },
+    };
+
+    const gw = new ExecutionGateway({
+      tools: new ToolRegistry({ "project.run": dangerousEntry }),
+      shell: new MockShellExecutor(),
+      executor: new CommandExecutor(new MockShellExecutor(), new RuntimeStore()),
+      approvalProvider: new RuntimeApprovalProvider(),
+      projectId: "proj_001",
+      onApprovalRequired: async () => true, // human approves!
+    });
+
+    // rm -rf is destructive — ACT mode → require_approval → human approves
+    // but untrusted + no grant → STILL denied
+    const result = await gw.execute(makeRequest({
+      toolId: "project.run",
+      mode: "act",
+      inputs: { command: "rm", args: ["-rf", "/tmp/test"] },
+      identity: makeIdentity({ trusted: false }),
+    }));
+
+    assert.equal(result.result.success, false);
+    assert.ok(
+      result.denialReason?.includes("Untrusted identity"),
+      `denial reason should mention untrusted identity, got: ${result.denialReason}`,
+    );
+    assert.equal(handlerCalled, false, "handler must NEVER be called — untrusted dangerous without grant");
+  });
+
   it("untrusted identity + safe command = allowed", async () => {
     // Safe commands are allowed for untrusted callers (still go through policy)
     const mock = makeMockTool("project.check", false);

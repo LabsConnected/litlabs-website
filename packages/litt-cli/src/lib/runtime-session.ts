@@ -26,6 +26,8 @@ import {
   CommandExecutor,
   RuntimeStore,
   CommandRouter,
+  ExecutionGateway,
+  ToolRegistry,
   type RuntimeEvent,
   type RuntimeState,
   type ShellExecutor,
@@ -76,6 +78,7 @@ export class RuntimeSession {
   private _store: RuntimeStore;
   private _executor: CommandExecutor;
   private _router: CommandRouter;
+  private _gateway: ExecutionGateway | null = null;
   private _cwd: string;
   private _mode: "plan" | "act" | "auto";
   private _onEvent: ((event: RuntimeEvent) => void) | null;
@@ -130,6 +133,31 @@ export class RuntimeSession {
    */
   getExecutor(): CommandExecutor {
     return this._executor;
+  }
+
+  /**
+   * Get the current execution mode (plan/act/auto).
+   */
+  getMode(): "plan" | "act" | "auto" {
+    return this._mode;
+  }
+
+  /**
+   * Get the ExecutionGateway — the ONE canonical execution authority.
+   * Created lazily on first access. All tool calls should route through
+   * this gateway, which enforces identity, grant, policy, approval, and
+   * credential checks before dispatching.
+   */
+  getGateway(): ExecutionGateway {
+    if (this._gateway) return this._gateway;
+    this._gateway = new ExecutionGateway({
+      tools: new ToolRegistry(),
+      shell: this._shell,
+      executor: this._executor,
+      store: this._store,
+      projectId: this._cwd,
+    });
+    return this._gateway;
   }
 
   /**
