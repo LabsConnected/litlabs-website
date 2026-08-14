@@ -736,3 +736,237 @@ describe("SEC-6.16 — Secret isolation in capsule", () => {
     assert.ok(Array.isArray(result.capsule!.credentialLeases));
   });
 });
+
+// ─── 17. SEC-6.1: No boolean bypass for approval ───────────────────
+
+describe("SEC-6.1 — No boolean bypass for approval", () => {
+  it("require_approval produces VerifiedApproval, not boolean bypass", async () => {
+    // The gateway must produce a VerifiedApproval object for require_approval.
+    // A plain boolean cannot substitute for cryptographic approval.
+    const mock = makeMockTool("project.write", true);
+    const { gateway } = setupGateway({
+      tools: { "project.write": mock.entry },
+      approvalProvider: new RuntimeApprovalProvider(),
+    });
+
+    // Provide an approval handler that approves
+    const gw = new ExecutionGateway({
+      tools: new ToolRegistry({ "project.write": mock.entry }),
+      shell: new MockShellExecutor(),
+      executor: new CommandExecutor(new MockShellExecutor(), new RuntimeStore()),
+      approvalProvider: new RuntimeApprovalProvider(),
+      projectId: "proj_001",
+      onApprovalRequired: async () => true,
+    });
+
+    const result = await gw.execute(makeRequest({
+      toolId: "project.write",
+      mode: "act",
+      inputs: { content: "test" },
+    }));
+
+    // The command should succeed — the gateway got a real VerifiedApproval
+    assert.equal(result.result.success, true);
+    assert.equal(result.approved, true);
+    // The capsule must have a VerifiedApproval attached
+    assert.ok(result.capsule, "capsule must exist");
+    assert.ok(result.capsule!.approval, "capsule must have VerifiedApproval");
+    assert.equal(result.capsule!.approval!.status, "valid");
+  });
+
+  it("require_approval without handler denies (fail closed)", async () => {
+    // No onApprovalRequired callback → gateway cannot get approval → deny
+    const mock = makeMockTool("project.write", true);
+    const { gateway } = setupGateway({ tools: { "project.write": mock.entry } });
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.write",
+      mode: "act",
+      inputs: { content: "test" },
+    }));
+
+    assert.equal(result.result.success, false);
+    assert.equal(result.approved, false);
+    assert.equal(result.policyEffect, "require_approval");
+    assert.equal(result.capsule, null, "no capsule created on denial");
+    assert.equal(mock.calls.length, 0, "handler must NEVER be called");
+  });
+
+  it("handler denial prevents execution", async () => {
+    const mock = makeMockTool("project.write", true);
+    const gw = new ExecutionGateway({
+      tools: new ToolRegistry({ "project.write": mock.entry }),
+      shell: new MockShellExecutor(),
+      executor: new CommandExecutor(new MockShellExecutor(), new RuntimeStore()),
+      approvalProvider: new RuntimeApprovalProvider(),
+      projectId: "proj_001",
+      onApprovalRequired: async () => false, // human denies
+    });
+
+    const result = await gw.execute(makeRequest({
+      toolId: "project.write",
+      mode: "act",
+      inputs: { content: "test" },
+    }));
+
+    assert.equal(result.result.success, false);
+    assert.equal(result.approved, false);
+    assert.equal(mock.calls.length, 0, "handler must NEVER be called on denial");
+  });
+});
+
+// ─── 18. SEC-6.1: Untrusted identity enforcement ───────────────────
+
+describe("SEC-6.1 — Untrusted identity enforcement", () => {
+  it("untrusted identity + elevated command without grant = denied", async () => {
+    // An untrusted model/agent cannot execute arbitrary_code without a grant.
+    // ACT mode + elevated → require_approval → no handler → denied.
+    // The untrusted check at 4b only fires when policy says "allow",
+    // but the approval gate catches it first (which is correct —
+    // the gateway never lets an untrusted caller bypass approval).
+    const mock = makeMockTool("project.run", false);
+    const { gateway } = setupGateway({ tools: { "project.run": mock.entry } });
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.run",
+      mode: "act",
+      inputs: { command: "node", args: ["-e", "console.log('hi')"] },
+      identity: makeIdentity({ trusted: false }),
+    }));
+
+    // node is arbitrary_code (elevated) — denied (no handler, no grant)
+    assert.equal(result.result.success, false);
+    assert.equal(result.approved, false);
+    assert.equal(mock.calls.length, 0, "handler must NEVER be called");
+  });
+
+  it("untrusted identity + dangerous command in AUTO = denied by policy", async () => {
+    // AUTO mode + dangerous → policy denies (not the untrusted check).
+    // This verifies the untrusted check doesn't interfere with policy.
+    const mock = makeMockTool("project.run", false);
+    const { gateway } = setupGateway({ tools: { "project.run": mock.entry } });
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.run",
+      mode: "auto",
+      inputs: { command: "rm", args: ["-rf", "/"] },
+      identity: makeIdentity({ trusted: false }),
+    }));
+
+    // rm -rf is dangerous — AUTO denies
+    assert.equal(result.result.success, false);
+    assert.equal(result.policyEffect, "deny");
+  });
+
+  it("untrusted identity + safe command = allowed", async () => {
+    // Safe commands are allowed for untrusted callers (still go through policy)
+    const mock = makeMockTool("project.check", false);
+    const { gateway } = setupGateway({ tools: { "project.check": mock.entry } });
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.check",
+      mode: "act",
+      identity: makeIdentity({ trusted: false }),
+    }));
+
+    // Safe read-only command — allowed even for untrusted
+    assert.equal(result.result.success, true);
+  });
+});
+
+// ─── 19. SEC-6.1: Credential-required tool without lease = denied ──
+
+describe("SEC-6.1 — Credential lease enforcement", () => {
+  it("credential-required tool without broker = denied", async () => {
+    // A tool that declares requiresCredentials cannot execute without
+    // a credential broker configured on the gateway.
+    // We provide an approval handler so the request gets past the
+    // approval gate — then the credential check fires.
+    const credRequiredEntry: ToolEntry = {
+      definition: {
+        id: "deploy.publish",
+        name: "deploy.publish",
+        description: "Deploys to production (requires credentials)",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+      },
+      metadata: {
+        projectScoped: true,
+        mutating: true,
+        readOnly: false,
+        requiresCredentials: [
+          { provider: "vercel", scopes: ["deploy"], audience: "vercel.com" },
+        ],
+      },
+      handler: async () => ({
+        status: "success" as const,
+        success: true,
+        message: "Deployed",
+        data: {},
+      }),
+    };
+
+    // Build a gateway with an approval handler but NO credential broker
+    const gw = new ExecutionGateway({
+      tools: new ToolRegistry({ "deploy.publish": credRequiredEntry }),
+      shell: new MockShellExecutor(),
+      executor: new CommandExecutor(new MockShellExecutor(), new RuntimeStore()),
+      approvalProvider: new RuntimeApprovalProvider(),
+      projectId: "proj_001",
+      onApprovalRequired: async () => true, // approve so we reach credential check
+    });
+
+    const result = await gw.execute(makeRequest({
+      toolId: "deploy.publish",
+      mode: "act",
+      inputs: { target: "production" },
+    }));
+
+    // No credential broker configured → denied at credential step
+    assert.equal(result.result.success, false);
+    assert.ok(result.denialReason?.includes("credential broker"));
+  });
+
+  it("credential-required handler never invoked without valid lease", async () => {
+    // Even if the handler is registered, it must NEVER be called
+    // when credential requirements are not met.
+    let handlerCalled = false;
+    const credRequiredEntry: ToolEntry = {
+      definition: {
+        id: "deploy.publish",
+        name: "deploy.publish",
+        description: "Deploys to production (requires credentials)",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+      },
+      metadata: {
+        projectScoped: true,
+        mutating: true,
+        readOnly: false,
+        requiresCredentials: [
+          { provider: "vercel", scopes: ["deploy"], audience: "vercel.com" },
+        ],
+      },
+      handler: async () => {
+        handlerCalled = true;
+        return {
+          status: "success" as const,
+          success: true,
+          message: "Deployed",
+          data: {},
+        };
+      },
+    };
+
+    const { gateway } = setupGateway({ tools: { "deploy.publish": credRequiredEntry } });
+
+    await gateway.execute(makeRequest({
+      toolId: "deploy.publish",
+      mode: "act",
+      inputs: { target: "production" },
+    }));
+
+    // The handler must NEVER have been called
+    assert.equal(handlerCalled, false, "handler must NEVER be called without valid lease");
+  });
+});
