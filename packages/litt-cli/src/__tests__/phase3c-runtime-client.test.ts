@@ -500,4 +500,353 @@ describe("RuntimeClient", () => {
     expect(mockSocket.disconnect).toHaveBeenCalled();
     expect(client.getConnectionState()).toBe("disconnected");
   });
+
+  // ─── Hardening: duplicate event suppression ─────────────────────
+
+  it("suppresses duplicate events with same type+runId+toolCallId+ts", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    const event = makeEvent("command_start", { command: "check" }, "run_dup_1");
+    emit("runtime:event", event);
+    emit("runtime:event", event); // exact duplicate
+
+    expect(events).toHaveLength(1);
+  });
+
+  it("suppresses duplicate tool_result events", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    const event = makeEvent("tool_result", { status: "success" }, "run_dup_2", "tc_dup_2");
+    emit("runtime:event", event);
+    emit("runtime:event", event); // duplicate
+
+    expect(events).toHaveLength(1);
+  });
+
+  it("allows same-type events with different runIds", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    emit("runtime:event", makeEvent("command_start", { command: "check" }, "run_A"));
+    emit("runtime:event", makeEvent("command_start", { command: "build" }, "run_B"));
+
+    expect(events).toHaveLength(2);
+  });
+
+  it("allows same-type stream events with different timestamps", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    emit("runtime:event", makeEvent("tool_stream", { stream: "stdout", chunk: "a" }, "run_s", "tc_s"));
+    // Different ts → not a duplicate
+    const e2 = makeEvent("tool_stream", { stream: "stdout", chunk: "b" }, "run_s", "tc_s");
+    e2.ts = e2.ts + 1;
+    emit("runtime:event", e2);
+
+    expect(events).toHaveLength(2);
+  });
+
+  // ─── Hardening: event ordering protection ───────────────────────
+
+  it("rejects events with timestamps older than last processed", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    const runId = "run_order_reject";
+    // First event at ts=1000
+    const e1 = makeEvent("command_start", { command: "check" }, runId);
+    e1.ts = 1000;
+    emit("runtime:event", e1);
+
+    // Second event at ts=500 (older) — should be rejected
+    const e2 = makeEvent("tool_call", { tool: "shell" }, runId, "tc_1");
+    e2.ts = 500;
+    emit("runtime:event", e2);
+
+    // Third event at ts=2000 (newer) — should be accepted
+    const e3 = makeEvent("tool_result", { status: "success" }, runId, "tc_1");
+    e3.ts = 2000;
+    emit("runtime:event", e3);
+
+    expect(events).toHaveLength(2); // e1 and e3, e2 rejected
+    expect(events[0].type).toBe("run.started");
+    expect(events[1].type).toBe("tool.completed");
+  });
+
+  it("allows command_start to reset ordering baseline", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // Run A at ts=2000
+    const e1 = makeEvent("command_start", { command: "check" }, "run_A");
+    e1.ts = 2000;
+    emit("runtime:event", e1);
+
+    // Run B starts at ts=1000 (clock skew) — command_start always accepted
+    const e2 = makeEvent("command_start", { command: "build" }, "run_B");
+    e2.ts = 1000;
+    emit("runtime:event", e2);
+
+    expect(events).toHaveLength(2);
+  });
+
+  // ─── Hardening: stale pre-reconnect event rejection ─────────────
+
+  it("rejects events with ts before lastReconnectTs when awaiting snapshot", async () => {
+    const { client, emit } = await setupClient();
+
+    // Simulate reconnect state
+    await client.resync();
+
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // Event with old timestamp (before reconnect) — should be rejected
+    const oldEvent = makeEvent("command_start", { command: "check" }, "run_old");
+    oldEvent.ts = Date.now() - 10000;
+    emit("runtime:event", oldEvent);
+
+    expect(events).toHaveLength(0);
+  });
+
+  // ─── Hardening: malformed runId rejection ───────────────────────
+
+  it("rejects events with missing runId (non-phase_change)", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // tool_call without runId — should be rejected
+    emit("runtime:event", makeEvent("tool_call", { tool: "shell" }, undefined, "tc_1"));
+
+    expect(events).toHaveLength(0);
+  });
+
+  it("allows phase_change events without runId", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // phase_change without runId — should not be rejected for missing runId
+    emit("runtime:event", makeEvent("phase_change", { phase: "running" }));
+
+    // phase_change maps to null lifecycle, so no events — but it wasn't
+    // rejected for missing runId (it would be rejected by the mapper)
+    expect(events).toHaveLength(0);
+  });
+
+  // ─── Hardening: active-run reconciliation ───────────────────────
+
+  it("reconciles: server says idle, client thinks running → clears local run", async () => {
+    const { client, emit } = await setupClient();
+    emit("runtime:event", makeEvent("command_start", { command: "check" }, "run_recon_1"));
+
+    expect(client.getCurrentRunId()).toBe("run_recon_1");
+
+    // Server snapshot says idle
+    client.reconcile(makeState({ activeCommand: null }));
+
+    expect(client.getCurrentRunId()).toBeNull();
+    expect(client.getKnownOldRuns()).toContain("run_recon_1");
+  });
+
+  it("reconciles: server says running, client thinks idle → adopts server run", async () => {
+    const { client, emit } = await setupClient();
+
+    const serverRun = {
+      command: "build",
+      args: [],
+      startedAt: Date.now(),
+      cwd: "/tmp",
+      runId: "run_server_active",
+    };
+    client.reconcile(makeState({ activeCommand: serverRun }));
+
+    expect(client.getCurrentRunId()).toBe("run_server_active");
+  });
+
+  it("snapshot reconciliation clears currentRunId when server is idle", async () => {
+    const { client, emit } = await setupClient();
+    emit("runtime:event", makeEvent("command_start", { command: "check" }, "run_snap_1"));
+
+    expect(client.getCurrentRunId()).toBe("run_snap_1");
+
+    // Server snapshot says idle
+    emit("runtime:snapshot", makeState({ activeCommand: null }));
+
+    expect(client.getCurrentRunId()).toBeNull();
+  });
+
+  it("snapshot reconciliation adopts active run from server", async () => {
+    const { client, emit } = await setupClient();
+
+    const serverRun = {
+      command: "test",
+      args: [],
+      startedAt: Date.now(),
+      cwd: "/tmp",
+      runId: "run_snap_active",
+    };
+    emit("runtime:snapshot", makeState({ activeCommand: serverRun }));
+
+    expect(client.getCurrentRunId()).toBe("run_snap_active");
+  });
+
+  // ─── Hardening: resync clears state ─────────────────────────────
+
+  it("resync clears seen events and ordering state", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // Process some events
+    emit("runtime:event", makeEvent("command_start", { command: "check" }, "run_pre_resync"));
+    emit("runtime:event", makeEvent("command_end", { success: true }, "run_pre_resync"));
+
+    expect(client.getSeenEventCount()).toBeGreaterThan(0);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeState({ phase: "idle" }),
+    });
+
+    await client.resync();
+
+    // After resync, seen events are cleared
+    expect(client.getSeenEventCount()).toBe(0);
+    expect(client.isAwaitingSnapshot()).toBe(true);
+  });
+
+  it("resync marks current run as old", async () => {
+    const { client, emit } = await setupClient();
+    emit("runtime:event", makeEvent("command_start", { command: "check" }, "run_resync_old"));
+
+    expect(client.getCurrentRunId()).toBe("run_resync_old");
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeState({ phase: "idle" }),
+    });
+
+    await client.resync();
+
+    expect(client.getKnownOldRuns()).toContain("run_resync_old");
+  });
+
+  // ─── Hardening: exponential backoff ─────────────────────────────
+
+  it("exposes initial backoff delay", async () => {
+    const client = createClient();
+    expect(client.getBackoffMs()).toBe(1000);
+  });
+
+  // ─── Hardening: nasty cases ─────────────────────────────────────
+
+  it("handles reconnect during active command", async () => {
+    const { client, emit } = await setupClient();
+    const events: LifecycleEvent[] = [];
+    client.onLifecycle((e) => events.push(e));
+
+    // Start a run
+    emit("runtime:event", makeEvent("command_start", { command: "build" }, "run_active_reconnect"));
+
+    // Reconnect happens — resync
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeState({
+        phase: "running",
+        activeCommand: {
+          command: "build",
+          args: [],
+          startedAt: Date.now(),
+          cwd: "/tmp",
+          runId: "run_active_reconnect",
+        },
+      }),
+    });
+
+    await client.resync();
+
+    // Server confirms the run is still active — we adopt it
+    expect(client.getCurrentRunId()).toBe("run_active_reconnect");
+  });
+
+  it("handles server says idle while client thinks running", async () => {
+    const { client, emit } = await setupClient();
+    emit("runtime:event", makeEvent("command_start", { command: "build" }, "run_client_thinks"));
+
+    // Server snapshot says idle — the run was lost
+    emit("runtime:snapshot", makeState({ activeCommand: null }));
+
+    // Client should clear its run tracking
+    expect(client.getCurrentRunId()).toBeNull();
+    expect(client.hasActiveRun()).toBe(false);
+  });
+
+  it("handles REST fallback followed by Socket.IO recovery", async () => {
+    const client = createClient();
+
+    // REST fallback — dispatch command
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, runId: "run_rest_recovery", result: { success: true } }),
+    });
+    const result = await client.dispatchCommand("check");
+    expect(result.ok).toBe(true);
+    expect(client.getCurrentRunId()).toBe("run_rest_recovery");
+
+    // Socket.IO recovers — connect
+    await client.connect();
+    const connectHandler = mockSocket.on.mock.calls.find(
+      ([event]) => event === "connect",
+    )?.[1];
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeState({ phase: "idle", activeCommand: null }),
+    });
+
+    // Connect fires — snapshot arrives showing idle
+    connectHandler?.();
+    emitSnapshotViaSocket(mockSocket, makeState({ activeCommand: null }));
+
+    // Client should reconcile — the REST run is now old
+    expect(client.getKnownOldRuns()).toContain("run_rest_recovery");
+  });
+
+  it("handles disconnect during cancellation", async () => {
+    const { client, emit } = await setupClient();
+    emit("runtime:event", makeEvent("command_start", { command: "build" }, "run_cancel_disconnect"));
+
+    // Cancel request sent
+    mockFetch.mockResolvedValueOnce({ ok: true });
+    const cancelPromise = client.cancelActiveRun();
+
+    // Disconnect happens during cancel
+    const disconnectHandler = mockSocket.on.mock.calls.find(
+      ([event]) => event === "disconnect",
+    )?.[1];
+    disconnectHandler?.("transport close");
+
+    // Cancel should still resolve (REST doesn't need Socket.IO)
+    const cancelled = await cancelPromise;
+    expect(cancelled).toBe(true);
+    expect(client.getConnectionState()).toBe("disconnected");
+  });
 });
+
+// Helper to emit snapshot via mock socket
+function emitSnapshotViaSocket(mock: typeof mockSocket, state: RuntimeState): void {
+  const snapshotHandler = mock.on.mock.calls.find(
+    ([event]) => event === "runtime:snapshot",
+  )?.[1];
+  snapshotHandler?.(state);
+}

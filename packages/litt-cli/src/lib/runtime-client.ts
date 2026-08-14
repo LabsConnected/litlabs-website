@@ -489,17 +489,35 @@ export class RuntimeClient {
 
   /**
    * Force a reconnect and resync.
-   * Called when the terminal-server restarts.
+   * Called when the terminal-server restarts or when the client
+   * detects that its state may be stale.
+   *
+   * This clears all local run tracking and duplicate-suppression state
+   * so that the post-reconnect snapshot becomes the single source of truth.
+   * No locally invented runtime state survives the resync.
    */
   async resync(): Promise<void> {
+    // Mark the current run as old so any late events from it are rejected
+    if (this.currentRunId) {
+      this.knownOldRuns.add(this.currentRunId);
+    }
+
+    // Clear duplicate-suppression and ordering state — we're starting fresh
+    this.seenEventIds.clear();
+    this.lastEventTs = 0;
+    this.awaitingSnapshot = true;
+    this.lastReconnectTs = Date.now();
+
     if (this.socket) {
       this.socket.disconnect();
     }
     // Wait a moment for cleanup
     await new Promise((r) => setTimeout(r, 200));
     this.reconnectAttempts = 0;
+    this.backoffMs = 1000; // reset backoff
     await this.connect();
-    // Fetch fresh state via REST as a backup to the Socket.IO snapshot
+    // Fetch fresh state via REST as a backup to the Socket.IO snapshot.
+    // This is the authoritative resync — no locally invented state.
     await this.fetchState();
   }
 
@@ -523,6 +541,50 @@ export class RuntimeClient {
 
   hasActiveRun(): boolean {
     return this.state?.activeCommand != null;
+  }
+
+  // ─── Hardening: introspection (for testing and debugging) ──────
+
+  /** True if waiting for a post-reconnect snapshot */
+  isAwaitingSnapshot(): boolean {
+    return this.awaitingSnapshot;
+  }
+
+  /** Number of duplicate events suppressed */
+  getSeenEventCount(): number {
+    return this.seenEventIds.size;
+  }
+
+  /** Current backoff delay (ms) */
+  getBackoffMs(): number {
+    return this.backoffMs;
+  }
+
+  /** Known old runs (for testing stale-run filtering) */
+  getKnownOldRuns(): string[] {
+    return [...this.knownOldRuns];
+  }
+
+  /**
+   * Reconcile local state with server state after reconnect.
+   * If the server says idle but we think a run is active, the run
+   * was lost during disconnect — mark it as old and clear local tracking.
+   * If the server says a run is active, adopt it.
+   */
+  reconcile(serverState: RuntimeState): void {
+    if (serverState.activeCommand == null && this.currentRunId) {
+      // Server says idle, we think running — server wins
+      this.knownOldRuns.add(this.currentRunId);
+      this.currentRunId = null;
+    }
+    if (serverState.activeCommand?.runId) {
+      // Server says a run is active — adopt it
+      this.currentRunId = serverState.activeCommand.runId;
+      // Clear any old-run marking for this run
+      this.knownOldRuns.delete(serverState.activeCommand.runId);
+    }
+    this.state = serverState;
+    this.notifyStateListeners();
   }
 
   // ─── Listener management ───────────────────────────────────────
