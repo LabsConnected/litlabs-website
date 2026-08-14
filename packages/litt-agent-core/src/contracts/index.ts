@@ -77,6 +77,29 @@ export {
   deriveHealthLabel,
 } from "./capability.js";
 
+// SEC-3: Grant Issuer + Verifier
+export type {
+  SigningKey,
+} from "./grant-issuer.js";
+export {
+  GrantIssuer,
+  createSigningKey,
+  generateGrantNonce,
+  generateGrantId,
+  extractGrantClaims,
+  canonicalGrantClaims,
+} from "./grant-issuer.js";
+export type {
+  VerificationKeyEntry,
+  VerificationKeyStore,
+  VerificationContext,
+} from "./grant-verifier.js";
+export {
+  GrantVerifier,
+  toVerifiedCapabilityGrant,
+  InMemoryKeyStore,
+} from "./grant-verifier.js";
+
 // Credential
 export type {
   CredentialRef,
