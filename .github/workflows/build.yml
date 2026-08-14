@@ -62,8 +62,8 @@ jobs:
           CI: true
           NEXT_TELEMETRY_DISABLED: "1"
           # Dummy Clerk keys for build-time SSG (not real credentials)
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_dummy_key_for_build_only"
-          CLERK_SECRET_KEY: "sk_test_dummy_key_for_build_only"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZHVtbXktY2ktYnVpbGQta2V5JA=="
+          CLERK_SECRET_KEY: "sk_test_ZHVtbXktY2ktYnVpbGQta2V5JA=="
 
       - name: Playwright tests
         run: |
@@ -74,8 +74,8 @@ jobs:
           PLAYWRIGHT_TEST: true
           PLAYWRIGHT_AUTH_DISABLED: true
           # Dummy Clerk keys so ClerkProvider initializes in test server
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_dummy_key_for_build_only"
-          CLERK_SECRET_KEY: "sk_test_dummy_key_for_build_only"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZHVtbXktY2ktYnVpbGQta2V5JA=="
+          CLERK_SECRET_KEY: "sk_test_ZHVtbXktY2ktYnVpbGQta2V5JA=="
 
       - name: Dependency audit
         run: pnpm audit --prod --audit-level=high
