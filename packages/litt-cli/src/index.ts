@@ -32,6 +32,7 @@ import { runCommand } from "./commands/run.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
+import { cockpitCommand } from "./commands/cockpit.js";
 import { dispatchRemote } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { ok, fail, header, c } from "./lib/utils.js";
@@ -58,6 +59,7 @@ const COMMANDS: Record<string, (args: string[], session?: RuntimeSession) => Pro
   inspect: inspectCommand,
   ask: askCommand,
   explain: explainCommand,
+  cockpit: cockpitCommand,
 };
 
 async function main(): Promise<number> {
@@ -177,6 +179,7 @@ Commands:
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice
+  cockpit    Interactive runtime cockpit (Socket.IO live state from terminal-server)
 
 Options:
   -h, --help     Show this help
@@ -195,6 +198,8 @@ Examples:
   litt build --remote    (Studio sees the same run)
   litt run echo hello    (streaming + Ctrl+C cancel)
   litt run pnpm test --mode auto
+  litt cockpit              (live runtime cockpit via Socket.IO)
+  litt cockpit check        (dispatch check via cockpit)
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"
