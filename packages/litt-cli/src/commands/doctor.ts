@@ -13,6 +13,7 @@
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
+import { ensureConfig, getConfigPath } from "../lib/config.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -103,16 +104,11 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     else warn(`${envVar}: not set`);
   }
 
-  // First-run config detection
+  // First-run config — auto-create if missing
   header("First-Run Config");
-  const littHome = process.env.LITT_HOME ?? path.join(os.homedir(), ".litt");
-  const configExists = fs.existsSync(path.join(littHome, "config.json"));
-  if (configExists) {
-    ok(`Config: ${path.join(littHome, "config.json")}`);
-  } else {
-    warn(`No config found at ${littHome}`);
-    console.log(`${c.dim}  Run 'litt' to start first-run setup.${c.reset}`);
-  }
+  const config = ensureConfig();
+  ok(`Config: ${getConfigPath()}`);
+  console.log(`${c.dim}  mode: ${config.defaultMode} | model: ${config.defaultModel} | initialized: ${config.initialized}${c.reset}`);
 
   // Terminal-server connectivity (optional)
   header("Terminal Server");

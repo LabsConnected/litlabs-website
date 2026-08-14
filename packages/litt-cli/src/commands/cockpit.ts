@@ -22,7 +22,9 @@ import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { SessionEventBridge } from "../ink/session-event-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
+import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c } from "../lib/utils.js";
+import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 
 export async function cockpitCommand(args: string[]): Promise<number> {
   // Check for TTY — Ink requires raw mode on stdin
@@ -33,6 +35,9 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     console.error(`${c.dim}  Or use non-interactive commands: litt doctor, litt status, litt run <cmd>${c.reset}`);
     return 1;
   }
+
+  // First-run config bootstrap — creates ~/.litt/config.json if missing
+  ensureConfig();
 
   // Auto-detect project root by walking upward from cwd.
   // The user can be in any subdirectory — LiTT finds the root.
@@ -79,7 +84,14 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     client = null;
   }
 
-  const model = process.env.OPENROUTER_API_KEY ? "claude-sonnet-4.6" : "heuristic";
+  // Model truth — provider availability ≠ model selection.
+  // OPENROUTER_API_KEY means OpenRouter is available, NOT that Claude is active.
+  // The cockpit displays the truthful model state:
+  //   - activeModel only when the runtime has executed a request
+  //   - configuredModel when a model is resolved but not yet active
+  //   - "unresolved" when no provider is available or no model configured
+  const modelState = buildModelState();
+  const model = modelDisplayLabel(modelState);
 
   // If a command was provided as arg, run it through the gateway then exit
   if (args.length > 0) {
