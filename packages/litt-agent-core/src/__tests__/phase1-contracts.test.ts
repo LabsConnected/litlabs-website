@@ -59,8 +59,10 @@ import {
   // Approval
   type ApprovalRecord,
   type ApprovalStatus,
+  type OperationDigestInput,
   generateApprovalId,
-  computeInputHash,
+  canonicalJSON,
+  computeOperationDigest,
   isApprovalValid,
   // Capsule
   type ExecutionCapsule,
@@ -180,7 +182,7 @@ describe("Phase 1 — Policy decision serialization", () => {
 // ─── 3. Credential leases cannot contain secret values ────────────
 
 describe("Phase 1 — Credential lease safety", () => {
-  it("CredentialLease has secretRef, not secret value", () => {
+  it("CredentialLease has secretRef (schema constraint, not runtime safety)", () => {
     const lease: CredentialLease = {
       leaseId: "lease-1",
       provider: "github",
@@ -202,10 +204,12 @@ describe("Phase 1 — Credential lease safety", () => {
     assert.ok(!lease.secretRef.includes("ghp_"));
   });
 
-  it("CredentialLease type does not have secret-value fields", () => {
-    // This is a compile-time check. If CredentialLease had an `apiKey` field,
-    // the _LeaseSafetyCheck type in credential.ts would produce a compile error.
-    // The fact that this file compiles proves the type is safe.
+  it("CredentialLease schema does not have secret-value fields", () => {
+    // This is a SCHEMA constraint, not a runtime safety guarantee.
+    // If CredentialLease had an `apiKey` field, the _LeaseSchemaCheck type
+    // in credential.ts would produce a compile error.
+    // The fact that this file compiles proves the schema is correct.
+    // Actual runtime secret isolation belongs to the Credential Broker (SEC-2).
     const lease: CredentialLease = {
       leaseId: "lease-1",
       provider: "openrouter",
@@ -221,7 +225,7 @@ describe("Phase 1 — Credential lease safety", () => {
       secretRef: "broker://openrouter/abc123/lease-1",
     };
 
-    // Verify no secret fields exist on the object
+    // Verify no secret fields exist on the schema
     assert.equal((lease as unknown as Record<string, unknown>).apiKey, undefined);
     assert.equal((lease as unknown as Record<string, unknown>).secret, undefined);
     assert.equal((lease as unknown as Record<string, unknown>).token, undefined);
@@ -456,6 +460,39 @@ describe("Phase 1 — ExecutionCapsule variants", () => {
     assert.equal(parsed.result.success, true);
     assert.ok(parsed.executionId.startsWith("exec_"));
   });
+
+  it("ToolExecution supports null capsuleId for non-capsule executions", () => {
+    const exec: ToolExecution = {
+      executionId: generateExecutionId(),
+      runId: "run-1",
+      capsuleId: null,
+      actor: {
+        actorId: "user:abc",
+        kind: "user",
+        tenantId: "tenant-1",
+        userId: "abc",
+        agentId: null,
+        label: "Test",
+      },
+      toolId: "files.read",
+      inputs: { path: "/tmp/test" },
+      capabilityGrantId: "grant-1",
+      credentialLeaseIds: [],
+      approvalId: null,
+      policyDecision: "{}",
+      result: {
+        success: true,
+        message: "ok",
+        data: {},
+        errorCode: null,
+        errorMessage: null,
+      },
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      durationMs: 5,
+    };
+    assert.equal(exec.capsuleId, null);
+  });
 });
 
 // ─── 5. Capability expiration/revocation is representable ─────────
@@ -480,10 +517,14 @@ describe("Phase 1 — Capability grant and health", () => {
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       audience: "litt-kernel",
       nonce: "nonce-123",
+      issuer: "litt-kernel",
+      policyVersion: "1.0.0",
     };
 
     assert.equal(grant.capabilities.length, 2);
     assert.equal(grant.riskTier, "high");
+    assert.equal(grant.issuer, "litt-kernel");
+    assert.equal(grant.policyVersion, "1.0.0");
     assert.ok(grant.expiresAt > grant.issuedAt);
   });
 
@@ -788,6 +829,18 @@ describe("Phase 1 — Sensory events", () => {
 // ─── 9. Approval records ──────────────────────────────────────────
 
 describe("Phase 1 — Approval records", () => {
+  const baseOp: OperationDigestInput = {
+    tenantId: "tenant-1",
+    userId: "abc123",
+    actorId: "user:abc123",
+    runId: "run-1",
+    toolId: "deploy",
+    action: "vercel.deploy",
+    resourceScope: ["project:proj-1"],
+    environment: "preview",
+    normalizedInput: { target: "preview", branch: "main" },
+  };
+
   it("ApprovalRecord is constructable", () => {
     const approval: ApprovalRecord = {
       approvalId: generateApprovalId(),
@@ -796,7 +849,7 @@ describe("Phase 1 — Approval records", () => {
       runId: "run-1",
       projectId: "proj-1",
       toolId: "git.push",
-      normalizedInputHash: computeInputHash({ branch: "main", force: false }),
+      operationDigest: computeOperationDigest(baseOp),
       risk: "high",
       scope: "once",
       status: "pending",
@@ -805,19 +858,75 @@ describe("Phase 1 — Approval records", () => {
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
     };
     assert.ok(approval.approvalId.startsWith("appr_"));
+    assert.ok(approval.operationDigest.startsWith("op_"));
     assert.equal(approval.status, "pending");
   });
 
-  it("computeInputHash produces different hashes for different inputs", () => {
-    const hash1 = computeInputHash({ branch: "main" });
-    const hash2 = computeInputHash({ branch: "feature" });
-    assert.notEqual(hash1, hash2);
+  it("computeOperationDigest produces same digest for same operation", () => {
+    const d1 = computeOperationDigest(baseOp);
+    const d2 = computeOperationDigest(baseOp);
+    assert.equal(d1, d2);
   });
 
-  it("computeInputHash produces same hash for same inputs", () => {
-    const hash1 = computeInputHash({ branch: "main", force: false });
-    const hash2 = computeInputHash({ branch: "main", force: false });
-    assert.equal(hash1, hash2);
+  it("computeOperationDigest produces same digest regardless of key order", () => {
+    const op1: OperationDigestInput = baseOp;
+    const op2: OperationDigestInput = {
+      // Same fields, different insertion order
+      normalizedInput: { target: "preview", branch: "main" },
+      environment: "preview",
+      resourceScope: ["project:proj-1"],
+      action: "vercel.deploy",
+      toolId: "deploy",
+      runId: "run-1",
+      actorId: "user:abc123",
+      userId: "abc123",
+      tenantId: "tenant-1",
+    };
+    const d1 = computeOperationDigest(op1);
+    const d2 = computeOperationDigest(op2);
+    assert.equal(d1, d2, "key reordering must not change the digest");
+  });
+
+  it("computeOperationDigest produces different digest for different inputs", () => {
+    const d1 = computeOperationDigest(baseOp);
+    const d2 = computeOperationDigest({ ...baseOp, normalizedInput: { target: "production", branch: "main" } });
+    assert.notEqual(d1, d2);
+  });
+
+  it("computeOperationDigest produces different digest for different tool", () => {
+    const d1 = computeOperationDigest(baseOp);
+    const d2 = computeOperationDigest({ ...baseOp, toolId: "git.push" });
+    assert.notEqual(d1, d2);
+  });
+
+  it("computeOperationDigest produces different digest for different resource", () => {
+    const d1 = computeOperationDigest(baseOp);
+    const d2 = computeOperationDigest({ ...baseOp, resourceScope: ["project:proj-2"] });
+    assert.notEqual(d1, d2);
+  });
+
+  it("computeOperationDigest produces different digest for preview vs production", () => {
+    const d1 = computeOperationDigest({ ...baseOp, environment: "preview" });
+    const d2 = computeOperationDigest({ ...baseOp, environment: "production" });
+    assert.notEqual(d1, d2, "deploy preview must not authorize deploy production");
+  });
+
+  it("computeOperationDigest produces different digest for different actor", () => {
+    const d1 = computeOperationDigest(baseOp);
+    const d2 = computeOperationDigest({ ...baseOp, actorId: "user:different" });
+    assert.notEqual(d1, d2);
+  });
+
+  it("canonicalJSON sorts keys recursively", () => {
+    const json1 = canonicalJSON({ a: 1, b: 2, c: { z: 9, a: 1 } });
+    const json2 = canonicalJSON({ c: { a: 1, z: 9 }, b: 2, a: 1 });
+    assert.equal(json1, json2);
+  });
+
+  it("canonicalJSON handles arrays preserving order", () => {
+    const json1 = canonicalJSON([1, 2, 3]);
+    const json2 = canonicalJSON([3, 2, 1]);
+    assert.notEqual(json1, json2);
   });
 
   it("isApprovalValid returns true for approved, non-expired", () => {
@@ -828,7 +937,7 @@ describe("Phase 1 — Approval records", () => {
       runId: "run-1",
       projectId: null,
       toolId: "files.write",
-      normalizedInputHash: "h-1",
+      operationDigest: "op_1",
       risk: "medium",
       scope: "once",
       status: "approved",
@@ -847,7 +956,7 @@ describe("Phase 1 — Approval records", () => {
       runId: "run-1",
       projectId: null,
       toolId: "files.write",
-      normalizedInputHash: "h-1",
+      operationDigest: "op_1",
       risk: "medium",
       scope: "once",
       status: "approved",
@@ -866,7 +975,7 @@ describe("Phase 1 — Approval records", () => {
       runId: "run-1",
       projectId: null,
       toolId: "files.write",
-      normalizedInputHash: "h-1",
+      operationDigest: "op_1",
       risk: "medium",
       scope: "once",
       status: "denied",

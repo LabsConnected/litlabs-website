@@ -3,8 +3,13 @@ import type { ActionRisk } from "./policy.js";
 /**
  * Canonical capability contracts.
  *
- * A CapabilityGrant is a signed/verified logical grant that binds
+ * A CapabilityGrant is a canonical grant claims structure that binds
  * capabilities to a run. It grants ABILITY, not credentials.
+ *
+ * Phase 1: in-process trusted server object. No cryptographic signing.
+ * Phase 2/3: GrantIssuer + GrantVerifier can cryptographically verify
+ * grants used by remote execution capsules without redesigning the
+ * claims structure (the `integrity` field is reserved for this).
  *
  * A CapabilityHealth is a multi-dimensional health state vector,
  * replacing the single mixed enum (ready/offline/connecting/...) with
@@ -17,10 +22,14 @@ import type { ActionRisk } from "./policy.js";
 // ─── Capability grant ─────────────────────────────────────────────
 
 /**
- * A signed/verified logical grant.
+ * A canonical grant claims structure.
  *
  * Grants ability, not credentials. Credentials are obtained separately
  * via CredentialLease.
+ *
+ * Phase 1: in-process trusted server object. Not cryptographically signed.
+ * The `integrity` field is reserved for future GrantIssuer/GrantVerifier
+ * implementations that support remote execution capsules.
  *
  * Explicit allow semantics:
  *   - Scoped to actor + resource + operation
@@ -72,6 +81,43 @@ export interface CapabilityGrant {
   audience: string;
   /** Cryptographic nonce for replay prevention */
   nonce: string;
+
+  /** Issuer identity (e.g. "litt-kernel", "policy-engine") */
+  issuer: string;
+  /** Policy engine version that authorized this grant */
+  policyVersion: string;
+
+  /**
+   * Optional integrity proof for remote/cross-process verification.
+   *
+   * Phase 1: undefined (in-process trusted object).
+   * Phase 2/3: populated by GrantIssuer with a cryptographic signature
+   * that GrantVerifier can check before accepting a grant from a remote
+   * capsule or untrusted process boundary.
+   */
+  integrity?: GrantIntegrity;
+}
+
+// ─── Grant integrity (reserved for future cryptographic verification) ─
+
+/**
+ * Cryptographic integrity proof for a capability grant.
+ *
+ * Reserved for Phase 2/3 GrantIssuer/GrantVerifier. Not populated in
+ * Phase 1 (in-process grants are trusted server objects).
+ *
+ * When populated, a GrantVerifier can confirm:
+ *   - the grant claims were not tampered with
+ *   - the grant was issued by the stated issuer
+ *   - the grant is within its validity window
+ */
+export interface GrantIntegrity {
+  /** Signature algorithm (e.g. "Ed25519", "HS256") */
+  algorithm: string;
+  /** Key ID used to verify the signature */
+  keyId: string;
+  /** Cryptographic signature over the canonical grant claims */
+  signature: string;
 }
 
 // ─── Grant budget ─────────────────────────────────────────────────

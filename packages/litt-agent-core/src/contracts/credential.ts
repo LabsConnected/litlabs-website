@@ -4,6 +4,11 @@
  * A CredentialLease represents ACCESS to a credential, not the raw secret.
  * The lease contains a secretRef (broker reference), never the secret value.
  *
+ * Phase 1 guarantee: the CredentialLease schema contains a secretRef,
+ * not a raw-secret field. This is a schema constraint, not a runtime
+ * safety guarantee. Actual runtime secret isolation belongs to the
+ * Credential Broker phase (SEC-2).
+ *
  * Secrets must never enter:
  *   - audit events
  *   - model context
@@ -126,15 +131,36 @@ export type CredentialAuthType =
   | "masked_proxy"            // Credential masking/proxy substitution
   | "static_key";             // Encrypted static API key (LAST RESORT)
 
-// ─── Safety: ensure leases never contain secret values ────────────
+// ─── Schema constraint: leases contain references, not secret values ─
 
 /**
- * Type-level check: CredentialLease must never contain known secret
- * field names. This is a compile-time safety net.
+ * Type-level constraint: CredentialLease must not contain known secret
+ * field names. This is a SCHEMA constraint, not a runtime safety guarantee.
  *
- * If someone accidentally adds a field like `apiKey`, `secret`,
- * `token`, `password`, or `privateKey` to CredentialLease, this
- * will produce a compile error.
+ * What this check prevents:
+ *   - Accidentally adding a field like `apiKey`, `secret`, `token`,
+ *     `password`, or `privateKey` to the CredentialLease interface.
+ *
+ * What this check does NOT prevent:
+ *   - Accidental logging of secrets obtained through other paths
+ *   - Object spreading that copies secret values from other sources
+ *   - HTTP responses or serialization that leaks secrets
+ *   - Runtime values assigned via `any` or untyped boundaries
+ *
+ * Phase 1 guarantees only:
+ *   The canonical CredentialLease contract contains a secretRef
+ *   (a broker reference), not a raw-secret field.
+ *
+ * Actual runtime secret isolation belongs to the Credential Broker phase
+ * (SEC-2), which provides:
+ *   - runtime schema validation
+ *   - secret broker boundary
+ *   - non-serializable secret material
+ *   - redaction
+ *   - log filtering
+ *   - model-context filtering
+ *   - credential proxy/injection
+ *   - lease TTL, scope, audience, revocation
  */
 type ForbiddenSecretFields =
   | "apiKey"
@@ -152,4 +178,4 @@ type ForbiddenSecretFields =
 // this evaluates to a non-never type, causing an error below.
 type LeaseSafetyViolation = Extract<keyof CredentialLease, ForbiddenSecretFields>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _LeaseSafetyCheck = LeaseSafetyViolation extends never ? "safe" : never;
+type _LeaseSchemaCheck = LeaseSafetyViolation extends never ? "schema_ok" : never;

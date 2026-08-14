@@ -12,6 +12,12 @@
  *   - cloud metadata endpoints (169.254.169.254)
  *   - DNS rebinding
  *   - data exfiltration
+ *   - IPv4-mapped IPv6 bypass
+ *   - redirect-into-private-range attacks
+ *   - hostname resolution TOCTOU
+ *
+ * Phase 1 defines the contract. Full enforcement belongs to the
+ * network engine in a later phase.
  *
  * This is the ONE canonical source. No existing system defines this concept.
  */
@@ -69,6 +75,25 @@ export const DENY_ALL_NETWORK: NetworkPolicy = {
 /**
  * A local development policy: allow loopback (for local dev servers)
  * but deny private networks and require explicit host allowlisting.
+ *
+ * WARNING: `allowLoopback: true` is a broad exception. The eventual
+ * network engine must NOT treat this as "anything goes on localhost".
+ * Final enforcement must explicitly enumerate which loopback services
+ * are permitted (e.g. terminal-server port, preview port, local Ollama)
+ * rather than allowing all of 127.0.0.1/::1.
+ *
+ * Final network enforcement must protect against:
+ *   - loopback (127.0.0.1, ::1, 0.0.0.0)
+ *   - private IPv4 (10/8, 172.16/12, 192.168/16)
+ *   - private IPv6 (fc00::/7, fd00::/8)
+ *   - link-local (169.254/16, fe80::/10)
+ *   - cloud metadata endpoints (169.254.169.254, metadata.google.internal)
+ *   - IPv4-mapped IPv6 (::ffff:127.0.0.1)
+ *   - DNS rebinding (hostname resolves to private IP)
+ *   - HTTP redirects into private ranges
+ *   - hostname/IP resolution changes between check and connect (TOCTOU)
+ *
+ * Phase 1 needs contract correctness, not a full network sandbox.
  */
 export const LOCAL_DEV_NETWORK: NetworkPolicy = {
   policyId: "default-local-dev",

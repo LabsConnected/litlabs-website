@@ -1,14 +1,35 @@
 /**
  * Canonical execution capsule and tool execution contracts.
  *
- * An ExecutionCapsule is the envelope around every serious tool execution.
- * It isolates execution from the persistent Kernel:
+ * An ExecutionCapsule is a bounded execution environment belonging to a
+ * RunIdentity. It is NOT created per individual tool invocation. One capsule
+ * typically lives for an entire run (or a bounded execution segment within
+ * a run). Multiple ToolExecution records occur inside it.
+ *
+ * Relationship:
+ *
+ *   RunIdentity
+ *        │
+ *   ExecutionCapsule  (one per run, or one per bounded segment)
+ *        │
+ *        ├─ ToolExecution #1
+ *        ├─ ToolExecution #2
+ *        ├─ ToolExecution #3
+ *        ├─ PTY session
+ *        ├─ Browser session
+ *        └─ MCP processes
+ *
+ * The capsule isolates execution from the persistent Kernel:
  *   - isolated workspace
  *   - PTY / browser / MCP
  *   - temporary credentials
  *   - network policy
  *   - CPU/RAM/process limits
  *   - automatic teardown
+ *
+ * Creating a fresh capsule per tool call would be wasteful (provisioning
+ * and tearing down isolation for every read_file, git.status, etc.) and
+ * would complicate credential/session continuity.
  *
  * "One persistent brain. Many disposable execution bodies."
  *
@@ -69,9 +90,13 @@ export interface CapsuleSandbox {
 // ─── Execution capsule ────────────────────────────────────────────
 
 /**
- * The envelope around every serious tool execution.
+ * A bounded execution environment belonging to a RunIdentity.
  *
- * Every meaningful execution must have:
+ * One capsule typically lives for an entire run (or a bounded execution
+ * segment within a run). Multiple ToolExecution records occur inside it.
+ * Do NOT create a fresh capsule per tool call.
+ *
+ * Every capsule must have:
  *   - runId
  *   - capsuleId
  *   - isolated workspace root
@@ -171,18 +196,23 @@ export interface EnvironmentBlueprint {
 /**
  * A record of a single tool execution within a capsule.
  *
- * This is the audit trail entry for every consequential operation.
+ * A capsule contains many ToolExecution records. This is the audit trail
+ * entry for every consequential operation. It references:
+ *   - runId: the run this execution belongs to
+ *   - capsuleId: the capsule this execution runs inside (when applicable)
+ *   - actorId (via actor): who initiated the execution
+ *   - toolId: which tool was invoked
  */
 export interface ToolExecution {
   /** Unique execution ID */
   executionId: string;
 
-  /** Run ID */
+  /** Run ID this execution belongs to */
   runId: string;
-  /** Capsule ID */
-  capsuleId: string;
+  /** Capsule ID this execution runs inside (null for non-capsule executions) */
+  capsuleId: string | null;
 
-  /** Actor identity */
+  /** Actor identity that initiated this execution */
   actor: ActorIdentity;
 
   /** Tool ID */
