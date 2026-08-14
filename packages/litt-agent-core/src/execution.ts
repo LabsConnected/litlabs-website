@@ -30,7 +30,7 @@
  *   - runShellCommand() remains DISABLED. No legitimate caller exists.
  */
 
-import type { ShellExecutor, ToolResult } from "./types.js";
+import type { ShellExecutor, ToolResult, StreamChunk } from "./types.js";
 import type { RuntimeStore } from "./state.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -546,6 +546,8 @@ export interface ExecutionOptions {
   commandLabel?: string;
   /** Skip package.json script inspection (for internal use) */
   skipScriptInspection?: boolean;
+  /** Optional streaming callback — invoked for each stdout/stderr chunk */
+  onStream?: (chunk: StreamChunk) => void;
 }
 
 // ─── Structured execution ─────────────────────────────────────────
@@ -666,6 +668,7 @@ export async function runCommand(
     timeoutMs,
     maxOutputBytes: options?.maxOutputBytes,
     env: filteredEnv,
+    onStream: options?.onStream,
   });
   const durationMs = Date.now() - t0;
 

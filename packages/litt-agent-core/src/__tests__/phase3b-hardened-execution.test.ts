@@ -136,5 +136,5 @@ describe("NodeShellExecutor timeout", () => {
     assert.equal(result.status, "timeout");
     assert.equal(result.ok, false);
     assert.ok(result.error!.includes("Timeout"));
-  }, 10_000);
+  });
 });

@@ -75,6 +75,10 @@ export type { CommandResult } from "./router.js";
 // Runtime state
 export { RuntimeStore, createInitialState } from "./state.js";
 
+// Hardened command executor (Phase 3B)
+export { CommandExecutor, createCommandExecutor } from "./command-executor.js";
+export type { CommandExecutorOptions, CommandExecutorResult } from "./command-executor.js";
+
 // Structured execution boundary
 export {
   runCommand as runCommandSecure,
