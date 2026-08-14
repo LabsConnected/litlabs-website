@@ -34,9 +34,19 @@ import {
   type ToolResult,
   type StreamChunk,
   type CommandExecutorResult,
+  type ExecutionRequest,
+  type RiskAssessment,
 } from "@litt/agent-core";
 
 // ─── Types ─────────────────────────────────────────────────────────
+
+/**
+ * Human approval callback for ExecutionGateway.
+ * When the gateway needs human approval, it calls this.
+ * The callback must return true to approve, false to deny.
+ * If not provided, pending approvals are denied (fail closed).
+ */
+export type ApprovalCallback = (request: ExecutionRequest, risk: RiskAssessment | null) => Promise<boolean>;
 
 export interface RuntimeSessionOptions {
   cwd: string;
@@ -45,6 +55,13 @@ export interface RuntimeSessionOptions {
   onEvent?: (event: RuntimeEvent) => void;
   /** Optional stream handler for live stdout/stderr */
   onStream?: (chunk: StreamChunk) => void;
+  /**
+   * Optional human approval callback for ExecutionGateway.
+   * When provided, the gateway calls this when approval is required.
+   * The callback must return true to approve, false to deny.
+   * If not provided, pending approvals are denied (fail closed).
+   */
+  onApprovalRequired?: ApprovalCallback;
 }
 
 export interface CommandRunOptions {
@@ -83,6 +100,7 @@ export class RuntimeSession {
   private _mode: "plan" | "act" | "auto";
   private _onEvent: ((event: RuntimeEvent) => void) | null;
   private _onStream: ((chunk: StreamChunk) => void) | null;
+  private _onApprovalRequired: ApprovalCallback | null;
   private _sigintInstalled: boolean = false;
   private _originalSigint: ((signal: "SIGINT") => void) | null = null;
 
@@ -91,6 +109,7 @@ export class RuntimeSession {
     this._mode = options.mode ?? "act";
     this._onEvent = options.onEvent ?? null;
     this._onStream = options.onStream ?? null;
+    this._onApprovalRequired = options.onApprovalRequired ?? null;
 
     this._shell = createShellExecutor(this._cwd);
     this._store = new RuntimeStore((event) => this._handleEvent(event));
@@ -143,6 +162,13 @@ export class RuntimeSession {
   }
 
   /**
+   * Get the canonical working directory (project root).
+   */
+  getCwd(): string {
+    return this._cwd;
+  }
+
+  /**
    * Get the ExecutionGateway — the ONE canonical execution authority.
    * Created lazily on first access. All tool calls should route through
    * this gateway, which enforces identity, grant, policy, approval, and
@@ -156,6 +182,7 @@ export class RuntimeSession {
       executor: this._executor,
       store: this._store,
       projectId: this._cwd,
+      onApprovalRequired: this._onApprovalRequired,
     });
     return this._gateway;
   }

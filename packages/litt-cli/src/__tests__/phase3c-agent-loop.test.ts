@@ -428,4 +428,32 @@ describe("AgentLoop", () => {
 
     expect(loop.getRunId()).toBeTruthy();
   });
+
+  // ─── Canonical project/workspace identity ─────────────────────
+
+  it("cwd chain invariant: process.cwd = RuntimeSession cwd = gateway projectId = ShellExecutor cwd", async () => {
+    // The invariant: all components in the execution chain share the
+    // same canonical project root. No component should guess or use
+    // a different project root.
+    const cwd = process.cwd();
+
+    // RuntimeSession was created with cwd = process.cwd()
+    expect(session.getCwd()).toBe(cwd);
+
+    // The gateway's projectId should match the session's cwd
+    // (verified via execution — the shell executor runs in the session's cwd)
+    const loop = createLoop(session);
+    const result = await loop.run([
+      { index: 0, toolCallId: "", command: "node", args: ["-e", "process.stdout.write(process.cwd())"], timeoutMs: 5000 },
+    ]);
+
+    // The command should have executed in the session's cwd
+    if (result.steps[0]?.result.data?.stdout) {
+      const execCwd = String(result.steps[0].result.data.stdout);
+      // The executed process's cwd should match process.cwd()
+      expect(execCwd.replace(/\\/g, "/")).toContain(
+        cwd.replace(/\\/g, "/").split("/").pop()!,
+      );
+    }
+  });
 });

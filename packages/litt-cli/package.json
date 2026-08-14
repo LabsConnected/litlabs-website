@@ -6,12 +6,17 @@
   "bin": {
     "litt": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "scripts"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc"
   },
   "dependencies": {
     "@litt/agent-core": "workspace:*",
@@ -26,6 +31,6 @@
     "vitest": "^2.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }

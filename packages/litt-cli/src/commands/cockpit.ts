@@ -4,12 +4,17 @@
  * Launches the Ink-based cockpit UI. All execution routes through
  * ExecutionGateway. The cockpit itself never executes anything.
  *
+ * Approval flow:
+ *   ExecutionGateway → onApprovalRequired → ApprovalBridge → Ink UI
+ *   → human decides → ApprovalBridge.decide() → gateway continues
+ *
  * Usage:  litt cockpit
  */
 
 import { render } from "ink";
 import React from "react";
 import { CockpitApp } from "../ink/app.js";
+import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
 import { detectProject, fail, header } from "../lib/utils.js";
@@ -22,8 +27,18 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  // Create the RuntimeSession — owns the gateway, executor, store
-  const session = createRuntimeSession({ cwd: process.cwd(), mode: "act" });
+  // Create the ApprovalBridge — connects gateway approval callbacks to the UI.
+  // The bridge only carries the human's boolean decision.
+  // The gateway remains sole authority for VerifiedApproval creation.
+  const approvalBridge = new ApprovalBridge();
+
+  // Create the RuntimeSession — owns the gateway, executor, store.
+  // The approval bridge is wired into the gateway via onApprovalRequired.
+  const session = createRuntimeSession({
+    cwd: process.cwd(),
+    mode: "act",
+    onApprovalRequired: (request, risk) => approvalBridge.request(request, risk),
+  });
   session.installSigintHandler();
 
   // Try to connect to terminal-server for realtime events
@@ -65,6 +80,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     React.createElement(CockpitApp, {
       session,
       client,
+      approvalBridge,
       project: String(project.packageJson?.name ?? "unnamed"),
       branch: project.gitBranch ?? "unknown",
       model,

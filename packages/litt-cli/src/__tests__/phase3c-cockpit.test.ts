@@ -9,7 +9,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RuntimeClient, type LifecycleEvent } from "../lib/runtime-client.js";
 import { Cockpit } from "../lib/cockpit.js";
 import { SignalHandler } from "../lib/signal-handler.js";
-import type { RuntimeState } from "@litt/agent-core";
+import { ApprovalBridge } from "../ink/approval-bridge.js";
+import type { PendingApproval } from "../ink/approval-bridge.js";
+import type { RuntimeState, ExecutionRequest, RiskAssessment } from "@litt/agent-core";
 
 // ─── Mocks ────────────────────────────────────────────────────────
 
@@ -322,5 +324,109 @@ describe("SignalHandler", () => {
 
     const finalCount = process.listenerCount("SIGINT");
     expect(finalCount).toBe(beforeCount);
+  });
+});
+
+// ─── ApprovalBridge Tests ─────────────────────────────────────────
+
+describe("ApprovalBridge", () => {
+  function makeRequest(toolId: string, command?: string): ExecutionRequest {
+    return {
+      toolId,
+      inputs: command ? { command, args: [] } : {},
+      cwd: process.cwd(),
+      mode: "act",
+      identity: {
+        tenantId: "cli-tenant",
+        userId: "cli-user",
+        actorId: "cli-user",
+        trusted: false,
+        interaction: "interactive",
+      },
+      runId: "run_test_001",
+      toolCallId: "tc_test_001",
+    };
+  }
+
+  function makeRisk(level: string): RiskAssessment {
+    return { level: level as "safe" | "elevated" | "dangerous", capability: "workspace_edit", reason: "test", mutating: true };
+  }
+
+  it("request() returns a pending Promise that resolves on decide(true)", async () => {
+    const bridge = new ApprovalBridge();
+    const promise = bridge.request(makeRequest("project.run", "pnpm install"), makeRisk("elevated"));
+
+    // Promise should be pending
+    let resolved = false;
+    promise.then(() => { resolved = true; });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(resolved).toBe(false);
+    expect(bridge.pending).not.toBeNull();
+    expect(bridge.pending!.toolId).toBe("project.run");
+    expect(bridge.pending!.action).toContain("pnpm install");
+
+    // Approve
+    bridge.decide(true);
+    await promise;
+
+    expect(resolved).toBe(true);
+    expect(bridge.pending).toBeNull();
+  });
+
+  it("request() resolves with false on decide(false) — denial", async () => {
+    const bridge = new ApprovalBridge();
+    const promise = bridge.request(makeRequest("project.run", "rm -rf /"), makeRisk("dangerous"));
+
+    bridge.decide(false);
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(bridge.pending).toBeNull();
+  });
+
+  it("cancel() resolves pending with false (fail closed)", async () => {
+    const bridge = new ApprovalBridge();
+    const promise = bridge.request(makeRequest("project.run", "git push"), makeRisk("dangerous"));
+
+    bridge.cancel();
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(bridge.pending).toBeNull();
+  });
+
+  it("subscribe() notifies when approval becomes pending and when cleared", async () => {
+    const bridge = new ApprovalBridge();
+    const notifications: (PendingApproval | null)[] = [];
+    const unsub = bridge.subscribe((pending) => {
+      notifications.push(pending);
+    });
+
+    const promise = bridge.request(makeRequest("project.run", "pnpm build"), makeRisk("elevated"));
+
+    // Should have notified with pending approval
+    expect(notifications.length).toBeGreaterThanOrEqual(1);
+    expect(notifications[0]).not.toBeNull();
+    expect(notifications[0]!.toolId).toBe("project.run");
+
+    bridge.decide(true);
+    await promise;
+
+    // Should have notified with null (cleared)
+    expect(notifications.length).toBeGreaterThanOrEqual(2);
+    expect(notifications[notifications.length - 1]).toBeNull();
+
+    unsub();
+  });
+
+  it("does not create VerifiedApproval — only carries boolean decision", () => {
+    const bridge = new ApprovalBridge();
+    // The bridge has no reference to RuntimeApprovalProvider, verifyApproval,
+    // or VerifiedApproval. It only stores a resolver function.
+    // This is by design — the gateway remains sole authority.
+    expect(bridge.pending).toBeNull();
+    // The bridge's API is: request(), decide(), cancel(), subscribe(), pending
+    // No verifyApproval, no createApproval, no VerifiedApproval anywhere.
   });
 });

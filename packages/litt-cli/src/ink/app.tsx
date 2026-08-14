@@ -8,8 +8,8 @@
  *   Ink UI → RuntimeSession → ExecutionGateway → Executor → Events → Ink UI
  */
 
-import React, { useState, useCallback } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import React, { useCallback } from "react";
+import { Box, useApp, useInput } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
@@ -20,37 +20,43 @@ import { ActivityStream } from "./activity-stream.js";
 import { CommandDock } from "./command-dock.js";
 import { ApprovalUX } from "./approval-ux.js";
 import { StatusBar } from "./status-bar.js";
+import type { ApprovalBridge } from "./approval-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
 
 export interface CockpitAppProps {
   session: RuntimeSession;
   client: RuntimeClient | null;
+  approvalBridge: ApprovalBridge;
   project: string;
   branch: string;
   model: string;
   cwd: string;
 }
 
-export function CockpitApp({ session, client, project, branch, model, cwd }: CockpitAppProps): React.ReactElement {
+export function CockpitApp({ session, client, approvalBridge, project, branch, model, cwd }: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
   useEventBridge(client, store);
-  const { submit, handleApproval } = useCockpitController({ session, store, onExit: () => exit() });
+  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit() });
 
-  // Ctrl+C cancels active run (first press), exits (second press when idle)
+  // Ctrl+C cancels active run or pending approval (first press), exits (second press when idle)
   useInput(useCallback((_, key) => {
     if (key.ctrl && _ === "c") {
-      if (store.state.holoState === "RUNNING" || store.state.holoState === "THINKING") {
+      if (store.state.holoState === "APPROVAL") {
+        approvalBridge.cancel();
+        store.actions.clearApproval();
+        store.actions.setHoloState("IDLE");
+      } else if (store.state.holoState === "RUNNING" || store.state.holoState === "THINKING") {
         session.cancel().catch(() => {});
         store.actions.setHoloState("IDLE");
       } else {
         exit();
       }
     }
-  }, [session, store, exit]));
+  }, [session, store, approvalBridge, exit]));
 
-  const disabled = store.state.holoState === "RUNNING" || store.state.holoState === "THINKING";
+  const disabled = store.state.holoState === "RUNNING" || store.state.holoState === "THINKING" || store.state.holoState === "APPROVAL";
 
   return (
     <Box flexDirection="column">

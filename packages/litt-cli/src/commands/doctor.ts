@@ -20,11 +20,16 @@ import * as os from "os";
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
 
-  // Node
+  // Node — Ink 7 and the CLI require Node >=22
   const nodeVersion = process.version;
-  const nodeOk = nodeVersion.startsWith("v18") || nodeVersion.startsWith("v20") || nodeVersion.startsWith("v22");
-  if (nodeOk) ok(`Node.js ${nodeVersion}`);
-  else fail(`Node.js ${nodeVersion} (requires >=18)`);
+  const major = parseInt(nodeVersion.slice(1).split(".")[0] ?? "0", 10);
+  const MIN_NODE = 22;
+  if (major >= MIN_NODE) {
+    ok(`Node.js ${nodeVersion}`);
+  } else {
+    fail(`Node.js ${nodeVersion} (requires >=${MIN_NODE} — Ink 7 requires Node 22+)`);
+    console.log(`${c.dim}  Cockpit and other Ink-based commands will crash on Node <22.${c.reset}`);
+  }
 
   // Git
   if (hasCommand("git")) {

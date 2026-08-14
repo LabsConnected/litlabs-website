@@ -80,6 +80,8 @@ export interface AgentLoopOptions {
   executor?: CommandExecutor | null;
   /** System prompt (prepended to the conversation) */
   systemPrompt?: string;
+  /** Project context to embed in the default system prompt (prevents model hallucination) */
+  projectContext?: { name: string; root: string; branch?: string | null } | null;
   /** Working directory for tool execution */
   cwd: string;
   /** User ID for tool context */
@@ -186,7 +188,7 @@ export async function runAgentLoop(
 
   // Build the system prompt with tool definitions
   const toolDefs = options.tools.list();
-  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs);
+  const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs, options.projectContext ?? null);
 
   // Build the conversation
   const messages: ChatMessage[] = [
@@ -428,9 +430,10 @@ export async function runAgentLoop(
 // ─── System prompt builder ─────────────────────────────────────────
 
 /**
- * Build the default system prompt that includes tool definitions.
+ * Build the default system prompt that includes tool definitions
+ * and optional project identity (so the model doesn't guess).
  */
-export function buildDefaultSystemPrompt(tools: ToolDefinition[]): string {
+export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: { name: string; root: string; branch?: string | null } | null): string {
   const toolList = tools.map((t) => {
     const params = Object.entries(t.inputSchema.properties ?? {})
       .map(([key, schema]) => {
@@ -441,8 +444,17 @@ export function buildDefaultSystemPrompt(tools: ToolDefinition[]): string {
     return `- ${t.id}: ${t.description}${params ? `\n  Parameters:\n${params}` : ""}`;
   }).join("\n");
 
+  const projectSection = project
+    ? `\nProject context (canonical — do not guess or hallucinate):
+  - Name: ${project.name}
+  - Root: ${project.root}
+  - Branch: ${project.branch ?? "unknown"}
+All tool calls execute in this project. Do not assume a different project.`
+    : "";
+
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.
 You help users build software by calling tools and providing insights.
+${projectSection}
 
 Available tools:
 ${toolList}

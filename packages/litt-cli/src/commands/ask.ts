@@ -83,6 +83,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       userId: "cli-user",
       mode: "act",
       maxRounds: 5,
+      projectContext: {
+        name: String(project.packageJson?.name ?? "unnamed"),
+        root: project.rootDir,
+        branch: project.gitBranch ?? "unknown",
+      },
       store,
       onModelStream: (event) => {
         if (event.type === "delta") {

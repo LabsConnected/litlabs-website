@@ -8,11 +8,22 @@
  * CRITICAL: The controller NEVER executes anything directly.
  * No exec(), spawn(), child_process, shelljs, or execa().
  * Everything goes through ExecutionGateway.
+ *
+ * Approval flow:
+ *   gateway.execute() → require_approval → onApprovalRequired callback
+ *   → ApprovalBridge.request() → Promise<boolean> pending
+ *   → UI shows ApprovalUX → user presses A/D
+ *   → ApprovalBridge.decide() → Promise resolves
+ *   → gateway verifyApproval() → VerifiedApproval → SAME execution continues
+ *
+ * The controller NEVER reissues the command after approval.
+ * The same runId, toolCallId, and operation digest flow through.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import type { RuntimeSession } from "../lib/runtime-session.js";
-import type { CockpitStore, HoloState } from "./cockpit-store.js";
+import type { CockpitStore } from "./cockpit-store.js";
+import type { ApprovalBridge } from "./approval-bridge.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
@@ -27,10 +38,29 @@ const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { c
 export interface CockpitControllerOptions {
   session: RuntimeSession;
   store: CockpitStore;
+  approvalBridge: ApprovalBridge;
   onExit?: () => void;
 }
 
-export function useCockpitController({ session, store, onExit }: CockpitControllerOptions) {
+export function useCockpitController({ session, store, approvalBridge, onExit }: CockpitControllerOptions) {
+  // Subscribe to approval bridge — when the gateway requests approval,
+  // the bridge sets a pending approval and notifies us.
+  useEffect(() => {
+    return approvalBridge.subscribe((pending) => {
+      if (pending) {
+        store.actions.setApprovalPrompt({
+          runId: pending.runId,
+          toolCallId: pending.toolCallId,
+          toolId: pending.toolId,
+          action: pending.action,
+          risk: pending.risk,
+          scope: pending.scope,
+        });
+        store.actions.setHoloState("APPROVAL");
+      }
+    });
+  }, [approvalBridge, store]);
+
   const submit = useCallback(async (input: string) => {
     store.actions.addCommand(input);
 
@@ -85,6 +115,9 @@ export function useCockpitController({ session, store, onExit }: CockpitControll
 
       try {
         const gateway = session.getGateway();
+        // gateway.execute() will block on approval if needed.
+        // The ApprovalBridge handles the human decision asynchronously.
+        // The same runId/toolCallId/operation continues after approval.
         const result = await gateway.execute({
           toolId: mapping.toolId,
           inputs: { command, args },
@@ -99,20 +132,17 @@ export function useCockpitController({ session, store, onExit }: CockpitControll
           },
         });
 
-        if (result.policyEffect === "require_approval" && !result.result.success) {
-          // Approval was required but not granted — show approval prompt
-          store.actions.setApprovalPrompt({
-            runId: result.runId,
-            toolCallId: result.toolCallId,
-            toolId: mapping.toolId,
-            action: `${command} ${args.join(" ")}`,
-            risk: "elevated",
-            scope: "project",
-          });
-          store.actions.setHoloState("APPROVAL");
-        } else if (result.result.success) {
+        // At this point, approval (if needed) has already been resolved
+        // through the bridge. The result reflects the actual outcome.
+        if (result.result.success) {
           store.actions.setHoloState("SUCCESS");
           setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+        } else if (result.result.status === "cancelled") {
+          store.actions.setHoloState("CANCELLED");
+          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        } else if (result.result.status === "timeout") {
+          store.actions.setHoloState("TIMEOUT");
+          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
         } else {
           store.actions.setHoloState("FAILED");
           setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
@@ -162,8 +192,6 @@ export function useCockpitController({ session, store, onExit }: CockpitControll
         toolCallId: prompt.toolCallId,
         text: `approved: ${prompt.action}`,
       });
-      // The gateway will verifyApproval() and create the VerifiedApproval
-      // The UI only provides the human decision — never the VerifiedApproval itself
     } else {
       store.actions.addActivity({
         id: `act_${Date.now()}`,
@@ -175,8 +203,15 @@ export function useCockpitController({ session, store, onExit }: CockpitControll
       });
     }
 
-    store.actions.setHoloState("IDLE");
-  }, [store]);
+    // Resolve the gateway's pending approval promise.
+    // The gateway will then verifyApproval() → VerifiedApproval → continue.
+    // The UI only provides the boolean — never the VerifiedApproval itself.
+    approvalBridge.decide(approved);
+
+    // Don't set IDLE here — the gateway execution is still in flight.
+    // The submit() callback will set the final holo state when
+    // gateway.execute() returns with the actual result.
+  }, [store, approvalBridge]);
 
   return { submit, handleApproval };
 }

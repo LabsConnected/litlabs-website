@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * LiTT CLI — AI operating system for your terminal.
  *
@@ -72,6 +73,15 @@ const COMMANDS: Record<string, CommandHandler> = {
 const LAZY_COMMANDS = new Set(["cockpit"]);
 
 async function main(): Promise<number> {
+  // Engine check — LiTT CLI requires Node 22+
+  const major = parseInt(process.version.slice(1), 10);
+  if (major < 22) {
+    console.error(`${c.red}LiTT CLI requires Node.js 22 or later.${c.reset}`);
+    console.error(`${c.dim}You are running Node ${process.version}.${c.reset}`);
+    console.error(`${c.dim}Upgrade: https://nodejs.org/${c.reset}`);
+    return 1;
+  }
+
   const args = process.argv.slice(2);
 
   // Extract --remote flag (can appear anywhere before or after command)
