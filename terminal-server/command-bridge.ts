@@ -17,33 +17,21 @@
  *   Studio / CLI / PowerShell all see the same run
  */
 
-import { CommandRouter, createShellExecutor } from "@litt/agent-core";
 import type { CommandResult } from "@litt/agent-core";
-import { getRuntimeStore } from "./runtime.js";
 import { getWorkspace } from "./workspace/WorkspaceManager.js";
-
-// ─── Singleton CommandRouter ──────────────────────────────────────
-
-let defaultRouter: CommandRouter | null = null;
-
-/**
- * Get a CommandRouter wired to the canonical RuntimeStore.
- * The cwd is resolved per-request from the workspace, not globally.
- */
-function getRouter(cwd: string, userId: string | null): CommandRouter {
-  const store = getRuntimeStore();
-  const shell = createShellExecutor(cwd);
-  return new CommandRouter(shell, {
-    cwd,
-    userId,
-    store,
-  });
-}
+import {
+  dispatchRegistry,
+  resolveCommand,
+  getCommandNames,
+  type CommandContext,
+  type CommandResponse,
+} from "./command-registry.js";
 
 // ─── Command request/response types ───────────────────────────────
 
 export interface CommandRequest {
-  command: "status" | "diff" | "check" | "test" | "build" | "debug" | "ship" | "log" | "branch" | "list_files" | "read_file" | "search" | "inspect_package";
+  /** Slash command (e.g. "/status") or bare command (e.g. "status") */
+  command: string;
   args?: Record<string, unknown>;
   workspaceId?: string;
   cwd?: string;
@@ -52,17 +40,22 @@ export interface CommandRequest {
 
 export interface CommandBridgeResult {
   ok: boolean;
-  result: CommandResult;
+  kind: string;
+  data: unknown;
+  message?: string;
   runId: string;
   timestamp: number;
+  durationMs: number;
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────
 
 /**
- * Dispatch a command through the canonical CommandRouter.
- * The RuntimeStore is updated automatically by CommandRouter,
- * which triggers Socket.IO broadcasts to all connected clients.
+ * Dispatch a command through the canonical command registry.
+ * This is the ONE dispatch path — both slash commands and bare commands
+ * route through the same registry.
+ *
+ * The RuntimeStore is updated by individual handlers that use CommandRouter.
  */
 export async function dispatchCommand(req: CommandRequest): Promise<CommandBridgeResult> {
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -77,44 +70,43 @@ export async function dispatchCommand(req: CommandRequest): Promise<CommandBridg
     }
   }
 
-  const router = getRouter(cwd, req.userId ?? null);
+  const ctx: CommandContext = {
+    cwd,
+    userId: req.userId ?? null,
+    workspaceId: req.workspaceId,
+    rawInput: req.command,
+  };
 
-  // Pass runId through to the router so it threads into RuntimeStore.
-  // This is the shared identity across CLI, Studio, and Socket.IO clients.
-  const dispatchArgs = { ...req.args, runId };
+  const response: CommandResponse = await dispatchRegistry(req.command, ctx);
 
-  try {
-    const result = await router.dispatch(req.command, dispatchArgs);
-
-    return {
-      ok: result.result.success,
-      result,
-      runId,
-      timestamp,
-    };
-  } catch (err) {
-    throw err;
-  }
+  return {
+    ok: response.ok,
+    kind: response.kind,
+    data: response.data,
+    message: response.message,
+    runId,
+    timestamp,
+    durationMs: response.durationMs,
+  };
 }
 
-// ─── Supported commands metadata ──────────────────────────────────
+// ─── Supported commands (registry-derived) ────────────────────────
 
-export const SUPPORTED_COMMANDS = [
-  "status",
-  "diff",
-  "check",
-  "test",
-  "build",
-  "debug",
-  "ship",
-  "log",
-  "branch",
-  "list_files",
-  "read_file",
-  "search",
-  "inspect_package",
-] as const;
-
+/**
+ * Check if a command is supported. Derives from the registry — no
+ * duplicated static list.
+ */
 export function isSupportedCommand(cmd: string): boolean {
-  return (SUPPORTED_COMMANDS as readonly string[]).includes(cmd);
+  return resolveCommand(cmd) !== null;
 }
+
+/**
+ * Get all supported command names. Derives from the registry.
+ */
+export function getSupportedCommands(): string[] {
+  return getCommandNames();
+}
+
+// Re-export for backward compatibility
+export type { CommandResult };
+

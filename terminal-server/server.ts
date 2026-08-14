@@ -49,7 +49,7 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
-import { dispatchCommand, isSupportedCommand, type CommandRequest } from "./command-bridge";
+import { dispatchCommand, type CommandRequest } from "./command-bridge";
 
 // ─── Service-to-service auth ───────────────────────────────────
 // Internal endpoints (under /internal/*) use a shared secret via
@@ -218,22 +218,23 @@ app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedReq
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
-// POST /internal/command — dispatch a canonical CommandRouter command.
-// Both Studio Web and `litt --remote` hit this endpoint.
-// The CommandRouter updates the RuntimeStore, which broadcasts to all
-// Socket.IO clients (Studio, CLI, PowerShell).
+// POST /internal/command — dispatch a slash command through the
+// canonical command registry. Both Studio Web, `litt --remote`, and
+// the PowerShell cockpit hit this endpoint.
+//
+// The command registry is the single source of truth for all commands.
+// Unknown commands produce a controlled error response — never a crash.
 app.post("/internal/command", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
   const body = req.body as CommandRequest;
   if (!body?.command || typeof body.command !== "string") {
     res.status(400).json({ error: "Missing 'command' field" });
     return;
   }
-  if (!isSupportedCommand(body.command)) {
-    res.status(400).json({ error: `Unsupported command: ${body.command}` });
-    return;
-  }
   try {
     const result = await dispatchCommand(body);
+    // Unknown commands return ok:false with kind "error" — HTTP 200
+    // so the client can display the error message. Only server errors
+    // get HTTP 500.
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
