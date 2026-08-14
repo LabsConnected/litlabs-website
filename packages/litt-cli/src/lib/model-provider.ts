@@ -76,7 +76,7 @@ export interface ModelState {
  * It is NEVER presented as activeModel — only as configuredModel with
  * source: "default". activeModel is set only after a real API call.
  */
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
+const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
 
 /**
  * Profile → model mapping.
@@ -87,8 +87,8 @@ const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
  */
 const PROFILE_MODELS: Record<Exclude<ModelProfile, "auto">, string> = {
   fast: "~google/gemini-flash-latest",
-  smart: "anthropic/claude-sonnet-4.6",
-  long: "anthropic/claude-sonnet-4.6",
+  smart: "anthropic/claude-sonnet-5",
+  long: "google/gemini-2.5-pro",
 };
 
 /**

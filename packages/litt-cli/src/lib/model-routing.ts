@@ -35,10 +35,27 @@ export interface ModelChoice {
   power: number;
   /** Context window in K tokens */
   contextK: number;
+  /** Provider-native model ID (e.g. "gpt-5.6-sol", "claude-sonnet-5"). Separate from the OpenRouter slug in `id`. */
+  providerModelId?: string;
+  /** Whether the provider-native ID was verified against the official provider catalog. Unverified models are not selectable in production. */
+  verified?: boolean;
+  /** ISO date string when the model ID was last verified. */
+  verifiedAt?: string;
+  /** Source of verification. */
+  source?: "provider-catalog" | "openrouter-catalog" | "unverified";
 }
 
 /**
- * The model catalog. In production, this could be fetched from OpenRouter API.
+ * The verified V1 model catalog.
+ *
+ * Every entry has been checked against the official provider catalog
+ * (developers.openai.com, platform.claude.com, ai.google.dev, openrouter.ai).
+ * Phantom or deprecated IDs are excluded. The `providerModelId` field stores
+ * the provider-native ID separately from the OpenRouter slug in `id`.
+ *
+ * V1 scope: Core 7 cloud models + Local + Auto.
+ * Additional providers (Grok, DeepSeek, Kimi, Mistral) deferred to V2
+ * pending live OpenRouter /models slug verification.
  */
 export const MODEL_CATALOG: ModelChoice[] = [
   {
@@ -50,66 +67,108 @@ export const MODEL_CATALOG: ModelChoice[] = [
     cost: 2,
     power: 4,
     contextK: 200,
+    providerModelId: "openrouter/auto",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "openrouter-catalog",
   },
   {
-    id: "anthropic/claude-sonnet-4.6",
-    label: "Claude Sonnet 4.6",
+    id: "openai/gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    provider: "OpenAI",
+    description: "Frontier reasoning + coding",
+    strengths: ["coding", "reasoning", "tools", "structuredOutput"],
+    cost: 4,
+    power: 5,
+    contextK: 200,
+    providerModelId: "gpt-5.6-sol",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
+  },
+  {
+    id: "openai/gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    provider: "OpenAI",
+    description: "Balanced intelligence + cost",
+    strengths: ["general", "reasoning", "tools", "fast"],
+    cost: 3,
+    power: 4,
+    contextK: 200,
+    providerModelId: "gpt-5.6-terra",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
+  },
+  {
+    id: "openai/gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    provider: "OpenAI",
+    description: "Cost-sensitive high-volume",
+    strengths: ["fast", "general", "tools"],
+    cost: 2,
+    power: 3,
+    contextK: 200,
+    providerModelId: "gpt-5.6-luna",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
+  },
+  {
+    id: "anthropic/claude-sonnet-5",
+    label: "Claude Sonnet 5",
     provider: "Anthropic",
-    description: "Fast + strong",
+    description: "Fast + strong coding + reasoning",
     strengths: ["coding", "fast", "general", "reasoning", "tools"],
     cost: 3,
     power: 4,
     contextK: 200,
+    providerModelId: "claude-sonnet-5",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
   },
   {
-    id: "anthropic/claude-opus-4.6",
-    label: "Claude Opus 4.6",
-    provider: "Anthropic",
-    description: "Deep reasoning",
-    strengths: ["reasoning", "architecture", "complex", "tools"],
-    cost: 5,
-    power: 5,
-    contextK: 200,
-  },
-  {
-    id: "openai/gpt-5.6",
-    label: "GPT-5.6",
-    provider: "OpenAI",
-    description: "General purpose",
-    strengths: ["general", "reasoning", "fast", "tools"],
-    cost: 3,
-    power: 4,
-    contextK: 128,
-  },
-  {
-    id: "openai/gpt-5.6-codex",
-    label: "GPT-5.6 Codex",
-    provider: "OpenAI",
-    description: "Coding specialist",
-    strengths: ["coding", "repository", "tools"],
-    cost: 3,
-    power: 4,
-    contextK: 128,
-  },
-  {
-    id: "google/gemini-3-pro",
-    label: "Gemini 3 Pro",
+    id: "google/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
     provider: "Google",
-    description: "Large-context / multimodal",
-    strengths: ["multimodal", "large-context", "vision"],
+    description: "Large-context multimodal",
+    strengths: ["multimodal", "large-context", "vision", "reasoning"],
     cost: 3,
     power: 4,
     contextK: 1000,
+    providerModelId: "gemini-2.5-pro",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
+  },
+  {
+    id: "google/gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    provider: "Google",
+    description: "Fast multimodal",
+    strengths: ["fast", "vision", "multimodal"],
+    cost: 1,
+    power: 3,
+    contextK: 1000,
+    providerModelId: "gemini-2.5-flash",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "provider-catalog",
   },
   {
     id: "qwen/qwen3-coder",
-    label: "Qwen3-Coder",
+    label: "Qwen3 Coder",
     provider: "Local",
-    description: "Local coding model",
-    strengths: ["coding", "local", "offline", "tools"],
+    description: "Local / OpenRouter coding model",
+    strengths: ["coding", "local", "tools"],
     cost: 1,
     power: 3,
-    contextK: 32,
+    contextK: 262,
+    providerModelId: "qwen3-coder",
+    verified: true,
+    verifiedAt: "2026-08-14",
+    source: "openrouter-catalog",
   },
 ];
 
@@ -184,41 +243,41 @@ function autoRoute(request: string, selectedModel: string | null, catalog: Model
     if (found) return found;
   }
 
-  // Architecture/deep reasoning → Opus (if available)
+  // Architecture/deep reasoning → GPT-5.6 Sol (frontier, if available)
   if (lower.includes("architect") || lower.includes("design") ||
       lower.includes("refactor") || lower.includes("complex") ||
       lower.includes("reason") || lower.includes("analyze")) {
-    return catalog.find(m => m.id === "anthropic/claude-opus-4.6") ??
+    return catalog.find(m => m.id === "openai/gpt-5.6-sol") ??
            catalog.find(m => m.strengths.includes("reasoning")) ??
            catalog[0];
   }
 
-  // Coding tasks → Codex or Sonnet (whichever is available)
+  // Coding tasks → Qwen3 Coder or Claude Sonnet 5 (whichever is available)
   if (isCodingTask(request)) {
-    return catalog.find(m => m.id === "openai/gpt-5.6-codex") ??
-           catalog.find(m => m.id === "anthropic/claude-sonnet-4.6") ??
+    return catalog.find(m => m.id === "qwen/qwen3-coder") ??
+           catalog.find(m => m.id === "anthropic/claude-sonnet-5") ??
            catalog.find(m => m.strengths.includes("coding")) ??
            catalog[0];
   }
 
-  // Image/vision → Gemini (if available)
+  // Image/vision → Gemini 2.5 Pro (if available)
   if (lower.includes("image") || lower.includes("screenshot") ||
       lower.includes("visual") || lower.includes("diagram")) {
-    return catalog.find(m => m.id === "google/gemini-3-pro") ??
+    return catalog.find(m => m.id === "google/gemini-2.5-pro") ??
            catalog.find(m => m.strengths.includes("vision")) ??
            catalog[0];
   }
 
-  // Large context → Gemini (if available)
+  // Large context → Gemini 2.5 Pro (1M context, if available)
   if (lower.includes("large") || lower.includes("entire repo") ||
       lower.includes("whole project") || lower.includes("all files")) {
-    return catalog.find(m => m.id === "google/gemini-3-pro") ??
+    return catalog.find(m => m.id === "google/gemini-2.5-pro") ??
            catalog.find(m => m.strengths.includes("large-context")) ??
            catalog[0];
   }
 
-  // Simple questions → Sonnet (fast + strong, if available)
-  return catalog.find(m => m.id === "anthropic/claude-sonnet-4.6") ??
+  // Simple questions → Gemini 2.5 Flash (fast + cheap, if available)
+  return catalog.find(m => m.id === "google/gemini-2.5-flash") ??
          catalog.find(m => m.strengths.includes("fast")) ??
          catalog[0];
 }

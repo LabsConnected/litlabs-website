@@ -35,7 +35,7 @@ import {
   type ModelPrefs,
   type ModelProvider,
 } from "../lib/provider-registry.js";
-import { routeModel, MODEL_CATALOG } from "../lib/model-routing.js";
+import { routeModel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -235,7 +235,7 @@ describe("ProviderRegistry", () => {
     // No keys set at all
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    expect(registry.isModelAvailable("anthropic/claude-sonnet-4.6")).toBe(false);
+    expect(registry.isModelAvailable("anthropic/claude-sonnet-5")).toBe(false);
   });
 
   it("isModelAvailable returns true when OpenRouter is available", async () => {
@@ -243,14 +243,14 @@ describe("ProviderRegistry", () => {
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
     // OpenRouter can route to any model
-    expect(registry.isModelAvailable("anthropic/claude-sonnet-4.6")).toBe(true);
+    expect(registry.isModelAvailable("anthropic/claude-sonnet-5")).toBe(true);
   });
 
   it("getModelServedBy returns openrouter when only OpenRouter key set", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    expect(registry.getModelServedBy("anthropic/claude-sonnet-4.6")).toBe("openrouter");
+    expect(registry.getModelServedBy("anthropic/claude-sonnet-5")).toBe("openrouter");
   });
 
   it("getUnavailableReason explains why a model is unavailable", async () => {
@@ -261,7 +261,7 @@ describe("ProviderRegistry", () => {
     delete process.env.GOOGLE_API_KEY;
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    const reason = registry.getUnavailableReason("anthropic/claude-sonnet-4.6");
+    const reason = registry.getUnavailableReason("anthropic/claude-sonnet-5");
     expect(reason).not.toBeNull();
     expect(reason!).toContain("Credential");
   });
@@ -274,11 +274,11 @@ describe("Fallback chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    const chain = registry.getFallbackChain("openai/gpt-5.6-codex", "coding");
+    const chain = registry.getFallbackChain("openai/gpt-5.6-sol", "coding");
     expect(chain.length).toBeGreaterThan(0);
-    expect(chain[0].id).toBe("openai/gpt-5.6-codex");
+    expect(chain[0].id).toBe("openai/gpt-5.6-sol");
     // Should include other coding-capable models as fallbacks
-    const hasOther = chain.some(m => m.id !== "openai/gpt-5.6-codex" && m.strengths.includes("coding"));
+    const hasOther = chain.some(m => m.id !== "openai/gpt-5.6-sol" && m.strengths.includes("coding"));
     expect(hasOther).toBe(true);
   });
 
@@ -286,9 +286,9 @@ describe("Fallback chain", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    const first = registry.getNextFallback("openai/gpt-5.6-codex", "coding", []);
+    const first = registry.getNextFallback("openai/gpt-5.6-sol", "coding", []);
     expect(first).not.toBeNull();
-    const second = registry.getNextFallback("openai/gpt-5.6-codex", "coding", [first!.id]);
+    const second = registry.getNextFallback("openai/gpt-5.6-sol", "coding", [first!.id]);
     expect(second).not.toBeNull();
     expect(second!.id).not.toBe(first!.id);
   });
@@ -322,9 +322,9 @@ describe("Fallback chain", () => {
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
     const executor = new FallbackExecutor(registry);
-    executor.nextFallback("openai/gpt-5.6-codex", "coding");
-    executor.nextFallback("anthropic/claude-sonnet-4.6", "coding");
-    expect(executor.getTried()).toEqual(["openai/gpt-5.6-codex", "anthropic/claude-sonnet-4.6"]);
+    executor.nextFallback("openai/gpt-5.6-sol", "coding");
+    executor.nextFallback("anthropic/claude-sonnet-5", "coding");
+    expect(executor.getTried()).toEqual(["openai/gpt-5.6-sol", "anthropic/claude-sonnet-5"]);
   });
 
   it("FallbackExecutor reset clears tried list", () => {
@@ -348,7 +348,7 @@ describe("Credential-aware routing", () => {
 
   it("routeModel does not route to Claude when Anthropic not available", () => {
     // Only OpenAI models available
-    const available = ["openai/gpt-5.6", "openai/gpt-5.6-codex"];
+    const available = ["openai/gpt-5.6-terra", "openai/gpt-5.6-sol"];
     const choice = routeModel("auto", null, "fix this TypeScript bug", available);
     expect(available).toContain(choice.id);
     expect(choice.id).not.toContain("anthropic");
@@ -360,40 +360,40 @@ describe("Credential-aware routing", () => {
   });
 
   it("routeModel budget mode respects availability", () => {
-    const available = ["openai/gpt-5.6", "openai/gpt-5.6-codex"];
+    const available = ["openai/gpt-5.6-terra", "openai/gpt-5.6-sol"];
     const choice = routeModel("budget", null, "write a function", available);
     expect(available).toContain(choice.id);
   });
 
   it("routeModel max mode respects availability", () => {
-    const available = ["openai/gpt-5.6", "openai/gpt-5.6-codex"];
+    const available = ["openai/gpt-5.6-terra", "openai/gpt-5.6-sol"];
     const choice = routeModel("max", null, "design architecture", available);
     expect(available).toContain(choice.id);
   });
 
   it("routeModel fixed mode falls through when selected model unavailable", () => {
-    const available = ["openai/gpt-5.6"];
+    const available = ["openai/gpt-5.6-terra"];
     // User selected Claude but it's not available → should fall through to auto
-    const choice = routeModel("fixed", "anthropic/claude-sonnet-4.6", "fix bug", available);
+    const choice = routeModel("fixed", "anthropic/claude-sonnet-5", "fix bug", available);
     expect(available).toContain(choice.id);
   });
 
-  it("routeModel coding task prefers Codex when available", () => {
-    const available = ["openai/gpt-5.6-codex", "anthropic/claude-sonnet-4.6", "google/gemini-3-pro"];
+  it("routeModel coding task prefers Qwen3 Coder when available", () => {
+    const available = ["qwen/qwen3-coder", "anthropic/claude-sonnet-5", "google/gemini-2.5-pro"];
     const choice = routeModel("auto", null, "fix this TypeScript bug in auth.ts", available);
-    expect(choice.id).toBe("openai/gpt-5.6-codex");
+    expect(choice.id).toBe("qwen/qwen3-coder");
   });
 
-  it("routeModel reasoning task prefers Opus when available", () => {
-    const available = ["anthropic/claude-opus-4.6", "openai/gpt-5.6", "anthropic/claude-sonnet-4.6"];
+  it("routeModel reasoning task prefers GPT-5.6 Sol when available", () => {
+    const available = ["openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "anthropic/claude-sonnet-5"];
     const choice = routeModel("auto", null, "redesign the execution architecture", available);
-    expect(choice.id).toBe("anthropic/claude-opus-4.6");
+    expect(choice.id).toBe("openai/gpt-5.6-sol");
   });
 
   it("routeModel vision task prefers Gemini when available", () => {
-    const available = ["google/gemini-3-pro", "anthropic/claude-sonnet-4.6", "openai/gpt-5.6"];
+    const available = ["google/gemini-2.5-pro", "anthropic/claude-sonnet-5", "openai/gpt-5.6-terra"];
     const choice = routeModel("auto", null, "inspect this screenshot and reproduce the UI", available);
-    expect(choice.id).toBe("google/gemini-3-pro");
+    expect(choice.id).toBe("google/gemini-2.5-pro");
   });
 });
 
@@ -416,9 +416,9 @@ describe("Model preferences persistence", () => {
 
     const prefs: ModelPrefs = {
       routingMode: "fixed",
-      selectedModel: "openai/gpt-5.6-codex",
-      capabilityOverrides: { coding: "openai/gpt-5.6-codex" },
-      lastUsedModel: "anthropic/claude-sonnet-4.6",
+      selectedModel: "qwen/qwen3-coder",
+      capabilityOverrides: { coding: "qwen/qwen3-coder" },
+      lastUsedModel: "anthropic/claude-sonnet-5",
       showFallbackNotifications: false,
     };
 
@@ -426,9 +426,9 @@ describe("Model preferences persistence", () => {
     const loaded = loadModelPrefs(prefsPath);
 
     expect(loaded.routingMode).toBe("fixed");
-    expect(loaded.selectedModel).toBe("openai/gpt-5.6-codex");
-    expect(loaded.capabilityOverrides.coding).toBe("openai/gpt-5.6-codex");
-    expect(loaded.lastUsedModel).toBe("anthropic/claude-sonnet-4.6");
+    expect(loaded.selectedModel).toBe("qwen/qwen3-coder");
+    expect(loaded.capabilityOverrides.coding).toBe("qwen/qwen3-coder");
+    expect(loaded.lastUsedModel).toBe("anthropic/claude-sonnet-5");
     expect(loaded.showFallbackNotifications).toBe(false);
 
     fs.rmSync(tmpDir, { recursive: true });
@@ -483,13 +483,13 @@ describe("Model preferences persistence", () => {
 
     const original: ModelPrefs = {
       routingMode: "max",
-      selectedModel: "anthropic/claude-opus-4.6",
+      selectedModel: "openai/gpt-5.6-sol",
       capabilityOverrides: {
-        coding: "openai/gpt-5.6-codex",
-        reasoning: "anthropic/claude-opus-4.6",
-        vision: "google/gemini-3-pro",
+        coding: "qwen/qwen3-coder",
+        reasoning: "openai/gpt-5.6-sol",
+        vision: "google/gemini-2.5-pro",
       },
-      lastUsedModel: "google/gemini-3-pro",
+      lastUsedModel: "google/gemini-2.5-pro",
       showFallbackNotifications: false,
     };
 
@@ -661,13 +661,13 @@ describe("RoutingEngine", () => {
     const prefs: ModelPrefs = {
       routingMode: "auto",
       selectedModel: null,
-      capabilityOverrides: { coding: "anthropic/claude-sonnet-4.6" },
+      capabilityOverrides: { coding: "anthropic/claude-sonnet-5" },
       lastUsedModel: null,
       showFallbackNotifications: true,
     };
     const engine = new RoutingEngine(registry, prefs, MODEL_CATALOG);
     const { choice } = engine.route("fix this bug", null, null, "auto");
-    expect(choice.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(choice.id).toBe("anthropic/claude-sonnet-5");
   });
 
   it("budget mode picks cheapest capable model mathematically", async () => {
@@ -691,17 +691,29 @@ describe("RoutingEngine", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
-    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, MODEL_CATALOG);
-    // Pass explicit available list including local model
-    const allIds = MODEL_CATALOG.map(m => m.id);
-    // Qwen3-Coder has 32K context — should be rejected for large context
-    // Use a coding task that implies reading the entire repository
+    // Use a custom catalog with a small-context model to test rejection
+    const smallContextCatalog: ModelChoice[] = [
+      ...MODEL_CATALOG,
+      {
+        id: "test/small-context-coder",
+        label: "Test Small Context",
+        provider: "OpenAI",
+        description: "Test model with 16K context",
+        strengths: ["coding", "tools"],
+        cost: 1,
+        power: 2,
+        contextK: 16,
+      },
+    ];
+    const engine = new RoutingEngine(registry, { routingMode: "auto", selectedModel: null, capabilityOverrides: {}, lastUsedModel: null, showFallbackNotifications: true }, smallContextCatalog);
+    const allIds = smallContextCatalog.map(m => m.id);
+    // Use a coding task that implies reading the entire repository (estimates 50K+ context)
     const longRequest = "fix this bug by reading all the files in the entire repository and understanding the whole project structure";
     const { telemetry } = engine.route(longRequest, allIds, null, "auto");
-    // Qwen3-Coder should be in rejected list (32K < estimated 50K+ context)
-    const qwenRejected = telemetry.rejected.find(r => r.modelId === "qwen/qwen3-coder");
-    expect(qwenRejected).toBeDefined();
-    expect(qwenRejected!.reason).toContain("Context too small");
+    // Small-context model should be in rejected list (16K < estimated 50K+ context)
+    const smallRejected = telemetry.rejected.find(r => r.modelId === "test/small-context-coder");
+    expect(smallRejected).toBeDefined();
+    expect(smallRejected!.reason).toContain("Context too small");
   });
 });
 
@@ -709,7 +721,7 @@ describe("RoutingEngine", () => {
 
 describe("Cost model", () => {
   it("getModelCost returns cost for known models", () => {
-    const cost = getModelCost("anthropic/claude-sonnet-4.6");
+    const cost = getModelCost("anthropic/claude-sonnet-5");
     expect(cost.inputPer1M).toBeGreaterThan(0);
     expect(cost.outputPer1M).toBeGreaterThan(0);
     expect(cost.paymentModel).toBe("byok");
@@ -730,7 +742,7 @@ describe("Cost model", () => {
   it("estimateRunCost calculates correctly", () => {
     // Claude Sonnet: $3/1M input, $15/1M output
     // 100K input + 10K output = 0.3 + 0.15 = $0.45
-    const cost = estimateRunCost("anthropic/claude-sonnet-4.6", 100_000, 10_000);
+    const cost = estimateRunCost("anthropic/claude-sonnet-5", 100_000, 10_000);
     expect(cost).toBeCloseTo(0.45, 2);
   });
 
@@ -836,6 +848,6 @@ describe("Async health refresh", () => {
     await registry.refresh();
     const ids = registry.getAvailableModelIds();
     expect(ids.length).toBeGreaterThan(0);
-    expect(ids).toContain("anthropic/claude-sonnet-4.6");
+    expect(ids).toContain("anthropic/claude-sonnet-5");
   });
 });

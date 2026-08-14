@@ -37,6 +37,9 @@
  */
 
 import type { ModelChoice } from "./model-routing.js";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 
 // ─── Capability registry ───────────────────────────────────────────
 
@@ -179,11 +182,12 @@ export interface ModelCost {
  */
 const MODEL_COSTS: Record<string, ModelCost> = {
   "openrouter/auto": { inputPer1M: 3, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
-  "anthropic/claude-sonnet-4.6": { inputPer1M: 3, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
-  "anthropic/claude-opus-4.6": { inputPer1M: 15, outputPer1M: 75, markup: 1.0, paymentModel: "byok" },
-  "openai/gpt-5.6": { inputPer1M: 5, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
-  "openai/gpt-5.6-codex": { inputPer1M: 5, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
-  "google/gemini-3-pro": { inputPer1M: 1.25, outputPer1M: 5, markup: 1.0, paymentModel: "byok" },
+  "anthropic/claude-sonnet-5": { inputPer1M: 3, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
+  "openai/gpt-5.6-sol": { inputPer1M: 5, outputPer1M: 15, markup: 1.0, paymentModel: "byok" },
+  "openai/gpt-5.6-terra": { inputPer1M: 3, outputPer1M: 10, markup: 1.0, paymentModel: "byok" },
+  "openai/gpt-5.6-luna": { inputPer1M: 1, outputPer1M: 4, markup: 1.0, paymentModel: "byok" },
+  "google/gemini-2.5-pro": { inputPer1M: 1.25, outputPer1M: 5, markup: 1.0, paymentModel: "byok" },
+  "google/gemini-2.5-flash": { inputPer1M: 0.3, outputPer1M: 2.5, markup: 1.0, paymentModel: "byok" },
   "qwen/qwen3-coder": { inputPer1M: 0, outputPer1M: 0, markup: 1.0, paymentModel: "byok" },
 };
 
@@ -696,9 +700,8 @@ const DEFAULT_PREFS: ModelPrefs = {
 
 export function loadModelPrefs(prefsPath: string): ModelPrefs {
   try {
-    const fs = require("fs");
-    if (!fs.existsSync(prefsPath)) return { ...DEFAULT_PREFS };
-    const raw = fs.readFileSync(prefsPath, "utf-8");
+    if (!existsSync(prefsPath)) return { ...DEFAULT_PREFS };
+    const raw = readFileSync(prefsPath, "utf-8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_PREFS, ...parsed };
   } catch {
@@ -708,21 +711,17 @@ export function loadModelPrefs(prefsPath: string): ModelPrefs {
 
 export function saveModelPrefs(prefs: ModelPrefs, prefsPath: string): void {
   try {
-    const fs = require("fs");
-    const path = require("path");
-    const dir = path.dirname(prefsPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
+    const dir = dirname(prefsPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(prefsPath, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
   } catch {
     // Non-fatal
   }
 }
 
 export function getDefaultPrefsPath(): string {
-  const path = require("path");
-  const os = require("os");
-  const littHome = process.env.LITT_HOME ?? path.join(os.homedir(), ".litt");
-  return path.join(littHome, "model-prefs.json");
+  const littHome = process.env.LITT_HOME ?? join(homedir(), ".litt");
+  return join(littHome, "model-prefs.json");
 }
 
 // ─── Fallback execution ────────────────────────────────────────────
@@ -942,27 +941,27 @@ export class RoutingEngine {
     // Task-specific preferences
     switch (taskType) {
       case "reasoning":
-        return filtered.find((m) => m.id === "anthropic/claude-opus-4.6") ??
+        return filtered.find((m) => m.id === "openai/gpt-5.6-sol") ??
                filtered.find((m) => m.strengths.includes("reasoning")) ??
                filtered[0] ?? null;
       case "coding":
-        return filtered.find((m) => m.id === "openai/gpt-5.6-codex") ??
-               filtered.find((m) => m.id === "anthropic/claude-sonnet-4.6") ??
+        return filtered.find((m) => m.id === "qwen/qwen3-coder") ??
+               filtered.find((m) => m.id === "anthropic/claude-sonnet-5") ??
                filtered.find((m) => m.strengths.includes("coding")) ??
                filtered[0] ?? null;
       case "vision":
-        return filtered.find((m) => m.id === "google/gemini-3-pro") ??
+        return filtered.find((m) => m.id === "google/gemini-2.5-pro") ??
                filtered.find((m) => m.strengths.includes("vision")) ??
                filtered[0] ?? null;
       case "local":
         return filtered.find((m) => m.strengths.includes("local")) ??
                filtered[0] ?? null;
       case "fast":
-        return filtered.find((m) => m.id === "anthropic/claude-sonnet-4.6") ??
+        return filtered.find((m) => m.id === "google/gemini-2.5-flash") ??
                filtered.find((m) => m.strengths.includes("fast")) ??
                filtered[0] ?? null;
       default:
-        return filtered.find((m) => m.id === "anthropic/claude-sonnet-4.6") ??
+        return filtered.find((m) => m.id === "anthropic/claude-sonnet-5") ??
                filtered[0] ?? null;
     }
   }
