@@ -73,6 +73,24 @@ export type { CommandResult } from "./router.js";
 // Runtime state
 export { RuntimeStore, createInitialState } from "./state.js";
 
+// Structured execution boundary
+export {
+  runCommand as runCommandSecure,
+  runShellCommand,
+  assessRisk,
+  detectShellInjection,
+  redactSecrets,
+  ExecutionError,
+} from "./execution.js";
+export type {
+  MissionMode,
+  RiskLevel,
+  RiskAssessment,
+  ExecutionOptions,
+  ExecutionErrorCode,
+  ApprovalProvider as ExecutionApprovalProvider,
+} from "./execution.js";
+
 // Compatibility exports — preserves askLiTTCode/handleLiTTCodeCommand
 // for existing callers (cli/src/litt-code-cli.tsx, cli/src/ui/App.tsx).
 // New code should use ModelProvider from types.ts instead.
