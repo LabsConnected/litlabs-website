@@ -417,6 +417,13 @@ export class ExecutionGateway {
     //
     // This runs AFTER approval so we know the human consented, but
     // BEFORE capsule creation so the capsule never authorizes it.
+    //
+    // NOTE: "dangerous" is NOT a CapabilityTier — getCapabilityTier()
+    // normalizes risk.level "dangerous" to either "destructive" or
+    // "external_action". So checking those two tiers covers ALL
+    // dangerous capabilities. Do not add "dangerous" here — it would
+    // be dead code. If getCapabilityTier() is ever changed to return
+    // a new tier for dangerous commands, update this check too.
     if (!request.identity.trusted && !grantVerified) {
       const requestedTier = this.getCapabilityTier(request, metadata);
       if (requestedTier === "destructive" || requestedTier === "external_action") {

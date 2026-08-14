@@ -913,6 +913,40 @@ describe("SEC-6.1 — Untrusted identity enforcement", () => {
     assert.equal(handlerCalled, false, "handler must NEVER be called — untrusted dangerous without grant");
   });
 
+  it("dangerous risk level is normalized to destructive or external_action (not 'dangerous')", () => {
+    // LOCK THE MAPPING: getCapabilityTier() must normalize risk.level
+    // "dangerous" to either "destructive" or "external_action".
+    // The CapabilityTier type has NO "dangerous" value. The trust
+    // enforcement checks for "destructive" || "external_action" —
+    // if this normalization breaks, the trust check would silently
+    // stop catching dangerous commands.
+    //
+    // This test proves the mapping so nobody "fixes" it later.
+    const { classifyCommand } = require("../execution.js") as typeof import("../execution.js");
+
+    // rm -rf → dangerous → destructive
+    const rmRisk = classifyCommand("rm", ["-rf", "/tmp/test"], "C:\\test");
+    assert.equal(rmRisk.level, "dangerous");
+    assert.ok(
+      rmRisk.capability === "destructive" || rmRisk.capability === "external_action",
+      `rm -rf capability should be destructive or external_action, got: ${rmRisk.capability}`,
+    );
+
+    // git push → dangerous → external_action
+    const pushRisk = classifyCommand("git", ["push"], "C:\\test");
+    assert.equal(pushRisk.level, "dangerous");
+    // git push is external_action (affects systems outside workspace)
+    assert.ok(
+      pushRisk.capability === "external_action" || pushRisk.capability === "destructive",
+      `git push capability should be external_action or destructive, got: ${pushRisk.capability}`,
+    );
+
+    // node -e → elevated → arbitrary_code (NOT dangerous)
+    const nodeRisk = classifyCommand("node", ["-e", "console.log(1)"], "C:\\test");
+    assert.equal(nodeRisk.level, "elevated");
+    assert.equal(nodeRisk.capability, "arbitrary_code");
+  });
+
   it("untrusted identity + safe command = allowed", async () => {
     // Safe commands are allowed for untrusted callers (still go through policy)
     const mock = makeMockTool("project.check", false);

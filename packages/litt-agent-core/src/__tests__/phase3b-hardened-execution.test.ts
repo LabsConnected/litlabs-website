@@ -129,8 +129,8 @@ describe("Sprint 9 — Windows shell builtins (echo, dir, set, cd)", () => {
   // correctly through the shell adapter. On non-Windows platforms
   // these are skipped (echo/dir/set/cd are handled differently).
 
-  it("echo executes successfully on Windows (shell builtin, not echo.exe)", async function () {
-    if (process.platform !== "win32") this.skip();
+  it("echo executes successfully on Windows (shell builtin, not echo.exe)", async () => {
+    if (process.platform !== "win32") return; // skip on non-Windows
     const shell = new NodeShellExecutor(process.cwd());
     const result = await shell.execute({
       command: "echo",
@@ -142,8 +142,8 @@ describe("Sprint 9 — Windows shell builtins (echo, dir, set, cd)", () => {
     assert.ok(result.stdout.includes("hello world"));
   });
 
-  it("dir executes successfully on Windows (shell builtin)", async function () {
-    if (process.platform !== "win32") this.skip();
+  it("dir executes successfully on Windows (shell builtin)", async () => {
+    if (process.platform !== "win32") return; // skip on non-Windows
     const shell = new NodeShellExecutor(process.cwd());
     const result = await shell.execute({
       command: "dir",
@@ -154,8 +154,8 @@ describe("Sprint 9 — Windows shell builtins (echo, dir, set, cd)", () => {
     assert.ok(result.ok);
   });
 
-  it("type executes successfully on Windows (shell builtin)", async function () {
-    if (process.platform !== "win32") this.skip();
+  it("type executes successfully on Windows (shell builtin)", async () => {
+    if (process.platform !== "win32") return; // skip on non-Windows
     const shell = new NodeShellExecutor(process.cwd());
     const result = await shell.execute({
       command: "type",
