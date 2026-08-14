@@ -963,6 +963,66 @@ describe("SEC-6.1 — Untrusted identity enforcement", () => {
   });
 });
 
+// ─── 19. SEC-6.1: Approval callback receives authoritative IDs ────
+
+describe("SEC-6.1 — Approval callback receives authoritative IDs", () => {
+  it("gateway-generated runId/toolCallId reach the approval callback and match GatewayResult/capsule", async () => {
+    // When the caller omits runId/toolCallId, the gateway generates them.
+    // The approval callback must receive those generated IDs so the UI
+    // can display correct correlation. The IDs in the callback, the
+    // GatewayResult, and the capsule must all match.
+    const mock = makeMockTool("project.write", true);
+
+    let capturedRunId = "";
+    let capturedToolCallId = "";
+    let callbackCalled = false;
+
+    const gw = new ExecutionGateway({
+      tools: new ToolRegistry({ "project.write": mock.entry }),
+      shell: new MockShellExecutor(),
+      executor: new CommandExecutor(new MockShellExecutor(), new RuntimeStore()),
+      approvalProvider: new RuntimeApprovalProvider(),
+      projectId: "proj_001",
+      onApprovalRequired: async (request) => {
+        callbackCalled = true;
+        capturedRunId = request.runId ?? "";
+        capturedToolCallId = request.toolCallId ?? "";
+        return true; // approve
+      },
+    });
+
+    // Execute WITHOUT supplying runId/toolCallId — gateway must generate them
+    const result = await gw.execute(makeRequest({
+      toolId: "project.write",
+      mode: "act",
+      inputs: { content: "test" },
+      // No runId or toolCallId — gateway generates them
+    }));
+
+    // The approval callback must have been called with non-empty IDs
+    assert.ok(callbackCalled, "approval callback must be called");
+    assert.ok(capturedRunId, "callback runId must be non-empty");
+    assert.ok(capturedToolCallId, "callback toolCallId must be non-empty");
+
+    // The callback IDs must match the GatewayResult IDs
+    assert.equal(capturedRunId, result.runId,
+      "callback runId must match GatewayResult runId");
+    assert.equal(capturedToolCallId, result.toolCallId,
+      "callback toolCallId must match GatewayResult toolCallId");
+
+    // The capsule IDs must also match
+    assert.ok(result.capsule, "capsule must exist");
+    assert.equal(capturedRunId, result.capsule!.runId,
+      "callback runId must match capsule runId");
+    assert.equal(capturedToolCallId, result.capsule!.toolCallId,
+      "callback toolCallId must match capsule toolCallId");
+
+    // Execution succeeded
+    assert.equal(result.result.success, true);
+    assert.equal(result.approved, true);
+  });
+});
+
 // ─── 19. SEC-6.1: Credential-required tool without lease = denied ──
 
 describe("SEC-6.1 — Credential lease enforcement", () => {

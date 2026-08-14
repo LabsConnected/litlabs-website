@@ -429,4 +429,29 @@ describe("ApprovalBridge", () => {
     // The bridge's API is: request(), decide(), cancel(), subscribe(), pending
     // No verifyApproval, no createApproval, no VerifiedApproval anywhere.
   });
+
+  it("synchronous subscriber race: decide() inside subscribe callback resolves the promise", async () => {
+    // Regression: if _notify() fires before _resolver is installed,
+    // a subscriber that synchronously calls decide() would see no
+    // resolver and the promise would hang forever.
+    const bridge = new ApprovalBridge();
+
+    // Subscribe with a callback that immediately decides
+    bridge.subscribe((pending) => {
+      if (pending) {
+        // Synchronously decide — this must work because the resolver
+        // is installed BEFORE _notify() is called
+        bridge.decide(true);
+      }
+    });
+
+    // request() must resolve even though the subscriber decided synchronously
+    const result = await bridge.request(
+      makeRequest("project.run", "pnpm install"),
+      makeRisk("elevated"),
+    );
+
+    expect(result).toBe(true);
+    expect(bridge.pending).toBeNull();
+  });
 });

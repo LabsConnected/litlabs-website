@@ -62,10 +62,12 @@ export class ApprovalBridge {
       scope: "project",
     };
 
-    this._notify();
-
+    // Set the resolver BEFORE notifying subscribers.
+    // If a subscriber synchronously calls decide(), the resolver must
+    // already be installed or the promise will never resolve.
     return new Promise<boolean>((resolve) => {
       this._resolver = resolve;
+      this._notify();
     });
   }
 
