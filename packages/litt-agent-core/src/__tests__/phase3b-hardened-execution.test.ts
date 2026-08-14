@@ -121,6 +121,52 @@ describe("NodeShellExecutor cancellation", () => {
   });
 });
 
+// ─── Sprint 9: Windows shell builtins ──────────────────────────────
+
+describe("Sprint 9 — Windows shell builtins (echo, dir, set, cd)", () => {
+  // These tests verify that Windows shell builtins — commands that
+  // are interpreted by cmd.exe and have no .exe file — execute
+  // correctly through the shell adapter. On non-Windows platforms
+  // these are skipped (echo/dir/set/cd are handled differently).
+
+  it("echo executes successfully on Windows (shell builtin, not echo.exe)", async function () {
+    if (process.platform !== "win32") this.skip();
+    const shell = new NodeShellExecutor(process.cwd());
+    const result = await shell.execute({
+      command: "echo",
+      args: ["hello", "world"],
+      timeoutMs: 5000,
+    });
+    assert.equal(result.status, "success");
+    assert.ok(result.ok);
+    assert.ok(result.stdout.includes("hello world"));
+  });
+
+  it("dir executes successfully on Windows (shell builtin)", async function () {
+    if (process.platform !== "win32") this.skip();
+    const shell = new NodeShellExecutor(process.cwd());
+    const result = await shell.execute({
+      command: "dir",
+      args: [],
+      timeoutMs: 5000,
+    });
+    assert.equal(result.status, "success");
+    assert.ok(result.ok);
+  });
+
+  it("type executes successfully on Windows (shell builtin)", async function () {
+    if (process.platform !== "win32") this.skip();
+    const shell = new NodeShellExecutor(process.cwd());
+    const result = await shell.execute({
+      command: "type",
+      args: ["nul"],
+      timeoutMs: 5000,
+    });
+    assert.equal(result.status, "success");
+    assert.ok(result.ok);
+  });
+});
+
 // ─── Timeout ───────────────────────────────────────────────────────
 
 describe("NodeShellExecutor timeout", () => {

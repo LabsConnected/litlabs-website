@@ -22,6 +22,23 @@ const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 // executable by checking for common extensions in PATH.
 const WINDOWS_EXTS = [".exe", ".cmd", ".bat"];
 
+/**
+ * Windows shell builtins — commands that are interpreted by cmd.exe
+ * and have no corresponding .exe file. These must run with shell:true
+ * so cmd.exe can interpret them.
+ *
+ * Without this, `litt run echo hello` fails on Windows because
+ * spawn("echo", ...) can't find echo.exe.
+ */
+const WINDOWS_BUILTINS = new Set([
+  "echo", "dir", "set", "cd", "type", "cls", "copy", "move",
+  "del", "erase", "md", "mkdir", "rd", "rmdir", "ren", "rename",
+  "path", "prompt", "title", "ver", "vol", "label", "chdir",
+  "chcp", "chkntfs", "color", "date", "time", "tree", "where",
+  "assoc", "ftype", "pushd", "popd", "setlocal", "endlocal",
+  "call", "exit", "rem", "if", "for", "goto",
+]);
+
 function resolveCommand(command: string): { command: string; args: string[]; useShell: boolean } {
   if (process.platform !== "win32") {
     return { command, args: [], useShell: false };
@@ -32,9 +49,17 @@ function resolveCommand(command: string): { command: string; args: string[]; use
     return { command, args: [], useShell: false };
   }
 
+  const lowerCommand = command.toLowerCase();
+
+  // Windows shell builtins (echo, dir, set, cd, etc.) — must use shell:true
+  // so cmd.exe interprets them. There's no echo.exe to spawn.
+  if (WINDOWS_BUILTINS.has(lowerCommand)) {
+    return { command, args: [], useShell: true };
+  }
+
   // Check if the command is a known package manager / CLI shim
   const shims = ["pnpm", "npm", "npx", "yarn", "pnpx"];
-  if (!shims.includes(command.toLowerCase())) {
+  if (!shims.includes(lowerCommand)) {
     // Not a shim — try directly (git, node, tsc, etc. are real .exe files)
     return { command, args: [], useShell: false };
   }
