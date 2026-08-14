@@ -139,6 +139,49 @@ export type RuntimePhase =
   | "complete"
   | "failed";
 
+/**
+ * Heartbeat status — shared between PowerShell, terminal-server, and litbit-web.
+ * Both surfaces must see the same heartbeat truth.
+ */
+export interface HeartbeatStatus {
+  /** Monotonic counter, increments on each heartbeat tick */
+  seq: number;
+  /** Timestamp (ms since epoch) of the last successful heartbeat */
+  lastHeartbeatAt: number;
+  /** Consecutive failures since last success */
+  failures: number;
+  /** Threshold after which the runtime is considered stale/offline */
+  maxFailures: number;
+  /** Interval between heartbeats in ms */
+  intervalMs: number;
+  /** Measured latency of the last heartbeat in ms, or null if not yet measured */
+  latencyMs: number | null;
+}
+
+/**
+ * Active command being executed (or null when idle).
+ * Both surfaces need this to show "running typecheck..." etc.
+ */
+export interface ActiveCommand {
+  command: string;
+  args: string[];
+  startedAt: number;
+  cwd: string;
+}
+
+/**
+ * Result of the last completed command.
+ * Both surfaces need this to show success/error state.
+ */
+export interface LastResult {
+  command: string;
+  success: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  finishedAt: number;
+  message: string;
+}
+
 export interface RuntimeState {
   phase: RuntimePhase;
   project: ProjectContext | null;
@@ -149,6 +192,12 @@ export interface RuntimeState {
   online: boolean;
   pingMs: number;
   contextTokens: number;
+  // Phase 2C additions — shared truth for both surfaces
+  heartbeat: HeartbeatStatus;
+  activeCommand: ActiveCommand | null;
+  lastResult: LastResult | null;
+  /** Timestamp of the last state mutation (ms since epoch) */
+  updatedAt: number;
 }
 
 // ─── Runtime Events ───────────────────────────────────────────────
@@ -159,7 +208,11 @@ export type RuntimeEventType =
   | "tool_result"
   | "delta"
   | "error"
-  | "status";
+  | "status"
+  | "heartbeat"
+  | "command_start"
+  | "command_end"
+  | "state_sync";
 
 export interface RuntimeEvent {
   type: RuntimeEventType;

@@ -5,11 +5,15 @@
  * handlers as the slash commands `/status` and `/diff`.
  *
  * No LLM inference is permitted for deterministic commands.
+ *
+ * Phase 2C: optionally updates a RuntimeStore with command start/end
+ * events so both PowerShell and web surfaces see the same execution truth.
  */
 
 import type { ShellExecutor, ToolResult, ToolContext } from "./types.js";
 import { ToolRegistry, createDefaultRegistry } from "./tools.js";
 import { resolveProjectContext } from "./project.js";
+import type { RuntimeStore } from "./state.js";
 
 export interface CommandResult {
   command: string;
@@ -28,16 +32,19 @@ export class CommandRouter {
   private shell: ShellExecutor;
   private cwd: string;
   private userId: string | null;
+  private store: RuntimeStore | null;
 
   constructor(shell: ShellExecutor, options?: {
     registry?: ToolRegistry;
     cwd?: string;
     userId?: string | null;
+    store?: RuntimeStore | null;
   }) {
     this.shell = shell;
     this.registry = options?.registry ?? createDefaultRegistry();
     this.cwd = options?.cwd ?? shell.cwd;
     this.userId = options?.userId ?? null;
+    this.store = options?.store ?? null;
   }
 
   private ctx(): ToolContext {
@@ -49,9 +56,49 @@ export class CommandRouter {
     };
   }
 
+  /**
+   * Execute a tool with optional RuntimeStore tracking.
+   * For execution commands (check/test/build), records start/end in the store.
+   */
+  private async execWithTracking(
+    commandName: string,
+    toolId: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult> {
+    const isExecCommand = ["project.check", "project.test", "project.build", "project.run"].includes(toolId);
+
+    if (this.store && isExecCommand) {
+      this.store.commandStart(commandName, [], this.cwd);
+    }
+    const t0 = Date.now();
+    const result = await this.registry.execute(toolId, this.ctx(), args);
+    const durationMs = Date.now() - t0;
+
+    if (this.store && isExecCommand) {
+      this.store.commandEnd(
+        commandName,
+        result.success,
+        (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
+        durationMs,
+        result.message,
+      );
+    }
+    return result;
+  }
+
   async status(): Promise<CommandResult> {
     const project = await resolveProjectContext(this.shell, this.cwd);
     const result = await this.registry.execute("project.status", this.ctx(), {});
+    if (this.store) {
+      this.store.setProject({
+        root: project.root,
+        name: project.name,
+        isGitRepo: project.isGitRepo,
+        branch: project.branch,
+        remote: project.remote,
+      });
+      this.store.setGitChanges((result.data.gitStatus as { changeCount?: number })?.changeCount ?? 0);
+    }
     return {
       command: "status",
       result,
@@ -101,17 +148,17 @@ export class CommandRouter {
   }
 
   async check(): Promise<CommandResult> {
-    const result = await this.registry.execute("project.check", this.ctx(), {});
+    const result = await this.execWithTracking("check", "project.check", {});
     return { command: "check", result };
   }
 
   async test(): Promise<CommandResult> {
-    const result = await this.registry.execute("project.test", this.ctx(), {});
+    const result = await this.execWithTracking("test", "project.test", {});
     return { command: "test", result };
   }
 
   async build(): Promise<CommandResult> {
-    const result = await this.registry.execute("project.build", this.ctx(), {});
+    const result = await this.execWithTracking("build", "project.build", {});
     return { command: "build", result };
   }
 
