@@ -21,9 +21,18 @@ import { CockpitApp } from "../ink/app.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
-import { detectProject, fail, header } from "../lib/utils.js";
+import { detectProject, fail, header, c } from "../lib/utils.js";
 
 export async function cockpitCommand(args: string[]): Promise<number> {
+  // Check for TTY — Ink requires raw mode on stdin
+  if (!process.stdin.isTTY) {
+    fail("LiTT cockpit requires an interactive terminal (TTY).");
+    console.error(`${c.dim}  You appear to be running in a non-interactive shell.${c.reset}`);
+    console.error(`${c.dim}  Open a real PowerShell/terminal window and run 'litt' there.${c.reset}`);
+    console.error(`${c.dim}  Or use non-interactive commands: litt doctor, litt status, litt run <cmd>${c.reset}`);
+    return 1;
+  }
+
   // Auto-detect project root by walking upward from cwd.
   // The user can be in any subdirectory — LiTT finds the root.
   const project = detectProject();
