@@ -152,26 +152,30 @@ export class RuntimeStore {
   /**
    * Mark a command as started. Emits command_start.
    * Both surfaces use this to show "running..." state.
+   * The runId is the shared identity across CLI, Studio, and Socket.IO.
    */
-  commandStart(command: string, args: string[], cwd: string): void {
+  commandStart(command: string, args: string[], cwd: string, runId?: string): void {
+    const id = runId ?? `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const active: ActiveCommand = {
       command,
       args,
       startedAt: Date.now(),
       cwd,
+      runId: id,
     };
     this.state.activeCommand = active;
     this.setPhase("running");
     this.emit({
       type: "command_start",
       ts: active.startedAt,
-      data: { command, args, cwd },
+      data: { command, args, cwd, runId: id },
     });
   }
 
   /**
    * Mark a command as finished. Emits command_end.
    * Stores the result for both surfaces to display.
+   * Carries the runId from the active command for bidirectional identity.
    */
   commandEnd(
     command: string,
@@ -179,8 +183,10 @@ export class RuntimeStore {
     exitCode: number | null,
     durationMs: number,
     message: string,
+    runId?: string,
   ): void {
     const finishedAt = Date.now();
+    const id = runId ?? this.state.activeCommand?.runId ?? `run_${finishedAt}_${Math.random().toString(36).slice(2, 8)}`;
     const result: LastResult = {
       command,
       success,
@@ -188,6 +194,7 @@ export class RuntimeStore {
       durationMs,
       finishedAt,
       message,
+      runId: id,
     };
     this.state.lastResult = result;
     this.state.activeCommand = null;
@@ -195,7 +202,7 @@ export class RuntimeStore {
     this.emit({
       type: "command_end",
       ts: finishedAt,
-      data: { command, success, exitCode, durationMs, message },
+      data: { command, success, exitCode, durationMs, message, runId: id },
     });
   }
 

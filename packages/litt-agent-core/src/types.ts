@@ -167,6 +167,8 @@ export interface ActiveCommand {
   args: string[];
   startedAt: number;
   cwd: string;
+  /** Unique run identifier — same across CLI, Studio, and Socket.IO clients */
+  runId: string;
 }
 
 /**
@@ -180,6 +182,8 @@ export interface LastResult {
   durationMs: number;
   finishedAt: number;
   message: string;
+  /** Run identifier — matches the runId from ActiveCommand when the command started */
+  runId: string;
 }
 
 export interface RuntimeState {

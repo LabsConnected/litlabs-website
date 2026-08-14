@@ -59,16 +59,18 @@ export class CommandRouter {
   /**
    * Execute a tool with optional RuntimeStore tracking.
    * For execution commands (check/test/build), records start/end in the store.
+   * Accepts an optional runId for bidirectional CLI↔Studio identity.
    */
   private async execWithTracking(
     commandName: string,
     toolId: string,
     args: Record<string, unknown>,
+    runId?: string,
   ): Promise<ToolResult> {
     const isExecCommand = ["project.check", "project.test", "project.build", "project.run"].includes(toolId);
 
     if (this.store && isExecCommand) {
-      this.store.commandStart(commandName, [], this.cwd);
+      this.store.commandStart(commandName, [], this.cwd, runId);
     }
     const t0 = Date.now();
     const result = await this.registry.execute(toolId, this.ctx(), args);
@@ -81,6 +83,7 @@ export class CommandRouter {
         (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
         durationMs,
         result.message,
+        runId,
       );
     }
     return result;
@@ -147,18 +150,18 @@ export class CommandRouter {
     return { command: "inspect_package", result };
   }
 
-  async check(): Promise<CommandResult> {
-    const result = await this.execWithTracking("check", "project.check", {});
+  async check(runId?: string): Promise<CommandResult> {
+    const result = await this.execWithTracking("check", "project.check", {}, runId);
     return { command: "check", result };
   }
 
-  async test(): Promise<CommandResult> {
-    const result = await this.execWithTracking("test", "project.test", {});
+  async test(runId?: string): Promise<CommandResult> {
+    const result = await this.execWithTracking("test", "project.test", {}, runId);
     return { command: "test", result };
   }
 
-  async build(): Promise<CommandResult> {
-    const result = await this.execWithTracking("build", "project.build", {});
+  async build(runId?: string): Promise<CommandResult> {
+    const result = await this.execWithTracking("build", "project.build", {}, runId);
     return { command: "build", result };
   }
 
@@ -219,6 +222,7 @@ export class CommandRouter {
    * Used by CLI entry points.
    */
   async dispatch(command: string, args?: Record<string, unknown>): Promise<CommandResult> {
+    const runId = typeof args?.runId === "string" ? args.runId : undefined;
     switch (command) {
       case "status": return this.status();
       case "diff": return this.diff(Boolean(args?.staged));
@@ -228,9 +232,9 @@ export class CommandRouter {
       case "read_file": return this.readFile(typeof args?.path === "string" ? args.path : "");
       case "search": return this.search(typeof args?.query === "string" ? args.query : "");
       case "inspect_package": return this.inspectPackage();
-      case "check": return this.check();
-      case "test": return this.test();
-      case "build": return this.build();
+      case "check": return this.check(runId);
+      case "test": return this.test(runId);
+      case "build": return this.build(runId);
       case "debug": return this.debug();
       case "ship": return this.ship();
       default:

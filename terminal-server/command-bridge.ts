@@ -79,15 +79,12 @@ export async function dispatchCommand(req: CommandRequest): Promise<CommandBridg
 
   const router = getRouter(cwd, req.userId ?? null);
 
-  // Set phase to running before dispatch
-  const store = getRuntimeStore();
-  store.setPhase("running");
+  // Pass runId through to the router so it threads into RuntimeStore.
+  // This is the shared identity across CLI, Studio, and Socket.IO clients.
+  const dispatchArgs = { ...req.args, runId };
 
   try {
-    const result = await router.dispatch(req.command, req.args);
-
-    // Update phase based on result
-    store.setPhase(result.result.success ? "complete" : "failed");
+    const result = await router.dispatch(req.command, dispatchArgs);
 
     return {
       ok: result.result.success,
@@ -96,7 +93,6 @@ export async function dispatchCommand(req: CommandRequest): Promise<CommandBridg
       timestamp,
     };
   } catch (err) {
-    store.setPhase("failed");
     throw err;
   }
 }

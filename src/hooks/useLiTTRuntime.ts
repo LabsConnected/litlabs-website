@@ -40,6 +40,7 @@ export interface ActiveCommand {
   args: string[];
   startedAt: number;
   cwd: string;
+  runId: string;
 }
 
 export interface LastResult {
@@ -49,6 +50,7 @@ export interface LastResult {
   durationMs: number;
   finishedAt: number;
   message: string;
+  runId: string;
 }
 
 export interface ProjectContext {
