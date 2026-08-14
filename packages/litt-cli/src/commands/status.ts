@@ -1,16 +1,16 @@
 /**
  * litt status — Show project + git status.
  *
- * Wired through @litt/agent-core CommandRouter → ToolRegistry → ShellExecutor.
- * This is the canonical status path. No duplicate implementation.
+ * Wired through RuntimeSession → CommandRouter → ToolRegistry → ShellExecutor.
+ * The session owns the canonical RuntimeStore — single source of truth.
  */
 
-import { createShellExecutor, CommandRouter } from "@litt/agent-core";
+import { RuntimeSession } from "../lib/runtime-session.js";
 import { ok, fail, warn, header, label, value, c } from "../lib/utils.js";
 
-export async function statusCommand(_args: string[]): Promise<number> {
-  const shell = createShellExecutor(process.cwd());
-  const router = new CommandRouter(shell, { cwd: process.cwd() });
+export async function statusCommand(_args: string[], session?: RuntimeSession): Promise<number> {
+  const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
+  const router = sess.getRouter();
 
   const result = await router.status();
 

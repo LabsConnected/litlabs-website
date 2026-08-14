@@ -5,14 +5,14 @@
  * This is the canonical diff path. No duplicate implementation.
  */
 
-import { createShellExecutor, CommandRouter } from "@litt/agent-core";
+import { RuntimeSession } from "../lib/runtime-session.js";
 import { fail, header, c } from "../lib/utils.js";
 
-export async function diffCommand(args: string[]): Promise<number> {
+export async function diffCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const staged = args.includes("--staged") || args.includes("--cached");
 
-  const shell = createShellExecutor(process.cwd());
-  const router = new CommandRouter(shell, { cwd: process.cwd() });
+  const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
+  const router = sess.getRouter();
 
   const result = await router.diff(staged);
 
