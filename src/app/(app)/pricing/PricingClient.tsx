@@ -23,6 +23,8 @@ type CardPlan = {
   futurePrice: string;
   description: string;
   credits: string;
+  /** "one-time" for Starter, "monthly" for paid plans */
+  creditLabel: string;
   projectLimit: number;
   featured?: boolean;
   accent: Accent;
@@ -40,6 +42,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: "No credit card required",
     description: PLANS.starter.description,
     credits: PLANS.starter.monthlyCredits.toLocaleString(),
+    creditLabel: "AI credits (one-time)",
     projectLimit: PLANS.starter.activeProjectLimit,
     accent: "neutral",
     cta: "Start free",
@@ -54,6 +57,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
+    creditLabel: "AI credits monthly",
     projectLimit: PLANS.creator_beta.activeProjectLimit,
     featured: true,
     accent: "cyan",
@@ -69,6 +73,7 @@ const CARD_PLANS: CardPlan[] = [
     futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
+    creditLabel: "AI credits monthly",
     projectLimit: PLANS.pro_builder_beta.activeProjectLimit,
     accent: "purple",
     cta: "Choose Pro",
@@ -83,11 +88,11 @@ const usageRules = [
   },
   {
     title: "Credits per billing cycle",
-    copy: "Paid plans grant AI credits after each successful billing cycle. Starter credits do not expire.",
+    copy: "Paid plans grant AI credits after each successful billing cycle. Starter includes a one-time 500-credit grant that does not expire.",
   },
   {
     title: "Fair usage tracking",
-    copy: "Every action shows its cost before it runs. You never get charged twice for the same thing.",
+    copy: "Expensive actions show an estimate before they run. You never get charged twice for the same thing.",
   },
 ];
 
@@ -120,7 +125,7 @@ const faq = [
   {
     question: "What is the Founding Member offer?",
     answer:
-      "A one-time $149 purchase that grants permanent Creator-level access and a Founder badge. No recurring subscription charge. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
+      "A one-time $149 purchase that grants permanent Creator-level feature access and a Founder badge. No recurring subscription charge. Does not include monthly credit grants — purchase credits separately or subscribe to a paid plan for recurring credits. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
   },
 ];
 
@@ -191,7 +196,7 @@ function PlanCard({
       <div className={styles.allowanceGrid}>
         <div className={styles.allowance}>
           <strong>{plan.credits}</strong>
-          <span>AI credits monthly</span>
+          <span>{plan.creditLabel}</span>
         </div>
         <div className={styles.allowance}>
           <strong>{plan.projectLimit}</strong>
@@ -340,14 +345,17 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
               )}
             </div>
             <h2>
-              $149 one-time for permanent Creator-level access.
+              $149 once. Permanent Creator-level feature access.
             </h2>
             <p>
               Founding Member grants permanent Creator-level feature access and a
-              Founder badge — no recurring subscription, no six-month limitation.
-              {founderAvailable
-                ? ` Limited to ${PLANS.founder.founderLimit} supporters.`
-                : " Checkout is currently unavailable pending an approved Stripe price."}
+              Founder badge — no recurring subscription charge. Does not include
+              monthly credit grants; purchase credits separately or subscribe to
+              a paid plan for recurring credits.
+              Limited to {PLANS.founder.founderLimit} supporters.
+              {!founderAvailable
+                ? " Checkout is currently unavailable pending an approved Stripe price."
+                : ""}
             </p>
           </div>
 
@@ -375,7 +383,7 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
         <div className={styles.trustGrid}>
           {[
             { title: "Cancel anytime", copy: "Cancellation stops future renewals. Access continues through the paid period." },
-            { title: "No surprise charges", copy: "Billable actions show cost before they run. Credits are used predictably." },
+            { title: "No surprise charges", copy: "Expensive actions show an estimate before they run. Credits are used predictably." },
             { title: "Your assets stay yours", copy: "Downgrades and cancellations never delete projects, media, or data." },
             { title: "Support channel", copy: "Need help? Reach out from Settings → Connections → Diagnostics." },
           ].map((item) => (

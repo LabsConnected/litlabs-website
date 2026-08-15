@@ -77,9 +77,9 @@ function ShowcasePageInner() {
         style={{ borderColor: T.borderColor, color: T.accentColor }}
       >
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>AUTOMATION SHOWCASE // PORTFOLIO &amp; PROOF</span>
+          <span>AUTOMATION SHOWCASE // EXAMPLE PROJECTS</span>
           <span>SYSTEM ARCHITECTURE MAPS // CASE STUDIES</span>
-          <span>ENTERPRISE-GRADE INFRASTRUCTURE VISUALS</span>
+          <span>REPRESENTATIVE INFRASTRUCTURE VISUALS</span>
         </div>
       </div>
 
@@ -100,7 +100,7 @@ function ShowcasePageInner() {
             fontFamily: "var(--font-display)",
           }}
         >
-          Portfolio & Proof
+          Example Projects
         </p>
         <h1
           className="font-display text-4xl md:text-5xl font-black mb-4"
@@ -118,9 +118,9 @@ function ShowcasePageInner() {
             opacity: 0.75,
           }}
         >
-          The assets that close deals. Project visuals, system architecture
-          maps, and case studies built to communicate complex automation
-          instantly.
+          Example project visuals, system architecture maps, and case
+          studies that communicate complex automation instantly. These
+          are representative examples — not customer work.
         </p>
         <div className="flex justify-center gap-3 flex-wrap">
           {[
