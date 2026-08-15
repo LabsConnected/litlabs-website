@@ -20,12 +20,13 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
-import { execSync } from "child_process";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
 import { isEnter, isEscape, isCtrl } from "./keyboard-utils.js";
+import { useTerminalSize } from "./use-terminal-size.js";
+import { HelpOverlay } from "./help-overlay.js";
 import { Header } from "./header.js";
 import { Subsystems } from "./subsystems.js";
 import { LiTTHoloPanel } from "./holo-panel.js";
@@ -41,6 +42,7 @@ import { ModelCenter } from "./model-center.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 import { brainLabel, type ModelChoice } from "../lib/model-routing.js";
+import { applyBranchRefresh } from "../lib/project-state.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -93,14 +95,9 @@ export function CockpitApp({
   useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
 
-  // Responsive layout — track terminal size
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => getLayoutMode(stdout?.rows ?? 40));
-  useEffect(() => {
-    if (!stdout) return;
-    const onResize = () => setLayoutMode(getLayoutMode(stdout.rows ?? 40));
-    stdout.on("resize", onResize);
-    return () => { stdout.off("resize", onResize); };
-  }, [stdout]);
+  // Responsive layout — reactive terminal viewport (spec §9).
+  const { rows } = useTerminalSize(stdout);
+  const layoutMode = getLayoutMode(rows);
 
   const modelReady = hasOpenRouterKey();
   const brain = brainLabel(store.state.routingMode, store.state.selectedModel);
@@ -110,20 +107,13 @@ export function CockpitApp({
   // Initialize store branch from prop, then refresh from the same cwd
   // the tools use. This ensures the header branch matches what
   // project.status and other git tools report — one source of truth.
+  // Branch detection is delegated to lib/project-state.ts — the UI
+  // component never calls child_process directly (spec §4/§58).
   useEffect(() => {
     if (branch && branch !== "unknown") {
       store.actions.setBranch(branch);
     }
-    // Refresh from session cwd — same directory tools execute in
-    try {
-      const fresh = execSync("git branch --show-current", {
-        cwd: session.getCwd(), encoding: "utf-8", timeout: 3000,
-        stdio: ["pipe", "pipe", "pipe"],
-      }).trim();
-      if (fresh) store.actions.setBranch(fresh);
-    } catch {
-      // git not available or not a git repo — keep prop branch
-    }
+    applyBranchRefresh(session.getCwd(), store.actions.setBranch, branch ?? "unknown");
   }, [branch, session, store]);
 
   // Seed startup activity (only once, when local runtime becomes ready)
@@ -168,6 +158,9 @@ export function CockpitApp({
     } else if (isCtrl(input, key, "l")) {
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
+    } else if (input === "?") {
+      // ? → Help (spec §16). Only when idle so it doesn't intercept mid-run.
+      if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
   }, [session, store, approvalBridge, exit]);
 
@@ -264,6 +257,9 @@ export function CockpitApp({
               onCancel={() => store.actions.setOverlay("none")}
             />
           )}
+          {store.state.overlay === "help" && (
+            <HelpOverlay onCancel={() => store.actions.setOverlay("none")} />
+          )}
         </>
       ) : (
         <>
@@ -329,16 +325,22 @@ export function CockpitApp({
             disabled={disabled}
           />
 
-          {/* Status bar — always visible */}
+          {/* Status bar — always visible: project + branch + model + ctx (spec §31) */}
           <StatusBar
             connected={store.state.connected}
             localRuntime={store.state.localRuntime}
             remoteRuntime={store.state.remoteRuntime}
             cwd={cwd}
+            project={project}
+            branch={store.state.branch}
             holoState={store.state.holoState}
             brain={brain}
             activeModel={activeModel}
+            source={source}
+            mode={mode}
             runId={store.state.currentRunId}
+            gitModified={gitModified}
+            gitUntracked={gitUntracked}
           />
         </>
       )}

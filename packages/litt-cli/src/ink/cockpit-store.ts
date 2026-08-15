@@ -133,7 +133,7 @@ export interface CockpitUIState {
 }
 
 /** Overlay type — which modal/picker is open */
-export type Overlay = "none" | "model-picker" | "command-palette" | "model-center";
+export type Overlay = "none" | "model-picker" | "command-palette" | "model-center" | "activity" | "help";
 
 /**
  * Routing mode — how LiTT chooses models.

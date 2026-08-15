@@ -38,7 +38,7 @@ import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buil
 import { routeModel, routingReason, brainLabel, routingModeLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
 import { ProviderRegistry, TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent, type Intent } from "../lib/intent.js";
-import { execSync } from "child_process";
+import { applyBranchRefresh } from "../lib/project-state.js";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
   "/build": { toolId: "project.build", args: () => ({ command: "pnpm", args: ["build"] }) },
@@ -78,17 +78,11 @@ function isToolCallMarkup(text: string): boolean {
 
 /**
  * Refresh the git branch from the same cwd the tools use.
- * This ensures the header branch matches what project.status reports.
+ * Delegates to lib/project-state.ts — the single canonical branch helper.
+ * The controller never calls child_process directly (spec §4/§58).
  */
-function refreshBranch(cwd: string): string {
-  try {
-    const branch = execSync("git branch --show-current", {
-      cwd, encoding: "utf-8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return branch || "unknown";
-  } catch {
-    return "unknown";
-  }
+function refreshBranch(cwd: string, previousBranch: string, setBranch: (b: string) => void): string {
+  return applyBranchRefresh(cwd, setBranch, previousBranch);
 }
 
 /**
@@ -436,8 +430,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         if (result.result.success) {
           // Refresh branch after git-changing commands (e.g. /run git switch)
           if (command === "git" || cmd === "/status" || cmd === "/diff") {
-            const freshBranch = refreshBranch(session.getCwd());
-            if (freshBranch !== "unknown") store.actions.setBranch(freshBranch);
+            refreshBranch(session.getCwd(), store.state.branch, store.actions.setBranch);
           }
           store.actions.setHoloState("COMPLETE");
           setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
@@ -486,10 +479,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         // Refresh branch from the same cwd the tools use — ensures
         // the header branch matches what project.status reports.
         const projectRoot = session.getCwd();
-        const freshBranch = refreshBranch(projectRoot);
-        if (freshBranch !== "unknown") {
-          store.actions.setBranch(freshBranch);
-        }
+        const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
 
         store.actions.addActivity({
           id: `act_${Date.now()}`,
@@ -616,10 +606,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
       // MISSION intent — full agent lifecycle with progress + steps
       // Refresh branch from the same cwd the tools use
       const projectRoot = session.getCwd();
-      const freshBranch = refreshBranch(projectRoot);
-      if (freshBranch !== "unknown") {
-        store.actions.setBranch(freshBranch);
-      }
+      const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
 
       store.actions.startMission(input);
       store.actions.setHoloState("UNDERSTANDING");

@@ -18,6 +18,7 @@
 import { render } from "ink";
 import React from "react";
 import { CockpitApp } from "../ink/app.js";
+import { CockpitErrorBoundary } from "../ink/cockpit-error-boundary.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import { SessionEventBridge } from "../ink/session-event-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
@@ -120,21 +121,23 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   const gitModified = (gitStatus.match(/^.M/gm) ?? []).length;
   const gitUntracked = (gitStatus.match(/^\?\?/gm) ?? []).length;
 
-  // Launch the Ink cockpit
+  // Launch the Ink cockpit, wrapped in an error boundary (spec §39).
   const { waitUntilExit } = render(
-    React.createElement(CockpitApp, {
-      session,
-      client,
-      approvalBridge,
-      sessionBridge,
-      project: String(project.packageJson?.name ?? "unnamed"),
-      branch: project.gitBranch ?? "unknown",
-      model,
-      cwd: projectRoot,
-      mode: session.getMode(),
-      gitModified,
-      gitUntracked,
-    }),
+    React.createElement(CockpitErrorBoundary, null,
+      React.createElement(CockpitApp, {
+        session,
+        client,
+        approvalBridge,
+        sessionBridge,
+        project: String(project.packageJson?.name ?? "unnamed"),
+        branch: project.gitBranch ?? "unknown",
+        model,
+        cwd: projectRoot,
+        mode: session.getMode(),
+        gitModified,
+        gitUntracked,
+      }),
+    ),
   );
 
   try {
