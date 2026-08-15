@@ -177,7 +177,7 @@ export function LandingHeroV3() {
                 Studio UI stack (Mission/Runtime/Terminal) on top (z-3).
                 Shifted right + scaled to keep LiTT on-screen at 1920px width. */}
             <div
-              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[-18%] lg:-top-4 lg:z-[1]"
+              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[2%] lg:-top-32 lg:z-[1] xl:right-[-5%] xl:-top-24 2xl:right-[-8%] 2xl:-top-20 litt-hero-mascot"
               style={{ minHeight: "min(560px, 65vh)" }}
             >
               {/* Helmet glow ring — behind the head, breathing */}
@@ -250,15 +250,15 @@ export function LandingHeroV3() {
                 style={{ animation: "litt-float 6s ease-in-out infinite" }}
               >
                 <div
-                  className="relative w-[280px] sm:w-[360px] lg:w-[440px]"
-                  style={{ height: "min(560px, 65vh)" }}
+                  className="relative w-[280px] sm:w-[360px] lg:w-[320px] xl:w-[360px] 2xl:w-[400px] litt-hero-mascot-img"
+                  style={{ height: "min(520px, 62vh)" }}
                 >
                   <Image
                     src="/brand/litt-mascot-hero.png"
                     alt="LiTT — the AI creative operating system character, full body with helmet, visor, headphones, and streetwear"
                     fill
                     priority
-                    sizes="(max-width: 640px) 280px, (max-width: 1024px) 360px, 440px"
+                    sizes="(max-width: 640px) 280px, (max-width: 1024px) 360px, (max-width: 1280px) 320px, (max-width: 1536px) 400px, 440px"
                     className="object-contain object-bottom drop-shadow-[0_8px_40px_rgba(168,85,247,0.3)]"
                   />
                 </div>
@@ -482,6 +482,17 @@ export function LandingHeroV3() {
           [style*="litt-hud-scan"],
           [style*="litt-particle-drift"],
           [style*="litt-card-float"] { animation: none !important; }
+        }
+        /* At wide viewports, shift LiTT to the right of the card stack
+           instead of peeking above it. Below 1700px, LiTT peeks above. */
+        @media (min-width: 1700px) {
+          .litt-hero-mascot {
+            right: -15% !important;
+            top: -0.25rem !important;
+          }
+          .litt-hero-mascot-img {
+            width: 440px !important;
+          }
         }
       `}</style>
     </section>
