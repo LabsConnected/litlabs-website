@@ -171,10 +171,13 @@ export function LandingHeroV3() {
           {/* ══════════ RIGHT: LiTT + Studio operating environment ══════════ */}
           {/* LiTT is the base layer (z-1), Studio UI floats on top (z-3).
               On mobile, everything stacks vertically. */}
-          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[680px]">
+          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[720px]">
             {/* ── LiTT mascot — base visual layer (z-1) ── */}
+            {/* Positioned to the right so head + upper body clear the centered
+                Studio UI stack (Mission/Runtime/Terminal) on top (z-3).
+                Shifted right + scaled to keep LiTT on-screen at 1920px width. */}
             <div
-              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[-2%] lg:top-0 lg:z-[1]"
+              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[-18%] lg:-top-4 lg:z-[1]"
               style={{ minHeight: "min(560px, 65vh)" }}
             >
               {/* Helmet glow ring — behind the head, breathing */}
@@ -239,21 +242,23 @@ export function LandingHeroV3() {
                   style={{ animation: "litt-particle-drift 11s ease-in-out infinite 3s" }}
                 />
               </div>
-              {/* LiTT character — 1.5x larger, head + upper body visible */}
+              {/* LiTT character — positioned so head + upper body are visible
+                  beside the Studio UI stack. Scaled to fit within the viewport
+                  at 1920px width without overflowing. */}
               <div
                 className="relative flex items-end justify-center"
                 style={{ animation: "litt-float 6s ease-in-out infinite" }}
               >
                 <div
-                  className="relative w-[300px] sm:w-[400px] lg:w-[560px]"
-                  style={{ height: "min(620px, 72vh)" }}
+                  className="relative w-[280px] sm:w-[360px] lg:w-[440px]"
+                  style={{ height: "min(560px, 65vh)" }}
                 >
                   <Image
                     src="/brand/litt-mascot-hero.png"
                     alt="LiTT — the AI creative operating system character, full body with helmet, visor, headphones, and streetwear"
                     fill
                     priority
-                    sizes="(max-width: 640px) 300px, (max-width: 1024px) 400px, 560px"
+                    sizes="(max-width: 640px) 280px, (max-width: 1024px) 360px, 440px"
                     className="object-contain object-bottom drop-shadow-[0_8px_40px_rgba(168,85,247,0.3)]"
                   />
                 </div>
