@@ -2,13 +2,11 @@
 
 import { useStudioStore, type LiTTStatus } from "@/stores/useStudioStore";
 import { useProjectStore } from "@/stores/useProjectStore";
-import {
-  MagnifyingGlassIcon,
-  ListIcon,
-  SidebarSimpleIcon,
-  ArrowsOutSimpleIcon,
-  ArrowsInSimpleIcon,
-} from "@phosphor-icons/react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { ListIcon } from "@phosphor-icons/react/dist/csr/List";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
+import { ArrowsInSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
 
 const statusConfig: Record<LiTTStatus, { color: string; label: string }> = {
   ready: { color: "bg-[#22c55e]", label: "Ready" },

@@ -1,14 +1,12 @@
 "use client";
 
 import { useStudioStore, type BottomDockTab } from "@/stores/useStudioStore";
-import {
-  ChatCircleIcon,
-  TerminalIcon,
-  BugIcon,
-  CheckCircleIcon,
-  RocketIcon,
-  MusicNoteIcon,
-} from "@phosphor-icons/react";
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
+import { TerminalIcon } from "@phosphor-icons/react/dist/csr/Terminal";
+import { BugIcon } from "@phosphor-icons/react/dist/csr/Bug";
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
+import { MusicNoteIcon } from "@phosphor-icons/react/dist/csr/MusicNote";
 
 const TABS: { id: BottomDockTab; label: string; icon: typeof ChatCircleIcon }[] = [
   { id: "chat", label: "LiTT Chat", icon: ChatCircleIcon },

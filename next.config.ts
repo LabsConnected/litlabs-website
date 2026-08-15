@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
   experimental: {
     turbopackFileSystemCacheForBuild: true,
     optimizePackageImports: [
+      "@phosphor-icons/react",
       "@supabase/supabase-js",
       "lucide-react",
       "@clerk/nextjs",

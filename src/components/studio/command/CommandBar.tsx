@@ -4,15 +4,13 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useStudioStore } from "@/stores/useStudioStore";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  MagnifyingGlassIcon,
-  CommandIcon,
-  FileIcon,
-  ImageIcon,
-  RocketIcon,
-  BrainIcon,
-  RobotIcon,
-} from "@phosphor-icons/react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { CommandIcon } from "@phosphor-icons/react/dist/csr/Command";
+import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
+import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
+import { BrainIcon } from "@phosphor-icons/react/dist/csr/Brain";
+import { RobotIcon } from "@phosphor-icons/react/dist/csr/Robot";
 
 interface CommandItem {
   id: string;
