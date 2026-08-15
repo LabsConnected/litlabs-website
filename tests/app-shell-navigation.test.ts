@@ -61,9 +61,9 @@ describe("AppShell Navigation", () => {
   });
 
   describe("Bottom utility items", () => {
-    it("has Wallet, Settings, Profile", () => {
+    it("has Wallet, Settings", () => {
       const labels = APP_NAV_BOTTOM.map((i) => i.label);
-      expect(labels).toEqual(["Wallet", "Settings", "Profile"]);
+      expect(labels).toEqual(["Wallet", "Settings"]);
     });
 
     it("all bottom items have hrefs", () => {

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import StudioBrowserJobsPanel from "@/app/studio/components/StudioBrowserJobsPanel";
+import StudioBrowserJobsPanel from "@/app/(app)/studio/components/StudioBrowserJobsPanel";
 
 // ─── Mock data ─────────────────────────────────────────────────
 

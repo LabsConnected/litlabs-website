@@ -9,6 +9,8 @@
 export type {
   ShellResult,
   ShellExecuteOptions,
+  StreamChunk,
+  ToolStatus,
   ToolResult,
   ToolDefinition,
   ToolCallRequest,
@@ -73,6 +75,20 @@ export type { CommandResult } from "./router.js";
 // Runtime state
 export { RuntimeStore, createInitialState } from "./state.js";
 
+// Hardened command executor (Phase 3B)
+export { CommandExecutor, createCommandExecutor } from "./command-executor.js";
+export type { CommandExecutorOptions, CommandExecutorResult } from "./command-executor.js";
+
+// ExecutionGateway — the ONE canonical execution authority (P0 fix)
+export { ExecutionGateway, createExecutionGateway } from "./execution-gateway.js";
+export type {
+  ExecutionGatewayOptions,
+  ExecutionRequest,
+  ExecutionIdentity,
+  GatewayResult,
+  GatewayExecutionCapsule,
+} from "./execution-gateway.js";
+
 // Structured execution boundary
 export {
   runCommand as runCommandSecure,
@@ -122,3 +138,30 @@ export type { ActionRisk as ActionRiskAlias } from "./contracts/policy.js";
 // New code should use ModelProvider from types.ts instead.
 // Marked for removal once cli/ migrates to the canonical core.
 export { askLiTTCode, handleLiTTCodeCommand } from "./compat.js";
+
+// Agent loop — canonical agent execution through the shared runtime
+export {
+  runAgentLoop,
+  parseToolCall,
+  stripToolCallBlocks,
+  accumulateStreamChunks,
+  processStreamChunk,
+} from "./agent-loop.js";
+export type {
+  AgentLoopOptions,
+  AgentLoopResult,
+  AgentToolCallRecord,
+  ParsedToolCall,
+  StreamParserState,
+} from "./agent-loop.js";
+
+// VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)
+export { VerificationGate, createVerificationGate, assertComplete } from "./verification-gate.js";
+export type {
+  VerificationCheckId,
+  VerificationConfig,
+  CheckResult,
+  VerificationResult,
+  BrowserVerifier,
+  VerificationGateOptions,
+} from "./verification-gate.js";

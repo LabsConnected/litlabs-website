@@ -40,6 +40,7 @@ class MockShell implements ShellExecutor {
     }
     return {
       ok: !this.shouldFail,
+      status: this.shouldFail ? "failed" : "success",
       stdout: `mock output for ${options.command}`,
       stderr: this.shouldFail ? "mock error" : "",
       exitCode: this.shouldFail ? 1 : 0,
@@ -47,10 +48,11 @@ class MockShell implements ShellExecutor {
       command: options.command,
       args: options.args ?? [],
       truncated: false,
+      pid: 12345,
     };
   }
 
-  async cancel(): Promise<void> {}
+  async cancel(): Promise<number[]> { return []; }
 }
 
 // ─── Event capture (simulates Socket.IO listener) ─────────────────

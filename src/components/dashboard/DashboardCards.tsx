@@ -33,7 +33,7 @@ const LiTTTerminal = dynamic(() => import("./LiTTTerminal"), {
     <div className="flex-1 min-h-0 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
   ),
 });
-const GalleryTool = dynamic(() => import("@/app/studio/tools/GalleryTool"), {
+const GalleryTool = dynamic(() => import("@/app/(app)/studio/tools/GalleryTool"), {
   ssr: false,
   loading: () => (
     <div className="h-96 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />

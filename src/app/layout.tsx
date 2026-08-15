@@ -2,13 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
-import { ProfileProvider } from "@/context/ProfileContext";
-import { WalletProvider } from "@/context/WalletContext";
-import { VisualProvider } from "@/context/VisualContext";
-import { YouTubePlayerProvider } from "@/context/YouTubePlayerContext";
-import { MediaHubProvider } from "@/components/media/MediaHubProvider";
-import { MusicPlayerProvider } from "@/context/MusicPlayerContext";
-import LayoutShell from "@/components/LayoutShell";
 import { AuthorityJsonLd } from "@/components/seo/AuthorityJsonLd";
 import { GhlAffiliateScript, GhlAffiliateSignupTracker } from "@/components/GhlAffiliateTracker";
 import {
@@ -100,21 +93,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const shell = (
-    <ThemeProvider>
-      <ProfileProvider>
-        <WalletProvider>
-          <VisualProvider>
-            <MediaHubProvider>
-              <YouTubePlayerProvider>
-                <MusicPlayerProvider>
-                  <LayoutShell>{children}</LayoutShell>
-                </MusicPlayerProvider>
-              </YouTubePlayerProvider>
-            </MediaHubProvider>
-          </VisualProvider>
-        </WalletProvider>
-      </ProfileProvider>
-    </ThemeProvider>
+    <ThemeProvider>{children}</ThemeProvider>
   );
 
   return (

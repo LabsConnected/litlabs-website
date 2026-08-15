@@ -2,14 +2,12 @@
 
 import { useStudioStore, type LeftRailTab } from "@/stores/useStudioStore";
 import { useProjectStore } from "@/stores/useProjectStore";
-import {
-  FolderOpenIcon,
-  FileIcon,
-  ImageIcon,
-  BrainIcon,
-  RobotIcon,
-  RocketIcon,
-} from "@phosphor-icons/react";
+import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
+import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { BrainIcon } from "@phosphor-icons/react/dist/csr/Brain";
+import { RobotIcon } from "@phosphor-icons/react/dist/csr/Robot";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 
 const TABS: { id: LeftRailTab; label: string; icon: typeof FolderOpenIcon }[] = [
   { id: "projects", label: "Projects", icon: FolderOpenIcon },

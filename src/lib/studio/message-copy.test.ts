@@ -6,7 +6,7 @@ import {
   conversationToMarkdown,
   copyToClipboard,
 } from "./message-copy";
-import type { ChatMessage } from "@/app/studio/stores/useStudioAgentStore";
+import type { ChatMessage } from "@/app/(app)/studio/stores/useStudioAgentStore";
 
 describe("message-copy utilities", () => {
   beforeEach(() => {

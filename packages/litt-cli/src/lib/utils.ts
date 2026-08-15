@@ -4,7 +4,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -80,14 +80,49 @@ export interface ProjectInfo {
   hasGit: boolean;
   gitBranch: string | null;
   gitStatus: string | null;
+  gitRemote: string | null;
   hasTsConfig: boolean;
   framework: string | null;
   packageManager: string | null;
   rootDir: string;
+  dirName: string;
 }
 
 export function detectProject(dir = process.cwd()): ProjectInfo {
-  const rootDir = resolve(dir);
+  // Walk upward to find the project root.
+  // Resolution order:
+  //   1. Walk up looking for .git or pnpm-workspace.yaml (true project root)
+  //   2. Walk up looking for package.json (may be a workspace package)
+  //   3. Fall back to the starting directory
+  let rootDir = resolve(dir);
+
+  // First pass: look for .git or pnpm-workspace.yaml
+  let searchDir = resolve(dir);
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(searchDir, ".git")) ||
+        existsSync(join(searchDir, "pnpm-workspace.yaml"))) {
+      rootDir = searchDir;
+      break;
+    }
+    const parent = dirname(searchDir);
+    if (parent === searchDir) break;
+    searchDir = parent;
+  }
+
+  // If no .git found, second pass: look for package.json
+  if (rootDir === resolve(dir) && !existsSync(join(rootDir, ".git"))) {
+    searchDir = resolve(dir);
+    for (let i = 0; i < 20; i++) {
+      if (existsSync(join(searchDir, "package.json"))) {
+        rootDir = searchDir;
+        break;
+      }
+      const parent = dirname(searchDir);
+      if (parent === searchDir) break;
+      searchDir = parent;
+    }
+  }
+
   const pkgPath = join(rootDir, "package.json");
   const hasPackageJson = existsSync(pkgPath);
   const packageJson = hasPackageJson
@@ -95,8 +130,14 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     : null;
 
   const hasGit = existsSync(join(rootDir, ".git"));
-  const gitBranch = hasGit ? exec("git rev-parse --abbrev-ref HEAD", { cwd: rootDir }).stdout || null : null;
+  // Use --show-current (more reliable on Windows) with --abbrev-ref fallback
+  const gitBranch = hasGit
+    ? (exec("git branch --show-current", { cwd: rootDir }).stdout ||
+       exec("git rev-parse --abbrev-ref HEAD", { cwd: rootDir }).stdout ||
+       null)
+    : null;
   const gitStatus = hasGit ? exec("git status --short", { cwd: rootDir }).stdout || null : null;
+  const gitRemote = hasGit ? exec("git remote get-url origin", { cwd: rootDir }).stdout || null : null;
 
   const hasTsConfig = existsSync(join(rootDir, "tsconfig.json"));
 
@@ -129,10 +170,12 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     hasGit,
     gitBranch,
     gitStatus,
+    gitRemote,
     hasTsConfig,
     framework,
     packageManager,
     rootDir,
+    dirName: basename(rootDir),
   };
 }
 

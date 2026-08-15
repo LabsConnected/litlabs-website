@@ -77,6 +77,29 @@ export {
   deriveHealthLabel,
 } from "./capability.js";
 
+// SEC-3: Grant Issuer + Verifier
+export type {
+  SigningKey,
+} from "./grant-issuer.js";
+export {
+  GrantIssuer,
+  createSigningKey,
+  generateGrantNonce,
+  generateGrantId,
+  extractGrantClaims,
+  canonicalGrantClaims,
+} from "./grant-issuer.js";
+export type {
+  VerificationKeyEntry,
+  VerificationKeyStore,
+  VerificationContext,
+} from "./grant-verifier.js";
+export {
+  GrantVerifier,
+  toVerifiedCapabilityGrant,
+  InMemoryKeyStore,
+} from "./grant-verifier.js";
+
 // Credential
 export type {
   CredentialRef,
@@ -96,6 +119,20 @@ export {
   redactString,
   redactForAudit,
 } from "./credential.js";
+
+// SEC-5: Production CredentialBroker
+export type {
+  StoredCredential,
+  CredentialStore,
+  BrokerContext,
+} from "./credential-broker.js";
+export {
+  ProductionCredentialBroker,
+  ProductionCredentialMaterializer,
+  InMemoryCredentialStore,
+  MaterializationError,
+  toLeaseAuditRecord,
+} from "./credential-broker.js";
 
 // Network
 export type {
@@ -144,6 +181,21 @@ export {
   computeOperationDigest,
   isApprovalValid,
 } from "./approval.js";
+
+// SEC-4: Runtime ApprovalProvider
+export type {
+  ApprovalVerificationResult,
+  ApprovalFailureReason,
+  VerifiedApproval,
+  ApprovalDecision,
+  ApprovalContext,
+} from "./approval-runtime.js";
+export {
+  RuntimeApprovalProvider,
+  toVerifiedApproval,
+  generateApprovalNonce,
+  toAuditRecord,
+} from "./approval-runtime.js";
 
 // Capsule / Execution
 export type {

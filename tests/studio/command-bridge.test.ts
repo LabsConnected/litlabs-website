@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseBuilderLocalCommand } from "@/app/studio/lib/builder-command-router";
+import { parseBuilderLocalCommand } from "@/app/(app)/studio/lib/builder-command-router";
 import { CommandRouter, createShellExecutor } from "@litt/agent-core";
 import { RuntimeStore, createInitialState } from "@litt/agent-core";
 import type { ShellExecutor, ShellResult, ShellExecuteOptions, ToolResult } from "@litt/agent-core";
@@ -28,6 +28,7 @@ class MockShellExecutor implements ShellExecutor {
     const safeArgs = options.args ?? [];
     return {
       ok: true,
+      status: "success",
       stdout: `mock output for ${options.command} ${safeArgs.join(" ")}`,
       stderr: "",
       exitCode: 0,
@@ -35,9 +36,10 @@ class MockShellExecutor implements ShellExecutor {
       command: options.command,
       args: safeArgs,
       truncated: false,
+      pid: 99999,
     };
   }
-  async cancel(): Promise<void> {}
+  async cancel(): Promise<number[]> { return []; }
 }
 
 // ─── 1. Slash command parsing ─────────────────────────────────────

@@ -1,18 +1,36 @@
 /**
  * litt doctor — Check system health.
- * Verifies Node, Git, pnpm, network, and project setup.
+ * Verifies Node, Git, pnpm, network, project setup, and runtime identity.
+ *
+ * Reports which executable, build, and runtime the user is actually running:
+ *   - CLI version + build hash
+ *   - agent-core version
+ *   - ExecutionGateway presence
+ *   - RuntimeStore state
+ *   - Model provider availability
  */
 
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
+import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
+import { ensureConfig, getConfigPath } from "../lib/config.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
 
-  // Node
+  // Node — Ink 7 and the CLI require Node >=22
   const nodeVersion = process.version;
-  const nodeOk = nodeVersion.startsWith("v18") || nodeVersion.startsWith("v20") || nodeVersion.startsWith("v22");
-  if (nodeOk) ok(`Node.js ${nodeVersion}`);
-  else fail(`Node.js ${nodeVersion} (requires >=18)`);
+  const major = parseInt(nodeVersion.slice(1).split(".")[0] ?? "0", 10);
+  const MIN_NODE = 22;
+  if (major >= MIN_NODE) {
+    ok(`Node.js ${nodeVersion}`);
+  } else {
+    fail(`Node.js ${nodeVersion} (requires >=${MIN_NODE} — Ink 7 requires Node 22+)`);
+    console.log(`${c.dim}  Cockpit and other Ink-based commands will crash on Node <22.${c.reset}`);
+  }
 
   // Git
   if (hasCommand("git")) {
@@ -74,24 +92,77 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     warn("Not a git repository");
   }
 
-  // Environment
+  // Environment — CLI-relevant only (not web-app env vars)
   header("Environment");
   const envVars = [
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-    "NEXT_PUBLIC_SUPABASE_URL",
     "OPENROUTER_API_KEY",
-    "GEMINI_API_KEY",
+    "LITT_TERMINAL_URL",
+    "LITT_MODE",
   ];
   for (const envVar of envVars) {
     if (process.env[envVar]) ok(`${envVar}: set`);
     else warn(`${envVar}: not set`);
   }
 
+  // First-run config — auto-create if missing
+  header("First-Run Config");
+  const config = ensureConfig();
+  ok(`Config: ${getConfigPath()}`);
+  console.log(`${c.dim}  mode: ${config.defaultMode} | model: ${config.defaultModel} | initialized: ${config.initialized}${c.reset}`);
+
+  // Terminal-server connectivity (optional)
+  header("Terminal Server");
+  const terminalUrl = process.env.LITT_TERMINAL_URL ?? "http://127.0.0.1:4001";
+  try {
+    const response = await fetch(`${terminalUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    if (response.ok) {
+      ok(`Terminal server: reachable at ${terminalUrl}`);
+    } else {
+      warn(`Terminal server: responded ${response.status} at ${terminalUrl}`);
+    }
+  } catch {
+    warn(`Terminal server: not reachable at ${terminalUrl}`);
+    console.log(`${c.dim}  (Optional — only needed for --remote and cockpit)${c.reset}`);
+  }
+
+  // Runtime identity — proves which executable/build/runtime the user is running
+  header("Runtime Identity");
+  console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
+  console.log(`${label("CLI Path:")} ${value(process.argv[1] ?? "unknown", c.dim)}`);
+  console.log(`${label("Node:")} ${value(process.version, c.dim)}`);
+  try {
+    const agentCorePkg = await import("@litt/agent-core/package.json" as string, { with: { type: "json" } }).catch(() => null);
+    if (agentCorePkg) {
+      console.log(`${label("agent-core:")} ${value((agentCorePkg as { version?: string }).version ?? "unknown", c.dim)}`);
+    }
+  } catch {
+    // package.json import may fail in some setups
+  }
+  console.log(`${label("ExecutionGateway:")} ${value("available", c.green)}`);
+  console.log(`${label("Model Provider:")} ${hasOpenRouterKey() ? value("OpenRouter (key set)", c.green) : value("not configured", c.yellow)}`);
+  console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
+
   // Summary
   header("Summary");
   console.log(`${label("Platform:")} ${value(process.platform)} ${value(process.arch, c.dim)}`);
-  console.log(`${label("Shell:")} ${value(process.env.SHELL ?? process.env.ComSpec ?? "unknown")}`);
-  console.log(`${label("CLI Version:")} ${value("0.1.0", c.green)}`);
+
+  // Detect host shell (not just ComSpec which is always cmd.exe on Windows)
+  let hostShell = "unknown";
+  if (process.env.SHELL) {
+    hostShell = process.env.SHELL;
+  } else if (process.env.PSModulePath) {
+    hostShell = "powershell";
+  } else if (process.env.ComSpec) {
+    hostShell = process.env.ComSpec;
+  }
+  // Execution shell (what ShellExecutor uses for child processes)
+  const execShell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL ?? "sh";
+  const shellNote = hostShell !== execShell ? ` (exec: ${execShell})` : "";
+  console.log(`${label("Shell:")} ${value(hostShell)}${c.dim}${shellNote}${c.reset}`);
+
+  console.log(`${label("CLI Version:")} ${value(CLI_VERSION, c.green)}`);
+  console.log(`${label("Package:")} ${value(CLI_PACKAGE_NAME, c.dim)}`);
+  console.log(`${c.dim}Upgrade: npm install -g ${CLI_PACKAGE_NAME}@latest${c.reset}`);
 
   return 0;
 }

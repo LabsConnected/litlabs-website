@@ -159,7 +159,7 @@ vi.mock("@/lib/visual-packs/types", () => ({
 
 import GenerationHistoryCard, {
   type GenerationCardData,
-} from "@/app/studio/components/GenerationHistoryCard";
+} from "@/app/(app)/studio/components/GenerationHistoryCard";
 
 const SAMPLE_THEME = {
   accentColor: "#ff00a0",
@@ -379,7 +379,7 @@ describe("History persistence", () => {
 
 // ─── CommandStudioHeader Activity toggle tests ──────────────────────────────
 
-import CommandStudioHeader from "@/app/studio/components/CommandStudioHeader";
+import CommandStudioHeader from "@/app/(app)/studio/components/CommandStudioHeader";
 
 const HEADER_CAPS = {
   projectId: "test",

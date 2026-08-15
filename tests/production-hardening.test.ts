@@ -14,7 +14,7 @@ describe("useResizableWidth", () => {
   });
 
   it("returns default width on first render", async () => {
-    const { useResizableWidth } = await import("../src/app/studio/hooks/useResizableWidth");
+    const { useResizableWidth } = await import("../src/app/(app)/studio/hooks/useResizableWidth");
     // We can't call hooks outside React, so test the logic indirectly
     // by verifying the module exports the expected interface
     expect(typeof useResizableWidth).toBe("function");
@@ -40,27 +40,27 @@ describe("useResizableWidth", () => {
 
 describe("Canvas save state truthfulness", () => {
   it("saveState starts as 'local' (not 'saved')", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     const state = mod.useCanvasBuilderStore.getState();
     expect(state.saveState).toBe("local");
   });
 
   it("saveState becomes 'dirty' after setDocument", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
-    const { createEmptyDocument } = await import("../src/app/studio/components/canvas/builder/types");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
+    const { createEmptyDocument } = await import("../src/app/(app)/studio/components/canvas/builder/types");
     mod.useCanvasBuilderStore.getState().setDocument(createEmptyDocument());
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("dirty");
   });
 
   it("saveState becomes 'saved' or 'local' after saveDocument", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     // Without a server canvas ID, it should be "local"
     mod.useCanvasBuilderStore.getState().saveDocument();
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("local");
   });
 
   it("saveState becomes 'saved' when serverCanvasId is set", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     mod.useCanvasBuilderStore.getState().setServerCanvasId("test-canvas-id");
     mod.useCanvasBuilderStore.getState().saveDocument();
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("saved");
@@ -74,7 +74,7 @@ describe("One LiTT architecture", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/PropertiesPanel.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/PropertiesPanel.tsx"),
       "utf-8",
     );
     expect(content).not.toContain("LiTTCopilotPanel");
@@ -85,7 +85,7 @@ describe("One LiTT architecture", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/PropertiesPanel.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/PropertiesPanel.tsx"),
       "utf-8",
     );
     expect(content).toContain("studio:ask-litt");
@@ -96,7 +96,7 @@ describe("One LiTT architecture", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/CanvasToolbar.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/CanvasToolbar.tsx"),
       "utf-8",
     );
     expect(content).toContain("studio:ask-litt");
@@ -111,7 +111,7 @@ describe("Canvas Build button renamed to Edit", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/CanvasToolbar.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/CanvasToolbar.tsx"),
       "utf-8",
     );
     expect(content).toContain("Edit");
@@ -156,7 +156,7 @@ describe("360° creator truthfulness", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/tools/SpaceTool.tsx"),
+      path.resolve("src/app/(app)/studio/tools/SpaceTool.tsx"),
       "utf-8",
     );
     expect(content).toContain("not yet available");
@@ -180,7 +180,7 @@ describe("Files is not a workspace stage", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/lib/studio-destinations.ts"),
+      path.resolve("src/app/(app)/studio/lib/studio-destinations.ts"),
       "utf-8",
     );
     // The type definition should be "plan" | "canvas" | "code" | "preview"
@@ -195,7 +195,7 @@ describe("Files is not a workspace stage", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/CommandStudio.tsx"),
+      path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
       "utf-8",
     );
     expect(content).toContain("Visual divider");
@@ -210,7 +210,7 @@ describe("Resize handles are wired", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/CommandStudio.tsx"),
+      path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
       "utf-8",
     );
     expect(content).toContain("ResizeHandle");
@@ -223,7 +223,7 @@ describe("Resize handles are wired", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/LiTTPanel.tsx"),
+      path.resolve("src/app/(app)/studio/components/LiTTPanel.tsx"),
       "utf-8",
     );
     expect(content).toContain("expandedWidth");
@@ -233,7 +233,7 @@ describe("Resize handles are wired", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/context/ContextDrawer.tsx"),
+      path.resolve("src/app/(app)/studio/components/context/ContextDrawer.tsx"),
       "utf-8",
     );
     expect(content).toContain("width?: number");
@@ -243,7 +243,7 @@ describe("Resize handles are wired", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/VisualCanvasBuilder.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/VisualCanvasBuilder.tsx"),
       "utf-8",
     );
     expect(content).toContain("paletteResize");
@@ -256,7 +256,7 @@ describe("Resize handles are wired", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/tools/DesignCanvas.tsx"),
+      path.resolve("src/app/(app)/studio/tools/DesignCanvas.tsx"),
       "utf-8",
     );
     expect(content).toContain("splitPct");
@@ -272,7 +272,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/hooks/useResizableWidth.ts"),
+      path.resolve("src/app/(app)/studio/hooks/useResizableWidth.ts"),
       "utf-8",
     );
     // The effect cleanup MUST clear userSelect, not just the onEnd handler
@@ -283,7 +283,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/hooks/useResizableWidth.ts"),
+      path.resolve("src/app/(app)/studio/hooks/useResizableWidth.ts"),
       "utf-8",
     );
     // Safety: clear stuck styles on mount
@@ -294,7 +294,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/tools/DesignCanvas.tsx"),
+      path.resolve("src/app/(app)/studio/tools/DesignCanvas.tsx"),
       "utf-8",
     );
     // The drag effect must have a cleanup return
@@ -305,7 +305,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/CommandStudio.tsx"),
+      path.resolve("src/app/(app)/studio/components/CommandStudio.tsx"),
       "utf-8",
     );
     expect(content).toContain('document.body.style.userSelect === "none"');
@@ -315,7 +315,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/canvas/builder/VisualCanvasBuilder.tsx"),
+      path.resolve("src/app/(app)/studio/components/canvas/builder/VisualCanvasBuilder.tsx"),
       "utf-8",
     );
     expect(content).toContain('target.tagName === "INPUT"');
@@ -326,7 +326,7 @@ describe("Text input bug — resize hooks clean up body styles", () => {
     const fs = await import("fs");
     const path = await import("path");
     const content = fs.readFileSync(
-      path.resolve("src/app/studio/components/StudioWorkspaceFrame.tsx"),
+      path.resolve("src/app/(app)/studio/components/StudioWorkspaceFrame.tsx"),
       "utf-8",
     );
     expect(content).toContain('target?.tagName === "INPUT"');

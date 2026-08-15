@@ -48,7 +48,7 @@ export function LandingCTA() {
               Your project already has the files.
             </p>
             <h2 className="mb-5 text-4xl font-black leading-[1.06] tracking-tight text-white md:text-6xl">
-              Now give it a{" "}
+              Now give it an{" "}
               <span
                 className="bg-clip-text text-transparent"
                 style={{
@@ -56,7 +56,7 @@ export function LandingCTA() {
                     "linear-gradient(110deg, #a855f7 0%, #30e7ff 100%)",
                 }}
               >
-                crew.
+                operator.
               </span>
             </h2>
 
@@ -86,18 +86,16 @@ export function LandingCTA() {
             </div>
 
             <p className="mt-6 text-xs text-neutral-600">
-              Free during beta · No credit card required · Self-host with Docker
+              Free during beta · No credit card required · BYOK supported
             </p>
 
             <div className="mt-10 flex flex-wrap items-center justify-center gap-6 border-t border-white/5 pt-8 text-xs text-neutral-500">
               <span className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                Platform live &amp; stable
+                LiTT Beta · Runtime-backed verification
               </span>
               <span className="hidden text-neutral-700 sm:inline">·</span>
-              <span>1,200+ creators building</span>
-              <span className="hidden text-neutral-700 sm:inline">·</span>
-              <span>Built with LiTT 🌳</span>
+              <span>Built by LiTTree LabStudios 🌳</span>
             </div>
           </div>
         </div>

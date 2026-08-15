@@ -189,3 +189,6 @@ tests/playwright/test_output*.txt
 
 .env*
 .vercel
+
+# Package tarballs
+*.tgz

@@ -256,24 +256,6 @@ function Format-LiTTRuntimeState {
 # ── Dispatch ───────────────────────────────────────────────────────
 $cliPath = Resolve-LittCli
 
-if (-not $Command -or $Command -eq "--help" -or $Command -eq "-h") {
-    if ($cliPath) {
-        & node $cliPath --help
-        exit $LASTEXITCODE
-    }
-    Write-Host "LiTT — deterministic command router + runtime consumer" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Commands:"
-    Write-Host "  status    Show project status (Git + runtime)"
-    Write-Host "  diff      Show Git diff"
-    Write-Host "  check     Run typecheck"
-    Write-Host "  test      Run tests"
-    Write-Host "  build     Run build"
-    Write-Host "  runtime   Show canonical runtime state from terminal-server"
-    Write-Host ""
-    exit 0
-}
-
 # Handle 'runtime' command locally (REST poll, no CLI needed)
 if ($Command -eq "runtime") {
     $snapshot = Get-LiTTRuntimeState
@@ -283,6 +265,20 @@ if ($Command -eq "runtime") {
 }
 
 if (-not $cliPath) {
+    if ($Command -eq "--help" -or $Command -eq "-h") {
+        Write-Host "LiTT — deterministic command router + runtime consumer" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Commands:"
+        Write-Host "  status    Show project status (Git + runtime)"
+        Write-Host "  diff      Show Git diff"
+        Write-Host "  check     Run typecheck"
+        Write-Host "  test      Run tests"
+        Write-Host "  build     Run build"
+        Write-Host "  runtime   Show canonical runtime state from terminal-server"
+        Write-Host ""
+        Write-Host "LiTT CLI not found — install with: pwsh -File packages/litt-cli/scripts/install-litt-cli.ps1" -ForegroundColor Yellow
+        exit 0
+    }
     Write-Host "LiTT CLI not found." -ForegroundColor Red
     Write-Host "  Options (in priority order):" -ForegroundColor Yellow
     Write-Host "    1. Set LITT_CLI_PATH env var to the built CLI path" -ForegroundColor Gray
@@ -293,6 +289,19 @@ if (-not $cliPath) {
     exit 1
 }
 
-$allArgs = @($Command) + $Rest
-& node $cliPath @allArgs
+# Forward ALL arguments to the Node CLI.
+# Bare `litt` (no args) → $Command is "" → pass nothing → CLI defaults to cockpit.
+# `litt --version` → pass "--version" → CLI prints version.
+# `litt doctor` → pass "doctor" → CLI runs doctor.
+# `litt status` → pass "status" → CLI runs status.
+if ($Command -eq "" -and $Rest.Count -eq 0) {
+    # Bare `litt` — no arguments at all → let the Node CLI handle it (defaults to cockpit)
+    & node $cliPath
+} else {
+    # Build the full argument list, preserving everything
+    $allArgs = @()
+    if ($Command) { $allArgs += $Command }
+    if ($Rest) { $allArgs += $Rest }
+    & node $cliPath @allArgs
+}
 exit $LASTEXITCODE

@@ -25,9 +25,9 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
-import { VoiceSessionProvider } from "@/app/studio/context/VoiceSessionContext";
-import { AGENT_META, type ChatMessage } from "@/app/studio/stores/useStudioAgentStore";
+import { useVoiceSession } from "@/app/(app)/studio/context/VoiceSessionContext";
+import { VoiceSessionProvider } from "@/app/(app)/studio/context/VoiceSessionContext";
+import { AGENT_META, type ChatMessage } from "@/app/(app)/studio/stores/useStudioAgentStore";
 
 // ---------------------------------------------------------------------------
 // Page context derivation

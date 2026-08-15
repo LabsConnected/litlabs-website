@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { NavAuth } from "@/components/ClerkAuth";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { Component, type ReactNode } from "react";
+import { Component, type ReactNode, useEffect, useState } from "react";
 
 class AuthBoundary extends Component<{ children: ReactNode }> {
   state = { hasError: false };
@@ -26,6 +26,16 @@ class AuthBoundary extends Component<{ children: ReactNode }> {
   }
 }
 
+/** Skeleton placeholder matching button height — avoids hydration mismatch on static pages */
+function AuthPlaceholder() {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-9 w-20 animate-pulse rounded-xl bg-white/5" />
+      <div className="h-9 w-24 animate-pulse rounded-xl bg-white/10" />
+    </div>
+  );
+}
+
 function AuthButtons() {
   const { isSignedIn, isLoaded } = useClerkAuth();
   return (
@@ -44,6 +54,15 @@ function AuthButtons() {
 }
 
 export function LandingHeaderAuth() {
+  // The landing page is statically prerendered, so the initial HTML always
+  // shows the signed-out state. Render a placeholder on first paint, then
+  // mount the real auth component after hydration so Clerk can detect the
+  // actual session client-side without a hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) return <AuthPlaceholder />;
+
   return (
     <AuthBoundary>
       <AuthButtons />

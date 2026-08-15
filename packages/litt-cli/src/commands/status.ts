@@ -1,16 +1,16 @@
 /**
  * litt status — Show project + git status.
  *
- * Wired through @litt/agent-core CommandRouter → ToolRegistry → ShellExecutor.
- * This is the canonical status path. No duplicate implementation.
+ * Wired through RuntimeSession → CommandRouter → ToolRegistry → ShellExecutor.
+ * The session owns the canonical RuntimeStore — single source of truth.
  */
 
-import { createShellExecutor, CommandRouter } from "@litt/agent-core";
-import { ok, fail, warn, header, label, value, c } from "../lib/utils.js";
+import { RuntimeSession } from "../lib/runtime-session.js";
+import { detectProject, ok, fail, warn, header, label, value, c } from "../lib/utils.js";
 
-export async function statusCommand(_args: string[]): Promise<number> {
-  const shell = createShellExecutor(process.cwd());
-  const router = new CommandRouter(shell, { cwd: process.cwd() });
+export async function statusCommand(_args: string[], session?: RuntimeSession): Promise<number> {
+  const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
+  const router = sess.getRouter();
 
   const result = await router.status();
 
@@ -19,21 +19,22 @@ export async function statusCommand(_args: string[]): Promise<number> {
     return 1;
   }
 
-  const project = result.project;
-  if (!project) {
-    fail("No project detected");
-    return 1;
-  }
+  // Use the CLI's canonical project detection for identity (package.json name),
+  // not the router's path.basename fallback. This ensures status, cockpit,
+  // and all CLI surfaces show the same project name.
+  const detected = detectProject();
+  const projectRoot = detected.rootDir;
+  const projectName = String(detected.packageJson?.name ?? detected.dirName);
 
   header("Project Status");
-  console.log(`${label("Root:")} ${value(project.root, c.bold)}`);
-  console.log(`${label("Name:")} ${value(project.name, c.bold)}`);
+  console.log(`${label("Root:")} ${value(projectRoot, c.bold)}`);
+  console.log(`${label("Name:")} ${value(projectName, c.bold)}`);
 
-  if (project.isGitRepo) {
+  if (detected.hasGit) {
     header("Git");
-    ok(`Branch: ${project.branch ?? "detached"}`);
-    if (project.remote) {
-      console.log(`  ${c.gray}remote: ${project.remote}${c.reset}`);
+    ok(`Branch: ${detected.gitBranch ?? "detached"}`);
+    if (detected.gitRemote) {
+      console.log(`  ${c.gray}remote: ${detected.gitRemote}${c.reset}`);
     }
 
     const gitStatus = result.result.data?.gitStatus as

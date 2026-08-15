@@ -293,13 +293,13 @@ describe("Discovery regression — JSON-LD structured data", () => {
 describe("Discovery regression — About page", () => {
   it("page file exists", () => {
     expect(
-      existsSync(path.resolve(__dirname, "../src/app/about/page.tsx"))
+      existsSync(path.resolve(__dirname, "../src/app/(app)/about/page.tsx"))
     ).toBe(true);
   });
 
   it("exports metadata with buildMetadata", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/about/page.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/about/page.tsx"),
       "utf-8"
     );
     expect(src).toContain("buildMetadata");
@@ -346,7 +346,7 @@ describe("Discovery regression — no WordPress fingerprints", () => {
 describe("Discovery regression — studio noindex", () => {
   it("studio layout sets robots index:false", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/studio/layout.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/studio/layout.tsx"),
       "utf-8"
     );
     expect(src).toContain("index: false");
@@ -358,7 +358,7 @@ describe("Discovery regression — studio noindex", () => {
 describe("Discovery regression — showcase metadata", () => {
   it("showcase layout exports buildMetadata", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/showcase/layout.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/showcase/layout.tsx"),
       "utf-8"
     );
     expect(src).toContain("buildMetadata");

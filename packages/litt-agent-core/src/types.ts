@@ -15,8 +15,24 @@
 
 // ─── Shell ────────────────────────────────────────────────────────
 
+/**
+ * Stream chunk emitted during command execution.
+ * Both stdout and stderr are streamed incrementally so the CLI cockpit
+ * and Studio can show real-time output without waiting for completion.
+ */
+export interface StreamChunk {
+  /** "stdout" or "stderr" */
+  stream: "stdout" | "stderr";
+  /** Text content (already decoded, secrets redacted by executor) */
+  text: string;
+  /** Timestamp (ms since epoch) when this chunk was received */
+  ts: number;
+}
+
 export interface ShellResult {
   ok: boolean;
+  /** Discrete status (canonical — matches ToolStatus semantics) */
+  status: "success" | "failed" | "cancelled" | "timeout";
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -25,6 +41,8 @@ export interface ShellResult {
   args: string[];
   truncated: boolean;
   error?: string;
+  /** Process ID of the spawned child (for debugging orphan processes) */
+  pid: number | null;
 }
 
 export interface ShellExecuteOptions {
@@ -34,15 +52,40 @@ export interface ShellExecuteOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   env?: Record<string, string>;
+  /** Optional streaming callback — invoked for each stdout/stderr chunk */
+  onStream?: (chunk: StreamChunk) => void;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────
 
 /**
+ * Canonical tool execution status.
+ *
+ * Four discrete outcomes — not a boolean:
+ *   success:   completed normally (exit 0 or equivalent)
+ *   failed:    completed abnormally (non-zero exit, error, or rejection)
+ *   cancelled: aborted by user or runtime before completion
+ *   timeout:   exceeded the configured time limit
+ *
+ * `success` and `failed` are natural completions.
+ * `cancelled` and `timeout` are unnatural completions (the process did not
+ * finish on its own — it was killed).
+ */
+export type ToolStatus = "success" | "failed" | "cancelled" | "timeout";
+
+/**
  * Canonical tool result shape.
  * Derived from src/lib/vapi-tools.ts ToolResult.
+ *
+ * `success` is retained for backward compatibility but is derived:
+ *   success = (status === "success")
+ *
+ * New code should check `status` instead of `success`.
  */
 export interface ToolResult {
+  /** Discrete execution status (canonical) */
+  status: ToolStatus;
+  /** Backward-compatible boolean: true iff status === "success" */
   success: boolean;
   message: string;
   data: Record<string, unknown>;
@@ -91,6 +134,18 @@ export interface ToolMetadata {
   projectScoped: boolean;
   mutating: boolean;
   readOnly: boolean;
+  /**
+   * Optional credential requirements (SEC-5).
+   * If provided, the ExecutionGateway resolves credential leases
+   * before dispatching the tool. Each entry specifies a provider
+   * and the scopes needed.
+   * A tool with requiresCredentials cannot execute without valid leases.
+   */
+  requiresCredentials?: Array<{
+    provider: string;
+    scopes: string[];
+    audience: string | null;
+  }>;
 }
 
 export interface ToolEntry {
@@ -103,7 +158,13 @@ export interface ToolEntry {
 
 export interface ShellExecutor {
   execute(options: ShellExecuteOptions): Promise<ShellResult>;
-  cancel(): Promise<void>;
+  /**
+   * Cancel the currently running command.
+   * Kills the entire process tree (not just the direct child) to
+   * guarantee zero orphan processes.
+   * Returns the list of PIDs that were killed (for audit/debugging).
+   */
+  cancel(): Promise<number[]>;
   readonly cwd: string;
   readonly platform: NodeJS.Platform | string;
   readonly environment: Record<string, string>;
@@ -206,22 +267,38 @@ export interface RuntimeState {
 
 // ─── Runtime Events ───────────────────────────────────────────────
 
+/**
+ * Canonical runtime event types.
+ *
+ * `litt_event` is the unified broadcast type — all surfaces (CLI cockpit,
+ * Studio, Socket.IO) listen for this and dispatch on the `subtype` field.
+ * Individual event types (phase_change, tool_call, etc.) are also emitted
+ * directly for surfaces that want to handle them individually.
+ */
 export type RuntimeEventType =
   | "phase_change"
   | "tool_call"
   | "tool_result"
+  | "tool_stream"
   | "delta"
   | "error"
   | "status"
   | "heartbeat"
   | "command_start"
   | "command_end"
-  | "state_sync";
+  | "state_sync"
+  | "litt_event";
 
 export interface RuntimeEvent {
   type: RuntimeEventType;
   ts: number;
   data: Record<string, unknown>;
+  /** For litt_event: the specific event subtype being broadcast */
+  subtype?: string;
+  /** Canonical run ID — present on all events belonging to a specific run */
+  runId?: string;
+  /** Canonical tool call ID — present on tool_call, tool_result, tool_stream */
+  toolCallId?: string;
 }
 
 export type RuntimeEventEmitter = (event: RuntimeEvent) => void;

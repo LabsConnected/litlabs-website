@@ -2,14 +2,12 @@
 
 import { useSelectionStore, type SelectionType } from "@/stores/useSelectionStore";
 import { useProjectStore } from "@/stores/useProjectStore";
-import {
-  ImageIcon,
-  CodeIcon,
-  RobotIcon,
-  RocketIcon,
-  BrainIcon,
-  GearIcon,
-} from "@phosphor-icons/react";
+import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
+import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
+import { RobotIcon } from "@phosphor-icons/react/dist/csr/Robot";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
+import { BrainIcon } from "@phosphor-icons/react/dist/csr/Brain";
+import { GearIcon } from "@phosphor-icons/react/dist/csr/Gear";
 
 const typeConfig: Record<SelectionType, { icon: typeof ImageIcon; label: string }> = {
   component: { icon: CodeIcon, label: "Component" },

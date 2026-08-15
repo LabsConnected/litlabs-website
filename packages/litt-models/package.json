@@ -1,0 +1,31 @@
+{
+  "name": "@litt/models",
+  "version": "0.1.0",
+  "description": "LiTT Model Registry — canonical model catalog, provider source-truth, and LiTT Auto routing. Shared by web runtime and CLI. Pure TypeScript, no React/Next/Clerk/Supabase.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx src/__tests__/*.test.ts",
+    "prepublishOnly": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "tsx": "^4.23.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

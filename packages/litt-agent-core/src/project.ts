@@ -139,6 +139,7 @@ export async function gitStatus(shell: ShellExecutor, cwd?: string): Promise<Too
 
   if (!res.ok) {
     return {
+      status: "failed",
       success: false,
       message: `git status failed: ${res.error ?? res.stderr}`,
       data: {},
@@ -147,6 +148,7 @@ export async function gitStatus(shell: ShellExecutor, cwd?: string): Promise<Too
 
   const lines = res.stdout.trim().split("\n").filter((l) => l.trim());
   return {
+    status: "success",
     success: true,
     message: lines.length === 0 ? "Working tree clean" : `${lines.length} change(s)`,
     data: {
@@ -172,6 +174,7 @@ export async function gitDiff(shell: ShellExecutor, cwd?: string, staged = false
 
   if (!res.ok) {
     return {
+      status: "failed",
       success: false,
       message: `git diff failed: ${res.error ?? res.stderr}`,
       data: {},
@@ -180,6 +183,7 @@ export async function gitDiff(shell: ShellExecutor, cwd?: string, staged = false
 
   const diff = res.stdout.trim();
   return {
+    status: "success",
     success: true,
     message: diff ? `${diff.split("\n").length} line(s) of diff` : "No changes",
     data: {
@@ -207,6 +211,7 @@ export async function gitLog(
 
   if (!res.ok) {
     return {
+      status: "failed",
       success: false,
       message: `git log failed: ${res.error ?? res.stderr}`,
       data: {},
@@ -215,6 +220,7 @@ export async function gitLog(
 
   const commits = res.stdout.trim().split("\n").filter((l) => l.trim());
   return {
+    status: "success",
     success: true,
     message: `${commits.length} commit(s)`,
     data: {
@@ -238,6 +244,7 @@ export async function gitBranch(shell: ShellExecutor, cwd?: string): Promise<Too
 
   if (!res.ok) {
     return {
+      status: "failed",
       success: false,
       message: `git branch failed: ${res.error ?? res.stderr}`,
       data: {},
@@ -246,6 +253,7 @@ export async function gitBranch(shell: ShellExecutor, cwd?: string): Promise<Too
 
   const branch = res.stdout.trim();
   return {
+    status: "success",
     success: true,
     message: branch ? `On branch ${branch}` : "Detached HEAD",
     data: { branch: branch || null },
@@ -265,6 +273,7 @@ export async function listFiles(
 
   if (!fs.existsSync(root)) {
     return {
+      status: "failed",
       success: false,
       message: `Directory not found: ${dirPath}`,
       data: {},
@@ -278,12 +287,14 @@ export async function listFiles(
       type: e.isDirectory() ? "dir" : "file",
     }));
     return {
-      success: true,
+      status: "success",
+    success: true,
       message: `${files.length} entr(y/ies)`,
       data: { files },
     };
   } catch (err) {
     return {
+      status: "failed",
       success: false,
       message: `Failed to list: ${err instanceof Error ? err.message : String(err)}`,
       data: {},
@@ -304,6 +315,7 @@ export async function readFile(
   // Path safety — block sensitive files
   if (!isSafePath(filePath)) {
     return {
+      status: "failed",
       success: false,
       message: `Blocked: ${filePath} matches sensitive file pattern`,
       data: {},
@@ -312,6 +324,7 @@ export async function readFile(
 
   if (!fs.existsSync(root)) {
     return {
+      status: "failed",
       success: false,
       message: `File not found: ${filePath}`,
       data: {},
@@ -322,19 +335,22 @@ export async function readFile(
     const stat = fs.statSync(root);
     if (stat.size > maxBytes) {
       return {
-        success: false,
+        status: "failed",
+      success: false,
         message: `File too large: ${stat.size} bytes (max ${maxBytes})`,
         data: { size: stat.size },
       };
     }
     const content = fs.readFileSync(root, "utf8");
     return {
-      success: true,
+      status: "success",
+    success: true,
       message: `${content.length} chars from ${filePath}`,
       data: { content, size: stat.size },
     };
   } catch (err) {
     return {
+      status: "failed",
       success: false,
       message: `Failed to read: ${err instanceof Error ? err.message : String(err)}`,
       data: {},
@@ -363,7 +379,8 @@ export async function searchFiles(
   if (res.ok) {
     const lines = res.stdout.trim().split("\n").filter((l) => l.trim()).slice(0, maxResults);
     return {
-      success: true,
+      status: "success",
+    success: true,
       message: `${lines.length} match(es)`,
       data: { matches: lines, query },
     };
@@ -371,6 +388,7 @@ export async function searchFiles(
 
   // Not a git repo or no matches — return empty
   return {
+    status: "success",
     success: true,
     message: "No matches (not a git repo or empty result)",
     data: { matches: [], query },
@@ -391,6 +409,7 @@ export async function inspectPackageJson(
 
   if (!fs.existsSync(pkgPath)) {
     return {
+      status: "failed",
       success: false,
       message: "No package.json found",
       data: {},
@@ -401,7 +420,8 @@ export async function inspectPackageJson(
     const raw = fs.readFileSync(pkgPath, "utf8");
     const pkg = JSON.parse(raw);
     return {
-      success: true,
+      status: "success",
+    success: true,
       message: `${pkg.name ?? "unnamed"}@${pkg.version ?? "0.0.0"}`,
       data: {
         name: pkg.name,
@@ -413,6 +433,7 @@ export async function inspectPackageJson(
     };
   } catch (err) {
     return {
+      status: "failed",
       success: false,
       message: `Failed to parse package.json: ${err instanceof Error ? err.message : String(err)}`,
       data: {},
@@ -442,6 +463,7 @@ export async function runCommand(
   const result = await shell.execute({ command, args, cwd, timeoutMs });
 
   return {
+    status: result.status,
     success: result.ok,
     message: result.ok
       ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
@@ -454,6 +476,8 @@ export async function runCommand(
       exitCode: result.exitCode,
       durationMs: result.durationMs,
       truncated: result.truncated,
+      status: result.status,
+      pid: result.pid,
     },
   };
 }
@@ -471,19 +495,20 @@ export async function runScript(
   const pkgPath = path.join(root, "package.json");
 
   if (!fs.existsSync(pkgPath)) {
-    return { success: false, message: "No package.json found", data: {} };
+    return { status: "failed", success: false, message: "No package.json found", data: {} };
   }
 
   let pkg: { scripts?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
   } catch {
-    return { success: false, message: "Failed to parse package.json", data: {} };
+    return { status: "failed", success: false, message: "Failed to parse package.json", data: {} };
   }
 
   if (!pkg.scripts?.[scriptName]) {
     const available = Object.keys(pkg.scripts ?? {});
     return {
+      status: "failed",
       success: false,
       message: `No "${scriptName}" script in package.json. Available: ${available.join(", ") || "none"}`,
       data: { availableScripts: available },

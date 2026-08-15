@@ -314,9 +314,24 @@ importers:
       '@litt/agent-core':
         specifier: workspace:*
         version: link:../litt-agent-core
+      '@litt/models':
+        specifier: workspace:*
+        version: link:../litt-models
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
+      ink:
+        specifier: ^7.1.0
+        version: 7.1.0(@types/react@19.2.18)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.8)
+      ink-text-input:
+        specifier: ^6.0.0
+        version: 6.0.0(ink@7.1.0(@types/react@19.2.18)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.8))(react@19.2.8)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      socket.io-client:
+        specifier: 4.8.3
+        version: 4.8.3(bufferutil@4.1.0)
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -382,6 +397,18 @@ importers:
       babel-preset-expo:
         specifier: ~57.0.6
         version: 57.0.6(@babel/core@7.29.7)(@babel/runtime@7.29.7)(expo@57.0.11)(react-refresh@0.14.2)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  packages/litt-models:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.1
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -14322,6 +14349,13 @@ snapshots:
       react: 19.2.7
       type-fest: 4.41.0
 
+  ink-text-input@6.0.0(ink@7.1.0(@types/react@19.2.18)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.8))(react@19.2.8):
+    dependencies:
+      chalk: 5.6.2
+      ink: 7.1.0(@types/react@19.2.18)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.8)
+      react: 19.2.8
+      type-fest: 4.41.0
+
   ink@7.1.0(@types/react@19.2.17)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.7):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.3.0
@@ -14352,6 +14386,41 @@ snapshots:
       yoga-layout: 3.2.1
     optionalDependencies:
       '@types/react': 19.2.17
+      react-devtools-core: 6.1.5(bufferutil@4.1.0)
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  ink@7.1.0(@types/react@19.2.18)(bufferutil@4.1.0)(react-devtools-core@6.1.5(bufferutil@4.1.0))(react@19.2.8):
+    dependencies:
+      '@alcalzone/ansi-tokenize': 0.3.0
+      ansi-escapes: 7.3.0
+      ansi-styles: 6.2.3
+      auto-bind: 5.0.1
+      chalk: 5.6.2
+      cli-boxes: 4.0.1
+      cli-cursor: 4.0.0
+      cli-truncate: 6.1.1
+      code-excerpt: 4.0.0
+      es-toolkit: 1.49.0
+      indent-string: 5.0.0
+      is-in-ci: 2.0.0
+      patch-console: 2.0.0
+      react: 19.2.8
+      react-reconciler: 0.33.0(react@19.2.8)
+      scheduler: 0.27.0
+      signal-exit: 3.0.7
+      slice-ansi: 9.0.0
+      stack-utils: 2.0.6
+      string-width: 8.2.2
+      terminal-size: 4.0.1
+      type-fest: 5.8.0
+      widest-line: 6.0.0
+      wrap-ansi: 10.0.0
+      ws: 8.21.0(bufferutil@4.1.0)
+      yoga-layout: 3.2.1
+    optionalDependencies:
+      '@types/react': 19.2.18
       react-devtools-core: 6.1.5(bufferutil@4.1.0)
     transitivePeerDependencies:
       - bufferutil
@@ -16122,6 +16191,11 @@ snapshots:
   react-reconciler@0.33.0(react@19.2.7):
     dependencies:
       react: 19.2.7
+      scheduler: 0.27.0
+
+  react-reconciler@0.33.0(react@19.2.8):
+    dependencies:
+      react: 19.2.8
       scheduler: 0.27.0
 
   react-refresh@0.14.2: {}

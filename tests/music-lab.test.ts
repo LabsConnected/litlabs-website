@@ -32,7 +32,7 @@ describe("Music Lab P0.1 — UI lock fix", () => {
   });
 
   it("MusicTool isBusy does not include 'idle' in active states", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     // isBusy should check for active states but idle is not among them
     const isBusyLine = content.match(/const isBusy.*?includes\(status\)/);
     expect(isBusyLine).toBeTruthy();
@@ -40,7 +40,7 @@ describe("Music Lab P0.1 — UI lock fix", () => {
   });
 
   it("Controls are not disabled on fresh page load (isBusy is false initially)", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     // The isBusy check must not include "idle" — it should only list active states.
     // "claimed" was added alongside the durable job recovery work (P0.2) and is a
     // legitimate active state, so we assert against the full active-states set.
@@ -171,7 +171,7 @@ describe("Music Lab P0.4 — Composition plans", () => {
 
 describe("Music Lab P0.5 — Real status phases", () => {
   it("Progress display uses phase labels not just status text", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("Queued — waiting for producer");
     expect(content).toContain("Preparing — building blueprint");
     expect(content).toContain("Writing — composing your track");
@@ -179,7 +179,7 @@ describe("Music Lab P0.5 — Real status phases", () => {
   });
 
   it("Indeterminate progress bar animation exists", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("music-progress-indeterminate");
     const css = read("src/app/globals.css");
     expect(css).toContain("music-progress-indeterminate");
@@ -198,7 +198,7 @@ describe("Music Lab P0.6 — Cancel confirmation", () => {
   });
 
   it("Cancel button shows loading state", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("isCancelling");
     expect(content).toContain("Cancelling…");
   });
@@ -230,7 +230,7 @@ describe("Music Lab Phase 3+4 — Real AI producer", () => {
   });
 
   it("MusicTool handleImprovePrompt calls API (not random suffix)", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("/api/music/enhance-prompt");
     expect(content).toContain("isEnhancing");
     // Must NOT contain the old random enhancers
@@ -238,7 +238,7 @@ describe("Music Lab Phase 3+4 — Real AI producer", () => {
   });
 
   it("MusicTool handleProducerSend calls API (not canned keywords)", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("/api/music/producer");
     expect(content).toContain("isProducerLoading");
     // Must NOT contain the old canned keyword matching
@@ -246,7 +246,7 @@ describe("Music Lab Phase 3+4 — Real AI producer", () => {
   });
 
   it("Producer transform buttons show loading state", () => {
-    const content = read("src/app/studio/tools/MusicTool.tsx");
+    const content = read("src/app/(app)/studio/tools/MusicTool.tsx");
     expect(content).toContain("isProducerLoading");
   });
 });
