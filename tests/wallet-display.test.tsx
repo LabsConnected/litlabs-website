@@ -80,11 +80,26 @@ describe("Wallet page display text", () => {
     expect(screen.queryByText("Credit balance unavailable.")).toBeNull();
   });
 
-  // NOTE: The "Credit balance unavailable." error-display test is
-  // deferred to Commit B, which adds isError support to the wallet
-  // page itself. The wallet CONTEXT already exposes isError (tested
-  // in wallet-context-state.test.tsx), but the wallet PAGE does not
-  // yet destructure or render it.
+  it("renders 'Credit balance unavailable.' when isError is true", async () => {
+    vi.mocked(mockedUseWallet).mockReturnValue({
+      balance: 0,
+      claimed: false,
+      isLoading: false,
+      isClaiming: false,
+      isError: true,
+      claim: vi.fn().mockResolvedValue(true),
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const mod = await import("@/app/(app)/wallet/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+
+    expect(screen.getByText("Credit balance unavailable.")).toBeTruthy();
+    // Should NOT render the "0" balance number when in error state.
+    expect(screen.queryByText("0")).toBeNull();
+  });
 
   it("renders a spinner when isLoading is true (not 0 or unavailable)", async () => {
     vi.mocked(mockedUseWallet).mockReturnValue({

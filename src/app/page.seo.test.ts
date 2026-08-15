@@ -26,8 +26,6 @@ const homeSchema = {
         "https://github.com/LabsConnected",
         "https://www.youtube.com/@LiTTreeLabStudios",
         "https://www.linkedin.com/company/litlabs",
-        "https://x.com/LitLabsNet",
-        "https://www.instagram.com/litlabsnet",
       ],
       logo: {
         "@type": "ImageObject",

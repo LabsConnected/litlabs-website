@@ -136,6 +136,7 @@ function MarketplaceInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState<"marketplace" | "beta">("marketplace");
 
   // Sync tab from URL after hydration to avoid SSR/client mismatch (React #418)
@@ -150,14 +151,20 @@ function MarketplaceInner() {
 
   // Load items from /api/marketplace/items
   const loadItems = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const res = await fetch("/api/marketplace/items");
+      if (!res.ok) {
+        setLoadError(true);
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data.items)) {
         setItems(data.items);
       }
     } catch {
-      // Keep empty list on error
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -521,13 +528,23 @@ function MarketplaceInner() {
               {searchQuery ? "Search results" : "All capabilities"}
               <span className="ml-2 text-white/30">({filteredItems.length})</span>
             </p>
-            {filteredItems.length === 0 ? (
+            {loadError ? (
+              <div className="py-12 text-center">
+                <p className="text-white/40">Marketplace couldn&rsquo;t load.</p>
+                <button
+                  onClick={() => loadItems()}
+                  className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredItems.length === 0 ? (
               <div className="py-12 text-center">
                 <p className="text-white/40">
                   {loading
                     ? "Loading capabilities..."
                     : items.length === 0
-                      ? "No marketplace items available yet. Run the database migration to seed items."
+                      ? "No tools available yet."
                       : `No items found matching "${searchQuery}".`}
                 </p>
                 {searchQuery && (

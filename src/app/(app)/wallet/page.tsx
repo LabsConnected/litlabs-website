@@ -41,7 +41,7 @@ export default function WalletPage() {
 
 function WalletContent() {
   const { resolvedColors: T } = useTheme();
-  const { balance, claimed, isLoading, isClaiming, claim } = useWallet();
+  const { balance, claimed, isLoading, isClaiming, isError, claim } = useWallet();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const searchParams = useSearchParams();
   const tab = (searchParams.get("tab") as Tab) || "overview";
@@ -88,6 +88,13 @@ function WalletContent() {
                     size={28}
                     style={{ color: T.accentColor }}
                   />
+                ) : isError ? (
+                  <span
+                    className="text-lg font-bold"
+                    style={{ color: T.textMuted }}
+                  >
+                    Credit balance unavailable.
+                  </span>
                 ) : (
                   <>
                     <span
