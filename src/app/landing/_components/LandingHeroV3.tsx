@@ -296,7 +296,7 @@ export function LandingHeroV3() {
                       <div
                         key={item.name}
                         className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] ${
-                          item.active
+                          ("active" in item && item.active)
                             ? "bg-violet-500/15 text-violet-300"
                             : "text-neutral-400"
                         }`}
