@@ -14,6 +14,7 @@ describe("DEMO badge regression", () => {
     process.cwd(),
     "src",
     "app",
+    "(app)",
     "studio",
     "components",
     "CommandStudioHeader.tsx",

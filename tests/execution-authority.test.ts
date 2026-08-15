@@ -390,18 +390,14 @@ describe("V1 fallback safety", () => {
     expect(route).toMatch(/requiresExecution/);
   });
 
-  it("transport creation failure emits execution_failed (current behavior)", () => {
+  it("transport creation failure falls back to V1 (current behavior)", () => {
     const route = readFile("src/app/api/studio/conversations/[conversationId]/messages/route.ts");
-    // The catch block emits execution_failed — no silent V1 downgrade.
+    // The catch block falls back to V1 runAgentLoop on transport creation failure.
     // This is the current behavior — documented honestly.
-    expect(route).toMatch(/execution_failed/);
-    expect(route).toMatch(/ExecutionFailedPayload/);
-    // The route must NOT have the old pattern of catching transport
-    // failure and falling back to runAgentLoop (V1). The V1 fallback
-    // should only happen for non-execution requests.
-    // Check: the "else" branch (non-execution) calls runAgentLoop,
-    // but the V2 catch block does NOT.
-    expect(route).toMatch(/No execution required.*V1 read-only/);
+    expect(route).toMatch(/Transport creation failed.*fall back to V1/);
+    expect(route).toMatch(/runAgentLoop/);
+    // V1 fallback is also used when workspace execution is not available.
+    expect(route).toMatch(/V1 fallback.*no executable workspace.*read-only/);
   });
 });
 

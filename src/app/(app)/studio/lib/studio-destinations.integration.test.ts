@@ -29,11 +29,11 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.legacyTool).toBe("chat");
     });
 
-    it("?tool=canvas → Studio Files / Canvas surface (NOT Work)", () => {
+    it("?tool=canvas → Studio Work with website mode (Canvas is a LiTT website capability)", () => {
       const r = mapLegacyToolToDestination("canvas");
       expect(r.destination).toBe("studio");
-      expect(r.mode).toBe("files");
-      expect(r.mode).not.toBe("work");
+      expect(r.mode).toBe("work");
+      expect(r.littMode).toBe("website");
     });
 
     it("?tool=code → Studio Code surface", () => {
@@ -47,8 +47,6 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.destination).toBe("studio");
       expect(r.mode).toBe("work");
       expect(r.legacyTool).toBe("build");
-      // The CommandStudio component uses legacyTool==="build" to render
-      // BuilderTool instead of the conversation transcript.
     });
 
     it("?tool=terminal → Studio Work with drawer open on Terminal", () => {
@@ -64,28 +62,28 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.mode).toBe("forge");
     });
 
-    it("?tool=image → Create / Image", () => {
+    it("?tool=image → Studio Work with image mode (LiTT chat is the primary surface)", () => {
       const r = mapLegacyToolToDestination("image");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("image");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("image");
     });
 
-    it("?tool=video → Create / Video", () => {
+    it("?tool=video → Studio Work with video mode", () => {
       const r = mapLegacyToolToDestination("video");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("video");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("video");
     });
 
-    it("?tool=audio → Create / Audio", () => {
+    it("?tool=audio → Studio Work with music mode", () => {
       const r = mapLegacyToolToDestination("audio");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("audio");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("music");
     });
 
-    it("?tool=color → Create / Image (color tool removed, legacy redirect)", () => {
+    it("?tool=color → Studio Work with image mode (color tool removed, legacy redirect)", () => {
       const r = mapLegacyToolToDestination("color");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("image");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("image");
     });
 
     it("?tool=assets → Assets", () => {
@@ -101,8 +99,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
       expect(mapLegacyToolToDestination("camera").destination).toBe("studio");
       expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
-      expect(mapLegacyToolToDestination("space").destination).toBe("create");
-      expect(mapLegacyToolToDestination("space").mode).toBe("environment");
+      expect(mapLegacyToolToDestination("space").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("space").littMode).toBe("auto");
       expect(mapLegacyToolToDestination("clibridge").destination).toBe("more");
       expect(mapLegacyToolToDestination("clibridge").mode).toBe("clibridge");
       expect(mapLegacyToolToDestination("workflows").destination).toBe("missions");

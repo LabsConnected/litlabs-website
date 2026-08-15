@@ -207,6 +207,14 @@ export function mapLegacyToolToDestination(
   tool: StudioTool | string | null,
   command?: string,
 ): DestinationState {
+  // ── Builder adapter — special case before LiTT mode normalization ──
+  // "build" is a build execution surface, not a creative tool. The
+  // CommandStudio component checks legacyTool === "build" to render the
+  // Builder adapter instead of the conversation transcript.
+  if (tool === "build") {
+    return { destination: "studio", legacyTool: "build", mode: "work", littMode: "website", command };
+  }
+
   // ── LiTT mode normalization ──
   // ALL creative tools (image/video/music/code/website) normalize to
   // the canonical LiTT chat surface. The conversation is permanent and

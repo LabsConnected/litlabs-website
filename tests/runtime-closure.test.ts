@@ -6,6 +6,8 @@
  * The command count is whatever the registry actually contains.
  */
 
+import fs from "fs";
+import path from "path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   COMMAND_REGISTRY,
@@ -387,8 +389,6 @@ describe("Secret Redaction", () => {
 
 describe("Process Safety Contract", () => {
   it("test-runtime.ps1 does not use Stop-Process -Name node", () => {
-    const fs = require("fs");
-    const path = require("path");
     const ps1 = fs.readFileSync(
       path.join(__dirname, "..", "tools", "test-runtime.ps1"),
       "utf8",
@@ -398,8 +398,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("test-runtime.ps1 does not use taskkill /IM", () => {
-    const fs = require("fs");
-    const path = require("path");
     const ps1 = fs.readFileSync(
       path.join(__dirname, "..", "tools", "test-runtime.ps1"),
       "utf8",
@@ -408,8 +406,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("test-runtime.ps1 uses taskkill /PID (PID-specific)", () => {
-    const fs = require("fs");
-    const path = require("path");
     const ps1 = fs.readFileSync(
       path.join(__dirname, "..", "tools", "test-runtime.ps1"),
       "utf8",
@@ -418,8 +414,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("test-runtime.ps1 has try/finally for cleanup", () => {
-    const fs = require("fs");
-    const path = require("path");
     const ps1 = fs.readFileSync(
       path.join(__dirname, "..", "tools", "test-runtime.ps1"),
       "utf8",
@@ -430,8 +424,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("test-runtime.ps1 verifies PID ownership before killing", () => {
-    const fs = require("fs");
-    const path = require("path");
     const ps1 = fs.readFileSync(
       path.join(__dirname, "..", "tools", "test-runtime.ps1"),
       "utf8",
@@ -441,8 +433,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("shell.ts uses PID-specific taskkill (not /IM)", () => {
-    const fs = require("fs");
-    const path = require("path");
     const shell = fs.readFileSync(
       path.join(__dirname, "..", "packages", "litt-agent-core", "src", "shell.ts"),
       "utf8",
@@ -452,8 +442,6 @@ describe("Process Safety Contract", () => {
   });
 
   it("execution.ts classifies taskkill as destructive", () => {
-    const fs = require("fs");
-    const path = require("path");
     const exec = fs.readFileSync(
       path.join(__dirname, "..", "packages", "litt-agent-core", "src", "execution.ts"),
       "utf8",

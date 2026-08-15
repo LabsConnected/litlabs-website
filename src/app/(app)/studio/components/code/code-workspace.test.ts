@@ -19,7 +19,7 @@ describe("Studio Code/Preview URL separation", () => {
     const r = mapLegacyToolToDestination("code");
     expect(r.destination).toBe("studio");
     expect(r.mode).toBe("code");
-    expect(r.legacyTool).toBe("code");
+    expect(r.littMode).toBe("code");
   });
 
   it("?tool=preview maps to Studio/Preview (not Code)", () => {
