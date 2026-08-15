@@ -481,6 +481,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         const projectRoot = session.getCwd();
         const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
 
+        store.actions.setAssistantResponse("", true);
+
         store.actions.addActivity({
           id: `act_${Date.now()}`,
           ts: Date.now(),
@@ -532,6 +534,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                 if (isToolCallMarkup(event.text)) return;
                 // Accumulate clean response text for a single summary event
                 chatResponseText += event.text;
+                store.actions.setAssistantResponse(chatResponseText, true);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -576,6 +579,11 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             },
           });
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
+          store.actions.setAssistantResponse(
+            chatResponseText.trim() || "LiTT completed without a text response.",
+            false,
+          );
+
           const seconds = (result.durationMs / 1000).toFixed(1);
           // Single concise DONE event — not raw response body
           store.actions.addActivity({
@@ -595,6 +603,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             text: truncateActivity(errText, 60),
             fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
           });
+          store.actions.setAssistantResponse(errText, false);
+
           // Clear processing on failure too — composer must return to editable
           store.actions.setIsProcessing(false);
           store.actions.setHoloState("FAILED");
@@ -641,6 +651,9 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         const model = new OpenRouterModelProvider({ model: routed.id });
 
         let missionToolCallCount = 0;
+        let missionResponseText = "";
+
+        store.actions.setAssistantResponse("", true);
 
         const result = await runAgentLoop(input, {
           model, tools, shell, gateway,
@@ -653,11 +666,16 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           },
           store: agentStore,
           onModelStream: (event) => {
-            // Model prose (deltas) do NOT go into the activity feed.
-            // Activity shows only structured operator events:
-            // THINK, ROUTE, READ, EDIT, RUN, PASS, FAIL, DONE.
-            // The response text belongs in a conversation area, not
-            // duplicated as streaming deltas in the operator feed.
+            if (event.type === "delta") {
+              if (isToolCallMarkup(event.text)) return;
+
+              missionResponseText += event.text;
+
+              store.actions.setAssistantResponse(
+                missionResponseText,
+                true,
+              );
+            }
           },
           onToolStream: (chunk: StreamChunk) => {
             // Tool stdout/stderr — only show stderr lines (errors are
@@ -724,6 +742,14 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
         const seconds = (result.durationMs / 1000).toFixed(1);
+        store.actions.setAssistantResponse(
+          missionResponseText.trim() ||
+            (result.termination === "complete"
+              ? "Mission complete."
+              : "Mission stopped."),
+          false,
+        );
+
         const doneText = `Mission ${result.termination === "complete" ? "complete" : "stopped"} · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`;
         store.actions.addActivity({
           id: `act_${Date.now()}_done`,
@@ -750,6 +776,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           text: truncateActivity(errText, 60),
           fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
         });
+        store.actions.setAssistantResponse(errText, false);
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
       }

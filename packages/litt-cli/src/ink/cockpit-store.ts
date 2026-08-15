@@ -63,6 +63,11 @@ export interface ActivityEntry {
   stream?: "stdout" | "stderr";
 }
 
+export interface AssistantResponseState {
+  text: string;
+  streaming: boolean;
+}
+
 /**
  * Mission tracking — the real runtime lifecycle of a task.
  */
@@ -163,6 +168,11 @@ export function useCockpitStore() {
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [lastCompletedMission, setLastCompletedMission] = useState<MissionState | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [assistantResponse, setAssistantResponseState] =
+    useState<AssistantResponseState>({
+      text: "",
+      streaming: false,
+    });
   const [branch, setBranch] = useState<string>("unknown");
 
   const addActivity = useCallback((entry: ActivityEntry) => {
@@ -249,6 +259,20 @@ export function useCockpitStore() {
     setMissionState(null);
   }, []);
 
+  const setAssistantResponse = useCallback(
+    (text: string, streaming: boolean) => {
+      setAssistantResponseState({ text, streaming });
+    },
+    [],
+  );
+
+  const clearAssistantResponse = useCallback(() => {
+    setAssistantResponseState({
+      text: "",
+      streaming: false,
+    });
+  }, []);
+
   const addCommand = useCallback((cmd: string) => {
     if (cmd.trim()) {
       setCommandHistory((prev) => [...prev.slice(-100), cmd]);
@@ -303,6 +327,7 @@ export function useCockpitStore() {
       missionState,
       lastCompletedMission,
       isProcessing,
+      assistantResponse,
       branch,
     },
     actions: {
@@ -332,6 +357,8 @@ export function useCockpitStore() {
       setMissionRuntimeProven,
       clearMission,
       setIsProcessing,
+      setAssistantResponse,
+      clearAssistantResponse,
       setBranch,
     },
   };

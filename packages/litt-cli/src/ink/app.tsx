@@ -32,6 +32,7 @@ import { Subsystems } from "./subsystems.js";
 import { LiTTHoloPanel } from "./holo-panel.js";
 import { MissionSection } from "./mission-section.js";
 import { ActivityStream } from "./activity-stream.js";
+import { AssistantResponsePanel } from "./assistant-response.js";
 import { FilesInfo } from "./files-info.js";
 import { QuickActions } from "./quick-actions.js";
 import { CommandDock } from "./command-dock.js";
@@ -297,6 +298,19 @@ export function CockpitApp({
           {store.state.approvalPrompt && (
             <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
           )}
+
+          {/* LiTT's actual response — Activity remains operator telemetry */}
+          <AssistantResponsePanel
+            text={store.state.assistantResponse.text}
+            streaming={store.state.assistantResponse.streaming}
+            maxChars={
+              layoutMode === "full"
+                ? 1000
+                : layoutMode === "medium"
+                  ? 650
+                  : 350
+            }
+          />
 
           {/* Activity stream — always visible, shrinks in compact mode */}
           <ActivityStream
