@@ -498,6 +498,9 @@ export async function runAgentLoop(
         toolCallId,
         data: {
           tool: toolEntry.definition.name,
+          toolId: toolEntry.definition.id,
+          toolCallId,
+          success: result.success,
           status: result.status,
           message: result.message,
           durationMs: toolDurationMs,
