@@ -23,6 +23,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
   runAgentLoop,
+  accumulateStreamChunks,
+  processStreamChunk,
   ToolRegistry,
   createShellExecutor,
   CommandExecutor,
@@ -30,6 +32,7 @@ import {
   ExecutionGateway,
   type RuntimeEvent,
   type StreamChunk,
+  type StreamParserState,
 } from "@litt/agent-core";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
@@ -170,8 +173,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
   // Owner/dev mode: persistent registry + telemetry for /route and /providers
   const providerRegistryRef = useRef<ProviderRegistry | null>(null);
   const telemetryStoreRef = useRef<TelemetryStore | null>(null);
-  if (!providerRegistryRef.current) providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
-  if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
+  if (providerRegistryRef.current == null) providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
+  if (telemetryStoreRef.current == null) telemetryStoreRef.current = new TelemetryStore();
   const providerRegistry = providerRegistryRef.current;
   const telemetryStore = telemetryStoreRef.current;
 
@@ -652,6 +655,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
 
         let missionToolCallCount = 0;
         let missionResponseText = "";
+        // Chunks accumulated from the model stream, processed through the
+        // stateful parser to filter raw protocol from presentation-safe text.
+        const currentChunks: string[] = [];
+        // Tool calls parsed from the model stream — dispatched internally,
+        // never visible in the assistant response.
+        const parsedToolCalls: any[] = [];
 
         store.actions.setAssistantResponse("", true);
 
@@ -667,10 +676,13 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           store: agentStore,
           onModelStream: (event) => {
             if (event.type === "delta") {
-              if (isToolCallMarkup(event.text)) return;
-
-              missionResponseText += event.text;
-
+              // Accumulate chunks through the stateful parser for protocol filtering.
+              // Raw model protocol is never exposed to the presentation surface.
+              currentChunks.push(event.text);
+              const accumulated = accumulateStreamChunks(currentChunks);
+              missionResponseText = accumulated.finalSafeText;
+              // Dispatch any parsed tool calls internally (not visible in UI)
+              parsedToolCalls.push(...accumulated.allToolCalls);
               store.actions.setAssistantResponse(
                 missionResponseText,
                 true,

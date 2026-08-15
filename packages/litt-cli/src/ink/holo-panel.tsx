@@ -315,7 +315,7 @@ export function LiTTHoloPanel({ state, activeModel, routingReason, missionStarte
               <ProgressBar progress={progressPct} color={color} />
             </Box>
           )}
-          {isWorking && startRef.current && (
+          {isWorking && elapsed > 0 && (
             <Box marginTop={0}>
               <Text dimColor>{elapsed}s</Text>
             </Box>

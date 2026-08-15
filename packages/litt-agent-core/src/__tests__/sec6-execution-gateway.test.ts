@@ -922,7 +922,7 @@ describe("SEC-6.1 — Untrusted identity enforcement", () => {
     // stop catching dangerous commands.
     //
     // This test proves the mapping so nobody "fixes" it later.
-    const { classifyCommand } = require("../execution.js") as typeof import("../execution.js");
+    // classifyCommand is imported at the top of this file.
 
     // rm -rf → dangerous → destructive
     const rmRisk = classifyCommand("rm", ["-rf", "/tmp/test"], "C:\\test");

@@ -144,13 +144,15 @@ export {
   runAgentLoop,
   parseToolCall,
   stripToolCallBlocks,
-  buildDefaultSystemPrompt,
+  accumulateStreamChunks,
+  processStreamChunk,
 } from "./agent-loop.js";
 export type {
   AgentLoopOptions,
   AgentLoopResult,
   AgentToolCallRecord,
   ParsedToolCall,
+  StreamParserState,
 } from "./agent-loop.js";
 
 // VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)

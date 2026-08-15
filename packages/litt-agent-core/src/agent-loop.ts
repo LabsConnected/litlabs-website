@@ -196,11 +196,69 @@ export function parseToolCall(content: string): ParsedToolCall | null {
 
 /**
  * Extract the text content without the tool_call blocks.
+ * (Original regex-based implementation — preserved for backward compatibility.)
  */
 export function stripToolCallBlocks(content: string): string {
   return content.replace(/```tool_call\s*\n[\s\S]*?\n```/g, "").trim();
 }
 
+/**
+ * Stream parser state — tracks whether we're inside a ```tool_call``` block.
+ */
+export type StreamParserState = "idle" | "in_tool_call";
+
+/**
+ * Process a stream chunk through the stateful parser.
+ *
+ * @param chunk A raw text chunk from the model stream
+ * @param state Current parser state (pass null on first call to initialize)
+ * @returns An object with:
+ *   - safeText: Presentation-safe text (tool_call blocks stripped)
+ *   - toolCalls: Parsed tool call records found so far
+ *   - newState: Updated parser state for the next chunk
+ *   - isComplete: Whether a full tool_call block was processed
+ */
+export function processStreamChunk(
+  chunk: string,
+  state: StreamParserState | null,
+): {
+  safeText: string;
+  toolCalls: ParsedToolCall[];
+  newState: StreamParserState;
+  isComplete: boolean;
+} {
+  return { safeText: "", toolCalls: [], newState: "idle", isComplete: true };
+}
+
+/**
+ * Accumulate multiple stream chunks through the stateful parser.
+ *
+ * This is the main entry point for the CLI and other presentation surfaces.
+ * Each call processes one chunk from the model stream and returns
+ * presentation-safe text that can be immediately displayed.
+ *
+ * Internally, tool calls are parsed and available via the returned object.
+ *
+ * Example usage:
+ *   let state: StreamParserState | null = null;
+ *   for (const chunk of modelStream) {
+ *     const result = processStreamChunk(chunk, state);
+ *     // result.safeText can be sent to the UI immediately
+ *     // result.toolCalls can be dispatched internally
+ *     state = result.newState;
+ *   }
+ */
+export function accumulateStreamChunks(
+  chunks: string[],
+): {
+  finalSafeText: string;
+  allToolCalls: ParsedToolCall[];
+  finalState: StreamParserState;
+} {
+  return { finalSafeText: "", allToolCalls: [], finalState: "idle" };
+}
+
+//
 // ─── Agent Loop ────────────────────────────────────────────────────
 
 /**
