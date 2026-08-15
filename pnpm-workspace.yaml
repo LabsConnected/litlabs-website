@@ -5,4 +5,5 @@ packages:
   - "cli"
   - "packages/litt-agent-core"
   - "packages/litt-cli"
+  - "packages/litt-models"
   - "packages/litt-companion"
