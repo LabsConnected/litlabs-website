@@ -38,7 +38,6 @@ CREATE POLICY "Service role full access"
   WITH CHECK (auth.role() = 'service_role');
 
 -- Auto-update updated_at on row change
-DROP FUNCTION IF EXISTS update_service_inquiries_updated_at();
 CREATE OR REPLACE FUNCTION update_service_inquiries_updated_at()
   RETURNS trigger AS $$
 BEGIN

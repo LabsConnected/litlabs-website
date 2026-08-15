@@ -1,64 +1,61 @@
 /**
- * litt status — Show project + auth + git status.
- * Quick overview of the current project state.
+ * litt status — Show project + git status.
+ *
+ * Wired through RuntimeSession → CommandRouter → ToolRegistry → ShellExecutor.
+ * The session owns the canonical RuntimeStore — single source of truth.
  */
 
-import { ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
+import { RuntimeSession } from "../lib/runtime-session.js";
+import { detectProject, ok, fail, warn, header, label, value, c } from "../lib/utils.js";
 
-export async function statusCommand(_args: string[]): Promise<number> {
-  const project = detectProject();
+export async function statusCommand(_args: string[], session?: RuntimeSession): Promise<number> {
+  const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
+  const router = sess.getRouter();
 
-  header("Project Status");
+  const result = await router.status();
 
-  if (project.hasPackageJson) {
-    const pkg = project.packageJson!;
-    console.log(`${label("Name:")} ${value(String(pkg.name ?? "unnamed"), c.bold)}`);
-    console.log(`${label("Version:")} ${value(String(pkg.version ?? "0.0.0"))}`);
-    if (project.framework) console.log(`${label("Framework:")} ${value(project.framework, c.cyan)}`);
-    console.log(`${label("Package Mgr:")} ${value(project.packageManager ?? "npm", c.blue)}`);
-    console.log(`${label("TypeScript:")} ${project.hasTsConfig ? value("configured", c.green) : value("not configured", c.yellow)}`);
-  } else {
-    fail("No package.json found");
+  if (!result.result.success) {
+    fail(result.result.message);
     return 1;
   }
 
-  header("Git");
-  if (project.hasGit) {
-    ok(`Branch: ${project.gitBranch}`);
-    const changes = project.gitStatus ? project.gitStatus.split("\n").filter(Boolean) : [];
-    if (changes.length === 0) {
-      ok("Working tree clean");
-    } else {
-      warn(`${changes.length} uncommitted change(s):`);
-      for (const change of changes.slice(0, 10)) {
-        console.log(`  ${c.gray}${change}${c.reset}`);
-      }
-      if (changes.length > 10) {
-        console.log(`  ${c.dim}... and ${changes.length - 10} more${c.reset}`);
+  // Use the CLI's canonical project detection for identity (package.json name),
+  // not the router's path.basename fallback. This ensures status, cockpit,
+  // and all CLI surfaces show the same project name.
+  const detected = detectProject();
+  const projectRoot = detected.rootDir;
+  const projectName = String(detected.packageJson?.name ?? detected.dirName);
+
+  header("Project Status");
+  console.log(`${label("Root:")} ${value(projectRoot, c.bold)}`);
+  console.log(`${label("Name:")} ${value(projectName, c.bold)}`);
+
+  if (detected.hasGit) {
+    header("Git");
+    ok(`Branch: ${detected.gitBranch ?? "detached"}`);
+    if (detected.gitRemote) {
+      console.log(`  ${c.gray}remote: ${detected.gitRemote}${c.reset}`);
+    }
+
+    const gitStatus = result.result.data?.gitStatus as
+      | { changeCount: number; files: string[] }
+      | undefined;
+
+    if (gitStatus) {
+      if (gitStatus.changeCount === 0) {
+        ok("Working tree clean");
+      } else {
+        warn(`${gitStatus.changeCount} uncommitted change(s):`);
+        for (const change of gitStatus.files.slice(0, 10)) {
+          console.log(`  ${c.gray}${change}${c.reset}`);
+        }
+        if (gitStatus.files.length > 10) {
+          console.log(`  ${c.dim}... and ${gitStatus.files.length - 10} more${c.reset}`);
+        }
       }
     }
   } else {
     fail("Not a git repository");
-  }
-
-  header("Scripts");
-  if (project.packageJson?.scripts) {
-    const scripts = project.packageJson.scripts as Record<string, string>;
-    const commonScripts = ["dev", "build", "test", "lint", "start"];
-    for (const name of commonScripts) {
-      if (scripts[name]) {
-        console.log(`  ${c.green}pnpm run ${name}${c.reset} ${c.dim}— ${scripts[name]}${c.reset}`);
-      }
-    }
-    const extraScripts = Object.keys(scripts).filter((s) => !commonScripts.includes(s));
-    for (const name of extraScripts.slice(0, 5)) {
-      console.log(`  ${c.blue}pnpm run ${name}${c.reset} ${c.dim}— ${scripts[name]}${c.reset}`);
-    }
-    if (extraScripts.length > 5) {
-      console.log(`  ${c.dim}... and ${extraScripts.length - 5} more scripts${c.reset}`);
-    }
-  } else {
-    warn("No scripts defined in package.json");
   }
 
   return 0;

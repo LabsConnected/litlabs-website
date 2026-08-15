@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@clerk/backend": "^3.11.4",
+    "@litt/agent-core": "workspace:*",
     "@livekit/agents": "^1.6.2",
     "@livekit/agents-plugin-openai": "^1.6.2",
     "cors": "^2.8.5",

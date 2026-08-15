@@ -37,6 +37,11 @@ jobs:
         env:
           CI: true
 
+      - name: Build @litt/agent-core
+        run: pnpm --filter @litt/agent-core build
+        env:
+          CI: true
+
       - name: Type check
         run: npx tsc --noEmit
 
@@ -56,15 +61,47 @@ jobs:
         env:
           CI: true
           NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
 
-      - name: Playwright tests
+      - name: Playwright core tests (blocking)
         run: |
-          pnpm exec playwright install --with-deps chromium
-          pnpm exec playwright test
+          pnpm exec playwright install --with-deps chromium firefox webkit
+          pnpm exec playwright test \
+            --project=public-chromium \
+            --project=public-firefox \
+            --project=public-webkit \
+            --project=accessibility-chromium
         env:
           CI: true
           PLAYWRIGHT_TEST: true
           PLAYWRIGHT_AUTH_DISABLED: true
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+
+      - name: Playwright visual regression (non-blocking)
+        run: |
+          pnpm exec playwright test --project=visual-regression || true
+        env:
+          CI: true
+          PLAYWRIGHT_TEST: true
+          PLAYWRIGHT_AUTH_DISABLED: true
+          PLAYWRIGHT_VISUAL: "true"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        continue-on-error: true
+
+      - name: Playwright integration tests (non-blocking without terminal-server)
+        run: |
+          pnpm exec playwright test --project=self-contained-auth || true
+        env:
+          CI: true
+          PLAYWRIGHT_TEST: true
+          PLAYWRIGHT_AUTH_DISABLED: true
+          PLAYWRIGHT_INTEGRATION: "true"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        continue-on-error: true
 
       - name: Dependency audit
         run: pnpm audit --prod --audit-level=high

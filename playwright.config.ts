@@ -79,7 +79,6 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
-  maxFailures: process.env.CI ? 10 : undefined,
 
   reporter: [
     ["list"],
@@ -126,10 +125,12 @@ export default defineConfig({
   },
 
   projects: [
-    // ── Public (signed-out) projects — always run ──
+    // ── Core blocking tests (deterministic, no external deps) ──
+    // Homepage, pricing, marketplace, signup, protected routes, navigation,
+    // security, accessibility, error states, API health
     {
       name: "public-chromium",
-      testMatch: /public|routes|visual|accessibility|navigation|error-states|security|site-audit|terminal/,
+      testMatch: /public-routes|public-critical|error-states|security|site-audit|navigation|terminal/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: { cookies: [], origins: [] },
@@ -152,14 +153,47 @@ export default defineConfig({
       },
     },
 
-    // ── Self-contained auth tests — use Clerk backend API, no auth-setup dependency ──
+    // ── Accessibility tests (blocking — critical WCAG violations) ──
     {
+      name: "accessibility-chromium",
+      testMatch: /accessibility/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: { cookies: [], origins: [] },
+      },
+    },
+
+    // ── Self-contained auth tests — use Clerk backend API, no auth-setup dependency ──
+    // Studio isolation needs terminal-server + DB — only run when explicitly enabled
+    ...(process.env.PLAYWRIGHT_INTEGRATION === "true" ? [{
       name: "self-contained-auth",
       testMatch: /isolation/,
       use: {
         ...devices["Desktop Chrome"],
       },
-    },
+    }] : []),
+
+    // ── Visual regression (separate — needs baseline snapshots) ──
+    // Run with: pnpm exec playwright test --project=visual-regression
+    ...(process.env.PLAYWRIGHT_VISUAL === "true" ? [{
+      name: "visual-regression",
+      testMatch: /visual/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: { cookies: [], origins: [] },
+      },
+    }] : []),
+
+    // ── Provider smoke tests (needs API keys — not in core CI) ──
+    // Run with: PLAYWRIGHT_PROVIDER_SMOKE=true pnpm exec playwright test
+    ...(process.env.PLAYWRIGHT_PROVIDER_SMOKE === "true" ? [{
+      name: "provider-smoke",
+      testMatch: /public-chat-litt-smoke/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: { cookies: [], origins: [] },
+      },
+    }] : []),
 
     // ── Authenticated projects — only when Clerk credentials are available ──
     ...authProjects,

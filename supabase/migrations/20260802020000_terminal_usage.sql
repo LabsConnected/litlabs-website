@@ -32,6 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_terminal_usage_period ON terminal_usage(billing_p
 -- RLS
 ALTER TABLE terminal_usage ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS terminal_usage_owner_select ON terminal_usage;
 CREATE POLICY terminal_usage_owner_select
   ON terminal_usage FOR SELECT
   USING (auth.jwt() ->> 'sub' = user_id);
@@ -47,6 +48,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_terminal_usage_updated_at ON terminal_usage;
 CREATE TRIGGER trigger_terminal_usage_updated_at
   BEFORE UPDATE ON terminal_usage
   FOR EACH ROW

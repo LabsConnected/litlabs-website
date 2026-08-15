@@ -18,14 +18,14 @@ const STEPS = [
     title: "Plan",
     color: "#f472b6",
     tag: "Orchestrate",
-    desc: "LiTT breaks the mission into clear steps and assigns the right agents. Nothing important happens silently.",
+    desc: "LiTT breaks the mission into clear steps and chooses the right tools and model for the work. Nothing important happens silently.",
   },
   {
     n: "04",
     title: "Build",
     color: "#f97316",
     tag: "Execute",
-    desc: "Your crew edits files, generates assets, runs commands, creates artifacts, and updates the live preview in real time.",
+    desc: "LiTT edits files, generates assets, runs commands, creates artifacts, and updates the live preview in real time.",
   },
   {
     n: "05",
@@ -59,7 +59,7 @@ export function LandingHowItWorks() {
             <span className="h-px w-8" style={{ background: "rgba(249,115,22,0.4)" }} />
           </div>
           <h2 className="mb-4 text-3xl font-black tracking-tight text-white md:text-5xl">
-            One mission. One crew.
+            One mission. One operator.
             <br />
             <span
               className="bg-clip-text text-transparent"
@@ -81,7 +81,7 @@ export function LandingHowItWorks() {
           {STEPS.map((s, i) => (
             <div
               key={s.n}
-              className="group relative overflow-hidden rounded-2xl border border-white/8 p-7 transition-all duration-300 hover:border-white/15"
+              className="group relative overflow-hidden rounded-2xl border border-white/8 p-7 transition-all duration-500 hover:-translate-y-1 hover:border-white/15 hover:shadow-[0_8px_40px_rgba(0,0,0,0.4)]"
               style={{
                 background: "linear-gradient(145deg, rgba(255,255,255,0.02), transparent)",
               }}

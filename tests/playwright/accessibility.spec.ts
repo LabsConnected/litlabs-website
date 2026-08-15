@@ -12,7 +12,7 @@ const ACCESSIBILITY_ROUTES = [
   { path: "/", name: "Homepage" },
   { path: "/pricing", name: "Pricing" },
   { path: "/marketplace", name: "Marketplace" },
-  { path: "/gallery", name: "Gallery" },
+  { path: "/gallery", name: "Gallery", redirectsTo: "/showcase" },
   { path: "/docs", name: "Docs" },
   { path: "/privacy", name: "Privacy" },
   { path: "/terms", name: "Terms" },
@@ -32,6 +32,15 @@ test.describe("Accessibility @public", () => {
     test(`${route.name} (${route.path}) has no critical accessibility violations`, async ({ page }) => {
       await page.goto(route.path);
       await page.waitForLoadState("domcontentloaded");
+
+      // If this route redirects (e.g. /gallery → /showcase), wait for the
+      // destination URL to stabilize and load. The redirect target may itself
+      // redirect unauthenticated users to /sign-in, which is expected behavior.
+      if (route.redirectsTo) {
+        await page.waitForURL(route.redirectsTo, { timeout: 10_000 }).catch(() => {});
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        await page.waitForLoadState("networkidle").catch(() => {});
+      }
 
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])

@@ -103,7 +103,7 @@ describe("Live P0.11-12 — Truthful status states", () => {
     // Import the component to verify the function exists
     // We can't easily test the internal function, but we can verify
     // the component module loads without error
-    const mod = await import("@/app/studio/components/LiveVoiceOverlay");
+    const mod = await import("@/app/(app)/studio/components/LiveVoiceOverlay");
     expect(mod.default).toBeDefined();
   });
 });
@@ -113,7 +113,7 @@ describe("Live P0.11-12 — Truthful status states", () => {
  */
 describe("Live P0.13 — RecentConversations component", () => {
   it("RecentConversations is a valid React component", async () => {
-    const mod = await import("@/app/studio/components/RecentConversations");
+    const mod = await import("@/app/(app)/studio/components/RecentConversations");
     expect(mod.default).toBeDefined();
     expect(typeof mod.default).toBe("function");
   });

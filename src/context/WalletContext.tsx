@@ -14,6 +14,8 @@ interface WalletContextType {
   claimed: boolean;
   isLoading: boolean;
   isClaiming: boolean;
+  /** True when the balance fetch failed — UI should show "unavailable" not 0 */
+  isError: boolean;
   claim: () => Promise<boolean>;
   refresh: () => Promise<void>;
 }
@@ -35,6 +37,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [claimed, setClaimed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isClaiming, setIsClaiming] = useState(false);
+  const [isError, setIsError] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,14 +46,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         if (res.status === 401) {
           setBalance(0);
           setClaimed(false);
+          setIsError(false);
+        } else {
+          setIsError(true);
         }
         return;
       }
       const data = await res.json();
       setBalance(typeof data.balance === "number" ? data.balance : 0);
       setClaimed(isSameDay(data.last_claim_date, new Date()));
+      setIsError(false);
     } catch {
-      // Keep existing optimistic state on network error
+      setIsError(true);
     } finally {
       setIsLoading(false);
     }
@@ -82,28 +89,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [balance, claimed, isClaiming]);
 
   useEffect(() => {
-    let active = true;
-    fetch("/api/wallet")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!active || !data) return;
-        setBalance(typeof data.balance === "number" ? data.balance : 0);
-        setClaimed(isSameDay(data.last_claim_date, new Date()));
-      })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+    // Delegate to refresh() for the initial load so the error-handling
+    // contract is identical on first mount and on subsequent polls.
+    // Previously the initial fetch swallowed errors (.catch(() => {})),
+    // so a failed first load showed balance 0 instead of "Credit balance
+    // unavailable." — the refresh callback already handles 401 (graceful
+    // sign-out, not an error) vs 500/network (isError=true) correctly.
+    void refresh();
     const id = setInterval(() => {
       if (!document.hidden) refresh();
     }, 30000);
     return () => {
-      active = false;
       clearInterval(id);
     };
   }, [refresh]);
 
   return (
     <WalletContext.Provider
-      value={{ balance, claimed, isLoading, isClaiming, claim, refresh }}
+      value={{ balance, claimed, isLoading, isClaiming, isError, claim, refresh }}
     >
       {children}
     </WalletContext.Provider>

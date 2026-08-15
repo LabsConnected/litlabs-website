@@ -9,7 +9,7 @@ import { BrandLogo } from "@/components/branding/BrandLogo";
 const NAV_LINKS = [
   { label: "Studio", href: "/studio" },
   { label: "Missions", href: "/studio?tool=workflows" },
-  { label: "Marketplace", href: "/marketplace" },
+  { label: "Marketplace", href: "/marketplace", badge: "Beta" },
   { label: "Pricing", href: "/pricing" },
   { label: "How it works", href: "#how" },
   { label: "Docs", href: "/docs" },
@@ -20,23 +20,23 @@ export function LandingHeader() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-[#06060e]/80 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 md:px-8">
+      <div className="mx-auto flex max-w-[1500px] items-center justify-between px-6 py-4 md:px-10 md:py-5">
         {/* Logo — icon only on mobile, icon+text on md+ */}
         <BrandLogo
           href="/"
-          size={30}
+          size={36}
           showText={false}
           className="md:hidden"
         />
         <BrandLogo
           href="/"
-          size={30}
+          size={36}
           showText
           className="hidden md:inline-flex"
         />
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-7 text-sm text-neutral-400 md:flex">
+        {/* Desktop nav — slightly larger */}
+        <nav className="hidden items-center gap-8 text-[15px] text-neutral-400 md:flex">
           {NAV_LINKS.map((l) =>
             l.href.startsWith("#") ? (
               <a
@@ -53,6 +53,11 @@ export function LandingHeader() {
                 className="transition hover:text-white"
               >
                 {l.label}
+                {"badge" in l && l.badge && (
+                  <span className="ml-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-300">
+                    {l.badge}
+                  </span>
+                )}
               </Link>
             ),
           )}
@@ -64,16 +69,16 @@ export function LandingHeader() {
           <button
             aria-label="Toggle menu"
             onClick={() => setOpen((v) => !v)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/3 text-neutral-300 transition hover:border-white/20 hover:bg-white/7 md:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/3 text-neutral-300 transition hover:border-white/20 hover:bg-white/7 md:hidden"
           >
-            {open ? <X size={17} /> : <Menu size={17} />}
+            {open ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
       </div>
 
       {/* Mobile drawer */}
       {open && (
-        <div className="border-t border-white/5 bg-[#06060e]/95 px-5 pb-5 pt-3 md:hidden">
+        <div className="border-t border-white/5 bg-[#06060e]/95 px-6 pb-5 pt-3 md:hidden">
           <nav className="flex flex-col gap-1">
             {NAV_LINKS.map((l) =>
               l.href.startsWith("#") ? (
@@ -90,9 +95,14 @@ export function LandingHeader() {
                   key={l.label}
                   href={l.href}
                   onClick={() => setOpen(false)}
-                  className="rounded-lg px-3 py-2.5 text-sm font-medium text-neutral-300 transition hover:bg-white/5 hover:text-white"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-neutral-300 transition hover:bg-white/5 hover:text-white"
                 >
                   {l.label}
+                  {"badge" in l && l.badge && (
+                    <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-amber-300">
+                      {l.badge}
+                    </span>
+                  )}
                 </Link>
               ),
             )}

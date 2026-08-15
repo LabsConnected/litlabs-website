@@ -40,6 +40,7 @@ END $$;
 ALTER TABLE public.billing_reconciliations ENABLE ROW LEVEL SECURITY;
 
 -- Only service role can access reconciliation records
+DROP POLICY IF EXISTS "Service role can manage billing_reconciliations" ON public.billing_reconciliations;
 CREATE POLICY "Service role can manage billing_reconciliations"
   ON public.billing_reconciliations
   FOR ALL

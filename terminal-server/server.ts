@@ -27,6 +27,13 @@ import { handleLiTTCodeCommand } from "./litt-code";
 import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
+  initRuntime,
+  runtimeCommandStart,
+  runtimeCommandEnd,
+  runtimeSetPhase,
+  getRuntimeState,
+} from "./runtime";
+import {
   prepareWorkspace,
   prepareBlankWorkspace,
   getWorkspace,
@@ -42,6 +49,7 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
+import { dispatchCommand, type CommandRequest } from "./command-bridge";
 
 // ─── Service-to-service auth ───────────────────────────────────
 // Internal endpoints (under /internal/*) use a shared secret via
@@ -177,6 +185,12 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
+// ─── Canonical runtime authority ──────────────────────────────────
+// One RuntimeStore owns the truth. Socket.IO clients receive a full
+// snapshot on connect and incremental updates on every mutation.
+// server.ts does NOT create another parallel state object.
+initRuntime(io);
+
 interface Session {
   ptyProcess: pty.IPty;
   createdAt: Date;
@@ -194,6 +208,38 @@ app.get("/health/live", (_req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
+});
+
+// ─── Runtime state endpoint ───────────────────────────────────────
+// Returns the canonical runtime snapshot. Both PowerShell and litbit-web
+// can poll this or use Socket.IO for realtime updates.
+app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedRequest, res: Response) => {
+  res.json(getRuntimeState());
+});
+
+// ─── Command bridge endpoint ──────────────────────────────────────
+// POST /internal/command — dispatch a slash command through the
+// canonical command registry. Both Studio Web, `litt --remote`, and
+// the PowerShell cockpit hit this endpoint.
+//
+// The command registry is the single source of truth for all commands.
+// Unknown commands produce a controlled error response — never a crash.
+app.post("/internal/command", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const body = req.body as CommandRequest;
+  if (!body?.command || typeof body.command !== "string") {
+    res.status(400).json({ error: "Missing 'command' field" });
+    return;
+  }
+  try {
+    const result = await dispatchCommand(body);
+    // Unknown commands return ok:false with kind "error" — HTTP 200
+    // so the client can display the error message. Only server errors
+    // get HTTP 500.
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
 });
 
 app.get("/health/ready", async (_req, res) => {
@@ -1140,12 +1186,16 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
+    runtimeSetPhase("thinking");
+    const cmdStart = Date.now();
     try {
       const reply = await handleLiTTCodeCommand(input);
+      runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied");
       socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
       socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
     } catch (err) {
       const message = err instanceof Error ? err.message : "LiTT failed";
+      runtimeCommandEnd("litt-code:command", false, 1, Date.now() - cmdStart, message);
       socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
     }
   });

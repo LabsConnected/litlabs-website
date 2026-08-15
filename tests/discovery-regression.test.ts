@@ -346,7 +346,7 @@ describe("Discovery regression — no WordPress fingerprints", () => {
 describe("Discovery regression — studio noindex", () => {
   it("studio layout sets robots index:false", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/studio/layout.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/studio/layout.tsx"),
       "utf-8"
     );
     expect(src).toContain("index: false");

@@ -85,9 +85,9 @@ describe("callLLMWithTools — model routing fallback", () => {
     mockFetch.mockResolvedValueOnce(
       makeErrorResponse(404, "Model not found"),
     );
-    // Fallback succeeds
+    // Fallback succeeds (first fallback in chain: gemini-2.5-flash)
     mockFetch.mockResolvedValueOnce(
-      makeSuccessResponse("anthropic/claude-3.5-sonnet", "Fallback response."),
+      makeSuccessResponse("google/gemini-2.5-flash", "Fallback response."),
     );
 
     const result = await callLLMWithTools(
@@ -98,7 +98,7 @@ describe("callLLMWithTools — model routing fallback", () => {
     );
 
     expect(result.text).toBe("Fallback response.");
-    expect(result.model).toBe("anthropic/claude-3.5-sonnet");
+    expect(result.model).toBe("google/gemini-2.5-flash");
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 

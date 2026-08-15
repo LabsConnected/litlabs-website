@@ -103,6 +103,8 @@ export interface TerminalCapability {
   workspaceId: string | null;
   lastVerifiedAt: string | null;
   error: string | null;
+  /** True when the terminal server /health endpoint responded OK (server is alive). */
+  serverReachable?: boolean;
 }
 
 export const HEARTBEAT_TIMEOUT_MS = 15_000;

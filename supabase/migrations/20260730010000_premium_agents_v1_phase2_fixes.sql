@@ -63,6 +63,9 @@ CREATE INDEX IF NOT EXISTS idx_user_agents_agent_id
 
 -- Recreate a single unique constraint
 ALTER TABLE public.user_agents
+  DROP CONSTRAINT IF EXISTS user_agents_user_id_agent_id_key;
+
+ALTER TABLE public.user_agents
   ADD CONSTRAINT user_agents_user_id_agent_id_key
   UNIQUE (user_id, agent_id);
 

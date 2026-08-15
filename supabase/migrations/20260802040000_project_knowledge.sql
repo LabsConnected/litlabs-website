@@ -77,19 +77,23 @@ CREATE INDEX IF NOT EXISTS idx_project_knowledge_superseded
 -- RLS: Users can only access their own project knowledge
 ALTER TABLE project_knowledge ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS project_knowledge_owner_select ON project_knowledge;
 CREATE POLICY project_knowledge_owner_select
   ON project_knowledge FOR SELECT
   USING (auth.jwt() ->> 'sub' = owner_id);
 
+DROP POLICY IF EXISTS project_knowledge_owner_insert ON project_knowledge;
 CREATE POLICY project_knowledge_owner_insert
   ON project_knowledge FOR INSERT
   WITH CHECK (auth.jwt() ->> 'sub' = owner_id);
 
+DROP POLICY IF EXISTS project_knowledge_owner_update ON project_knowledge;
 CREATE POLICY project_knowledge_owner_update
   ON project_knowledge FOR UPDATE
   USING (auth.jwt() ->> 'sub' = owner_id)
   WITH CHECK (auth.jwt() ->> 'sub' = owner_id);
 
+DROP POLICY IF EXISTS project_knowledge_owner_delete ON project_knowledge;
 CREATE POLICY project_knowledge_owner_delete
   ON project_knowledge FOR DELETE
   USING (auth.jwt() ->> 'sub' = owner_id);
@@ -103,6 +107,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS project_knowledge_updated_at ON project_knowledge;
 CREATE TRIGGER project_knowledge_updated_at
   BEFORE UPDATE ON project_knowledge
   FOR EACH ROW

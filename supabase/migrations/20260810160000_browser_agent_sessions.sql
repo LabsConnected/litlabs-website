@@ -45,21 +45,25 @@ create index if not exists idx_browser_sessions_created_at on public.browser_ses
 
 alter table public.browser_sessions enable row level security;
 
+DROP POLICY IF EXISTS "Users can read own browser sessions" ON public.browser_sessions;
 create policy "Users can read own browser sessions"
   on public.browser_sessions
   for select
   using (auth.uid()::text = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own browser sessions" ON public.browser_sessions;
 create policy "Users can insert own browser sessions"
   on public.browser_sessions
   for insert
   with check (auth.uid()::text = user_id);
 
+DROP POLICY IF EXISTS "Users can update own browser sessions" ON public.browser_sessions;
 create policy "Users can update own browser sessions"
   on public.browser_sessions
   for update
   using (auth.uid()::text = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own browser sessions" ON public.browser_sessions;
 create policy "Users can delete own browser sessions"
   on public.browser_sessions
   for delete
@@ -104,16 +108,19 @@ create index if not exists idx_browser_actions_created_at on public.browser_acti
 
 alter table public.browser_actions enable row level security;
 
+DROP POLICY IF EXISTS "Users can read own browser actions" ON public.browser_actions;
 create policy "Users can read own browser actions"
   on public.browser_actions
   for select
   using (auth.uid()::text = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own browser actions" ON public.browser_actions;
 create policy "Users can insert own browser actions"
   on public.browser_actions
   for insert
   with check (auth.uid()::text = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own browser actions" ON public.browser_actions;
 create policy "Users can delete own browser actions"
   on public.browser_actions
   for delete

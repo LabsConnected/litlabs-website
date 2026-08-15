@@ -10,7 +10,7 @@ const COLS: Array<{
     links: [
       { label: "Studio", href: "/studio" },
       { label: "Missions", href: "/studio?tool=workflows" },
-      { label: "Marketplace", href: "/marketplace" },
+      { label: "Marketplace (Beta)", href: "/marketplace" },
       { label: "Pricing", href: "/pricing" },
     ],
   },
@@ -160,7 +160,7 @@ export function LandingFooter() {
           <div>© {new Date().getFullYear()} LiTTree LabStudios™. LiTT™ and Spark™ are LiTTree LabStudios trademarks.</div>
           <div className="flex items-center gap-2 font-mono text-neutral-600">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-            All systems normal · v1.0.0
+            System status: Operational
           </div>
         </div>
       </div>

@@ -25,6 +25,9 @@ test.describe("Navigation @public", () => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
 
+    // Wait for nav to render — Clerk hydration may delay nav rendering
+    await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+
     // Find all nav links — try data-testid first, then fall back to nav a[href]
     let navLinks = page.locator('[data-testid^="nav-"]');
     let count = await navLinks.count();
@@ -39,8 +42,10 @@ test.describe("Navigation @public", () => {
 
     // Test the first 3 links to avoid timeout
     for (let i = 0; i < Math.min(count, 3); i++) {
+      // Re-query nav links each iteration — Clerk hydration may re-render nav
+      navLinks = page.locator("nav a[href]");
       const link = navLinks.nth(i);
-      const href = await link.getAttribute("href");
+      const href = await link.getAttribute("href", { timeout: 20_000 });
       expect(href, `Nav link ${i} must have an href`).toBeTruthy();
 
       // Navigate to the link
@@ -54,6 +59,8 @@ test.describe("Navigation @public", () => {
       // Go back to homepage for next link
       await page.goBack();
       await page.waitForLoadState("domcontentloaded");
+      // Wait for nav to re-render after Clerk hydration
+      await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
     }
   });
 

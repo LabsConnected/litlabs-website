@@ -14,7 +14,7 @@ describe("useResizableWidth", () => {
   });
 
   it("returns default width on first render", async () => {
-    const { useResizableWidth } = await import("../src/app/studio/hooks/useResizableWidth");
+    const { useResizableWidth } = await import("../src/app/(app)/studio/hooks/useResizableWidth");
     // We can't call hooks outside React, so test the logic indirectly
     // by verifying the module exports the expected interface
     expect(typeof useResizableWidth).toBe("function");
@@ -40,27 +40,27 @@ describe("useResizableWidth", () => {
 
 describe("Canvas save state truthfulness", () => {
   it("saveState starts as 'local' (not 'saved')", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     const state = mod.useCanvasBuilderStore.getState();
     expect(state.saveState).toBe("local");
   });
 
   it("saveState becomes 'dirty' after setDocument", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
-    const { createEmptyDocument } = await import("../src/app/studio/components/canvas/builder/types");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
+    const { createEmptyDocument } = await import("../src/app/(app)/studio/components/canvas/builder/types");
     mod.useCanvasBuilderStore.getState().setDocument(createEmptyDocument());
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("dirty");
   });
 
   it("saveState becomes 'saved' or 'local' after saveDocument", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     // Without a server canvas ID, it should be "local"
     mod.useCanvasBuilderStore.getState().saveDocument();
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("local");
   });
 
   it("saveState becomes 'saved' when serverCanvasId is set", async () => {
-    const mod = await import("../src/app/studio/components/canvas/builder/store");
+    const mod = await import("../src/app/(app)/studio/components/canvas/builder/store");
     mod.useCanvasBuilderStore.getState().setServerCanvasId("test-canvas-id");
     mod.useCanvasBuilderStore.getState().saveDocument();
     expect(mod.useCanvasBuilderStore.getState().saveState).toBe("saved");

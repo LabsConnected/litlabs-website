@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useCapabilities } from "@/app/studio/hooks/useCapabilities";
+import { useCapabilities } from "@/app/(app)/studio/hooks/useCapabilities";
 import { Boxes, ExternalLink, FolderGit2, RefreshCw, Rocket, ShieldCheck, Terminal, Waypoints } from "lucide-react";
 import type { CapabilityStatus } from "@/lib/capabilities/types";
 
