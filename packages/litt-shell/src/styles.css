@@ -1,0 +1,251 @@
+/* LiTT Shell - Minimal Desktop Application Styles */
+
+:root {
+  --litt-bg-primary: #0a0a0a;
+  --litt-bg-secondary: #1a1a1a;
+  --litt-accent: #00d4ff;
+  --litt-text-primary: #ffffff;
+  --litt-text-secondary: #a0a0a0;
+  --litt-border: #2a2a2a;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--litt-bg-primary);
+  color: var(--litt-text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.litt-shell-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.litt-shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background-color: var(--litt-bg-secondary);
+  border-bottom: 1px solid var(--litt-border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.litt-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--litt-accent);
+}
+
+.litt-footer-label {
+  color: var(--litt-text-secondary);
+  font-size: 12px;
+}
+
+.litt-shell-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  overflow: auto;
+  gap: 24px;
+}
+
+.litt-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--litt-text-primary);
+}
+
+.litt-logo {
+  font-size: 28px;
+}
+
+.litt-name {
+  font-size: 28px;
+}
+
+.litt-shell-section {
+  margin-top: 8px;
+}
+
+.litt-shell-title {
+  font-size: 14px;
+  color: var(--litt-text-secondary);
+  margin-bottom: 12px;
+}
+
+.litt-status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.litt-status-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.litt-status-label {
+  font-size: 13px;
+  color: var(--litt-text-secondary);
+}
+
+.litt-status-value {
+  font-size: 13px;
+  background-color: var(--litt-bg-secondary);
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--litt-border);
+}
+
+.litt-shell-footer {
+  padding: 12px 20px;
+  background-color: var(--litt-bg-secondary);
+  border-top: 1px solid var(--litt-border);
+  font-size: 12px;
+  color: var(--litt-text-secondary);
+}
+
+/* Scrollbar styling */
+.litt-shell-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.litt-shell-content::-webkit-scrollbar-track {
+  background: var(--litt-bg-primary);
+}
+
+.litt-shell-content::-webkit-scrollbar-thumb {
+  background: var(--litt-accent);
+  border-radius: 4px;
+}
+
+.litt-shell-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.8);
+}
+
+/* Conversation Area */
+.litt-conversation-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background-color: var(--litt-bg-primary);
+  border: 1px solid var(--litt-border);
+  border-radius: 8px;
+  padding: 16px;
+  gap: 12px;
+}
+
+.litt-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+}
+
+.litt-message {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  word-wrap: break-word;
+}
+
+.litt-message.user-message {
+  align-self: flex-end;
+  background-color: var(--litt-accent);
+  color: var(--litt-bg-primary);
+}
+
+.litt-message.assistant-message {
+  align-self: flex-start;
+  background-color: var(--litt-bg-secondary);
+  color: var(--litt-text-primary);
+  border: 1px solid var(--litt-border);
+}
+
+.litt-message-content {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.litt-message-timestamp {
+  font-size: 10px;
+  color: var(--litt-text-secondary);
+  margin-top: 4px;
+  text-align: var(--litt-text-secondary);
+}
+
+/* Input Area */
+.litt-input-area {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 8px;
+}
+
+.litt-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  background-color: var(--litt-bg-secondary);
+  color: var(--litt-text-primary);
+  border: 1px solid var(--litt-border);
+  border-radius: 8px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.litt-input:focus {
+  border-color: var(--litt-accent);
+}
+
+.litt-input::placeholder {
+  color: var(--litt-text-secondary);
+}
+
+.litt-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.litt-send-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  background-color: var(--litt-accent);
+  color: var(--litt-bg-primary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.litt-send-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.litt-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

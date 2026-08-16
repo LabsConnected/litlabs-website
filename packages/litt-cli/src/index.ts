@@ -32,6 +32,7 @@ import { runCommand } from "./commands/run.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
+import { desktopCommand } from "./commands/desktop.js";
 import { dispatchRemote } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
@@ -48,7 +49,7 @@ const lazyCockpit = async (): Promise<CommandHandler> =>
 const VERSION = CLI_VERSION;
 
 /** Commands that can be dispatched remotely through terminal-server */
-const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build"]);
+const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "explain", "desktop"]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
 const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
@@ -65,11 +66,12 @@ const COMMANDS: Record<string, CommandHandler> = {
   inspect: inspectCommand,
   ask: askCommand,
   explain: explainCommand,
+  desktop: desktopCommand,
   // cockpit is lazy-loaded below (heavy Ink/React dependency)
 };
 
 /** Commands that require lazy loading (heavy deps like Ink/React) */
-const LAZY_COMMANDS = new Set(["cockpit"]);
+const LAZY_COMMANDS = new Set(["cockpit", "tui"]);
 
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
@@ -102,7 +104,14 @@ async function main(): Promise<number> {
     finalArgs = [...cleanArgs.slice(0, modeIdx), ...cleanArgs.slice(modeIdx + 2)];
   }
 
-  const requestedCommand = finalArgs[0];
+  // Strip --tui flag before extracting command (similar to --mode)
+  const tuiIdx = finalArgs.indexOf("--tui");
+  const forceTui = tuiIdx !== -1;
+  const argsWithoutTui = forceTui
+    ? [...finalArgs.slice(0, tuiIdx), ...finalArgs.slice(tuiIdx + 1)]
+    : finalArgs;
+
+  const requestedCommand = argsWithoutTui[0];
 
   // --help / -h always prints help (never launches cockpit)
   if (requestedCommand === "--help" || requestedCommand === "-h") {
@@ -115,9 +124,9 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // Bare `litt` (no command) defaults to cockpit — the interactive experience
-  const command = requestedCommand ?? "cockpit";
-  const rest = requestedCommand ? finalArgs.slice(1) : [];
+  // Bare 'litt' defaults to desktop; --tui forces cockpit
+  const command = requestedCommand ?? (forceTui ? "cockpit" : "desktop");
+  const rest = requestedCommand ? argsWithoutTui.slice(1) : [];
 
   // --remote: dispatch through terminal-server's canonical CommandRouter
   if (useRemote) {
@@ -215,7 +224,7 @@ LiTT CLI v${VERSION} — AI operating system for your terminal
 
 Usage: litt [command] [options]
 
-  Bare 'litt' launches the interactive cockpit.
+  Bare 'litt' launches the desktop app. Use --tui for the interactive cockpit.
 
 Commands:
   doctor     Check system health (Node, Git, pnpm, network, auth)
@@ -229,16 +238,20 @@ Commands:
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice
+  desktop    Launch LiTT Desktop app
   cockpit    Interactive runtime cockpit (Socket.IO live state from terminal-server)
+  tui        Alias for cockpit (interactive runtime cockpit)
 
 Options:
   -h, --help     Show this help
   -v, --version  Show version
   --remote       Dispatch through terminal-server (shared RuntimeStore with Studio)
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
+  --tui          Launch interactive Ink cockpit (instead of desktop)
 
 Examples:
-  litt                     (launch interactive cockpit)
+  litt                     (launch desktop app)
+  litt --tui               (launch interactive cockpit)
   litt doctor
   litt status
   litt diff
@@ -249,6 +262,7 @@ Examples:
   litt build --remote    (Studio sees the same run)
   litt run echo hello    (streaming + Ctrl+C cancel)
   litt run pnpm test --mode auto
+  litt desktop              (explicit desktop launch)
   litt cockpit              (live runtime cockpit via Socket.IO)
   litt cockpit check        (dispatch check via cockpit)
   litt inspect
