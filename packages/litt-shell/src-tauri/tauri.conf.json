@@ -1,0 +1,26 @@
+{
+  "identifier": "com.litlabs.litt-shell",
+  "productName": "LiTT",
+  "version": "0.1.0",
+  "build": {
+    "beforeDevCommand": "pnpm exec vite dev",
+    "beforeBuildCommand": "pnpm exec vite build",
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LiTT",
+        "width": 1100,
+        "height": 760,
+        "center": true,
+        "visible": true,
+        "focus": true,
+        "resizable": true,
+        "decorations": true
+      }
+    ]
+  }
+}

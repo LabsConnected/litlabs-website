@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { createDockerSession } from "./docker-manager";
-import { handleLiTTCodeCommand } from "./litt-code";
+import { handleLiTTCodeCommand, streamLiTTCode, type LiTTEvent } from "./litt-code";
 import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
@@ -1042,6 +1042,7 @@ io.use((socket, next) => {
   try {
     const tokenPayload = verifyTerminalToken(socket.handshake.auth?.token);
     socket.data.userId = tokenPayload.sub;
+    socket.data.cwd = tokenPayload.cwd;  // Authenticated Desktop cwd from JWT
     const workspaceId = tokenPayload.wid;
     if (workspaceId) {
       const ws = getWorkspace(String(workspaceId));
@@ -1072,6 +1073,7 @@ io.on("connection", (socket) => {
   const sessionId = randomUUID();
   const workspaceId = socket.data.workspaceId as string | undefined;
   const projectId = socket.data.projectId as string | undefined;
+  const desktopCwd = socket.data.cwd as string | undefined;
 
   // If a workspaceId was provided and verified, use the workspace root.
   // Otherwise fall back to the user's root workspace (legacy behavior).
@@ -1079,6 +1081,9 @@ io.on("connection", (socket) => {
   mkdirSync(workspace, { recursive: true });
 
   console.log("[Terminal] Connected:", { userId, sessionId, workspaceId: workspaceId ?? "default", projectId: projectId ?? "none" });
+  if (desktopCwd) {
+    console.log("[Terminal] Authenticated desktop cwd:", desktopCwd);
+  }
 
   let ptyProcess: pty.IPty;
 
@@ -1203,6 +1208,31 @@ io.on("connection", (socket) => {
   socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
     if (typeof cols === "number" && typeof rows === "number") {
       ptyProcess.resize(cols, rows);
+    }
+  });
+
+  // ── Natural-language chat ────────────────────────────────────────
+  // Thin bridge: authenticated socket → streamLiTTCode → litt:event streaming back
+  socket.on("litt:chat", async (req: { turnId: string; message: string }) => {
+    if (!req?.turnId || typeof req?.message !== "string" || !req.message.trim()) {
+      socket.emit("litt:event", { type: "error", turnId: req?.turnId ?? "unknown", message: "Invalid request: require turnId and non-empty message" });
+      return;
+    }
+
+    const turnId = req.turnId;
+    const message = req.message;
+
+    console.log("[LiTT Chat] turn cwd:", desktopCwd || "none");
+
+    // Call the canonical natural-language entrypoint
+    try {
+      await streamLiTTCode(message, (event: LiTTEvent) => {
+        // Re-emit with turnId for correlation
+        socket.emit("litt:event", { ...event, turnId });
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
+      socket.emit("litt:event", { type: "error", turnId, message: errorMsg });
     }
   });
 

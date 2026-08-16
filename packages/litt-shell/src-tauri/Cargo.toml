@@ -1,0 +1,42 @@
+[package]
+name = "litt-shell"
+version = "0.1.0"
+description = "LiTT Shell - Standalone desktop application"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+repository = "https://github.com/LabsConnected/litlabs-website"
+
+[lib]
+name = "litt_shell_lib"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "litt-shell"
+path = "src/main.rs"
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+dirs = "5"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 0

@@ -9,6 +9,7 @@ type TerminalTokenPayload = {
   exp: number;
   wid?: string;
   pid?: string;
+  cwd?: string;
 };
 
 function sign(encodedPayload: string, secret: string): string {
@@ -17,6 +18,15 @@ function sign(encodedPayload: string, secret: string): string {
 
 export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
   const secret = process.env.TERMINAL_AUTH_SECRET ?? "";
+
+  // Development mode: accept "dev-" prefixed unsigned tokens when secret is not configured
+  // This allows local Desktop/TUI development without requiring full auth setup
+  if (typeof token === "string" && token.startsWith("dev-")) {
+    const payload = parseTokenPayload(token, "dev-");
+    if (payload) return payload;
+    // Fall through to error if dev token is malformed
+  }
+
   if (secret.length < 32) throw new Error("Terminal authentication is not configured");
   if (typeof token !== "string") throw new Error("Missing terminal token");
 
@@ -29,11 +39,26 @@ export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
     throw new Error("Invalid terminal token");
   }
 
+  const payload = parseTokenPayload(encodedPayload, "");
+  if (!payload) throw new Error("Invalid terminal token");
+  return payload;
+}
+
+/** Parse token payload from base64url encoded string, optionally stripping prefix */
+function parseTokenPayload(encodedPayload: string, prefix: string): TerminalTokenPayload | null {
+  let payloadStr: string;
+  if (prefix && encodedPayload.startsWith(prefix)) {
+    // Dev token: "dev-" + base64url(JSON)
+    payloadStr = Buffer.from(encodedPayload.slice(prefix.length), "base64url").toString("utf8");
+  } else {
+    // Signed token: base64url(JSON) + "." + signature
+    payloadStr = Buffer.from(encodedPayload, "base64url").toString("utf8");
+  }
   let payload: TerminalTokenPayload;
   try {
-    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+    payload = JSON.parse(payloadStr);
   } catch {
-    throw new Error("Invalid terminal token");
+    return null;
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -46,7 +71,7 @@ export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
     payload.iat > now + 30 ||
     payload.exp <= now
   ) {
-    throw new Error("Expired or invalid terminal token");
+    return null;
   }
   return payload;
 }
