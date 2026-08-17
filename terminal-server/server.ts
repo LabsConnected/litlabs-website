@@ -23,7 +23,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { createDockerSession } from "./docker-manager";
-import { handleLiTTCodeCommand, streamLiTTCode, type LiTTEvent } from "./litt-code";
+import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
+import { streamLiTTOperator } from "./litt-agent";
 import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
@@ -1226,10 +1227,23 @@ io.on("connection", (socket) => {
 
     // Call the canonical natural-language entrypoint
     try {
-      await streamLiTTCode(message, (event: LiTTEvent) => {
-        // Re-emit with turnId for correlation
-        socket.emit("litt:event", { ...event, turnId });
-      });
+      if (!desktopCwd) {
+        socket.emit("litt:event", {
+          type: "error",
+          turnId,
+          message: "Authenticated Desktop project cwd is unavailable.",
+        });
+        return;
+      }
+
+      await streamLiTTOperator(
+        message,
+        desktopCwd,
+        (event: LiTTEvent) => {
+          // Re-emit only to the originating authenticated Desktop turn.
+          socket.emit("litt:event", { ...event, turnId });
+        },
+      );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
       socket.emit("litt:event", { type: "error", turnId, message: errorMsg });

@@ -270,10 +270,74 @@ export async function runAgentLoop(
       totalTokens += doneEvent.usage.total_tokens;
     }
 
+    // Never silently accept an empty model turn.
+    // Empty output is not a successful assistant response and must not
+    // become a blank completed turn in CLI/Desktop surfaces.
+    if (!modelContent.trim()) {
+      if (round >= maxRounds - 1) {
+        return {
+          content:
+            "LiTT received an empty model response after retrying. " +
+            "The turn was not completed and no success is being claimed.",
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "error",
+        };
+      }
+
+      messages.push({
+        role: "user",
+        content:
+          "Your previous response was empty. Retry now. " +
+          "You MUST either call an available tool using a valid tool_call block " +
+          "or return a non-empty final answer. " +
+          "If the request requires project evidence, use the project tools yourself.",
+      });
+
+      continue;
+    }
+
     // Check for tool calls in the response
     const toolCall = parseToolCall(modelContent);
 
     if (!toolCall) {
+      // Requests for repository/runtime evidence cannot honestly complete
+      // before at least one project tool has executed.
+      const requiresProjectEvidence =
+        /\b(inspect|working tree|git status|project status|current project|use (?:your )?(?:project )?tools|verify (?:the )?(?:project|repo|build|tests?)|run (?:the )?(?:build|tests?|typecheck)|read (?:the )?(?:repo|repository|file)|search (?:the )?(?:repo|repository|codebase))\b/i.test(prompt);
+
+      if (requiresProjectEvidence && toolCalls.length === 0) {
+        if (round >= maxRounds - 1) {
+          return {
+            content:
+              "LiTT could not obtain required project evidence before reaching the tool-call round limit. " +
+              "No project-state claim is being made.",
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: "max_rounds",
+          };
+        }
+
+        messages.push({
+          role: "assistant",
+          content: modelContent,
+        });
+
+        messages.push({
+          role: "user",
+          content:
+            "You have not gathered any project evidence yet. " +
+            "Do not answer from memory and do not ask the user to run commands. " +
+            "Call the appropriate project tool now. For repository identity and Git state, begin with project.status.",
+        });
+
+        continue;
+      }
+
       // No tool call — the model claims it is done.
       //
       // THE CRITICAL V1 RULE:
@@ -499,6 +563,7 @@ export async function runAgentLoop(
         data: {
           tool: toolEntry.definition.name,
           status: result.status,
+          success: result.success,
           message: result.message,
           durationMs: toolDurationMs,
         },
@@ -571,6 +636,13 @@ All tool calls execute in this project. Do not assume a different project.`
 
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.
 You help users build software by calling tools and providing insights.
+
+CRITICAL OPERATOR RULES:
+- Never return an empty response.
+- When the user asks you to inspect, verify, check, test, build, search, read, or examine the current project, you MUST gather evidence with the available project tools before giving the final answer.
+- Never ask the user to run a command that an available project tool can run for you.
+- Do not claim project state, Git state, test state, build state, or file contents without tool evidence.
+- If a tool fails, report the actual failure instead of pretending the inspection succeeded.
 ${projectSection}
 
 Available tools:

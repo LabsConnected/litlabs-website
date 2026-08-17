@@ -40,6 +40,8 @@ export type {
   ApprovalResult,
   ApprovalProvider,
   AuthProvider,
+  MissionEventSubtype,
+  RuntimeEventType,
 } from "./types.js";
 
 // Shell
@@ -163,3 +165,39 @@ export type {
   BrowserVerifier,
   VerificationGateOptions,
 } from "./verification-gate.js";
+
+// ─── Missions Module (Autopilot V1) ─────────────────────────────────────
+// Mission domain types, state machine, and persistence.
+// Wraps and orchestrates existing ExecutionGateway/ToolRegistry/RuntimeStore.
+export {
+  MissionStore,
+  createMissionStore,
+  isValidMissionTransition,
+  isValidStepTransition,
+  validateMissionTransition,
+  validateStepTransition,
+  generateMissionId,
+  generateStepId,
+  generateEvidenceId,
+  generateCheckpointId,
+  createDefaultRetryBudget,
+  deriveStepStatus,
+  deriveMissionStatus,
+} from "./missions/index.js";
+export type {
+  MissionStatus,
+  MissionStepStatus,
+  EvidenceType,
+  Mission,
+  MissionStep,
+  RepositoryBaseline,
+  MissionEvidence,
+  Checkpoint,
+  ActionRecord,
+  VerificationResult as MissionVerificationResult,
+  RetryBudget,
+  ProviderFailure,
+  ProviderState,
+  TransitionResult,
+} from "./missions/index.js";
+export type { Mission as MissionModel } from "./missions/index.js";

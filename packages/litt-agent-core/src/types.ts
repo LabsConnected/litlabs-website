@@ -247,6 +247,38 @@ export interface LastResult {
   runId: string;
 }
 
+// Forward declaration for Mission type (Phase 3: Autopilot V1)
+// The full Mission interface is defined in mission-entities.ts
+// This declaration suffices for the RuntimeState reference
+export interface Mission {
+  id: string;
+  version: string;
+  goal: string;
+  normalizedGoal: string;
+  projectRoot: string;
+  workspaceId: string | null;
+  sessionId: string | null;
+  mode: import("./execution.js").MissionMode;
+  status: import("./missions/mission-types.js").MissionStatus;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  currentStepId: string | null;
+  steps: import("./missions/mission-entities.js").MissionStep[];
+  baseline: import("./missions/mission-types.js").RepositoryBaseline | null;
+  evidence: import("./missions/mission-types.js").MissionEvidence[];
+  checkpoints: import("./missions/mission-types.js").Checkpoint[];
+  attemptCounters: Record<string, number>;
+  retryBudgets: Record<string, import("./missions/mission-types.js").RetryBudget>;
+  providerState: import("./missions/mission-types.js").ProviderState | null;
+  blockingReason: string | null;
+  failureReason: string | null;
+  completionReason: string | null;
+  lastHeartbeatAt: number;
+  metadata: Record<string, unknown>;
+}
+
 export interface RuntimeState {
   phase: RuntimePhase;
   project: ProjectContext | null;
@@ -263,6 +295,12 @@ export interface RuntimeState {
   lastResult: LastResult | null;
   /** Timestamp of the last state mutation (ms since epoch) */
   updatedAt: number;
+  /** Phase 3: Mission state for autonomous operation */
+  mission: Mission | null;
+  /** Phase 3: Last heartbeat timestamp for active mission */
+  lastMissionHeartbeatAt: number;
+  /** Phase 3: Number of completed mission steps */
+  missionStepsCompleted: number;
 }
 
 // ─── Runtime Events ───────────────────────────────────────────────
@@ -288,6 +326,28 @@ export type RuntimeEventType =
   | "command_end"
   | "state_sync"
   | "litt_event";
+
+/**
+ * Additional event subtypes for mission lifecycle.
+ * These are emitted via litt_event with subtype field.
+ */
+export type MissionEventSubtype =
+  | "mission:created"
+  | "mission:started"
+  | "mission:completed"
+  | "mission:failed"
+  | "mission:blocked"
+  | "mission:cancelled"
+  | "mission:heartbeat"
+  | "step:started"
+  | "step:passed"
+  | "step:failed"
+  | "step:blocked"
+  | "step:retry"
+  | "checkpoint:saved"
+  | "approval:required"
+  | "approval:approved"
+  | "approval:denied";
 
 export interface RuntimeEvent {
   type: RuntimeEventType;

@@ -6,6 +6,9 @@
  *
  * Phase 2C: Added heartbeat, active command, last result, timestamps,
  * serialization (toJSON), and heartbeat lifecycle management.
+ *
+ * Phase 3: MissionStore persistence integration.
+ * Mission state persists to disk and restores on restart.
  */
 
 import type {
@@ -17,7 +20,58 @@ import type {
   HeartbeatStatus,
   ActiveCommand,
   LastResult,
+  Mission,
+  MissionEventSubtype,
 } from "./types.js";
+import type { MissionStatus } from "./missions/mission-types.js";
+import { MissionStore } from "./missions/mission-store.js";
+
+// ─── Persistence Adapter ───────────────────────────────────────────────
+
+/**
+ * Interface for mission persistence.
+ * Filesystem-based by default; DB adapters can be added later.
+ */
+export interface MissionPersistence {
+  /** Load the active mission, if any */
+  loadActiveMission(): Promise<Mission | null>;
+  /** Save a mission */
+  saveMission(mission: Mission): Promise<void>;
+  /** Delete a mission */
+  deleteMission(id: string): Promise<boolean>;
+}
+
+/**
+ * Default filesystem-based mission persistence.
+ * Uses MissionStore for the actual file I/O.
+ */
+export class FilesystemMissionPersistence implements MissionPersistence {
+  private store: MissionStore;
+
+  constructor(projectRoot: string) {
+    this.store = new MissionStore(projectRoot);
+  }
+
+  async loadActiveMission(): Promise<Mission | null> {
+    const activeId = this.store.getActiveMissionId();
+    if (!activeId) return null;
+    return this.store.getMission(activeId);
+  }
+
+  async saveMission(mission: Mission): Promise<void> {
+    this.store.updateMission(mission);
+  }
+
+  async deleteMission(id: string): Promise<boolean> {
+    return this.store.deleteMission(id);
+  }
+}
+
+export function createFilesystemMissionPersistence(
+  projectRoot: string,
+): FilesystemMissionPersistence {
+  return new FilesystemMissionPersistence(projectRoot);
+}
 
 export function createInitialState(): RuntimeState {
   const now = Date.now();
@@ -42,7 +96,25 @@ export function createInitialState(): RuntimeState {
     activeCommand: null,
     lastResult: null,
     updatedAt: now,
+    // Phase 3: Mission state for autonomous operation
+    mission: null,
+    lastMissionHeartbeatAt: 0,
+    missionStepsCompleted: 0,
   };
+}
+
+// ─── RuntimeStore ─────────────────────────────────────────────────────
+
+/**
+ * RuntimeStore options.
+ */
+export interface RuntimeStoreOptions {
+  /** Event emitter for runtime events */
+  emitter?: RuntimeEventEmitter | null;
+  /** Project root for persistence (enables MissionStore persistence) */
+  projectRoot?: string;
+  /** Custom persistence adapter (defaults to FilesystemMissionPersistence) */
+  persistence?: MissionPersistence | null;
 }
 
 export class RuntimeStore {
@@ -50,12 +122,33 @@ export class RuntimeStore {
   private emitter: RuntimeEventEmitter | null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null;
   private heartbeatFn: (() => Promise<number>) | null;
+  private _persistence: MissionPersistence | null;
 
-  constructor(emitter?: RuntimeEventEmitter) {
+  constructor(
+    emitterOrOptions?: RuntimeEventEmitter | RuntimeStoreOptions,
+  ) {
     this.state = createInitialState();
-    this.emitter = emitter ?? null;
+    // Handle overloaded constructor
+    if (typeof emitterOrOptions === "function" || emitterOrOptions === undefined) {
+      this.emitter = emitterOrOptions ?? null;
+      this._persistence = null;
+    } else {
+      this.emitter = emitterOrOptions.emitter ?? null;
+      this._persistence = this.createPersistence(emitterOrOptions);
+    }
     this.heartbeatTimer = null;
     this.heartbeatFn = null;
+  }
+
+  /**
+   * Create the persistence adapter based on options.
+   */
+  private createPersistence(opts: RuntimeStoreOptions): MissionPersistence | null {
+    if (opts.persistence) return opts.persistence;
+    if (opts.projectRoot) {
+      return createFilesystemMissionPersistence(opts.projectRoot);
+    }
+    return null;
   }
 
   // ── State access ────────────────────────────────────────────────
@@ -94,6 +187,54 @@ export class RuntimeStore {
     });
   }
 
+  // ── Persistence Lifecycle ────────────────────────────────────────
+
+  /**
+   * Load mission state from persistence.
+   * Call this on startup after setting project context.
+   * Restores the active mission and its status from disk.
+   */
+  async load(): Promise<void> {
+    if (!this._persistence) return;
+
+    const savedMission = await this._persistence.loadActiveMission();
+    if (savedMission) {
+      // Restore the mission state
+      this.state.mission = savedMission;
+      this.state.lastMissionHeartbeatAt = savedMission.lastHeartbeatAt;
+      this.state.missionStepsCompleted = savedMission.steps.filter(
+        (s) => s.status === "passed" || s.status === "skipped",
+      ).length;
+      this.touch();
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:restored",
+        ts: Date.now(),
+        data: { missionId: savedMission.id, status: savedMission.status },
+      });
+    }
+  }
+
+  /**
+   * Persist the current mission state.
+   */
+  private async persistMission(): Promise<void> {
+    if (!this._persistence || !this.state.mission) return;
+
+    try {
+      await this._persistence.saveMission(this.state.mission);
+    } catch {
+      // Silent fail - persistence errors shouldn't break runtime
+    }
+  }
+
+  /**
+   * Check if persistence is enabled.
+   */
+  isPersistenceEnabled(): boolean {
+    return this._persistence !== null;
+  }
+
   // ── Phase ───────────────────────────────────────────────────────
 
   setPhase(phase: RuntimePhase): void {
@@ -122,6 +263,93 @@ export class RuntimeStore {
   setModel(model: string | null, profile: string | null): void {
     this.state.model = model;
     this.state.profile = profile;
+    this.touch();
+  }
+
+  // ── Mission ────────────────────────────────────────────────────────
+
+  /**
+   * Set the active mission.
+   * Emits mission:created or mission:started event.
+   */
+  setMission(mission: Mission): void {
+    const hadMission = this.state.mission !== null;
+    this.state.mission = mission;
+    this.state.lastMissionHeartbeatAt = Date.now();
+    this.touch();
+    if (!hadMission) {
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:created",
+        ts: Date.now(),
+        data: { missionId: mission.id, mode: mission.mode },
+      });
+    } else if (mission.status !== "planning") {
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:started",
+        ts: Date.now(),
+        data: { missionId: mission.id, status: mission.status },
+      });
+    }
+  }
+
+  /**
+   * Update mission status.
+   * Emits appropriate mission event subtype.
+   */
+  updateMissionStatus(missionId: string, status: MissionStatus): void {
+    const mission = this.state.mission;
+    if (!mission || mission.id !== missionId) return;
+    const prevStatus = mission.status;
+    if (prevStatus === status) return;
+
+    mission.status = status;
+    this.state.updatedAt = Date.now();
+    this.touch();
+
+    this.emit({
+      type: "litt_event",
+      subtype: `mission:${status}` as MissionEventSubtype,
+      ts: Date.now(),
+      data: { missionId, from: prevStatus, to: status },
+    });
+  }
+
+  /**
+   * Update mission step count.
+   */
+  incrementMissionStepsCompleted(): void {
+    this.state.missionStepsCompleted++;
+    this.touch();
+  }
+
+  /**
+   * Send mission heartbeat.
+   */
+  emitMissionHeartbeat(): void {
+    const mission = this.state.mission;
+    if (mission) {
+      this.state.lastMissionHeartbeatAt = Date.now();
+      this.touch();
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:heartbeat",
+        ts: Date.now(),
+        data: { missionId: mission.id, stepsCompleted: this.state.missionStepsCompleted },
+      });
+    }
+  }
+
+  /**
+   * Clear mission (e.g. on cancellation or completion).
+   */
+  clearMission(missionId: string): void {
+    const mission = this.state.mission;
+    if (mission?.id !== missionId) return;
+    this.state.mission = null;
+    this.state.lastMissionHeartbeatAt = 0;
+    this.state.missionStepsCompleted = 0;
     this.touch();
   }
 
