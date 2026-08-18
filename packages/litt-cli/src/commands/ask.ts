@@ -84,7 +84,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       cwd: projectRoot,
       userId: "cli-user",
       mode: "act",
-      maxRounds: 5,
+      maxRounds: 12,
       projectContext: {
         name: String(project.packageJson?.name ?? "unnamed"),
         root: project.rootDir,

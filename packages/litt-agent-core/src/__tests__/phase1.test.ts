@@ -88,8 +88,9 @@ describe("Phase 1B — Project Detection", () => {
     const subDir = path.join(REPO_ROOT, "src", "lib");
     const root = detectProjectRoot(subDir);
     // Should walk up and find the repo root (has .git)
-    assert.ok(root.endsWith("litlabs-website"),
-      `expected repo root ending in litlabs-website, got: ${root}`);
+    const repoName = path.basename(REPO_ROOT);
+    assert.ok(root.endsWith(repoName),
+      `expected repo root ending in ${repoName}, got: ${root}`);
   });
 
   it("detectProjectRoot uses explicit root when provided", () => {
@@ -100,8 +101,9 @@ describe("Phase 1B — Project Detection", () => {
   it("resolveProjectContext returns git repo info", async () => {
     const ctx = await resolveProjectContext(SHELL, REPO_ROOT);
     assert.equal(ctx.isGitRepo, true);
-    assert.ok(ctx.root.endsWith("litlabs-website"),
-      `root should end with litlabs-website, got: ${ctx.root}`);
+    const repoName = path.basename(REPO_ROOT);
+    assert.ok(ctx.root.endsWith(repoName),
+      `root should end with ${repoName}, got: ${ctx.root}`);
     assert.ok(ctx.branch !== null, "branch should be detected");
     assert.ok(ctx.name.length > 0, "name should be non-empty");
   });
@@ -172,8 +174,9 @@ describe("Phase 1D — Command Router", () => {
     assert.equal(result.command, "status");
     assert.equal(result.result.success, true);
     assert.ok(result.project, "should have project info");
-    assert.ok(result.project?.root.endsWith("litlabs-website"),
-      `root should end with litlabs-website, got: ${result.project?.root}`);
+    const repoName = path.basename(REPO_ROOT);
+    assert.ok(result.project?.root.endsWith(repoName),
+      `root should end with ${repoName}, got: ${result.project?.root}`);
     assert.ok(result.project?.isGitRepo, "should be a git repo");
   });
 
@@ -234,7 +237,8 @@ describe("Acceptance Gate 2 — No Hardcoded Paths", () => {
     // It should detect the git repo by walking up from the subdirectory
     assert.equal(ctx.isGitRepo, true);
     // The root should be the repo root (found by walking up to .git)
-    assert.ok(ctx.root.endsWith("litlabs-website"),
+    const repoName = path.basename(REPO_ROOT);
+    assert.ok(ctx.root.endsWith(repoName),
       `root should be the repo root, got: ${ctx.root}`);
     // The branch should be detected
     assert.ok(ctx.branch !== null, "branch should be detected from subdirectory");

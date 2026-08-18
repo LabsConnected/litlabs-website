@@ -40,6 +40,8 @@ export type {
   ApprovalResult,
   ApprovalProvider,
   AuthProvider,
+  MissionEventSubtype,
+  RuntimeEventType,
 } from "./types.js";
 
 // Shell
@@ -74,6 +76,7 @@ export type { CommandResult } from "./router.js";
 
 // Runtime state
 export { RuntimeStore, createInitialState } from "./state.js";
+export type { RecoveryResult, MissionPersistence } from "./state.js";
 
 // Hardened command executor (Phase 3B)
 export { CommandExecutor, createCommandExecutor } from "./command-executor.js";
@@ -153,6 +156,28 @@ export type {
   ParsedToolCall,
 } from "./agent-loop.js";
 
+// Semantic mission planner — generates a MissionStep[] plan BEFORE tool
+// execution and persists it to the canonical RuntimeStore. Tools then
+// attach to existing steps via toolHistory/actionHistory/evidence.
+// One step may cover many tool calls; one tool may serve many steps.
+export {
+  planMission,
+  parseSemanticPlan,
+  fallbackPlan,
+  resolveStepForTool,
+  attachToolToStep,
+  progressMissionStepAfterTool,
+  toolToEvidenceType,
+  isStepEvidenceSatisfied,
+  updateToolResultOnStep,
+} from "./mission-planner.js";
+export type {
+  SemanticStepSpec,
+  SemanticPlan,
+  PlanMissionOptions,
+  PlanMissionResult,
+} from "./mission-planner.js";
+
 // VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)
 export { VerificationGate, createVerificationGate, assertComplete } from "./verification-gate.js";
 export type {
@@ -163,3 +188,39 @@ export type {
   BrowserVerifier,
   VerificationGateOptions,
 } from "./verification-gate.js";
+
+// ─── Missions Module (Autopilot V1) ─────────────────────────────────────
+// Mission domain types, state machine, and persistence.
+// Wraps and orchestrates existing ExecutionGateway/ToolRegistry/RuntimeStore.
+export {
+  MissionStore,
+  createMissionStore,
+  isValidMissionTransition,
+  isValidStepTransition,
+  validateMissionTransition,
+  validateStepTransition,
+  generateMissionId,
+  generateStepId,
+  generateEvidenceId,
+  generateCheckpointId,
+  createDefaultRetryBudget,
+  deriveStepStatus,
+  deriveMissionStatus,
+} from "./missions/index.js";
+export type {
+  MissionStatus,
+  MissionStepStatus,
+  EvidenceType,
+  Mission,
+  MissionStep,
+  RepositoryBaseline,
+  MissionEvidence,
+  Checkpoint,
+  ActionRecord,
+  VerificationResult as MissionVerificationResult,
+  RetryBudget,
+  ProviderFailure,
+  ProviderState,
+  TransitionResult,
+} from "./missions/index.js";
+export type { Mission as MissionModel } from "./missions/index.js";

@@ -257,6 +257,17 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
+
+    // TEMPORARY compatibility routing:
+    // Groq currently rejects this model when it attempts native tool use
+    // while LiTT is still using the text-form tool_call protocol.
+    //
+    // Keep fallbacks enabled so OpenRouter can use another endpoint for
+    // the same model. Remove this once LiTT moves to native tool calling.
+    provider: {
+      ignore: ["groq"],
+      allow_fallbacks: true,
+    },
   };
   if (useWebSearch) {
     body.tools = [buildWebSearchTool()];
@@ -298,6 +309,31 @@ async function streamChatWithOpenRouter(
       } catch {
         continue;
       }
+
+      // OpenRouter may report provider/rate-limit/etc. errors MID-STREAM
+      // while the HTTP response itself remains 200.
+      // Never convert those into a silent empty assistant response.
+      if (obj.error) {
+        const code =
+          obj.error?.code ??
+          obj.choices?.[0]?.finish_reason ??
+          "unknown";
+
+        const message =
+          obj.error?.message ??
+          "Unknown OpenRouter streaming error";
+
+        throw new Error(
+          `OpenRouter stream error ${code}: ${message}`,
+        );
+      }
+
+      if (obj.choices?.[0]?.finish_reason === "error") {
+        throw new Error(
+          "OpenRouter stream terminated with finish_reason=error",
+        );
+      }
+
       if (obj.model) finalModel = obj.model;
       const delta = obj.choices?.[0]?.delta?.content;
       if (delta) {
@@ -308,6 +344,14 @@ async function streamChatWithOpenRouter(
       if (obj.usage?.total_tokens) total_tokens = obj.usage.total_tokens;
     }
   }
+  // A successful provider stream must produce assistant content.
+  // Do not emit "done" for a zero-content completion.
+  if (!content.trim()) {
+    throw new Error(
+      `OpenRouter stream completed without assistant content (model=${finalModel})`,
+    );
+  }
+
   const tEnd = Date.now();
   const timing: LiTTTiming = {
     ttftMs: tFirst >= 0 ? tFirst - t0 : -1,
@@ -319,43 +363,104 @@ async function streamChatWithOpenRouter(
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
-export async function streamLiTTCode(
-  prompt: string,
+
+/**
+ * Stream an already-built canonical conversation through LiTT's EXISTING
+ * provider/model routing.
+ *
+ * This is intentionally the shared provider boundary for higher-level
+ * runtimes such as the Desktop agent loop. It does NOT create another
+ * provider client or another LiTT brain.
+ */
+export async function streamLiTTMessages(
+  messages: ChatMessage[],
   emit: (e: LiTTEvent) => void,
+  routingPrompt?: string,
 ): Promise<LiTTResult> {
-  const { profile, model } = resolveProfile(prompt);
-  const webSearch = needsWebSearch(prompt);
-  // Strip /web or /search prefix from the prompt before sending to the model
-  const cleanPrompt = prompt.replace(/^(\/web|\/search)\s+/i, "").trim();
-  const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content:
-        "You are LiTT, the lead AI copilot for LiTTree Lab Studios. You help users build software. " +
-        "When asked for commands, prefer safe, explainable commands. " +
-        "Warn about destructive operations. Keep responses concise and actionable." +
-        (webSearch ? " When web search results are available, cite sources with URLs." : ""),
-    },
-    { role: "user", content: cleanPrompt },
-  ];
+  const promptForRouting =
+    routingPrompt ??
+    messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content)
+      .join("\n\n");
+
+  const { profile, model } = resolveProfile(promptForRouting);
+  const webSearch = needsWebSearch(promptForRouting);
 
   if (webSearch) {
     emit({ type: "meta", provider: "openrouter", model, profile });
   }
 
   try {
-    return await streamChatWithOllama(messages, emit, model, profile);
+    return await streamChatWithOllama(
+      messages,
+      emit,
+      model,
+      profile,
+    );
   } catch (ollamaErr) {
     try {
-      return await streamChatWithOpenRouter(messages, emit, model, profile, webSearch);
+      return await streamChatWithOpenRouter(
+        messages,
+        emit,
+        model,
+        profile,
+        webSearch,
+      );
     } catch (orErr) {
-      const msg = `Ollama: ${ollamaErr instanceof Error ? ollamaErr.message : String(ollamaErr)} | OpenRouter: ${orErr instanceof Error ? orErr.message : String(orErr)}`;
+      const msg =
+        `Ollama: ${
+          ollamaErr instanceof Error
+            ? ollamaErr.message
+            : String(ollamaErr)
+        } | OpenRouter: ${
+          orErr instanceof Error
+            ? orErr.message
+            : String(orErr)
+        }`;
+
       emit({ type: "error", message: msg });
       throw new Error(msg);
     }
   }
 }
 
+/**
+ * Normal direct LiTT chat.
+ *
+ * Builds the concise copilot system prompt, then delegates to the SAME
+ * message-level provider boundary used by the operator.
+ */
+export async function streamLiTTCode(
+  prompt: string,
+  emit: (e: LiTTEvent) => void,
+): Promise<LiTTResult> {
+  const webSearch = needsWebSearch(prompt);
+
+  const cleanPrompt = prompt
+    .replace(/^(\/web|\/search)\s+/i, "")
+    .trim();
+
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are LiTT, the lead AI copilot for LiTTree Lab Studios. " +
+        "You help users build software. " +
+        "When asked for commands, prefer safe, explainable commands. " +
+        "Warn about destructive operations. Keep responses concise and actionable." +
+        (webSearch
+          ? " When web search results are available, cite sources with URLs."
+          : ""),
+    },
+    {
+      role: "user",
+      content: cleanPrompt,
+    },
+  ];
+
+  return streamLiTTMessages(messages, emit, prompt);
+}
 export async function askLiTTCode(prompt: string): Promise<string> {
   const { model } = resolveProfile(prompt);
   const messages: ChatMessage[] = [
@@ -432,4 +537,310 @@ Be concise. If the command is unclear, list the available commands.
 
   const prompt = `${systemContext}\n\nCommand: ${command || "help"}\nArguments: ${rest || "none"}`;
   return await askLiTTCode(prompt);
+}
+
+
+/* ========================================================================
+ * LiTT native OpenRouter tool transport
+ *
+ * This provider boundary is used by the authenticated Desktop operator.
+ * Model-selected tools are converted into LiTT's canonical tool_call
+ * envelope; runAgentLoop then dispatches through ExecutionGateway.
+ * ====================================================================== */
+
+export type LiTTNativeTool = {
+  toolId: string;
+  functionName: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export async function streamLiTTMessagesWithTools(
+  messages: ChatMessage[],
+  nativeTools: LiTTNativeTool[],
+  emit: (event: LiTTEvent) => void,
+  routingPrompt?: string,
+): Promise<LiTTResult> {
+  const promptForRouting =
+    routingPrompt ??
+    messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content)
+      .join("\n\n");
+
+  const { profile, model } = resolveProfile(promptForRouting);
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    const message = "OPENROUTER_API_KEY not configured";
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  const tools = nativeTools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.functionName,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+
+  const requestBody: Record<string, unknown> = {
+    model,
+    messages: messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    stream: false,
+    tools,
+    tool_choice: nativeTools.length > 0 ? "auto" : "none",
+    parallel_tool_calls: false,
+  };
+
+  const startedAt = Date.now();
+
+  emit({
+    type: "meta",
+    provider: "openrouter",
+    model,
+    profile,
+  });
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+          "HTTP-Referer":
+            process.env.NEXT_PUBLIC_SITE_URL ||
+            "https://litlabs.net",
+          "X-Title": "LiTT Desktop Operator",
+        },
+        body: JSON.stringify(requestBody),
+      },
+    );
+  } catch (error) {
+    const message =
+      `OpenRouter request failed: ${
+        error instanceof Error
+          ? error.message
+          : String(error)
+      }`;
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  if (!response.ok) {
+    const errorBody =
+      await response.text().catch(() => "");
+
+    const message =
+      `OpenRouter API error ${response.status}: ${
+        errorBody || response.statusText
+      }`;
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  const data: any = await response.json();
+
+  if (data?.error) {
+    const message =
+      `OpenRouter error ${
+        data.error?.code ?? "unknown"
+      }: ${
+        data.error?.message ?? "unknown provider error"
+      }`;
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  const choice = data?.choices?.[0];
+
+  if (!choice) {
+    const message =
+      "OpenRouter returned no completion choice";
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  const responseMessage = choice.message ?? {};
+
+  let content =
+    typeof responseMessage.content === "string"
+      ? responseMessage.content
+      : "";
+
+  const toolCalls =
+    Array.isArray(responseMessage.tool_calls)
+      ? responseMessage.tool_calls
+      : [];
+
+  if (toolCalls.length > 1) {
+    const message =
+      `OpenRouter returned ${toolCalls.length} tool calls ` +
+      `while parallel_tool_calls=false`;
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  if (toolCalls.length === 1) {
+    const providerCall = toolCalls[0];
+
+    const functionName =
+      providerCall?.function?.name;
+
+    if (
+      typeof functionName !== "string" ||
+      !functionName
+    ) {
+      const message =
+        "OpenRouter returned a tool call without a function name";
+
+      emit({ type: "error", message });
+      throw new Error(message);
+    }
+
+    const toolSpec =
+      nativeTools.find(
+        (tool) =>
+          tool.functionName === functionName,
+      );
+
+    if (!toolSpec) {
+      const message =
+        `Provider requested unknown tool: ${functionName}`;
+
+      emit({ type: "error", message });
+      throw new Error(message);
+    }
+
+    const rawArguments =
+      providerCall?.function?.arguments;
+
+    let inputs: Record<string, unknown> = {};
+
+    if (
+      typeof rawArguments === "string" &&
+      rawArguments.trim()
+    ) {
+      try {
+        const parsed = JSON.parse(rawArguments);
+
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed)
+        ) {
+          throw new Error(
+            "arguments JSON was not an object",
+          );
+        }
+
+        inputs =
+          parsed as Record<string, unknown>;
+      } catch (error) {
+        const message =
+          `Invalid arguments for ${toolSpec.toolId}: ${
+            error instanceof Error
+              ? error.message
+              : String(error)
+          }`;
+
+        emit({ type: "error", message });
+        throw new Error(message);
+      }
+    } else if (
+      typeof rawArguments === "object" &&
+      rawArguments !== null &&
+      !Array.isArray(rawArguments)
+    ) {
+      inputs =
+        rawArguments as Record<string, unknown>;
+    }
+
+    /*
+     * Compatibility envelope:
+     *
+     * runAgentLoop already understands this canonical format.
+     * We therefore gain provider-native function calling without creating
+     * a second execution path.
+     */
+    const canonicalToolCall = [
+      "```tool_call",
+      JSON.stringify({
+        tool: toolSpec.toolId,
+        inputs,
+      }),
+      "```",
+    ].join("\n");
+
+    content =
+      content.trim()
+        ? `${content}\n${canonicalToolCall}`
+        : canonicalToolCall;
+  }
+
+  if (!content.trim()) {
+    const message =
+      `OpenRouter completed without assistant text or a native tool call ` +
+      `(model=${data?.model ?? model})`;
+
+    emit({ type: "error", message });
+    throw new Error(message);
+  }
+
+  const finishedAt = Date.now();
+
+  const finalModel =
+    data?.model ?? model;
+
+  const usage = {
+    total_tokens:
+      data?.usage?.total_tokens ?? 0,
+  };
+
+  const timing: LiTTTiming = {
+    ttftMs: -1,
+    generationMs: -1,
+    totalMs: finishedAt - startedAt,
+  };
+
+  /*
+   * ModelProvider expects stream events. For now the native tool transport
+   * emits the completed model payload as one delta. Actual execution events
+   * continue through Agent Core / ExecutionGateway.
+   */
+  emit({
+    type: "delta",
+    text: content,
+  });
+
+  emit({
+    type: "done",
+    model: finalModel,
+    usage,
+    timing,
+  });
+
+  return {
+    content,
+    model: finalModel,
+    provider: "openrouter",
+    usage,
+    timing,
+    profile,
+  };
 }

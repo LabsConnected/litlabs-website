@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
+import { buildCanonicalMission, sameCanonicalMission } from "./canonical-mission.js";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
@@ -94,6 +95,34 @@ export function CockpitApp({
   const { stdout } = useStdout();
   useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
+
+  // ─── Canonical mission projection ───
+  // RuntimeStore.mission is the authority. This hook projects it into
+  // the cockpit's canonicalMission state on mount and when mission
+  // events arrive through the SessionEventBridge. sameCanonicalMission
+  // keeps the previous render-cache reference when nothing meaningful
+  // changed, so React bails out of the update (no re-render).
+  useEffect(() => {
+    const projectCanonical = () => {
+      const m = session.getStore().getMission();
+      const next = buildCanonicalMission(m);
+      store.actions.setCanonicalMission((prev) =>
+        sameCanonicalMission(prev, next) ? prev : next,
+      );
+    };
+
+    // Project on mount
+    projectCanonical();
+
+    // Project on every mission event from the session bridge
+    const unsub = sessionBridge.subscribe((event) => {
+      if (event.type.startsWith("mission.")) {
+        projectCanonical();
+      }
+    });
+
+    return () => { unsub(); };
+  }, [session, sessionBridge, store]);
 
   // Responsive layout — reactive terminal viewport (spec §9).
   const { rows } = useTerminalSize(stdout);

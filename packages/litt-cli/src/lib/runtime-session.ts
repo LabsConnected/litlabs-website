@@ -40,6 +40,7 @@ import {
   type VerificationResult,
   type VerificationConfig,
   type BrowserVerifier,
+  type RecoveryResult,
 } from "@litt/agent-core";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -117,9 +118,37 @@ export class RuntimeSession {
     this._onApprovalRequired = options.onApprovalRequired ?? null;
 
     this._shell = createShellExecutor(this._cwd);
-    this._store = new RuntimeStore((event) => this._handleEvent(event));
+    // Pass projectRoot to RuntimeStore so mission persistence is enabled.
+    // Without this, missions are never written to disk and recovery is impossible.
+    this._store = new RuntimeStore({
+      emitter: (event) => this._handleEvent(event),
+      projectRoot: this._cwd,
+    });
     this._executor = new CommandExecutor(this._shell, this._store, (event) => this._handleEvent(event));
     this._router = new CommandRouter(this._shell, { cwd: this._cwd, store: this._store });
+  }
+
+  // ── Startup / Recovery ──────────────────────────────────────────
+
+  /**
+   * Startup recovery — load any persisted active mission from disk.
+   *
+   * This is the automatic restart/checkpoint recovery path:
+   *   RuntimeSession startup
+   *     → loadWithRecovery()
+   *     → active mission restored (if it was non-terminal)
+   *     → checkpoint restored
+   *     → canonical events/state exposed once
+   *
+   * Terminal missions (COMPLETE, FAILED, CANCELLED) are NOT restored —
+   * they are done. Only working/verifying/blocked missions resume.
+   *
+   * Call this once after creating the session, before rendering the UI.
+   * Returns the recovery result so the caller can surface a "mission
+   * restored" notification if desired.
+   */
+  async startup(): Promise<RecoveryResult> {
+    return this._store.loadWithRecovery();
   }
 
   // ── Public API ──────────────────────────────────────────────────
@@ -157,6 +186,39 @@ export class RuntimeSession {
    */
   getExecutor(): CommandExecutor {
     return this._executor;
+  }
+
+  /**
+   * Get the canonical RuntimeStore — the ONE source of runtime truth.
+   *
+   * Natural-language agent loops MUST use this store (not a fresh one)
+   * so that mission state, persistence, recovery, command_start/end
+   * events, and state_sync all flow through the canonical event bus.
+   * This is the fix for the Shell's "second brain" problem.
+   */
+  getStore(): RuntimeStore {
+    return this._store;
+  }
+
+  /**
+   * Get the canonical ShellExecutor — shared by CommandExecutor and
+   * ExecutionGateway. Agent loops need this for the ToolRegistry path
+   * (non-gateway fallback); in the canonical path the gateway handles
+   * execution, but the shell reference is still required by runAgentLoop.
+   */
+  getShell(): ShellExecutor {
+    return this._shell;
+  }
+
+  /**
+   * Emit a RuntimeEvent through the canonical event bus.
+   *
+   * Agent loops call this for agent_tool_call / agent_tool_result /
+   * verification_failed_repair events so they reach SessionEventBridge
+   * → EventBridge → CockpitStore — the same path as command_start/end.
+   */
+  emitAgentEvent(event: RuntimeEvent): void {
+    this._handleEvent(event);
   }
 
   /**

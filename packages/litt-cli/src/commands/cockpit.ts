@@ -75,6 +75,17 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   });
   session.installSigintHandler();
 
+  // ─── Startup recovery ───
+  // Load any persisted active mission from disk. This is the automatic
+  // restart/checkpoint recovery path. Non-terminal missions (working,
+  // verifying, blocked) are restored; terminal missions (complete,
+  // failed, cancelled) are NOT restored.
+  const recovery = await session.startup();
+  if (recovery.recovered && recovery.mission) {
+    // The mission:restored event was already emitted by loadWithRecovery.
+    // The SessionEventBridge will project it to the cockpit UI.
+  }
+
   // Try to connect to terminal-server for realtime events
   let client: RuntimeClient | null = null;
   try {

@@ -24,6 +24,7 @@ prod-only.json
 .kilo/
 .kilocode/
 .quadcodeai/
+.litt/
 
 # Screenshot artifacts (generated during dev/testing)
 studio-after.png

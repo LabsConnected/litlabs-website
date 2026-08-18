@@ -44,7 +44,17 @@ export interface LifecycleEvent {
     | "tool.failed"
     | "tool.cancelled"
     | "tool.timeout"
-    | "run.completed";
+    | "run.completed"
+    | "mission.created"
+    | "mission.started"
+    | "mission.step_created"
+    | "mission.step_started"
+    | "mission.step_passed"
+    | "mission.step_failed"
+    | "mission.verifying"
+    | "mission.completed"
+    | "mission.failed"
+    | "mission.restored";
   runId: string;
   toolCallId?: string;
   ts: number;
