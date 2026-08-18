@@ -528,48 +528,125 @@ export async function POST(req: NextRequest) {
                 .eq("user_id", refundUser.id)
                 .eq("plan", refundPlanId);
 
-              // For one_time plans (Founder), do NOT debit LiTTBits —
-              // Founder has 0 LiTTBits. For subscription plans, debit
-              // the refunded amount from purchased balance.
-              if (plan.billingType === "subscription") {
-                try {
-                  await sb.rpc("debit_credits", {
-                    p_user_id: refundUser.id,
-                    p_amount: charge.amount_refunded / 100,
-                    p_category: "refund",
-                    p_description: `Refund for charge ${charge.id}`,
-                    p_idempotency_key: `refund_${charge.id}`,
-                  });
-                } catch {
-                  // Ledger not available — skip
-                }
-              }
+              // Do NOT debit LiTTBits for plan refunds (subscription OR
+              // one_time). Subscription credits were already consumed
+              // during the billing period — revoking access via status
+              // "refunded" is the correct enforcement, not a credit
+              // debit. Founder has 0 LiTTBits by definition. Debiting an
+              // arbitrary dollar amount (amount_refunded/100) as LiTTBits
+              // would be wrong accounting — LiTTBits are not 1:1 with USD
+              // cents (6000 credits = $15, i.e. ~400 credits/dollar).
             }
           }
           break;
         }
 
-        // ── Credit pack refund: debit LBC ──
-        // Only debit LBC for credit_pack refunds — never for agents or plans.
+        // ── Credit pack refund: debit the proportional LiTTBits share ──
+        // Only debit for credit_pack refunds — never for agents or plans.
+        // The total LiTTBits granted is carried in the charge metadata as
+        // coin_amount (set at checkout time). LiTTBits are NOT 1:1 with
+        // USD cents (6000 credits = $15, i.e. ~400 credits/dollar), so we
+        // never derive LiTTBits directly from cents. Instead we claw back
+        // the SAME PROPORTION of LiTTBits as the refund bears to the
+        // original charge:
+        //   debitLiTTBits = round(coinAmount * refundAmount / chargeAmount)
+        // A full refund (refundAmount === chargeAmount) debits exactly
+        // coinAmount. A partial refund debits only its proportional share,
+        // so a 50% refund of a 2,000-LiTTBits pack debits 1,000 — never
+        // the full 2,000.
+        //
+        // ── Refund amount + identity resolution (event-identity safe) ──
+        // The charge.refunded event carries a Charge object (NOT a Refund).
+        // Stripe's docs recommend "Listen to refund.created for information
+        // about the refund." Since we handle charge.refunded, we must
+        // resolve the triggering refund's amount without relying on
+        // refunds.data[0] being the triggering refund.
+        //
+        // PRIMARY: event.data.previous_attributes.amount_refunded delta.
+        //   The Charge's amount_refunded is cumulative. previous_attributes
+        //   captures the cumulative total BEFORE this event, so:
+        //     refundAmount = charge.amount_refunded - previous.amount_refunded
+        //   This is the EXACT amount of the triggering refund — immune to
+        //   concurrent partial-refund races where refunds.data[0] might be
+        //   a newer, different refund. The idempotency key uses event.id
+        //   (each charge.refunded event = exactly one refund, so event.id
+        //   is per-refund and race-free).
+        //
+        // FALLBACK: charge.refunds.data[0].amount (most-recent refund).
+        //   Used when previous_attributes is absent (older API versions or
+        //   edge cases). Under normal sequential processing data[0] IS the
+        //   triggering refund. Idempotency key uses refunds.data[0].id.
+        //
+        // NEVER: charge.amount_refunded alone (cumulative — would re-debit
+        //   the full cumulative total on every event, the old over-debit
+        //   bug). If neither source is available, fall back to the full
+        //   coinAmount as a safe default (preserves prior behavior for
+        //   malformed events — conservative over-debit is recoverable).
         if (refundProductType === "credit_pack" && refundClerkId) {
-          const { data: refundUser } = await sb
-            .from("users")
-            .select("id")
-            .eq("clerk_id", refundClerkId)
-            .single();
-          if (refundUser) {
-            // Debit the refunded amount from purchased balance via ledger
-            try {
-              await sb.rpc("debit_credits", {
-                p_user_id: refundUser.id,
-                // Stripe amount is in cents; convert to LiTTBits (1:1 with USD cents in this system).
-                p_amount: charge.amount_refunded / 100,
-                p_category: "refund",
-                p_description: `Refund for charge ${charge.id}`,
-                p_idempotency_key: `refund_${charge.id}`,
-              });
-            } catch {
-              // Ledger not available — skip
+          const coinAmount = parseInt(refundMeta.coin_amount || "0", 10);
+          if (coinAmount > 0) {
+            const { data: refundUser } = await sb
+              .from("users")
+              .select("id")
+              .eq("clerk_id", refundClerkId)
+              .single();
+            if (refundUser) {
+              const chargeAmount = charge.amount ?? 0;
+              const latestRefund = charge.refunds?.data?.[0];
+
+              // Resolve the triggering refund's amount + identity.
+              const prevAttrs = event.data.previous_attributes as
+                | Partial<Stripe.Charge>
+                | undefined;
+              const prevAmountRefunded = prevAttrs?.amount_refunded;
+              const hasPrevDelta =
+                typeof prevAmountRefunded === "number" &&
+                typeof charge.amount_refunded === "number";
+              const deltaAmount = hasPrevDelta
+                ? (charge.amount_refunded as number) -
+                  (prevAmountRefunded as number)
+                : undefined;
+
+              // PRIMARY: previous_attributes delta (race-free).
+              // FALLBACK: refunds.data[0].amount (most-recent refund).
+              // NEVER: charge.amount_refunded alone (cumulative).
+              const refundAmount = deltaAmount ?? latestRefund?.amount;
+              // Idempotency: event.id when using delta (per-refund,
+              // race-free); refunds.data[0].id as fallback.
+              const refundId = hasPrevDelta
+                ? event.id
+                : latestRefund?.id ?? event.id;
+
+              // Proportional clawback. Fall back to the full coinAmount
+              // only when the proportion cannot be determined (missing
+              // charge amount or refund amount) — preserves the prior
+              // full-clawback behavior as a safe default and avoids
+              // under-debiting on malformed events.
+              let debitAmount = coinAmount;
+              if (
+                chargeAmount > 0 &&
+                refundAmount !== undefined &&
+                refundAmount > 0
+              ) {
+                debitAmount = Math.round(
+                  (coinAmount * refundAmount) / chargeAmount,
+                );
+                if (debitAmount < 0) debitAmount = 0;
+                if (debitAmount > coinAmount) debitAmount = coinAmount;
+              }
+              if (debitAmount > 0) {
+                try {
+                  await sb.rpc("debit_credits", {
+                    p_user_id: refundUser.id,
+                    p_amount: debitAmount,
+                    p_category: "refund",
+                    p_description: `Refund for charge ${charge.id}`,
+                    p_idempotency_key: `refund_${refundId}`,
+                  });
+                } catch {
+                  // Ledger not available — skip
+                }
+              }
             }
           }
         }
