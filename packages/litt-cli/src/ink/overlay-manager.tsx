@@ -112,8 +112,6 @@ export function OverlayKeyboardProvider({
  */
 export function useOverlayKeyboard(id: string, handler: KeyboardHandler): void {
   const ctx = useContext(OverlayKeyboardContext);
-  if (!ctx) return; // No provider — fall back gracefully
-
   // Keep handler in a ref so we always call the latest version
   const handlerRef = useRef(handler);
   useEffect(() => {
@@ -121,6 +119,7 @@ export function useOverlayKeyboard(id: string, handler: KeyboardHandler): void {
   });
 
   useEffect(() => {
+    if (!ctx) return; // No provider — fall back gracefully
     return ctx.register(id, (input, key) => handlerRef.current(input, key));
   }, [id, ctx]);
 }
