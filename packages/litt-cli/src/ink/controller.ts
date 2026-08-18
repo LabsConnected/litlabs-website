@@ -26,6 +26,9 @@ import {
   planMission,
   resolveStepForTool,
   attachToolToStep,
+  updateToolResultOnStep,
+  progressMissionStepAfterTool,
+  toolToEvidenceType,
   type RuntimeEvent,
   type StreamChunk,
 } from "@litt/agent-core";
@@ -679,6 +682,15 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             branch: freshBranch ?? branch ?? "unknown",
           },
           store: agentStore,
+          // ─── Wire the VerificationGate into the agent loop ───
+          // This is the REAL repair/revalidation path: when the model
+          // says "done", the loop runs the gate. If the gate fails,
+          // the failures are fed back to the model as a repair request
+          // and the loop continues. The model must actually fix the
+          // failures and reach a state the runtime can prove.
+          // Without this, the loop terminates on model "done" and the
+          // controller runs the gate separately — no repair loop.
+          verificationGate: session.getVerificationGate(),
           onModelStream: (event) => {
             // Model prose (deltas) do NOT go into the activity feed.
           },
@@ -709,13 +721,14 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                   agentStore.setCurrentStep(stepId).catch(() => {});
                 }
                 // Record the tool call against the step's toolHistory.
+                // Status is "pending" — the result arrives in
+                // agent_tool_result and updates the record truthfully.
                 if (stepId && toolCallId) {
                   attachToolToStep(agentStore, stepId, {
                     toolId,
                     toolName: (event.data as { tool?: string }).tool ?? toolId,
                     toolCallId,
-                    success: true, // updated on result
-                    message: "",
+                    toolRunId: `agent_${toolCallId}`,
                   }).catch(() => {});
                 }
               }
@@ -731,29 +744,38 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             } else if (event.subtype === "agent_tool_result") {
               const success = (event.data as { success?: boolean }).success ?? true;
               const toolName = (event.data as { tool?: string }).tool ?? "unknown";
+              const toolId = (event.data as { toolId?: string }).toolId ?? "";
               const message = (event.data as { message?: string }).message ?? "";
               const durationMs = (event.data as { durationMs?: number }).durationMs;
 
               // Record evidence on the current step — tools contribute
               // evidence to the step, they do NOT define the step.
+              // Use the canonical evidence type for this tool so step
+              // requiredEvidence can be checked.
               if (currentStepId) {
+                const evidenceType = toolToEvidenceType(toolId);
                 agentStore.addMissionEvidence({
                   stepId: currentStepId,
-                  type: "command_result",
+                  type: evidenceType,
                   source: toolName,
                   summary: message.slice(0, 200),
                   success,
-                  metadata: { durationMs, toolName },
+                  metadata: { durationMs, toolName, toolId },
                 }).catch(() => {});
 
-                // A step transitions to passed/failed only when the
-                // model advances past it (next step starts) or when a
-                // clear pass/fail signal arrives. We do NOT mark a
-                // step passed on every successful tool — a step may
-                // require several tools. Instead, when a tool FAILS,
-                // we record the failure on the step. The step is
-                // marked passed when the NEXT step starts (the model
-                // moved on) or when verification proves it.
+                // Update the action record with the truthful result.
+                // This transitions the record from "pending" to
+                // "success" or "failed". A failed record stays failed.
+                const toolCallIdFromCall = (event.data as { toolCallId?: string }).toolCallId ?? "";
+                if (toolCallIdFromCall) {
+                  updateToolResultOnStep(agentStore, currentStepId, toolCallIdFromCall, {
+                    success,
+                    message,
+                    durationMs,
+                  }).catch(() => {});
+                }
+
+                // A failed tool marks the current step as failed.
                 if (!success) {
                   agentStore.updateMissionStepStatus(
                     currentStepId,
@@ -764,6 +786,21 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                       verificationEvidence: message.slice(0, 500),
                     },
                   ).catch(() => {});
+                } else {
+                  // Successful tool — check if the current step's
+                  // requiredEvidence is now satisfied. If so, advance
+                  // the step (working → passed, open next step).
+                  // This is the REAL semantic progression: steps
+                  // advance when their evidence contract is met, not
+                  // on every tool success.
+                  progressMissionStepAfterTool(agentStore, {
+                    success: true,
+                    toolId,
+                  }).then((advanced) => {
+                    if (advanced?.openedStepId) {
+                      currentStepId = advanced.openedStepId;
+                    }
+                  }).catch(() => {});
                 }
               }
             }
@@ -787,6 +824,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
         // ─── VerificationGate owns completion ───
+        // The agent loop already ran the gate (if configured). Use the
+        // loop's verification result if available — it contains the
+        // repair/revalidation outcome. Only run the gate separately if
+        // the loop didn't (e.g. no gate was configured).
         store.actions.setHoloState("VERIFYING");
         store.actions.addActivity({
           id: `act_${Date.now()}_verify`,
@@ -802,7 +843,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         let missionComplete = false;
 
         try {
-          const verification = await session.verify();
+          // Use the loop's verification result if it ran the gate
+          const verification = result.verification
+            ? { ...result.verification, message: result.verification.message }
+            : await session.verify();
           verificationSummary = verification.message;
           missionComplete = verification.proven;
 

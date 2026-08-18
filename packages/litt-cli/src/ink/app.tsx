@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
+import { buildCanonicalMission, sameCanonicalMission } from "./canonical-mission.js";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
@@ -98,32 +99,16 @@ export function CockpitApp({
   // ─── Canonical mission projection ───
   // RuntimeStore.mission is the authority. This hook projects it into
   // the cockpit's canonicalMission state on mount and when mission
-  // events arrive through the SessionEventBridge.
+  // events arrive through the SessionEventBridge. sameCanonicalMission
+  // keeps the previous render-cache reference when nothing meaningful
+  // changed, so React bails out of the update (no re-render).
   useEffect(() => {
     const projectCanonical = () => {
       const m = session.getStore().getMission();
-      if (m) {
-        store.actions.setCanonicalMission({
-          id: m.id,
-          goal: m.goal,
-          status: m.status,
-          currentStepId: m.currentStepId,
-          steps: m.steps.map((s) => ({
-            id: s.id,
-            title: s.title,
-            status: s.status,
-            sequence: s.sequence,
-          })),
-          verificationProven: m.evidence.some(
-            (e) => e.type === "verification_result" && e.success === true,
-          ) || null,
-          restored: m.metadata?.restoredFrom !== undefined,
-          completionReason: m.completionReason,
-          failureReason: m.failureReason,
-        });
-      } else {
-        store.actions.setCanonicalMission(null);
-      }
+      const next = buildCanonicalMission(m);
+      store.actions.setCanonicalMission((prev) =>
+        sameCanonicalMission(prev, next) ? prev : next,
+      );
     };
 
     // Project on mount

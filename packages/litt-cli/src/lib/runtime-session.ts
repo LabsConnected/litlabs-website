@@ -40,6 +40,7 @@ import {
   type VerificationResult,
   type VerificationConfig,
   type BrowserVerifier,
+  type RecoveryResult,
 } from "@litt/agent-core";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -125,6 +126,29 @@ export class RuntimeSession {
     });
     this._executor = new CommandExecutor(this._shell, this._store, (event) => this._handleEvent(event));
     this._router = new CommandRouter(this._shell, { cwd: this._cwd, store: this._store });
+  }
+
+  // ── Startup / Recovery ──────────────────────────────────────────
+
+  /**
+   * Startup recovery — load any persisted active mission from disk.
+   *
+   * This is the automatic restart/checkpoint recovery path:
+   *   RuntimeSession startup
+   *     → loadWithRecovery()
+   *     → active mission restored (if it was non-terminal)
+   *     → checkpoint restored
+   *     → canonical events/state exposed once
+   *
+   * Terminal missions (COMPLETE, FAILED, CANCELLED) are NOT restored —
+   * they are done. Only working/verifying/blocked missions resume.
+   *
+   * Call this once after creating the session, before rendering the UI.
+   * Returns the recovery result so the caller can surface a "mission
+   * restored" notification if desired.
+   */
+  async startup(): Promise<RecoveryResult> {
+    return this._store.loadWithRecovery();
   }
 
   // ── Public API ──────────────────────────────────────────────────

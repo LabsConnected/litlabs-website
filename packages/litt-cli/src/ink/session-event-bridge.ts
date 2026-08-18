@@ -58,27 +58,54 @@ export class SessionEventBridge {
     const data = event.data ?? {};
 
     switch (event.type) {
-      case "command_start":
-        if (this.currentRunId && this.currentRunId !== runId) {
-          // new run — old run is done
-        }
-        this.currentRunId = runId;
-        return { type: "run.started", runId, ts, data };
+      // ─── Exactly-once contract ─────────────────────────────────────────
+      // The agent loop (runAgentLoop) emits TWO parallel event streams for a
+      // single tool execution:
+      //   (a) agent_tool_call / agent_tool_result  via the `emitter` callback
+      //   (b) command_start / command_end           via store.commandStart/End
+      //	Both are legitimate internal events — (a) carries the tool identity
+      //	(toolCallId), (b) carries the run identity (runId "agent_<toolCallId>").
+      //	If we projected BOTH, one tool would yield two RUNs and two results
+      //	(observed live as `RUN RUN / DONE PASS`).
+      //
+      //	The canonical UI START/RESULT for an agent execution is the TOOL-level
+      //	event (agent_tool_call → tool.started, agent_tool_result →
+      //	tool.completed). The agent-loop command_start/command_end are internal
+      //	RuntimeStore bookkeeping (phase, activeCommand, heartbeat, lastResult)
+      //	and must NOT also project. We still track the run identity.
+      //
+      //	Non-agent executions (slash /run shell commands, direct store.command*)
+      //	do not carry the "agent_" runId prefix, so their run.started/run.completed
+      //	projections are preserved.
+      case "command_start": {
+        const runnerRunId = (data.runId as string) ?? event.runId ?? "";
+        if (runnerRunId) this.currentRunId = runnerRunId;
+        // Agent-loop command_start is bookkeeping — the paired agent_tool_call
+        // has already emitted the canonical `tool.started`. Do not project.
+        if (runnerRunId.startsWith("agent_")) return null;
+        return { type: "run.started", runId: runnerRunId || this.currentRunId || "", ts, data };
+      }
 
       case "command_end": {
+        const runnerRunId = (data.runId as string) ?? event.runId ?? this.currentRunId ?? "";
+        if (runnerRunId) this.currentRunId = runnerRunId;
+        // Agent-loop command_end is bookkeeping — the paired agent_tool_result
+        // emits the canonical result projection. Do not project.
+        if (runnerRunId.startsWith("agent_")) return null;
+
         const success = data.success as boolean;
         const cancelled = data.cancelled as boolean;
         const timedOut = data.timedOut as boolean;
 
         if (cancelled) {
-          return { type: "run.completed", runId, ts, data: { ...data, status: "cancelled" } };
+          return { type: "run.completed", runId: runnerRunId, ts, data: { ...data, status: "cancelled" } };
         }
         if (timedOut) {
-          return { type: "run.completed", runId, ts, data: { ...data, status: "timeout" } };
+          return { type: "run.completed", runId: runnerRunId, ts, data: { ...data, status: "timeout" } };
         }
         return {
           type: "run.completed",
-          runId,
+          runId: runnerRunId,
           ts,
           data: { ...data, status: success ? "success" : "failed" },
         };
