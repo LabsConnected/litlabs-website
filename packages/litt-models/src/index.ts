@@ -48,3 +48,44 @@ export {
 export type { RouteOptions } from "./router";
 
 export { RunPinStore } from "./run-pin";
+
+// ─── Discovery + health verification ───────────────────────────────
+export type {
+  EnvAccessor,
+  FetchResponse,
+  Fetcher,
+  HealthTier,
+  ProviderHealthResult,
+  DiscoveredModelEntry,
+  DiscoveryResult,
+  DiscoveryOptions,
+  DiscoveryReport,
+} from "./discovery";
+export {
+  envAccessorFromMap,
+  envAccessorFromProcess,
+  createDefaultFetcher,
+  HealthCache,
+  ProviderDiscoveryOrchestrator,
+  parseOpenRouterModels,
+  parseOpenAICompatibleModels,
+  parseLocalModels,
+  matchAgainstCatalog,
+  applyDiscoveryToRegistry,
+} from "./discovery";
+
+// ─── Escalation + mission affinity ─────────────────────────────────
+export type {
+  FailureRecord,
+  FailureKind,
+  MissionAffinity,
+  EscalationEvent,
+  EscalationPolicy,
+} from "./escalation";
+export {
+  classifyFailure,
+  DEFAULT_ESCALATION_POLICY,
+  EscalationTracker,
+  intelligenceRank,
+  isFallbackKind,
+} from "./escalation";

@@ -23,12 +23,14 @@
 
 import { MODEL_CATALOG, LITT_DEFAULTS } from "./catalog";
 import type {
+  Availability,
   CredentialInfo,
   CredentialResolver,
   LiTTTier,
   ModelDefinition,
   ProviderId,
   RoutingMode,
+  VerificationSource,
 } from "./types";
 
 export class ModelRegistry {
@@ -151,6 +153,53 @@ export class ModelRegistry {
     if (m && m.availability !== "offline") {
       this.models.set(id, { ...m, availability: "offline" });
     }
+  }
+
+  /**
+   * Apply a discovery result for a single model. Used by the discovery
+   * orchestrator to flip availability + verification based on a live
+   * provider /models response.
+   *
+   *   "online"  → availability online, verified true, source = the discovery source
+   *   "offline" → availability offline (model not found in live catalog)
+   *   "unverified" → reset to unverified (e.g. discovery skipped)
+   *
+   * Catalog metadata (capabilities, pricing, etc.) is NEVER overwritten —
+   * only availability + verification fields change.
+   */
+  markDiscovered(id: string, availability: Availability, source: VerificationSource): void {
+    const m = this.models.get(id);
+    if (!m) return;
+    const verified = availability === "online";
+    this.models.set(id, {
+      ...m,
+      availability,
+      verified,
+      verifiedAt: verified ? new Date().toISOString() : null,
+      source: verified ? source : (availability === "offline" ? m.source : "unverified"),
+    });
+  }
+
+  /**
+   * Count of models currently confirmed available (availability "online").
+   */
+  getDiscoveredCount(): number {
+    let n = 0;
+    for (const m of this.models.values()) {
+      if (m.availability === "online") n++;
+    }
+    return n;
+  }
+
+  /**
+   * Count of models per provider with availability "online".
+   */
+  getDiscoveredCountByProvider(provider: ProviderId): number {
+    let n = 0;
+    for (const m of this.models.values()) {
+      if (m.provider === provider && m.availability === "online") n++;
+    }
+    return n;
   }
 
   /**

@@ -186,22 +186,47 @@ export interface RouteOptions {
    * separate routing engine.
    */
   preference?: "auto" | "budget" | "max";
+  /**
+   * Strict mode: when true, PINNED/ASK throw if the chosen model is not
+   * routable instead of falling back to AUTO. Use this for FIXED policy
+   * where the user explicitly wants that model or a clear error.
+   * Default false (preserve existing fall-back-to-auto behavior).
+   */
+  strict?: boolean;
+  /**
+   * Only consider models that have been verified available (availability
+   * "online") — i.e. confirmed by real discovery. When false (default for
+   * backward compat), routable-but-unverified models are also considered.
+   * MAX/BUDGET always prefer online models; this controls whether
+   * unverified models are excluded entirely or just deprioritized.
+   */
+  verifiedOnly?: boolean;
 }
 
 /**
  * Route a model for a run.
  *
  * AUTO    → classify task → select from available models using LiTT defaults.
- * PINNED  → use the pinned model if routable; else fall back to AUTO.
- * ASK     → use the supplied choice if routable; else fall back to AUTO.
+ * PINNED  → use the pinned model if routable; else fall back to AUTO (or throw if strict).
+ * ASK     → use the supplied choice if routable; else fall back to AUTO (or throw if strict).
  *
  * The `preference` option modifies AUTO selection:
  *   "budget" → cheapest capable model instead of LiTT default
  *   "max"    → strongest available model instead of LiTT default
  *
- * Never throws — if everything fails, returns the first available model with
- * a fallback reason. If no models are available, throws (the runtime should
- * surface a "no provider configured" error).
+ * Truthfulness contract:
+ *   - MAX only selects from verified-online models. If the strongest
+ *     verified model is not the absolute strongest in the catalog, the
+ *     result's fallbackReason explains which stronger models were
+ *     unavailable and why.
+ *   - BUDGET only selects from verified-online models with pricing.
+ *   - PINNED with strict=true throws a clear error if the model is not
+ *     routable, instead of silently falling back.
+ *
+ * Never throws (except strict PINNED/ASK unavailable, or no models at all).
+ * If everything fails, returns the first available model with a fallback
+ * reason. If no models are available, throws (the runtime should surface a
+ * "no provider configured" error).
  */
 export function routeModel(
   registry: ModelRegistry,
@@ -217,53 +242,111 @@ export function routeModel(
 
   const mode: RoutingMode = options.mode ?? "auto";
   const preference = options.preference ?? "auto";
+  const strict = options.strict ?? false;
+  const verifiedOnly = options.verifiedOnly ?? false;
+
+  // The candidate set: verified-online models are always candidates.
+  // Unverified-but-routable models are candidates unless verifiedOnly.
+  const onlineModels = available.filter((m) => m.availability === "online");
+  const candidatePool = verifiedOnly
+    ? onlineModels
+    : [...onlineModels, ...available.filter((m) => m.availability !== "online")];
 
   // PINNED / ASK: respect explicit choice if routable
   if (mode === "pinned" && options.pinnedModelId) {
     const pinned = registry.getById(options.pinnedModelId);
     if (pinned && registry.isRoutable(pinned)) {
-      return buildResult(registry, pinned, `Pinned: ${pinned.displayName}`, classifyTask(input));
+      return buildResult(registry, pinned, `Pinned: ${pinned.displayName}`, classifyTask(input), null, "pinned");
     }
+    // Not routable
+    if (strict) {
+      const reason = pinned
+        ? `FIXED model ${pinned.displayName} is not available (availability: ${pinned.availability})`
+        : `FIXED model ${options.pinnedModelId} is not in the catalog`;
+      throw new Error(reason);
+    }
+    // Non-strict: fall through to AUTO with a fallback reason
+    const taskKind = classifyTask(input);
+    const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+    return buildResult(
+      registry,
+      model,
+      reason,
+      taskKind,
+      pinned ? `Pinned ${pinned.displayName} unavailable (availability: ${pinned.availability}) → AUTO fallback` : `Pinned ${options.pinnedModelId} unknown → AUTO fallback`,
+      "auto",
+    );
   }
   if (mode === "ask" && options.askChoice) {
     const choice = registry.getById(options.askChoice);
     if (choice && registry.isRoutable(choice)) {
-      return buildResult(registry, choice, `User choice: ${choice.displayName}`, classifyTask(input));
+      return buildResult(registry, choice, `User choice: ${choice.displayName}`, classifyTask(input), null, "ask");
     }
+    if (strict) {
+      const reason = choice
+        ? `ASK model ${choice.displayName} is not available (availability: ${choice.availability})`
+        : `ASK model ${options.askChoice} is not in the catalog`;
+      throw new Error(reason);
+    }
+    const taskKind = classifyTask(input);
+    const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+    return buildResult(
+      registry,
+      model,
+      reason,
+      taskKind,
+      choice ? `ASK ${choice.displayName} unavailable (availability: ${choice.availability}) → AUTO fallback` : `ASK ${options.askChoice} unknown → AUTO fallback`,
+      "auto",
+    );
   }
 
   // AUTO (or fallback from a non-routable pin/ask)
   const taskKind = classifyTask(input);
 
-  // Budget preference: cheapest capable model
+  // Budget preference: cheapest capable model (verified-online preferred)
   if (preference === "budget") {
-    const cheapest = selectCheapest(registry, available);
+    const cheapest = selectCheapest(candidatePool, onlineModels);
     if (cheapest) {
-      return buildResult(registry, cheapest, "Budget — cheapest capable model", taskKind);
+      const fallbackReason = cheapest.availability !== "online"
+        ? `No verified-online models — selected best available (unverified): ${cheapest.displayName}`
+        : null;
+      return buildResult(registry, cheapest, "Budget — cheapest capable model", taskKind, fallbackReason, "budget");
     }
   }
 
-  // Max preference: strongest available model
+  // Max preference: strongest available model (verified-online only)
   if (preference === "max") {
-    const strongest = selectStrongest(available);
+    const pool = onlineModels.length > 0 ? onlineModels : candidatePool;
+    const strongest = selectStrongest(pool);
     if (strongest) {
-      return buildResult(registry, strongest, "Max — strongest available model", taskKind);
+      // Build a fallback reason:
+      //   - if no verified-online models exist (all unverified), report that
+      //   - else if stronger models exist but are unavailable, list them
+      let fallbackReason: string | null = null;
+      if (onlineModels.length === 0) {
+        fallbackReason = `No verified-online models discovered — selected strongest routable (unverified): ${strongest.displayName}. Run discovery to verify.`;
+      } else {
+        fallbackReason = buildMaxFallbackReason(registry, strongest);
+      }
+      return buildResult(registry, strongest, "Max — strongest available verified model", taskKind, fallbackReason, "max");
     }
   }
 
-  const { model, reason } = selectForTask(registry, taskKind, available);
-  return buildResult(registry, model, reason, taskKind);
+  const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
+  return buildResult(registry, model, reason, taskKind, null, "auto");
 }
 
 /**
- * Select the cheapest capable model from available.
+ * Select the cheapest capable model.
+ * Prefers verified-online models with pricing; falls back to any available.
  */
 function selectCheapest(
-  registry: ModelRegistry,
-  available: ModelDefinition[],
+  candidates: ModelDefinition[],
+  onlineModels: ModelDefinition[],
 ): ModelDefinition | null {
-  const withPricing = available.filter((m) => m.pricing);
-  if (withPricing.length === 0) return available[0] ?? null;
+  const pool = onlineModels.length > 0 ? onlineModels : candidates;
+  const withPricing = pool.filter((m) => m.pricing);
+  if (withPricing.length === 0) return pool[0] ?? null;
   return [...withPricing].sort((a, b) => {
     const costA = a.pricing!.inputPer1M + a.pricing!.outputPer1M;
     const costB = b.pricing!.inputPer1M + b.pricing!.outputPer1M;
@@ -273,13 +356,55 @@ function selectCheapest(
 
 /**
  * Select the strongest (frontier intelligence) available model.
+ * Sort: frontier > balanced > light, then by context window desc.
  */
 function selectStrongest(available: ModelDefinition[]): ModelDefinition | null {
-  const frontier = available.filter((m) => m.intelligence === "frontier");
-  if (frontier.length > 0) return frontier[0];
-  const balanced = available.filter((m) => m.intelligence === "balanced");
-  if (balanced.length > 0) return balanced[0];
-  return available[0] ?? null;
+  if (available.length === 0) return null;
+  const rank = (m: ModelDefinition) =>
+    m.intelligence === "frontier" ? 3 : m.intelligence === "balanced" ? 2 : 1;
+  return [...available].sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return rb - ra;
+    return b.contextWindow - a.contextWindow;
+  })[0];
+}
+
+/**
+ * Build a fallback reason for MAX when the selected model is not the
+ * absolute strongest in the catalog. Lists which stronger OR same-tier
+ * models were unavailable and why.
+ *
+ * Same-tier unavailable models are included because MAX should explain
+ * why a particular frontier model was chosen over another unavailable
+ * frontier model (e.g. "GPT-5.6 Sol unavailable → Claude Fable 5 selected").
+ */
+function buildMaxFallbackReason(
+  registry: ModelRegistry,
+  selected: ModelDefinition,
+): string | null {
+  const selectedRank =
+    selected.intelligence === "frontier" ? 3 :
+    selected.intelligence === "balanced" ? 2 : 1;
+
+  // Find catalog models that are stronger OR same-tier, not the selected
+  // model, and not available (offline/no-key/unverified).
+  const unavailable = registry.getAll()
+    .filter((m) => {
+      const rank =
+        m.intelligence === "frontier" ? 3 :
+        m.intelligence === "balanced" ? 2 : 1;
+      return rank >= selectedRank;
+    })
+    .filter((m) => m.canonicalId !== selected.canonicalId)
+    .filter((m) => !registry.isRoutable(m) || m.availability !== "online");
+
+  if (unavailable.length === 0) return null;
+
+  const reasons = unavailable.slice(0, 3).map((m) => {
+    const routable = registry.isRoutable(m);
+    return `${m.displayName} ${routable ? "(unverified)" : "(unavailable: " + m.availability + ")"}`;
+  });
+  return `${reasons.join(", ")} → ${selected.displayName} selected`;
 }
 
 function buildResult(
@@ -287,6 +412,8 @@ function buildResult(
   model: ModelDefinition,
   reason: string,
   taskKind: TaskKind,
+  fallbackReason: string | null,
+  appliedPolicy: "auto" | "pinned" | "ask" | "budget" | "max",
 ): RoutingResult {
   const cred = registry.credentialFor(model);
   return {
@@ -295,6 +422,8 @@ function buildResult(
     taskKind,
     servedBy: cred.servedBy,
     credentialSource: cred.source,
+    fallbackReason,
+    appliedPolicy,
   };
 }
 
