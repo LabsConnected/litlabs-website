@@ -158,6 +158,28 @@ export interface OperatorResult {
 // ─── System prompt builder ────────────────────────────────────────
 
 /**
+ * Read the current git branch synchronously-ish (capped at 2s).
+ * This is a read-only diagnostic probe — the same class as /doctor's
+ * git probes. It populates the operator's project context when the
+ * RuntimeStore's `state.project` has not been set yet (i.e. /status
+ * has not been called).
+ */
+function readGitBranch(cwd: string): string {
+  try {
+    const { execFileSync } = require("child_process");
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      cwd,
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    }).trim();
+    return branch || "detached";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Build the canonical operator system prompt.
  *
  * This is the IDENTITY prompt — it tells the model WHO it is, WHERE it
@@ -180,8 +202,10 @@ function buildOperatorSystemPrompt(cwd: string, mode: string): string {
   const store = getRuntimeStore();
   const state = store.getState();
 
-  // Extract runtime context
-  const branch = state.project?.branch ?? "unknown";
+  // Extract runtime context. If the RuntimeStore's project field hasn't
+  // been populated yet (e.g. /status was never called), read the git
+  // branch directly so the operator always has concrete project context.
+  const branch = state.project?.branch ?? readGitBranch(cwd);
   const phase = state.phase ?? "idle";
   const online = state.online ? "online" : "offline";
   const model = state.model ?? "unconfigured";

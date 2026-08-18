@@ -345,8 +345,51 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
       message: "Usage: /ask <prompt>",
     };
   }
-  // Lazy import to avoid loading LLM deps at registry load time
+  // ─── Canonical operator path ───────────────────────────────────
+  // /ask routes through runLiTTOperator → runAgentLoop → ExecutionGateway,
+  // giving it tool execution, gateway enforcement, RuntimeStore lifecycle
+  // events, and a canonical runId — the SAME brain path as the Socket.IO
+  // NL handler. This eliminates the second authoritative brain path.
+  //
+  // Falls back to the legacy askLiTTCode path ONLY if the model provider
+  // is unreachable (no Ollama + no OPENROUTER_API_KEY). The legacy path
+  // is a bare LLM call with no tools — it is NOT authoritative.
+  const { runLiTTOperator, operatorAvailable } = require("./litt-operator");
   const { askLiTTCode } = require("./litt-code");
+
+  const canUseOperator = await operatorAvailable().catch(() => false);
+
+  if (canUseOperator) {
+    try {
+      const result = await runLiTTOperator({
+        prompt,
+        cwd: ctx.cwd,
+        userId: ctx.userId,
+        mode: ctx.mode ?? "act",
+      });
+      return {
+        kind: "brain_response",
+        ok: result.termination !== "error",
+        data: {
+          text: redactSecrets(result.content),
+          runId: result.runId,
+          toolCalls: result.toolCalls.length,
+          rounds: result.rounds,
+        },
+        durationMs: Date.now() - t0,
+      };
+    } catch (err) {
+      return {
+        kind: "brain_response",
+        ok: false,
+        data: { text: "" },
+        durationMs: Date.now() - t0,
+        message: redactSecrets(err instanceof Error ? err.message : String(err)),
+      };
+    }
+  }
+
+  // ─── Legacy fallback (no model provider available) ─────────────
   try {
     const text = await askLiTTCode(prompt);
     return {
