@@ -92,6 +92,41 @@ export interface MissionState {
 }
 
 /**
+ * Canonical mission projection — a lightweight projection of
+ * RuntimeStore.mission that the UI renders directly. This is NOT
+ * a competing authority — it's a render cache of canonical truth.
+ *
+ * RuntimeStore.mission remains the single source of truth.
+ * The useRuntimeMissionProjection hook updates this from canonical
+ * mission:* events.
+ */
+export interface CanonicalMissionProjection {
+  /** Mission ID from RuntimeStore.mission.id */
+  id: string;
+  /** Mission goal from RuntimeStore.mission.goal */
+  goal: string;
+  /** Mission status from RuntimeStore.mission.status */
+  status: string;
+  /** Current step ID from RuntimeStore.mission.currentStepId */
+  currentStepId: string | null;
+  /** Steps projected from RuntimeStore.mission.steps */
+  steps: Array<{
+    id: string;
+    title: string;
+    status: string;
+    sequence: number;
+  }>;
+  /** Verification proven — from mission evidence */
+  verificationProven: boolean | null;
+  /** Mission was restored from disk on startup */
+  restored: boolean;
+  /** Completion reason (if complete) */
+  completionReason: string | null;
+  /** Failure reason (if failed) */
+  failureReason: string | null;
+}
+
+/**
  * Intent classification — how LiTT treats user input.
  *   chat     — casual conversation, questions, greetings
  *   command  — slash commands
@@ -124,6 +159,9 @@ export interface CockpitUIState {
   missionState: MissionState | null;
   /** Last completed mission (retained for display) */
   lastCompletedMission: MissionState | null;
+  /** Canonical mission projection from RuntimeStore.mission.
+   *  This is a render cache — RuntimeStore.mission is the authority. */
+  canonicalMission: CanonicalMissionProjection | null;
   /** CHAT processing flag — independent of mission holoState.
    *  CHAT does NOT use UNDERSTANDING/PLANNING/etc. It sets isProcessing
    *  to block the composer while keeping holoState = IDLE. */
@@ -162,6 +200,7 @@ export function useCockpitStore() {
   const [mission, setMission] = useState<string | null>(null);
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [lastCompletedMission, setLastCompletedMission] = useState<MissionState | null>(null);
+  const [canonicalMission, setCanonicalMission] = useState<CanonicalMissionProjection | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branch, setBranch] = useState<string>("unknown");
 
@@ -302,6 +341,7 @@ export function useCockpitStore() {
       mission,
       missionState,
       lastCompletedMission,
+      canonicalMission,
       isProcessing,
       branch,
     },
@@ -331,6 +371,7 @@ export function useCockpitStore() {
       setMissionBuild,
       setMissionRuntimeProven,
       clearMission,
+      setCanonicalMission,
       setIsProcessing,
       setBranch,
     },

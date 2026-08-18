@@ -23,11 +23,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
   runAgentLoop,
-  ToolRegistry,
-  createShellExecutor,
-  CommandExecutor,
-  RuntimeStore,
-  ExecutionGateway,
+  planMission,
+  resolveStepForTool,
+  attachToolToStep,
   type RuntimeEvent,
   type StreamChunk,
 } from "@litt/agent-core";
@@ -493,15 +491,13 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         // holoState stays IDLE — CHAT is not a mission.
         store.actions.setIsProcessing(true);
         try {
-          const tools = new ToolRegistry();
-          const shell = createShellExecutor(projectRoot);
-          const agentStore = new RuntimeStore();
-          const executor = new CommandExecutor(shell, agentStore);
-          const gateway = new ExecutionGateway({
-            tools, shell, executor, store: agentStore,
-            projectId: projectRoot,
-            onApprovalRequired: (req, risk) => approvalBridge.request(req, risk),
-          });
+          // ─── CANONICAL PATH — one brain, one RuntimeStore ───
+          // Reuse the session's canonical ExecutionGateway + RuntimeStore.
+          // No ephemeral second store/gateway. Events flow through:
+          //   RuntimeStore → SessionEventBridge → EventBridge → CockpitStore
+          const gateway = session.getGateway();
+          const tools = gateway.getTools();
+          const agentStore = session.getStore();
           const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
           store.actions.addActivity({
             id: `act_${Date.now()}_route`,
@@ -520,7 +516,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           let chatResponseText = "";
 
           const result = await runAgentLoop(input, {
-            model, tools, shell, gateway,
+            model, tools, shell: session.getShell(),
+            gateway,
             cwd: projectRoot, userId: "cli-user",
             mode: session.getMode(), maxRounds: 4,
             projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
@@ -535,43 +532,23 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
               }
             },
             onToolStream: (chunk: StreamChunk) => {
-              // Only show stderr in activity — stdout is too noisy
-              if (chunk.stream === "stderr") {
-                store.actions.addActivity({
-                  id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                  ts: chunk.ts,
-                  type: "tool.stderr",
-                  text: truncateActivity(chunk.text, 60),
-                  fullText: chunk.text,
-                  stream: chunk.stream,
-                });
-              }
+              // Tool stdout/stderr — route through the canonical event bus
+              // so SessionEventBridge → EventBridge → CockpitStore handles it.
+              session.emitAgentEvent({
+                type: "tool_stream",
+                ts: chunk.ts,
+                data: { stream: chunk.stream, text: chunk.text },
+              });
             },
             emitter: (event: RuntimeEvent) => {
-              // CHAT tool calls get structured events but NO mission state changes
+              // Route agent events through the canonical event bus.
+              // SessionEventBridge maps agent_tool_call/agent_tool_result
+              // to LifecycleEvents → EventBridge → CockpitStore.
+              // No toolId.includes() inference — holo state comes from
+              // canonical command_start/command_end events.
+              session.emitAgentEvent(event);
               if (event.subtype === "agent_tool_call") {
                 chatToolCallCount++;
-                const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
-                const toolCallId = (event.data as { toolCallId?: string }).toolCallId ?? `tc_${chatToolCallCount}`;
-                store.actions.addActivity({
-                  id: `act_${Date.now()}_tc`,
-                  ts: Date.now(),
-                  type: "tool.started",
-                  tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : toolId.includes("status") ? "STATUS" : "RUN",
-                  text: toolId,
-                  toolCallId,
-                });
-              } else if (event.subtype === "agent_tool_result") {
-                const success = (event.data as { success?: boolean }).success;
-                const toolCallId = (event.data as { toolCallId?: string }).toolCallId;
-                store.actions.addActivity({
-                  id: `act_${Date.now()}_tr`,
-                  ts: Date.now(),
-                  type: success ? "tool.completed" : "tool.failed",
-                  tag: success ? "PASS" : "FAIL",
-                  text: success ? "Tool completed" : "Tool failed",
-                  toolCallId,
-                });
               }
             },
           });
@@ -603,7 +580,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         return;
       }
 
-      // MISSION intent — full agent lifecycle with progress + steps
+      // MISSION intent — full agent lifecycle with real Mission state
       // Refresh branch from the same cwd the tools use
       const projectRoot = session.getCwd();
       const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
@@ -619,14 +596,27 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
       });
 
       try {
-        const tools = new ToolRegistry();
-        const shell = createShellExecutor(projectRoot);
-        const agentStore = new RuntimeStore();
-        const executor = new CommandExecutor(shell, agentStore);
-        const gateway = new ExecutionGateway({
-          tools, shell, executor, store: agentStore,
-          projectId: projectRoot,
-          onApprovalRequired: (req, risk) => approvalBridge.request(req, risk),
+        // ─── CANONICAL PATH — one brain, one RuntimeStore ───
+        const gateway = session.getGateway();
+        const tools = gateway.getTools();
+        const agentStore = session.getStore();
+
+        // ─── Create a REAL Mission in the canonical RuntimeStore ───
+        const mission = await agentStore.createMission({
+          goal: input,
+          mode: session.getMode(),
+          projectRoot,
+          sessionId: null,
+          workspaceId: null,
+          metadata: { source: "nl-mission", branch: freshBranch ?? branch ?? "unknown" },
+        });
+
+        store.actions.addActivity({
+          id: `act_${Date.now()}_mission`,
+          ts: Date.now(),
+          type: "info",
+          tag: "MISSION",
+          text: `Mission created: ${mission.id}`,
         });
 
         const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
@@ -640,10 +630,47 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         store.actions.setActiveModel(routed.label);
         const model = new OpenRouterModelProvider({ model: routed.id });
 
-        let missionToolCallCount = 0;
+        // ─── SEMANTIC PLANNING — plan BEFORE execution ───
+        // The model generates a semantic execution plan. planMission()
+        // persists it as MissionStep[] on the canonical RuntimeStore
+        // BEFORE any tool runs. Tools then execute UNDER an existing
+        // semantic step — they do NOT define the step. One step may
+        // cover many tool calls; one tool may serve many steps.
+        store.actions.setHoloState("UNDERSTANDING");
+        store.actions.addActivity({
+          id: `act_${Date.now()}_plan`,
+          ts: Date.now(),
+          type: "info",
+          tag: "PLAN",
+          text: "Planning mission steps",
+        });
+
+        const { plan, steps: plannedSteps } = await planMission({
+          model,
+          store: agentStore,
+          goal: input,
+          projectContext: {
+            name: projectName ?? "unnamed",
+            root: projectRoot,
+            branch: freshBranch ?? branch ?? "unknown",
+          },
+        });
+
+        store.actions.addActivity({
+          id: `act_${Date.now()}_plansteps`,
+          ts: Date.now(),
+          type: "info",
+          tag: "PLAN",
+          text: `Plan (${plan.source}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
+        });
+
+        // The semantic steps now exist on the canonical mission BEFORE
+        // the first tool call. Execution begins; tools attach to steps.
+        let currentStepId: string | null = null;
 
         const result = await runAgentLoop(input, {
-          model, tools, shell, gateway,
+          model, tools, shell: session.getShell(),
+          gateway,
           cwd: projectRoot, userId: "cli-user",
           mode: session.getMode(), maxRounds: 10,
           projectContext: {
@@ -654,93 +681,208 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           store: agentStore,
           onModelStream: (event) => {
             // Model prose (deltas) do NOT go into the activity feed.
-            // Activity shows only structured operator events:
-            // THINK, ROUTE, READ, EDIT, RUN, PASS, FAIL, DONE.
-            // The response text belongs in a conversation area, not
-            // duplicated as streaming deltas in the operator feed.
           },
           onToolStream: (chunk: StreamChunk) => {
-            // Tool stdout/stderr — only show stderr lines (errors are
-            // operationally relevant). stdout is too noisy for the feed.
-            if (chunk.stream === "stderr") {
-              store.actions.addActivity({
-                id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                ts: chunk.ts,
-                type: "tool.stderr",
-                text: truncateActivity(chunk.text, 60),
-                fullText: chunk.text,
-                stream: chunk.stream,
-              });
-            }
+            session.emitAgentEvent({
+              type: "tool_stream",
+              ts: chunk.ts,
+              data: { stream: chunk.stream, text: chunk.text },
+            });
           },
           emitter: (event: RuntimeEvent) => {
+            // Route agent events through the canonical event bus.
+            session.emitAgentEvent(event);
+
             if (event.subtype === "agent_tool_call") {
-              missionToolCallCount++;
               const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
-              const toolCallId = (event.data as { toolCallId?: string }).toolCallId ?? `tc_${missionToolCallCount}`;
-              // Track mission lifecycle based on tool type
-              if (toolId.includes("read") || toolId.includes("inspect")) {
-                store.actions.setHoloState("READING");
-                store.actions.updateMissionState("READING");
-              } else if (toolId.includes("edit") || toolId.includes("write")) {
-                store.actions.setHoloState("EDITING");
-                store.actions.updateMissionState("EDITING");
-                store.actions.addMissionFile(toolId);
-              } else if (toolId.includes("build") || toolId.includes("run")) {
-                store.actions.setHoloState("RUNNING");
-                store.actions.updateMissionState("RUNNING");
-                store.actions.addMissionCommand(toolId);
-              } else if (toolId.includes("test")) {
-                store.actions.setHoloState("TESTING");
-                store.actions.updateMissionState("TESTING");
-                store.actions.addMissionCommand(toolId);
-              } else if (toolId.includes("verify") || toolId.includes("check")) {
-                store.actions.setHoloState("VERIFYING");
-                store.actions.updateMissionState("VERIFYING");
+              const toolCallId = (event.data as { toolCallId?: string }).toolCallId ?? "";
+
+              // Attach this tool call to an existing semantic step.
+              // resolveStepForTool picks the current working step, or
+              // the first pending step whose scope matches the tool,
+              // or the first pending step (sequential progression).
+              const missionNow = agentStore.getMission();
+              if (missionNow) {
+                const stepId = resolveStepForTool(missionNow.steps, toolId, currentStepId);
+                if (stepId && stepId !== currentStepId) {
+                  currentStepId = stepId;
+                  agentStore.setCurrentStep(stepId).catch(() => {});
+                }
+                // Record the tool call against the step's toolHistory.
+                if (stepId && toolCallId) {
+                  attachToolToStep(agentStore, stepId, {
+                    toolId,
+                    toolName: (event.data as { tool?: string }).tool ?? toolId,
+                    toolCallId,
+                    success: true, // updated on result
+                    message: "",
+                  }).catch(() => {});
+                }
               }
-              store.actions.addActivity({
-                id: `act_${Date.now()}_tc`,
-                ts: Date.now(),
-                type: "tool.started",
-                tag: toolId.includes("read") ? "READ" : toolId.includes("edit") ? "EDIT" : toolId.includes("status") ? "STATUS" : toolId.includes("verify") || toolId.includes("check") ? "VERIFY" : "RUN",
-                text: toolId,
-                toolCallId,
-              });
+
+              // Track UI artifacts — projection only, not lifecycle inference.
+              const MUTATION_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
+              const EXECUTION_TOOLS = new Set(["project.build", "project.test", "project.typecheck", "project.run"]);
+              if (MUTATION_TOOLS.has(toolId)) {
+                store.actions.addMissionFile(toolId);
+              } else if (EXECUTION_TOOLS.has(toolId)) {
+                store.actions.addMissionCommand(toolId);
+              }
             } else if (event.subtype === "agent_tool_result") {
-              const success = (event.data as { success?: boolean }).success;
-              const toolCallId = (event.data as { toolCallId?: string }).toolCallId;
-              store.actions.addActivity({
-                id: `act_${Date.now()}_tr`,
-                ts: Date.now(),
-                type: success ? "tool.completed" : "tool.failed",
-                tag: success ? "PASS" : "FAIL",
-                text: success ? "Tool completed" : "Tool failed",
-                toolCallId,
-              });
+              const success = (event.data as { success?: boolean }).success ?? true;
+              const toolName = (event.data as { tool?: string }).tool ?? "unknown";
+              const message = (event.data as { message?: string }).message ?? "";
+              const durationMs = (event.data as { durationMs?: number }).durationMs;
+
+              // Record evidence on the current step — tools contribute
+              // evidence to the step, they do NOT define the step.
+              if (currentStepId) {
+                agentStore.addMissionEvidence({
+                  stepId: currentStepId,
+                  type: "command_result",
+                  source: toolName,
+                  summary: message.slice(0, 200),
+                  success,
+                  metadata: { durationMs, toolName },
+                }).catch(() => {});
+
+                // A step transitions to passed/failed only when the
+                // model advances past it (next step starts) or when a
+                // clear pass/fail signal arrives. We do NOT mark a
+                // step passed on every successful tool — a step may
+                // require several tools. Instead, when a tool FAILS,
+                // we record the failure on the step. The step is
+                // marked passed when the NEXT step starts (the model
+                // moved on) or when verification proves it.
+                if (!success) {
+                  agentStore.updateMissionStepStatus(
+                    currentStepId,
+                    "failed",
+                    {
+                      failureReason: message.slice(0, 300),
+                      verificationPassed: false,
+                      verificationEvidence: message.slice(0, 500),
+                    },
+                  ).catch(() => {});
+                }
+              }
             }
           },
         });
+
+        // When the agent loop finishes, mark the current step passed
+        // (the model moved past it) and let the VerificationGate own
+        // the final mission COMPLETE/FAILED truth.
+        if (currentStepId) {
+          const m = agentStore.getMission();
+          const step = m?.steps.find((s) => s.id === currentStepId);
+          if (step && step.status === "working") {
+            await agentStore.updateMissionStepStatus(currentStepId, "passed", {
+              verificationPassed: true,
+              verificationEvidence: "Agent loop completed this step",
+            }).catch(() => {});
+          }
+        }
 
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
-        const seconds = (result.durationMs / 1000).toFixed(1);
-        const doneText = `Mission ${result.termination === "complete" ? "complete" : "stopped"} · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`;
+        // ─── VerificationGate owns completion ───
+        store.actions.setHoloState("VERIFYING");
         store.actions.addActivity({
-          id: `act_${Date.now()}_done`,
+          id: `act_${Date.now()}_verify`,
           ts: Date.now(),
-          type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-          tag: result.termination === "complete" ? "DONE" : "STOP",
-          text: doneText,
-          fullText: `${doneText}\nRounds: ${result.rounds}\nTool calls: ${result.toolCalls.length}\nDuration: ${result.durationMs}ms\nTermination: ${result.termination}`,
+          type: "info",
+          tag: "VERIFY",
+          text: "Running verification gate",
         });
 
-        // Mission complete — set COMPLETE state (retained for display)
-        if (result.termination === "complete") {
+        await agentStore.setMissionVerifying();
+
+        let verificationSummary = "Verification not run";
+        let missionComplete = false;
+
+        try {
+          const verification = await session.verify();
+          verificationSummary = verification.message;
+          missionComplete = verification.proven;
+
+          await agentStore.addMissionEvidence({
+            stepId: null,
+            type: "verification_result",
+            source: "VerificationGate",
+            summary: verification.message,
+            success: verification.proven,
+            metadata: {
+              proven: verification.proven,
+              ranChecks: verification.ranChecks,
+              skippedChecks: verification.skippedChecks,
+              totalDurationMs: verification.totalDurationMs,
+              checks: verification.checks.map((c) => ({
+                id: c.id,
+                status: c.status,
+                exitCode: c.exitCode,
+                message: c.message,
+              })),
+            },
+          });
+
+          store.actions.addActivity({
+            id: `act_${Date.now()}_vresult`,
+            ts: Date.now(),
+            type: verification.proven ? "verification.passed" : "verification.failed",
+            tag: verification.proven ? "PASS" : "FAIL",
+            text: verification.proven
+              ? `Verification PROVEN — ${verification.ranChecks.join(", ")}`
+              : `Verification FAILED — ${verification.checks.filter((c) => c.status !== "skipped" && c.status !== "success").map((c) => c.id).join(", ")}`,
+            fullText: verification.message,
+          });
+        } catch (verifyErr) {
+          verificationSummary = `Verification error: ${verifyErr instanceof Error ? verifyErr.message : String(verifyErr)}`;
+          missionComplete = false;
+          store.actions.addActivity({
+            id: `act_${Date.now()}_verr`,
+            ts: Date.now(),
+            type: "error",
+            tag: "ERROR",
+            text: "Verification gate error",
+            fullText: verificationSummary,
+          });
+        }
+
+        // ─── Mission completion — driven by VerificationGate, not model ───
+        const seconds = (result.durationMs / 1000).toFixed(1);
+        if (missionComplete) {
+          await agentStore.completeMission(
+            `Verified by VerificationGate: ${verificationSummary.slice(0, 200)}`,
+            verificationSummary,
+          );
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
+          store.actions.setMissionRuntimeProven(true);
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: "agent.complete",
+            tag: "DONE",
+            text: `Mission COMPLETE (verified) · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
+            fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
+          });
         } else {
-          store.actions.setHoloState("IDLE");
-          store.actions.clearMission();
+          await agentStore.failMission(
+            `Verification not proven: ${verificationSummary.slice(0, 200)}`,
+            verificationSummary,
+          );
+          store.actions.setHoloState("FAILED");
+          store.actions.updateMissionState("FAILED");
+          store.actions.setMissionRuntimeProven(false);
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: "agent.stopped",
+            tag: "FAIL",
+            text: `Mission NOT verified · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
+            fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
+          });
         }
       } catch (err) {
         const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
@@ -752,6 +894,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
+        // Fail the canonical mission if one was created
+        const agentStore = session.getStore();
+        const m = agentStore.getMission();
+        if (m) {
+          await agentStore.failMission(errText).catch(() => {});
+        }
       }
       return;
     }

@@ -120,6 +120,53 @@ export function useEventBridge(
         store.actions.setCurrentRunId(null);
         break;
       }
+
+      // ─── Mission lifecycle events — project from RuntimeStore.mission ───
+      // These come from SessionEventBridge mapping mission:* subtypes.
+      // The controller also sets holo/missionState directly, but these
+      // events ensure the cockpit reflects canonical runtime truth.
+      case "mission.created":
+        entry = makeEntry("mission.created", `Mission: ${event.data.goal ?? event.data.missionId ?? ""}`, event);
+        // Project canonical mission into cockpit
+        store.actions.setCanonicalMission({
+          id: (event.data.missionId as string) ?? "",
+          goal: (event.data.goal as string) ?? "",
+          status: "planning",
+          currentStepId: null,
+          steps: [],
+          verificationProven: null,
+          restored: false,
+          completionReason: null,
+          failureReason: null,
+        });
+        break;
+      case "mission.started":
+        entry = makeEntry("mission.started", `Mission started: ${event.data.missionId ?? ""}`, event);
+        break;
+      case "mission.step_created":
+        entry = makeEntry("mission.step_created", `Step: ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        break;
+      case "mission.step_started":
+        entry = makeEntry("mission.step_started", `→ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        break;
+      case "mission.step_passed":
+        entry = makeEntry("mission.step_passed", `✓ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        break;
+      case "mission.step_failed":
+        entry = makeEntry("mission.step_failed", `✗ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        break;
+      case "mission.verifying":
+        entry = makeEntry("mission.verifying", "Verifying mission", event);
+        break;
+      case "mission.completed":
+        entry = makeEntry("mission.completed", `Mission COMPLETE: ${event.data.completionReason ?? ""}`, event);
+        break;
+      case "mission.failed":
+        entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event);
+        break;
+      case "mission.restored":
+        entry = makeEntry("mission.restored", `Mission restored: ${event.data.missionId ?? ""}`, event);
+        break;
       default:
         return;
     }

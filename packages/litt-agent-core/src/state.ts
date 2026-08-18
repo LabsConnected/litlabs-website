@@ -6,6 +6,9 @@
  *
  * Phase 2C: Added heartbeat, active command, last result, timestamps,
  * serialization (toJSON), and heartbeat lifecycle management.
+ *
+ * Phase 3: MissionStore persistence integration.
+ * Mission state persists to disk and restores on restart.
  */
 
 import type {
@@ -17,7 +20,109 @@ import type {
   HeartbeatStatus,
   ActiveCommand,
   LastResult,
+  Mission,
+  MissionEventSubtype,
 } from "./types.js";
+import type { MissionStatus, MissionStepStatus, MissionEvidence, EvidenceType, Checkpoint } from "./missions/mission-types.js";
+import type { MissionStep } from "./missions/mission-entities.js";
+import { MissionStore } from "./missions/mission-store.js";
+import { generateStepId, generateEvidenceId, generateCheckpointId } from "./missions/mission-types.js";
+import { validateStepTransition, isValidMissionTransition, isValidStepTransition } from "./missions/mission-state-machine.js";
+
+// ─── Persistence Adapter ───────────────────────────────────────────────
+
+/**
+ * Interface for mission persistence.
+ * Filesystem-based by default; DB adapters can be added later.
+ */
+export interface MissionPersistence {
+  /** Load the active mission, if any */
+  loadActiveMission(): Promise<Mission | null>;
+  /** Save a mission */
+  saveMission(mission: Mission): Promise<void>;
+  /** Delete a mission */
+  deleteMission(id: string): Promise<boolean>;
+  /** Get active mission ID, if any */
+  getActiveMissionId(): string | null;
+  /** Clear the active mission marker */
+  clearActiveMission(): void | Promise<void>;
+  /** Load active mission with recovery support */
+  loadActiveMissionWithRecovery(): Promise<RecoveryResult> | RecoveryResult;
+}
+
+/**
+ * Recovery result from loading a mission.
+ */
+export interface RecoveryResult {
+  recovered: boolean;
+  error?: { reason: string; message?: string };
+  resumedFrom?: string;
+  mission: Mission | null;
+}
+
+/**
+ * Default filesystem-based mission persistence.
+ * Uses MissionStore for the actual file I/O.
+ */
+export class FilesystemMissionPersistence implements MissionPersistence {
+  private store: MissionStore;
+
+  constructor(projectRoot: string) {
+    this.store = new MissionStore(projectRoot);
+  }
+
+  async loadActiveMission(): Promise<Mission | null> {
+    const activeId = this.store.getActiveMissionId();
+    if (!activeId) return null;
+    return this.store.getMission(activeId);
+  }
+
+  async saveMission(mission: Mission): Promise<void> {
+    this.store.updateMission(mission);
+    this.store.setActiveMission(mission.id);
+  }
+
+  async deleteMission(id: string): Promise<boolean> {
+    return this.store.deleteMission(id);
+  }
+
+  getActiveMissionId(): string | null {
+    return this.store.getActiveMissionId();
+  }
+
+  clearActiveMission(): void {
+    this.store.clearActiveMission();
+  }
+
+  loadActiveMissionWithRecovery(): RecoveryResult {
+    const activeId = this.store.getActiveMissionId();
+    if (!activeId) {
+      return { recovered: false, mission: null, error: { reason: "missing" } };
+    }
+
+    const result = this.store.loadMissionWithRecovery(activeId);
+
+    // Check if mission was created by resumeFromCheckpoint (has resumedFrom in metadata)
+    const resumedFrom = result.recovered?.metadata?.resumedFrom as string | undefined;
+
+    // Determine if this is a fresh load or recovery
+    // recovered = true means we got a valid mission back (possibly from backup recovery)
+    const recovered = result.recovered !== null;
+
+    return {
+      recovered,
+      mission: result.recovered,
+      error: result.error,
+      resumedFrom,
+    };
+  }
+}
+
+export function createFilesystemMissionPersistence(
+  projectRoot: string,
+): FilesystemMissionPersistence {
+  return new FilesystemMissionPersistence(projectRoot);
+}
 
 export function createInitialState(): RuntimeState {
   const now = Date.now();
@@ -42,20 +147,65 @@ export function createInitialState(): RuntimeState {
     activeCommand: null,
     lastResult: null,
     updatedAt: now,
+    // Phase 3: Mission state for autonomous operation
+    mission: null,
+    lastMissionHeartbeatAt: 0,
+    missionStepsCompleted: 0,
   };
+}
+
+// ─── RuntimeStore ─────────────────────────────────────────────────────
+
+/**
+ * RuntimeStore options.
+ */
+export interface RuntimeStoreOptions {
+  /** Event emitter for runtime events */
+  emitter?: RuntimeEventEmitter | null;
+  /** Project root for persistence (enables MissionStore persistence) */
+  projectRoot?: string;
+  /** Custom persistence adapter (defaults to FilesystemMissionPersistence) */
+  persistence?: MissionPersistence | null;
 }
 
 export class RuntimeStore {
   private state: RuntimeState;
   private emitter: RuntimeEventEmitter | null;
+  // ReturnType<typeof setInterval> resolves to NodeJS.Timeout under
+  // @types/node and to number under DOM lib. Support both so the file
+  // type-checks identically in Node-only and mixed lib environments.
   private heartbeatTimer: ReturnType<typeof setInterval> | null;
   private heartbeatFn: (() => Promise<number>) | null;
+  private _persistence: MissionPersistence | null;
 
-  constructor(emitter?: RuntimeEventEmitter) {
+  constructor(
+    emitterOrOptions?: RuntimeEventEmitter | RuntimeStoreOptions,
+  ) {
     this.state = createInitialState();
-    this.emitter = emitter ?? null;
+    // Handle overloaded constructor
+    if (typeof emitterOrOptions === "function") {
+      this.emitter = emitterOrOptions;
+      this._persistence = null;
+    } else if (emitterOrOptions === undefined) {
+      this.emitter = null;
+      this._persistence = null;
+    } else {
+      this.emitter = emitterOrOptions.emitter ?? null;
+      this._persistence = this.createPersistence(emitterOrOptions);
+    }
     this.heartbeatTimer = null;
     this.heartbeatFn = null;
+  }
+
+  /**
+   * Create the persistence adapter based on options.
+   */
+  private createPersistence(opts: RuntimeStoreOptions): MissionPersistence | null {
+    if (opts.persistence) return opts.persistence;
+    if (opts.projectRoot) {
+      return createFilesystemMissionPersistence(opts.projectRoot);
+    }
+    return null;
   }
 
   // ── State access ────────────────────────────────────────────────
@@ -94,6 +244,106 @@ export class RuntimeStore {
     });
   }
 
+  // ── Persistence Lifecycle ────────────────────────────────────────
+
+  /**
+   * Load mission state from persistence.
+   * Call this on startup after setting project context.
+   * Restores the active mission and its status from disk.
+   */
+  async load(): Promise<void> {
+    if (!this._persistence) return;
+
+    const savedMission = await this._persistence.loadActiveMission();
+    if (savedMission) {
+      // Restore the mission state
+      this.state.mission = savedMission;
+      this.state.lastMissionHeartbeatAt = savedMission.lastHeartbeatAt;
+      this.state.missionStepsCompleted = savedMission.steps.filter(
+        (s) => s.status === "passed" || s.status === "skipped",
+      ).length;
+      this.touch();
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:restored",
+        ts: Date.now(),
+        data: { missionId: savedMission.id, status: savedMission.status },
+      });
+    }
+  }
+
+  /**
+   * Persist the current mission state.
+   */
+  private async persistMission(): Promise<void> {
+    if (!this._persistence || !this.state.mission) return;
+
+    try {
+      await this._persistence.saveMission(this.state.mission);
+    } catch {
+      // Silent fail - persistence errors shouldn't break runtime
+    }
+  }
+
+  /**
+   * Public persistence hook for callers that mutate mission step fields
+   * directly (e.g. the semantic mission planner attaching tool calls to
+   * existing steps via toolHistory/actionHistory). Touches state, emits
+   * nothing extra, and persists.
+   *
+   * This does NOT change mission/step status — use the dedicated
+   * transition methods for that. It only persists in-place mutations
+   * to step arrays (toolHistory, actionHistory, filesRead, filesChanged).
+   */
+  async persistMissionNow(): Promise<void> {
+    if (!this.state.mission) return;
+    this.touch();
+    await this.persistMission();
+  }
+
+  /**
+   * Check if persistence is enabled.
+   */
+  isPersistenceEnabled(): boolean {
+    return this._persistence !== null;
+  }
+
+  /**
+   * Get the persistence adapter instance.
+   */
+  getPersistence(): MissionPersistence | null {
+    return this._persistence;
+  }
+
+  /**
+   * Load mission state with recovery support.
+   * Returns the recovery result with mission set in state if loaded.
+   */
+  async loadWithRecovery(): Promise<RecoveryResult> {
+    if (!this._persistence) {
+      return { recovered: false, mission: null, error: { reason: "missing" } };
+    }
+
+    const result = await this._persistence.loadActiveMissionWithRecovery();
+
+    if (result.mission) {
+      this.state.mission = result.mission;
+      this.state.lastMissionHeartbeatAt = result.mission.lastHeartbeatAt;
+      this.state.missionStepsCompleted = result.mission.steps.filter(
+        (s) => s.status === "passed" || s.status === "skipped",
+      ).length;
+      this.touch();
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:restored",
+        ts: Date.now(),
+        data: { missionId: result.mission.id, status: result.mission.status },
+      });
+    }
+
+    return result;
+  }
+
   // ── Phase ───────────────────────────────────────────────────────
 
   setPhase(phase: RuntimePhase): void {
@@ -123,6 +373,630 @@ export class RuntimeStore {
     this.state.model = model;
     this.state.profile = profile;
     this.touch();
+  }
+
+  // ── Mission ────────────────────────────────────────────────────────
+
+  /**
+   * Create a new mission and set it as the canonical active mission.
+   * This is the ONE entry point for starting a new mission — the
+   * controller calls this when natural-language input is classified
+   * as a mission. The mission is persisted through the existing
+   * FilesystemMissionPersistence / MissionStore path.
+   *
+   * Returns the created Mission (now the canonical RuntimeStore.mission).
+   */
+  async createMission(params: {
+    goal: string;
+    mode?: "plan" | "act" | "auto";
+    projectRoot?: string;
+    sessionId?: string | null;
+    workspaceId?: string | null;
+    metadata?: Record<string, unknown>;
+  }): Promise<Mission> {
+    const mission: Mission = {
+      id: `mission_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
+      version: "1.0.0",
+      goal: params.goal,
+      normalizedGoal: params.goal.trim().toLowerCase(),
+      projectRoot: params.projectRoot ?? "",
+      workspaceId: params.workspaceId ?? null,
+      sessionId: params.sessionId ?? null,
+      mode: params.mode ?? "act",
+      status: "planning",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null,
+      currentStepId: null,
+      steps: [],
+      baseline: null,
+      evidence: [],
+      checkpoints: [],
+      attemptCounters: {},
+      retryBudgets: {},
+      providerState: null,
+      blockingReason: null,
+      failureReason: null,
+      completionReason: null,
+      lastHeartbeatAt: Date.now(),
+      metadata: params.metadata ?? {},
+    };
+
+    // Use the existing setMission path — it emits mission:created
+    // and persists through the canonical adapter.
+    await this.setMission(mission);
+    return mission;
+  }
+
+  /**
+   * Set the active mission.
+   * Persists the mission and emits mission:created or mission:started event.
+   *
+   * State mutation and event emission happen synchronously (before the
+   * await), so callers that don't await still see the state change
+   * immediately. Callers that DO await get the guarantee that the
+   * mission has been persisted to disk before continuing.
+   */
+  async setMission(mission: Mission): Promise<void> {
+    const hadMission = this.state.mission !== null;
+    this.state.mission = mission;
+    this.state.lastMissionHeartbeatAt = Date.now();
+    this.touch();
+    if (!hadMission) {
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:created",
+        ts: Date.now(),
+        data: { missionId: mission.id, mode: mission.mode },
+      });
+    } else if (mission.status !== "planning") {
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:started",
+        ts: Date.now(),
+        data: { missionId: mission.id, status: mission.status },
+      });
+    }
+    // Persist the mission to disk (awaited so callers can rely on it)
+    await this.persistMission();
+  }
+
+  /**
+   * Update mission status.
+   * Emits appropriate mission event subtype and persists the change.
+   *
+   * State mutation and event emission happen synchronously (before the
+   * await), so callers that don't await still see the state change
+   * immediately. Callers that DO await get the guarantee that the
+   * status change has been persisted before continuing.
+   */
+  async updateMissionStatus(missionId: string, status: MissionStatus): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission || mission.id !== missionId) return;
+    const prevStatus = mission.status;
+    if (prevStatus === status) return;
+
+    mission.status = status;
+    this.state.updatedAt = Date.now();
+    this.touch();
+
+    this.emit({
+      type: "litt_event",
+      subtype: `mission:${status}` as MissionEventSubtype,
+      ts: Date.now(),
+      data: { missionId, from: prevStatus, to: status },
+    });
+
+    // Persist the status change (awaited so callers can rely on it)
+    await this.persistMission();
+  }
+
+  // ── Mission Steps ─────────────────────────────────────────────────
+
+  /**
+   * Add a step to the current mission.
+   * The step is appended to mission.steps with status "pending".
+   * Emits mission:step_created and persists.
+   */
+  async addMissionStep(params: {
+    title: string;
+    description?: string;
+    requiredEvidence?: EvidenceType[];
+    dependencies?: string[];
+    allowedActionScope?: string[];
+  }): Promise<MissionStep | null> {
+    const mission = this.state.mission;
+    if (!mission) return null;
+
+    const stepId = generateStepId();
+    const newStep: MissionStep = {
+      id: stepId,
+      sequence: mission.steps.length,
+      title: params.title,
+      description: params.description ?? "",
+      status: "pending",
+      requiredEvidence: params.requiredEvidence ?? [],
+      dependencies: params.dependencies ?? [],
+      allowedActionScope: params.allowedActionScope ?? [],
+      toolHistory: [],
+      actionHistory: [],
+      filesRead: [],
+      filesChanged: [],
+      verificationResults: [],
+      attemptCount: 0,
+      repairAttemptCount: 0,
+      failureReason: null,
+      blockingReason: null,
+      startedAt: null,
+      finishedAt: null,
+    };
+
+    mission.steps.push(newStep);
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:step_created",
+      ts: Date.now(),
+      data: { missionId: mission.id, stepId, title: newStep.title, sequence: newStep.sequence },
+    });
+    await this.persistMission();
+    return newStep;
+  }
+
+  /**
+   * Set the current step of the mission.
+   * Emits mission:step_started if the step transitions to "working".
+   */
+  async setCurrentStep(stepId: string): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    const step = mission.steps.find((s) => s.id === stepId);
+    if (!step) return;
+
+    mission.currentStepId = stepId;
+
+    // Transition step to "working" if it's pending
+    if (step.status === "pending") {
+      const validation = validateStepTransition(step.status, "working");
+      if (validation.allowed) {
+        step.status = "working";
+        step.startedAt = new Date().toISOString();
+        step.attemptCount++;
+      }
+    }
+
+    // Transition mission to "working" if it's "planning"
+    if (mission.status === "planning" && isValidMissionTransition("planning", "working")) {
+      mission.status = "working";
+      if (!mission.startedAt) {
+        mission.startedAt = new Date().toISOString();
+      }
+    }
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:step_started",
+      ts: Date.now(),
+      data: { missionId: mission.id, stepId, title: step.title, status: step.status },
+    });
+    await this.persistMission();
+  }
+
+  /**
+   * Update a mission step's status.
+   * Validates the transition using the canonical state machine.
+   * Records verification results when provided.
+   * Emits mission:step_{status} and persists.
+   */
+  async updateMissionStepStatus(
+    stepId: string,
+    status: MissionStepStatus,
+    options?: {
+      failureReason?: string;
+      blockingReason?: string;
+      verificationPassed?: boolean;
+      verificationEvidence?: string;
+    },
+  ): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    const step = mission.steps.find((s) => s.id === stepId);
+    if (!step) return;
+
+    const validation = validateStepTransition(step.status, status);
+    if (!validation.allowed) return;
+
+    step.status = status;
+    if (status === "passed" || status === "failed" || status === "skipped") {
+      step.finishedAt = new Date().toISOString();
+    }
+    if (options?.failureReason) step.failureReason = options.failureReason;
+    if (options?.blockingReason) step.blockingReason = options.blockingReason;
+    if (options?.verificationPassed !== undefined) {
+      step.verificationResults.push({
+        checkId: `check_${Date.now()}`,
+        passed: options.verificationPassed,
+        evidence: options.verificationEvidence ?? "",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Update mission-level state based on step outcome
+    this.state.missionStepsCompleted = mission.steps.filter(
+      (s) => s.status === "passed" || s.status === "skipped",
+    ).length;
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: `mission:step_${status}` as MissionEventSubtype,
+      ts: Date.now(),
+      data: {
+        missionId: mission.id,
+        stepId,
+        title: step.title,
+        from: step.status,
+        to: status,
+      },
+    });
+    await this.persistMission();
+  }
+
+  /**
+   * Record evidence on the current mission (and optionally a specific step).
+   * Emits mission:evidence_recorded and persists.
+   */
+  async addMissionEvidence(evidence: {
+    stepId?: string | null;
+    type: EvidenceType;
+    source: string;
+    summary: string;
+    success?: boolean;
+    metadata?: Record<string, unknown>;
+  }): Promise<MissionEvidence | null> {
+    const mission = this.state.mission;
+    if (!mission) return null;
+
+    const evidenceId = generateEvidenceId();
+    const record: MissionEvidence = {
+      id: evidenceId,
+      missionId: mission.id,
+      stepId: evidence.stepId ?? null,
+      type: evidence.type,
+      source: evidence.source,
+      timestamp: new Date().toISOString(),
+      success: evidence.success,
+      summary: evidence.summary,
+      metadata: evidence.metadata ?? {},
+    };
+
+    mission.evidence.push(record);
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:evidence_recorded",
+      ts: Date.now(),
+      data: {
+        missionId: mission.id,
+        evidenceId,
+        type: record.type,
+        stepId: record.stepId,
+        success: record.success,
+        summary: record.summary.slice(0, 200),
+      },
+    });
+    await this.persistMission();
+    return record;
+  }
+
+  /**
+   * Record a tool invocation on a mission step.
+   * Updates step.toolHistory and step.actionHistory.
+   * Does NOT change step status — that is driven by execution results.
+   */
+  async recordStepToolCall(
+    stepId: string,
+    tool: string,
+    action: { description: string; status: "success" | "failed" | "approved" | "denied" },
+  ): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    const step = mission.steps.find((s) => s.id === stepId);
+    if (!step) return;
+
+    if (!step.toolHistory.includes(tool)) {
+      step.toolHistory.push(tool);
+    }
+    step.actionHistory.push({
+      description: action.description,
+      tool,
+      timestamp: new Date().toISOString(),
+      status: action.status,
+    });
+    this.touch();
+    await this.persistMission();
+  }
+
+  /**
+   * Get the current mission (canonical truth).
+   * Returns null if no mission is active.
+   */
+  getMission(): Mission | null {
+    return this.state.mission;
+  }
+
+  /**
+   * Mark the mission as verifying (entering VerificationGate).
+   * Transitions to "verifying" status if valid.
+   */
+  async setMissionVerifying(): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    if (!isValidMissionTransition(mission.status, "verifying")) return;
+    mission.status = "verifying";
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:verifying",
+      ts: Date.now(),
+      data: { missionId: mission.id },
+    });
+    await this.persistMission();
+  }
+
+  /**
+   * Complete the mission with runtime-proven verification.
+   * ONLY call this when VerificationGate.proven === true.
+   * Records verification evidence and transitions to "complete".
+   */
+  async completeMission(completionReason: string, verificationEvidence?: string): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    if (!isValidMissionTransition(mission.status, "complete")) return;
+
+    mission.status = "complete";
+    mission.completionReason = completionReason;
+    mission.completedAt = new Date().toISOString();
+
+    if (verificationEvidence) {
+      mission.evidence.push({
+        id: generateEvidenceId(),
+        missionId: mission.id,
+        stepId: null,
+        type: "verification_result",
+        source: "VerificationGate",
+        timestamp: new Date().toISOString(),
+        success: true,
+        summary: verificationEvidence,
+        metadata: {},
+      });
+    }
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:completed",
+      ts: Date.now(),
+      data: { missionId: mission.id, completionReason },
+    });
+    await this.persistMission();
+  }
+
+  /**
+   * Fail the mission with a reason.
+   * Records failure evidence and transitions to "failed".
+   */
+  async failMission(failureReason: string, verificationEvidence?: string): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    if (!isValidMissionTransition(mission.status, "failed")) {
+      // From "verifying" we can go to "failed" via "working" first
+      if (mission.status === "verifying" && isValidMissionTransition("verifying", "working")) {
+        mission.status = "working";
+      } else {
+        return;
+      }
+    }
+
+    mission.status = "failed";
+    mission.failureReason = failureReason;
+    mission.completedAt = new Date().toISOString();
+
+    if (verificationEvidence) {
+      mission.evidence.push({
+        id: generateEvidenceId(),
+        missionId: mission.id,
+        stepId: null,
+        type: "verification_result",
+        source: "VerificationGate",
+        timestamp: new Date().toISOString(),
+        success: false,
+        summary: verificationEvidence,
+        metadata: {},
+      });
+    }
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:failed",
+      ts: Date.now(),
+      data: { missionId: mission.id, failureReason },
+    });
+    await this.persistMission();
+  }
+
+  /**
+   * Update mission step count.
+   */
+  incrementMissionStepsCompleted(): void {
+    this.state.missionStepsCompleted++;
+    this.touch();
+  }
+
+  /**
+   * Send mission heartbeat.
+   */
+  emitMissionHeartbeat(): void {
+    const mission = this.state.mission;
+    if (mission) {
+      this.state.lastMissionHeartbeatAt = Date.now();
+      this.touch();
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:heartbeat",
+        ts: Date.now(),
+        data: { missionId: mission.id, stepsCompleted: this.state.missionStepsCompleted },
+      });
+    }
+  }
+
+  /**
+   * Clear mission (e.g. on cancellation or completion).
+   * Deletes persisted mission and clears active state.
+   */
+  async clearMission(missionId: string): Promise<void> {
+    const mission = this.state.mission;
+    if (mission?.id !== missionId) return;
+
+    // Delete from persistence
+    if (this._persistence) {
+      await this._persistence.deleteMission(missionId);
+    }
+
+    // Clear active mission marker
+    if (this._persistence) {
+      await this._persistence.clearActiveMission();
+    }
+
+    this.state.mission = null;
+    this.state.lastMissionHeartbeatAt = 0;
+    this.state.missionStepsCompleted = 0;
+    this.touch();
+  }
+
+  /**
+   * Add a checkpoint to the current mission.
+   *
+   * Checkpoints capture the mission's progress at a point in time so
+   * it can be resumed later if the mission is interrupted (crash,
+   * restart, manual pause). The checkpoint records the current step,
+   * proven steps, changes made, and remaining work.
+   */
+  async addCheckpoint(params: {
+    stepId: string | null;
+    provenAt?: string[];
+    changes?: string[];
+    remaining?: string[];
+  }): Promise<Checkpoint | null> {
+    const mission = this.state.mission;
+    if (!mission) return null;
+
+    const checkpoint: Checkpoint = {
+      id: generateCheckpointId(),
+      missionId: mission.id,
+      stepId: params.stepId,
+      provenAt: params.provenAt ?? mission.steps.filter((s) => s.status === "passed").map((s) => s.id),
+      changes: params.changes ?? [],
+      remaining: params.remaining ?? mission.steps.filter((s) => s.status === "pending").map((s) => s.id),
+      resumePoint: params.stepId ?? mission.currentStepId ?? "",
+      retryBudgets: {},
+      runtimeVersion: mission.version,
+      createdAt: new Date().toISOString(),
+    };
+
+    mission.checkpoints.push(checkpoint);
+    this.touch();
+    await this.persistMission();
+    return checkpoint;
+  }
+
+  /**
+   * Resume the mission from a checkpoint.
+   *
+   * Same-mission resume is allowed ONLY when the mission is "blocked".
+   * blocked → working is the only lifecycle transition performed by this
+   * method. All other statuses are rejected:
+   *   - failed / complete / cancelled are terminal (auditable, no revival)
+   *   - planning is not resumable through this API
+   *   - working is not resumable through this API
+   *   - verifying is not resumable through this API
+   *
+   * For a blocked mission, the resumed step is reset from "blocked" to
+   * "working" (clearing its blockingReason) and its attemptCount is
+   * incremented. Historical failure state on other steps is preserved.
+   *
+   * Emits a mission:resumed event so surfaces can update their projection.
+   */
+  async resumeMission(checkpointId: string): Promise<boolean> {
+    const mission = this.state.mission;
+    if (!mission) return false;
+
+    // Only blocked missions can be resumed through this API.
+    // blocked → working is the only lifecycle transition performed here.
+    if (mission.status !== "blocked") {
+      return false;
+    }
+
+    const checkpoint = mission.checkpoints.find((cp) => cp.id === checkpointId);
+    if (!checkpoint) return false;
+
+    // blocked → working is a valid transition per the state machine.
+    if (!isValidMissionTransition("blocked", "working")) return false;
+    mission.status = "working";
+
+    // Set the current step from the checkpoint
+    const stepId = checkpoint.stepId ?? checkpoint.resumePoint;
+    mission.currentStepId = stepId;
+
+    // If the step exists and is blocked, reset to working.
+    // Do NOT reset failed steps — their failure state is auditable.
+    if (stepId) {
+      const step = mission.steps.find((s) => s.id === stepId);
+      if (step && step.status === "blocked") {
+        if (isValidStepTransition("blocked", "working")) {
+          step.status = "working";
+          step.blockingReason = null;
+          step.attemptCount = (step.attemptCount ?? 0) + 1;
+        }
+      }
+    }
+
+    mission.metadata = { ...mission.metadata, resumedFrom: checkpointId };
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:resumed",
+      ts: Date.now(),
+      data: { missionId: mission.id, checkpointId, stepId },
+    });
+    await this.persistMission();
+    return true;
+  }
+
+  /**
+   * Cancel the mission with a reason.
+   * Transitions to "cancelled" status and records the reason.
+   */
+  async cancelMission(reason: string): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    if (!isValidMissionTransition(mission.status, "cancelled")) return;
+
+    mission.status = "cancelled";
+    mission.blockingReason = reason;
+    mission.completedAt = new Date().toISOString();
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:cancelled",
+      ts: Date.now(),
+      data: { missionId: mission.id, reason },
+    });
+    await this.persistMission();
   }
 
   // ── Git ─────────────────────────────────────────────────────────
@@ -246,9 +1120,12 @@ export class RuntimeStore {
         // Errors are handled inside tickHeartbeat
       });
     }, intervalMs);
-    // Don't keep the process alive just for heartbeats
-    if (this.heartbeatTimer.unref) {
-      this.heartbeatTimer.unref();
+    // Don't keep the process alive just for heartbeats.
+    // `unref` is a Node-only API; guard for environments where the
+    // timer is a number (DOM lib typing) or lacks unref.
+    const timer = this.heartbeatTimer as { unref?: () => void } | null;
+    if (timer && typeof timer.unref === "function") {
+      timer.unref();
     }
   }
 

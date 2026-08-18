@@ -1,7 +1,9 @@
 /**
  * LiTT Desktop launcher.
  *
- * Bare `litt` and `litt desktop` route here.
+ * `litt desktop` routes here. Bare `litt` does NOT — it launches the Ink
+ * cockpit inside the current terminal. This command opens the Desktop/Tauri
+ * GUI surface, which shares the same canonical RuntimeSession as the cockpit.
  *
  * Responsibilities:
  * - resolve the caller's canonical project root
