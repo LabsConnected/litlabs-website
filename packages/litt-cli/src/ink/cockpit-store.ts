@@ -10,7 +10,7 @@
  * about itself (which panel is selected, what the user typed, etc).
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
@@ -246,10 +246,9 @@ export function useCockpitStore() {
   const [branch, setBranch] = useState<string>("unknown");
   // The transcript is owned by a pure ChatTranscriptStore (testable in
   // node env without a React renderer). The hook mirrors its snapshot
-  // into React state so renders stay reactive.
-  const transcriptStoreRef = useRef<ChatTranscriptStore | null>(null);
-  if (!transcriptStoreRef.current) transcriptStoreRef.current = new ChatTranscriptStore();
-  const transcriptStore = transcriptStoreRef.current;
+  // into React state so renders stay reactive. useState with a lazy
+  // initializer creates the store once and never re-creates it.
+  const [transcriptStore] = useState(() => new ChatTranscriptStore());
   const [chatTranscript, setChatTranscript] = useState<ChatMessage[]>(() => transcriptStore.snapshot());
 
   const addActivity = useCallback((entry: ActivityEntry) => {
