@@ -45,7 +45,7 @@ const authProjects = (hasRealClerk && hasTestUsers) ? [
   },
   {
     name: "authenticated-chromium",
-    testMatch: /studio|chat|image|files|agents|billing|golden|projects|settings|profile|marketplace/,
+    testMatch: /studio|chat|image|files|agents|golden|projects|settings|profile|marketplace/,
     use: {
       ...devices["Desktop Chrome"],
       storageState: path.join(authDir, "user-a.json"),
@@ -130,7 +130,11 @@ export default defineConfig({
     // security, accessibility, error states, API health
     {
       name: "public-chromium",
-      testMatch: /public-routes|public-critical|error-states|security|site-audit|navigation|terminal/,
+      // billing.spec.ts tests public/unauthenticated behavior (pricing page
+      // content + wallet redirect for unauthenticated users). Placing it here
+      // (empty storageState) is correct — authenticated-chromium would break
+      // the wallet-redirect test since a logged-in user wouldn't be redirected.
+      testMatch: /public-routes|public-critical|error-states|security|site-audit|navigation|terminal|billing/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: { cookies: [], origins: [] },
