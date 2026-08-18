@@ -1,76 +1,77 @@
 /**
- * ModelCenter — full model management screen (/models).
+ * ModelCenter — full model management screen (/models, Ctrl+M).
  *
- * Shows REAL provider status from ProviderRegistry:
- *   - Each provider with health: READY / NO KEY / RATE LIMITED / DOWN
- *   - Credential type: BYOK ✓ / LiTT Credits ✓ / Local
- *   - Models actually discovered per provider
+ * Shows REAL provider status from ModelRuntime (@litt/models):
+ *   - Each provider with health tier: DISCOVERY OK / AUTHENTICATED / CONFIGURED / DEGRADED / DOWN
+ *   - Credential type: BYOK ✓ / Local
+ *   - Models actually discovered per provider (from OpenRouter /models)
  *   - Latency from health check
  *   - Unavailable models shown with reason (can't be selected)
- *
- * This is the "advanced" view. /model is the quick switch.
+ *   - Model provider vs transport attribution (e.g. "OpenAI · via OpenRouter")
  *
  * Truth rule (same as VerificationGate):
- *   A model is only shown as available if its provider credential
- *   is present and healthy. No pretending.
+ *   A model is only shown as available if discovery confirmed it.
+ *   Static catalog presence alone never implies usability.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useApp } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEscape } from "./keyboard-utils.js";
-import { COLORS, healthColor, costTier } from "./colors.js";
-import { MODEL_CATALOG, type ModelChoice, type RoutingMode } from "../lib/model-routing.js";
-import {
-  ProviderRegistry,
-  type ProviderStatus,
-  type DiscoveredModel,
-} from "../lib/provider-registry.js";
+import { COLORS, costTier } from "./colors.js";
+import { ModelRuntime, type ProviderStatus } from "../lib/model-runtime.js";
+import type { ModelDefinition, ProviderId } from "@litt/models";
+import type { RoutingMode } from "../lib/model-routing.js";
 
 export interface ModelCenterProps {
   routingMode: RoutingMode;
   selectedModelId: string | null;
+  /** Active model label (what the runtime is actually using). */
+  activeModel?: string | null;
   hasApiKey: boolean;
   onCancel: () => void;
+  /** Injected ModelRuntime (shared with controller). Optional — creates own if absent. */
+  modelRuntime?: ModelRuntime;
 }
 
-const HEALTH_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
-  "ready": { icon: "●", color: "green", label: "READY" },
-  "unverified": { icon: "?", color: "yellow", label: "UNVERIFIED" },
-  "no-key": { icon: "○", color: "gray", label: "NO KEY" },
-  "rate-limited": { icon: "⚠", color: "yellow", label: "RATE LIMITED" },
-  "down": { icon: "✗", color: "red", label: "DOWN" },
+const TIER_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
+  "discovery-ok": { icon: "●", color: COLORS.success, label: "READY" },
+  "authenticated": { icon: "●", color: COLORS.success, label: "AUTH OK" },
+  "configured": { icon: "○", color: COLORS.secondary, label: "CONFIGURED" },
+  "inference-verified": { icon: "✓", color: COLORS.success, label: "VERIFIED" },
+  "degraded": { icon: "⚠", color: COLORS.warning, label: "DEGRADED" },
+  "down": { icon: "✗", color: COLORS.error, label: "DOWN" },
 };
 
-const CRED_LABEL: Record<string, string> = {
-  "byok": "BYOK",
-  "litt-credits": "LiTT Credits",
-  "free": "Free",
-  "local": "Local",
-};
-
-export function ModelCenter({ routingMode, selectedModelId, hasApiKey, onCancel }: ModelCenterProps): React.ReactElement {
+export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiKey, onCancel, modelRuntime: injectedRuntime }: ModelCenterProps): React.ReactElement {
   const { exit } = useApp();
-  const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const runtimeRef = useRef<ModelRuntime | null>(null);
+  if (!runtimeRef.current) runtimeRef.current = injectedRuntime ?? new ModelRuntime();
+  const runtime = runtimeRef.current;
 
+  const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
+  const [models, setModels] = useState<ModelDefinition[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [discoveredCount, setDiscoveredCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    const registry = new ProviderRegistry(MODEL_CATALOG);
 
-    // Show last-known status immediately (async refresh, no blocking)
-    registry.refreshAsync();
-    setStatuses(registry.getProviderStatuses());
-    setLoading(false);
+    // Show last-known status immediately (from health cache)
+    const showCached = () => {
+      setStatuses(runtime.getProviderStatuses());
+      setModels(runtime.getAllModels());
+      setDiscoveredCount(runtime.getDiscoveredCount());
+      setLoading(false);
+    };
+    showCached();
 
-    // Refresh in background, then update
+    // Refresh in background — real OpenRouter /models discovery
     setRefreshing(true);
-    registry.refresh().then(() => {
+    runtime.refresh().then(() => {
       if (!cancelled) {
-        setStatuses(registry.getProviderStatuses());
+        showCached();
         setRefreshing(false);
       }
     }).catch(() => {
@@ -78,7 +79,7 @@ export function ModelCenter({ routingMode, selectedModelId, hasApiKey, onCancel 
     });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [runtime]);
 
   useOverlayKeyboard("model-center", (_, key) => {
     if (isEscape(key, "")) onCancel();
@@ -86,85 +87,61 @@ export function ModelCenter({ routingMode, selectedModelId, hasApiKey, onCancel 
 
   if (loading) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2} paddingY={1}>
-        <Text bold color="magenta">LiTT MODEL CENTER</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+        <Text bold color={COLORS.brand}>LiTT MODEL CENTER</Text>
         <Text dimColor>Discovering providers...</Text>
       </Box>
     );
   }
 
-  if (error) {
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={2} paddingY={1}>
-        <Text bold color="red">LiTT MODEL CENTER — ERROR</Text>
-        <Text color="red">{error}</Text>
-        <Text dimColor>Esc to close</Text>
-      </Box>
-    );
+  // Group models by their native provider (model provider, not transport)
+  const modelsByProvider = new Map<ProviderId, ModelDefinition[]>();
+  for (const m of models) {
+    const list = modelsByProvider.get(m.provider) ?? [];
+    list.push(m);
+    modelsByProvider.set(m.provider, list);
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
       <Box marginBottom={1}>
-        <Text bold color="magenta">LiTT MODEL CENTER</Text>
+        <Text bold color={COLORS.brand}>LiTT MODEL CENTER</Text>
         <Text dimColor> — real provider status</Text>
+        {refreshing && <Text color={COLORS.working}> (refreshing...)</Text>}
       </Box>
 
-      {/* Providers with real health + discovered models */}
+      {/* ─── PROVIDERS ─── */}
       <Text dimColor bold>PROVIDERS</Text>
       <Box flexDirection="column" marginBottom={1}>
+        {statuses.length === 0 && (
+          <Box marginLeft={2}>
+            <Text dimColor>No providers checked yet. {hasApiKey ? "Refresh to discover." : "Set OPENROUTER_API_KEY."}</Text>
+          </Box>
+        )}
         {statuses.map((status) => {
-          const health = HEALTH_CONFIG[status.health] ?? HEALTH_CONFIG["unknown"];
-          const credLabel = CRED_LABEL[status.provider.credentialType] ?? "Unknown";
+          const tier = TIER_CONFIG[status.tier] ?? { icon: "?", color: COLORS.secondary, label: status.tier.toUpperCase() };
           return (
-            <Box key={status.provider.id} flexDirection="column" marginBottom={0}>
-              {/* Provider header */}
+            <Box key={status.providerId} flexDirection="column" marginBottom={0}>
               <Box>
-                <Text color={health.color} bold>{health.icon}</Text>
-                <Text color={status.hasCredential ? "white" : "gray"} bold>
-                  {" "}{status.provider.label.padEnd(12)}
+                <Text color={tier.color} bold>{tier.icon}</Text>
+                <Text color={status.hasCredential ? COLORS.text : COLORS.secondary} bold>
+                  {" "}{status.label.padEnd(12)}
                 </Text>
-                <Text color={health.color}> {health.label}</Text>
-                <Text dimColor> · {credLabel}{status.hasCredential ? " ✓" : ""}</Text>
+                <Text color={tier.color}> {tier.label}</Text>
+                <Text dimColor> · {status.hasCredential ? "✓" : "✗"}</Text>
                 {status.latencyMs !== null && (
                   <Text dimColor> · {status.latencyMs}ms</Text>
                 )}
-                {status.servedBy !== status.provider.id && status.hasCredential && (
-                  <Text color="cyan" dimColor> · via {status.servedBy}</Text>
+                {status.discoveredCount > 0 && (
+                  <Text dimColor> · {status.discoveredCount} models</Text>
+                )}
+                {status.servedBy !== status.providerId && status.hasCredential && (
+                  <Text color={COLORS.info} dimColor> · via {status.servedBy}</Text>
                 )}
               </Box>
-              {/* Discovered models */}
-              {status.models.length > 0 ? (
-                <Box flexDirection="column" marginLeft={4}>
-                  {status.models.map((model: DiscoveredModel) => (
-                    <Box key={model.choice.id}>
-                      <Text color={model.available ? (model.proven ? "green" : "yellow") : "gray"}>
-                        {model.available ? (model.proven ? "✓" : "?") : "○"}
-                      </Text>
-                      <Text color={model.available ? "white" : "gray"}>
-                        {" "}{model.choice.label}
-                      </Text>
-                      {model.available && !model.proven && (
-                        <Text color="yellow" dimColor> (unverified)</Text>
-                      )}
-                      {!model.available && model.unavailableReason && (
-                        <Text color="red" dimColor> — {model.unavailableReason}</Text>
-                      )}
-                      {model.choice.id === selectedModelId && (
-                        <Text color="magenta" bold> ◀ selected</Text>
-                      )}
-                    </Box>
-                  ))}
-                </Box>
-              ) : (
+              {status.reason && status.tier === "down" && (
                 <Box marginLeft={4}>
-                  <Text dimColor>Models: —</Text>
-                </Box>
-              )}
-              {/* Error message */}
-              {status.error && (
-                <Box marginLeft={4}>
-                  <Text color="red" dimColor>  {status.error}</Text>
+                  <Text color={COLORS.error} dimColor>  {status.reason}</Text>
                 </Box>
               )}
             </Box>
@@ -172,20 +149,66 @@ export function ModelCenter({ routingMode, selectedModelId, hasApiKey, onCancel 
         })}
       </Box>
 
-      {/* Current selection */}
+      {/* ─── MODELS BY PROVIDER ─── */}
+      <Text dimColor bold>MODELS{discoveredCount > 0 ? ` · ${discoveredCount} discovered` : ""}</Text>
+      <Box flexDirection="column" marginBottom={1}>
+        {[...modelsByProvider.entries()].map(([provider, providerModels]) => {
+          const providerStatus = statuses.find((s) => s.providerId === provider);
+          const viaOpenRouter = providerStatus?.servedBy === "openrouter" && provider !== "openrouter";
+          return (
+            <Box key={provider} flexDirection="column" marginBottom={0}>
+              <Text dimColor bold>
+                {provider.toUpperCase()}{viaOpenRouter ? " · via OpenRouter" : ""}
+              </Text>
+              {providerModels.map((model) => {
+                const isOnline = model.availability === "online";
+                const isOffline = model.availability === "offline";
+                const isUnverified = model.availability === "unverified";
+                const statusIcon = isOnline ? "✓" : isOffline ? "✗" : "?";
+                const statusLabel = isOnline ? "READY" : isOffline ? "OFFLINE" : "UNVERIFIED";
+                const statusColor = isOnline ? COLORS.success : isOffline ? COLORS.error : COLORS.warning;
+                const isSelected = model.canonicalId === selectedModelId;
+                const isActive = activeModel && model.displayName === activeModel;
+
+                return (
+                  <Box key={model.canonicalId} marginLeft={2}>
+                    <Text color={statusColor}>{statusIcon}</Text>
+                    <Text color={isOnline ? COLORS.text : COLORS.secondary}>
+                      {" "}{model.displayName.padEnd(24)}
+                    </Text>
+                    <Text color={statusColor}> {statusLabel.padEnd(10)}</Text>
+                    <Text dimColor> {model.description.slice(0, 20).padEnd(20)}</Text>
+                    <Text color={COLORS.warning}>{costTier(model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0)}</Text>
+                    {isSelected && <Text color={COLORS.brand} bold> ◀ selected</Text>}
+                    {isActive && !isSelected && <Text color={COLORS.info} bold> ◀ active</Text>}
+                  </Box>
+                );
+              })}
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* ─── CURRENT ─── */}
       <Text dimColor bold>CURRENT</Text>
       <Box flexDirection="column" marginBottom={1}>
         <Box>
-          <Text dimColor>Routing: </Text>
-          <Text color="magenta" bold>{routingMode.toUpperCase()}</Text>
+          <Text dimColor>Policy     </Text>
+          <Text color={COLORS.brand} bold>{routingMode.toUpperCase()}</Text>
         </Box>
         <Box>
-          <Text dimColor>Selected: </Text>
-          <Text color="cyan">{selectedModelId ?? "auto"}</Text>
+          <Text dimColor>Selected   </Text>
+          <Text color={COLORS.info}>{selectedModelId ?? "auto"}</Text>
         </Box>
+        {activeModel && (
+          <Box>
+            <Text dimColor>Active     </Text>
+            <Text color={COLORS.success} bold>{activeModel}</Text>
+          </Box>
+        )}
         <Box>
-          <Text dimColor>Credential: </Text>
-          <Text color={hasApiKey ? "green" : "red"}>
+          <Text dimColor>Credential </Text>
+          <Text color={hasApiKey ? COLORS.success : COLORS.error}>
             {hasApiKey ? "✓ API key set" : "✗ No API key"}
           </Text>
         </Box>

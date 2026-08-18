@@ -36,8 +36,8 @@ import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
-import { routeModel, routingReason, brainLabel, routingModeLabel, MODEL_CATALOG, type ModelChoice } from "../lib/model-routing.js";
-import { ProviderRegistry, TelemetryStore } from "../lib/provider-registry.js";
+import { ModelRuntime, routingReason, routingModeLabel, brainLabel, type RoutedModel } from "../lib/model-runtime.js";
+import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent, type Intent } from "../lib/intent.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 
@@ -168,13 +168,20 @@ export interface CockpitControllerOptions {
 }
 
 export function useCockpitController({ session, store, approvalBridge, onExit, projectName, branch }: CockpitControllerOptions) {
-  // Owner/dev mode: persistent registry + telemetry for /route and /providers
-  const providerRegistryRef = useRef<ProviderRegistry | null>(null);
+  // Canonical model runtime: @litt/models registry + real OpenRouter discovery.
+  // Replaces the legacy ProviderRegistry + model-routing.
+  const modelRuntimeRef = useRef<ModelRuntime | null>(null);
   const telemetryStoreRef = useRef<TelemetryStore | null>(null);
-  if (!providerRegistryRef.current) providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
+  if (!modelRuntimeRef.current) modelRuntimeRef.current = new ModelRuntime();
   if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
-  const providerRegistry = providerRegistryRef.current;
+  const modelRuntime = modelRuntimeRef.current;
   const telemetryStore = telemetryStoreRef.current;
+
+  // Trigger background discovery on mount — populates model availability
+  // from real OpenRouter /models endpoint. Non-blocking.
+  useEffect(() => {
+    modelRuntime.refreshAsync();
+  }, [modelRuntime]);
 
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us.
@@ -342,37 +349,53 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
       return;
     }
     if (input === "/route") {
-      // Show current routing configuration (not just telemetry)
+      // Show current routing configuration using canonical @litt/models routing
       const mode = store.state.routingMode;
       const selected = store.state.selectedModel;
-      const routed = routeModel(mode, selected, "general task");
+      let routed: RoutedModel;
+      try {
+        routed = modelRuntime.route(mode, selected, "general task");
+      } catch (err) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}_route_err`,
+          ts: Date.now(),
+          type: "error",
+          tag: "ROUTE",
+          text: `Routing error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
       const reason = routingReason(routed, "general task");
-      const servedBy = providerRegistry.getModelServedBy(routed.id) ?? "unknown";
-      const fallback = providerRegistry.getFallbackChain(routed.id, "coding");
-      const fallbackLabel = fallback.length > 1 ? fallback[1].label : "none";
+      const servedBy = routed.servedBy;
+      const fallback = modelRuntime.getFallbackChain(routed.id, "coding");
+      const fallbackLabel = fallback.length > 1 ? modelRuntime.getLabel(fallback[1].canonicalId) : "none";
 
       store.actions.addActivity({ id: `act_${Date.now()}_r0`, ts: Date.now(), type: "info", tag: "ROUTE", text: `BRAIN        ${routingModeLabel(mode)}` });
       store.actions.addActivity({ id: `act_${Date.now()}_r1`, ts: Date.now() + 1, type: "info", tag: "ROUTE", text: `ACTIVE       ${routed.label}` });
       store.actions.addActivity({ id: `act_${Date.now()}_r2`, ts: Date.now() + 2, type: "info", tag: "ROUTE", text: `PROVIDER     ${servedBy}` });
       store.actions.addActivity({ id: `act_${Date.now()}_r3`, ts: Date.now() + 3, type: "info", tag: "ROUTE", text: `REASON       ${reason}` });
       store.actions.addActivity({ id: `act_${Date.now()}_r4`, ts: Date.now() + 4, type: "info", tag: "ROUTE", text: `FALLBACK     ${fallbackLabel}` });
-      store.actions.addActivity({ id: `act_${Date.now()}_r5`, ts: Date.now() + 5, type: "info", tag: "INFO", text: "Also: /route explain · /route force <model> · /route candidates" });
+      if (routed.fallbackReason) {
+        store.actions.addActivity({ id: `act_${Date.now()}_r4b`, ts: Date.now() + 5, type: "info", tag: "ROUTE", text: `FALLBACK WHY ${routed.fallbackReason}` });
+      }
+      store.actions.addActivity({ id: `act_${Date.now()}_r5`, ts: Date.now() + 6, type: "info", tag: "INFO", text: "Also: /route explain · /route force <model> · /route candidates" });
       return;
     }
 
     // ─── Owner/dev mode: /providers ─────────────────────────
     if (input === "/providers health") {
       store.actions.addActivity({ id: `act_${Date.now()}_0`, ts: Date.now(), type: "info", text: "Provider Health:" });
-      for (const status of providerRegistry.getProviderStatuses()) {
-        const healthLabel = status.health.toUpperCase();
+      for (const status of modelRuntime.getProviderStatuses()) {
+        const healthLabel = status.tier.toUpperCase();
         const credLabel = status.hasCredential ? "✓" : "✗";
         const latency = status.latencyMs !== null ? ` ${status.latencyMs}ms` : "";
-        const servedVia = status.servedBy !== status.provider.id ? ` (via ${status.servedBy})` : "";
+        const servedVia = status.servedBy !== status.providerId ? ` (via ${status.servedBy})` : "";
+        const models = status.discoveredCount > 0 ? ` ${status.discoveredCount} models` : "";
         store.actions.addActivity({
-          id: `act_${Date.now()}_p_${status.provider.id}`,
+          id: `act_${Date.now()}_p_${status.providerId}`,
           ts: Date.now(),
           type: "info",
-          text: `  ${status.provider.label.padEnd(12)} ${healthLabel.padEnd(14)} cred:${credLabel}${latency}${servedVia}`,
+          text: `  ${status.label.padEnd(12)} ${healthLabel.padEnd(16)} cred:${credLabel}${latency}${servedVia}${models}`,
         });
       }
       return;
@@ -501,7 +524,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           const gateway = session.getGateway();
           const tools = gateway.getTools();
           const agentStore = session.getStore();
-          const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
+          const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
           store.actions.addActivity({
             id: `act_${Date.now()}_route`,
             ts: Date.now(),
@@ -509,8 +532,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             tag: "ROUTE",
             text: `${routed.label}`,
           });
+          // Set the CONFIGURED model label — the actual ACTIVE model is
+          // confirmed after streaming sees the runtime response model.
           store.actions.setActiveModel(routed.label);
-          const model = new OpenRouterModelProvider({ model: routed.id });
+          const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
 
           // Track tool calls for structured activity events.
           // CHAT can call tools (e.g. project.status) but does NOT
@@ -622,7 +647,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           text: `Mission created: ${mission.id}`,
         });
 
-        const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
+        const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
         store.actions.addActivity({
           id: `act_${Date.now()}_route`,
           ts: Date.now(),
@@ -630,8 +655,10 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           tag: "ROUTE",
           text: `${routed.label}`,
         });
+        // Set the CONFIGURED model label — the actual ACTIVE model is
+        // confirmed after streaming sees the runtime response model.
         store.actions.setActiveModel(routed.label);
-        const model = new OpenRouterModelProvider({ model: routed.id });
+        const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
 
         // ─── SEMANTIC PLANNING — plan BEFORE execution ───
         // The model generates a semantic execution plan. planMission()

@@ -5,12 +5,8 @@
  *   ROUTING — Auto / Fixed / Budget / Max with descriptions
  *   MODELS  — grouped by provider with status, cost, capabilities
  *
- * Design goals:
- *   - Compact (not a giant blank modal)
- *   - Shows ACTIVE model at a glance
- *   - Shows provider + credential source
- *   - Unavailable models shown but not selectable
- *   - Purple brand color (LiTT identity)
+ * Uses ModelRuntime (@litt/models) for real discovery + truth.
+ * Replaces the legacy ProviderRegistry + model-routing imports.
  *
  * Keyboard:
  *   Tab      — switch between Routing / Models
@@ -21,13 +17,14 @@
  * Uses the OverlayManager — no direct useInput call.
  */
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, isTab, isUpArrow, isDownArrow } from "./keyboard-utils.js";
 import { COLORS, costTier } from "./colors.js";
-import { MODEL_CATALOG, type ModelChoice, type RoutingMode } from "../lib/model-routing.js";
-import { ProviderRegistry, type DiscoveredModel } from "../lib/provider-registry.js";
+import { ModelRuntime } from "../lib/model-runtime.js";
+import type { ModelDefinition, ProviderId } from "@litt/models";
+import type { RoutingMode, ModelChoice } from "../lib/model-routing.js";
 
 export interface ModelPickerProps {
   selectedModelId: string | null;
@@ -39,6 +36,8 @@ export interface ModelPickerProps {
   activeModel?: string | null;
   /** Provider source string (e.g. "OpenRouter • BYOK ✓") */
   source?: string;
+  /** Injected ModelRuntime (shared with controller). Optional. */
+  modelRuntime?: ModelRuntime;
 }
 
 const ROUTING_MODES: { id: RoutingMode; label: string; description: string }[] = [
@@ -56,63 +55,32 @@ export function ModelPicker({
   onCancel,
   activeModel,
   source = "OpenRouter • BYOK ✓",
+  modelRuntime: injectedRuntime,
 }: ModelPickerProps): React.ReactElement {
   const [tab, setTab] = useState<"routing" | "models">("routing");
-  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([]);
+  const runtimeRef = useRef<ModelRuntime | null>(null);
+  if (!runtimeRef.current) runtimeRef.current = injectedRuntime ?? new ModelRuntime();
+  const runtime = runtimeRef.current;
+
+  const [allModels, setAllModels] = useState<ModelDefinition[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Discover real model availability (async, non-blocking)
   useEffect(() => {
     let cancelled = false;
-    const registry = new ProviderRegistry(MODEL_CATALOG);
-    registry.refreshAsync();
-
-    const buildDiscovered = () => {
-      const statuses = registry.getProviderStatuses();
-      return MODEL_CATALOG.map((choice) => {
-        for (const status of statuses) {
-          const found = status.models.find((m) => m.choice.id === choice.id);
-          if (found) return found;
-        }
-        const openrouter = statuses.find((s) => s.provider.id === "openrouter");
-        if (openrouter && (openrouter.health === "ready" || openrouter.health === "unverified")) {
-          return { choice, available: true, servedBy: "openrouter", proven: openrouter.health === "ready" };
-        }
-        const provider = statuses.find((s) =>
-          s.provider.label.toLowerCase() === choice.provider.toLowerCase(),
-        );
-        if (provider && provider.health === "no-key") {
-          return {
-            choice,
-            available: false,
-            unavailableReason: `${choice.provider} credential required`,
-            servedBy: provider.provider.id,
-            proven: false,
-          };
-        }
-        return {
-          choice,
-          available: false,
-          unavailableReason: "No provider credential",
-          servedBy: "unknown",
-          proven: false,
-        };
-      });
-    };
-
-    setDiscoveredModels(buildDiscovered());
+    // Show cached immediately
+    setAllModels(runtime.getAllModels());
     setLoading(false);
-
-    registry.refresh().then(() => {
-      if (!cancelled) setDiscoveredModels(buildDiscovered());
+    // Refresh in background
+    runtime.refresh().then(() => {
+      if (!cancelled) setAllModels(runtime.getAllModels());
     }).catch(() => {});
-
     return () => { cancelled = true; };
-  }, []);
+  }, [runtime]);
 
-  const availableModels = discoveredModels.filter((m) => m.available);
+  const availableModels = allModels.filter((m) => m.availability === "online" || m.availability === "unverified");
   const [selectedIdx, setSelectedIdx] = useState(() => {
-    const activeIdx = availableModels.findIndex((m) => m.choice.id === selectedModelId);
+    const activeIdx = availableModels.findIndex((m) => m.canonicalId === selectedModelId);
     return activeIdx >= 0 ? activeIdx : 0;
   });
   const [routingIdx, setRoutingIdx] = useState(() => {
@@ -121,8 +89,6 @@ export function ModelPicker({
   });
 
   // Keyboard handler — registered with OverlayManager
-  // This is the ONLY keyboard handler when this overlay is active.
-  // The prompt underneath receives ZERO keyboard events.
   useOverlayKeyboard("model-picker", useCallback((input, key) => {
     if (isTab(key)) {
       setTab((prev) => (prev === "routing" ? "models" : "routing"));
@@ -149,18 +115,30 @@ export function ModelPicker({
         setSelectedIdx((prev) => Math.min(availableModels.length - 1, prev + 1));
       } else if (isEnter(key, input)) {
         const model = availableModels[selectedIdx];
-        if (model) onSelectModel(model.choice);
+        if (model) {
+          // Adapt to the ModelChoice shape the controller expects
+          onSelectModel({
+            id: model.canonicalId,
+            label: model.displayName,
+            provider: model.provider,
+            description: model.description,
+            strengths: model.recommendedFor ?? [],
+            cost: model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0,
+            power: model.intelligence === "frontier" ? 5 : model.intelligence === "balanced" ? 3 : 1,
+            contextK: Math.round(model.contextWindow / 1000),
+          } as ModelChoice);
+        }
       }
     }
   }, [tab, routingIdx, selectedIdx, loading, availableModels, onSelectModel, onSelectRoutingMode, onCancel]));
 
   // Build the active model display
   const activeLabel = activeModel ?? (selectedModelId
-    ? MODEL_CATALOG.find(m => m.id === selectedModelId)?.label ?? "—"
+    ? runtime.getLabel(selectedModelId)
     : "LiTT Auto");
 
   // Group models by provider for the Models tab
-  const providers = [...new Set(MODEL_CATALOG.map((m) => m.provider))];
+  const providers = [...new Set(allModels.map((m) => m.provider))];
   let flatIdx = 0;
 
   return (
@@ -223,37 +201,34 @@ export function ModelPicker({
           {providers.map((provider) => (
             <Box key={provider} flexDirection="column">
               <Text dimColor bold>{provider.toUpperCase()}</Text>
-              {discoveredModels
-                .filter((m) => m.choice.provider === provider)
+              {allModels
+                .filter((m) => m.provider === provider)
                 .map((model) => {
                   const idx = flatIdx++;
                   const isSelected = idx === selectedIdx;
-                  const isActive = model.choice.id === selectedModelId;
-                  const isAvailable = model.available;
-                  const statusIcon = isAvailable
-                    ? (model.proven ? "●" : "?")
-                    : "○";
-                  const statusLabel = isAvailable
-                    ? (model.proven ? "READY" : "UNVERIFIED")
-                    : (model.unavailableReason?.includes("credential") ? "NO KEY" : "OFFLINE");
-                  const statusColor = isAvailable
-                    ? (model.proven ? COLORS.success : COLORS.warning)
-                    : COLORS.secondary;
+                  const isActive = model.canonicalId === selectedModelId;
+                  const isOnline = model.availability === "online";
+                  const isOffline = model.availability === "offline";
+                  const isRoutable = runtime.isRoutable(model.canonicalId);
+                  const statusIcon = isOnline ? "●" : isOffline ? "✗" : "?";
+                  const statusLabel = isOnline ? "READY" : isOffline ? "OFFLINE" : "UNVERIFIED";
+                  const statusColor = isOnline ? COLORS.success : isOffline ? COLORS.error : COLORS.warning;
+                  const isSelectable = isOnline || (!isOffline && isRoutable);
 
                   return (
-                    <Box key={model.choice.id}>
-                      <Text color={isSelected && isAvailable ? COLORS.brand : undefined}>
-                        {isSelected && isAvailable ? ">" : " "}
+                    <Box key={model.canonicalId}>
+                      <Text color={isSelected && isSelectable ? COLORS.brand : undefined}>
+                        {isSelected && isSelectable ? ">" : " "}
                       </Text>
                       <Text
-                        color={isSelected && isAvailable ? COLORS.brand : isAvailable ? COLORS.text : COLORS.secondary}
-                        bold={isSelected && isAvailable}
+                        color={isSelected && isSelectable ? COLORS.brand : isSelectable ? COLORS.text : COLORS.secondary}
+                        bold={isSelected && isSelectable}
                       >
-                        {" "}{model.choice.label.padEnd(22)}
+                        {" "}{model.displayName.padEnd(22)}
                       </Text>
                       <Text color={statusColor}>{statusIcon} {statusLabel.padEnd(10)}</Text>
-                      <Text dimColor> {model.choice.description.padEnd(16)}</Text>
-                      <Text color={COLORS.warning}>{costTier(model.choice.cost)}</Text>
+                      <Text dimColor> {model.description.slice(0, 16).padEnd(16)}</Text>
+                      <Text color={COLORS.warning}>{costTier(model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0)}</Text>
                       {isActive && <Text color={COLORS.success}> ✓</Text>}
                     </Box>
                   );

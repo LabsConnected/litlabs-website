@@ -275,6 +275,7 @@ export function CockpitApp({
             <ModelCenter
               routingMode={store.state.routingMode}
               selectedModelId={store.state.selectedModel}
+              activeModel={store.state.activeModel}
               hasApiKey={modelReady}
               onCancel={() => store.actions.setOverlay("none")}
             />
