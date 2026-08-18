@@ -34,6 +34,8 @@ function entryTag(entry: ActivityEntry): string {
     case "agent.thinking":
     case "agent.request":
       return "THINK";
+    case "agent.response":
+      return "LiTT";
     case "agent.chat":
       return "CHAT";
     case "agent.delta":
@@ -95,6 +97,40 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max - 1) + "…";
 }
 
+/**
+ * Wrap text into lines of at most `max` chars, preserving explicit
+ * newlines from the source. Used for agent.response entries so the
+ * LiTT body is rendered across the terminal width instead of being
+ * collapsed to a single truncated line.
+ *
+ * Exported for unit testing the wrap behavior directly.
+ */
+export function wrapText(text: string, max: number): string[] {
+  if (max < 1) return [text];
+  const out: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    if (paragraph.length === 0) {
+      out.push("");
+      continue;
+    }
+    // Greedy word-wrap
+    const words = paragraph.split(/\s+/);
+    let line = "";
+    for (const word of words) {
+      if (line.length === 0) {
+        line = word;
+      } else if (line.length + 1 + word.length <= max) {
+        line += " " + word;
+      } else {
+        out.push(line);
+        line = word;
+      }
+    }
+    if (line.length > 0) out.push(line);
+  }
+  return out.length > 0 ? out : [""];
+}
+
 export function ActivityStream({ entries, maxEntries = 8 }: { entries: ActivityEntry[]; maxEntries?: number }): React.ReactElement {
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 80;
@@ -131,6 +167,36 @@ export function ActivityStream({ entries, maxEntries = 8 }: { entries: ActivityE
           const color = activityColor(tag);
           const time = formatTime(entry.ts);
           const isStream = entry.type === "tool.stdout" || entry.type === "tool.stderr" || entry.type === "agent.delta";
+
+          // ─── LiTT response body — wrap, do NOT truncate to one line ───
+          // The full body lives in fullText. We render it wrapped across
+          // the available terminal width so the user can actually read
+          // the response. The first line carries the timestamp + tag
+          // header; subsequent lines are indented under the message
+          // column. Raw tool_call/JSON markup never reaches here — the
+          // controller filters it via isToolCallMarkup before
+          // accumulating chatResponseText.
+          if (entry.type === "agent.response") {
+            const body = entry.fullText ?? entry.text;
+            const lines = wrapText(body, msgMax);
+            return (
+              <Box key={entry.id} flexDirection="column">
+                <Box>
+                  <Text dimColor>{time}  </Text>
+                  <Text color={color} bold>{tag.padEnd(8)}</Text>
+                  <Text color={color}> {lines[0]}</Text>
+                </Box>
+                {lines.slice(1).map((line, i) => (
+                  <Box key={`${entry.id}_l${i}`}>
+                    {/* Indent continuation lines under the message column:
+                        8 (time) + 2 + 8 (tag) + 2 = 20 chars */}
+                    <Text color={color}>{" ".repeat(20)}{line}</Text>
+                  </Box>
+                ))}
+              </Box>
+            );
+          }
+
           const msg = truncate(entry.text, msgMax);
 
           return (

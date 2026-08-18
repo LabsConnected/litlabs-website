@@ -565,7 +565,33 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           });
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
           const seconds = (result.durationMs / 1000).toFixed(1);
-          // Single concise DONE event — not raw response body
+
+          // ─── Render the LiTT response body ───
+          // chatResponseText accumulated clean (non-tool-call) deltas from
+          // onModelStream. If non-empty, emit a user-visible agent.response
+          // entry carrying the FULL body. The activity-stream renderer
+          // special-cases this type so the body is wrapped across the
+          // terminal width instead of being truncated to one line.
+          // This does NOT replace the canonical runAgentLoop/runtime path —
+          // it only adds a presentation entry to CockpitStore (which is
+          // presentation-only by contract).
+          const responseBody = chatResponseText.trim();
+          if (responseBody) {
+            store.actions.addActivity({
+              id: `act_${Date.now()}_resp`,
+              ts: Date.now(),
+              type: "agent.response",
+              tag: "LiTT",
+              // text holds a one-line summary for any compact fallback
+              // renderer; fullText holds the entire wrapped body.
+              text: truncateActivity(responseBody, 80),
+              fullText: responseBody,
+            });
+          }
+
+          // Concise completion summary — kept as a separate event so the
+          // feed still shows the timing/tools line. It does NOT replace
+          // the response body above.
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
