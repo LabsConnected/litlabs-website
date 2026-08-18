@@ -12,8 +12,8 @@ export function isValidMissionTransition(
 ): boolean {
   const validTransitions: Record<MissionStatus, MissionStatus[]> = {
     planning: ["working", "cancelled"],
-    working: ["verifying", "blocked", "cancelled"],
-    verifying: ["working", "complete", "blocked", "cancelled"],
+    working: ["verifying", "blocked", "failed", "cancelled"],
+    verifying: ["working", "complete", "blocked", "failed", "cancelled"],
     blocked: ["working", "cancelled"],
     failed: [],
     complete: [],

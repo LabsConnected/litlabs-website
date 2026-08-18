@@ -23,11 +23,11 @@ import type {
   Mission,
   MissionEventSubtype,
 } from "./types.js";
-import type { MissionStatus, MissionStepStatus, MissionEvidence, EvidenceType } from "./missions/mission-types.js";
+import type { MissionStatus, MissionStepStatus, MissionEvidence, EvidenceType, Checkpoint } from "./missions/mission-types.js";
 import type { MissionStep } from "./missions/mission-entities.js";
 import { MissionStore } from "./missions/mission-store.js";
-import { generateStepId, generateEvidenceId } from "./missions/mission-types.js";
-import { validateStepTransition, isValidMissionTransition } from "./missions/mission-state-machine.js";
+import { generateStepId, generateEvidenceId, generateCheckpointId } from "./missions/mission-types.js";
+import { validateStepTransition, isValidMissionTransition, isValidStepTransition } from "./missions/mission-state-machine.js";
 
 // ─── Persistence Adapter ───────────────────────────────────────────────
 
@@ -875,6 +875,128 @@ export class RuntimeStore {
     this.state.lastMissionHeartbeatAt = 0;
     this.state.missionStepsCompleted = 0;
     this.touch();
+  }
+
+  /**
+   * Add a checkpoint to the current mission.
+   *
+   * Checkpoints capture the mission's progress at a point in time so
+   * it can be resumed later if the mission is interrupted (crash,
+   * restart, manual pause). The checkpoint records the current step,
+   * proven steps, changes made, and remaining work.
+   */
+  async addCheckpoint(params: {
+    stepId: string | null;
+    provenAt?: string[];
+    changes?: string[];
+    remaining?: string[];
+  }): Promise<Checkpoint | null> {
+    const mission = this.state.mission;
+    if (!mission) return null;
+
+    const checkpoint: Checkpoint = {
+      id: generateCheckpointId(),
+      missionId: mission.id,
+      stepId: params.stepId,
+      provenAt: params.provenAt ?? mission.steps.filter((s) => s.status === "passed").map((s) => s.id),
+      changes: params.changes ?? [],
+      remaining: params.remaining ?? mission.steps.filter((s) => s.status === "pending").map((s) => s.id),
+      resumePoint: params.stepId ?? mission.currentStepId ?? "",
+      retryBudgets: {},
+      runtimeVersion: mission.version,
+      createdAt: new Date().toISOString(),
+    };
+
+    mission.checkpoints.push(checkpoint);
+    this.touch();
+    await this.persistMission();
+    return checkpoint;
+  }
+
+  /**
+   * Resume the mission from a checkpoint.
+   *
+   * Same-mission resume is allowed ONLY when the mission is "blocked".
+   * blocked → working is the only lifecycle transition performed by this
+   * method. All other statuses are rejected:
+   *   - failed / complete / cancelled are terminal (auditable, no revival)
+   *   - planning is not resumable through this API
+   *   - working is not resumable through this API
+   *   - verifying is not resumable through this API
+   *
+   * For a blocked mission, the resumed step is reset from "blocked" to
+   * "working" (clearing its blockingReason) and its attemptCount is
+   * incremented. Historical failure state on other steps is preserved.
+   *
+   * Emits a mission:resumed event so surfaces can update their projection.
+   */
+  async resumeMission(checkpointId: string): Promise<boolean> {
+    const mission = this.state.mission;
+    if (!mission) return false;
+
+    // Only blocked missions can be resumed through this API.
+    // blocked → working is the only lifecycle transition performed here.
+    if (mission.status !== "blocked") {
+      return false;
+    }
+
+    const checkpoint = mission.checkpoints.find((cp) => cp.id === checkpointId);
+    if (!checkpoint) return false;
+
+    // blocked → working is a valid transition per the state machine.
+    if (!isValidMissionTransition("blocked", "working")) return false;
+    mission.status = "working";
+
+    // Set the current step from the checkpoint
+    const stepId = checkpoint.stepId ?? checkpoint.resumePoint;
+    mission.currentStepId = stepId;
+
+    // If the step exists and is blocked, reset to working.
+    // Do NOT reset failed steps — their failure state is auditable.
+    if (stepId) {
+      const step = mission.steps.find((s) => s.id === stepId);
+      if (step && step.status === "blocked") {
+        if (isValidStepTransition("blocked", "working")) {
+          step.status = "working";
+          step.blockingReason = null;
+          step.attemptCount = (step.attemptCount ?? 0) + 1;
+        }
+      }
+    }
+
+    mission.metadata = { ...mission.metadata, resumedFrom: checkpointId };
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:resumed",
+      ts: Date.now(),
+      data: { missionId: mission.id, checkpointId, stepId },
+    });
+    await this.persistMission();
+    return true;
+  }
+
+  /**
+   * Cancel the mission with a reason.
+   * Transitions to "cancelled" status and records the reason.
+   */
+  async cancelMission(reason: string): Promise<void> {
+    const mission = this.state.mission;
+    if (!mission) return;
+    if (!isValidMissionTransition(mission.status, "cancelled")) return;
+
+    mission.status = "cancelled";
+    mission.blockingReason = reason;
+    mission.completedAt = new Date().toISOString();
+
+    this.touch();
+    this.emit({
+      type: "litt_event",
+      subtype: "mission:cancelled",
+      ts: Date.now(),
+      data: { missionId: mission.id, reason },
+    });
+    await this.persistMission();
   }
 
   // ── Git ─────────────────────────────────────────────────────────

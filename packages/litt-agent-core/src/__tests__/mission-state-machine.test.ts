@@ -44,6 +44,22 @@ describe("Mission State Machine — Valid Mission Transitions", () => {
   it("verifying → complete is allowed (on pass)", () => {
     assert.equal(isValidMissionTransition("verifying", "complete"), true);
   });
+
+  it("working → failed is allowed (crash during work)", () => {
+    assert.equal(isValidMissionTransition("working", "failed"), true);
+  });
+
+  it("verifying → failed is allowed (verification failure)", () => {
+    assert.equal(isValidMissionTransition("verifying", "failed"), true);
+  });
+
+  it("verifying → blocked is allowed", () => {
+    assert.equal(isValidMissionTransition("verifying", "blocked"), true);
+  });
+
+  it("blocked → working is allowed (resume from blocked)", () => {
+    assert.equal(isValidMissionTransition("blocked", "working"), true);
+  });
 });
 
 describe("Mission State Machine — Invalid Mission Transitions", () => {
