@@ -329,12 +329,14 @@ export function CockpitApp({
             </Box>
           )}
 
-          {/* Mission section — always visible */}
+          {/* Mission section — always visible.
+              Renders from the canonical RuntimeStore.mission projection. */}
           <MissionSection
             holoState={store.state.holoState}
             mission={store.state.mission}
             missionState={store.state.missionState}
             lastCompletedMission={store.state.lastCompletedMission}
+            missionProjection={store.state.missionProjection}
           />
 
           {/* Approval UX (when needed) — registers as keyboard owner */}

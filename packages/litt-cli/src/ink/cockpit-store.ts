@@ -11,6 +11,7 @@
  */
 
 import { useState, useCallback, useEffect } from "react";
+import type { MissionProjection } from "./mission-projection.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -203,6 +204,11 @@ export function useCockpitStore() {
   const [canonicalMission, setCanonicalMission] = useState<CanonicalMissionProjection | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branch, setBranch] = useState<string>("unknown");
+  // Mission projection — a CACHE ONLY. Derived entirely from the
+  // canonical RuntimeStore.mission via projectMission(). CockpitStore
+  // never mutates mission lifecycle truth; it only caches the projection
+  // for Ink rendering. Refreshed by the controller on mission:* events.
+  const [missionProjection, setMissionProjection] = useState<MissionProjection | null>(null);
 
   const addActivity = useCallback((entry: ActivityEntry) => {
     // Bound the store: keep last 200 entries, and cap fullText at 4KB
@@ -344,6 +350,7 @@ export function useCockpitStore() {
       canonicalMission,
       isProcessing,
       branch,
+      missionProjection,
     },
     actions: {
       setSelectedPanel,
@@ -374,6 +381,7 @@ export function useCockpitStore() {
       setCanonicalMission,
       setIsProcessing,
       setBranch,
+      setMissionProjection,
     },
   };
 }

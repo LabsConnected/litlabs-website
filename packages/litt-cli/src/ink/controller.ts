@@ -37,6 +37,7 @@ import { routeModel, routingReason, brainLabel, routingModeLabel, MODEL_CATALOG,
 import { ProviderRegistry, TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent, type Intent } from "../lib/intent.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
+import { projectMission } from "./mission-projection.js";
 
 const SLASH_MAP: Record<string, { toolId: string; args: (input: string[]) => { command: string; args: string[] } }> = {
   "/build": { toolId: "project.build", args: () => ({ command: "pnpm", args: ["build"] }) },
@@ -191,6 +192,15 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
     });
   }, [approvalBridge, store]);
 
+  // Refresh the cockpit's mission projection from the canonical
+  // RuntimeStore.mission. This is the ONLY way the cockpit's mission
+  // view updates — it is a pure cache of canonical truth, never
+  // independently mutated lifecycle state.
+  const refreshMissionProjection = useCallback((session: RuntimeSession, restored = false) => {
+    const mission = session.getStore().getMission();
+    store.actions.setMissionProjection(projectMission(mission, restored));
+  }, [store]);
+
   const submit = useCallback(async (input: string) => {
     store.actions.addCommand(input);
 
@@ -198,6 +208,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
     if (input === "/clear") {
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
+      store.actions.setMissionProjection(null);
       return;
     }
     if (input === "/help") {
@@ -618,6 +629,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           tag: "MISSION",
           text: `Mission created: ${mission.id}`,
         });
+        // Refresh projection — mission now exists on the canonical store.
+        refreshMissionProjection(session);
 
         const routed = routeModel(store.state.routingMode, store.state.selectedModel, input);
         store.actions.addActivity({
@@ -663,6 +676,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           tag: "PLAN",
           text: `Plan (${plan.source}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
         });
+        // Refresh projection — semantic steps now exist on the canonical mission.
+        refreshMissionProjection(session);
 
         // The semantic steps now exist on the canonical mission BEFORE
         // the first tool call. Execution begins; tools attach to steps.
@@ -728,6 +743,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
               } else if (EXECUTION_TOOLS.has(toolId)) {
                 store.actions.addMissionCommand(toolId);
               }
+              // Refresh projection — step advanced / tool attached on canonical mission.
+              refreshMissionProjection(session);
             } else if (event.subtype === "agent_tool_result") {
               const success = (event.data as { success?: boolean }).success ?? true;
               const toolName = (event.data as { tool?: string }).tool ?? "unknown";
@@ -766,6 +783,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                   ).catch(() => {});
                 }
               }
+              // Refresh projection — evidence / step status changed on canonical mission.
+              refreshMissionProjection(session);
             }
           },
         });
@@ -783,6 +802,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             }).catch(() => {});
           }
         }
+        // Refresh projection — final step transitioned on canonical mission.
+        refreshMissionProjection(session);
 
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
@@ -884,6 +905,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
           });
         }
+        // Final projection refresh — mission COMPLETE/FAILED on canonical store.
+        refreshMissionProjection(session);
       } catch (err) {
         const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
         store.actions.addActivity({
@@ -900,6 +923,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         if (m) {
           await agentStore.failMission(errText).catch(() => {});
         }
+        refreshMissionProjection(session);
       }
       return;
     }
