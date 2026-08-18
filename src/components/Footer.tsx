@@ -21,10 +21,12 @@ const COMPANY_LINKS = [
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/cookies", label: "Cookies" },
+  { href: "/terms#credits-and-payments", label: "Refunds & Cancellation" },
+  { href: "mailto:support@litlabs.net", label: "Support", external: true },
 ];
 
 const CONNECT_LINKS = [
-  { href: "https://github.com", label: "GitHub", external: true },
+  { href: "https://github.com/LabsConnected/litlabs-website", label: "GitHub", external: true },
 ];
 
 export default function Footer() {
@@ -121,16 +123,27 @@ export default function Footer() {
               Company
             </div>
             <div className="space-y-2">
-              {COMPANY_LINKS.map((item) => (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className="block text-sm opacity-70 hover:opacity-100 transition-opacity"
-                  style={{ color: C.textColor }}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {COMPANY_LINKS.map((item) =>
+                "external" in item && item.external ? (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    className="block text-sm opacity-70 hover:opacity-100 transition-opacity"
+                    style={{ color: C.textColor }}
+                  >
+                    {item.label}
+                  </a>
+                ) : (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className="block text-sm opacity-70 hover:opacity-100 transition-opacity"
+                    style={{ color: C.textColor }}
+                  >
+                    {item.label}
+                  </Link>
+                ),
+              )}
             </div>
           </div>
           <div>

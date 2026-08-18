@@ -439,7 +439,7 @@ export class ExecutionGateway {
     // If the tool declares credential requirements, resolve leases
     // BEFORE capsule creation. A credential-required tool with zero
     // valid leases is denied. The leases are attached to the capsule.
-    let credentialLeases: CredentialLease[] = [];
+    const credentialLeases: CredentialLease[] = [];
     if (metadata.requiresCredentials && metadata.requiresCredentials.length > 0) {
       if (!this._credentialBroker) {
         return this.deny(

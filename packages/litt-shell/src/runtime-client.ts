@@ -40,7 +40,7 @@ export class DesktopRuntimeClient {
   private _state: ConnectionState = "OFFLINE";
   private _runtimeState: RuntimeState | null = null;
   private _workspace: WorkspaceState = { name: "Desktop", path: "", branch: null, status: "loading" };
-  private listeners: Map<string, ((value: any) => void)[]> = new Map();
+  private listeners: Map<string, ((value: unknown) => void)[]> = new Map();
   private _cwd: string | null = null;
 
   /**
@@ -87,7 +87,7 @@ export class DesktopRuntimeClient {
   get workspace(): WorkspaceState { return this._workspace; }
   get isConnected(): boolean { return this._state === "SHARED"; }
 
-  private emit(event: string, value: any): void {
+  private emit(event: string, value: unknown): void {
     const listeners = this.listeners.get(event);
     if (listeners) { listeners.forEach(l => l(value)); }
   }
@@ -95,7 +95,7 @@ export class DesktopRuntimeClient {
   subscribe(event: "state", listener: (value: ConnectionState) => void): () => void;
   subscribe(event: "workspace", listener: (value: WorkspaceState) => void): () => void;
   subscribe(event: "litt:event", listener: (value: { type: string; turnId: string; text?: string; message?: string; model?: string; usage?: { total_tokens: number }; timing?: { ttftMs: number; generationMs: number; totalMs: number } }) => void): () => void;
-  subscribe(event: string, listener: (value: any) => void): () => void {
+  subscribe(event: string, listener: (value: unknown) => void): () => void {
     if (!this.listeners.has(event)) { this.listeners.set(event, []); }
     const listeners = this.listeners.get(event)!;
     listeners.push(listener);

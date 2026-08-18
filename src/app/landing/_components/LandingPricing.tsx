@@ -1,62 +1,83 @@
 /**
- * LandingPricing — LiTBits pricing (V1).
+ * LandingPricing — pricing teaser aligned with canonical plans.
+ *
+ * Reads from @/config/plans (the pricing authority) and displays the
+ * three customer-facing plans: Starter, Creator Beta, Pro Builder Beta.
+ * Does NOT duplicate pricing logic — only renders canonical values.
  *
  * V1 spec: keep it simple.
  *   - free entry
- *   - low-cost LiTBits
+ *   - paid beta plans with clear allowances
  *   - BYOK
- *   - clear usage
+ *   - link to full /pricing page for details
  */
 
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
+import { PLANS, formatPrice, type PlanId } from "@/config/plans";
 
-const TIERS = [
+type Tier = {
+  id: PlanId;
+  name: string;
+  price: string;
+  period: string;
+  tagline: string;
+  features: string[];
+  cta: string;
+  href: string;
+  highlight: boolean;
+  color: string;
+};
+
+const TIERS: Tier[] = [
   {
-    name: "Free",
-    price: "$0",
-    period: "during beta",
+    id: "starter",
+    name: PLANS.starter.name,
+    price: formatPrice(PLANS.starter.default_price),
+    period: "forever",
     tagline: "Start building, no card required.",
     features: [
-      "Limited LiTBits per month",
-      "Code, Terminal, Tests, VerificationGate",
-      "1 active project",
+      `${PLANS.starter.monthlyCredits.toLocaleString()} AI credits (one-time)`,
+      `${PLANS.starter.activeProjectLimit} active project`,
+      "Code generation & image generation",
       "Community support",
     ],
-    cta: "Start Building Free",
+    cta: "Start Free",
     href: "/sign-up",
     highlight: false,
     color: "#34d399",
   },
   {
-    name: "LiTBits",
-    price: "Pay as you go",
-    period: "low-cost credits",
-    tagline: "Buy LiTBits. Spend them on real work.",
+    id: "creator_beta",
+    name: PLANS.creator_beta.name,
+    price: formatPrice(PLANS.creator_beta.default_price),
+    period: "/month · beta",
+    tagline: "Research, write, and market with AI agents.",
     features: [
-      "Studio + Memory + Deploy",
-      "Unlimited projects",
-      "Bring your own OpenRouter key (BYOK)",
-      "Pay only for agent work you use",
+      `${PLANS.creator_beta.monthlyCredits.toLocaleString()} AI credits per billing cycle`,
+      `${PLANS.creator_beta.activeProjectLimit} active projects`,
+      "Private projects & GitHub connection",
+      "Voice mode & preview deployments",
     ],
-    cta: "Get LiTBits",
+    cta: "Choose Creator",
     href: "/pricing",
     highlight: true,
     color: "#a855f7",
   },
   {
-    name: "BYOK",
-    price: "Your keys",
-    period: "your compute",
-    tagline: "Bring your own model keys. Pay only for LiTT.",
+    id: "pro_builder_beta",
+    name: PLANS.pro_builder_beta.name,
+    price: formatPrice(PLANS.pro_builder_beta.default_price),
+    period: "/month · beta",
+    tagline: "Build, debug, and deploy with full AI tooling.",
     features: [
-      "Use your OpenRouter / OpenAI / Anthropic keys",
-      "Route to fast / smart / long profiles",
-      "Full Studio + Memory + Deploy",
-      "No per-token markup from LiTT",
+      `${PLANS.pro_builder_beta.monthlyCredits.toLocaleString()} AI credits per billing cycle`,
+      `${PLANS.pro_builder_beta.activeProjectLimit} active projects`,
+      "Terminal runtime & advanced coding models",
+      "Vercel deployment & Supabase integration",
     ],
-    cta: "Bring your key",
-    href: "/sign-up",
+    cta: "Choose Pro",
+    href: "/pricing",
     highlight: false,
     color: "#30e7ff",
   },
@@ -69,7 +90,7 @@ export function LandingPricing() {
         <div className="mb-14 text-center">
           <div className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300">
             <span className="h-px w-8 bg-violet-400/40" />
-            Pricing · LiTBits
+            Pricing · Beta
             <span className="h-px w-8 bg-violet-400/40" />
           </div>
           <h2 className="mb-4 text-3xl font-black tracking-tight text-white md:text-5xl">
@@ -80,15 +101,15 @@ export function LandingPricing() {
             </span>
           </h2>
           <p className="mx-auto max-w-xl text-base text-neutral-400">
-            LiTBits are credits you spend on real agent work — planning, coding, verifying,
-            shipping. Bring your own keys to pay even less.
+            Start free with 500 AI credits. Upgrade to a paid beta plan for more projects,
+            credits, and capabilities. Bring your own model keys to pay even less.
           </p>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
           {TIERS.map((tier) => (
             <div
-              key={tier.name}
+              key={tier.id}
               className={`relative overflow-hidden rounded-2xl border p-7 transition-all duration-300 ${
                 tier.highlight ? "border-violet-500/30 lg:scale-[1.03]" : "border-white/8 hover:border-white/15"
               }`}
@@ -142,8 +163,19 @@ export function LandingPricing() {
         </div>
 
         <p className="mt-8 text-center text-xs text-neutral-600">
-          LiTBits are spent on agent work (planning, tool calls, verification). You always see
-          usage before it happens. No hidden charges.
+          AI credits are spent on agent work (planning, tool calls, verification). You always see
+          usage before it happens. No hidden charges.{" "}
+          <Link href="/terms#credits-and-payments" className="text-neutral-500 underline-offset-2 hover:text-neutral-400 hover:underline">
+            Refund &amp; cancellation policy
+          </Link>
+          {" · "}
+          <Link href="/pricing" className="text-neutral-500 underline-offset-2 hover:text-neutral-400 hover:underline">
+            Full pricing details
+          </Link>
+          {" · "}
+          <a href="mailto:support@litlabs.net" className="text-neutral-500 underline-offset-2 hover:text-neutral-400 hover:underline">
+            support@litlabs.net
+          </a>
         </p>
       </div>
     </section>

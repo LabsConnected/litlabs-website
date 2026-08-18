@@ -170,8 +170,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
   // Owner/dev mode: persistent registry + telemetry for /route and /providers
   const providerRegistryRef = useRef<ProviderRegistry | null>(null);
   const telemetryStoreRef = useRef<TelemetryStore | null>(null);
-  if (!providerRegistryRef.current) providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
-  if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
+  if (providerRegistryRef.current == null) {
+    providerRegistryRef.current = new ProviderRegistry(MODEL_CATALOG);
+  }
+  if (telemetryStoreRef.current == null) {
+    telemetryStoreRef.current = new TelemetryStore();
+  }
   const providerRegistry = providerRegistryRef.current;
   const telemetryStore = telemetryStoreRef.current;
 

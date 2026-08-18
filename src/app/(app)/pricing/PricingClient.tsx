@@ -459,6 +459,22 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
         </div>
       </section>
 
+      <div style={{ textAlign: "center", padding: "0 1rem 2rem" }}>
+        <p style={{ fontSize: "0.8rem", color: "var(--muted)", margin: 0 }}>
+          <Link href="/terms#credits-and-payments" style={{ color: "var(--muted)", textDecoration: "underline", textUnderlineOffset: "2px" }}>
+            Refund &amp; cancellation policy
+          </Link>
+          {" · "}
+          <Link href="/terms" style={{ color: "var(--muted)", textDecoration: "underline", textUnderlineOffset: "2px" }}>
+            Terms of Service
+          </Link>
+          {" · "}
+          <a href="mailto:support@litlabs.net" style={{ color: "var(--muted)", textDecoration: "underline", textUnderlineOffset: "2px" }}>
+            support@litlabs.net
+          </a>
+        </p>
+      </div>
+
       <section className={styles.finalCta}>
         <div>
           <p className={styles.eyebrow}>Ready when you are</p>
