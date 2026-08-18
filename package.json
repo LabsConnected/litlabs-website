@@ -27,6 +27,8 @@
     "test:e2e:report": "playwright show-report",
     "type-check": "tsc --noEmit",
     "type-check:tests": "tsc --noEmit --project tsconfig.test.json",
+    "pretypecheck": "pnpm --filter @litt/agent-core build",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "clean": "powershell -Command \"Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue\"",
     "clean:dist": "powershell -Command \"Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue\"",
     "rebuild": "pnpm clean && pnpm build",
