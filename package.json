@@ -114,6 +114,7 @@
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
+    "@types/express": "^4.17.21",
     "@types/http-proxy": "^1.17.17",
     "@types/node": "^20",
     "@types/pg": "^8.21.0",

@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as http from "http";
 import * as path from "path";
+import type { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from "express";
 import type { RemoteCommandRequest, RemoteCommandResponse } from "@litt/agent-core";
 
 // We test against the real Express app by importing it.
@@ -46,7 +47,7 @@ async function startTestServer(): Promise<http.Server> {
 
   // Inline auth middleware matching server.ts's requireInternalServiceAuth.
   // We don't import it because it's a local function in server.ts.
-  const testAuth = (req: any, res: any, next: any) => {
+  const testAuth = (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
     const key = req.headers["x-internal-service-key"];
     const expected = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
     if (!expected || expected.length < 32) {
@@ -86,7 +87,7 @@ async function startTestServer(): Promise<http.Server> {
       return;
     }
     const args = Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [];
-    const userId = (body.userId as string | null) ?? (req as any).terminalUserId ?? null;
+    const userId = (body.userId as string | null) ?? (req as ExpressRequest & { terminalUserId?: string }).terminalUserId ?? null;
 
     try {
       const resp = await dispatchCommand({

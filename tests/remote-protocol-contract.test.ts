@@ -34,7 +34,6 @@ import { dispatchRemote } from "../packages/litt-cli/src/lib/remote.js";
 import {
   resolveCommand,
   getCommandNames,
-  type CommandContext,
 } from "../terminal-server/command-registry.js";
 import {
   isRemoteError,
@@ -241,7 +240,7 @@ describe("runId correlation with runtime execution", () => {
     expect(typeof resp.runId).toBe("string");
     expect(resp.runId).toMatch(/^run_/);
     // There is no second runId field on the response.
-    expect((resp as Record<string, unknown>).bridgeRunId).toBeUndefined();
+    expect((resp as unknown as Record<string, unknown>).bridgeRunId).toBeUndefined();
   });
 
   it("check/test/build accept ctx.runId and pass it to CommandRouter", async () => {

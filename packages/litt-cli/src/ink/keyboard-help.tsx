@@ -7,6 +7,6 @@ import { Text } from "ink";
 
 export function KeyboardHelp(): React.ReactElement {
   return (
-    <Text dimColor>Ctrl+M model · Ctrl+K actions · Ctrl+C cancel · Ctrl+L clear · Esc close</Text>
+    <Text dimColor>F2 model · Ctrl+K actions · Ctrl+C cancel · Ctrl+L clear · Esc close</Text>
   );
 }

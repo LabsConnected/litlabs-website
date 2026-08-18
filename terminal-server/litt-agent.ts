@@ -20,7 +20,6 @@ import {
   ToolRegistry,
   createShellExecutor,
   CommandExecutor,
-  RuntimeStore,
   ExecutionGateway,
   type ChatMessage,
   type ModelProvider,
@@ -36,6 +35,8 @@ import {
   type LiTTResult,
   type LiTTNativeTool,
 } from "./litt-code";
+
+import { getRuntimeStore } from "./runtime";
 
 
 class SharedLiTTModelProvider implements ModelProvider {
@@ -122,8 +123,13 @@ export async function streamLiTTOperator(
   const shell =
     createShellExecutor(projectRoot);
 
+  // Use the canonical singleton RuntimeStore — never create a second
+  // authority in the same terminal-server process.  Both the
+  // terminal:input path (runLiTTOperator) and the Desktop litt:chat
+  // path (streamLiTTOperator) must share one store so mission state,
+  // event projection, and runtime truth remain consistent.
   const store =
-    new RuntimeStore();
+    getRuntimeStore();
 
   const executor =
     new CommandExecutor(

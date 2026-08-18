@@ -70,6 +70,33 @@ export function isCtrl(input: string, key: KeyInfo, ch: string): boolean {
   return key.ctrl === true && input === ch;
 }
 
+// ─── Function key detection (raw escape sequences) ───
+// Ink's useInput strips function-key input to '' because F-keys are in
+// nonAlphanumericKeys. The key object has no f1/f2/... fields. So we must
+// detect F-keys from the RAW stdin data before Ink processes it.
+//
+// F2 escape sequences across terminals:
+//   \x1bOQ     — xterm/gnome (most common: Windows Terminal, iTerm2, gnome)
+//   \x1b[12~   — xterm/rxvt (vt220-style)
+//   \x1b[Q     — xterm ESC [ letter variant
+//   \x1bQ      — xterm ESC letter variant
+//   \x1b[[B    — Cygwin
+
+/** F2 raw escape sequences (checked against raw stdin data) */
+const F2_SEQUENCES = [
+  "\x1bOQ",
+  "\x1b[12~",
+  "\x1b[Q",
+  "\x1bQ",
+  "\x1b[[B",
+];
+
+/** Check if raw stdin data is an F2 keypress */
+export function isRawF2(data: string | Buffer): boolean {
+  const s = typeof data === "string" ? data : data.toString("utf8");
+  return F2_SEQUENCES.includes(s);
+}
+
 /**
  * Is this a printable character (not a control key, not a special key)?
  * Used to determine if input should go to a text field.

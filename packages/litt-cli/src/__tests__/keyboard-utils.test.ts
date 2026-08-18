@@ -15,6 +15,7 @@ import {
   isBackspace,
   isCtrl,
   isPrintable,
+  isRawF2,
   type KeyInfo,
 } from "../ink/keyboard-utils.js";
 
@@ -134,6 +135,53 @@ describe("keyboard-utils", () => {
 
     it("does not detect wrong character", () => {
       expect(isCtrl("c", key({ ctrl: true }), "m")).toBe(false);
+    });
+  });
+
+  describe("isRawF2", () => {
+    it("detects xterm/gnome F2 (\\x1bOQ)", () => {
+      expect(isRawF2("\x1bOQ")).toBe(true);
+    });
+
+    it("detects vt220-style F2 (\\x1b[12~)", () => {
+      expect(isRawF2("\x1b[12~")).toBe(true);
+    });
+
+    it("detects xterm ESC [ letter F2 (\\x1b[Q)", () => {
+      expect(isRawF2("\x1b[Q")).toBe(true);
+    });
+
+    it("detects xterm ESC letter F2 (\\x1bQ)", () => {
+      expect(isRawF2("\x1bQ")).toBe(true);
+    });
+
+    it("detects Cygwin F2 (\\x1b[[B)", () => {
+      expect(isRawF2("\x1b[[B")).toBe(true);
+    });
+
+    it("accepts Buffer input", () => {
+      expect(isRawF2(Buffer.from("\x1bOQ", "utf8"))).toBe(true);
+    });
+
+    it("does not detect F1", () => {
+      expect(isRawF2("\x1bOP")).toBe(false);
+      expect(isRawF2("\x1b[11~")).toBe(false);
+    });
+
+    it("does not detect F3", () => {
+      expect(isRawF2("\x1bOR")).toBe(false);
+      expect(isRawF2("\x1b[13~")).toBe(false);
+    });
+
+    it("does not detect regular characters", () => {
+      expect(isRawF2("a")).toBe(false);
+      expect(isRawF2("")).toBe(false);
+    });
+
+    it("does not detect Enter or Esc", () => {
+      expect(isRawF2("\r")).toBe(false);
+      expect(isRawF2("\n")).toBe(false);
+      expect(isRawF2("\x1b")).toBe(false);
     });
   });
 

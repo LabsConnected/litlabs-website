@@ -13,19 +13,20 @@
  * when the terminal is too short.
  *
  * Input system:
- *   Global useInput ONLY consumes Ctrl+M/K/L/C and Esc.
+ *   Global useInput ONLY consumes Ctrl+K/L/C and Esc.
+ *   F2 is detected via a raw stdin listener (Ink strips F-key input).
  *   All printable characters fall through to TextInput.
  *   After overlay closes, focus returns to the prompt.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import { buildCanonicalMission, sameCanonicalMission } from "./canonical-mission.js";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isEnter, isEscape, isCtrl } from "./keyboard-utils.js";
+import { isEnter, isEscape, isCtrl, isRawF2 } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { HelpOverlay } from "./help-overlay.js";
 import { Header } from "./header.js";
@@ -42,7 +43,8 @@ import { ModelPicker } from "./model-picker.js";
 import { ModelCenter } from "./model-center.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
-import { brainLabel, type ModelChoice } from "../lib/model-routing.js";
+import { ModelRuntime } from "../lib/model-runtime.js";
+import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
@@ -94,7 +96,16 @@ export function CockpitApp({
   const store = useCockpitStore();
   const { stdout } = useStdout();
   useEventBridge(client, store, sessionBridge);
-  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
+
+  // ─── Canonical ModelRuntime — ONE instance for the whole app ───
+  // Created at the app owner level and shared with the controller,
+  // Model Center (F2), Model Picker (/model), and the header.
+  // /model and F2 operate on the same canonical ModelRuntime.
+  const modelRuntimeRef = useRef<ModelRuntime | null>(null);
+  if (!modelRuntimeRef.current) modelRuntimeRef.current = new ModelRuntime();
+  const modelRuntime = modelRuntimeRef.current;
+
+  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch, modelRuntime });
 
   // ─── Canonical mission projection ───
   // RuntimeStore.mission is the authority. This hook projects it into
@@ -129,7 +140,7 @@ export function CockpitApp({
   const layoutMode = getLayoutMode(rows);
 
   const modelReady = hasOpenRouterKey();
-  const brain = brainLabel(store.state.routingMode, store.state.selectedModel);
+  const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   const activeModel = store.state.activeModel;
   const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
@@ -158,11 +169,18 @@ export function CockpitApp({
     }
   }, [store.state.localRuntime, store.state.activityLog.length, project, modelReady, store]);
 
-  // App-level shortcut handler — ONLY handles Ctrl+M/K/L/C and Ctrl+C.
+  // App-level shortcut handler — ONLY handles F2/Ctrl+K/L/C and Ctrl+C.
   // This is passed to the OverlayKeyboardProvider, which dispatches it
   // ONLY when no overlay owns the keyboard. All printable characters
   // fall through to TextInput in the CommandDock.
+  // F2 is delivered via a raw stdin listener (Ink strips F-key input),
+  // so it arrives here as the F2 escape sequence in `input`.
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
+    if (isRawF2(input)) {
+      // F2 → Model Center (canonical shortcut, replaces Ctrl+M)
+      store.actions.setOverlay("model-center");
+      return;
+    }
     if (isCtrl(input, key, "c")) {
       if (store.state.holoState === "APPROVAL") {
         approvalBridge.cancel();
@@ -180,8 +198,6 @@ export function CockpitApp({
       } else {
         exit();
       }
-    } else if (isCtrl(input, key, "m")) {
-      store.actions.setOverlay("model-picker");
     } else if (isCtrl(input, key, "k")) {
       store.actions.setOverlay("command-palette");
     } else if (isCtrl(input, key, "l")) {
@@ -269,6 +285,9 @@ export function CockpitApp({
               onSelectModel={handleModelSelect}
               onSelectRoutingMode={handleRoutingModeSelect}
               onCancel={() => store.actions.setOverlay("none")}
+              activeModel={store.state.activeModel}
+              source={source}
+              modelRuntime={modelRuntime}
             />
           )}
           {store.state.overlay === "model-center" && (
@@ -278,6 +297,9 @@ export function CockpitApp({
               activeModel={store.state.activeModel}
               hasApiKey={modelReady}
               onCancel={() => store.actions.setOverlay("none")}
+              onSelectRoutingMode={handleRoutingModeSelect}
+              onSelectModel={handleModelSelect}
+              modelRuntime={modelRuntime}
             />
           )}
           {store.state.overlay === "command-palette" && (

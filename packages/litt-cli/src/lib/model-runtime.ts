@@ -73,6 +73,8 @@ export interface ProviderStatus {
   latencyMs: number | null;
   discoveredCount: number;
   reason: string;
+  /** Raw error string from the health probe (null when healthy). */
+  error: string | null;
 }
 
 // ─── ModelRuntime ──────────────────────────────────────────────────
@@ -87,6 +89,8 @@ export class ModelRuntime {
   readonly registry: ModelRegistry;
   readonly discovery: ProviderDiscoveryOrchestrator;
   private healthCache: HealthCache;
+  /** Last refresh error (null when last refresh succeeded). For truthful UI. */
+  private _lastRefreshError: string | null = null;
 
   constructor() {
     this.registry = new ModelRegistry(
@@ -99,6 +103,11 @@ export class ModelRuntime {
       undefined, // default fetcher
       this.healthCache,
     );
+  }
+
+  /** Last refresh error — null when the last refresh succeeded. */
+  get lastRefreshError(): string | null {
+    return this._lastRefreshError;
   }
 
   // ─── Routing ─────────────────────────────────────────────────────
@@ -184,9 +193,18 @@ export class ModelRuntime {
 
   /**
    * Trigger foreground discovery + health refresh. Awaitable.
+   * Captures the error into lastRefreshError for truthful UI display
+   * (the orchestrator itself records per-provider DOWN reasons, but a
+   * top-level throw — e.g. unhandled rejection — must not be swallowed).
    */
   async refresh(): Promise<void> {
-    await this.discovery.refresh(this.registry);
+    try {
+      await this.discovery.refresh(this.registry);
+      this._lastRefreshError = null;
+    } catch (err) {
+      this._lastRefreshError = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
   }
 
   /**
@@ -203,6 +221,7 @@ export class ModelRuntime {
       latencyMs: h.latencyMs,
       discoveredCount: h.discoveredCount,
       reason: h.reason,
+      error: h.error,
     }));
   }
 
@@ -262,6 +281,14 @@ export class ModelRuntime {
     }
     return map;
   }
+
+  /**
+   * Brain label — what the user sees as "LiTT's brain."
+   * Uses this runtime's registry (canonical truth), not a null placeholder.
+   */
+  brainLabel(mode: RoutingMode, selectedModel: string | null): string {
+    return cliBrainLabel(mode, selectedModel, this.registry);
+  }
 }
 
 // ─── Display helpers (re-export from cli-routing) ──────────────────
@@ -270,8 +297,8 @@ export function routingModeLabel(mode: RoutingMode): string {
   return cliRoutingModeLabel(mode);
 }
 
-export function brainLabel(mode: RoutingMode, selectedModel: string | null): string {
-  return cliBrainLabel(mode, selectedModel, null as unknown as ModelRegistry);
+export function brainLabel(mode: RoutingMode, selectedModel: string | null, registry: ModelRegistry): string {
+  return cliBrainLabel(mode, selectedModel, registry);
 }
 
 /**

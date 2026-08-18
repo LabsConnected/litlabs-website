@@ -89,7 +89,11 @@ export function ModelPicker({
   });
 
   // Keyboard handler — registered with OverlayManager
+  const KEY_DEBUG = process.env.LITT_KEY_DEBUG === "1";
   useOverlayKeyboard("model-picker", useCallback((input, key) => {
+    if (KEY_DEBUG) {
+      process.stderr.write(`[KEY] model-picker input=${JSON.stringify(input)} return=${key.return} escape=${key.escape} tab=${key.tab} up=${key.upArrow} down=${key.downArrow} ctrl=${key.ctrl} currentTab=${tab}\n`);
+    }
     if (isTab(key)) {
       setTab((prev) => (prev === "routing" ? "models" : "routing"));
       return;

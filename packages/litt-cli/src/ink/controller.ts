@@ -165,20 +165,23 @@ export interface CockpitControllerOptions {
   projectName?: string;
   /** Canonical git branch (from the same detectProject() call as the header) */
   branch?: string;
+  /**
+   * Canonical ModelRuntime — the SINGLE shared instance for the whole app.
+   * Owned by CockpitApp and shared with Model Center, Model Picker, and the
+   * header. The controller must NOT create its own.
+   */
+  modelRuntime: ModelRuntime;
 }
 
-export function useCockpitController({ session, store, approvalBridge, onExit, projectName, branch }: CockpitControllerOptions) {
-  // Canonical model runtime: @litt/models registry + real OpenRouter discovery.
-  // Replaces the legacy ProviderRegistry + model-routing.
-  const modelRuntimeRef = useRef<ModelRuntime | null>(null);
+export function useCockpitController({ session, store, approvalBridge, onExit, projectName, branch, modelRuntime }: CockpitControllerOptions) {
+  // Telemetry store is controller-local (not model truth).
   const telemetryStoreRef = useRef<TelemetryStore | null>(null);
-  if (!modelRuntimeRef.current) modelRuntimeRef.current = new ModelRuntime();
   if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
-  const modelRuntime = modelRuntimeRef.current;
   const telemetryStore = telemetryStoreRef.current;
 
   // Trigger background discovery on mount — populates model availability
-  // from real OpenRouter /models endpoint. Non-blocking.
+  // from real OpenRouter /models endpoint. Non-blocking. The shared
+  // ModelRuntime is owned by CockpitApp; we only kick off discovery here.
   useEffect(() => {
     modelRuntime.refreshAsync();
   }, [modelRuntime]);

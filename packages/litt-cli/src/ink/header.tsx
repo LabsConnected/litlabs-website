@@ -118,7 +118,7 @@ export function Header({
       <Box>
         <Text dimColor bold>BRAIN   </Text>
         <Text color={COLORS.brand} bold>{brain}</Text>
-        <Text dimColor>  Ctrl+M</Text>
+        <Text dimColor>  F2</Text>
         <Text dimColor>   </Text>
         <Text dimColor bold>ACTIVE </Text>
         <Text color={shortModel ? COLORS.info : COLORS.secondary}>

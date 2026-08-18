@@ -1,7 +1,14 @@
 /**
- * ModelCenter — full model management screen (/models, Ctrl+M).
+ * ModelCenter — full canonical model management screen (F2, /models).
  *
- * Shows REAL provider status from ModelRuntime (@litt/models):
+ * Interactive: keyboard selection of routing policy AND exact models.
+ *   Tab      — switch between Routing / Models
+ *   ↑/↓      — navigate items
+ *   Enter    — select (routing mode or exact model)
+ *   Esc      — close WITHOUT changing selection
+ *
+ * Shows REAL provider status from the shared canonical ModelRuntime
+ * (@litt/models):
  *   - Each provider with health tier: DISCOVERY OK / AUTHENTICATED / CONFIGURED / DEGRADED / DOWN
  *   - Credential type: BYOK ✓ / Local
  *   - Models actually discovered per provider (from OpenRouter /models)
@@ -12,16 +19,20 @@
  * Truth rule (same as VerificationGate):
  *   A model is only shown as available if discovery confirmed it.
  *   Static catalog presence alone never implies usability.
+ *   Discovery failures show the ACTUAL reason — never "Models: —".
+ *
+ * Both F2 (this screen) and /model (ModelPicker) mutate the same
+ * shared canonical ModelRuntime instance passed in from CockpitApp.
  */
 
-import React, { useState, useEffect, useRef } from "react";
-import { Box, Text, useApp } from "ink";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Box, Text } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
-import { isEscape } from "./keyboard-utils.js";
+import { isEnter, isEscape, isTab, isUpArrow, isDownArrow } from "./keyboard-utils.js";
 import { COLORS, costTier } from "./colors.js";
 import { ModelRuntime, type ProviderStatus } from "../lib/model-runtime.js";
 import type { ModelDefinition, ProviderId } from "@litt/models";
-import type { RoutingMode } from "../lib/model-routing.js";
+import type { RoutingMode, ModelChoice } from "../lib/model-routing.js";
 
 export interface ModelCenterProps {
   routingMode: RoutingMode;
@@ -30,8 +41,12 @@ export interface ModelCenterProps {
   activeModel?: string | null;
   hasApiKey: boolean;
   onCancel: () => void;
-  /** Injected ModelRuntime (shared with controller). Optional — creates own if absent. */
-  modelRuntime?: ModelRuntime;
+  /** Select a routing policy (AUTO/BUDGET/MAX/FIXED). */
+  onSelectRoutingMode?: (mode: RoutingMode) => void;
+  /** Select an exact model (FIXED). */
+  onSelectModel?: (model: ModelChoice) => void;
+  /** Shared canonical ModelRuntime — injected from CockpitApp. Required. */
+  modelRuntime: ModelRuntime;
 }
 
 const TIER_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
@@ -43,56 +58,161 @@ const TIER_CONFIG: Record<string, { icon: string; color: string; label: string }
   "down": { icon: "✗", color: COLORS.error, label: "DOWN" },
 };
 
-export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiKey, onCancel, modelRuntime: injectedRuntime }: ModelCenterProps): React.ReactElement {
-  const { exit } = useApp();
-  const runtimeRef = useRef<ModelRuntime | null>(null);
-  if (!runtimeRef.current) runtimeRef.current = injectedRuntime ?? new ModelRuntime();
-  const runtime = runtimeRef.current;
+const ROUTING_MODES: { id: RoutingMode; label: string; description: string }[] = [
+  { id: "auto", label: "AUTO", description: "LiTT chooses the best engine" },
+  { id: "fixed", label: "FIXED", description: "Always use the selected model" },
+  { id: "budget", label: "BUDGET", description: "Lowest-cost capable engine" },
+  { id: "max", label: "MAX", description: "Strongest available engine" },
+];
 
+type DiscoveryState = "loading" | "ok" | "error" | "empty";
+
+export function ModelCenter({
+  routingMode,
+  selectedModelId,
+  activeModel,
+  hasApiKey,
+  onCancel,
+  onSelectRoutingMode,
+  onSelectModel,
+  modelRuntime,
+}: ModelCenterProps): React.ReactElement {
+  const [tab, setTab] = useState<"routing" | "models">("routing");
   const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
   const [models, setModels] = useState<ModelDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [discoveryState, setDiscoveryState] = useState<DiscoveryState>("loading");
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [discoveredCount, setDiscoveredCount] = useState(0);
+
+  // Routing tab cursor
+  const [routingIdx, setRoutingIdx] = useState(() => {
+    const idx = ROUTING_MODES.findIndex((m) => m.id === routingMode);
+    return idx >= 0 ? idx : 0;
+  });
+
+  // Models tab — flat list of selectable (online or unverified+ routable) models
+  const selectableModels = models.filter(
+    (m) => m.availability === "online" || (m.availability !== "offline" && modelRuntime.isRoutable(m.canonicalId)),
+  );
+  const [modelIdx, setModelIdx] = useState(() => {
+    const idx = selectableModels.findIndex((m) => m.canonicalId === selectedModelId);
+    return idx >= 0 ? idx : 0;
+  });
 
   useEffect(() => {
     let cancelled = false;
 
-    // Show last-known status immediately (from health cache)
     const showCached = () => {
-      setStatuses(runtime.getProviderStatuses());
-      setModels(runtime.getAllModels());
-      setDiscoveredCount(runtime.getDiscoveredCount());
-      setLoading(false);
+      setStatuses(modelRuntime.getProviderStatuses());
+      setModels(modelRuntime.getAllModels());
     };
+
+    // Show last-known state immediately (from health cache)
     showCached();
+    const cachedError = modelRuntime.lastRefreshError;
+    if (modelRuntime.getDiscoveredCount() > 0 || (statuses.length > 0 && statuses.some((s) => s.discoveredCount > 0))) {
+      setDiscoveryState("ok");
+      setDiscoveryError(null);
+    } else if (cachedError) {
+      setDiscoveryState("error");
+      setDiscoveryError(cachedError);
+    } else {
+      setDiscoveryState("loading");
+    }
 
     // Refresh in background — real OpenRouter /models discovery
     setRefreshing(true);
-    runtime.refresh().then(() => {
-      if (!cancelled) {
-        showCached();
-        setRefreshing(false);
+    modelRuntime.refresh().then(() => {
+      if (cancelled) return;
+      showCached();
+      setRefreshing(false);
+      const discovered = modelRuntime.getDiscoveredCount();
+      if (discovered > 0) {
+        setDiscoveryState("ok");
+        setDiscoveryError(null);
+      } else {
+        // No models discovered — is it an error or genuinely empty?
+        const downProvider = modelRuntime.getProviderStatuses().find((s) => s.tier === "down");
+        if (downProvider) {
+          setDiscoveryState("error");
+          setDiscoveryError(downProvider.reason || downProvider.error || `${downProvider.label} is down`);
+        } else if (modelRuntime.lastRefreshError) {
+          setDiscoveryState("error");
+          setDiscoveryError(modelRuntime.lastRefreshError);
+        } else {
+          setDiscoveryState("empty");
+        }
       }
-    }).catch(() => {
-      if (!cancelled) setRefreshing(false);
+    }).catch((err) => {
+      if (cancelled) return;
+      setRefreshing(false);
+      const reason = err instanceof Error ? err.message : String(err);
+      setDiscoveryState("error");
+      setDiscoveryError(reason);
     });
 
     return () => { cancelled = true; };
-  }, [runtime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelRuntime]);
 
-  useOverlayKeyboard("model-center", (_, key) => {
-    if (isEscape(key, "")) onCancel();
-  });
+  // Keep model cursor valid as the selectable list changes
+  useEffect(() => {
+    if (modelIdx >= selectableModels.length) {
+      setModelIdx(Math.max(0, selectableModels.length - 1));
+    }
+  }, [selectableModels.length, modelIdx]);
 
-  if (loading) {
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
-        <Text bold color={COLORS.brand}>LiTT MODEL CENTER</Text>
-        <Text dimColor>Discovering providers...</Text>
-      </Box>
-    );
-  }
+  // Keyboard handler — registered with OverlayManager
+  const KEY_DEBUG = process.env.LITT_KEY_DEBUG === "1";
+  useOverlayKeyboard("model-center", useCallback((input, key) => {
+    if (KEY_DEBUG) {
+      process.stderr.write(`[KEY] model-center input=${JSON.stringify(input)} return=${key.return} escape=${key.escape} tab=${key.tab} up=${key.upArrow} down=${key.downArrow} ctrl=${key.ctrl} currentTab=${tab}\n`);
+    }
+    if (isTab(key)) {
+      setTab((prev) => (prev === "routing" ? "models" : "routing"));
+      return;
+    }
+    if (isEscape(key, input)) {
+      // Esc closes WITHOUT changing selection
+      onCancel();
+      return;
+    }
+
+    if (tab === "routing") {
+      if (isUpArrow(key)) {
+        setRoutingIdx((prev) => Math.max(0, prev - 1));
+      } else if (isDownArrow(key)) {
+        setRoutingIdx((prev) => Math.min(ROUTING_MODES.length - 1, prev + 1));
+      } else if (isEnter(key, input)) {
+        const mode = ROUTING_MODES[routingIdx].id;
+        onSelectRoutingMode?.(mode);
+        // Switch to models tab after choosing FIXED so the user can pick
+        // an exact model; otherwise stay on routing.
+        if (mode === "fixed") setTab("models");
+      }
+    } else {
+      // Models tab
+      if (isUpArrow(key)) {
+        setModelIdx((prev) => Math.max(0, prev - 1));
+      } else if (isDownArrow(key)) {
+        setModelIdx((prev) => Math.min(selectableModels.length - 1, prev + 1));
+      } else if (isEnter(key, input)) {
+        const model = selectableModels[modelIdx];
+        if (model) {
+          onSelectModel?.({
+            id: model.canonicalId,
+            label: model.displayName,
+            provider: model.provider,
+            description: model.description,
+            strengths: model.recommendedFor ?? [],
+            cost: model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0,
+            power: model.intelligence === "frontier" ? 5 : model.intelligence === "balanced" ? 3 : 1,
+            contextK: Math.round(model.contextWindow / 1000),
+          } as ModelChoice);
+        }
+      }
+    }
+  }, [tab, routingIdx, modelIdx, selectableModels, onSelectRoutingMode, onSelectModel, onCancel]));
 
   // Group models by their native provider (model provider, not transport)
   const modelsByProvider = new Map<ProviderId, ModelDefinition[]>();
@@ -102,15 +222,25 @@ export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiK
     modelsByProvider.set(m.provider, list);
   }
 
+  const discoveredCount = modelRuntime.getDiscoveredCount();
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+      {/* Title bar with tab indicator */}
       <Box marginBottom={1}>
         <Text bold color={COLORS.brand}>LiTT MODEL CENTER</Text>
-        <Text dimColor> — real provider status</Text>
+        <Text dimColor>  </Text>
+        <Text color={tab === "routing" ? COLORS.brand : COLORS.secondary} bold={tab === "routing"}>
+          {tab === "routing" ? "[Routing]" : " Routing "}
+        </Text>
+        <Text dimColor>  </Text>
+        <Text color={tab === "models" ? COLORS.brand : COLORS.secondary} bold={tab === "models"}>
+          {tab === "models" ? "[Models]" : " Models "}
+        </Text>
         {refreshing && <Text color={COLORS.working}> (refreshing...)</Text>}
       </Box>
 
-      {/* ─── PROVIDERS ─── */}
+      {/* ─── PROVIDERS (always visible — truth) ─── */}
       <Text dimColor bold>PROVIDERS</Text>
       <Box flexDirection="column" marginBottom={1}>
         {statuses.length === 0 && (
@@ -120,6 +250,7 @@ export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiK
         )}
         {statuses.map((status) => {
           const tier = TIER_CONFIG[status.tier] ?? { icon: "?", color: COLORS.secondary, label: status.tier.toUpperCase() };
+          const showReason = status.tier === "down" || status.tier === "degraded";
           return (
             <Box key={status.providerId} flexDirection="column" marginBottom={0}>
               <Box>
@@ -139,9 +270,9 @@ export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiK
                   <Text color={COLORS.info} dimColor> · via {status.servedBy}</Text>
                 )}
               </Box>
-              {status.reason && status.tier === "down" && (
+              {showReason && (status.reason || status.error) && (
                 <Box marginLeft={4}>
-                  <Text color={COLORS.error} dimColor>  {status.reason}</Text>
+                  <Text color={COLORS.error} dimColor>  {status.error ?? status.reason}</Text>
                 </Box>
               )}
             </Box>
@@ -149,47 +280,106 @@ export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiK
         })}
       </Box>
 
-      {/* ─── MODELS BY PROVIDER ─── */}
-      <Text dimColor bold>MODELS{discoveredCount > 0 ? ` · ${discoveredCount} discovered` : ""}</Text>
-      <Box flexDirection="column" marginBottom={1}>
-        {[...modelsByProvider.entries()].map(([provider, providerModels]) => {
-          const providerStatus = statuses.find((s) => s.providerId === provider);
-          const viaOpenRouter = providerStatus?.servedBy === "openrouter" && provider !== "openrouter";
-          return (
-            <Box key={provider} flexDirection="column" marginBottom={0}>
-              <Text dimColor bold>
-                {provider.toUpperCase()}{viaOpenRouter ? " · via OpenRouter" : ""}
-              </Text>
-              {providerModels.map((model) => {
-                const isOnline = model.availability === "online";
-                const isOffline = model.availability === "offline";
-                const isUnverified = model.availability === "unverified";
-                const statusIcon = isOnline ? "✓" : isOffline ? "✗" : "?";
-                const statusLabel = isOnline ? "READY" : isOffline ? "OFFLINE" : "UNVERIFIED";
-                const statusColor = isOnline ? COLORS.success : isOffline ? COLORS.error : COLORS.warning;
-                const isSelected = model.canonicalId === selectedModelId;
-                const isActive = activeModel && model.displayName === activeModel;
+      {/* ─── ROUTING TAB ─── */}
+      {tab === "routing" && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text dimColor bold>ROUTING POLICY</Text>
+          {ROUTING_MODES.map((mode, idx) => {
+            const isSelected = idx === routingIdx;
+            const isActive = mode.id === routingMode;
+            return (
+              <Box key={mode.id}>
+                <Text color={isSelected ? COLORS.brand : undefined}>
+                  {isSelected ? ">" : " "}
+                </Text>
+                <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}>
+                  {" "}{mode.label.padEnd(10)}
+                </Text>
+                <Text dimColor>  {mode.description}</Text>
+                {isActive && <Text color={COLORS.success}> ✓ active</Text>}
+              </Box>
+            );
+          })}
+          <Box marginTop={1}>
+            <Text dimColor>Enter to apply · FIXED then switches to Models tab to pick an exact model</Text>
+          </Box>
+        </Box>
+      )}
 
+      {/* ─── MODELS TAB ─── */}
+      {tab === "models" && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text dimColor bold>MODELS{discoveredCount > 0 ? ` · ${discoveredCount} discovered` : ""}</Text>
+
+          {/* Truthful discovery state — never "Models: —" */}
+          {discoveryState === "loading" && (
+            <Box marginLeft={2} marginBottom={1}>
+              <Text color={COLORS.working}>Discovering models from OpenRouter...</Text>
+            </Box>
+          )}
+          {discoveryState === "error" && (
+            <Box marginLeft={2} marginBottom={1} flexDirection="column">
+              <Text color={COLORS.error} bold>✗ Discovery failed</Text>
+              <Text color={COLORS.error}>  {discoveryError ?? "Unknown error"}</Text>
+              <Text dimColor>  Check OPENROUTER_API_KEY and network. Esc to close.</Text>
+            </Box>
+          )}
+          {discoveryState === "empty" && (
+            <Box marginLeft={2} marginBottom={1}>
+              <Text color={COLORS.warning}>No models discovered. {hasApiKey ? "Provider returned zero models." : "Set OPENROUTER_API_KEY."}</Text>
+            </Box>
+          )}
+
+          {discoveryState !== "loading" && modelsByProvider.size > 0 && (
+            <Box flexDirection="column">
+              {[...modelsByProvider.entries()].map(([provider, providerModels]) => {
+                const providerStatus = statuses.find((s) => s.providerId === provider);
+                const viaOpenRouter = providerStatus?.servedBy === "openrouter" && provider !== "openrouter";
                 return (
-                  <Box key={model.canonicalId} marginLeft={2}>
-                    <Text color={statusColor}>{statusIcon}</Text>
-                    <Text color={isOnline ? COLORS.text : COLORS.secondary}>
-                      {" "}{model.displayName.padEnd(24)}
+                  <Box key={provider} flexDirection="column" marginBottom={0}>
+                    <Text dimColor bold>
+                      {provider.toUpperCase()}{viaOpenRouter ? " · via OpenRouter" : ""}
                     </Text>
-                    <Text color={statusColor}> {statusLabel.padEnd(10)}</Text>
-                    <Text dimColor> {model.description.slice(0, 20).padEnd(20)}</Text>
-                    <Text color={COLORS.warning}>{costTier(model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0)}</Text>
-                    {isSelected && <Text color={COLORS.brand} bold> ◀ selected</Text>}
-                    {isActive && !isSelected && <Text color={COLORS.info} bold> ◀ active</Text>}
+                    {providerModels.map((model) => {
+                      const isOnline = model.availability === "online";
+                      const isOffline = model.availability === "offline";
+                      const statusIcon = isOnline ? "✓" : isOffline ? "✗" : "?";
+                      const statusLabel = isOnline ? "READY" : isOffline ? "OFFLINE" : "UNVERIFIED";
+                      const statusColor = isOnline ? COLORS.success : isOffline ? COLORS.error : COLORS.warning;
+                      const isSelected = model.canonicalId === selectedModelId;
+                      const isActive = activeModel && model.displayName === activeModel;
+                      const isSelectable = isOnline || (!isOffline && modelRuntime.isRoutable(model.canonicalId));
+                      // Cursor position in the flat selectable list
+                      const flatIdx = selectableModels.findIndex((m) => m.canonicalId === model.canonicalId);
+                      const isCursor = flatIdx === modelIdx && isSelectable;
+
+                      return (
+                        <Box key={model.canonicalId} marginLeft={2}>
+                          <Text color={isCursor ? COLORS.brand : undefined}>
+                            {isCursor ? ">" : " "}
+                          </Text>
+                          <Text color={statusColor}>{statusIcon}</Text>
+                          <Text color={isOnline ? COLORS.text : COLORS.secondary}>
+                            {" "}{model.displayName.padEnd(24)}
+                          </Text>
+                          <Text color={statusColor}> {statusLabel.padEnd(10)}</Text>
+                          <Text dimColor> {model.description.slice(0, 20).padEnd(20)}</Text>
+                          <Text color={COLORS.warning}>{costTier(model.pricing ? model.pricing.inputPer1M + model.pricing.outputPer1M : 0)}</Text>
+                          {isSelected && <Text color={COLORS.brand} bold> ◀ selected</Text>}
+                          {isActive && !isSelected && <Text color={COLORS.info} bold> ◀ active</Text>}
+                          {!isSelectable && <Text dimColor> (not routable)</Text>}
+                        </Box>
+                      );
+                    })}
                   </Box>
                 );
               })}
             </Box>
-          );
-        })}
-      </Box>
+          )}
+        </Box>
+      )}
 
-      {/* ─── CURRENT ─── */}
+      {/* ─── CURRENT (runtime truth) ─── */}
       <Text dimColor bold>CURRENT</Text>
       <Box flexDirection="column" marginBottom={1}>
         <Box>
@@ -215,7 +405,10 @@ export function ModelCenter({ routingMode, selectedModelId, activeModel, hasApiK
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>Esc to close · Use /model for quick switch · Ctrl+M</Text>
+        <Text dimColor>
+          {tab === "routing" ? "Tab Models" : "Tab Routing"}
+          {"   ↑↓ Move   Enter Select   Esc Close (no change)   F2"}
+        </Text>
       </Box>
     </Box>
   );
