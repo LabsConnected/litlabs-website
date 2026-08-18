@@ -144,6 +144,8 @@ function MarketplaceInner() {
     if (searchParams.get("tab") === "beta") setActiveTab("beta");
   }, [searchParams]);
 
+  const checkoutCanceled = searchParams.get("canceled") === "true";
+
   const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -334,6 +336,26 @@ function MarketplaceInner() {
           }}
         >
           {toast.msg}
+        </div>
+      )}
+
+      {/* Checkout canceled banner */}
+      {checkoutCanceled && (
+        <div
+          className="border-b border-amber-400/20 bg-amber-400/5 px-4 py-3 sm:px-6"
+          role="status"
+          aria-live="polite"
+        >
+          <ProductFrame>
+            <p className="text-sm text-amber-300">
+              Checkout was canceled — you were not charged. Your credits and
+              installations are unchanged. Browse the marketplace below or{" "}
+              <Link href="/wallet" className="underline">
+                check your wallet balance
+              </Link>
+              .
+            </p>
+          </ProductFrame>
         </div>
       )}
 
