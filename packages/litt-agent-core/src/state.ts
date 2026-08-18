@@ -193,10 +193,6 @@ export class RuntimeStore {
       this.emitter = emitterOrOptions.emitter ?? null;
       this._persistence = this.createPersistence(emitterOrOptions);
     }
-    } else {
-      this.emitter = emitterOrOptions.emitter ?? null;
-      this._persistence = this.createPersistence(emitterOrOptions);
-    }
     this.heartbeatTimer = null;
     this.heartbeatFn = null;
   }
@@ -1105,3 +1101,4 @@ export class RuntimeStore {
     }
   }
 }
+
