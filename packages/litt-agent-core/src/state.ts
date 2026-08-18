@@ -183,9 +183,16 @@ export class RuntimeStore {
   ) {
     this.state = createInitialState();
     // Handle overloaded constructor
-    if (typeof emitterOrOptions === "function" || emitterOrOptions === undefined) {
-      this.emitter = emitterOrOptions ?? null;
+    if (typeof emitterOrOptions === "function") {
+      this.emitter = emitterOrOptions;
       this._persistence = null;
+    } else if (emitterOrOptions === undefined) {
+      this.emitter = null;
+      this._persistence = null;
+    } else {
+      this.emitter = emitterOrOptions.emitter ?? null;
+      this._persistence = this.createPersistence(emitterOrOptions);
+    }
     } else {
       this.emitter = emitterOrOptions.emitter ?? null;
       this._persistence = this.createPersistence(emitterOrOptions);

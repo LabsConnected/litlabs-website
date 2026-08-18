@@ -14,6 +14,43 @@ const MISSION_STORAGE_VERSION = "1.0.0";
 const MISSIONS_DIR_NAME = ".litt";
 const CHECKPOINT_KEY = "__active_mission_id";
 
+/**
+ * Fill in missing fields from a partially-parsed mission object.
+ * Used by getMission, loadMissionWithRecovery, and recoverMissionFromBackup
+ * to ensure the returned Mission always has all required fields, even if
+ * the JSON on disk is missing some (e.g. older format or partial write).
+ */
+function normalizeMission(parsed: Partial<Mission>, fallbackId: string): Mission {
+  return {
+    id: parsed.id ?? fallbackId,
+    version: parsed.version ?? MISSION_STORAGE_VERSION,
+    goal: parsed.goal ?? "",
+    normalizedGoal: parsed.normalizedGoal ?? "",
+    projectRoot: parsed.projectRoot ?? "",
+    workspaceId: parsed.workspaceId ?? null,
+    sessionId: parsed.sessionId ?? null,
+    mode: parsed.mode ?? "auto",
+    status: parsed.status ?? "planning",
+    createdAt: parsed.createdAt ?? new Date().toISOString(),
+    updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+    startedAt: parsed.startedAt ?? null,
+    completedAt: parsed.completedAt ?? null,
+    currentStepId: parsed.currentStepId ?? null,
+    steps: parsed.steps ?? [],
+    baseline: parsed.baseline ?? null,
+    evidence: parsed.evidence ?? [],
+    checkpoints: parsed.checkpoints ?? [],
+    attemptCounters: parsed.attemptCounters ?? {},
+    retryBudgets: parsed.retryBudgets ?? {},
+    providerState: parsed.providerState ?? null,
+    blockingReason: parsed.blockingReason ?? null,
+    failureReason: parsed.failureReason ?? null,
+    completionReason: parsed.completionReason ?? null,
+    lastHeartbeatAt: parsed.lastHeartbeatAt ?? Date.now(),
+    metadata: parsed.metadata ?? {},
+  } as Mission;
+}
+
 export class MissionStore {
   private missionsDir: string;
   private activeMissionId: string | null = null;
@@ -114,34 +151,7 @@ export class MissionStore {
     try {
       const content = fs.readFileSync(filePath, "utf-8");
       const parsed = JSON.parse(content) as Partial<Mission>;
-      return {
-        id: parsed.id ?? id,
-        version: parsed.version ?? MISSION_STORAGE_VERSION,
-        goal: parsed.goal ?? "",
-        normalizedGoal: parsed.normalizedGoal ?? "",
-        projectRoot: parsed.projectRoot ?? "",
-        workspaceId: parsed.workspaceId ?? null,
-        sessionId: parsed.sessionId ?? null,
-        mode: parsed.mode ?? "auto",
-        status: parsed.status ?? "planning",
-        createdAt: parsed.createdAt ?? new Date().toISOString(),
-        updatedAt: parsed.updatedAt ?? new Date().toISOString(),
-        startedAt: parsed.startedAt ?? null,
-        completedAt: parsed.completedAt ?? null,
-        currentStepId: parsed.currentStepId ?? null,
-        steps: parsed.steps ?? [],
-        baseline: parsed.baseline ?? null,
-        evidence: parsed.evidence ?? [],
-        checkpoints: parsed.checkpoints ?? [],
-        attemptCounters: parsed.attemptCounters ?? {},
-        retryBudgets: parsed.retryBudgets ?? {},
-        providerState: parsed.providerState ?? null,
-        blockingReason: parsed.blockingReason ?? null,
-        failureReason: parsed.failureReason ?? null,
-        completionReason: parsed.completionReason ?? null,
-        lastHeartbeatAt: parsed.lastHeartbeatAt ?? Date.now(),
-        metadata: parsed.metadata ?? {},
-      } as Mission;
+      return normalizeMission(parsed, id);
     } catch {
       return null;
     }
@@ -177,7 +187,8 @@ export class MissionStore {
     );
 
     if (filter?.limit) {
-      missions = missions.slice(filter.offset ?? 0, filter.limit);
+      const offset = filter.offset ?? 0;
+      missions = missions.slice(offset, offset + filter.limit);
     }
 
     return missions;
@@ -205,7 +216,33 @@ export class MissionStore {
     }
 
     fs.writeFileSync(tempPath, content, "utf-8");
-    fs.renameSync(tempPath, filePath);
+
+    // Atomic rename: on POSIX this is atomic. On Windows, renameSync
+    // can fail with EPERM if the target exists or is locked by another
+    // process (antivirus, indexer, etc.). Retry a few times, then fall
+    // back to a direct write if rename keeps failing.
+    try {
+      fs.renameSync(tempPath, filePath);
+    } catch {
+      // Retry with unlink + rename, or fall back to direct write
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        fs.renameSync(tempPath, filePath);
+      } catch {
+        // Last resort: write directly (not atomic, but preserves data)
+        try {
+          fs.writeFileSync(filePath, content, "utf-8");
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // If even direct write fails, the temp file may still exist.
+          // The backup file (if any) preserves the previous state.
+        }
+      }
+    }
   }
 
   deleteMission(id: string): boolean {
@@ -292,10 +329,11 @@ export class MissionStore {
       if (fs.existsSync(backupPath)) {
         try {
           const content = fs.readFileSync(backupPath, "utf-8");
-          const parsed = JSON.parse(content) as Mission;
+          const parsed = JSON.parse(content) as Partial<Mission>;
           if (parsed.id && parsed.version) {
+            const normalized = normalizeMission(parsed, id);
             fs.copyFileSync(backupPath, filePath);
-            return { recoveryAttempted: true, recovered: parsed };
+            return { recoveryAttempted: true, recovered: normalized };
           }
         } catch {}
       }
@@ -304,7 +342,7 @@ export class MissionStore {
 
     try {
       const content = fs.readFileSync(filePath, "utf-8");
-      const parsed = JSON.parse(content) as Partial<Mission> as Mission;
+      const parsed = JSON.parse(content) as Partial<Mission>;
 
       if (!parsed.id || !parsed.version || !parsed.createdAt) {
         const backup = this.recoverMissionFromBackup(id);
@@ -318,7 +356,7 @@ export class MissionStore {
         };
       }
 
-      return { recoveryAttempted: true, recovered: parsed };
+      return { recoveryAttempted: true, recovered: normalizeMission(parsed, id) };
     } catch (err) {
       const backup = this.recoverMissionFromBackup(id);
       if (backup) {
@@ -349,11 +387,12 @@ export class MissionStore {
 
     try {
       const content = fs.readFileSync(backupPath, "utf-8");
-      const parsed = JSON.parse(content) as Mission;
+      const parsed = JSON.parse(content) as Partial<Mission>;
 
       if (parsed.id && parsed.version) {
+        const normalized = normalizeMission(parsed, id);
         fs.copyFileSync(backupPath, filePath);
-        return parsed;
+        return normalized;
       }
     } catch {
       // Recovery failed
