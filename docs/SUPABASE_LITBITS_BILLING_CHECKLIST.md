@@ -71,10 +71,10 @@ Use separate Stripe price IDs and webhook secrets for preview and production.
 Create exactly these server-side price mappings:
 
 | Plan | Stripe mode | Beta price | LiTTBits |
-|---|---|---:|---:|
+|---|---|---|---|
 | Starter | no checkout | Free | 500 once at account creation |
-| Creator Beta | recurring monthly | $7 | 6,000 per paid period |
-| Pro Builder Beta | recurring monthly | $19 | 20,000 per paid period |
+| Creator Beta | recurring monthly | $15 | 6,000 per paid period |
+| Pro Builder Beta | recurring monthly | $39 | 20,000 per paid period |
 | Founding Member | one-time payment | $149 | No recurring allowance |
 
 The Founding Member product grants permanent Creator-level entitlements, but
