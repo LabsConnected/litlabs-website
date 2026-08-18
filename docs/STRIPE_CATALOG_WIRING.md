@@ -12,8 +12,8 @@ Do NOT create new Stripe products for these.
 
 | Plan | Stripe Price | Mode | Env Variable |
 |---|---|---|---|
-| Creator Beta | $7.00/month | recurring | `STRIPE_PRICE_CREATOR_BETA` |
-| Pro Builder Beta | $19.00/month | recurring | `STRIPE_PRICE_PRO_BUILDER_BETA` |
+| Creator Beta | $15.00/month | recurring | `STRIPE_PRICE_CREATOR_BETA` |
+| Pro Builder Beta | $39.00/month | recurring | `STRIPE_PRICE_PRO_BUILDER_BETA` |
 | Founding Member | $149.00 one-time | one_time | `STRIPE_PRICE_FOUNDER` |
 
 ### Premium Marketplace Agents
@@ -134,7 +134,7 @@ disabled until ALL of the following pass:
 ## Required Payment Tests (Stripe Test Mode)
 
 ### Creator Beta
-- Checkout charges $7/month
+- Checkout charges $15/month
 - Subscription row becomes active
 - `invoice.paid` grants exactly 6,000 LiTTBits
 - Replaying the webhook does not grant twice
@@ -142,16 +142,16 @@ disabled until ALL of the following pass:
 - Failed payment marks access past due
 
 ### Pro Builder Beta
-- Checkout charges $19/month
+- Checkout charges $39/month
 - Exactly 20,000 LiTTBits granted on successful billing
 - Pro entitlement and 25-project limit apply
 - Terminal entitlement does not claim connected unless a real PTY session exists
 
 ### Founding Member
 - Checkout charges exactly $149 once
-- No Stripe recurring subscription is created (mode=one_time)
+- No Stripe recurring subscription is created (Stripe Checkout mode=`payment`; plan billing type=`one_time`)
 - Permanent Founder entitlement record stored in subscriptions table
-- No six-month expiration is written
+- No expiration is written
 - No recurring LiTTBits are granted (monthlyCredits = 0)
 - Duplicate checkout cannot create duplicate Founder access
 - Refund handling revokes or flags the entitlement
@@ -164,3 +164,4 @@ disabled until ALL of the following pass:
 - Refund revokes the entitlement
 - Failed and expired sessions create no entitlement
 - Agent memory remains isolated by instance namespace
+

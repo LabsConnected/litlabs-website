@@ -125,7 +125,7 @@ const faq = [
   {
     question: "What is the Founding Member offer?",
     answer:
-      "A one-time $149 purchase that grants permanent Creator-level feature access and a Founder badge. No recurring subscription charge. Does not include monthly credit grants — purchase credits separately or subscribe to a paid plan for recurring credits. Checkout is currently unavailable pending an approved Stripe price. Limited to 100 supporters.",
+      "A one-time $149 purchase that grants permanent Creator-level feature access and a Founder badge. No recurring subscription charge. Does not include monthly credit grants — purchase credits separately or subscribe to a paid plan for recurring credits. Founding Members are limited to 100 supporters.",
   },
 ];
 

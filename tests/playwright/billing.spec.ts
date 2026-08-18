@@ -13,31 +13,34 @@ test.describe("Billing @billing", () => {
 
     const bodyText = await page.locator("body").innerText();
 
-    // Creator Beta must be $7/month
-    expect(bodyText, "Pricing page must show $7 for Creator").toContain("$7");
+    // Creator Beta must be $15/month
+    expect(bodyText, "Pricing page must show $15 for Creator").toContain("$15");
 
-    // Pro Builder Beta must be $19/month
-    expect(bodyText, "Pricing page must show $19 for Pro").toContain("$19");
+    // Pro Builder Beta must be $39/month
+    expect(bodyText, "Pricing page must show $39 for Pro").toContain("$39");
 
-    // Founder must show "Coming Soon"
-    expect(bodyText, "Founder must show Coming Soon").toContain("Coming Soon");
+    // Founder price is $149 one-time
+    expect(bodyText, "Pricing page must show $149 for Founder").toContain("$149");
 
-    // Must NOT show $49 or $149 for Founder
-    expect(bodyText, "Founder must NOT show $49").not.toContain("$49");
-    expect(bodyText, "Founder must NOT show $149").not.toContain("$149");
+    // Must NOT show old prices
+    expect(bodyText, "Pricing page must NOT show $7 for Creator").not.toContain("$7");
+    expect(bodyText, "Pricing page must NOT show $19 for Pro").not.toContain("$19");
 
     assertNoErrors(errors);
   });
 
-  test("Founder checkout button is disabled", async ({ page }) => {
+  test("Founder price is $149 one-time purchase", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
     await page.goto("/pricing");
     await page.waitForLoadState("domcontentloaded");
 
-    // Find the Founder button
-    const founderButton = page.locator("button", { hasText: "Coming Soon" });
+    // Founder price should be displayed
+    const founderPrice = page.locator("section.founderBanner h2");
+    await expect(founderPrice).toContainText("$149");
+
+    // Button should exist (either enabled or disabled based on Stripe config)
+    const founderButton = page.locator("section.founderBanner button");
     await expect(founderButton).toBeVisible();
-    await expect(founderButton).toBeDisabled();
 
     assertNoErrors(errors);
   });
@@ -48,7 +51,7 @@ test.describe("Billing @billing", () => {
     await page.waitForLoadState("domcontentloaded");
 
     // Find Creator checkout button — should be enabled
-    const creatorButton = page.locator("button", { hasText: /Creator|Start|Subscribe|Get/i }).first();
+    const creatorButton = page.locator('button', { hasText: /Creator|Choose Creator/i });
     if (await creatorButton.isVisible()) {
       await expect(creatorButton).toBeEnabled();
     }
