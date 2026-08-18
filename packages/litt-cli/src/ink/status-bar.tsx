@@ -61,8 +61,6 @@ export interface StatusBarProps {
   source: string;
   mode: string;
   runId: string | null;
-  gitModified: number;
-  gitUntracked: number;
 }
 
 export function StatusBar({

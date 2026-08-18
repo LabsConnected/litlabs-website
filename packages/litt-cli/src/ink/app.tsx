@@ -1,16 +1,17 @@
 /**
- * CockpitApp — the Ink cockpit composition root.
+ * CockpitApp — the Ink cockpit composition root (premium TUI).
  *
- * Priority order (what must always be visible):
- *   1. Header (compact in small terminals)
- *   2. LiTT state (holo)
- *   3. Current mission
- *   4. Activity
- *   5. Prompt (ALWAYS visible)
- *   6. Status bar
+ * Premium layout (spec):
+ *   1. Compact header — brand + project + ONLINE + model + state
+ *   2. Mission section — only when canonical mission exists
+ *   3. Activity stream — conversation/work stream
+ *   4. Command dock — ALWAYS visible, keyboard-native input
+ *   5. Status bar — quiet context line
  *
- * Files / quick actions / extra telemetry collapse first
- * when the terminal is too short.
+ * Layout modes:
+ *   FULL    >= 42 rows  — everything visible
+ *   MEDIUM  30-41 rows  — compact header, mission first
+ *   COMPACT < 30 rows   — minimal header, everything squeezes
  *
  * Input system:
  *   Global useInput ONLY consumes Ctrl+M/K/L/C and Esc.
@@ -18,7 +19,7 @@
  *   After overlay closes, focus returns to the prompt.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
@@ -28,12 +29,9 @@ import { isEnter, isEscape, isCtrl } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { HelpOverlay } from "./help-overlay.js";
 import { Header } from "./header.js";
-import { Subsystems } from "./subsystems.js";
-import { LiTTHoloPanel } from "./holo-panel.js";
+import { LittShard } from "./litt-shard.js";
 import { MissionSection } from "./mission-section.js";
 import { ActivityStream } from "./activity-stream.js";
-import { FilesInfo } from "./files-info.js";
-import { QuickActions } from "./quick-actions.js";
 import { CommandDock } from "./command-dock.js";
 import { ApprovalUX } from "./approval-ux.js";
 import { StatusBar } from "./status-bar.js";
@@ -47,6 +45,8 @@ import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
+import type { HoloState } from "./cockpit-store.js";
+import type { MissionProjection } from "./mission-projection.js";
 
 type LayoutMode = "full" | "medium" | "compact";
 
@@ -54,21 +54,44 @@ type LayoutMode = "full" | "medium" | "compact";
  * Layout thresholds based on actual row budget.
  *
  * Reserved rows (always visible):
- *   Header:       ~4 rows (compact) to ~10 rows (full)
- *   Mission:      ~3 rows
+ *   Header:       ~4 rows (compact) to ~8 rows (full)
+ *   Mission:      ~3 rows (when active)
  *   Activity:     ~5 rows (shrinks in compact)
  *   Prompt:       ~2 rows
  *   Status bar:   ~3 rows
  *   Separators:   ~2 rows
  *
  * FULL    >= 42 rows  — everything visible
- * MEDIUM  30-41 rows  — hide files, quick actions; compact header
- * COMPACT < 30 rows   — hide holo, subsystems, files, quick actions; minimal header
+ * MEDIUM  30-41 rows  — compact header, mission first
+ * COMPACT < 30 rows   — minimal header, everything squeezes
  */
 function getLayoutMode(rows: number): LayoutMode {
   if (rows >= 42) return "full";
   if (rows >= 30) return "medium";
   return "compact";
+}
+
+function holoLabel(state: HoloState): string {
+  switch (state) {
+    case "IDLE": return "IDLE";
+    case "UNDERSTANDING": return "INSPECTING";
+    case "PLANNING": return "PLANNING";
+    case "READING": return "READING";
+    case "EDITING": return "EDITING";
+    case "RUNNING": return "WORKING";
+    case "TESTING": return "TESTING";
+    case "VERIFYING": return "VERIFYING";
+    case "APPROVAL": return "APPROVAL";
+    case "COMPLETE": return "COMPLETE";
+    case "FAILED": return "FAILED";
+    case "CANCELLED": return "CANCELLED";
+    case "TIMEOUT": return "TIMEOUT";
+    default: return "IDLE";
+  }
+}
+
+function holoStateIsBusy(state: HoloState): boolean {
+  return ["UNDERSTANDING", "PLANNING", "READING", "EDITING", "RUNNING", "TESTING", "VERIFYING"].includes(state);
 }
 
 export interface CockpitAppProps {
@@ -256,10 +279,24 @@ export function CockpitApp({
   // Show overlays on top, hide the main content
   const overlayOpen = store.state.overlay !== "none";
 
+  // Calculate elapsed time
+  const elapsed = useMemo(() => {
+    const started = store.state.missionState?.startedAt;
+    if (!started) return undefined;
+    return Math.floor((Date.now() - new Date(started).getTime()) / 1000);
+  }, [store.state.missionState?.startedAt]);
+
+  // Activity max entries based on layout
+  const activityMax = useMemo(() => {
+    if (layoutMode === "compact") return Math.max(3, Math.min(4, rows - 20));
+    if (layoutMode === "medium") return 6;
+    return 10;
+  }, [layoutMode, rows]);
+
   return (
     <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
-    <Box flexDirection="column">
-      {/* Header — always visible, compact in medium/compact mode */}
+      <Box flexDirection="column" flexGrow={1}>
+        {/* Compact header — always visible */}
       <Header
         project={project}
         projectRoot={cwd}
@@ -306,61 +343,37 @@ export function CockpitApp({
           )}
         </>
       ) : (
-        <>
-          {/* Holo + Subsystems — only in full layout (collapses first) */}
-          {layoutMode === "full" && (
-            <Box flexDirection="row" gap={2}>
-              <LiTTHoloPanel
-                state={store.state.holoState}
-                activeModel={store.state.activeModel}
-                routingReason={store.state.mission}
-                missionStartedAt={store.state.missionState?.startedAt ?? null}
-              />
-              <Box flexDirection="column">
-                <Subsystems
-                  selected={store.state.selectedPanel}
-                  onSelect={(p) => store.actions.setSelectedPanel(p as import("./cockpit-store.js").CockpitPanel)}
-                  localRuntime={store.state.localRuntime}
-                  remoteRuntime={store.state.remoteRuntime}
-                  holoState={store.state.holoState}
-                  modelReady={modelReady}
-                />
-              </Box>
-            </Box>
-          )}
+        <Box flexDirection="column" flexGrow={1}>
+          {/* LittShard — identity face (full for planning/approval/completion/failure) */}
+          <Box justifyContent="center" alignItems="center" marginTop={1}>
+            <LittShard
+              state={store.state.holoState}
+              full={["PLANNING", "VERIFYING", "APPROVAL", "COMPLETE", "FAILED", "CANCELLED", "TIMEOUT"].includes(store.state.holoState)}
+              elapsed={elapsed}
+            />
+          </Box>
 
-          {/* Mission section — always visible.
-              Renders from the canonical RuntimeStore.mission projection. */}
-          <MissionSection
-            holoState={store.state.holoState}
-            mission={store.state.mission}
-            missionState={store.state.missionState}
-            lastCompletedMission={store.state.lastCompletedMission}
-            missionProjection={store.state.missionProjection}
-          />
+          {/* Mission section — only when canonical mission exists */}
+          {(store.state.missionProjection || store.state.missionState) && (
+            <MissionSection
+              holoState={store.state.holoState}
+              mission={store.state.mission}
+              missionState={store.state.missionState}
+              lastCompletedMission={store.state.lastCompletedMission}
+              missionProjection={store.state.missionProjection}
+            />
+          )}
 
           {/* Approval UX (when needed) — registers as keyboard owner */}
           {store.state.approvalPrompt && (
             <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
           )}
 
-          {/* Activity stream — always visible, shrinks in compact mode */}
+          {/* Activity stream — conversation/work stream */}
           <ActivityStream
             entries={store.state.activityLog}
-            maxEntries={layoutMode === "full" ? 10 : layoutMode === "medium" ? 6 : 4}
+            maxEntries={activityMax}
           />
-
-          {/* Files info — hide in medium/compact */}
-          {layoutMode === "full" && (
-            <FilesInfo
-              modified={gitModified}
-              untracked={gitUntracked}
-              missionFiles={store.state.missionState?.filesTouched ?? []}
-            />
-          )}
-
-          {/* Quick actions — hide in medium/compact */}
-          {layoutMode === "full" && <QuickActions />}
 
           {/* Command dock — ALWAYS visible */}
           <CommandDock
@@ -371,7 +384,7 @@ export function CockpitApp({
             disabled={disabled}
           />
 
-          {/* Status bar — always visible: project + branch + model + ctx (spec §31) */}
+          {/* Status bar — quiet footer */}
           <StatusBar
             connected={store.state.connected}
             localRuntime={store.state.localRuntime}
@@ -385,12 +398,10 @@ export function CockpitApp({
             source={source}
             mode={mode}
             runId={store.state.currentRunId}
-            gitModified={gitModified}
-            gitUntracked={gitUntracked}
           />
-        </>
+        </Box>
       )}
-    </Box>
+      </Box>
     </OverlayKeyboardProvider>
   );
 }
