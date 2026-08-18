@@ -29,7 +29,9 @@ export function isValidStepTransition(
 ): boolean {
   const validTransitions: Record<MissionStepStatus, MissionStepStatus[]> = {
     pending: ["working", "skipped", "failed"],
-    working: ["verifying", "failed", "blocked"],
+    // "passed" is allowed directly from "working" — a successful tool
+    // execution proves the step without needing a separate verifying phase.
+    working: ["verifying", "passed", "failed", "blocked"],
     verifying: ["passed", "failed", "blocked", "working"],
     passed: [],
     failed: ["working", "failed", "blocked", "skipped"],

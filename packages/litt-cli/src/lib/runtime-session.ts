@@ -117,7 +117,12 @@ export class RuntimeSession {
     this._onApprovalRequired = options.onApprovalRequired ?? null;
 
     this._shell = createShellExecutor(this._cwd);
-    this._store = new RuntimeStore((event) => this._handleEvent(event));
+    // Pass projectRoot to RuntimeStore so mission persistence is enabled.
+    // Without this, missions are never written to disk and recovery is impossible.
+    this._store = new RuntimeStore({
+      emitter: (event) => this._handleEvent(event),
+      projectRoot: this._cwd,
+    });
     this._executor = new CommandExecutor(this._shell, this._store, (event) => this._handleEvent(event));
     this._router = new CommandRouter(this._shell, { cwd: this._cwd, store: this._store });
   }
@@ -157,6 +162,39 @@ export class RuntimeSession {
    */
   getExecutor(): CommandExecutor {
     return this._executor;
+  }
+
+  /**
+   * Get the canonical RuntimeStore — the ONE source of runtime truth.
+   *
+   * Natural-language agent loops MUST use this store (not a fresh one)
+   * so that mission state, persistence, recovery, command_start/end
+   * events, and state_sync all flow through the canonical event bus.
+   * This is the fix for the Shell's "second brain" problem.
+   */
+  getStore(): RuntimeStore {
+    return this._store;
+  }
+
+  /**
+   * Get the canonical ShellExecutor — shared by CommandExecutor and
+   * ExecutionGateway. Agent loops need this for the ToolRegistry path
+   * (non-gateway fallback); in the canonical path the gateway handles
+   * execution, but the shell reference is still required by runAgentLoop.
+   */
+  getShell(): ShellExecutor {
+    return this._shell;
+  }
+
+  /**
+   * Emit a RuntimeEvent through the canonical event bus.
+   *
+   * Agent loops call this for agent_tool_call / agent_tool_result /
+   * verification_failed_repair events so they reach SessionEventBridge
+   * → EventBridge → CockpitStore — the same path as command_start/end.
+   */
+  emitAgentEvent(event: RuntimeEvent): void {
+    this._handleEvent(event);
   }
 
   /**

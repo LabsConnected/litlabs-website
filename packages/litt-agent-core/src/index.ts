@@ -155,6 +155,24 @@ export type {
   ParsedToolCall,
 } from "./agent-loop.js";
 
+// Semantic mission planner — generates a MissionStep[] plan BEFORE tool
+// execution and persists it to the canonical RuntimeStore. Tools then
+// attach to existing steps via toolHistory/actionHistory/evidence.
+// One step may cover many tool calls; one tool may serve many steps.
+export {
+  planMission,
+  parseSemanticPlan,
+  fallbackPlan,
+  resolveStepForTool,
+  attachToolToStep,
+} from "./mission-planner.js";
+export type {
+  SemanticStepSpec,
+  SemanticPlan,
+  PlanMissionOptions,
+  PlanMissionResult,
+} from "./mission-planner.js";
+
 // VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)
 export { VerificationGate, createVerificationGate, assertComplete } from "./verification-gate.js";
 export type {

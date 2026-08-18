@@ -201,6 +201,8 @@ export function stripToolCallBlocks(content: string): string {
   return content.replace(/```tool_call\s*\n[\s\S]*?\n```/g, "").trim();
 }
 
+// ─── Mission Planning ──────────────────────────────────────────────
+
 // ─── Agent Loop ────────────────────────────────────────────────────
 
 /**

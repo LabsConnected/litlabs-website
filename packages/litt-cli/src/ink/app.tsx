@@ -95,6 +95,50 @@ export function CockpitApp({
   useEventBridge(client, store, sessionBridge);
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
 
+  // ─── Canonical mission projection ───
+  // RuntimeStore.mission is the authority. This hook projects it into
+  // the cockpit's canonicalMission state on mount and when mission
+  // events arrive through the SessionEventBridge.
+  useEffect(() => {
+    const projectCanonical = () => {
+      const m = session.getStore().getMission();
+      if (m) {
+        store.actions.setCanonicalMission({
+          id: m.id,
+          goal: m.goal,
+          status: m.status,
+          currentStepId: m.currentStepId,
+          steps: m.steps.map((s) => ({
+            id: s.id,
+            title: s.title,
+            status: s.status,
+            sequence: s.sequence,
+          })),
+          verificationProven: m.evidence.some(
+            (e) => e.type === "verification_result" && e.success === true,
+          ) || null,
+          restored: m.metadata?.restoredFrom !== undefined,
+          completionReason: m.completionReason,
+          failureReason: m.failureReason,
+        });
+      } else {
+        store.actions.setCanonicalMission(null);
+      }
+    };
+
+    // Project on mount
+    projectCanonical();
+
+    // Project on every mission event from the session bridge
+    const unsub = sessionBridge.subscribe((event) => {
+      if (event.type.startsWith("mission.")) {
+        projectCanonical();
+      }
+    });
+
+    return () => { unsub(); };
+  }, [session, sessionBridge, store]);
+
   // Responsive layout — reactive terminal viewport (spec §9).
   const { rows } = useTerminalSize(stdout);
   const layoutMode = getLayoutMode(rows);
