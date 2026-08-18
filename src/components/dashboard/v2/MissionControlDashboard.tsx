@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAppUser } from "@/hooks/useClerkAuth";
+import { useUserEnsure } from "@/context/UserEnsureContext";
 import { MediaNowPlayingCard } from "@/components/media/MediaNowPlayingCard";
 import { Icon, getGreeting, timeAgo } from "./dashboard-v2-utils";
 import type { MissionControlResponse } from "@/lib/mission-control";
@@ -39,6 +40,8 @@ import {
   EntranceSection,
   GlassPanel,
 } from "./DashboardEffects";
+import { FirstRunWelcome } from "./FirstRunWelcome";
+import { FirstRunWelcome } from "./FirstRunWelcome";
 
 const D = { ...DashTokens, bg: "transparent", bgGradient: DashTokens.heroGradient };
 
@@ -377,6 +380,7 @@ export function MissionControlDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAppUser();
+  const { isNew, ensured, error: ensureError, retry: retryEnsure } = useUserEnsure();
   const displayName = user?.firstName || user?.username || "there";
 
   // LiTT command center state
@@ -572,6 +576,53 @@ export function MissionControlDashboard() {
             </div>
           </header>
         </EntranceSection>
+
+        {/* === First-run welcome banner === */}
+        {isNew && ensured && (
+          <EntranceSection delay={0.04}>
+            <div className="mb-5 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+              style={{ borderColor: `${D.accentGreen}33`, background: `${D.accentGreen}08` }}
+              data-testid="first-run-welcome"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  style={{ background: `${D.accentGreen}15`, border: `1px solid ${D.accentGreen}30` }}>
+                  <Icon name="sparkles" size={18} style={{ color: D.accentGreen }} />
+                </div>
+                <div>
+                  <div className="text-sm font-black" style={{ color: D.textPrimary }}>
+                    Welcome to LiTTree! You&rsquo;re all set.
+                  </div>
+                  <div className="mt-0.5 text-xs" style={{ color: D.textMuted }}>
+                    You have {balance.toLocaleString()} LiTTBits to start. Ask LiTT to build something, or open Studio to begin.
+                  </div>
+                </div>
+              </div>
+              <Link href="/studio"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black transition hover:scale-[1.02]"
+                style={{ backgroundColor: D.accent, color: D.bgGradient.includes("#0") ? "#fff" : "#0a0a0f" }}
+              >
+                <Icon name="sparkles" size={14} /> Open Studio
+              </Link>
+            </div>
+          </EntranceSection>
+        )}
+
+        {/* === User ensure error banner === */}
+        {ensureError && !ensured && (
+          <div className="mb-5 flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm"
+            style={{ borderColor: `${D.accentAmber}33`, background: `${D.accentAmber}10`, color: D.dangerText }}
+            data-testid="ensure-error-banner"
+          >
+            <Icon name="alert" size={17} />
+            <span>Couldn&rsquo;t initialize your account. Some features may not work.</span>
+            <button type="button" onClick={retryEnsure}
+              className="ml-auto rounded-lg px-2 py-1 text-[10px] font-bold transition hover:opacity-80"
+              style={{ background: `${D.accentAmber}20` }}>
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* === Error banner === */}
         {error && (

@@ -26,7 +26,7 @@ export default function SignInPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignIn
-            fallbackRedirectUrl="/studio?tool=chat"
+            fallbackRedirectUrl="/dashboard"
             signUpUrl="/sign-up"
             appearance={{
               elements: {

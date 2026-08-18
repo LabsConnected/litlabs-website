@@ -26,7 +26,7 @@ export default function SignUpPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignUp
-            fallbackRedirectUrl="/"
+            fallbackRedirectUrl="/dashboard"
             signInUrl="/sign-in"
             appearance={{
               elements: {
