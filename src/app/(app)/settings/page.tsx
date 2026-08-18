@@ -42,6 +42,8 @@ import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/(app)/studio
 import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSummary";
 import { useLocalSettings } from "@/hooks/useLocalSettings";
 import { WhatLiTTKnowsSection } from "./litt-knows/WhatLiTTKnowsSection";
+import { type BillingType } from "@/config/plans";
+import { resolveBillingDisplay } from "@/lib/billing/display";
 
 /* ── Icon map ──────────────────────────────────────────────────────── */
 
@@ -857,6 +859,34 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPic, setUploadingPic] = useState(false);
   const [picError, setPicError] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string>("Loading…");
+
+  // Fetch the user's current plan so the Account summary matches the
+  // Billing section rather than showing a hardcoded "Free Plan".
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/billing/subscription", { cache: "no-store" });
+        if (!res.ok) {
+          if (!cancelled) setPlanName("Starter");
+          return;
+        }
+        const json = await res.json();
+        if (cancelled) return;
+        // Reuse the single presentation resolver so the Account summary and
+        // the Billing section share one plan-selection implementation.
+        const display = resolveBillingDisplay(
+          json.plan ?? null,
+          json.subscription ?? null,
+        );
+        setPlanName(display.planName);
+      } catch {
+        if (!cancelled) setPlanName("Starter");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleProfilePicUpload = useCallback(async (file: File) => {
     if (!user) return;
@@ -1012,7 +1042,7 @@ function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedCo
           style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}
         >
           <div>
-            <div className="text-sm font-black" style={{ color: T.accentColor }}>Free Plan</div>
+            <div className="text-sm font-black" style={{ color: T.accentColor }}>{planName}</div>
             <div className="text-[10px] text-white/40">Beta access</div>
           </div>
           <Link href="/settings?section=billing" className="text-xs font-bold" style={{ color: T.accentColor }}
@@ -2291,11 +2321,14 @@ type BillingData = {
   plan: {
     id: string;
     name: string;
+    billingType?: BillingType;
     monthlyPriceCents: number | null;
+    default_price?: number | null;
     monthlyCredits: number;
     beta: boolean;
   } | null;
   subscription: {
+    plan?: string;
     status: string;
     stripe_customer_id: string | null;
     current_period_end: string | null;
@@ -2344,19 +2377,53 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
     }
   }, []);
 
-  const planName = data?.plan?.name ?? "Starter";
-  const planPrice = data?.plan?.monthlyPriceCents ?? 0;
-  const isPaid = planPrice !== null && planPrice > 0;
+  // Resolve display values from server authority (PLANS config + subscription
+  // data). The subscription row carries the real purchased plan id even when
+  // the API falls back to Starter for non-active statuses — so a
+  // canceled-but-still-within-period subscriber sees their real plan.
+  const {
+    planName,
+    isSubscription,
+    isOneTime,
+    isPaid,
+    priceLabel,
+    plan: displayPlan,
+    showPortal,
+    isActive,
+    isCanceledWithAccess,
+    isPastDue,
+    periodEndDate,
+  } = resolveBillingDisplay(data?.plan ?? null, data?.subscription ?? null);
   const balances = data?.balances;
   const totalBalance = balances?.total ?? 0;
   const monthlyBalance = balances?.monthly ?? 0;
   const purchasedBalance = balances?.purchased ?? 0;
   const betaBalance = balances?.beta_promotional ?? 0;
   const subStatus = data?.subscription?.status ?? "none";
-  const periodEnd = data?.subscription?.current_period_end;
+  const upgradedPlanId = useSearchParams().get("upgraded");
 
   return (
     <div className="space-y-4">
+      {/* Checkout success banner */}
+      {upgradedPlanId && !loading && (
+        <div
+          className="rounded-xl border px-4 py-3"
+          style={{ borderColor: `${T.accentColor}40`, backgroundColor: `${T.accentColor}10` }}
+        >
+          <div className="text-xs font-black" style={{ color: T.accentColor }}>
+            Welcome to {planName}.
+          </div>
+          <p className="mt-1 text-[11px] text-white/60">
+            {isOneTime
+              ? "Your one-time purchase is complete. Your feature access is now permanent — no recurring charge."
+              : isActive
+                ? "Your subscription is active. Credits for this billing cycle will appear in your wallet shortly. You can manage or cancel anytime from here."
+                : "Your checkout completed. Billing status may take a moment to update. Check your Wallet and billing status here."}
+            {" Check your Wallet for your current balance."}
+          </p>
+        </div>
+      )}
+
       {/* Current Plan */}
       <SettingsCard title="Plan" description="Current subscription" icon={<Coins size={16} />}>
         {loading ? (
@@ -2370,26 +2437,35 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               <div>
                 <div className="text-sm font-black" style={{ color: T.accentColor }}>{planName}</div>
                 <div className="text-[10px] text-white/40">
-                  {isPaid ? `$${(planPrice / 100).toFixed(0)}/month` : "Free"}
-                  {data?.plan?.beta && " · Beta"}
+                  {priceLabel}
+                  {displayPlan?.beta && " · Beta"}
                 </div>
-                {subStatus === "active" && periodEnd && (
+                {isActive && periodEndDate && (
                   <div className="mt-1 text-[10px] text-white/30">
-                    Renews {new Date(periodEnd).toLocaleDateString()}
+                    Renews {periodEndDate.toLocaleDateString()}
                   </div>
                 )}
-                {subStatus === "canceled" && (
-                  <div className="mt-1 text-[10px] text-amber-400/70">Canceled — access until period end</div>
+                {isSubscription && subStatus === "canceled" && (
+                  <div className="mt-1 text-[10px] text-amber-400/70">
+                    Canceled{isCanceledWithAccess && periodEndDate ? ` — access until ${periodEndDate.toLocaleDateString()}` : ""}
+                  </div>
                 )}
-                {subStatus === "past_due" && (
-                  <div className="mt-1 text-[10px] text-red-400/70">Payment past due</div>
+                {isPastDue && (
+                  <div className="mt-1 text-[10px] text-red-400/70">
+                    Payment past due — update your payment method to keep access
+                  </div>
+                )}
+                {isOneTime && (
+                  <div className="mt-1 text-[10px] text-white/30">
+                    Permanent access — no recurring charge
+                  </div>
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
                 <Link href="/pricing" className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-white/70 transition hover:bg-white/5">
                   {isPaid ? "Change plan" : "Upgrade"}
                 </Link>
-                {isPaid && (
+                {showPortal && (
                   <button
                     onClick={handlePortal}
                     disabled={portalLoading}
@@ -2400,9 +2476,14 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
                 )}
               </div>
             </div>
-            {subStatus === "canceled" && (
+            {isSubscription && subStatus === "canceled" && (
               <p className="mt-2 text-[10px] text-white/40">
                 Your projects and data are preserved. You can resubscribe anytime.
+              </p>
+            )}
+            {isPastDue && (
+              <p className="mt-2 text-[10px] text-white/40">
+                Update your payment method via “Manage billing” to restore automatic renewals.
               </p>
             )}
           </>

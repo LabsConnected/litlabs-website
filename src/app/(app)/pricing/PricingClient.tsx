@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
@@ -236,9 +237,18 @@ function PlanCard({
 }
 
 export default function PricingClient({ founderAvailable }: { founderAvailable: boolean }) {
+  return (
+    <Suspense fallback={<main className={styles.page} />}>
+      <PricingClientInner founderAvailable={founderAvailable} />
+    </Suspense>
+  );
+}
+
+function PricingClientInner({ founderAvailable }: { founderAvailable: boolean }) {
   const { isSignedIn } = useClerkAuth();
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canceled = useSearchParams().get("canceled") === "true";
 
   const handleCheckout = useCallback(
     async (plan: PlanDefinition) => {
@@ -291,6 +301,25 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
           <span className={styles.liveDot} />
           Founder Beta Pricing
         </div>
+
+        {canceled && (
+          <div
+            className={styles.errorBanner}
+            role="status"
+            aria-live="polite"
+            style={{ marginBottom: 16, marginTop: 0 }}
+          >
+            Checkout was canceled — you were not charged. Your current plan and
+            credits are unchanged. Pick a plan below when you’re ready, or{" "}
+            <Link
+              href="/settings?section=billing"
+              style={{ textDecoration: "underline" }}
+            >
+              review your current plan
+            </Link>
+            .
+          </div>
+        )}
 
         <h1>
           Your AI creative studio.

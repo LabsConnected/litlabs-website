@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useCallback, useState } from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -12,8 +12,6 @@ import PageShell from "@/components/PageShell";
 import { ProductFrame } from "@/components/ProductPageFrame";
 import {
   Wallet,
-  Coins,
-  Gift,
   Loader2,
   ArrowUpRight,
   ShoppingBag,
@@ -41,26 +39,13 @@ export default function WalletPage() {
 
 function WalletContent() {
   const { resolvedColors: T } = useTheme();
-  const { balance, claimed, isLoading, isClaiming, isError, claim } = useWallet();
+  const { balance, isLoading, isError } = useWallet();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const searchParams = useSearchParams();
   const tab = (searchParams.get("tab") as Tab) || "overview";
 
-  const [claimMsg, setClaimMsg] = useState<string | null>(null);
-
   const signInMessage =
     isLoaded && !isSignedIn ? "Sign in to manage your wallet." : null;
-  const displayClaimMsg = claimMsg ?? signInMessage;
-
-  const handleClaim = useCallback(async () => {
-    setClaimMsg(null);
-    const ok = await claim();
-    setClaimMsg(
-      ok
-        ? "Daily bonus claimed! +50 AI credits"
-        : "Daily bonus is currently unavailable.",
-    );
-  }, [claim]);
 
   const cardStyle = {
     backgroundColor: `${T.boxBg}60`,
@@ -123,12 +108,12 @@ function WalletContent() {
               </Link>
             </div>
           </div>
-          {displayClaimMsg && (
+          {signInMessage && (
             <p
               className="mt-4 text-sm opacity-70"
               style={{ color: T.textMuted }}
             >
-              {displayClaimMsg}
+              {signInMessage}
             </p>
           )}
         </div>

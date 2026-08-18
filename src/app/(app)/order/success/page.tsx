@@ -55,7 +55,7 @@ function SuccessContent() {
           </div>
           <p className="mb-3 font-mono text-xs uppercase tracking-[0.25em] text-green-400">Order confirmed</p>
           <h1 className="text-3xl font-bold sm:text-5xl">Thank you for your purchase.</h1>
-          <p className="mx-auto mt-4 max-w-xl text-base text-[var(--text-muted)]">Your payment was received. Your purchase is being applied to your LitLabs account.</p>
+          <p className="mx-auto mt-4 max-w-xl text-base text-[var(--text-muted)]">Your payment was received and is being applied to your LitLabs account.</p>
         </section>
 
         <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] sm:p-7">
@@ -84,6 +84,27 @@ function SuccessContent() {
           {unavailable && !loading && !receipt && (
             <div className="py-5"><h2 className="text-lg">Your purchase is recorded.</h2><p className="mt-2 text-[var(--text-muted)]">We could not display the receipt here. Your payment confirmation will arrive by email. Contact support if anything looks wrong.</p></div>
           )}
+        </section>
+
+        <section className="mt-6 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] sm:p-7">
+          <h2 className="mb-3 text-lg">What happens next?</h2>
+          <ul className="space-y-2 text-sm text-[var(--text-muted)]">
+            <li className="flex items-start gap-2">
+              <Check size={16} className="mt-0.5 shrink-0 text-green-400" aria-hidden="true" />
+              <span>
+                If your purchase includes LiTTBits, they will appear in your wallet
+                after payment processing completes.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check size={16} className="mt-0.5 shrink-0 text-green-400" aria-hidden="true" />
+              <span>Check your <Link href="/wallet" className="text-[var(--accent-color)] underline">Wallet</Link> to see your updated balance.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check size={16} className="mt-0.5 shrink-0 text-green-400" aria-hidden="true" />
+              <span>Manage your plan and billing anytime from <Link href="/settings?section=billing" className="text-[var(--accent-color)] underline">Settings → Billing</Link>.</span>
+            </li>
+          </ul>
         </section>
 
         <section className="mt-8">
