@@ -32,6 +32,15 @@ import { validateStepTransition, isValidMissionTransition, isValidStepTransition
 // ─── Persistence Adapter ───────────────────────────────────────────────
 
 /**
+ * Check if a mission status is terminal (no further transitions).
+ * Terminal missions (COMPLETE, FAILED, CANCELLED) are NOT restored
+ * during restart/recovery — they are done.
+ */
+export function isTerminalMissionStatus(status: MissionStatus): boolean {
+  return status === "complete" || status === "failed" || status === "cancelled";
+}
+
+/**
  * Interface for mission persistence.
  * Filesystem-based by default; DB adapters can be added later.
  */
@@ -107,7 +116,25 @@ export class FilesystemMissionPersistence implements MissionPersistence {
 
     // Determine if this is a fresh load or recovery
     // recovered = true means we got a valid mission back (possibly from backup recovery)
-    const recovered = result.recovered !== null;
+    let recovered = result.recovered !== null;
+
+    // ─── Do NOT restore terminal missions ───────────────────────
+    // COMPLETE, FAILED, and CANCELLED missions are done. Restoring
+    // them would re-run completed work or revive failed missions that
+    // should stay failed. Only working/verifying/blocked missions
+    // resume after restart.
+    if (result.recovered && isTerminalMissionStatus(result.recovered.status)) {
+      // Clear the active mission pointer so we don't keep trying to
+      // restore a terminal mission on every startup.
+      this.clearActiveMission();
+      recovered = false;
+      return {
+        recovered: false,
+        mission: null,
+        error: { reason: "terminal" },
+        resumedFrom,
+      };
+    }
 
     return {
       recovered,
@@ -608,6 +635,11 @@ export class RuntimeStore {
     const validation = validateStepTransition(step.status, status);
     if (!validation.allowed) return;
 
+    // Capture the TRUE previous status BEFORE mutating — otherwise the
+    // transition event can falsely emit `passed → passed` instead of
+    // `working → passed`.
+    const from = step.status;
+
     step.status = status;
     if (status === "passed" || status === "failed" || status === "skipped") {
       step.finishedAt = new Date().toISOString();
@@ -637,7 +669,7 @@ export class RuntimeStore {
         missionId: mission.id,
         stepId,
         title: step.title,
-        from: step.status,
+        from,
         to: status,
       },
     });
@@ -755,6 +787,46 @@ export class RuntimeStore {
     const mission = this.state.mission;
     if (!mission) return;
     if (!isValidMissionTransition(mission.status, "complete")) return;
+
+    // ─── Truthful COMPLETE contract ───────────────────────────────
+    // COMPLETE is NOT allowed while any required mission step remains
+    // in a non-terminal state (pending, working, verifying, blocked,
+    // failed). The VerificationGate proves the project passes, but
+    // the mission steps prove the SEMANTIC work was done. Both must
+    // be satisfied for an honest COMPLETE.
+    //
+    // Steps with no requiredEvidence are considered satisfied if they
+    // reached "passed" or were "skipped". The final "verify" step is
+    // allowed to be "working" if the gate already proved verification
+    // (the gate IS the evidence for that step).
+    const incompleteSteps = mission.steps.filter((s) => {
+      if (s.status === "passed" || s.status === "skipped") return false;
+      // A "working" final step is OK if the gate proved verification
+      if (s.status === "working" && verificationEvidence) {
+        const isVerifyStep = s.allowedActionScope.includes("verify") ||
+          s.requiredEvidence.includes("verification_result");
+        if (isVerifyStep) return false;
+      }
+      return true; // pending, working, verifying, blocked, failed
+    });
+
+    if (incompleteSteps.length > 0) {
+      // Refuse to complete — log the incomplete steps as evidence
+      const stepList = incompleteSteps
+        .map((s) => `${s.title} (${s.status})`)
+        .join(", ");
+      this.emit({
+        type: "litt_event",
+        subtype: "mission:complete_refused",
+        ts: Date.now(),
+        data: {
+          missionId: mission.id,
+          reason: `Cannot complete: ${incompleteSteps.length} step(s) not passed: ${stepList}`,
+          incompleteSteps: incompleteSteps.map((s) => ({ id: s.id, title: s.title, status: s.status })),
+        },
+      });
+      return; // Do NOT complete
+    }
 
     mission.status = "complete";
     mission.completionReason = completionReason;

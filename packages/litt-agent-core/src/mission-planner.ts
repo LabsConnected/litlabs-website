@@ -23,7 +23,7 @@
 import type { ChatMessage, ModelProvider, ModelStreamEvent } from "./types.js";
 import type { RuntimeStore } from "./state.js";
 import type { Mission, MissionStep } from "./missions/mission-entities.js";
-import type { EvidenceType } from "./missions/mission-types.js";
+import type { EvidenceType, MissionEvidence } from "./missions/mission-types.js";
 
 // ─── Plan types ────────────────────────────────────────────────────
 
@@ -168,7 +168,7 @@ export function parseSemanticPlan(text: string): SemanticStepSpec[] | null {
 export function fallbackPlan(goal: string): SemanticStepSpec[] {
   const g = goal.toLowerCase();
 
-  const stabilizeKeywords = ["stable", "stability", "production", "ready", "fix", "broken", "deploy"];
+  const stabilizeKeywords = ["stable", "stabilize", "stability", "production", "ready", "fix", "broken", "deploy"];
   const isStabilize = stabilizeKeywords.some((k) => g.includes(k));
 
   if (isStabilize) {
@@ -354,6 +354,11 @@ function toolToScope(toolId: string): string | null {
  * Record a tool call against a step's toolHistory and actionHistory.
  * This is the canonical way tools attach to existing semantic steps —
  * the tool does NOT define the step, it contributes to it.
+ *
+ * The record is created with status "pending" — the result is NOT
+ * known yet at tool_call time. Use updateToolResultOnStep() to update
+ * the record when the tool result arrives. This prevents recording
+ * success: true before execution completes.
  */
 export async function attachToolToStep(
   store: RuntimeStore,
@@ -362,9 +367,8 @@ export async function attachToolToStep(
     toolId: string;
     toolName: string;
     toolCallId: string;
-    success: boolean;
-    message: string;
-    durationMs?: number;
+    toolRunId?: string;
+    message?: string;
     filesRead?: string[];
     filesChanged?: string[];
   },
@@ -379,12 +383,16 @@ export async function attachToolToStep(
     step.toolHistory.push(record.toolCallId);
   }
 
-  // Append to actionHistory
+  // Append to actionHistory with PENDING status — the result is not
+  // known yet. The record is updated when the tool result arrives.
   step.actionHistory.push({
-    description: `${record.toolName}: ${record.message.slice(0, 120)}`,
+    description: `${record.toolName}: ${record.message?.slice(0, 120) ?? "started"}`,
     tool: record.toolId,
+    toolCallId: record.toolCallId,
+    toolRunId: record.toolRunId,
     timestamp: new Date().toISOString(),
-    status: record.success ? "success" : "failed",
+    startedAt: new Date().toISOString(),
+    status: "pending",
   });
 
   // Append file lists (dedup)
@@ -401,4 +409,190 @@ export async function attachToolToStep(
 
   // Persist via the store's touch + persist path
   await store.persistMissionNow();
+}
+
+/**
+ * Update a tool's action record on a step when the tool result arrives.
+ * This is the canonical way to record the truthful outcome of a tool
+ * execution — the record was created with status "pending" by
+ * attachToolToStep, and this function updates it to "success" or
+ * "failed" with the actual result.
+ *
+ * A failed tool must remain failed in history. This function does NOT
+ * rewrite a failed record to success — it only updates pending records.
+ */
+export async function updateToolResultOnStep(
+  store: RuntimeStore,
+  stepId: string,
+  toolCallId: string,
+  result: { success: boolean; message: string; durationMs?: number },
+): Promise<void> {
+  const mission = store.getMission();
+  if (!mission) return;
+  const step = mission.steps.find((s) => s.id === stepId);
+  if (!step) return;
+
+  // Find the action record by toolCallId
+  const record = step.actionHistory.find((r) => r.toolCallId === toolCallId);
+  if (!record) return;
+
+  // Only update pending records — a failed record stays failed
+  if (record.status === "pending") {
+    record.status = result.success ? "success" : "failed";
+    record.completedAt = new Date().toISOString();
+    record.result = { success: result.success, message: result.message.slice(0, 300) };
+    if (result.message && record.description.endsWith("started")) {
+      record.description = `${record.tool ?? "tool"}: ${result.message.slice(0, 120)}`;
+    }
+  }
+
+  await store.persistMissionNow();
+}
+
+/**
+ * Map a tool id to the canonical evidence type it produces.
+ *
+ * This is the key mapping that drives semantic step progression: when
+ * a tool succeeds, it produces evidence of a specific type. If the
+ * current step's `requiredEvidence` includes that type, the step is
+ * semantically complete and the mission advances to the next step.
+ *
+ * Without this mapping, all tool results produce generic
+ * `command_result` evidence, which never matches `typecheck_result`,
+ * `test_result`, `build_result`, etc. — so steps never advance.
+ */
+export function toolToEvidenceType(toolId: string): EvidenceType {
+  switch (toolId) {
+    case "project.status":
+      return "repository_status";
+    case "project.diff":
+      return "diff";
+    case "project.typecheck":
+      return "typecheck_result";
+    case "project.test":
+      return "test_result";
+    case "project.build":
+      return "build_result";
+    case "project.read_file":
+      return "file_read";
+    case "project.search":
+      return "search_result";
+    case "project.list_files":
+      return "repository_status";
+    default:
+      return "command_result";
+  }
+}
+
+/**
+ * Check if a mission step's required evidence has been satisfied by
+ * the evidence collected on the mission.
+ *
+ * A step is semantically complete when ALL of its requiredEvidence
+ * types are present in the mission's evidence list with success=true.
+ *
+ * Steps without requiredEvidence are never auto-advanced by this
+ * check — they rely on the model moving to a different scope or the
+ * agent loop completion path.
+ */
+export function isStepEvidenceSatisfied(
+  step: MissionStep,
+  evidence: MissionEvidence[],
+): boolean {
+  if (!step.requiredEvidence || step.requiredEvidence.length === 0) return false;
+  for (const requiredType of step.requiredEvidence) {
+    const found = evidence.some(
+      (e) => e.type === requiredType && e.success === true,
+    );
+    if (!found) return false;
+  }
+  return true;
+}
+
+/**
+ * Advance the canonical mission after a tool result if the current
+ * step's required evidence is now satisfied.
+ *
+ * THE REAL RUNTIME LIFECYCLE (not presentation):
+ *
+ *   step 1 working (requiredEvidence: [repository_status])
+ *     → project.status succeeds → evidence: repository_status
+ *     → isStepEvidenceSatisfied(step 1) → true
+ *     → step 1 passed (mission:step_passed)
+ *     → step 2 working (mission:step_started)
+ *
+ *   step 2 working (requiredEvidence: [typecheck_result])
+ *     → project.typecheck succeeds → evidence: typecheck_result
+ *     → isStepEvidenceSatisfied(step 2) → true
+ *     → step 2 passed
+ *     → step 3 working
+ *
+ * Rules:
+ *   - A FAILED tool result never advances — the mission stays on the
+ *     current working step so repairs/retries attach to the same step.
+ *   - The current working step is passed only when its requiredEvidence
+ *     is fully satisfied AND a later pending step exists (the final
+ *     step is left working for the VerificationGate).
+ *   - Steps without requiredEvidence are advanced when the tool's scope
+ *     differs from the current step's scope (the model moved to a new
+ *     semantic phase).
+ *   - All transitions go through the canonical RuntimeStore state
+ *     machine, which validates every transition and emits canonical
+ *     mission:* events.
+ *
+ * Returns the steps that were transitioned, or null when nothing moved.
+ */
+export async function progressMissionStepAfterTool(
+  store: RuntimeStore,
+  options: {
+    success: boolean;
+    toolId: string;
+  },
+): Promise<{ passedStepId: string | null; openedStepId: string | null } | null> {
+  const mission = store.getMission();
+  if (!mission) return null;
+  if (!options.success) return null; // failed/retried tool — stay in step
+
+  const step =
+    mission.steps.find((s) => s.id === mission.currentStepId) ??
+    mission.steps.find((s) => s.status === "working");
+  if (!step || step.status !== "working") return null;
+
+  // Check if the step's required evidence is now satisfied
+  const evidenceSatisfied = isStepEvidenceSatisfied(step, mission.evidence);
+
+  // If evidence isn't satisfied, check if we should still advance:
+  //   - Steps WITHOUT requiredEvidence advance when any tool succeeds
+  //     (the tool success IS the evidence — there's no specific
+  //     evidence contract to wait for)
+  //   - Steps WITH requiredEvidence advance only when the evidence
+  //     contract is met (or when the tool's scope differs, meaning
+  //     the model moved to a new phase)
+  if (!evidenceSatisfied) {
+    if (!step.requiredEvidence || step.requiredEvidence.length === 0) {
+      // No evidence contract — a successful tool is enough to advance
+      // (but only if there's a next step — checked below)
+    } else {
+      // Has requiredEvidence — check if the tool's scope differs
+      const toolScope = toolToScope(options.toolId);
+      if (!toolScope || !step.allowedActionScope.includes(toolScope)) {
+        // Tool scope doesn't match — but we still need evidence
+        return null;
+      } else {
+        return null; // same scope, evidence not satisfied yet — stay
+      }
+    }
+  }
+
+  const idx = mission.steps.indexOf(step);
+  const nextPending = mission.steps.slice(idx + 1).find((s) => s.status === "pending");
+  if (!nextPending) return null; // final step — the gate/loop-end owns completion
+
+  await store.updateMissionStepStatus(step.id, "passed", {
+    verificationPassed: true,
+    verificationEvidence: `Step satisfied by ${options.toolId} evidence`,
+  });
+  await store.setCurrentStep(nextPending.id);
+
+  return { passedStepId: step.id, openedStepId: nextPending.id };
 }

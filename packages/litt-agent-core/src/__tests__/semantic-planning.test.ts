@@ -22,6 +22,7 @@ import {
   fallbackPlan,
   resolveStepForTool,
   attachToolToStep,
+  updateToolResultOnStep,
 } from "../mission-planner.js";
 import type { ModelProvider, ChatMessage, ModelStreamEvent } from "../types.js";
 
@@ -357,7 +358,7 @@ describe("Semantic Mission Planning", () => {
   // ─── attachToolToStep — toolHistory / actionHistory ──────────────
 
   describe("attachToolToStep — records tools on existing steps", () => {
-    it("appends to toolHistory and actionHistory", async () => {
+    it("appends to toolHistory and actionHistory with pending status", async () => {
       const store = new RuntimeStore({ projectRoot: tmpDir });
       await store.createMission({ goal: "test", mode: "act", projectRoot: tmpDir });
       const step = await store.addMissionStep({ title: "Diagnose" });
@@ -366,15 +367,13 @@ describe("Semantic Mission Planning", () => {
         toolId: "project.search",
         toolName: "search",
         toolCallId: "tc_1",
-        success: true,
-        message: "Found 3 matches",
       });
 
       const updated = store.getMission()?.steps[0];
       assert.ok(updated?.toolHistory.includes("tc_1"));
       assert.equal(updated?.actionHistory.length, 1);
       assert.equal(updated?.actionHistory[0].tool, "project.search");
-      assert.equal(updated?.actionHistory[0].status, "success");
+      assert.equal(updated?.actionHistory[0].status, "pending");
     });
 
     it("does not duplicate toolHistory entries for the same toolCallId", async () => {
@@ -384,11 +383,11 @@ describe("Semantic Mission Planning", () => {
 
       await attachToolToStep(store, step!.id, {
         toolId: "project.read_file", toolName: "read_file",
-        toolCallId: "tc_2", success: true, message: "ok",
+        toolCallId: "tc_2",
       });
       await attachToolToStep(store, step!.id, {
         toolId: "project.read_file", toolName: "read_file",
-        toolCallId: "tc_2", success: true, message: "ok",
+        toolCallId: "tc_2",
       });
 
       const updated = store.getMission()?.steps[0];
@@ -402,12 +401,12 @@ describe("Semantic Mission Planning", () => {
 
       await attachToolToStep(store, step!.id, {
         toolId: "project.edit_file", toolName: "edit_file",
-        toolCallId: "tc_3", success: true, message: "edited",
+        toolCallId: "tc_3",
         filesRead: ["src/a.ts"], filesChanged: ["src/a.ts"],
       });
       await attachToolToStep(store, step!.id, {
         toolId: "project.edit_file", toolName: "edit_file",
-        toolCallId: "tc_4", success: true, message: "edited",
+        toolCallId: "tc_4",
         filesRead: ["src/a.ts", "src/b.ts"], filesChanged: ["src/b.ts"],
       });
 
@@ -423,8 +422,78 @@ describe("Semantic Mission Planning", () => {
       // Should not throw
       await attachToolToStep(store, "nonexistent_step", {
         toolId: "project.run", toolName: "run",
-        toolCallId: "tc_5", success: true, message: "ok",
+        toolCallId: "tc_5",
       });
+    });
+
+    it("updateToolResultOnStep transitions pending to success", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({ goal: "test", mode: "act", projectRoot: tmpDir });
+      const step = await store.addMissionStep({ title: "Diagnose" });
+
+      await attachToolToStep(store, step!.id, {
+        toolId: "project.search", toolName: "search",
+        toolCallId: "tc_res1",
+      });
+
+      // Record starts pending
+      let updated = store.getMission()?.steps[0];
+      assert.equal(updated?.actionHistory[0].status, "pending");
+
+      // Update with success
+      await updateToolResultOnStep(store, step!.id, "tc_res1", {
+        success: true,
+        message: "Found 3 matches",
+      });
+
+      updated = store.getMission()?.steps[0];
+      assert.equal(updated?.actionHistory[0].status, "success");
+      assert.equal(updated?.actionHistory[0].result?.success, true);
+    });
+
+    it("updateToolResultOnStep transitions pending to failed", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({ goal: "test", mode: "act", projectRoot: tmpDir });
+      const step = await store.addMissionStep({ title: "Diagnose" });
+
+      await attachToolToStep(store, step!.id, {
+        toolId: "project.test", toolName: "test",
+        toolCallId: "tc_res2",
+      });
+
+      await updateToolResultOnStep(store, step!.id, "tc_res2", {
+        success: false,
+        message: "Tests failed",
+      });
+
+      const updated = store.getMission()?.steps[0];
+      assert.equal(updated?.actionHistory[0].status, "failed");
+      assert.equal(updated?.actionHistory[0].result?.success, false);
+    });
+
+    it("a failed record stays failed — updateToolResultOnStep does not rewrite it", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({ goal: "test", mode: "act", projectRoot: tmpDir });
+      const step = await store.addMissionStep({ title: "Diagnose" });
+
+      await attachToolToStep(store, step!.id, {
+        toolId: "project.test", toolName: "test",
+        toolCallId: "tc_res3",
+      });
+
+      await updateToolResultOnStep(store, step!.id, "tc_res3", {
+        success: false,
+        message: "Tests failed",
+      });
+
+      // Try to update again with success — should NOT change
+      await updateToolResultOnStep(store, step!.id, "tc_res3", {
+        success: true,
+        message: "Tests passed",
+      });
+
+      const updated = store.getMission()?.steps[0];
+      assert.equal(updated?.actionHistory[0].status, "failed");
     });
   });
 
@@ -466,6 +535,8 @@ describe("Semantic Mission Planning", () => {
         toolId: "project.status",
         toolName: "status",
         toolCallId: "tc_first",
+      });
+      await updateToolResultOnStep(store, firstToolStep!, "tc_first", {
         success: true,
         message: "clean tree",
       });

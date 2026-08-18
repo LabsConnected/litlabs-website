@@ -76,6 +76,7 @@ export type { CommandResult } from "./router.js";
 
 // Runtime state
 export { RuntimeStore, createInitialState } from "./state.js";
+export type { RecoveryResult, MissionPersistence } from "./state.js";
 
 // Hardened command executor (Phase 3B)
 export { CommandExecutor, createCommandExecutor } from "./command-executor.js";
@@ -165,6 +166,10 @@ export {
   fallbackPlan,
   resolveStepForTool,
   attachToolToStep,
+  progressMissionStepAfterTool,
+  toolToEvidenceType,
+  isStepEvidenceSatisfied,
+  updateToolResultOnStep,
 } from "./mission-planner.js";
 export type {
   SemanticStepSpec,

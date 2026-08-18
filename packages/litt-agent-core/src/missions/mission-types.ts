@@ -108,8 +108,13 @@ export interface Checkpoint {
 export interface ActionRecord {
   description: string;
   tool?: string;
+  toolCallId?: string;
+  toolRunId?: string;
   timestamp: string;
-  status: "success" | "failed" | "approved" | "denied";
+  startedAt?: string;
+  completedAt?: string;
+  status: "success" | "failed" | "approved" | "denied" | "pending";
+  result?: { success: boolean; message: string };
 }
 
 export interface VerificationResult {
