@@ -25,9 +25,9 @@ const ROADMAP: Array<{
   { status: "BETA", title: "Model selection / BYOK", desc: "Bring your own OpenRouter key. Route to fast / smart / long profiles." },
   { status: "COMING", title: "Games pipeline", desc: "Build, verify, and ship playable browser games end-to-end." },
   { status: "COMING", title: "Multi-agent crews", desc: "Specialized agents (Forge, Visionary, Research, QA) on one mission." },
-  { status: "COMING", title: "Voice mode", desc: "Talk to LiTT. Spoken responses, camera-assisted context." },
+  { status: "BETA", title: "Voice mode", desc: "Talk to LiTT. Spoken responses, camera-assisted context." },
   { status: "COMING", title: "Cloud handoff", desc: "Run long missions in the cloud and pick them up anywhere." },
-  { status: "COMING", title: "Marketplace", desc: "Share and install LiTT plugins, tools, and project templates." },
+  { status: "BETA", title: "Marketplace", desc: "Share and install LiTT plugins, tools, and project templates." },
 ];
 
 const STATUS_STYLES: Record<RoadmapStatus, { color: string; bg: string; border: string }> = {
