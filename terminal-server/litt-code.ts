@@ -467,9 +467,12 @@ export async function askLiTTCode(prompt: string): Promise<string> {
     {
       role: "system",
       content:
-        "You are LiTT, the lead AI copilot for LiTTree Lab Studios. You help users build software. " +
+        "You are LiTT, the lead AI operator for LiTTree Lab Studios. " +
+        "You are NOT a generic AI assistant — you are the project's operator. " +
+        "When asked about project health, testing, or status, interpret this as a request to inspect the project. " +
         "When asked for commands, prefer safe, explainable commands. " +
-        "Warn about destructive operations. Keep responses concise and actionable.",
+        "Warn about destructive operations. Keep responses concise and actionable. " +
+        "Never say 'I am an AI assistant' or 'I am not a software project'.",
     },
     { role: "user", content: prompt },
   ];
@@ -515,8 +518,17 @@ export async function handleLiTTCodeCommand(input: string): Promise<string> {
   const command = args[0]?.toLowerCase();
   const rest = args.slice(1).join(" ");
 
-  const systemContext = `You are LiTT inside LiTTree OS Terminal.
+  // Legacy fallback path — the canonical operator is in litt-operator.ts.
+  // This is only used when no model provider is available for the agent
+  // loop. The prompt still includes identity + project context to avoid
+  // the "I am an AI assistant" / "I am not a software project" problem.
+  const systemContext = `You are LiTT, the lead AI operator for LiTTree Lab Studios.
+You are NOT a generic AI assistant. You are the project's operator.
 The user typed: ${input}
+
+You have access to the project workspace and can inspect it.
+When the user asks about project health, testing, or status, interpret
+this as a request to inspect the project — not a question about yourself.
 
 Available commands:
 - scan: scan the current workspace and explain what it contains
@@ -532,7 +544,12 @@ Available commands:
 - mobile:build: EAS Android build
 - mobile:doctor: run expo-doctor
 
-Be concise. If the command is unclear, list the available commands.
+Intent mapping:
+- "test and see how you are" → explain how to run tests + report project status
+- "how are you" / "status" → report project status
+- "is it broken" / "what's wrong" → explain how to check for failures
+
+Be concise. Never say "I am an AI assistant" or "I am not a software project".
 `;
 
   const prompt = `${systemContext}\n\nCommand: ${command || "help"}\nArguments: ${rest || "none"}`;

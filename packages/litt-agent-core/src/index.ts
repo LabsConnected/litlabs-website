@@ -92,6 +92,21 @@ export type {
   GatewayExecutionCapsule,
 } from "./execution-gateway.js";
 
+// Remote command protocol — the ONE contract shared between CLI / Termux /
+// Desktop clients and terminal-server's /internal/command endpoint.
+export {
+  successResponse,
+  errorResponse,
+  isRemoteError,
+  hasRemoteResult,
+} from "./remote-protocol.js";
+export type {
+  RemoteCommandRequest,
+  RemoteCommandResponse,
+  RemoteCommandError,
+  RemoteCommandErrorCode,
+} from "./remote-protocol.js";
+
 // Structured execution boundary
 export {
   runCommand as runCommandSecure,

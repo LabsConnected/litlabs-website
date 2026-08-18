@@ -1,67 +1,75 @@
 /**
- * Command bridge — routes web/CLI command requests through the canonical
- * CommandRouter from @litt/agent-core, wired to the same RuntimeStore
- * that terminal-server already owns.
+ * Command bridge — routes web/CLI/Termux command requests through the
+ * canonical command registry from @litt/agent-core, wired to the same
+ * RuntimeStore that terminal-server already owns.
  *
- * This is the ONE place where HTTP requests become CommandRouter calls.
- * Both Studio Web and `litt --remote` hit this path.
+ * This is the ONE place where HTTP requests become command dispatches.
+ * Both Studio Web, `litt --remote`, and the PowerShell cockpit hit
+ * this path.
  *
  *   POST /internal/command
- *         ↓
+ *         ↓  RemoteCommandRequest  (structured argv — never shell-string)
  *   CommandBridge.dispatch()
  *         ↓
- *   CommandRouter (agent-core)
+ *   command-registry  (read-only / project commands)
+ *   ExecutionGateway  (mutating commands like /do → project.run)
  *         ↓
  *   RuntimeStore updates → Socket.IO broadcasts
  *         ↓
- *   Studio / CLI / PowerShell all see the same run
+ *   RemoteCommandResponse  (same runId as the runtime execution)
+ *         ↓
+ *   Studio / CLI / Termux / Desktop observers
+ *
+ * Protocol: imports the ONE shared `RemoteCommandRequest` /
+ * `RemoteCommandResponse` contract from `@litt/agent-core`. No
+ * duplicate interface definitions here.
  */
 
-import type { CommandResult } from "@litt/agent-core";
-import { getWorkspace } from "./workspace/WorkspaceManager.js";
 import {
-  dispatchRegistry,
   resolveCommand,
   getCommandNames,
+  dispatchRegistry,
   type CommandContext,
   type CommandResponse,
-} from "./command-registry.js";
-
-// ─── Command request/response types ───────────────────────────────
-
-export interface CommandRequest {
-  /** Slash command (e.g. "/status") or bare command (e.g. "status") */
-  command: string;
-  args?: Record<string, unknown>;
-  workspaceId?: string;
-  cwd?: string;
-  userId?: string | null;
-}
-
-export interface CommandBridgeResult {
-  ok: boolean;
-  kind: string;
-  data: unknown;
-  message?: string;
-  runId: string;
-  timestamp: number;
-  durationMs: number;
-}
+} from "./command-registry";
+import { getWorkspace } from "./workspace/WorkspaceManager";
+import {
+  successResponse,
+  errorResponse,
+  type RemoteCommandRequest,
+  type RemoteCommandResponse,
+} from "@litt/agent-core";
 
 // ─── Dispatch ─────────────────────────────────────────────────────
 
 /**
- * Dispatch a command through the canonical command registry.
+ * Dispatch a remote command through the canonical command registry.
  * This is the ONE dispatch path — both slash commands and bare commands
  * route through the same registry.
  *
- * The RuntimeStore is updated by individual handlers that use CommandRouter.
+ * The runId generated here is passed THROUGH to the registry handlers
+ * so the RuntimeStore records the SAME runId. No second execution
+ * identity is minted.
  */
-export async function dispatchCommand(req: CommandRequest): Promise<CommandBridgeResult> {
+export async function dispatchCommand(
+  req: RemoteCommandRequest,
+): Promise<RemoteCommandResponse> {
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const timestamp = Date.now();
+  const requestId = req.requestId;
 
-  // Resolve cwd: explicit > workspace root > server cwd
+  // ─── Validate the request ────────────────────────────────────
+  if (!req.command || typeof req.command !== "string") {
+    return errorResponse({
+      runId,
+      requestId,
+      code: "malformed_request",
+      message: "Missing 'command' field",
+      timestamp,
+    });
+  }
+
+  // ─── Resolve cwd: explicit > workspace root > server cwd ─────
   let cwd = req.cwd ?? process.cwd();
   if (req.workspaceId) {
     const ws = getWorkspace(req.workspaceId);
@@ -70,24 +78,59 @@ export async function dispatchCommand(req: CommandRequest): Promise<CommandBridg
     }
   }
 
+  // ─── Reject unknown commands with a typed error ──────────────
+  // resolveCommand returns null for commands not in the registry.
+  // We fail cleanly with `unknown_command` + the available list so
+  // clients can branch on `error.code` instead of crashing.
+  if (resolveCommand(req.command) === null) {
+    const trimmed = req.command.trim();
+    const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+    const cmdName = withoutSlash.split(/\s+/)[0] ?? "";
+    return errorResponse({
+      runId,
+      requestId,
+      code: "unknown_command",
+      message: `Unknown command: /${cmdName}. Type /help for available commands.`,
+      availableCommands: getCommandNames(),
+      timestamp,
+    });
+  }
+
+  // ─── Build the command context ───────────────────────────────
+  // The runId is passed through so registry handlers can forward it
+  // to CommandRouter methods (check/test/build accept runId) and to
+  // the ExecutionGateway (for /do). This is what makes the response
+  // runId == the runtime execution runId.
   const ctx: CommandContext = {
     cwd,
     userId: req.userId ?? null,
     workspaceId: req.workspaceId,
     rawInput: req.command,
+    runId,
+    mode: req.mode ?? "act",
   };
 
-  const response: CommandResponse = await dispatchRegistry(req.command, ctx);
+  // ─── Dispatch through the registry ───────────────────────────
+  // dispatchRegistry receives the RAW command string (which encodes
+  // any inline args like "/diff --staged"). The structured `args`
+  // from the request are appended so both inline and structured argv
+  // are preserved. Handlers receive the merged args array.
+  const response: CommandResponse = await dispatchRegistry(
+    req.command,
+    ctx,
+    req.args,
+  );
 
-  return {
+  return successResponse({
+    runId,
+    requestId,
     ok: response.ok,
     kind: response.kind,
-    data: response.data,
-    message: response.message,
-    runId,
-    timestamp,
+    message: response.message ?? "",
+    data: (response.data as Record<string, unknown>) ?? {},
     durationMs: response.durationMs,
-  };
+    timestamp,
+  });
 }
 
 // ─── Supported commands (registry-derived) ────────────────────────
@@ -106,7 +149,3 @@ export function isSupportedCommand(cmd: string): boolean {
 export function getSupportedCommands(): string[] {
   return getCommandNames();
 }
-
-// Re-export for backward compatibility
-export type { CommandResult };
-

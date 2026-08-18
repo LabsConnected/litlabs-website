@@ -16,8 +16,8 @@ import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { createShellExecutor } from "@litt/agent-core";
-import type { CommandRouter, CommandResult } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState } from "./runtime.js";
+import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
+import { getRuntimeStore, getRuntimeState, getExecutionGateway } from "./runtime.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
@@ -96,6 +96,15 @@ export interface CommandContext {
   workspaceId?: string;
   /** The raw command string as received (e.g. "/doctor --deep") */
   rawInput: string;
+  /**
+   * Canonical runId for this dispatch. Passed through to CommandRouter
+   * methods (check/test/build) and to the ExecutionGateway (for /do)
+   * so the response runId == the runtime execution runId. No second
+   * execution identity is minted by the bridge.
+   */
+  runId?: string;
+  /** Mission mode (PLAN/ACT/AUTO). Defaults to "act". */
+  mode?: MissionMode;
 }
 
 export interface CommandResponse {
@@ -190,21 +199,21 @@ async function handleDiff(args: string[], ctx: CommandContext): Promise<CommandR
 async function handleCheck(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const router = getRouter(ctx.cwd, ctx.userId);
-  const result = await router.check();
+  const result = await router.check(ctx.runId);
   return routerResultToResponse("check", result, t0);
 }
 
 async function handleBuild(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const router = getRouter(ctx.cwd, ctx.userId);
-  const result = await router.build();
+  const result = await router.build(ctx.runId);
   return routerResultToResponse("build", result, t0);
 }
 
 async function handleTest(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const router = getRouter(ctx.cwd, ctx.userId);
-  const result = await router.test();
+  const result = await router.test(ctx.runId);
   return routerResultToResponse("test", result, t0);
 }
 
@@ -214,9 +223,9 @@ async function handleGit(args: string[], ctx: CommandContext): Promise<CommandRe
   const validSubcmds = new Set(["status", "diff", "log", "branch", "show"]);
   if (!validSubcmds.has(subcmd)) {
     return {
-      kind: "error",
+      kind: "git_result",
       ok: false,
-      data: { subcmd },
+      data: { subcmd, output: `Unknown git subcommand: ${subcmd}. Valid: ${[...validSubcmds].join(", ")}` },
       durationMs: Date.now() - t0,
       message: `Unknown git subcommand: ${subcmd}. Valid: ${[...validSubcmds].join(", ")}`,
     };
@@ -329,9 +338,9 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
   const prompt = args.join(" ");
   if (!prompt) {
     return {
-      kind: "error",
+      kind: "brain_response",
       ok: false,
-      data: {},
+      data: { text: "" },
       durationMs: Date.now() - t0,
       message: "Usage: /ask <prompt>",
     };
@@ -348,9 +357,9 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
     };
   } catch (err) {
     return {
-      kind: "brain_error",
+      kind: "brain_response",
       ok: false,
-      data: {},
+      data: { text: "" },
       durationMs: Date.now() - t0,
       message: redactSecrets(err instanceof Error ? err.message : String(err)),
     };
@@ -359,33 +368,76 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
 
 async function handleDo(args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const command = args.join(" ");
-  if (!command) {
+  // /do executes a shell command. It MUST route through the canonical
+  // ExecutionGateway → CommandExecutor → ShellExecutor path — never
+  // child_process.execFile directly. The `mutability: "workspace_edit"`
+  // metadata alone is NOT enforcement; the gateway enforces mode/policy/
+  // approval before any shell invocation.
+  //
+  // Structured argv is preserved end-to-end. The first arg is the
+  // command, the rest are its arguments. No shell-string interpolation.
+  if (args.length === 0) {
+    // Usage errors and policy/approval denials are legitimate outcomes
+    // of /do, not implementation bugs. Return kind: "exec_result" with
+    // ok: false so the registry's kind-check doesn't flag this as a
+    // mismatch. The `error` kind is reserved for the registry's own
+    // dispatch failures (unknown command, handler crash).
     return {
-      kind: "error",
+      kind: "exec_result",
       ok: false,
-      data: {},
+      data: {
+        command: null,
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        policyEffect: "deny",
+        approved: false,
+        denialReason: "Usage: /do <command> [args...]",
+      },
       durationMs: Date.now() - t0,
-      message: "Usage: /do <command>",
+      message: "Usage: /do <command> [args...]",
     };
   }
-  // /do executes a shell command — classified as workspace_edit
-  // Parse command + args naively (no shell metacharacter interpretation)
-  const parts = command.split(/\s+/);
-  const cmd = parts[0];
-  const cmdArgs = parts.slice(1);
-  const result = await execShell(cmd, cmdArgs, ctx.cwd, 30_000);
+  const command = args[0];
+  const cmdArgs = args.slice(1);
+
+  const gateway = getExecutionGateway(ctx.cwd, ctx.mode ?? "act");
+  const gwResult = await gateway.execute({
+    toolId: "project.run",
+    inputs: { command, args: cmdArgs },
+    cwd: ctx.cwd,
+    mode: ctx.mode ?? "act",
+    runId: ctx.runId,
+    identity: {
+      tenantId: "terminal-server",
+      userId: ctx.userId ?? "terminal-server",
+      actorId: ctx.userId ?? "terminal-server",
+      // terminal-server's /internal/command is authenticated at the HTTP
+      // boundary (X-Internal-Service-Key). The gateway still enforces
+      // mode/policy/approval — but the caller is a trusted service.
+      trusted: true,
+      interaction: "headless",
+    },
+    timeoutMs: 30_000,
+  });
+
+  const result = gwResult.result;
   return {
     kind: "exec_result",
-    ok: result.exitCode === 0,
+    ok: result.success,
     data: {
-      command: cmd,
-      exitCode: result.exitCode,
-      stdout: redactSecrets(result.stdout),
-      stderr: redactSecrets(result.stderr),
+      command,
+      exitCode: (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
+      stdout: redactSecrets((result.data.stdout as string | undefined) ?? ""),
+      stderr: redactSecrets((result.data.stderr as string | undefined) ?? ""),
+      // Gateway enforcement metadata — proves this went through the
+      // canonical authority, not a direct execFile.
+      policyEffect: gwResult.policyEffect,
+      approved: gwResult.approved,
+      denialReason: gwResult.denialReason,
     },
     durationMs: Date.now() - t0,
-    message: result.exitCode === 0 ? undefined : `Exit code ${result.exitCode}`,
+    message: result.message || (result.success ? undefined : `Exit code ${result.data.exitCode ?? 1}`),
   };
 }
 
@@ -394,9 +446,9 @@ async function handleWeb(args: string[], ctx: CommandContext): Promise<CommandRe
   const query = args.join(" ");
   if (!query) {
     return {
-      kind: "error",
+      kind: "web_result",
       ok: false,
-      data: {},
+      data: { text: "" },
       durationMs: Date.now() - t0,
       message: "Usage: /web <query>",
     };
@@ -412,9 +464,9 @@ async function handleWeb(args: string[], ctx: CommandContext): Promise<CommandRe
     };
   } catch (err) {
     return {
-      kind: "brain_error",
+      kind: "web_result",
       ok: false,
-      data: {},
+      data: { text: "" },
       durationMs: Date.now() - t0,
       message: redactSecrets(err instanceof Error ? err.message : String(err)),
     };
@@ -648,10 +700,17 @@ export function validateRegistry(): string[] {
  * This is the ONE dispatch path. Both /internal/command and tests use this.
  *
  * Unknown commands produce a controlled error response — never a crash.
+ *
+ * `extraArgs` carries the structured argv from a `RemoteCommandRequest`.
+ * They are appended to the args parsed from the raw command string so
+ * both inline (`/diff --staged`) and structured (`{command:"diff",
+ * args:["--staged"]}`) argv are preserved end-to-end. Handlers receive
+ * the merged array.
  */
 export async function dispatchRegistry(
   rawInput: string,
   ctx: CommandContext,
+  extraArgs: string[] = [],
 ): Promise<CommandResponse> {
   const resolved = resolveCommand(rawInput);
 
@@ -671,9 +730,14 @@ export async function dispatchRegistry(
   }
 
   const { spec, args } = resolved;
+  // Merge inline-parsed args with structured argv from the request.
+  // Structured args take precedence (appended last) so a client sending
+  // `{command:"diff", args:["--staged"]}` gets the same result as
+  // `/diff --staged`.
+  const mergedArgs = [...args, ...extraArgs];
 
   try {
-    const response = await spec.handler(args, ctx);
+    const response = await spec.handler(mergedArgs, ctx);
     // Verify the handler returned the registered response kind
     if (response.kind !== spec.responseKind) {
       // Don't crash — but flag the mismatch

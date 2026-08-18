@@ -1,43 +1,51 @@
 /**
  * Remote command dispatcher — sends commands to terminal-server's
- * canonical CommandRouter via HTTP.
+ * canonical command dispatcher via HTTP.
  *
  * When `--remote` is passed, the CLI doesn't run commands locally.
  * Instead it sends them to terminal-server, which:
- *   1. Dispatches through the SAME CommandRouter from @litt/agent-core
+ *   1. Dispatches through the command registry / ExecutionGateway
+ *      from @litt/agent-core
  *   2. Updates the canonical RuntimeStore
  *   3. Broadcasts state via Socket.IO to all connected clients (Studio, CLI)
  *
  * This means `litt build --remote` and `/build` in Studio execute
- * the same CommandRouter instance and share the same runId.
+ * the same dispatcher and share the same runId.
+ *
+ * Protocol: imports the ONE shared `RemoteCommandRequest` /
+ * `RemoteCommandResponse` contract from `@litt/agent-core`. The server
+ * decodes the exact same schema. No duplicate interface definitions,
+ * no triple-deref (`result.result.result.message`) — the response
+ * `result` is a single-level `ToolResult`.
  */
 
-import type { CommandResult } from "@litt/agent-core";
+import type {
+  RemoteCommandRequest,
+  RemoteCommandResponse,
+  MissionMode,
+} from "@litt/agent-core";
+import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
 
 export interface RemoteDispatchOptions {
   terminalUrl?: string;
   internalKey?: string;
   cwd?: string;
-}
-
-export interface RemoteDispatchResult {
-  ok: boolean;
-  result: CommandResult;
-  runId: string;
-  timestamp: number;
+  mode?: MissionMode;
 }
 
 const DEFAULT_TERMINAL_URL = "http://127.0.0.1:4001";
 
 /**
  * Send a command to terminal-server's /internal/command endpoint.
- * Returns the CommandResult from the canonical CommandRouter.
+ * Returns the canonical RemoteCommandResponse — the SAME schema the
+ * server produces. Structured argv is preserved end-to-end (never
+ * encoded into a shell string).
  */
 export async function dispatchRemote(
   command: string,
-  args: Record<string, unknown> | undefined,
+  args: string[] = [],
   options: RemoteDispatchOptions = {},
-): Promise<RemoteDispatchResult> {
+): Promise<RemoteCommandResponse> {
   const baseUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
   const key = options.internalKey ?? process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
 
@@ -48,31 +56,43 @@ export async function dispatchRemote(
     );
   }
 
+  const requestBody: RemoteCommandRequest = {
+    command,
+    args,
+    cwd: options.cwd ?? process.cwd(),
+    mode: options.mode,
+  };
+
   const response = await fetch(`${baseUrl}/internal/command`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Internal-Service-Key": key,
     },
-    body: JSON.stringify({
-      command,
-      args,
-      cwd: options.cwd ?? process.cwd(),
-    }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(240_000),
   });
 
-  const payload = await response.json().catch(() => null) as RemoteDispatchResult & { error?: string } | null;
+  const payload = await response.json().catch(() => null) as
+    | (RemoteCommandResponse & { error?: string })
+    | null;
 
   if (!response.ok) {
-    throw new Error(payload?.error ?? `Remote command failed (${response.status})`);
+    // HTTP-level failure (auth, 500, etc.). The server may still return
+    // a partial RemoteCommandResponse shape with a top-level `error`
+    // string (legacy) — prefer the typed `error.code` if present.
+    const typedMessage = payload?.error && typeof payload.error === "object"
+      ? (payload.error as { message?: string }).message
+      : undefined;
+    const legacyMessage = typeof payload?.error === "string" ? payload.error : undefined;
+    throw new Error(typedMessage ?? legacyMessage ?? `Remote command failed (${response.status})`);
   }
 
   if (!payload) {
     throw new Error("No response from terminal server");
   }
 
-  return payload;
+  return payload as RemoteCommandResponse;
 }
 
 /**
@@ -89,3 +109,7 @@ export async function isRemoteAvailable(options: RemoteDispatchOptions = {}): Pr
     return false;
   }
 }
+
+// Re-export the type guards so callers (index.ts) can branch on typed
+// errors without re-importing from agent-core.
+export { isRemoteError, hasRemoteResult };

@@ -47,7 +47,7 @@ import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
-import { dispatchRemote } from "./lib/remote.js";
+import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
@@ -63,8 +63,38 @@ const lazyCockpit = async (): Promise<CommandHandler> =>
 
 const VERSION = CLI_VERSION;
 
-/** Commands that can be dispatched remotely through terminal-server */
-const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "explain", "desktop"]);
+/**
+ * Commands that can be dispatched remotely through terminal-server.
+ *
+ * This is a deliberately curated subset of the server's command
+ * registry (see terminal-server/command-registry.ts). Commands that
+ * require local resources (doctor probes the local machine, run streams
+ * a local PTY, ask/explain hit the LLM directly) are NOT remoteable.
+ *
+ * The server is the source of truth: if a command is sent remotely that
+ * the server doesn't support, the server returns a typed
+ * `unknown_command` error (see RemoteCommandError) and the CLI reports
+ * it cleanly — never a crash, never undefined dereferencing.
+ */
+const REMOTEABLE_COMMANDS = new Set([
+  "status",
+  "diff",
+  "check",
+  "test",
+  "build",
+  "desktop",
+  // Brain/system commands that the server registry supports and that
+  // make sense to dispatch remotely (no local-only resources).
+  "git",
+  "ask",
+  "do",
+  "web",
+  "model",
+  "doctor",
+  "studio",
+  "local",
+  "help",
+]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
 const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
@@ -129,7 +159,7 @@ async function main(): Promise<number> {
       console.error(`--remote is only supported for: ${[...REMOTEABLE_COMMANDS].join(", ")}`);
       return 1;
     }
-    return await runRemote(command, rest);
+    return await runRemote(command, rest, mode);
   }
 
   // Resolve handler — lazy-load heavy commands (Ink/React) on demand
@@ -182,30 +212,55 @@ async function main(): Promise<number> {
 }
 
 /**
- * Dispatch a command through terminal-server's canonical CommandRouter.
- * The same CommandRouter that Studio Web uses — so CLI and Studio share
- * the same RuntimeStore, same runId, same Socket.IO broadcasts.
+ * Dispatch a command through terminal-server's canonical command
+ * dispatcher. The same dispatcher that Studio Web uses — so CLI and
+ * Studio share the same RuntimeStore, same runId, same Socket.IO
+ * broadcasts.
+ *
+ * Protocol: sends a RemoteCommandRequest (structured argv preserved
+ * end-to-end) and decodes a RemoteCommandResponse (single-level
+ * `result` ToolResult — no triple-deref). Typed errors are branched
+ * on `error.code` instead of string-matching.
  */
-async function runRemote(command: string, _args: string[]): Promise<number> {
+async function runRemote(
+  command: string,
+  args: string[],
+  mode: "plan" | "act" | "auto" = "act",
+): Promise<number> {
   header(`${command} (remote)`);
   try {
-    const result = await dispatchRemote(command, undefined, {
+    const response = await dispatchRemote(command, args, {
       cwd: detectProject().rootDir,
+      mode,
     });
 
-    if (!result.ok) {
-      fail(result.result.result.message);
-      const stderr = result.result.result.data?.stderr as string | undefined;
-      if (stderr) console.log(`${c.gray}${stderr}${c.reset}`);
+    // Protocol-level error (unknown command, gateway denial, etc.)
+    if (isRemoteError(response)) {
+      const err = response.error;
+      fail(`${err.code}: ${err.message}`);
+      if (err.code === "unknown_command" && err.availableCommands?.length) {
+        console.error(`${c.dim}  Available: ${err.availableCommands.join(", ")}${c.reset}`);
+      }
+      console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
       return 1;
     }
 
-    ok(result.result.result.message);
-    const stdout = result.result.result.data?.stdout as string | undefined;
+    // Command-level failure (e.g. build exited non-zero)
+    if (!response.ok || !hasRemoteResult(response)) {
+      fail(response.result?.message ?? `Remote command failed (kind=${response.kind})`);
+      const stderr = response.result?.data?.stderr as string | undefined;
+      if (stderr) console.log(`${c.gray}${stderr}${c.reset}`);
+      console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
+      return 1;
+    }
+
+    ok(response.result.message);
+    const stdout = response.result.data?.stdout as string | undefined;
     if (stdout) console.log(`${c.gray}${stdout}${c.reset}`);
 
-    // Show runId for cross-surface verification
-    console.log(`${c.gray}runId: ${result.runId}${c.reset}`);
+    // Show runId for cross-surface verification — this is the ACTUAL
+    // runtime execution runId, not a second identity minted by the bridge.
+    console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
     return 0;
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
