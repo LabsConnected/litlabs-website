@@ -101,6 +101,7 @@ export function activityColor(tag: string): string {
       return COLORS.warning;
     case "CHAT":
     case "INFO":
+    case "LiTT":
       return COLORS.brand;
     default:
       return COLORS.secondary;
