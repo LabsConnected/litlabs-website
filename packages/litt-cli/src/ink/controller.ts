@@ -211,6 +211,7 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
     if (input === "/clear") {
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
+      store.actions.clearChatTranscript();
       return;
     }
     if (input === "/help") {
@@ -516,6 +517,13 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           text: truncateActivity(input, 40),
           fullText: input,
         });
+        // Persist the user message to the chat transcript (rendered once).
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
         // CHAT sets isProcessing, NOT holoState=UNDERSTANDING.
         // holoState stays IDLE — CHAT is not a mission.
         store.actions.setIsProcessing(true);
@@ -528,6 +536,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           const tools = gateway.getTools();
           const agentStore = session.getStore();
           const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
+          // Routing trace — requested (brain/policy) vs resolved (route()).
+          // The brain label is the configured policy identity; the resolved
+          // label is what route() actually picked for this input. If they
+          // differ, fallbackReason explains why (AUTO selection, escalation,
+          // availability fallback, etc.).
+          const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
           store.actions.addActivity({
             id: `act_${Date.now()}_route`,
             ts: Date.now(),
@@ -540,11 +554,23 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           store.actions.setActiveModel(routed.label);
           const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
 
+          // Persist a streaming assistant message — the live preview.
+          // Finalized ONCE with result.content when the loop completes.
+          store.actions.addChatMessage({
+            role: "assistant",
+            content: "",
+            ts: Date.now(),
+            status: "streaming",
+            requestedModel,
+            resolvedModel: routed.label,
+            servedModel: null,
+            fallbackReason: routed.fallbackReason,
+          });
+
           // Track tool calls for structured activity events.
           // CHAT can call tools (e.g. project.status) but does NOT
           // progress through mission lifecycle states.
           let chatToolCallCount = 0;
-          let chatResponseText = "";
 
           const result = await runAgentLoop(input, {
             model, tools, shell: session.getShell(),
@@ -556,10 +582,11 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             onModelStream: (event) => {
               if (event.type === "delta") {
                 // Filter out raw tool_call/json markup — never dump
-                // model protocol internals to the activity feed.
+                // model protocol internals to the chat transcript.
                 if (isToolCallMarkup(event.text)) return;
-                // Accumulate clean response text for a single summary event
-                chatResponseText += event.text;
+                // Live streaming preview — append to the pending
+                // assistant message. Finalized once on completion.
+                store.actions.appendAssistantDelta(event.text);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -584,6 +611,21 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             },
           });
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
+          // ─── Finalize the assistant message ONCE ───
+          // result.content is the canonical final response (tool_call
+          // blocks stripped by the agent loop). Persist it exactly once.
+          // An empty result.content is rendered as an explicit error —
+          // never a blank completed turn.
+          const finalContent = result.content.trim()
+            ? result.content
+            : "LiTT returned an empty response. The turn was not completed.";
+          const finalStatus: "complete" | "error" =
+            result.termination === "complete" ? "complete" : "error";
+          store.actions.finalizeAssistantMessage({
+            content: finalContent,
+            status: finalStatus,
+            servedModel: model.activeModel,
+          });
           const seconds = (result.durationMs / 1000).toFixed(1);
           // Single concise DONE event — not raw response body
           store.actions.addActivity({
@@ -602,6 +644,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
             ts: Date.now(), type: "error", tag: "ERROR",
             text: truncateActivity(errText, 60),
             fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
+          });
+          // Finalize the streaming assistant message as an ERROR —
+          // never leave it blank or partially streamed.
+          store.actions.finalizeAssistantMessage({
+            content: errText,
+            status: "error",
           });
           // Clear processing on failure too — composer must return to editable
           store.actions.setIsProcessing(false);
@@ -624,6 +672,13 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         type: "agent.request",
         tag: "THINK",
         text: "Understanding request",
+      });
+      // Persist the user message to the chat transcript (rendered once).
+      store.actions.addChatMessage({
+        role: "user",
+        content: input,
+        ts: Date.now(),
+        status: "complete",
       });
 
       try {
@@ -651,6 +706,8 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         });
 
         const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
+        // Routing trace — requested (brain/policy) vs resolved (route()).
+        const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
         store.actions.addActivity({
           id: `act_${Date.now()}_route`,
           ts: Date.now(),
@@ -662,6 +719,21 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         // confirmed after streaming sees the runtime response model.
         store.actions.setActiveModel(routed.label);
         const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
+
+        // Persist a streaming assistant message — live preview during
+        // the mission. Finalized ONCE with result.content when the loop
+        // completes. The mission body is the same canonical response
+        // the user sees in CHAT — one brain, one rendering.
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: "",
+          ts: Date.now(),
+          status: "streaming",
+          requestedModel,
+          resolvedModel: routed.label,
+          servedModel: null,
+          fallbackReason: routed.fallbackReason,
+        });
 
         // ─── SEMANTIC PLANNING — plan BEFORE execution ───
         // The model generates a semantic execution plan. planMission()
@@ -722,7 +794,14 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           // controller runs the gate separately — no repair loop.
           verificationGate: session.getVerificationGate(),
           onModelStream: (event) => {
-            // Model prose (deltas) do NOT go into the activity feed.
+            // Model prose (deltas) do NOT go into the activity feed,
+            // but DO stream into the chat transcript as a live preview.
+            // Filter out raw tool_call/json markup — never dump model
+            // protocol internals to the transcript.
+            if (event.type === "delta") {
+              if (isToolCallMarkup(event.text)) return;
+              store.actions.appendAssistantDelta(event.text);
+            }
           },
           onToolStream: (chunk: StreamChunk) => {
             session.emitAgentEvent({
@@ -853,6 +932,24 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
 
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
 
+        // ─── Finalize the assistant message ONCE ───
+        // result.content is the canonical final response (tool_call
+        // blocks stripped by the agent loop). Persist it exactly once.
+        // An empty result.content is rendered as an explicit error —
+        // never a blank completed turn.
+        {
+          const finalContent = result.content.trim()
+            ? result.content
+            : "LiTT returned an empty response. The mission turn was not completed.";
+          const finalStatus: "complete" | "error" =
+            result.termination === "complete" ? "complete" : "error";
+          store.actions.finalizeAssistantMessage({
+            content: finalContent,
+            status: finalStatus,
+            servedModel: model.activeModel,
+          });
+        }
+
         // ─── VerificationGate owns completion ───
         // The agent loop already ran the gate (if configured). Use the
         // loop's verification result if available — it contains the
@@ -965,6 +1062,12 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           ts: Date.now(), type: "error", tag: "ERROR",
           text: truncateActivity(errText, 60),
           fullText: err instanceof Error ? `${errText}\nStack: ${err.stack ?? "(no stack)"}` : errText,
+        });
+        // Finalize the streaming assistant message as an ERROR —
+        // never leave it blank or partially streamed.
+        store.actions.finalizeAssistantMessage({
+          content: errText,
+          status: "error",
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");

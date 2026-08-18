@@ -10,7 +10,8 @@
  * about itself (which panel is selected, what the user typed, etc).
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { ChatTranscriptStore } from "./chat-transcript-store.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -43,6 +44,43 @@ export interface ApprovalPrompt {
   action: string;
   risk: string;
   scope: string;
+}
+
+/**
+ * Chat transcript message — the canonical assistant/user conversation.
+ *
+ * This is the PERSISTED response body. The activity feed is a truncated
+ * operator log; the transcript is the full, rendered assistant content.
+ *
+ * Lifecycle:
+ *   - On submit: a "user" message is appended.
+ *   - During streaming: an "assistant" message with status "streaming"
+ *     is appended and its body grows as deltas arrive (live preview).
+ *   - On completion: the streaming message is finalized to status
+ *     "complete" with result.content (the canonical final response,
+ *     persisted ONCE — never duplicated).
+ *   - On error: the streaming message is finalized to status "error"
+ *     with the error text (never blank).
+ *
+ * Routing trace (assistant messages only):
+ *   - requestedModel: the brain/policy label (what the user configured)
+ *   - resolvedModel:  the routed model label (what route() picked)
+ *   - servedModel:    the model the provider actually served (after
+ *     streaming confirms it; null until then)
+ *   - fallbackReason: why the resolved model differs from the requested
+ *     policy, if applicable (null when the policy was honored exactly)
+ */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+  status: "streaming" | "complete" | "error";
+  /** Routing trace — assistant messages only. */
+  requestedModel?: string;
+  resolvedModel?: string;
+  servedModel?: string | null;
+  fallbackReason?: string | null;
 }
 
 /**
@@ -168,6 +206,9 @@ export interface CockpitUIState {
   isProcessing: boolean;
   /** Live git branch — refreshed before each submit to match tool truth. */
   branch: string;
+  /** Chat transcript — persisted assistant/user conversation body.
+   *  Survives rerender and overlay open/close. Bounded to last 50 messages. */
+  chatTranscript: ChatMessage[];
 }
 
 /** Overlay type — which modal/picker is open */
@@ -203,6 +244,13 @@ export function useCockpitStore() {
   const [canonicalMission, setCanonicalMission] = useState<CanonicalMissionProjection | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branch, setBranch] = useState<string>("unknown");
+  // The transcript is owned by a pure ChatTranscriptStore (testable in
+  // node env without a React renderer). The hook mirrors its snapshot
+  // into React state so renders stay reactive.
+  const transcriptStoreRef = useRef<ChatTranscriptStore | null>(null);
+  if (!transcriptStoreRef.current) transcriptStoreRef.current = new ChatTranscriptStore();
+  const transcriptStore = transcriptStoreRef.current;
+  const [chatTranscript, setChatTranscript] = useState<ChatMessage[]>(() => transcriptStore.snapshot());
 
   const addActivity = useCallback((entry: ActivityEntry) => {
     // Bound the store: keep last 200 entries, and cap fullText at 4KB
@@ -213,6 +261,53 @@ export function useCockpitStore() {
       : entry;
     setActivityLog((prev) => [...prev.slice(-200), bounded]);
   }, []);
+
+  // ─── Chat transcript actions ─────────────────────────────────────
+  // The transcript is the PERSISTED assistant response body. All
+  // mutations go through the pure ChatTranscriptStore (testable without
+  // a React renderer) and the result is mirrored into React state.
+  const syncTranscript = useCallback(() => {
+    setChatTranscript(transcriptStore.snapshot());
+  }, [transcriptStore]);
+
+  /** Append a new user or assistant message. Returns the message id. */
+  const addChatMessage = useCallback((msg: Omit<ChatMessage, "id">): string => {
+    const id = transcriptStore.add(msg);
+    syncTranscript();
+    return id;
+  }, [transcriptStore, syncTranscript]);
+
+  /**
+   * Append a delta to the LAST assistant message (streaming live preview).
+   * If the last message is not a streaming assistant message, this is a
+   * no-op (the caller must have added one first). Idempotent per delta.
+   */
+  const appendAssistantDelta = useCallback((text: string) => {
+    transcriptStore.appendDelta(text);
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
+
+  /**
+   * Finalize the LAST assistant message with canonical content + status.
+   * Called ONCE when the agent loop completes (success) or errors.
+   * Replaces the streaming body with the authoritative result.content so
+   * the persisted message is exactly what the runtime produced — never a
+   * partial stream, never duplicated. Also stamps the served model.
+   */
+  const finalizeAssistantMessage = useCallback((options: {
+    content: string;
+    status: "complete" | "error";
+    servedModel?: string | null;
+  }) => {
+    transcriptStore.finalize(options);
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
+
+  /** Clear the chat transcript (e.g. /clear). */
+  const clearChatTranscript = useCallback(() => {
+    transcriptStore.clear();
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
 
   /** Start a new mission */
   const startMission = useCallback((text: string, runId: string | null = null) => {
@@ -344,6 +439,7 @@ export function useCockpitStore() {
       canonicalMission,
       isProcessing,
       branch,
+      chatTranscript,
     },
     actions: {
       setSelectedPanel,
@@ -374,6 +470,10 @@ export function useCockpitStore() {
       setCanonicalMission,
       setIsProcessing,
       setBranch,
+      addChatMessage,
+      appendAssistantDelta,
+      finalizeAssistantMessage,
+      clearChatTranscript,
     },
   };
 }

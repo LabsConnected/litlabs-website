@@ -34,6 +34,7 @@ import { Subsystems } from "./subsystems.js";
 import { LiTTHoloPanel } from "./holo-panel.js";
 import { MissionSection } from "./mission-section.js";
 import { ActivityStream } from "./activity-stream.js";
+import { ChatTranscript } from "./chat-transcript.js";
 import { FilesInfo } from "./files-info.js";
 import { QuickActions } from "./quick-actions.js";
 import { CommandDock } from "./command-dock.js";
@@ -349,6 +350,17 @@ export function CockpitApp({
           {store.state.approvalPrompt && (
             <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
           )}
+
+          {/* Chat transcript — the canonical assistant response body.
+              Always visible (not gated by layoutMode). Survives overlay
+              open/close because it lives in the CockpitStore, not in
+              overlay-local state. This is the ONE place the assistant
+              response is rendered — the activity feed is a truncated
+              operator log, not a response renderer. */}
+          <ChatTranscript
+            messages={store.state.chatTranscript}
+            maxMessages={layoutMode === "full" ? 6 : layoutMode === "medium" ? 4 : 3}
+          />
 
           {/* Activity stream — always visible, shrinks in compact mode */}
           <ActivityStream

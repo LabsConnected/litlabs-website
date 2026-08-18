@@ -562,7 +562,7 @@ Be concise. Never say "I am an AI assistant" or "I am not a software project".
  *
  * This provider boundary is used by the authenticated Desktop operator.
  * Model-selected tools are converted into LiTT's canonical tool_call
- * envelope; runAgentLoop then dispatches through ExecutionGateway.
+ * envelope; runAgentLoop then dispatches through the canonical gateway.
  * ====================================================================== */
 
 export type LiTTNativeTool = {
@@ -838,7 +838,7 @@ export async function streamLiTTMessagesWithTools(
   /*
    * ModelProvider expects stream events. For now the native tool transport
    * emits the completed model payload as one delta. Actual execution events
-   * continue through Agent Core / ExecutionGateway.
+   * continue through Agent Core / the canonical gateway.
    */
   emit({
     type: "delta",

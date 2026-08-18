@@ -17,10 +17,6 @@ import path from "path";
 
 import {
   runAgentLoop,
-  ToolRegistry,
-  createShellExecutor,
-  CommandExecutor,
-  ExecutionGateway,
   type ChatMessage,
   type ModelProvider,
   type ModelResult,
@@ -36,7 +32,12 @@ import {
   type LiTTNativeTool,
 } from "./litt-code";
 
-import { getRuntimeStore } from "./runtime";
+import {
+  getRuntimeStore,
+  getExecutionGateway,
+  getCanonicalToolRegistry,
+  getCanonicalShell,
+} from "./runtime";
 
 
 class SharedLiTTModelProvider implements ModelProvider {
@@ -120,40 +121,23 @@ export async function streamLiTTOperator(
   const projectRoot =
     path.resolve(cwd);
 
-  const shell =
-    createShellExecutor(projectRoot);
-
-  // Use the canonical singleton RuntimeStore — never create a second
-  // authority in the same terminal-server process.  Both the
-  // terminal:input path (runLiTTOperator) and the Desktop litt:chat
-  // path (streamLiTTOperator) must share one store so mission state,
-  // event projection, and runtime truth remain consistent.
+  // Use canonical singletons from runtime.ts — never create a second
+  // RuntimeStore or ExecutionGateway in the same terminal-server process.
+  // Both the terminal:input path (runLiTTOperator) and the Desktop
+  // litt:chat path (streamLiTTOperator) must share one store, one
+  // gateway, one tool registry so mission state, event projection,
+  // and runtime truth remain consistent.
   const store =
     getRuntimeStore();
 
-  const executor =
-    new CommandExecutor(
-      shell,
-      store,
-    );
+  const gateway =
+    getExecutionGateway(projectRoot, "act");
 
   const tools =
-    new ToolRegistry();
+    getCanonicalToolRegistry(projectRoot);
 
-  const gateway =
-    new ExecutionGateway({
-      tools,
-      shell,
-      executor,
-      store,
-      projectId: projectRoot,
-
-      /*
-       * Desktop approval UI comes next.
-       * Until then elevated operations fail closed.
-       */
-      onApprovalRequired: null,
-    });
+  const shell =
+    getCanonicalShell(projectRoot);
 
   const model =
     new SharedLiTTModelProvider(
