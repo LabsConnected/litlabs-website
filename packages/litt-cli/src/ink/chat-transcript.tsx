@@ -95,6 +95,20 @@ function UserMessage({ msg }: { msg: ChatMessage }): React.ReactElement {
   );
 }
 
+/**
+ * Single chat message — unbordered, for embedding in any surface
+ * (the minimal shell transcript, the bordered CHAT panel, overlays).
+ */
+export function ChatMessageView({ msg }: { msg: ChatMessage }): React.ReactElement {
+  return (
+    <Box flexDirection="column">
+      {msg.role === "user"
+        ? <UserMessage msg={msg} />
+        : <AssistantMessage msg={msg} />}
+    </Box>
+  );
+}
+
 export interface ChatTranscriptProps {
   messages: ChatMessage[];
   /** Max messages to render (most recent). Default 6. */
@@ -111,9 +125,7 @@ export function ChatTranscript({ messages, maxMessages = 6 }: ChatTranscriptProp
       <Text bold color={COLORS.brand}>CHAT</Text>
       {visible.map((msg) => (
         <Box key={msg.id} flexDirection="column">
-          {msg.role === "user"
-            ? <UserMessage msg={msg} />
-            : <AssistantMessage msg={msg} />}
+          <ChatMessageView msg={msg} />
         </Box>
       ))}
     </Box>

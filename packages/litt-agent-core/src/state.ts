@@ -864,9 +864,17 @@ export class RuntimeStore {
     const mission = this.state.mission;
     if (!mission) return;
     if (!isValidMissionTransition(mission.status, "failed")) {
-      // From "verifying" we can go to "failed" via "working" first
-      if (mission.status === "verifying" && isValidMissionTransition("verifying", "working")) {
+      // Route through the legal state machine path first:
+      //   "verifying" → working → failed  (existing special case)
+      //   "planning"  → working → failed  (mission never left planning —
+      //     e.g. a fabricated answer with zero tool calls produced no
+      //     setCurrentStep, so failMission must still end honestly)
+      const canStartWork =
+        (mission.status === "verifying" || mission.status === "planning") &&
+        isValidMissionTransition(mission.status, "working");
+      if (canStartWork) {
         mission.status = "working";
+        if (!mission.startedAt) mission.startedAt = new Date().toISOString();
       } else {
         return;
       }

@@ -139,10 +139,11 @@ export function OverlayKeyboardProvider({
       }
     }
 
-    // No overlay — dispatch to app shortcut handler (Ctrl+K/L/C, Ctrl+C)
-    // F2 is handled by the raw listener above (Ink strips F-key input).
-    // Only ctrl/escape keys are dispatched here; printable chars go to TextInput.
-    if (keyInfo.ctrl || keyInfo.escape) {
+    // No overlay — dispatch to app shortcut handler (Ctrl+K/L/C/D/N/R/O,
+    // Ctrl+C, Tab=Plan/Act, ?=help). F2 is handled by the raw listener
+    // above (Ink strips F-key input). Only ctrl/escape/tab keys are
+    // dispatched here; printable chars go to the composer's useInput.
+    if (keyInfo.ctrl || keyInfo.escape || keyInfo.tab) {
       appHandlerRef.current(input, keyInfo);
     }
   }, []));

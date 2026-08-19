@@ -279,10 +279,11 @@ Usage: litt [command] [options]
   Both surfaces share one canonical RuntimeSession — same brain, same truth.
 
 Commands:
-  (default)  Launch the Ink operator cockpit in the current terminal
-  shell      Explicit alias for the Ink cockpit (same as bare 'litt')
-  cockpit    Alias for the Ink cockpit
-  tui        Alias for the Ink cockpit
+  (default)  Launch the LiTT shell in the current terminal
+  shell      Explicit alias for the LiTT shell (same as bare 'litt')
+  shell --window  Open LiTT in a dedicated terminal window (Windows Terminal)
+  cockpit    Alias for the LiTT shell
+  tui        Alias for the LiTT shell
   desktop    Launch the LiTT Desktop (Tauri) GUI application
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version

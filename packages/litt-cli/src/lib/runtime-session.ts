@@ -229,6 +229,31 @@ export class RuntimeSession {
   }
 
   /**
+   * Set the execution mode live (Tab toggle, /plan, /act).
+   * PLAN is enforced at the ExecutionGateway — mutations are denied,
+   * never silently allowed. The agent loop + gateway + executor all
+   * read the mode through this session, so one setter flips the
+   * whole chain.
+   */
+  setMode(mode: "plan" | "act" | "auto"): void {
+    this._mode = mode;
+  }
+
+  /**
+   * Switch the session's canonical working directory (/workspace).
+   * The gateway (projectId) and verification gate are invalidated so
+   * the next access re-binds to the new root. The store keeps its own
+   * per-mission roots — missions created after the switch use the new
+   * projectRoot.
+   */
+  setCwd(cwd: string): void {
+    if (cwd === this._cwd) return;
+    this._cwd = cwd;
+    this._gateway = null;
+    this._verificationGate = null;
+  }
+
+  /**
    * Get the canonical working directory (project root).
    */
   getCwd(): string {

@@ -26,8 +26,22 @@ import { RuntimeClient } from "../lib/runtime-client.js";
 import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c } from "../lib/utils.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
+import { getGitState } from "../lib/git-state.js";
+import { launchShellWindow } from "../lib/window-launcher.js";
 
 export async function cockpitCommand(args: string[]): Promise<number> {
+  // `litt shell --window` / `litt cockpit -w` — open a dedicated LiTT
+  // terminal window (Windows Terminal profile) and return immediately.
+  if (args[0] === "--window" || args[0] === "-w") {
+    const launched = launchShellWindow(process.cwd());
+    if (!launched) {
+      fail("Could not open a LiTT window. Run 'litt shell' inside a terminal instead.");
+      return 1;
+    }
+    console.log("⚡ LiTT window launched.");
+    return 0;
+  }
+
   // Check for TTY — Ink requires raw mode on stdin
   if (!process.stdin.isTTY) {
     fail("LiTT cockpit requires an interactive terminal (TTY).");
@@ -127,10 +141,11 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     return result.result.success ? 0 : 1;
   }
 
-  // Parse git status for file counts
-  const gitStatus = project.gitStatus ?? "";
-  const gitModified = (gitStatus.match(/^.M/gm) ?? []).length;
-  const gitUntracked = (gitStatus.match(/^\?\?/gm) ?? []).length;
+  // FILES counter — canonical git state (same source as litt doctor,
+  // litt status, and the agent mission's project.status tool).
+  const gitState = getGitState(projectRoot);
+  const gitModified = gitState.changed;
+  const gitUntracked = gitState.untracked;
 
   // Launch the Ink cockpit, wrapped in an error boundary (spec §39).
   const { waitUntilExit } = render(

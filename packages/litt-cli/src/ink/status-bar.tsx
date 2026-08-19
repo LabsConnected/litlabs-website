@@ -1,22 +1,22 @@
 /**
- * StatusBar — single bottom context line (spec §31).
+ * StatusBar — the LiTT shell's two-line bottom bar.
  *
- * Wide:     C:\Dev\Homebase-3.0 | fix/litt-terminal-runtime-ui | GPT-5.6 Sol | ctx — | IDLE
- * Standard: Homebase-3.0 | fix/runtime-ui | SOL | ctx — | IDLE
- * Narrow:   Homebase-3.0 | SOL | ctx —
+ *   LiTT Auto → GPT-5.6                    ○ Plan   ● Act
+ *   litlabs-website · main · LOCAL              +292 -96
  *
- * Priority order if space is limited:
- *   1. project  2. run state  3. model  4. context  5. branch  6. version
+ * Right-side states (one at a time):
+ *   clean          — nothing changed
+ *   +292 -96       — dirty (modified + untracked)
+ *   ◉ Working · 12s — mission/chat in flight
+ *   ! failed · n   — last mission failed (message + [v] hint)
  *
- * No fake statuses. Model shown only when the runtime has resolved one.
- * Context % is omitted until real token counts are wired in — shows
- * "ctx —" rather than fabricating a number (spec §33).
+ * No fake statuses. Everything comes from canonical state.
  */
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
-import { COLORS, stateColor } from "./colors.js";
-import type { HoloState } from "./cockpit-store.js";
+import { COLORS } from "./colors.js";
+import type { HoloState, MissionState } from "./cockpit-store.js";
 
 /** Shorten model name: "anthropic/claude-sonnet-4.6" → "Sonnet 4.6" */
 function shortModelName(model: string | null): string {
@@ -39,108 +39,132 @@ function truncateTail(text: string, max: number): string {
   return "…" + text.slice(text.length - (max - 1));
 }
 
-/** Truncate a path to fit, preserving the head (drive letter) + tail. */
-function truncatePath(path: string, max: number): string {
-  if (path.length <= max) return path;
-  if (max <= 3) return path.slice(0, max);
-  const head = path.slice(0, 2);
-  const tail = truncateTail(path, max - 3);
-  return `${head}…${tail.slice(2)}`;
+function isWorking(h: HoloState): boolean {
+  return h === "UNDERSTANDING" || h === "PLANNING" || h === "READING"
+    || h === "EDITING" || h === "RUNNING" || h === "TESTING"
+    || h === "VERIFYING" || h === "APPROVAL";
 }
 
 export interface StatusBarProps {
-  connected: boolean;
-  localRuntime: string;
-  remoteRuntime: string;
-  cwd: string;
   project: string;
   branch: string;
+  localRuntime: string;
   holoState: HoloState;
   brain: string;
   activeModel: string | null;
-  source: string;
-  mode: string;
-  runId: string | null;
+  mode: "plan" | "act";
+  isProcessing: boolean;
+  busySince: number | null;
+  missionState: MissionState | null;
   gitModified: number;
   gitUntracked: number;
 }
 
 export function StatusBar({
-  localRuntime, cwd, project, branch, holoState, activeModel,
+  project, branch, localRuntime, holoState, brain, activeModel,
+  mode, isProcessing, busySince, missionState, gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
-  const band = width >= 120 ? "wide" : width >= 80 ? "standard" : "narrow";
 
-  const localIcon = localRuntime === "ready" ? "●" : "○";
-  const localColor = localRuntime === "ready" ? COLORS.success : COLORS.warning;
-  const sColor = stateColor(holoState);
-  const modelShort = shortModelName(activeModel);
-  // Context % is not yet wired to real token counts (spec §33).
-  // Show "ctx —" rather than fabricating a number.
-  const ctxLabel = "ctx —";
-  const sep = " | ";
+  const working = isProcessing || isWorking(holoState);
+  const busy = working || holoState === "COMPLETE" || holoState === "FAILED"
+    || holoState === "CANCELLED" || holoState === "TIMEOUT";
 
-  if (band === "narrow") {
-    const projectShort = truncateTail(project, 18);
-    const modelTiny = modelShort ? truncateTail(modelShort, 10) : "";
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Text dimColor>{"─".repeat(Math.min(width, 60))}</Text>
-        <Box>
-          <Text color={localColor}>{localIcon}</Text>
-          <Text color={COLORS.working} bold>{` ${projectShort}`}</Text>
-          {modelTiny && <Text dimColor>{sep}</Text>}
-          {modelTiny && <Text color={COLORS.info}>{modelTiny}</Text>}
-          <Text dimColor>{sep}</Text>
-          <Text color={COLORS.secondary}>{ctxLabel}</Text>
-        </Box>
-      </Box>
+  // Right-hand status: clean / +N -M / ◉ Working · Ns / ! failed
+  let right: React.ReactElement;
+  if (working) {
+    // Real elapsed time: busySince (chat) or mission startedAt (mission).
+    const started = busySince ?? missionState?.startedAt ?? Date.now();
+    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    right = (
+      <Text color={COLORS.working} bold>
+        ◉ Working · {seconds}s
+      </Text>
     );
+  } else if (missionState && (missionState.state === "FAILED" || missionState.state === "CANCELLED" || missionState.state === "TIMEOUT")) {
+    const label = missionState.state === "FAILED" ? "failed" : missionState.state.toLowerCase();
+    const tests = missionState.testResults && missionState.testResults.failed > 0
+      ? ` · ${missionState.testResults.failed} test${missionState.testResults.failed !== 1 ? "s" : ""} failing`
+      : "";
+    right = (
+      <Text color={COLORS.error} bold>
+        ! {label}{tests}  <Text dimColor>[v] View</Text>
+      </Text>
+    );
+  } else if (gitModified + gitUntracked > 0) {
+    right = (
+      <Text color={COLORS.warning}>
+        +{gitModified + gitUntracked}
+        <Text dimColor>  </Text>
+      </Text>
+    );
+  } else {
+    right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
   }
 
-  if (band === "standard") {
-    const projectShort = truncateTail(project, 24);
-    const branchShort = truncateTail(branch, 18);
-    const modelStd = modelShort ? truncateTail(modelShort, 16) : "";
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Text dimColor>{"─".repeat(Math.min(width, 60))}</Text>
-        <Box>
-          <Text color={localColor}>{localIcon}</Text>
-          <Text color={COLORS.working} bold>{` ${projectShort}`}</Text>
-          <Text dimColor>{sep}</Text>
-          <Text color={COLORS.warning}>{branchShort}</Text>
-          {modelStd && <Text dimColor>{sep}</Text>}
-          {modelStd && <Text color={COLORS.info}>{modelStd}</Text>}
-          <Text dimColor>{sep}</Text>
-          <Text color={COLORS.secondary}>{ctxLabel}</Text>
-          <Text dimColor>{sep}</Text>
-          <Text color={sColor}>{holoState}</Text>
-        </Box>
-      </Box>
-    );
-  }
+  // ── Line 1: brain → active   |   Plan/Act ──
+  const brainShort = truncateTail(brain, 26);
+  const modelShort = activeModel ? truncateTail(shortModelName(activeModel), 22) : null;
+  const planDot = mode === "plan" ? "●" : "○";
+  const actDot = mode === "act" ? "●" : "○";
 
-  // Wide: path | branch | model | ctx | state
-  const pathShort = truncatePath(cwd, 36);
-  const branchShort = truncateTail(branch, 28);
-  const modelWide = modelShort ? truncateTail(modelShort, 20) : "";
+  const left1 = (
+    <Text>
+      <Text color={COLORS.brand} bold>{brainShort}</Text>
+      {modelShort && (
+        <>
+          <Text dimColor> → </Text>
+          <Text color={COLORS.info}>{modelShort}</Text>
+        </>
+      )}
+    </Text>
+  );
+
+  const right1 = (
+    <Text>
+      <Text color={mode === "plan" ? COLORS.brand : COLORS.secondary} bold={mode === "plan"}>{planDot} Plan</Text>
+      <Text dimColor>   </Text>
+      <Text color={mode === "act" ? COLORS.brand : COLORS.secondary} bold={mode === "act"}>{actDot} Act</Text>
+    </Text>
+  );
+
+  // ── Line 2: project · branch · LOCAL   |   right status ──
+  const projectShort = truncateTail(project, 26);
+  const branchShort = truncateTail(branch, 24);
+  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
+  const localColor = localRuntime === "ready" ? COLORS.success : localRuntime === "error" ? COLORS.error : COLORS.warning;
+  const localLabel = localRuntime === "ready" ? "LOCAL" : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+
+  const left2 = (
+    <Text>
+      <Text color={COLORS.working} bold>{projectShort}</Text>
+      <Text dimColor> · </Text>
+      <Text color={COLORS.warning}>{branchShort}</Text>
+      <Text dimColor> · </Text>
+      <Text color={localColor}>{localIcon} {localLabel}</Text>
+    </Text>
+  );
+
+  const line2 = (
+    <Box justifyContent="space-between">
+      {left2}
+      {right}
+    </Box>
+  );
+
+  const line1 = (
+    <Box justifyContent="space-between">
+      {left1}
+      {right1}
+    </Box>
+  );
+
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text dimColor>{"─".repeat(Math.min(width, 72))}</Text>
-      <Box>
-        <Text color={localColor}>{localIcon}</Text>
-        <Text color={COLORS.working} bold>{` ${pathShort}`}</Text>
-        <Text dimColor>{sep}</Text>
-        <Text color={COLORS.warning}>{branchShort}</Text>
-        {modelWide && <Text dimColor>{sep}</Text>}
-        {modelWide && <Text color={COLORS.info}>{modelWide}</Text>}
-        <Text dimColor>{sep}</Text>
-        <Text color={COLORS.secondary}>{ctxLabel}</Text>
-        <Text dimColor>{sep}</Text>
-        <Text color={sColor}>{holoState}</Text>
-      </Box>
+      {line1}
+      {line2}
     </Box>
   );
 }

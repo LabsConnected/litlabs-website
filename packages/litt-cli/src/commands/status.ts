@@ -7,6 +7,7 @@
 
 import { RuntimeSession } from "../lib/runtime-session.js";
 import { detectProject, ok, fail, warn, header, label, value, c } from "../lib/utils.js";
+import { getGitState } from "../lib/git-state.js";
 
 export async function statusCommand(_args: string[], session?: RuntimeSession): Promise<number> {
   const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
@@ -30,28 +31,28 @@ export async function statusCommand(_args: string[], session?: RuntimeSession): 
   console.log(`${label("Root:")} ${value(projectRoot, c.bold)}`);
   console.log(`${label("Name:")} ${value(projectName, c.bold)}`);
 
-  if (detected.hasGit) {
+  // Canonical git state — the SAME source as litt doctor, the cockpit
+  // FILES counter, and the agent mission's project.status tool. All
+  // surfaces always agree.
+  const gitState = getGitState(projectRoot);
+  if (gitState.isGitRepo) {
     header("Git");
-    ok(`Branch: ${detected.gitBranch ?? "detached"}`);
+    ok(`Branch: ${gitState.branch ?? "detached"}`);
     if (detected.gitRemote) {
       console.log(`  ${c.gray}remote: ${detected.gitRemote}${c.reset}`);
     }
 
-    const gitStatus = result.result.data?.gitStatus as
-      | { changeCount: number; files: string[] }
-      | undefined;
-
-    if (gitStatus) {
-      if (gitStatus.changeCount === 0) {
-        ok("Working tree clean");
-      } else {
-        warn(`${gitStatus.changeCount} uncommitted change(s):`);
-        for (const change of gitStatus.files.slice(0, 10)) {
-          console.log(`  ${c.gray}${change}${c.reset}`);
-        }
-        if (gitStatus.files.length > 10) {
-          console.log(`  ${c.dim}... and ${gitStatus.files.length - 10} more${c.reset}`);
-        }
+    if (gitState.clean) {
+      ok("Working tree clean");
+    } else {
+      warn(
+        `${gitState.changed} modified · ${gitState.untracked} untracked (${gitState.changed + gitState.untracked} total)`,
+      );
+      for (const change of gitState.files.slice(0, 10)) {
+        console.log(`  ${c.gray}${change}${c.reset}`);
+      }
+      if (gitState.files.length > 10) {
+        console.log(`  ${c.dim}... and ${gitState.files.length - 10} more${c.reset}`);
       }
     }
   } else {

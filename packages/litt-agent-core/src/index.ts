@@ -208,6 +208,9 @@ export type {
   BrowserVerifier,
   VerificationGateOptions,
 } from "./verification-gate.js";
+// Structural gate contract for runAgentLoop — surfaces can provide
+// adapters (e.g. read-only evidence gates) without extending the class.
+export type { VerificationGateLike } from "./agent-loop.js";
 
 // ─── Missions Module (Autopilot V1) ─────────────────────────────────────
 // Mission domain types, state machine, and persistence.

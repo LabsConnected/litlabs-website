@@ -84,14 +84,23 @@ export interface ChatMessage {
 }
 
 /**
+ * Activity vocabulary — the tiny semantic set the shell renders.
+ * The whole runtime surface maps onto these five glyphs:
+ *   → working   ✓ success   ! warning   × failed   ◆ decision
+ */
+export type ActivitySemantic = "working" | "success" | "warning" | "failed" | "decision";
+
+/**
  * Activity entry — operator feed format.
  * tag is the short verb (THINK, ROUTE, READ, EDIT, RUN, PASS, VERIFY, etc.)
+ * semantic is the tiny-vocabulary classification used by the shell feed.
  */
 export interface ActivityEntry {
   id: string;
   ts: number;
   type: string;
   tag?: string;
+  semantic?: ActivitySemantic;
   runId?: string;
   toolCallId?: string;
   /** Display text — truncated for the feed. */
@@ -209,10 +218,38 @@ export interface CockpitUIState {
   /** Chat transcript — persisted assistant/user conversation body.
    *  Survives rerender and overlay open/close. Bounded to last 50 messages. */
   chatTranscript: ChatMessage[];
+  /** Execution mode — PLAN (read-only) or ACT (full). Tab toggles. */
+  mode: "plan" | "act";
+  /** Workspace context — display truth for the shell. Updated by
+   *  /workspace switches and branch refreshes. */
+  project: string;
+  cwd: string;
+  gitModified: number;
+  gitUntracked: number;
+  /** Composer draft — lifted into the store so / and @ overlays can
+   *  read/append to the in-progress input. */
+  composerValue: string;
+  /** Query seeded into the next opened overlay (palette/picker). */
+  overlayQuery: string;
+  /** When the shell entered a busy state (chat/mission) — for the
+   *  status bar's "◉ Working · Ns" timer. Null when idle. */
+  busySince: number | null;
 }
 
 /** Overlay type — which modal/picker is open */
-export type Overlay = "none" | "model-picker" | "command-palette" | "model-center" | "activity" | "help";
+export type Overlay =
+  | "none"
+  | "model-picker"
+  | "command-palette"
+  | "model-center"
+  | "activity"
+  | "help"
+  | "context-picker"
+  | "file-picker"
+  | "diff-viewer"
+  | "workspace-picker"
+  | "resume-picker"
+  | "ship";
 
 /**
  * Routing mode — how LiTT chooses models.
@@ -244,6 +281,14 @@ export function useCockpitStore() {
   const [canonicalMission, setCanonicalMission] = useState<CanonicalMissionProjection | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branch, setBranch] = useState<string>("unknown");
+  const [mode, setMode] = useState<"plan" | "act">("act");
+  const [project, setProject] = useState<string>("");
+  const [cwd, setCwd] = useState<string>("");
+  const [gitModified, setGitModified] = useState<number>(0);
+  const [gitUntracked, setGitUntracked] = useState<number>(0);
+  const [composerValue, setComposerValue] = useState("");
+  const [overlayQuery, setOverlayQuery] = useState("");
+  const [busySince, setBusySince] = useState<number | null>(null);
   // The transcript is owned by a pure ChatTranscriptStore (testable in
   // node env without a React renderer). The hook mirrors its snapshot
   // into React state so renders stay reactive. useState with a lazy
@@ -409,6 +454,24 @@ export function useCockpitStore() {
 
   const clearApproval = useCallback(() => setApprovalPrompt(null), []);
 
+  /** Toggle execution mode (Tab). PLAN = read-only, ACT = full. */
+  const toggleMode = useCallback(() => {
+    setMode((prev) => prev === "act" ? "plan" : "act");
+  }, []);
+
+  /** Set workspace context (project name / root / git counts). */
+  const setWorkspace = useCallback((p: { project?: string; cwd?: string; branch?: string; gitModified?: number; gitUntracked?: number }) => {
+    if (p.project !== undefined) setProject(p.project);
+    if (p.cwd !== undefined) setCwd(p.cwd);
+    if (p.branch !== undefined) setBranch(p.branch);
+    if (p.gitModified !== undefined) setGitModified(p.gitModified);
+    if (p.gitUntracked !== undefined) setGitUntracked(p.gitUntracked);
+  }, []);
+
+  /** Mark the shell busy (status bar "◉ Working · Ns" timer). */
+  const startBusy = useCallback(() => setBusySince(Date.now()), []);
+  const stopBusy = useCallback(() => setBusySince(null), []);
+
   // Auto-clear approval prompt when holoState transitions away from APPROVAL
   useEffect(() => {
     if (holoState !== "APPROVAL" && approvalPrompt) {
@@ -439,6 +502,14 @@ export function useCockpitStore() {
       isProcessing,
       branch,
       chatTranscript,
+      mode,
+      project,
+      cwd,
+      gitModified,
+      gitUntracked,
+      composerValue,
+      overlayQuery,
+      busySince,
     },
     actions: {
       setSelectedPanel,
@@ -473,6 +544,13 @@ export function useCockpitStore() {
       appendAssistantDelta,
       finalizeAssistantMessage,
       clearChatTranscript,
+      setMode,
+      toggleMode,
+      setWorkspace,
+      setComposerValue,
+      setOverlayQuery,
+      startBusy,
+      stopBusy,
     },
   };
 }

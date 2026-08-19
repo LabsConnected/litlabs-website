@@ -178,10 +178,17 @@ export function useEventBridge(
     // Map event to Holo state
     const holo = holoFromEvent(event);
     if (holo) {
-      store.actions.setHoloState(holo);
-      // Auto-return to IDLE after terminal states (except APPROVAL which stays)
-      if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
-        setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+      // During VERIFYING, tool events emitted by the verification gate's
+      // checks must not regress the display back to RUNNING — the mission
+      // has finished executing and the runtime is proving it. Terminal
+      // states (FAILED etc.) still apply.
+      const isVerifying = store.state.holoState === "VERIFYING";
+      if (!(holo === "RUNNING" && isVerifying)) {
+        store.actions.setHoloState(holo);
+        // Auto-return to IDLE after terminal states (except APPROVAL which stays)
+        if (holo === "COMPLETE" || holo === "FAILED" || holo === "CANCELLED" || holo === "TIMEOUT") {
+          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        }
       }
     }
   }, [store]);

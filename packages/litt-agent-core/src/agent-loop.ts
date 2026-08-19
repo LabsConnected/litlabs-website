@@ -46,7 +46,7 @@ import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
-import type { VerificationGate, VerificationResult } from "./verification-gate.js";
+import type { VerificationResult } from "./verification-gate.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -100,6 +100,10 @@ export interface AgentLoopOptions {
   /**
    * Optional VerificationGate — the runtime truth boundary.
    *
+   * Structural type (see VerificationGateLike): any object with
+   * verify(). The concrete VerificationGate class satisfies it, as do
+   * surface-level adapters (e.g. the CLI's read-only mission gate).
+   *
    * When provided, the loop enforces the single most important rule:
    *   COMPLETE ≠ model says done
    *   COMPLETE = runtime proved it passed
@@ -115,7 +119,7 @@ export interface AgentLoopOptions {
    * = "complete"). This preserves backward compatibility for tests and
    * surfaces that don't yet wire the gate.
    */
-  verificationGate?: VerificationGate | null;
+  verificationGate?: VerificationGateLike | null;
   /**
    * Optional escalation hook — when provided with missionId + modelResolver,
    * repeated model failures (tool/reasoning) automatically escalate to a
@@ -134,6 +138,15 @@ export interface AgentLoopOptions {
   modelResolver?: ModelResolver | null;
   /** Task kind for escalation model selection (default: "coding"). */
   taskKind?: string;
+}
+
+/**
+ * Structural verification-gate contract — the loop only calls verify().
+ * The concrete VerificationGate class satisfies this; surfaces may also
+ * provide adapters (e.g. read-only evidence gates) without extending it.
+ */
+export interface VerificationGateLike {
+  verify(): Promise<VerificationResult>;
 }
 
 export interface AgentLoopResult {
@@ -249,29 +262,62 @@ export interface EscalationRecord {
  *   ```tool_call
  *   { "tool": "project.status", "inputs": {} }
  *   ```
+ *
+ * The parser is deliberately tolerant of real-world model output:
+ *   - CRLF line endings (`\r\n`)
+ *   - whitespace after the ```tool_call opener (or none at all)
+ *   - a missing newline before the closing fence (```tool_call{...}```)
+ *   - a bare JSON tool object on its own line (no fences):
+ *       tool_call
+ *       { "tool": "project.status", "inputs": {} }
+ *   - an inline `tool_call:` prefix before the JSON object
  */
 export interface ParsedToolCall {
   toolId: string;
   inputs: Record<string, unknown>;
 }
 
-export function parseToolCall(content: string): ParsedToolCall | null {
-  // Look for ```tool_call ... ``` blocks
-  const match = content.match(/```tool_call\s*\n([\s\S]*?)\n```/);
-  if (!match) return null;
+/** Fenced ```tool_call block — tolerant of spacing/CRLF and a missing
+ *  newline before the closing fence. */
+const TOOL_CALL_FENCE_RE = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/i;
+/** A line that looks like a bare JSON tool object (single line). */
+const BARE_TOOL_JSON_RE = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/m;
 
+function parseToolJson(raw: string): ParsedToolCall | null {
   try {
-    const parsed = JSON.parse(match[1]);
-    if (typeof parsed.tool === "string") {
+    const parsed = JSON.parse(raw.trim());
+    if (parsed && typeof parsed === "object" && typeof (parsed as { tool?: unknown }).tool === "string") {
+      const inputs = (parsed as { inputs?: unknown }).inputs;
       return {
-        toolId: parsed.tool,
-        inputs: typeof parsed.inputs === "object" && parsed.inputs !== null
-          ? parsed.inputs as Record<string, unknown>
+        toolId: (parsed as { tool: string }).tool,
+        inputs: typeof inputs === "object" && inputs !== null
+          ? inputs as Record<string, unknown>
           : {},
       };
     }
   } catch {
     // Malformed JSON — not a valid tool call
+  }
+  return null;
+}
+
+export function parseToolCall(content: string): ParsedToolCall | null {
+  // 1. Fenced ```tool_call ... ``` block.
+  const match = content.match(TOOL_CALL_FENCE_RE);
+  if (match) {
+    const parsed = parseToolJson(match[1]);
+    if (parsed) return parsed;
+  }
+
+  // 2. Bare JSON tool object on its own line (the model sometimes skips
+  //    the fences entirely, e.g. `tool_call` then a JSON line).
+  const bareMatch = content.match(BARE_TOOL_JSON_RE);
+  if (bareMatch) {
+    // Snip the JSON object out of the surrounding text and try to parse it.
+    const lineStart = content.lastIndexOf("\n", bareMatch.index) + 1;
+    const jsonText = content.slice(lineStart).split("\n")[0] ?? "";
+    const parsed = parseToolJson(jsonText);
+    if (parsed) return parsed;
   }
 
   return null;
@@ -279,9 +325,12 @@ export function parseToolCall(content: string): ParsedToolCall | null {
 
 /**
  * Extract the text content without the tool_call blocks.
+ * Uses the same tolerant fence matching as parseToolCall so a block
+ * that was parsed as a tool call is always stripped from the final
+ * response text (never leaked into the user chat).
  */
 export function stripToolCallBlocks(content: string): string {
-  return content.replace(/```tool_call\s*\n[\s\S]*?\n```/g, "").trim();
+  return content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "").trim();
 }
 
 // ─── Mission Planning ──────────────────────────────────────────────
@@ -485,21 +534,55 @@ export async function runAgentLoop(
 
     if (!toolCall) {
       // Requests for repository/runtime evidence cannot honestly complete
-      // before at least one project tool has executed.
+      // before at least one project tool has SUCCEEDED. A recorded call
+      // is not evidence — a failed/unavailable tool must never be masked
+      // as a successful repository inspection.
       const requiresProjectEvidence =
         /\b(inspect|working tree|git status|project status|current project|use (?:your )?(?:project )?tools|verify (?:the )?(?:project|repo|build|tests?)|run (?:the )?(?:build|tests?|typecheck)|read (?:the )?(?:repo|repository|file)|search (?:the )?(?:repo|repository|codebase))\b/i.test(prompt);
 
-      if (requiresProjectEvidence && toolCalls.length === 0) {
-        if (round >= maxRounds - 1) {
+      const hasSuccessfulToolEvidence = toolCalls.some((tc) => tc.result.success);
+      const cleanContent = stripToolCallBlocks(modelContent);
+
+      if (requiresProjectEvidence && !hasSuccessfulToolEvidence) {
+        // An honest failure report IS an acceptable answer: the model
+        // recorded the failed attempt and explicitly states verification
+        // could not be completed. A fabricated success is NOT — that is
+        // re-prompted until the model either produces real evidence or
+        // an honest failure explanation.
+        const lastFailure = toolCalls[toolCalls.length - 1];
+        const acknowledgesFailure =
+          lastFailure !== undefined &&
+          !lastFailure.result.success &&
+          /\b(could not|couldn't|failed|unable|not available|not able|did not (?:run|execute)|was not (?:run|executed)|error)\b/i.test(cleanContent);
+
+        if (acknowledgesFailure) {
+          // Accept the honest failure — the loop records it and never
+          // claims verified repository state.
+          if (missionId && escalation) escalation.recordFailure(missionId, "tool", lastFailure.result.message);
           return {
-            content:
-              "LiTT could not obtain required project evidence before reaching the tool-call round limit. " +
-              "No project-state claim is being made.",
+            content: cleanContent,
             toolCalls,
             rounds,
             durationMs: Date.now() - startTime,
             usage: { total_tokens: totalTokens },
-            termination: "max_rounds",
+            termination: "verification_failed",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+
+        if (round >= maxRounds - 1) {
+          const failureDetails = toolCalls.length > 0
+            ? `\n\nTool failures:\n${toolCalls.map((tc) => `- ${tc.toolId}: ${tc.result.message}`).join("\n")}`
+            : "";
+          return {
+            content:
+              "LiTT could not obtain required project evidence before reaching the tool-call round limit. " +
+              "No project-state claim is being made." + failureDetails,
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: toolCalls.length > 0 ? "verification_failed" : "max_rounds",
             escalations: escalationEvents.length ? escalationEvents : undefined,
           };
         }
@@ -509,12 +592,18 @@ export async function runAgentLoop(
           content: modelContent,
         });
 
+        const failureContext = toolCalls.length > 0
+          ? `\n\nYour previous tool call(s) failed:\n${toolCalls.map((tc) => `- ${tc.toolId}: ${tc.result.message}`).join("\n")}\n` +
+            `Do NOT claim repository state as verified. Retry with an available tool, or state plainly that verification could not be completed.`
+          : "";
+
         messages.push({
           role: "user",
           content:
-            "You have not gathered any project evidence yet. " +
+            "You have not gathered successful project evidence yet. " +
             "Do not answer from memory and do not ask the user to run commands. " +
-            "Call the appropriate project tool now. For repository identity and Git state, begin with project.status.",
+            "Call the appropriate project tool now. For repository identity and Git state, begin with project.status." +
+            failureContext,
         });
 
         continue;
@@ -531,8 +620,6 @@ export async function runAgentLoop(
       // If the gate fails, we feed the failures back to the model as a
       // repair request and continue the loop — the model must actually
       // fix the failures and reach a state the runtime can prove.
-      const cleanContent = stripToolCallBlocks(modelContent);
-
       if (!options.verificationGate) {
         // No gate — preserve original behavior (model "done" = complete)
         // Record success — the model gave a non-empty final answer.
@@ -758,6 +845,7 @@ export async function runAgentLoop(
         toolCallId,
         data: {
           tool: toolEntry.definition.name,
+          toolId: toolEntry.definition.id,
           status: result.status,
           success: result.success,
           message: result.message,

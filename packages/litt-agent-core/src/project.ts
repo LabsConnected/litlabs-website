@@ -72,7 +72,20 @@ export async function resolveProjectContext(
   explicitRoot?: string,
 ): Promise<ProjectContext> {
   const root = detectProjectRoot(cwd ?? shell.cwd, explicitRoot);
-  const name = path.basename(root);
+  // Canonical project name: package.json name when present (matches what
+  // the CLI surfaces display), falling back to the directory basename.
+  let name = path.basename(root);
+  try {
+    const pkgPath = path.join(root, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      if (typeof pkg.name === "string" && pkg.name.trim()) {
+        name = pkg.name;
+      }
+    }
+  } catch {
+    // keep basename fallback
+  }
 
   // Check if it's a git repo
   const gitDirResult = await shell.execute({
