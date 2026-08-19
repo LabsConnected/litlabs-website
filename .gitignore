@@ -155,10 +155,19 @@ voice-server/.agents/
 bun.lock
 package-lock.json
 
-# Local-only project files (gitignored per .clinerules)
-AGENTS.md
+# Local-only project files (AGENTS.md is now committed — canonical repo instructions)
 .todo.md
 PR_BODY_V12.txt
+
+# Canonical repo-level agent instructions — committed, not local-only
+!/AGENTS.md
+
+# Secret material — never commit (extends *.pem above)
+*.key
+secrets/
+credentials/
+.agent-secrets
+**/*service-account*.json
 
 # Local-only libraries and reference dirs (not part of this repo's source)
 litlabs/

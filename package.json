@@ -13,6 +13,7 @@
     "verify:emulatorjs": "node scripts/verify-emulatorjs-assets.mjs",
     "start": "next start",
     "lint": "eslint",
+    "check": "pnpm lint && pnpm type-check && pnpm test && pnpm build",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
