@@ -192,6 +192,8 @@ export interface OpenRouterModelOptions {
   apiKey?: string;
   model?: string;
   profile?: ModelProfile;
+  /** Max response tokens. Defaults to 4096 (existing production behavior). */
+  maxTokens?: number;
 }
 
 export function hasOpenRouterKey(): boolean {
@@ -202,6 +204,7 @@ export class OpenRouterModelProvider implements ModelProvider {
   private readonly _apiKey: string;
   private readonly _model: string;
   private readonly _profile: ModelProfile;
+  private readonly _maxTokens: number;
   /** The active model — set after the first stream() meta event. */
   private _activeModel: string | null = null;
 
@@ -211,6 +214,7 @@ export class OpenRouterModelProvider implements ModelProvider {
       throw new Error("OPENROUTER_API_KEY is required for OpenRouterModelProvider");
     }
     this._profile = options.profile ?? "smart";
+    this._maxTokens = options.maxTokens ?? 4096;
 
     // Resolution: explicit override > profile > default
     if (options.model) {
@@ -260,7 +264,7 @@ export class OpenRouterModelProvider implements ModelProvider {
         model: this._model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
-        max_tokens: 4096,
+        max_tokens: this._maxTokens,
       }),
     });
 
@@ -296,6 +300,14 @@ export class OpenRouterModelProvider implements ModelProvider {
 
         try {
           const parsed = JSON.parse(data);
+          // Surface upstream errors embedded in SSE chunks (e.g. credit
+          // limits, model unavailable). Without this the provider silently
+          // returns empty content and the caller never learns why the
+          // stream produced no deltas.
+          if (parsed.error) {
+            const errMsg = parsed.error.message ?? "OpenRouter stream error";
+            throw new Error(`OpenRouter stream error: ${errMsg}`);
+          }
           const delta = parsed.choices?.[0]?.delta;
           if (delta?.content) {
             content += delta.content;
@@ -309,8 +321,13 @@ export class OpenRouterModelProvider implements ModelProvider {
           if (parsed.usage?.total_tokens) {
             totalTokens = parsed.usage.total_tokens;
           }
-        } catch {
-          // Skip malformed chunks
+        } catch (e) {
+          // Re-throw upstream provider errors so the agent loop can surface
+          // them instead of silently retrying on empty content.
+          if (e instanceof Error && e.message.startsWith("OpenRouter stream error:")) {
+            throw e;
+          }
+          // Skip malformed/unparseable chunks
         }
       }
     }

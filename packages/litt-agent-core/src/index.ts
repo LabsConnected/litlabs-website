@@ -163,12 +163,17 @@ export {
   parseToolCall,
   stripToolCallBlocks,
   buildDefaultSystemPrompt,
+  classifyAgentFailure,
 } from "./agent-loop.js";
 export type {
   AgentLoopOptions,
   AgentLoopResult,
   AgentToolCallRecord,
   ParsedToolCall,
+  AgentFailureKind,
+  EscalationHook,
+  ModelResolver,
+  EscalationRecord,
 } from "./agent-loop.js";
 
 // Semantic mission planner — generates a MissionStep[] plan BEFORE tool

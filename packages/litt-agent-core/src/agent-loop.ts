@@ -116,6 +116,24 @@ export interface AgentLoopOptions {
    * surfaces that don't yet wire the gate.
    */
   verificationGate?: VerificationGate | null;
+  /**
+   * Optional escalation hook — when provided with missionId + modelResolver,
+   * repeated model failures (tool/reasoning) automatically escalate to a
+   * stronger model and the loop continues. This is the Autopilot reliability
+   * path: a weak model that keeps failing gets replaced mid-mission.
+   */
+  escalation?: EscalationHook | null;
+  /** Mission id for escalation tracking. Required for escalation to activate. */
+  missionId?: string;
+  /** Model id of the initial `model` provider — used for escalation tracking. */
+  modelId?: string;
+  /**
+   * Resolves a model id to a ModelProvider. Required for escalation to
+   * construct the new (stronger) provider mid-loop.
+   */
+  modelResolver?: ModelResolver | null;
+  /** Task kind for escalation model selection (default: "coding"). */
+  taskKind?: string;
 }
 
 export interface AgentLoopResult {
@@ -145,6 +163,12 @@ export interface AgentLoopResult {
    * when a gate is in use.
    */
   verification?: VerificationResult;
+  /**
+   * Escalation events that occurred during this loop run.
+   * Each entry records a model swap from a weaker to a stronger model
+   * after repeated failures. Present only when escalation was activated.
+   */
+  escalations?: EscalationRecord[];
 }
 
 export interface AgentToolCallRecord {
@@ -154,6 +178,65 @@ export interface AgentToolCallRecord {
   inputs: Record<string, unknown>;
   result: ToolResult;
   durationMs: number;
+}
+
+// ─── Escalation ────────────────────────────────────────────────────
+
+/**
+ * Failure kind classification — mirrors @litt/models classifyFailure.
+ * Kept local so agent-core stays platform-independent (no litt-models dep).
+ */
+export type AgentFailureKind = "tool" | "reasoning" | "network" | "rate-limit" | "auth" | "content" | "unknown";
+
+/**
+ * Classify a raw error into a failure kind. Used to decide whether to
+ * escalate (tool/reasoning failures) vs fallback (network/rate-limit).
+ */
+export function classifyAgentFailure(error: unknown): AgentFailureKind {
+  if (!(error instanceof Error)) return "unknown";
+  const msg = error.message.toLowerCase();
+  if (msg.includes("429") || msg.includes("rate limit")) return "rate-limit";
+  if (msg.includes("401") || msg.includes("403") || msg.includes("unauthorized") || msg.includes("forbidden")) return "auth";
+  if (msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("network") || msg.includes("econnreset") || msg.includes("timeout")) return "network";
+  if (msg.includes("tool") || msg.includes("function call") || msg.includes("invalid arguments")) return "tool";
+  if (msg.includes("invalid json") || msg.includes("parse") || msg.includes("malformed")) return "content";
+  if (msg.includes("reason") || msg.includes("wrong") || msg.includes("incorrect")) return "reasoning";
+  return "unknown";
+}
+
+/**
+ * Escalation hook — the abstraction the agent loop uses to track
+ * per-mission failures and decide when to swap to a stronger model.
+ *
+ * The real implementation is @litt/models EscalationTracker. The
+ * controller adapts it to this interface. agent-core stays pure
+ * (no litt-models dependency).
+ */
+export interface EscalationHook {
+  startMission(missionId: string, modelId: string): void;
+  recordFailure(missionId: string, kind: AgentFailureKind, message?: string): void;
+  recordSuccess(missionId: string): void;
+  shouldEscalate(missionId: string): boolean;
+  pickEscalatedModel(missionId: string, taskKind: string): { modelId: string; reason: string } | null;
+  commitEscalation(missionId: string, toModelId: string, reason: string, runId?: string): { fromModelId: string; toModelId: string; reason: string; at: string } | null;
+  currentModel(missionId: string): string | null;
+  endMission(missionId: string): void;
+}
+
+/**
+ * Resolves a model id to a ModelProvider — needed for escalation to
+ * construct the new (stronger) provider mid-loop.
+ */
+export type ModelResolver = (modelId: string) => ModelProvider | null;
+
+/**
+ * Record of an escalation that occurred during a loop run.
+ */
+export interface EscalationRecord {
+  fromModelId: string;
+  toModelId: string;
+  reason: string;
+  at: string;
 }
 
 // ─── Tool call parsing ─────────────────────────────────────────────
@@ -237,6 +320,70 @@ export async function runAgentLoop(
 
   let termination: AgentLoopResult["termination"] = "complete";
 
+  // ─── Escalation setup ──────────────────────────────────────────
+  // When an escalation hook + missionId + modelResolver are provided,
+  // repeated model failures (tool/reasoning) automatically swap to a
+  // stronger model and the loop continues. This is the Autopilot
+  // reliability path: a weak model that keeps failing gets replaced
+  // mid-mission, preserving the same conversation/context.
+  const missionId = options.missionId;
+  const escalation = options.escalation;
+  const taskKind = options.taskKind ?? "coding";
+  let activeModel = options.model;
+  let activeModelId = options.modelId ?? "unknown";
+  const escalationEvents: EscalationRecord[] = [];
+
+  if (missionId && escalation) {
+    if (escalation.currentModel(missionId) === null) {
+      escalation.startMission(missionId, activeModelId);
+    } else {
+      activeModelId = escalation.currentModel(missionId)!;
+    }
+  }
+
+  /**
+   * Check if the mission should escalate, and if so, swap to a stronger
+   * model. Returns true if escalation happened (caller should continue
+   * the loop with the new model), false otherwise.
+   */
+  function tryEscalate(): boolean {
+    if (!missionId || !escalation) return false;
+    if (!escalation.shouldEscalate(missionId)) return false;
+    const pick = escalation.pickEscalatedModel(missionId, taskKind);
+    if (!pick) return false;
+    if (!options.modelResolver) return false;
+    const newModel = options.modelResolver(pick.modelId);
+    if (!newModel) return false;
+    const fromId = activeModelId;
+    const event = escalation.commitEscalation(missionId, pick.modelId, pick.reason);
+    if (event) {
+      escalationEvents.push({
+        fromModelId: event.fromModelId,
+        toModelId: event.toModelId,
+        reason: event.reason,
+        at: event.at,
+      });
+    } else {
+      escalationEvents.push({
+        fromModelId: fromId,
+        toModelId: pick.modelId,
+        reason: pick.reason,
+        at: new Date().toISOString(),
+      });
+    }
+    activeModel = newModel;
+    activeModelId = pick.modelId;
+    if (options.emitter) {
+      options.emitter({
+        type: "litt_event",
+        subtype: "model_escalated",
+        ts: Date.now(),
+        data: { fromModelId: fromId, toModelId: pick.modelId, reason: pick.reason, missionId },
+      });
+    }
+    return true;
+  }
+
   for (let round = 0; round < maxRounds; round++) {
     rounds++;
 
@@ -245,7 +392,7 @@ export async function runAgentLoop(
     const modelEvents: ModelStreamEvent[] = [];
 
     try {
-      await options.model.stream(messages, (event) => {
+      await activeModel.stream(messages, (event) => {
         modelEvents.push(event);
         if (options.onModelStream) {
           try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
@@ -255,6 +402,31 @@ export async function runAgentLoop(
         }
       });
     } catch (err) {
+      // Escalation path: record the failure. If the threshold is
+      // reached, swap to a stronger model and continue. If below
+      // threshold, continue the loop to accumulate more failures
+      // (the model will fail again on the next round). The maxRounds
+      // limit prevents unbounded retries.
+      if (missionId && escalation) {
+        escalation.recordFailure(
+          missionId,
+          classifyAgentFailure(err),
+          err instanceof Error ? err.message : String(err),
+        );
+        if (tryEscalate()) {
+          // Escalated to a stronger model — continue with it.
+          continue;
+        }
+        // Below threshold — continue to accumulate failures.
+        // Push a retry prompt so the conversation has context.
+        messages.push({
+          role: "user",
+          content:
+            `The previous model call failed: ${err instanceof Error ? err.message : String(err)}. ` +
+            `Retry now. You MUST either call an available tool or return a final answer.`,
+        });
+        continue;
+      }
       termination = "error";
       return {
         content: `Model error: ${err instanceof Error ? err.message : String(err)}`,
@@ -263,6 +435,7 @@ export async function runAgentLoop(
         durationMs: Date.now() - startTime,
         usage: { total_tokens: totalTokens },
         termination,
+        escalations: escalationEvents.length ? escalationEvents : undefined,
       };
     }
 
@@ -276,6 +449,11 @@ export async function runAgentLoop(
     // Empty output is not a successful assistant response and must not
     // become a blank completed turn in CLI/Desktop surfaces.
     if (!modelContent.trim()) {
+      // Track empty responses as content failures (not counted toward
+      // escalation by default, but recorded for audit).
+      if (missionId && escalation) {
+        escalation.recordFailure(missionId, "content", "empty model response");
+      }
       if (round >= maxRounds - 1) {
         return {
           content:
@@ -286,6 +464,7 @@ export async function runAgentLoop(
           durationMs: Date.now() - startTime,
           usage: { total_tokens: totalTokens },
           termination: "error",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
         };
       }
 
@@ -321,6 +500,7 @@ export async function runAgentLoop(
             durationMs: Date.now() - startTime,
             usage: { total_tokens: totalTokens },
             termination: "max_rounds",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
           };
         }
 
@@ -355,6 +535,8 @@ export async function runAgentLoop(
 
       if (!options.verificationGate) {
         // No gate — preserve original behavior (model "done" = complete)
+        // Record success — the model gave a non-empty final answer.
+        if (missionId && escalation) escalation.recordSuccess(missionId);
         return {
           content: cleanContent,
           toolCalls,
@@ -362,6 +544,7 @@ export async function runAgentLoop(
           durationMs: Date.now() - startTime,
           usage: { total_tokens: totalTokens },
           termination: "complete",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
         };
       }
 
@@ -371,6 +554,7 @@ export async function runAgentLoop(
 
       if (verification.proven) {
         // The runtime PROVED it. This is the only honest "complete".
+        if (missionId && escalation) escalation.recordSuccess(missionId);
         return {
           content: cleanContent,
           toolCalls,
@@ -379,6 +563,7 @@ export async function runAgentLoop(
           usage: { total_tokens: totalTokens },
           termination: "complete",
           verification,
+          escalations: escalationEvents.length ? escalationEvents : undefined,
         };
       }
 
@@ -397,6 +582,15 @@ export async function runAgentLoop(
               .map((c) => ({ id: c.id, status: c.status, message: c.message, stderr: c.stderr })),
           },
         });
+      }
+
+      // Escalation: the model claimed done but the gate proved it wrong.
+      // This is a reasoning failure. Record it and try a stronger model.
+      // The repair feedback (pushed below) is still added to the
+      // conversation so the new (stronger) model sees what to fix.
+      if (missionId && escalation) {
+        escalation.recordFailure(missionId, "reasoning", verification.message);
+        tryEscalate();
       }
 
       messages.push({ role: "assistant", content: modelContent });
@@ -582,6 +776,19 @@ export async function runAgentLoop(
         data: result.data,
       }, null, 2)}`,
     });
+
+    // Escalation: track tool success/failure. Repeated tool failures
+    // (the model is too weak to call tools correctly) trigger
+    // escalation to a stronger model. The tool result is already in
+    // the conversation, so the new model sees what went wrong.
+    if (missionId && escalation) {
+      if (result.success) {
+        escalation.recordSuccess(missionId);
+      } else {
+        escalation.recordFailure(missionId, "tool", result.message);
+        tryEscalate();
+      }
+    }
   }
 
   if (rounds >= maxRounds && termination === "complete") {
@@ -608,6 +815,7 @@ export async function runAgentLoop(
     usage: { total_tokens: totalTokens },
     termination,
     verification: lastVerification,
+    escalations: escalationEvents.length ? escalationEvents : undefined,
   };
 }
 

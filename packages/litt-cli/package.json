@@ -15,6 +15,7 @@
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
+    "test:live": "node scripts/run-live-tests.mjs",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "tsc"
   },

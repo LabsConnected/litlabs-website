@@ -35,6 +35,7 @@ import {
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { CockpitStore } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
+import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveConfiguredModel, buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, brainLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
@@ -773,6 +774,15 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
         // the first tool call. Execution begins; tools attach to steps.
         let currentStepId: string | null = null;
 
+        // ─── Escalation wiring ───
+        // Repeated model failures (tool/reasoning) automatically escalate
+        // to a stronger verified model and the loop continues. This is the
+        // Autopilot reliability path: a weak model that keeps failing gets
+        // replaced mid-mission, preserving the same conversation/context.
+        const escalationTracker = createEscalationTracker();
+        const escalationHook = createEscalationHook(escalationTracker, modelRuntime, "coding");
+        const modelResolver = createModelResolver(modelRuntime);
+
         const result = await runAgentLoop(input, {
           model, tools, shell: session.getShell(),
           gateway,
@@ -793,6 +803,16 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
           // Without this, the loop terminates on model "done" and the
           // controller runs the gate separately — no repair loop.
           verificationGate: session.getVerificationGate(),
+          // ─── Wire the EscalationHook into the agent loop ───
+          // The mission id + model id + resolver let the loop track
+          // per-mission failures and swap to a stronger model when
+          // the threshold is reached. The loop continues with the
+          // new model — no mission restart, no context loss.
+          escalation: escalationHook,
+          missionId: mission.id,
+          modelId: routed.id,
+          modelResolver,
+          taskKind: "coding",
           onModelStream: (event) => {
             // Model prose (deltas) do NOT go into the activity feed,
             // but DO stream into the chat transcript as a live preview.
@@ -912,6 +932,28 @@ export function useCockpitController({ session, store, approvalBridge, onExit, p
                   }).catch(() => {});
                 }
               }
+            } else if (event.subtype === "model_escalated") {
+              // Escalation event — surface it in the activity feed and
+              // update the active model label to the new (stronger) model.
+              const fromModelId = (event.data as { fromModelId?: string }).fromModelId ?? "unknown";
+              const toModelId = (event.data as { toModelId?: string }).toModelId ?? "unknown";
+              const reason = (event.data as { reason?: string }).reason ?? "";
+              store.actions.addActivity({
+                id: `act_${Date.now()}_escalate`,
+                ts: Date.now(),
+                type: "info",
+                tag: "ESCALATE",
+                text: `${fromModelId} → ${toModelId}`,
+              });
+              store.actions.setActiveModel(toModelId);
+              // Log the full reason for audit.
+              store.actions.addActivity({
+                id: `act_${Date.now()}_escalate_reason`,
+                ts: Date.now(),
+                type: "info",
+                tag: "ESCALATE",
+                text: reason.slice(0, 120),
+              });
             }
           },
         });
