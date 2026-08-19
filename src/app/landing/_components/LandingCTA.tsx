@@ -1,7 +1,18 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import { ArrowRight, Rocket, Sparkles } from "lucide-react";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 export function LandingCTA() {
+  const { isSignedIn } = useClerkAuth();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const ctaHref = mounted && isSignedIn ? "/studio" : "/sign-up";
+  const ctaLabel = mounted && isSignedIn ? "Enter Studio" : "Launch Studio free";
+
   return (
     <section className="relative z-10 px-4 py-24 md:py-32">
       <div className="mx-auto max-w-5xl">
@@ -67,11 +78,11 @@ export function LandingCTA() {
 
             <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/sign-up"
+                href={ctaHref}
                 className="group inline-flex items-center gap-2.5 rounded-2xl bg-white px-8 py-4 text-sm font-black text-black shadow-[0_0_50px_rgba(255,255,255,0.25)] transition hover:scale-[1.02] hover:shadow-[0_0_70px_rgba(255,255,255,0.4)]"
               >
                 <Rocket size={15} />
-                Launch Studio free
+                {ctaLabel}
                 <ArrowRight
                   size={13}
                   className="transition-transform group-hover:translate-x-0.5"

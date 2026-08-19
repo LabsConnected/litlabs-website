@@ -188,14 +188,68 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 }
 
 // ─── Clerk auth + route protection ────────────────────────────────
+//
+// ONE SOURCE OF TRUTH for public vs protected routes.
+//
+// Public page routes (explicitly NOT in the protected list):
+//   /              — landing page
+//   /pricing       — public pricing
+//   /docs          — public documentation
+//   /about         — public about
+//   /privacy       — public privacy policy
+//   /terms         — public terms of service
+//   /cookies       — public cookie policy
+//   /sign-in/*     — Clerk sign-in (catch-all)
+//   /sign-up/*     — Clerk sign-up (catch-all)
+//   /login         — legacy redirect → /sign-in
+//   /gallery/*     — public gallery viewing
+//   /games/*       — public games
+//   /hire          — public hiring page
+//   /resources/*   — public resources
+//   /discover      — public discover
+//   /showcase/*    — public showcase
+//   /marketplace/* — public marketplace browsing (install/checkout are protected APIs)
+//   /voice         — public voice playground
+//   /social        — public social feed
+//   /generate      — public generate page
+//   /creator       — public creator page
+//   /chat          — public chat
+//   /agent         — public agent info
+//   /builder       — public builder
+//   /ai-builder    — public AI builder
+//
+// Protected page routes (require authentication):
+//   /dashboard, /studio/*, /projects, /wallet,
+//   /deployments, /settings/*, /profile/*, /admin/*, /owner,
+//   /library/*, /memories, /flow, /code, /agent-chat,
+//   /ai-builder, /builder, /chat, /generate,
+//   /litt, /litt-terminal, /runtime-test, /order/*
 
 const isProtectedRoute = createRouteMatcher([
+  // Protected page routes
   "/studio(.*)",
+  "/dashboard(.*)",
+  "/projects(.*)",
+  "/wallet(.*)",
+  "/deployments(.*)",
   "/settings(.*)",
   "/profile(.*)",
-  "/wallet(.*)",
-  "/dashboard(.*)",
+  "/admin(.*)",
+  "/owner(.*)",
+  "/library(.*)",
+  "/memories(.*)",
+  "/flow(.*)",
+  "/code(.*)",
   "/agent-chat(.*)",
+  "/ai-builder(.*)",
+  "/builder(.*)",
+  "/chat(.*)",
+  "/generate(.*)",
+  "/litt(.*)",
+  "/litt-terminal(.*)",
+  "/runtime-test(.*)",
+  "/order(.*)",
+  // Protected API routes
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
   "/api/settings/(.*)",
@@ -290,7 +344,7 @@ function protectRoute(req: NextRequest): NextResponse {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const signInUrl = new URL("/sign-in", req.url);
-  signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+  signInUrl.searchParams.set("redirect_url", req.nextUrl.pathname + req.nextUrl.search);
   return NextResponse.redirect(signInUrl);
 }
 
@@ -315,7 +369,7 @@ const innerMiddleware = useClerkMiddleware
           );
         }
         const signInUrl = new URL("/sign-in", req.url);
-        signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+        signInUrl.searchParams.set("redirect_url", req.nextUrl.pathname + req.nextUrl.search);
         return NextResponse.redirect(signInUrl);
       }
 
