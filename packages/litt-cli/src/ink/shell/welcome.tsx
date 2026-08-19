@@ -1,13 +1,12 @@
 /**
  * Welcome — the idle LiTT shell face.
  *
- * Centered logo with a subtle one-shot entrance animation (~450ms):
- * letters of "LiTT" appear one at a time, then the tagline, then the
- * prompt + hints. Then it is STATIC — never animates again.
+ * One-shot entrance (~440ms): letters of "LiTT" appear one at a time,
+ * then the tagline, then the prompt + hints. Then it is STATIC — never
+ * animates again. The moment the user submits, this area becomes the
+ * transcript inside the SAME reserved region — no reflow, no jumping.
  *
- * Rendered ONLY while the transcript is empty and nothing is running.
- * The moment the user submits, this area becomes the transcript (the
- * shell swaps content in place — no reflow, no jumping).
+ * Minimal on purpose: this is a developer instrument, not a dashboard.
  */
 
 import React, { useEffect, useState } from "react";
@@ -30,10 +29,10 @@ export function Welcome(): React.ReactElement {
 
   const letters = ["L", "i", "T", "T"].slice(0, frame).join(" ");
   const full = frame >= 4;
-  const pad = Math.max(0, Math.floor((width - 20) / 2));
+  const pad = Math.max(0, Math.floor((width - 20) / 2) - 2);
 
   return (
-    <Box flexDirection="column" paddingY={full ? 2 : 4}>
+    <Box flexDirection="column" paddingTop={full ? 3 : 4}>
       <Box paddingLeft={pad}>
         <Text bold color={COLORS.brand}>
           {full ? "L i T T" : letters}
@@ -48,12 +47,10 @@ export function Welcome(): React.ReactElement {
           <Box paddingLeft={pad} marginTop={2}>
             <Text color={COLORS.text}>What are we making tonight?</Text>
           </Box>
-          <Box paddingLeft={pad} marginTop={1}>
+          <Box paddingLeft={pad} marginTop={2}>
             <Text dimColor>/ commands</Text>
-            <Text dimColor>   </Text>
+            <Text dimColor>    </Text>
             <Text dimColor>@ context</Text>
-            <Text dimColor>   </Text>
-            <Text dimColor>Tab plan/act</Text>
           </Box>
         </>
       )}

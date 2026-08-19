@@ -1,7 +1,17 @@
 /**
- * Composer — the single input line of the LiTT shell.
+ * Composer — the single input line of the LiTT shell — the product's
+ * center of gravity.
  *
- * `› Ask LiTT anything...`
+ * ```
+ *   │ › What's slowing down my PC?▌          ← focused (cursor blinks)
+ *   │ › Ask LiTT anything...                 ← idle (placeholder)
+ *   │ › LiTT is working…          Esc to stop ← busy (no cursor)
+ * ```
+ *
+ * The thin brand left accent + `›` prompt + software cursor are the
+ * ONLY focus signals — no loud box, no glow. The native terminal cursor
+ * stays hidden (Ink hides it); this component renders its own
+ * blinking `▌` at the actual caret position.
  *
  * Owns ALL printable key handling (no ink-text-input) so the shell has
  * one keyboard truth:
@@ -13,8 +23,8 @@
  *   - ↑↓                        → command history (when idle)
  *
  * The draft lives in the CockpitStore (composerValue) so the / and @
- * overlays can read and extend it (e.g. picking a file appends the
- * token), then the composer restores it on close.
+ * overlays can read and extend it, then the composer restores it on
+ * close (the store holds it — the composer never loses focus content).
  */
 
 import React, { useCallback, useEffect, useRef } from "react";
@@ -24,6 +34,8 @@ import {
   type KeyInfo,
 } from "../keyboard-utils.js";
 import { COLORS } from "../colors.js";
+import { useCursorBlink } from "../use-cursor-blink.js";
+import { deriveFocusState } from "../focus-state.js";
 
 export interface ComposerProps {
   value: string;
@@ -37,13 +49,32 @@ export interface ComposerProps {
   disabled: boolean;
   /** True while a mission/chat is processing — composer shows a live indicator. */
   busy?: boolean;
+  /** True when the transcript is scrolled into history (not live). */
+  scrolled?: boolean;
+  /** Focus epoch from the store — caret restarts ONCE per transition. */
+  focusEpoch?: number;
+  /** Typing while scrolled returns the transcript to live + restores focus. */
+  onReturnToLive?: () => void;
 }
 
 export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
-  onOpenPalette, onOpenContext, disabled, busy,
+  onOpenPalette, onOpenContext, disabled, busy, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
   const [caret, setCaret] = React.useState(value.length);
+
+  // ─── Focus ownership — ONE authority (focus-state.ts) ────────────
+  // The composer renders its caret and runs its blink timer ONLY from
+  // this derivation. Stream chunks, timer ticks, and status updates
+  // never re-assert focus; only genuine transitions (overlay close,
+  // run settle, return-to-live) restart the caret via the epoch.
+  const focus = deriveFocusState({
+    overlayActive: false, // the composer only renders when no overlay is open
+    busy: !!(disabled || busy),
+    approvalActive: false, // covered by disabled (APPROVAL disables the composer)
+    scrolled: !!scrolled,
+  });
+  const cursor = useCursorBlink(550, 700, focus.blinkEnabled, focusEpoch ?? null);
 
   const valueRef = useRef(value);
   useEffect(() => { valueRef.current = value; }, [value]);
@@ -51,8 +82,8 @@ export function Composer({
   useEffect(() => { caretRef.current = caret; }, [caret]);
   const disabledRef = useRef(disabled);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
-  const busyRef = useRef(busy);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
+  const scrolledRef = useRef(scrolled);
+  useEffect(() => { scrolledRef.current = scrolled; }, [scrolled]);
 
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
@@ -64,6 +95,10 @@ export function Composer({
   useEffect(() => { onOpenPaletteRef.current = onOpenPalette; }, [onOpenPalette]);
   const onOpenContextRef = useRef(onOpenContext);
   useEffect(() => { onOpenContextRef.current = onOpenContext; }, [onOpenContext]);
+  const onReturnToLiveRef = useRef(onReturnToLive);
+  useEffect(() => { onReturnToLiveRef.current = onReturnToLive; }, [onReturnToLive]);
+  const pokeRef = useRef(cursor.poke);
+  useEffect(() => { pokeRef.current = cursor.poke; }, [cursor.poke]);
 
   useInput(useCallback((input: string, key: KeyInfo) => {
     if (disabledRef.current) return;
@@ -84,6 +119,7 @@ export function Composer({
       if (current) {
         onChangeRef.current("");
         setCaret(0);
+        pokeRef.current();
       }
       return;
     }
@@ -98,6 +134,7 @@ export function Composer({
       if (prev !== null) {
         onChangeRef.current(prev);
         setCaret(prev.length);
+        pokeRef.current();
       }
       return;
     }
@@ -108,18 +145,26 @@ export function Composer({
       const next = current.slice(0, pos - 1) + current.slice(pos);
       onChangeRef.current(next);
       setCaret(Math.max(0, pos - 1));
+      pokeRef.current();
       return;
     }
 
     // Left / Right caret movement.
-    if (key.leftArrow && pos > 0) { setCaret(pos - 1); return; }
-    if (key.rightArrow && pos < current.length) { setCaret(pos + 1); return; }
+    if (key.leftArrow && pos > 0) { setCaret(pos - 1); pokeRef.current(); return; }
+    if (key.rightArrow && pos < current.length) { setCaret(pos + 1); pokeRef.current(); return; }
 
     // Printable input — insert at caret. Paste arrives as a multi-char string.
     if (input && !key.ctrl && !key.meta && key.tab === false) {
+      // Typing while scrolled into history is an explicit "I'm back in
+      // the composer" signal — return to live (focus restored once by
+      // the store's bumpFocus). Never yank the view while merely
+      // streaming or on timer ticks.
+      if (scrolledRef.current) onReturnToLiveRef.current?.();
+
       const next = current.slice(0, pos) + input + current.slice(pos);
       onChangeRef.current(next);
       setCaret(pos + input.length);
+      pokeRef.current();
 
       // / and @ triggers fire when the draft STARTS with them (typed at
       // the very first position). The overlay takes the partial query so
@@ -133,22 +178,53 @@ export function Composer({
     }
   }, []));
 
-  const placeholder = busy ? "LiTT is working…" : "Ask LiTT anything...";
+  const placeholder = "Ask LiTT anything...";
+  // The software caret exists ONLY when the composer is genuinely the
+  // active interaction target (idle + live). Busy, overlay, approval,
+  // and scrolled-history states never manufacture a fake caret.
+  const cursorVisible = focus.showCaret && cursor.visible;
+
+  const renderInput = () => {
+    if (busy || disabled) {
+      return <Text dimColor>LiTT is working…</Text>;
+    }
+    const before = value.slice(0, caret);
+    const after = value.slice(caret);
+    if (value.length === 0) {
+      return (
+        <>
+          <Text color={COLORS.brand} bold>{cursorVisible ? "▌" : " "}</Text>
+          <Text dimColor>{placeholder}</Text>
+        </>
+      );
+    }
+    return (
+      <Text color={COLORS.text}>
+        {before}
+        <Text color={COLORS.brand} bold>{cursorVisible ? "▌" : " "}</Text>
+        {after}
+      </Text>
+    );
+  };
 
   return (
-    <Box marginTop={1}>
-      <Text color={COLORS.brand} bold>› </Text>
-      {disabled ? (
-        <Text dimColor>{placeholder}</Text>
-      ) : (
-        <Box flexDirection="row">
-          <Text color={COLORS.text}>
-            {value.slice(0, caret)}
-            <Text color={COLORS.brand} bold>{value[caret] ?? " "}</Text>
-            {value.slice(caret + 1)}
-          </Text>
-          {value.length === 0 && <Text dimColor>{placeholder}</Text>}
-        </Box>
+    <Box
+      flexDirection="row"
+      marginTop={1}
+      borderStyle="single"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderLeft
+      borderLeftColor={COLORS.brand}
+      paddingLeft={1}
+    >
+      <Box flexGrow={1}>
+        <Text bold color={COLORS.brand}>› </Text>
+        {renderInput()}
+      </Box>
+      {(busy || disabled) && (
+        <Text dimColor>Esc to stop</Text>
       )}
     </Box>
   );

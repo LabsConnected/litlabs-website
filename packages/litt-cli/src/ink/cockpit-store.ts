@@ -10,8 +10,9 @@
  * about itself (which panel is selected, what the user typed, etc).
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
+import { FocusEpochTracker } from "./focus-state.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -81,6 +82,9 @@ export interface ChatMessage {
   resolvedModel?: string;
   servedModel?: string | null;
   fallbackReason?: string | null;
+  /** Turn duration (ms) — stamped once at finalize; drives the
+   *  collapsed "Model · 9.0s" routing footer. */
+  durationMs?: number | null;
 }
 
 /**
@@ -136,6 +140,18 @@ export interface MissionState {
   buildPassed: boolean | null;
   /** Runtime verification proven */
   runtimeProven: boolean | null;
+  /** Git porcelain file paths captured at mission start — the baseline
+   *  pre-existing repo state. NEVER attributed to this mission. */
+  baselineGitFiles: string[];
+  /** Files changed BY this mission (baseline vs terminal git snapshot).
+   *  null until the mission reaches a terminal state. */
+  missionDeltaFiles: string[] | null;
+  /** True when the mission only read (no mutation tools succeeded).
+   *  Read-only missions NEVER claim "verification passed" for code
+   *  changes — they were not executing a verification gate. */
+  readOnly: boolean | null;
+  /** Every tool id invoked during the mission (for honest summaries). */
+  toolsUsed: string[];
 }
 
 /**
@@ -234,6 +250,18 @@ export interface CockpitUIState {
   /** When the shell entered a busy state (chat/mission) — for the
    *  status bar's "◉ Working · Ns" timer. Null when idle. */
   busySince: number | null;
+  /** Transcript scroll anchor — index of the top visible message.
+   *  null = LIVE (auto-follow the newest). The logical transcript is
+   *  NEVER mutated by the viewport; this is pure scroll position. */
+  transcriptAnchor: number | null;
+  /** Page size (messages per PgUp/PgDn) — set by the shell from the
+   *  live-mode visible count. */
+  transcriptPage: number;
+  /** Focus epoch — bumped EXACTLY ONCE per composer-restoration
+   *  transition (overlay close, run settle, explicit return-to-live).
+   *  The composer restarts its steady caret on change. Never bumped by
+   *  renders, stream chunks, or timer ticks (focus-state.ts). */
+  focusEpoch: number;
 }
 
 /** Overlay type — which modal/picker is open */
@@ -274,7 +302,7 @@ export function useCockpitStore() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
   const [activeModel, setActiveModel] = useState<string | null>(null);
-  const [overlay, setOverlay] = useState<Overlay>("none");
+  const [overlay, setOverlayState] = useState<Overlay>("none");
   const [mission, setMission] = useState<string | null>(null);
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [lastCompletedMission, setLastCompletedMission] = useState<MissionState | null>(null);
@@ -289,6 +317,17 @@ export function useCockpitStore() {
   const [composerValue, setComposerValue] = useState("");
   const [overlayQuery, setOverlayQuery] = useState("");
   const [busySince, setBusySince] = useState<number | null>(null);
+  const [transcriptAnchor, setTranscriptAnchor] = useState<number | null>(null);
+  // ─── Focus epoch — the single event-based focus authority ────────
+  // The tracker decides exactly-once restoration transitions; the React
+  // state is only a mirror so renders stay reactive. Epoch 1 = focused
+  // at launch (the allowed initial focus moment).
+  const focusTrackerRef = useRef<FocusEpochTracker | null>(null);
+  if (focusTrackerRef.current === null) {
+    focusTrackerRef.current = new FocusEpochTracker({ overlay: "none" });
+  }
+  const [focusEpoch, setFocusEpoch] = useState<number>(() => focusTrackerRef.current!.epoch);
+  const [transcriptPage, setTranscriptPage] = useState(5);
   // The transcript is owned by a pure ChatTranscriptStore (testable in
   // node env without a React renderer). The hook mirrors its snapshot
   // into React state so renders stay reactive. useState with a lazy
@@ -342,6 +381,7 @@ export function useCockpitStore() {
     content: string;
     status: "complete" | "error";
     servedModel?: string | null;
+    durationMs?: number | null;
   }) => {
     transcriptStore.finalize(options);
     syncTranscript();
@@ -368,6 +408,34 @@ export function useCockpitStore() {
       typecheckPassed: null,
       buildPassed: null,
       runtimeProven: null,
+      baselineGitFiles: [],
+      missionDeltaFiles: null,
+      readOnly: null,
+      toolsUsed: [],
+    });
+  }, []);
+
+  /** Record the git baseline captured at mission start. */
+  const setMissionBaseline = useCallback((files: string[]) => {
+    setMissionState((prev) => prev ? { ...prev, baselineGitFiles: files } : prev);
+  }, []);
+
+  /** Record the mission delta computed at completion (baseline vs now). */
+  const setMissionDelta = useCallback((files: string[]) => {
+    setMissionState((prev) => prev ? { ...prev, missionDeltaFiles: files } : prev);
+  }, []);
+
+  /** Record whether the mission was read-only (no mutation tools). */
+  const setMissionReadOnly = useCallback((readOnly: boolean) => {
+    setMissionState((prev) => prev ? { ...prev, readOnly } : prev);
+  }, []);
+
+  /** Record a tool invocation (for honest read-only summaries). */
+  const addMissionTool = useCallback((toolId: string) => {
+    setMissionState((prev) => {
+      if (!prev) return prev;
+      if (prev.toolsUsed.includes(toolId)) return prev;
+      return { ...prev, toolsUsed: [...prev.toolsUsed, toolId] };
     });
   }, []);
 
@@ -468,9 +536,62 @@ export function useCockpitStore() {
     if (p.gitUntracked !== undefined) setGitUntracked(p.gitUntracked);
   }, []);
 
+  // ─── Overlay + busy transitions drive the focus epoch ────────────
+  // Exactly-once restoration: opening an overlay does NOT bump; closing
+  // one DOES. Starting a run does NOT bump; the run settling (busy →
+  // idle) DOES. The tracker is transition-based, so repeated no-op
+  // calls (stale closures, double stopBusy) never double-bump.
+  const setOverlay = useCallback((next: Overlay) => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setOverlay(next);
+    setOverlayState(next);
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
   /** Mark the shell busy (status bar "◉ Working · Ns" timer). */
-  const startBusy = useCallback(() => setBusySince(Date.now()), []);
-  const stopBusy = useCallback(() => setBusySince(null), []);
+  const startBusy = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setBusy(true);
+    setBusySince(Date.now());
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  /** End the busy state — restores composer focus exactly once. */
+  const stopBusy = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setBusy(false);
+    setBusySince(null);
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  /** Explicit focus restoration (e.g. typing returns from history). */
+  const bumpFocus = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.bump();
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  // ─── Transcript scroll (viewport position — never mutates history) ──
+  const scrollPgUp = useCallback(() => {
+    const page = Math.max(1, transcriptPage);
+    setTranscriptAnchor((prev) => {
+      const base = prev ?? chatTranscript.length;
+      return Math.max(0, base - page);
+    });
+  }, [transcriptPage, chatTranscript.length]);
+
+  const scrollPgDn = useCallback(() => {
+    const page = Math.max(1, transcriptPage);
+    setTranscriptAnchor((prev) => {
+      if (prev === null) return null;
+      const next = prev + page;
+      return next >= chatTranscript.length ? null : next;
+    });
+  }, [transcriptPage, chatTranscript.length]);
+
+  const scrollHome = useCallback(() => setTranscriptAnchor(0), []);
+  const scrollEnd = useCallback(() => setTranscriptAnchor(null), []);
+  const resetTranscriptScroll = useCallback(() => setTranscriptAnchor(null), []);
 
   // Auto-clear approval prompt when holoState transitions away from APPROVAL
   useEffect(() => {
@@ -510,6 +631,9 @@ export function useCockpitStore() {
       composerValue,
       overlayQuery,
       busySince,
+      transcriptAnchor,
+      transcriptPage,
+      focusEpoch,
     },
     actions: {
       setSelectedPanel,
@@ -536,6 +660,10 @@ export function useCockpitStore() {
       setMissionTypecheck,
       setMissionBuild,
       setMissionRuntimeProven,
+      setMissionBaseline,
+      setMissionDelta,
+      setMissionReadOnly,
+      addMissionTool,
       clearMission,
       setCanonicalMission,
       setIsProcessing,
@@ -551,6 +679,14 @@ export function useCockpitStore() {
       setOverlayQuery,
       startBusy,
       stopBusy,
+      bumpFocus,
+      setTranscriptAnchor,
+      setTranscriptPage,
+      scrollPgUp,
+      scrollPgDn,
+      scrollHome,
+      scrollEnd,
+      resetTranscriptScroll,
     },
   };
 }

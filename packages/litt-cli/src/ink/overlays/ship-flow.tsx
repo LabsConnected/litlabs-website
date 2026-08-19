@@ -123,33 +123,34 @@ export function ShipFlow({
   const checks = verification?.checks ?? [];
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.brand}>SHIP</Text>
+        <Text bold color={COLORS.text}>SHIP</Text>
         <Text dimColor>{project}</Text>
       </Box>
 
       {/* Branch + changes */}
       <Box marginTop={1}>
-        <Text dimColor bold>Branch   </Text>
-        <Text color={COLORS.warning}>{branch}</Text>
+        <Text dimColor>Branch   </Text>
+        <Text color={COLORS.secondaryBright}>{branch}</Text>
       </Box>
       <Box>
-        <Text dimColor bold>Changes  </Text>
+        <Text dimColor>Changes  </Text>
         <Text>
           {files.length} file{files.length !== 1 ? "s" : ""}
           {files.length > 0 && <> · <Text color={COLORS.success}>+{totalAdded}</Text> <Text color={COLORS.error}>-{totalRemoved}</Text></>}
         </Text>
       </Box>
 
-      {/* Verification */}
+      {/* Verification — the honest ship gate, no ambiguous state */}
       <Box marginTop={1} flexDirection="column">
-        <Text dimColor bold>Verification</Text>
-        {phase === "verifying" && <Text color={COLORS.working}>→ Running verification gate…</Text>}
-        {verification && checks.length === 0 && (
-          <Text color={verification.proven ? COLORS.success : COLORS.error}>
-            {verification.proven ? "✓ " : "× "}{verification.message}
-          </Text>
+        <Text dimColor>Verification</Text>
+        {phase === "verifying" && <Text color={COLORS.working}>◉ Running verification…</Text>}
+        {verification && verification.proven && (
+          <Text color={COLORS.success} bold>✓ Verification proven</Text>
+        )}
+        {verification && !verification.proven && (
+          <Text color={COLORS.error} bold>× Verification not proven</Text>
         )}
         {verification && checks.map((c) => (
           <Box key={c.id}>
@@ -160,23 +161,20 @@ export function ShipFlow({
             {c.status === "failed" && <Text color={COLORS.error}>  {c.message}</Text>}
           </Box>
         ))}
-        {verification && !verification.proven && (
-          <Text color={COLORS.error}>× Gate not proven — fix issues before shipping.</Text>
-        )}
       </Box>
 
       {/* Suggested commit */}
       <Box marginTop={1} flexDirection="column">
-        <Text dimColor bold>{editing ? "Commit message (edit)" : "Suggested commit"}</Text>
-        <Text color={editing ? COLORS.working : COLORS.text} bold>
-          {message}{editing ? "▋" : ""}
+        <Text dimColor>{editing ? "Commit message (edit)" : "Suggested commit"}</Text>
+        <Text color={COLORS.text} bold>
+          {message}{editing ? "▌" : ""}
         </Text>
       </Box>
 
       {/* Result */}
       {phase === "committing" && (
         <Box marginTop={1}>
-          <Text color={COLORS.working}>→ Committing…</Text>
+          <Text color={COLORS.working}>◉ Committing…</Text>
         </Box>
       )}
       {(phase === "done" || phase === "error") && (
@@ -187,23 +185,26 @@ export function ShipFlow({
         </Box>
       )}
 
-      {/* Actions */}
+      {/* Actions — commit keys exist ONLY when verification is proven */}
       <Box marginTop={1}>
         {phase === "ready" && !editing && (
           <>
             <Text color={COLORS.success} bold>[C]</Text><Text dimColor> Commit  </Text>
-            <Text color={COLORS.info} bold>[P]</Text><Text dimColor> Commit + Push  </Text>
+            <Text color={COLORS.success} bold>[P]</Text><Text dimColor> Commit + Push  </Text>
             <Text color={COLORS.warning} bold>[E]</Text><Text dimColor> Edit  </Text>
-            <Text color={COLORS.working} bold>[R]</Text><Text dimColor> Review  </Text>
+            <Text color={COLORS.info} bold>[R]</Text><Text dimColor> Review  </Text>
             <Text dimColor>Esc Cancel</Text>
           </>
         )}
         {editing && <Text dimColor>type to edit · Enter/Esc done</Text>}
         {phase === "blocked" && (
-          <Text color={COLORS.error} bold>Gate not proven — commit disabled. Fix issues, then re-open /ship to re-verify.</Text>
+          <Box flexDirection="column">
+            <Text color={COLORS.error}>× Verification not proven — Commit disabled</Text>
+            <Text dimColor>Fix issues, then re-open /ship to re-verify. Enter/Esc close</Text>
+          </Box>
         )}
-        {(phase === "done" || phase === "error" || phase === "blocked") && <Text dimColor>Enter/Esc close</Text>}
-        {phase === "verifying" && <Text dimColor>gate running…</Text>}
+        {(phase === "done" || phase === "error") && <Text dimColor>Enter/Esc close</Text>}
+        {phase === "verifying" && <Text dimColor>verification running…</Text>}
       </Box>
     </Box>
   );

@@ -48,6 +48,7 @@ import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
+import { porcelainPaths, computeMissionDelta } from "../lib/mission-delta.js";
 import {
   MissionVerificationGate,
   createMissionEvidenceTracker,
@@ -495,6 +496,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const submitRef = useRef<(input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => void>(() => {});
   const submit = useCallback(async (input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => {
     store.actions.addCommand(input);
+    // A new turn returns the transcript to LIVE mode (auto-follow).
+    store.actions.resetTranscriptScroll();
     // Mode is authoritative on the session — /plan /act Tab all converge.
     session.setMode(store.state.mode);
 
@@ -980,7 +983,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // Set the CONFIGURED model label — the actual ACTIVE model is
           // confirmed after streaming sees the runtime response model.
           store.actions.setActiveModel(routed.label);
-          const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
+          // Declare the project tools NATIVELY on the transport — the
+          // model sees real tool schemas, so it never claims tools are
+          // unavailable (the dogfood "unable to access project.status"
+          // failure). Native tool_calls are translated back into LiTT's
+          // tool_call fence format by the provider.
+          const model = new OpenRouterModelProvider({
+            model: routed.openRouterModelId ?? routed.id,
+            tools: tools.list(),
+          });
 
           // Persist a streaming assistant message — the live preview.
           // Finalized ONCE with result.content when the loop completes.
@@ -1059,6 +1070,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             content: finalContent,
             status: finalStatus,
             servedModel: model.activeModel,
+            durationMs: result.durationMs,
           });
           const seconds = (result.durationMs / 1000).toFixed(1);
           // Single concise DONE event — not raw response body
@@ -1069,9 +1081,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             tag: "CHAT",
             text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
-          // CHAT complete — clear isProcessing, holoState stays IDLE
-          store.actions.setIsProcessing(false);
-          store.actions.stopBusy();
+          // CHAT complete — the tool events above pushed holoState to
+          // RUNNING mid-run; a successful chat must return it to IDLE
+          // (the composer/status reconcile out of Working). Cleanup in finally.
+          store.actions.setHoloState("IDLE");
           persistSession();
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
@@ -1087,11 +1100,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             content: errText,
             status: "error",
           });
-          // Clear processing on failure too — composer must return to editable
-          store.actions.setIsProcessing(false);
-          store.actions.stopBusy();
           store.actions.setHoloState("FAILED");
           setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        } finally {
+          // ONE canonical transition out of a run: every terminal
+          // outcome (success, failed, provider error, tool error, stall)
+          // re-enables the composer and stops the busy timer. The shell
+          // can never stay visually Working after the run settles.
+          store.actions.setIsProcessing(false);
+          store.actions.stopBusy();
         }
         return;
       }
@@ -1108,6 +1125,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       store.actions.startMission(input);
       store.actions.startBusy();
       store.actions.setHoloState("UNDERSTANDING");
+      // ─── Git BASELINE at mission start (dogfood P0) ──────────────
+      // The repo's pre-existing dirty files are recorded BEFORE any
+      // tool runs so the DONE summary can distinguish "repository
+      // state" from "mission delta". Pre-existing dirt is NEVER
+      // attributed to this mission.
+      {
+        const gs = getGitState(projectRoot);
+        store.actions.setMissionBaseline(porcelainPaths(gs.porcelain));
+      }
       act(store, "Understanding request", "agent.request", "working", "THINK");
       // Persist the user message to the chat transcript (rendered once).
       store.actions.addChatMessage({
@@ -1117,6 +1143,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         status: "complete",
       });
 
+      // Every terminal outcome must reconcile the shell out of Working
+      // state. `settled` tracks whether a branch already handled the
+      // terminal state; the finally is the guarantee for anything that
+      // escapes (e.g. a cleanup call itself throwing).
+      let settled = false;
       try {
         // ─── CANONICAL PATH — one brain, one RuntimeStore ───
         const gateway = session.getGateway();
@@ -1138,7 +1169,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           ts: Date.now(),
           type: "info",
           tag: "MISSION",
-          text: `Mission created: ${mission.id}`,
+          text: "Mission created",
         });
 
         const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, modelInput);
@@ -1154,7 +1185,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // Set the CONFIGURED model label — the actual ACTIVE model is
         // confirmed after streaming sees the runtime response model.
         store.actions.setActiveModel(routed.label);
-        const model = new OpenRouterModelProvider({ model: routed.openRouterModelId ?? routed.id });
+        // Native tool schemas on the transport — the model sees the real
+        // project tools (dogfood P0: it must never claim project.status
+        // is unavailable in this session).
+        const model = new OpenRouterModelProvider({
+          model: routed.openRouterModelId ?? routed.id,
+          tools: tools.list(),
+        });
 
         // Persist a streaming assistant message — live preview during
         // the mission. Finalized ONCE with result.content when the loop
@@ -1234,7 +1271,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // replaced mid-mission, preserving the same conversation/context.
         const escalationTracker = createEscalationTracker();
         const escalationHook = createEscalationHook(escalationTracker, modelRuntime, "coding");
-        const modelResolver = createModelResolver(modelRuntime);
+        // Escalation-swapped models get the SAME native tool schemas —
+        // a stronger model must never lose the project tools mid-mission.
+        const modelResolver = createModelResolver(modelRuntime, tools.list());
 
         // ─── Evidence tracker + read-only verification ──────────
         // Read-only inspection missions (no mutation tools called) are
@@ -1317,6 +1356,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const toolCallId = (event as { toolCallId?: string }).toolCallId
                 ?? (event.data as { toolCallId?: string }).toolCallId
                 ?? "";
+              // Record the tool invocation for honest summaries
+              // (e.g. "2 tools used" for read-only missions).
+              store.actions.addMissionTool(toolId);
 
               // Track mutation/evidence state synchronously — the
               // verification gate reads it when the loop calls verify().
@@ -1350,7 +1392,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const MUTATION_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
               const EXECUTION_TOOLS = new Set(["project.build", "project.test", "project.typecheck", "project.run"]);
               if (MUTATION_TOOLS.has(toolId)) {
-                store.actions.addMissionFile(toolId);
+                // Record the REAL file path (inputs.file/path), never the
+                // tool id — filesTouched is a file list, not a tool list.
+                const inputs = (event.data as { inputs?: Record<string, unknown> }).inputs ?? {};
+                const file = typeof inputs.file === "string" ? inputs.file
+                  : typeof inputs.path === "string" ? inputs.path
+                    : null;
+                if (file) {
+                  store.actions.addMissionFile(file);
+                } else {
+                  store.actions.addMissionFile(toolId);
+                }
               } else if (EXECUTION_TOOLS.has(toolId)) {
                 store.actions.addMissionCommand(toolId);
               }
@@ -1478,6 +1530,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             content: finalContent,
             status: finalStatus,
             servedModel: model.activeModel,
+            durationMs: result.durationMs,
           });
         }
 
@@ -1568,6 +1621,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         }
 
+        // ─── Mission delta + read-only classification (dogfood P0) ──
+        // Compare the terminal git snapshot against the baseline captured
+        // at mission start. Pre-existing dirty files are NEVER attributed
+        // to this mission. Read-only missions never claim a verification
+        // gate ran on code changes.
+        {
+          const gs = getGitState(projectRoot);
+          const delta = computeMissionDelta(
+            store.state.missionState?.baselineGitFiles ?? [],
+            porcelainPaths(gs.porcelain),
+          );
+          store.actions.setMissionDelta(delta.changed);
+          store.actions.setMissionReadOnly(evidenceTracker.isReadOnly());
+        }
+
         // ─── Mission completion — driven by VerificationGate, not model ───
         const seconds = (result.durationMs / 1000).toFixed(1);
         if (missionComplete) {
@@ -1589,13 +1657,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
           store.actions.setMissionRuntimeProven(true);
+          settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
             type: "agent.complete",
             tag: "DONE",
-            text: `Mission COMPLETE (verified) · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
+            text: `Mission verified · ${seconds}s`,
             fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
           });
         } else {
@@ -1606,13 +1675,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED");
           store.actions.setMissionRuntimeProven(false);
+          settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
             type: "agent.stopped",
             tag: "FAIL",
-            text: `Mission NOT verified · ${result.rounds}r · ${result.toolCalls.length}t · ${seconds}s`,
+            text: `Mission not verified · ${seconds}s`,
             fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
           });
         }
@@ -1638,12 +1708,23 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
+        settled = true;
         store.actions.stopBusy();
         // Fail the canonical mission if one was created
         const agentStore = session.getStore();
         const m = agentStore.getMission();
         if (m) {
           await agentStore.failMission(errText).catch(() => {});
+        }
+      } finally {
+        // The canonical transition out of a run — no terminal outcome
+        // (success, failed, cancelled, timeout, provider/tool/planning
+        // error, transport stall) may leave the shell visually Working.
+        if (!settled) {
+          store.actions.setIsProcessing(false);
+          store.actions.stopBusy();
+          store.actions.setHoloState("FAILED");
+          store.actions.updateMissionState("FAILED");
         }
       }
       return;

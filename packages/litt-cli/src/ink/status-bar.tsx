@@ -1,43 +1,33 @@
 /**
  * StatusBar — the LiTT shell's two-line bottom bar.
  *
- *   LiTT Auto → GPT-5.6                    ○ Plan   ● Act
- *   litlabs-website · main · LOCAL              +292 -96
+ * ```
+ *   LiTT Auto → GPT-5.6 Luna                    ○ Plan   ● Act
+ *   litlabs-website · feat/litt-final-integration · LOCAL    clean
+ * ```
  *
- * Right-side states (one at a time):
- *   clean          — nothing changed
- *   +292 -96       — dirty (modified + untracked)
- *   ◉ Working · 12s — mission/chat in flight
- *   ! failed · n   — last mission failed (message + [v] hint)
+ * Hierarchy (never everything bright):
+ *   brain        — white + subtle orange identity
+ *   active model — white
+ *   Plan/Act     — active orange, inactive dim gray
+ *   project      — gray
+ *   branch       — slightly brighter gray
+ *   LOCAL        — muted, state-colored
+ *   clean        — muted green
+ *   dirty        — muted amber (+N)
+ *   working      — small active indicator (◉ Working · Ns)
+ *   error        — muted red (! failed · v View)
  *
- * No fake statuses. Everything comes from canonical state.
+ * One dim divider above. No fake statuses — everything comes from
+ * canonical state. Left/right segments never overlap: the left side
+ * truncates to the width the right side leaves.
  */
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { truncateTail, shortModelName } from "./text-wrap.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
-
-/** Shorten model name: "anthropic/claude-sonnet-4.6" → "Sonnet 4.6" */
-function shortModelName(model: string | null): string {
-  if (!model) return "";
-  const withoutProvider = model.includes("/") ? model.split("/").slice(1).join("/") : model;
-  const cleaned = withoutProvider
-    .replace(/^claude-/, "Claude ")
-    .replace(/^gpt-/, "GPT-")
-    .replace(/^gemini-/, "Gemini ")
-    .replace(/^o1-/, "o1 ")
-    .replace(/^o3-/, "o3 ")
-    .replace(/-/g, " ");
-  return cleaned.replace(/\b\w/, (c) => c.toUpperCase());
-}
-
-/** Truncate a string to fit, preserving the tail (most meaningful part). */
-function truncateTail(text: string, max: number): string {
-  if (text.length <= max) return text;
-  if (max <= 1) return "…";
-  return "…" + text.slice(text.length - (max - 1));
-}
 
 function isWorking(h: HoloState): boolean {
   return h === "UNDERSTANDING" || h === "PLANNING" || h === "READING"
@@ -71,51 +61,60 @@ export function StatusBar({
   const busy = working || holoState === "COMPLETE" || holoState === "FAILED"
     || holoState === "CANCELLED" || holoState === "TIMEOUT";
 
-  // Right-hand status: clean / +N -M / ◉ Working · Ns / ! failed
+  // ── Line 2 right: clean / +N / ◉ Working / ! failed ──
   let right: React.ReactElement;
   if (working) {
-    // Real elapsed time: busySince (chat) or mission startedAt (mission).
     const started = busySince ?? missionState?.startedAt ?? Date.now();
     const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
     right = (
-      <Text color={COLORS.working} bold>
+      <Text color={COLORS.working}>
         ◉ Working · {seconds}s
       </Text>
     );
-  } else if (missionState && (missionState.state === "FAILED" || missionState.state === "CANCELLED" || missionState.state === "TIMEOUT")) {
+  } else if (missionState
+    && (missionState.state === "FAILED" || missionState.state === "CANCELLED" || missionState.state === "TIMEOUT")) {
     const label = missionState.state === "FAILED" ? "failed" : missionState.state.toLowerCase();
     const tests = missionState.testResults && missionState.testResults.failed > 0
       ? ` · ${missionState.testResults.failed} test${missionState.testResults.failed !== 1 ? "s" : ""} failing`
       : "";
     right = (
-      <Text color={COLORS.error} bold>
-        ! {label}{tests}  <Text dimColor>[v] View</Text>
+      <Text>
+        <Text color={COLORS.error}>! {label}{tests}</Text>
+        <Text dimColor>  v View</Text>
       </Text>
     );
   } else if (gitModified + gitUntracked > 0) {
-    right = (
-      <Text color={COLORS.warning}>
-        +{gitModified + gitUntracked}
-        <Text dimColor>  </Text>
-      </Text>
-    );
+    right = <Text color={COLORS.warning}>+{gitModified + gitUntracked}</Text>;
   } else {
     right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
   }
 
   // ── Line 1: brain → active   |   Plan/Act ──
-  const brainShort = truncateTail(brain, 26);
-  const modelShort = activeModel ? truncateTail(shortModelName(activeModel), 22) : null;
+  const modelShort = activeModel ? shortModelName(activeModel) : null;
   const planDot = mode === "plan" ? "●" : "○";
   const actDot = mode === "act" ? "●" : "○";
+  const right1Text = `${planDot} Plan   ${actDot} Act`;
+
+  // ── Line 2: project · branch · LOCAL   |   right status ──
+  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
+  const localColor = localRuntime === "ready" ? COLORS.success
+    : localRuntime === "error" ? COLORS.error : COLORS.warning;
+  const localLabel = localRuntime === "ready" ? "LOCAL"
+    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+
+  // Right-segment widths for overlap-free truncation.
+  const rightWidth = Math.max(5, measure(right));
+  const right1Width = right1Text.length;
+  const left1Max = Math.max(20, width - 4 - right1Width);
+  const left2Max = Math.max(24, width - 4 - rightWidth);
 
   const left1 = (
     <Text>
-      <Text color={COLORS.brand} bold>{brainShort}</Text>
+      <Text color={COLORS.brand} bold>{truncateTail(brain, Math.max(12, Math.floor(left1Max * 0.4)))}</Text>
       {modelShort && (
         <>
           <Text dimColor> → </Text>
-          <Text color={COLORS.info}>{modelShort}</Text>
+          <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - 18))}</Text>
         </>
       )}
     </Text>
@@ -129,42 +128,50 @@ export function StatusBar({
     </Text>
   );
 
-  // ── Line 2: project · branch · LOCAL   |   right status ──
-  const projectShort = truncateTail(project, 26);
-  const branchShort = truncateTail(branch, 24);
-  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
-  const localColor = localRuntime === "ready" ? COLORS.success : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL" : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  const projectShort = truncateTail(project, Math.max(10, Math.floor(left2Max * 0.42)));
+  const branchShort = truncateTail(branch, Math.max(10, Math.floor(left2Max * 0.36)));
 
   const left2 = (
     <Text>
-      <Text color={COLORS.working} bold>{projectShort}</Text>
+      <Text color={COLORS.secondary}>{projectShort}</Text>
       <Text dimColor> · </Text>
-      <Text color={COLORS.warning}>{branchShort}</Text>
+      <Text color={COLORS.secondaryBright}>{branchShort}</Text>
       <Text dimColor> · </Text>
-      <Text color={localColor}>{localIcon} {localLabel}</Text>
+      <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
     </Text>
-  );
-
-  const line2 = (
-    <Box justifyContent="space-between">
-      {left2}
-      {right}
-    </Box>
-  );
-
-  const line1 = (
-    <Box justifyContent="space-between">
-      {left1}
-      {right1}
-    </Box>
   );
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text dimColor>{"─".repeat(Math.min(width, 72))}</Text>
-      {line1}
-      {line2}
+      <Text color={COLORS.secondaryDim}>{"─".repeat(Math.max(20, Math.min(width - 4, 72)))}</Text>
+      <Box justifyContent="space-between">
+        {left1}
+        {right1}
+      </Box>
+      <Box justifyContent="space-between">
+        {left2}
+        {right}
+      </Box>
     </Box>
   );
 }
+
+/** Rough visual width of a React element subtree (text lengths only). */
+function measure(node: React.ReactElement): number {
+  let total = 0;
+  const walk = (n: React.ReactNode): void => {
+    if (n == null || typeof n === "boolean") return;
+    if (typeof n === "string" || typeof n === "number") { total += String(n).length; return; }
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (React.isValidElement(n)) {
+      const props = n.props as { children?: React.ReactNode };
+      if (typeof props.children === "string") total += props.children.length;
+      else walk(props.children);
+    }
+  };
+  walk(node);
+  return total;
+}
+
+// Re-export for consumers that need the friendly label logic.
+export { shortModelName };

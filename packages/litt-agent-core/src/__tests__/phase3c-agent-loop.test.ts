@@ -106,6 +106,57 @@ describe("Agent Loop", () => {
     assert.equal(stripped, "Before\n\nAfter");
   });
 
+  // ─── DOGFOOD REGRESSIONS: tolerant tool-call parsing ────────────
+
+  it("REGRESSION: parses a bare tool object embedded mid-prose (no newline before it)", () => {
+    const content = 'Let me check { "tool": "project.status", "inputs": {} } now';
+    const parsed = parseToolCall(content);
+    assert.notEqual(parsed, null);
+    assert.equal(parsed!.toolId, "project.status");
+  });
+
+  it("REGRESSION: parses a bare tool object preceded by prose braces", () => {
+    const content = 'Using the { status } tool: { "tool": "project.status", "inputs": {} }';
+    const parsed = parseToolCall(content);
+    assert.notEqual(parsed, null);
+    assert.equal(parsed!.toolId, "project.status");
+  });
+
+  it("REGRESSION: strips a bare (unfenced) tool object from final content", () => {
+    const content = 'Checking now.\n{ "tool": "project.status", "inputs": {} }\nThe branch is main.';
+    const stripped = stripToolCallBlocks(content);
+    assert.ok(!stripped.includes('"tool"'));
+    assert.ok(!stripped.includes("project.status"));
+    assert.ok(stripped.includes("Checking now."));
+    assert.ok(stripped.includes("The branch is main."));
+  });
+
+  it("REGRESSION: strips a bare tool object embedded mid-prose", () => {
+    const content = 'I will check { "tool": "project.status", "inputs": {} } and report.';
+    const stripped = stripToolCallBlocks(content);
+    assert.ok(!stripped.includes("project.status"));
+    assert.ok(stripped.includes("I will check"));
+  });
+
+  it("REGRESSION: strips multiple bare tool objects", () => {
+    const content = '{ "tool": "a", "inputs": {} }\n{ "tool": "b", "inputs": {} }\nanswer';
+    const stripped = stripToolCallBlocks(content);
+    assert.ok(!stripped.includes('"tool"'));
+    assert.ok(stripped.includes("answer"));
+  });
+
+  it("REGRESSION: the exact observed leak fragment never survives stripping", () => {
+    const content = 'Checking{"tool":"project.status","inputs":{}}';
+    const stripped = stripToolCallBlocks(content);
+    assert.ok(!stripped.includes('project.status","inputs":{}'));
+  });
+
+  it("REGRESSION: prose containing brace-like text is preserved", () => {
+    const content = "The {balanced} braces are prose, not a tool call.";
+    const stripped = stripToolCallBlocks(content);
+    assert.equal(stripped, "The {balanced} braces are prose, not a tool call.");
+  });
+
   // ─── System prompt builder ──────────────────────────────────────
 
   it("builds system prompt with tool definitions", () => {

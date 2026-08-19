@@ -110,8 +110,8 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
 
   if (files.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={COLORS.success} paddingX={2} paddingY={1}>
-        <Text bold color={COLORS.success}>DIFF</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
+        <Text bold color={COLORS.text}>DIFF</Text>
         <Text dimColor>No changes. Working tree is clean.</Text>
         <Box marginTop={1}>
           <Text dimColor>Esc close</Text>
@@ -124,9 +124,9 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
   const totalRemoved = files.reduce((s, f) => s + f.deletions, 0);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.brand}>DIFF</Text>
+        <Text bold color={COLORS.text}>DIFF</Text>
         <Text dimColor>
           {files.length} file{files.length !== 1 ? "s" : ""} · <Text color={COLORS.success}>+{totalAdded}</Text> <Text color={COLORS.error}>-{totalRemoved}</Text>
         </Text>
@@ -135,7 +135,7 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
       {detail ? (
         // ── Detail diff for one file ──
         <Box flexDirection="column" marginTop={1}>
-          <Text color={COLORS.working} bold>{detail}</Text>
+          <Text color={COLORS.text} bold>{detail}</Text>
           {detailDiff ? (
             <Box flexDirection="column">
               {detailDiff.split("\n").map((line, i) => {
@@ -145,7 +145,7 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
                 let bold = false;
                 if (line.startsWith("+") && !line.startsWith("+++")) { color = COLORS.success; }
                 else if (line.startsWith("-") && !line.startsWith("---")) { color = COLORS.error; }
-                else if (line.startsWith("@@")) { color = COLORS.working; bold = true; }
+                else if (line.startsWith("@@")) { color = COLORS.secondaryDim; }
                 return (
                   <Text key={i} color={color} bold={bold}>{line}</Text>
                 );
@@ -177,8 +177,10 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
             const sg = STATUS_GLYPH[f.status] ?? { glyph: f.status, color: COLORS.secondary };
             return (
               <Box key={f.path}>
-                <Text color={isSelected ? COLORS.brand : undefined}>{isSelected ? ">" : " "}</Text>
-                <Text color={sg.color} bold>{sg.glyph}</Text>
+                <Text color={isSelected ? COLORS.brand : COLORS.secondaryDim}>
+                  {isSelected ? ">" : " "}
+                </Text>
+                <Text color={sg.color}>{sg.glyph}</Text>
                 <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}>
                   {` ${f.path}`}
                 </Text>
@@ -189,10 +191,7 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
             );
           })}
           <Box marginTop={1}>
-            <Text color={COLORS.success} bold>[A]</Text><Text dimColor> Accept  </Text>
-            <Text color={COLORS.error} bold>[R]</Text><Text dimColor> Revert  </Text>
-            <Text color={COLORS.info} bold>[O]</Text><Text dimColor> Open  </Text>
-            <Text dimColor>Enter detail · ↑↓ navigate · Esc close</Text>
+            <Text dimColor>A Accept · R Revert · O Open · Enter detail · ↑↓ navigate · Esc close</Text>
           </Box>
         </Box>
       )}

@@ -2,12 +2,14 @@
  * Tests for the semantic color system.
  *
  * Verifies that:
- *   - LiTT brand is magenta (purple)
- *   - Success/pass is green
- *   - Working is cyan
- *   - Warning is yellow
- *   - Failure is red
- *   - Secondary is gray
+ *   - LiTT brand is warm amber/orange (the ONE controlled accent)
+ *   - Content text is warm near-white (never pure white)
+ *   - Metadata is gray; dim gray for de-emphasis
+ *   - Success is muted green
+ *   - Working is warm amber
+ *   - Warning is muted amber
+ *   - Failure is muted red
+ *   - Info is muted blue
  *   - State colors map correctly
  *   - Activity tags map correctly
  */
@@ -17,28 +19,42 @@ import { COLORS, stateColor, activityColor, healthColor, costTier } from "../ink
 
 describe("colors", () => {
   describe("COLORS constants", () => {
-    it("brand is magenta (purple)", () => {
-      expect(COLORS.brand).toBe("magenta");
+    it("brand is warm amber/orange", () => {
+      expect(COLORS.brand).toBe("#ff9e64");
     });
 
-    it("success is green", () => {
-      expect(COLORS.success).toBe("green");
+    it("success is muted green", () => {
+      expect(COLORS.success).toBe("#9ece6a");
     });
 
-    it("working is cyan", () => {
-      expect(COLORS.working).toBe("cyan");
+    it("working is warm amber", () => {
+      expect(COLORS.working).toBe("#ffb454");
     });
 
-    it("warning is yellow", () => {
-      expect(COLORS.warning).toBe("yellow");
+    it("warning is muted amber", () => {
+      expect(COLORS.warning).toBe("#e0af68");
     });
 
-    it("error is red", () => {
-      expect(COLORS.error).toBe("red");
+    it("error is muted red", () => {
+      expect(COLORS.error).toBe("#f7768e");
     });
 
-    it("secondary is gray", () => {
-      expect(COLORS.secondary).toBe("gray");
+    it("secondary is medium gray", () => {
+      expect(COLORS.secondary).toBe("#8d897f");
+    });
+
+    it("secondaryDim is dim gray", () => {
+      expect(COLORS.secondaryDim).toBe("#5f5c55");
+    });
+
+    it("content text is warm near-white — not pure white", () => {
+      expect(COLORS.text).toBe("#e4e1da");
+      expect(COLORS.text).not.toBe("white");
+    });
+
+    it("user text is brighter than metadata", () => {
+      expect(COLORS.textBright).toBe("#f7f5f0");
+      expect(COLORS.textBright.length).toBe(7);
     });
   });
 
@@ -47,7 +63,7 @@ describe("colors", () => {
       expect(stateColor("IDLE")).toBe(COLORS.brand);
     });
 
-    it("working states → cyan", () => {
+    it("working states → working (amber)", () => {
       expect(stateColor("UNDERSTANDING")).toBe(COLORS.working);
       expect(stateColor("PLANNING")).toBe(COLORS.working);
       expect(stateColor("READING")).toBe(COLORS.working);
@@ -76,7 +92,7 @@ describe("colors", () => {
   });
 
   describe("activityColor", () => {
-    it("working tags → cyan", () => {
+    it("working tags → amber", () => {
       expect(activityColor("THINK")).toBe(COLORS.working);
       expect(activityColor("ROUTE")).toBe(COLORS.working);
       expect(activityColor("READ")).toBe(COLORS.working);
@@ -95,12 +111,12 @@ describe("colors", () => {
       expect(activityColor("ERROR")).toBe(COLORS.error);
     });
 
-    it("warning tags → yellow", () => {
+    it("warning tags → amber", () => {
       expect(activityColor("WARN")).toBe(COLORS.warning);
       expect(activityColor("APPROVAL")).toBe(COLORS.warning);
     });
 
-    it("brand tags → magenta", () => {
+    it("brand tags → amber", () => {
       expect(activityColor("CHAT")).toBe(COLORS.brand);
       expect(activityColor("INFO")).toBe(COLORS.brand);
     });

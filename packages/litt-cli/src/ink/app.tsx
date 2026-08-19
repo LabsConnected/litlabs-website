@@ -154,9 +154,30 @@ export function CockpitApp({
       store.actions.setOverlay("model-center");
       return;
     }
+    // Transcript scroll — PgUp/PgDn/Home/End. Works even while busy
+    // (browsing history during a run). Never steals Up/Down (history).
+    if (key.pageUp) { store.actions.scrollPgUp(); return; }
+    if (key.pageDown) { store.actions.scrollPgDn(); return; }
+    if (key.home) { store.actions.scrollHome(); return; }
+    if (key.end) { store.actions.scrollEnd(); return; }
     if (key.tab) {
       // Tab → Plan/Act toggle. Never mid-processing.
       if (!store.state.isProcessing) controller.toggleMode();
+      return;
+    }
+    // Esc while working — cancel the active mission/chat (the composer
+    // shows "Esc to stop"; this makes it true). Esc when idle is the
+    // composer's own "clear draft" — the app handler ignores it here.
+    if (key.escape && (store.state.isProcessing
+      || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
+      || store.state.holoState === "PLANNING"
+      || store.state.holoState === "READING" || store.state.holoState === "EDITING"
+      || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
+      session.cancel().catch(() => {});
+      store.actions.setIsProcessing(false);
+      store.actions.setHoloState("IDLE");
+      store.actions.clearMission();
+      store.actions.stopBusy();
       return;
     }
     if (isCtrl(input, key, "c")) {
@@ -173,6 +194,7 @@ export function CockpitApp({
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
+        store.actions.stopBusy();
       } else {
         exit();
       }
@@ -366,6 +388,17 @@ export function CockpitApp({
             onOpenPalette={controller.openPalette}
             onOpenContext={controller.openContext}
             composerDisabled={disabled}
+            composerScrolled={store.state.transcriptAnchor !== null}
+            composerFocusEpoch={store.state.focusEpoch}
+            onComposerReturnToLive={() => {
+              // Typing while scrolled: return to live AND restore the
+              // caret exactly once (the allowed explicit focus moment).
+              store.actions.setTranscriptAnchor(null);
+              store.actions.bumpFocus();
+            }}
+            transcriptAnchor={store.state.transcriptAnchor}
+            onTranscriptPageChange={store.actions.setTranscriptPage}
+            onTranscriptAnchorChange={store.actions.setTranscriptAnchor}
             project={store.state.project}
             branch={store.state.branch}
             localRuntime={store.state.localRuntime}

@@ -94,43 +94,44 @@ export function ContextPicker({ cwd, mode = "context", initialQuery = "", onSele
   }, [items, selectedIdx, onSelect, onCancel]));
 
   const visible = items.slice(0, 14);
+  const specialItems = visible.filter((i) => i.kind === "special");
+  const fileItems = visible.filter((i) => i.kind === "file");
+
+  const renderRow = (item: PickerItem): React.ReactElement => {
+    const idx = items.indexOf(item);
+    const isSelected = idx === selectedIdx;
+    return (
+      <Box key={item.token}>
+        <Text color={isSelected ? COLORS.brand : COLORS.secondaryDim}>
+          {isSelected ? ">" : " "}
+        </Text>
+        <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}> {item.label}</Text>
+        {item.detail !== "file" && <Text dimColor>  {item.detail}</Text>}
+      </Box>
+    );
+  };
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       <Box marginBottom={1}>
-        <Text bold color={COLORS.brand}>ATTACH CONTEXT</Text>
+        <Text bold color={COLORS.text}>ATTACH CONTEXT</Text>
         <Text dimColor> — </Text>
         <Text color={COLORS.text}>{query}</Text>
       </Box>
 
-      {mode !== "files" && (
+      {mode !== "files" && specialItems.length > 0 && (
         <Box flexDirection="column">
-          {visible.filter((i) => i.kind === "special").map((item) => {
-            const idx = items.indexOf(item);
-            const isSelected = idx === selectedIdx;
-            return (
-              <Box key={item.token}>
-                <Text color={isSelected ? COLORS.brand : undefined}>{isSelected ? ">" : " "}</Text>
-                <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}> {item.label}</Text>
-                <Text dimColor>  {item.detail}</Text>
-              </Box>
-            );
-          })}
+          <Text dimColor>CONTEXT</Text>
+          {specialItems.map(renderRow)}
         </Box>
       )}
 
-      <Box flexDirection="column">
-        {visible.filter((i) => i.kind === "file").map((item) => {
-          const idx = items.indexOf(item);
-          const isSelected = idx === selectedIdx;
-          return (
-            <Box key={item.token}>
-              <Text color={isSelected ? COLORS.brand : undefined}>{isSelected ? ">" : " "}</Text>
-              <Text color={isSelected ? COLORS.brand : COLORS.working} dimColor={!isSelected}> {item.label}</Text>
-            </Box>
-          );
-        })}
-      </Box>
+      {fileItems.length > 0 && (
+        <Box flexDirection="column">
+          <Text dimColor>FILES</Text>
+          {fileItems.map(renderRow)}
+        </Box>
+      )}
 
       {visible.length === 0 && <Text dimColor>No matches</Text>}
 

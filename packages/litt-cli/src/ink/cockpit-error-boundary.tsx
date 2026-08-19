@@ -43,13 +43,15 @@ export class CockpitErrorBoundary extends React.Component<CockpitErrorBoundaryPr
 function CrashView({ message }: { message: string }): React.ReactElement {
   const { exit } = useApp();
 
-  // Restore terminal state — disable raw mode if it was enabled.
-  // Ink normally handles this on unmount, but a crash mid-render may
-  // leave the terminal in a bad state. Best-effort restoration.
+  // Restore terminal state — disable raw mode if it was enabled, and
+  // show the native cursor (the shell renders a software cursor while
+  // running). Ink normally handles this on unmount, but a crash
+  // mid-render may leave the terminal in a bad state.
   try {
     if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
       process.stdin.setRawMode(false);
     }
+    if (process.stdout.isTTY) process.stdout.write("\x1b[?25h");
   } catch {
     // ignore — best-effort restoration
   }

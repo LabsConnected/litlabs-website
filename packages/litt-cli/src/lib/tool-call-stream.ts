@@ -49,10 +49,22 @@ export interface ToolCallStreamFilter {
  * Create a stateful per-stream filter. Call once per agent-loop run and
  * feed every delta through next(); the returned string is the visible
  * portion of that delta. Call flush() when the stream ends.
+ *
+ * Protocol states:
+ *   - inFence: inside a ```tool_call/```tool_result/```tool/```json
+ *     fence — everything is suppressed until the closing ```.
+ *   - inJsonObject: a bare JSON tool object (`{ "tool": ... }`) was
+ *     detected WITHOUT fences. It is suppressed until the braces
+ *     balance (the object is complete). This closes the leak where a
+ *     tool object split across deltas — e.g. delta A `{"tool":"`,
+ *     delta B `project.status","inputs":{}}` — previously emitted the
+ *     trailing fragments (`project.status","inputs":{}`) because they
+ *     no longer started with `{`.
  */
 export function createToolCallStreamFilter(): ToolCallStreamFilter {
   let carry = "";
   let inFence = false;
+  let jsonDepth = 0;
 
   function next(delta: string): string {
     carry += delta;
@@ -72,29 +84,45 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         continue;
       }
 
+      if (jsonDepth > 0) {
+        // Inside a bare JSON tool object — track brace balance and drop
+        // everything until the object closes (depth returns to 0).
+        let i = 0;
+        while (i < carry.length) {
+          const ch = carry[i];
+          if (ch === "{") jsonDepth++;
+          else if (ch === "}") jsonDepth--;
+          i++;
+          if (jsonDepth === 0) break;
+        }
+        carry = carry.slice(i);
+        continue;
+      }
+
       const fenceIdx = carry.search(FENCE_OPENER_RE);
       const jsonIdx = carry.search(BARE_TOOL_JSON_RE);
       const protoIdx = carry.search(BARE_PROTOCOL_LINE_RE);
 
       // Earliest trigger wins. Prefer the fence opener.
       let start = -1;
-      let kind: "fence" | "line" | null = null;
+      let kind: "fence" | "line" | "json" | null = null;
       if (fenceIdx !== -1) {
         start = fenceIdx;
         kind = "fence";
-        if (jsonIdx !== -1 && jsonIdx < start) { start = jsonIdx; kind = "line"; }
+        if (jsonIdx !== -1 && jsonIdx < start) { start = jsonIdx; kind = "json"; }
         if (protoIdx !== -1 && protoIdx < start) { start = protoIdx; kind = "line"; }
       } else {
         const candidates = [jsonIdx, protoIdx].filter((i) => i !== -1);
         if (candidates.length > 0) {
           start = Math.min(...candidates);
-          kind = "line";
+          kind = candidates[0] === jsonIdx ? "json" : "line";
         }
       }
 
       if (start === -1 || kind === null) {
         // No trigger — emit everything except a bounded tail (a fence
-        // opener could be split across delta boundaries).
+        // opener or bare-JSON opener could be split across delta
+        // boundaries).
         if (carry.length > KEEP_TAIL) {
           out += carry.slice(0, carry.length - KEEP_TAIL);
           carry = carry.slice(-KEEP_TAIL);
@@ -102,10 +130,10 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         break;
       }
 
-      // Emit prose before the trigger. For "line" triggers the match
+      // Emit prose before the trigger. For line/json triggers the match
       // starts at a newline (or ^) — skip that newline so the protocol
-      // line itself is suppressed. For fence triggers the match starts
-      // AT the backticks — emit up to them.
+      // content itself is suppressed. For fence triggers the match
+      // starts AT the backticks — emit up to them.
       const lineStartOffset = kind === "fence" ? start : (start === 0 ? 0 : start + 1);
       out += carry.slice(0, lineStartOffset);
       carry = carry.slice(lineStartOffset);
@@ -116,8 +144,25 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         const m = carry.match(FENCE_OPENER_RE);
         if (m) carry = carry.slice(m[0].length);
         inFence = true;
+      } else if (kind === "json") {
+        // Suppress the bare JSON tool object until its braces balance.
+        // The opener `{` is still in carry — start the depth at 0 and
+        // let the scan count it (an object with nested inputs needs
+        // depth 2 before closing). Handles the object split across
+        // many deltas.
+        jsonDepth = 0;
+        let i = 0;
+        while (i < carry.length) {
+          const ch = carry[i];
+          if (ch === "{") jsonDepth++;
+          else if (ch === "}") jsonDepth--;
+          i++;
+          if (jsonDepth === 0) break;
+        }
+        carry = carry.slice(i);
       } else {
-        // Bare protocol line / JSON line — suppress through the line end.
+        // Bare protocol line (tool_call / tool_result) — suppress
+        // through the line end.
         const nl = carry.indexOf("\n");
         carry = nl === -1 ? "" : carry.slice(nl + 1);
       }
@@ -128,10 +173,11 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
 
   function flush(): string {
     let out = "";
-    if (inFence) {
-      // Stream ended inside a fence — drop the remainder.
+    if (inFence || jsonDepth > 0) {
+      // Stream ended inside protocol content — drop the remainder.
       carry = "";
       inFence = false;
+      jsonDepth = 0;
       return "";
     }
     // Emit any withheld tail (it never formed a fence).

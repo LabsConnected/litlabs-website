@@ -282,7 +282,6 @@ export interface ParsedToolCall {
 const TOOL_CALL_FENCE_RE = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/i;
 /** A line that looks like a bare JSON tool object (single line). */
 const BARE_TOOL_JSON_RE = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/m;
-
 function parseToolJson(raw: string): ParsedToolCall | null {
   try {
     const parsed = JSON.parse(raw.trim());
@@ -301,6 +300,23 @@ function parseToolJson(raw: string): ParsedToolCall | null {
   return null;
 }
 
+/**
+ * Extract a balanced brace span starting at the given `{` index.
+ * Returns null when the braces never balance (malformed object).
+ */
+function balancedJsonSpan(content: string, openIdx: number): string | null {
+  let depth = 0;
+  for (let i = openIdx; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return content.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
+
 export function parseToolCall(content: string): ParsedToolCall | null {
   // 1. Fenced ```tool_call ... ``` block.
   const match = content.match(TOOL_CALL_FENCE_RE);
@@ -312,11 +328,25 @@ export function parseToolCall(content: string): ParsedToolCall | null {
   // 2. Bare JSON tool object on its own line (the model sometimes skips
   //    the fences entirely, e.g. `tool_call` then a JSON line).
   const bareMatch = content.match(BARE_TOOL_JSON_RE);
-  if (bareMatch) {
+  if (bareMatch && bareMatch.index !== undefined) {
     // Snip the JSON object out of the surrounding text and try to parse it.
     const lineStart = content.lastIndexOf("\n", bareMatch.index) + 1;
     const jsonText = content.slice(lineStart).split("\n")[0] ?? "";
     const parsed = parseToolJson(jsonText);
+    if (parsed) return parsed;
+  }
+
+  // 3. Bare JSON tool object ANYWHERE (mid-prose, no newline before it).
+  //    A missed tool call is worse than a missed answer: the model keeps
+  //    re-claiming failure and the tool result never reaches the next
+  //    turn (the observed "unable to access the tool" → tool succeeded
+  //    contradiction). Scan every brace-balanced span that contains a
+  //    `"tool":` key and try to parse it.
+  for (let idx = 0; idx < content.length; idx++) {
+    if (content[idx] !== "{") continue;
+    const span = balancedJsonSpan(content, idx);
+    if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+    const parsed = parseToolJson(span);
     if (parsed) return parsed;
   }
 
@@ -325,12 +355,29 @@ export function parseToolCall(content: string): ParsedToolCall | null {
 
 /**
  * Extract the text content without the tool_call blocks.
- * Uses the same tolerant fence matching as parseToolCall so a block
- * that was parsed as a tool call is always stripped from the final
- * response text (never leaked into the user chat).
+ * Uses the same tolerant matching as parseToolCall so a block that was
+ * parsed as a tool call is always stripped from the final response text
+ * (never leaked into the user chat). Strips both fenced blocks AND bare
+ * JSON tool objects anywhere in the text.
  */
 export function stripToolCallBlocks(content: string): string {
-  return content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "").trim();
+  let stripped = content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "");
+  // Strip bare JSON tool objects (fenced handling above; this covers
+  // unfenced `{ "tool": ... }` objects that models emit without fences,
+  // even when split from the surrounding prose by a newline or not).
+  for (let guard = 0; guard < 8; guard++) {
+    let removed = false;
+    for (let idx = 0; idx < stripped.length; idx++) {
+      if (stripped[idx] !== "{") continue;
+      const span = balancedJsonSpan(stripped, idx);
+      if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+      stripped = stripped.slice(0, idx) + stripped.slice(idx + span.length);
+      removed = true;
+      break;
+    }
+    if (!removed) break;
+  }
+  return stripped.trim();
 }
 
 // ─── Mission Planning ──────────────────────────────────────────────

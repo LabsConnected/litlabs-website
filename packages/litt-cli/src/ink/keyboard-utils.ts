@@ -28,6 +28,8 @@ export interface KeyInfo {
   shift?: boolean;
   pageUp?: boolean;
   pageDown?: boolean;
+  home?: boolean;
+  end?: boolean;
 }
 
 /**

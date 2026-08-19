@@ -95,9 +95,9 @@ export function CommandPalette({ actions, onSelect, onCancel, initialQuery = "" 
   let flatIdx = 0;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       <Box marginBottom={1}>
-        <Text bold color={COLORS.brand}>COMMANDS</Text>
+        <Text bold color={COLORS.text}>COMMANDS</Text>
         <Text dimColor> — </Text>
         <Text color={COLORS.text}>{query}</Text>
       </Box>
@@ -107,13 +107,13 @@ export function CommandPalette({ actions, onSelect, onCancel, initialQuery = "" 
         if (items.length === 0) return null;
         return (
           <Box key={group} flexDirection="column" marginBottom={0}>
-            <Text dimColor bold>{group}</Text>
+            <Text dimColor>{group}</Text>
             {items.map((action) => {
               const idx = flatIdx++;
               const isSelected = idx === selectedIdx;
               return (
                 <Box key={action.id}>
-                  <Text color={isSelected ? COLORS.brand : undefined}>
+                  <Text color={isSelected ? COLORS.brand : COLORS.secondaryDim}>
                     {isSelected ? ">" : " "}
                   </Text>
                   <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}>

@@ -121,7 +121,7 @@ export function OverlayKeyboardProvider({
   }, [internal_eventEmitter]);
 
   // SINGLE useInput for the entire app
-  useInput(useCallback((input: string, key: { upArrow: boolean; downArrow: boolean; leftArrow: boolean; rightArrow: boolean; return: boolean; escape: boolean; tab: boolean; backspace: boolean; delete: boolean; ctrl: boolean; meta: boolean; shift: boolean; pageUp: boolean; pageDown: boolean }) => {
+  useInput(useCallback((input: string, key: { upArrow: boolean; downArrow: boolean; leftArrow: boolean; rightArrow: boolean; return: boolean; escape: boolean; tab: boolean; backspace: boolean; delete: boolean; ctrl: boolean; meta: boolean; shift: boolean; pageUp: boolean; pageDown: boolean; home: boolean; end: boolean }) => {
     const keyInfo: KeyInfo = key;
     const stack = ownerStackRef.current;
     const topOwner = stack[stack.length - 1];
@@ -141,9 +141,11 @@ export function OverlayKeyboardProvider({
 
     // No overlay — dispatch to app shortcut handler (Ctrl+K/L/C/D/N/R/O,
     // Ctrl+C, Tab=Plan/Act, ?=help). F2 is handled by the raw listener
-    // above (Ink strips F-key input). Only ctrl/escape/tab keys are
-    // dispatched here; printable chars go to the composer's useInput.
-    if (keyInfo.ctrl || keyInfo.escape || keyInfo.tab) {
+    // above (Ink strips F-key input). Transcript scroll keys
+    // (PgUp/PgDn/Home/End) also route to the app handler; printable
+    // chars and Up/Down go to the composer's useInput.
+    if (keyInfo.ctrl || keyInfo.escape || keyInfo.tab
+      || keyInfo.pageUp || keyInfo.pageDown || keyInfo.home || keyInfo.end) {
       appHandlerRef.current(input, keyInfo);
     }
   }, []));

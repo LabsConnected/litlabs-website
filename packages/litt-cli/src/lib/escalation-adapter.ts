@@ -17,7 +17,7 @@ import {
   type TaskKind,
   type ModelDefinition,
 } from "@litt/models";
-import type { EscalationHook, ModelResolver, AgentFailureKind } from "@litt/agent-core";
+import type { EscalationHook, ModelResolver, AgentFailureKind, ToolDefinition } from "@litt/agent-core";
 import type { ModelProvider } from "@litt/agent-core";
 
 import { OpenRouterModelProvider } from "./model-provider.js";
@@ -84,17 +84,21 @@ export function createEscalationHook(
  * OpenRouterModelProvider. Uses the ModelRuntime's registry to
  * resolve the OpenRouter model id.
  *
+ * `tools` (optional) are the native tool schemas to declare on every
+ * escalated provider — the stronger model must see the SAME project
+ * tools the original model had, or it will claim tools are unavailable.
+ *
  * Returns null if the model is not in the registry or has no
  * OpenRouter model id (e.g. a native-provider-only model).
  */
-export function createModelResolver(runtime: ModelRuntime): ModelResolver {
+export function createModelResolver(runtime: ModelRuntime, tools?: ToolDefinition[]): ModelResolver {
   return (modelId: string): ModelProvider | null => {
     const model: ModelDefinition | undefined = runtime.getModel(modelId);
     if (!model) return null;
     const orId = model.openRouterModelId;
     if (!orId) return null;
     try {
-      return new OpenRouterModelProvider({ model: orId });
+      return new OpenRouterModelProvider({ model: orId, tools });
     } catch {
       // OpenRouterModelProvider throws if no API key — can't escalate
       // to this model. Return null so the loop falls back.

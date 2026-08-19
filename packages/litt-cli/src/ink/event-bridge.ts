@@ -126,7 +126,11 @@ export function useEventBridge(
       // The controller also sets holo/missionState directly, but these
       // events ensure the cockpit reflects canonical runtime truth.
       case "mission.created":
-        entry = makeEntry("mission.created", `Mission: ${event.data.goal ?? event.data.missionId ?? ""}`, event);
+        // The mission goal is the human-readable identity; the raw
+        // mission ID is debug detail (/status, /activity) — never the feed.
+        entry = makeEntry("mission.created", event.data.goal
+          ? `Mission: ${String(event.data.goal).slice(0, 80)}`
+          : "Mission created", event);
         // Project canonical mission into cockpit
         store.actions.setCanonicalMission({
           id: (event.data.missionId as string) ?? "",
@@ -141,7 +145,7 @@ export function useEventBridge(
         });
         break;
       case "mission.started":
-        entry = makeEntry("mission.started", `Mission started: ${event.data.missionId ?? ""}`, event);
+        entry = makeEntry("mission.started", "Mission started", event);
         break;
       case "mission.step_created":
         entry = makeEntry("mission.step_created", `Step: ${event.data.title ?? event.data.stepId ?? ""}`, event);
@@ -165,7 +169,7 @@ export function useEventBridge(
         entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event);
         break;
       case "mission.restored":
-        entry = makeEntry("mission.restored", `Mission restored: ${event.data.missionId ?? ""}`, event);
+        entry = makeEntry("mission.restored", "Mission restored", event);
         break;
       default:
         return;

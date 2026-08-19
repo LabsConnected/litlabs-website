@@ -88,6 +88,80 @@ describe("createToolCallStreamFilter", () => {
     expect(filter.next("hello")).toBe("");
     expect(filter.flush()).toBe("hello");
   });
+
+  // ─── DOGFOOD REGRESSIONS: bare JSON tool objects split across deltas ─
+
+  it("REGRESSION: bare tool JSON split after the opener does not leak trailing fragments", () => {
+    // Observed live: `project.status","inputs":{}` appeared in the
+    // transcript. The opener `{"tool":"` was suppressed, but the
+    // following fragment no longer starts with `{` and used to pass.
+    const filter = createToolCallStreamFilter();
+    const deltas = [
+      '{"tool":"',           // opener (suppressed)
+      'project.status",',    // ← the observed leak fragment
+      '"inputs":{}}',        // closing fragment
+      "\nThe branch is main.",
+    ];
+    const out = feed(filter, deltas);
+    expect(out).not.toContain("project.status");
+    expect(out).not.toContain('"inputs"');
+    expect(out).not.toContain('"tool"');
+    expect(out).toContain("The branch is main.");
+  });
+
+  it("REGRESSION: the exact observed fragment never appears", () => {
+    const filter = createToolCallStreamFilter();
+    const out = feed(filter, [
+      '{"tool":"',
+      'project.status","inputs":{}}',   // exact observed leak
+      " done",
+    ]);
+    expect(out).not.toContain('project.status","inputs":{}');
+    expect(out).toBe(" done");
+  });
+
+  it("REGRESSION: a bare tool object with nested inputs split across many deltas", () => {
+    const filter = createToolCallStreamFilter();
+    const deltas = [
+      '{ "tool": "proj',
+      'ect.run", "inputs": { "command": "git", "arg',
+      's": ["status"] } }',
+      "\nResult below.",
+    ];
+    const out = feed(filter, deltas);
+    expect(out).not.toContain("project.run");
+    expect(out).not.toContain("git");
+    expect(out).toContain("Result below.");
+  });
+
+  it("REGRESSION: multiple bare tool objects in one stream", () => {
+    const filter = createToolCallStreamFilter();
+    const out = feed(filter, [
+      '{"tool":"a","inputs":{}}',
+      '{"tool":"b","inputs":{}}',
+      " final",
+    ]);
+    expect(out).not.toContain('"tool"');
+    expect(out).toBe(" final");
+  });
+
+  it("REGRESSION: bare JSON object followed by a fenced block", () => {
+    const filter = createToolCallStreamFilter();
+    const out = feed(filter, [
+      '{"tool":"a","inputs":{}}\n',
+      "```tool_call\n{ \"tool\": \"b\" }\n```",
+      " answer",
+    ]);
+    expect(out).not.toContain('"tool"');
+    expect(out).not.toContain("```");
+    expect(out).toContain("answer");
+  });
+
+  it("flush() inside a fragmented bare tool object drops the remainder", () => {
+    const filter = createToolCallStreamFilter();
+    filter.next('{"tool":"project.status"');
+    expect(filter.flush()).toBe("");
+  });
 });
 
 describe("isToolCallMarkup (back-compat predicate)", () => {

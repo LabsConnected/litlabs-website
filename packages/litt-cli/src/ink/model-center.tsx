@@ -225,10 +225,10 @@ export function ModelCenter({
   const discoveredCount = modelRuntime.getDiscoveredCount();
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       {/* Title bar with tab indicator */}
       <Box marginBottom={1}>
-        <Text bold color={COLORS.brand}>LiTT MODEL CENTER</Text>
+        <Text bold color={COLORS.text}>LiTT MODEL CENTER</Text>
         <Text dimColor>  </Text>
         <Text color={tab === "routing" ? COLORS.brand : COLORS.secondary} bold={tab === "routing"}>
           {tab === "routing" ? "[Routing]" : " Routing "}
@@ -241,7 +241,7 @@ export function ModelCenter({
       </Box>
 
       {/* ─── PROVIDERS (always visible — truth) ─── */}
-      <Text dimColor bold>PROVIDERS</Text>
+      <Text dimColor>PROVIDERS</Text>
       <Box flexDirection="column" marginBottom={1}>
         {statuses.length === 0 && (
           <Box marginLeft={2}>
@@ -283,7 +283,7 @@ export function ModelCenter({
       {/* ─── ROUTING TAB ─── */}
       {tab === "routing" && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor bold>ROUTING POLICY</Text>
+          <Text dimColor>ROUTING POLICY</Text>
           {ROUTING_MODES.map((mode, idx) => {
             const isSelected = idx === routingIdx;
             const isActive = mode.id === routingMode;
@@ -309,7 +309,7 @@ export function ModelCenter({
       {/* ─── MODELS TAB ─── */}
       {tab === "models" && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor bold>MODELS{discoveredCount > 0 ? ` · ${discoveredCount} discovered` : ""}</Text>
+          <Text dimColor>MODELS{discoveredCount > 0 ? ` · ${discoveredCount} discovered` : ""}</Text>
 
           {/* Truthful discovery state — never "Models: —" */}
           {discoveryState === "loading" && (
@@ -380,7 +380,7 @@ export function ModelCenter({
       )}
 
       {/* ─── CURRENT (runtime truth) ─── */}
-      <Text dimColor bold>CURRENT</Text>
+      <Text dimColor>CURRENT</Text>
       <Box flexDirection="column" marginBottom={1}>
         <Box>
           <Text dimColor>Policy     </Text>
@@ -388,12 +388,12 @@ export function ModelCenter({
         </Box>
         <Box>
           <Text dimColor>Selected   </Text>
-          <Text color={COLORS.info}>{selectedModelId ?? "auto"}</Text>
+          <Text color={COLORS.text}>{selectedModelId ?? "auto"}</Text>
         </Box>
         {activeModel && (
           <Box>
             <Text dimColor>Active     </Text>
-            <Text color={COLORS.success} bold>{activeModel}</Text>
+            <Text color={COLORS.text} bold>{activeModel}</Text>
           </Box>
         )}
         <Box>

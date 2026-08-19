@@ -35,7 +35,18 @@ import type {
   ModelResult,
   ModelStreamEvent,
   ModelProfile,
+  ToolDefinition,
 } from "@litt/agent-core";
+
+/** OpenAI-compatible native function schema (the `tools` request field). */
+interface NativeToolSchema {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 // ─── Model Truth Types ─────────────────────────────────────────────
 
@@ -194,7 +205,32 @@ export interface OpenRouterModelOptions {
   profile?: ModelProfile;
   /** Max response tokens. Defaults to 4096 (existing production behavior). */
   maxTokens?: number;
+  /**
+   * Native tool definitions (OpenAI-compatible `tools` request field).
+   *
+   * When provided, the API request declares these as REAL function tools
+   * so the model sees actual tool schemas instead of relying on a
+   * prompt-only protocol. Models that only emit native `tool_calls` now
+   * work; the provider translates native calls back into LiTT's internal
+   * `tool_call` fence blocks so the agent loop keeps ONE parsing path.
+   *
+   * Without this, frontier models often conclude "I have no tools in
+   * this session" and answer in prose — the observed live dogfood
+   * failure ("I'm unable to access the project status tool...").
+   */
+  tools?: ToolDefinition[];
+  /**
+   * Transport stall watchdog (ms): abort the stream when NO bytes arrive
+   * for this long. Prevents a silently-dropped SSE connection from
+   * leaving the run stuck in "Working" forever (dogfood P0). Real work
+   * keeps producing bytes — this only fires on a true stall.
+   * Default 90_000ms. Tests inject a tiny value.
+   */
+  idleStallMs?: number;
 }
+
+/** Default stall threshold — 90s without a single stream byte. */
+export const DEFAULT_IDLE_STALL_MS = 90_000;
 
 export function hasOpenRouterKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY;
@@ -205,6 +241,9 @@ export class OpenRouterModelProvider implements ModelProvider {
   private readonly _model: string;
   private readonly _profile: ModelProfile;
   private readonly _maxTokens: number;
+  private readonly _idleStallMs: number;
+  /** Native OpenAI-compatible tool schemas — null when not provided. */
+  private readonly _tools: NativeToolSchema[] | null;
   /** The active model — set after the first stream() meta event. */
   private _activeModel: string | null = null;
 
@@ -215,6 +254,17 @@ export class OpenRouterModelProvider implements ModelProvider {
     }
     this._profile = options.profile ?? "smart";
     this._maxTokens = options.maxTokens ?? 4096;
+    this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
+    this._tools = options.tools && options.tools.length > 0
+      ? options.tools.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.id,
+            description: t.description,
+            parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+          },
+        }))
+      : null;
 
     // Resolution: explicit override > profile > default
     if (options.model) {
@@ -252,97 +302,179 @@ export class OpenRouterModelProvider implements ModelProvider {
       profile: this._profile,
     });
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${this._apiKey}`,
-        "HTTP-Referer": "https://litlabs.net",
-        "X-Title": "LiTT CLI",
-      },
-      body: JSON.stringify({
-        model: this._model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: true,
-        max_tokens: this._maxTokens,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "unknown error");
-      throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
+    // ─── Transport stall watchdog (dogfood P0) ─────────────────────
+    // A silently-dropped SSE connection (network cut, proxy hang) can
+    // otherwise leave reader.read() pending forever → the run stays
+    // "Working" with no way out. Real work keeps producing bytes; this
+    // only aborts when NOTHING has arrived for idleStallMs. The timer
+    // is re-armed on every received chunk, so the abort fires exactly
+    // idleStallMs after the last byte — no poll-interval quantization.
+    const abort = new AbortController();
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const armStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (!abort.signal.aborted) {
+          abort.abort();
+        }
+      }, this._idleStallMs);
+    };
+    if (this._idleStallMs > 0) {
+      armStallTimer();
     }
 
-    if (!response.body) {
-      throw new Error("OpenRouter returned no response body");
-    }
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this._apiKey}`,
+          "HTTP-Referer": "https://litlabs.net",
+          "X-Title": "LiTT CLI",
+        },
+        body: JSON.stringify({
+          model: this._model,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          stream: true,
+          max_tokens: this._maxTokens,
+          // Declare the project tools NATIVELY (OpenAI function calling).
+          // The model sees real tool schemas — it no longer has to guess
+          // from a prompt-only protocol (the "unable to access the tool"
+          // dogfood failure). tool_choice defaults to "auto".
+          ...(this._tools ? { tools: this._tools } : {}),
+        }),
+        signal: abort.signal,
+      });
 
-    let content = "";
-    let totalTokens = 0;
-    let resolvedModel = this._model;
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "unknown error");
+        throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      if (!response.body) {
+        throw new Error("OpenRouter returned no response body");
+      }
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+      let content = "";
+      let totalTokens = 0;
+      let resolvedModel = this._model;
+      // Native tool_calls arrive as fragmented deltas (per index): the
+      // name arrives once, `arguments` may be split across many chunks.
+      const nativeToolCalls: Array<{ name: string; args: string }> = [];
+      const accumulateToolCalls = (calls: unknown): void => {
+        if (!Array.isArray(calls)) return;
+        for (const tc of calls as Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>) {
+          const idx = tc.index ?? 0;
+          nativeToolCalls[idx] ??= { name: "", args: "" };
+          if (tc.function?.name) nativeToolCalls[idx].name = tc.function.name;
+          if (tc.function?.arguments) nativeToolCalls[idx].args += tc.function.arguments;
+        }
+      };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") continue;
+      while (true) {
+        const { done, value } = await reader.read();
+        // Bytes arrived — restart the stall clock.
+        armStallTimer();
+        if (done) break;
 
-        try {
-          const parsed = JSON.parse(data);
-          // Surface upstream errors embedded in SSE chunks (e.g. credit
-          // limits, model unavailable). Without this the provider silently
-          // returns empty content and the caller never learns why the
-          // stream produced no deltas.
-          if (parsed.error) {
-            const errMsg = parsed.error.message ?? "OpenRouter stream error";
-            throw new Error(`OpenRouter stream error: ${errMsg}`);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            // Surface upstream errors embedded in SSE chunks (e.g. credit
+            // limits, model unavailable). Without this the provider silently
+            // returns empty content and the caller never learns why the
+            // stream produced no deltas.
+            if (parsed.error) {
+              const errMsg = parsed.error.message ?? "OpenRouter stream error";
+              throw new Error(`OpenRouter stream error: ${errMsg}`);
+            }
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              content += delta.content;
+              emit({ type: "delta", text: delta.content });
+            }
+            // Native streaming tool_calls (OpenAI function-calling deltas).
+            accumulateToolCalls(delta?.tool_calls);
+            // Non-streaming shape (some proxies return it even in stream mode).
+            accumulateToolCalls(parsed.choices?.[0]?.message?.tool_calls);
+            // Capture the model the API actually used (may differ from configured
+            // when profile is "auto" and OpenRouter routed to a specific model)
+            if (parsed.model) {
+              resolvedModel = parsed.model as string;
+            }
+            if (parsed.usage?.total_tokens) {
+              totalTokens = parsed.usage.total_tokens;
+            }
+          } catch (e) {
+            // Re-throw upstream provider errors so the agent loop can surface
+            // them instead of silently retrying on empty content.
+            if (e instanceof Error && e.message.startsWith("OpenRouter stream error:")) {
+              throw e;
+            }
+            // Skip malformed/unparseable chunks
           }
-          const delta = parsed.choices?.[0]?.delta;
-          if (delta?.content) {
-            content += delta.content;
-            emit({ type: "delta", text: delta.content });
-          }
-          // Capture the model the API actually used (may differ from configured
-          // when profile is "auto" and OpenRouter routed to a specific model)
-          if (parsed.model) {
-            resolvedModel = parsed.model as string;
-          }
-          if (parsed.usage?.total_tokens) {
-            totalTokens = parsed.usage.total_tokens;
-          }
-        } catch (e) {
-          // Re-throw upstream provider errors so the agent loop can surface
-          // them instead of silently retrying on empty content.
-          if (e instanceof Error && e.message.startsWith("OpenRouter stream error:")) {
-            throw e;
-          }
-          // Skip malformed/unparseable chunks
         }
       }
+
+      // ─── Native tool_calls → internal fence format ───────────────
+      // The model called a tool natively (it saw the real schema). Render
+      // each call as LiTT's `tool_call` fence block so the agent loop's
+      // single parser executes it — the loop never learns about the
+      // transport protocol, and the model output stays model-shaped.
+      const nativeBlocks = nativeToolCalls
+        .filter((tc) => tc.name)
+        .map((tc) => {
+          let inputs: unknown = {};
+          if (tc.args) {
+            try {
+              inputs = JSON.parse(tc.args);
+            } catch {
+              inputs = {};
+            }
+          }
+          return `\`\`\`tool_call\n${JSON.stringify({ tool: tc.name, inputs }, null, 2)}\n\`\`\``;
+        })
+        .join("\n");
+      if (nativeBlocks) {
+        content = content ? `${content}\n${nativeBlocks}` : nativeBlocks;
+      }
+
+      // activeModel is now known from runtime execution
+      this._activeModel = resolvedModel;
+
+      return {
+        content,
+        model: resolvedModel,
+        provider: "openrouter",
+        usage: { total_tokens: totalTokens || Math.ceil(content.length / 4) },
+        timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
+        profile: this._profile,
+      };
+    } catch (err) {
+      // Distinguish a watchdog abort from a real API error — the run
+      // must reconcile as a terminal error, not spin forever.
+      if (abort.signal.aborted) {
+        throw new Error(
+          "OpenRouter stream stalled — no data received for a while. " +
+          "The connection appears to have been dropped, so the run was stopped instead of hanging.",
+        );
+      }
+      throw err;
+    } finally {
+      if (stallTimer) clearTimeout(stallTimer);
     }
-
-    // activeModel is now known from runtime execution
-    this._activeModel = resolvedModel;
-
-    return {
-      content,
-      model: resolvedModel,
-      provider: "openrouter",
-      usage: { total_tokens: totalTokens || Math.ceil(content.length / 4) },
-      timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
-      profile: this._profile,
-    };
   }
 
   async health(): Promise<number> {

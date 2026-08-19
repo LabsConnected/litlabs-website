@@ -85,6 +85,7 @@ export class ChatTranscriptStore {
     content: string;
     status: "complete" | "error";
     servedModel?: string | null;
+    durationMs?: number | null;
   }): void {
     const last = this.last();
     if (!last || last.role !== "assistant") return;
@@ -95,6 +96,7 @@ export class ChatTranscriptStore {
         content: options.content,
         status: options.status,
         servedModel: options.servedModel ?? last.servedModel ?? null,
+        durationMs: options.durationMs ?? last.durationMs ?? null,
       },
     ];
   }

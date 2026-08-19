@@ -1,50 +1,69 @@
 /**
- * LiTT semantic color system.
+ * LiTT semantic color system — the premium shell palette.
  *
- * Purple is the LiTT brand color — it should make the cockpit
- * unmistakably LiTT. Every other color has a semantic meaning.
+ * One controlled accent (warm LiTT orange/amber) and a strict contrast
+ * hierarchy. If everything is orange, the design has failed.
  *
- * | Meaning    | Color   |
- * | ---------- | ------- |
- * | LiTT/brand | magenta |  (Ink's "magenta" renders as purple on most terminals)
- * | Ready/pass | green   |
- * | Working    | cyan    |
- * | Warning    | yellow  |
- * | Failure    | red     |
- * | Secondary  | gray    |
- * | Main text  | white   |
- * | Info/link  | blue    |
+ * Priority:
+ *   1. White  = content        (assistant body, user text, results)
+ *   2. Gray   = metadata       (labels, timestamps, routing, events)
+ *   3. Orange = LiTT/focus/action (mark, active selection, Plan/Act,
+ *              composer accent, working glyph when appropriate)
+ *   4. Green  = success
+ *   5. Red    = failure
+ *
+ * Warm near-black backgrounds (terminal default) pair with warm text
+ * grays — no pure bright-white-on-pure-black anywhere.
+ *
+ * | Meaning   | Value     | Role                                  |
+ * | --------- | --------- | ------------------------------------- |
+ * | brand     | #ff9e64   | LiTT accent — identity, focus, active |
+ * | brandBright| #ffc777  | brighter accent (hover/emphasis)      |
+ * | text      | #e4e1da   | assistant body — warm soft white      |
+ * | textBright| #f7f5f0   | user text / important results         |
+ * | secondary | #8d897f   | metadata — medium gray                |
+ * | secondaryDim | #5f5c55 | dim gray — de-emphasized               |
+ * | success   | #9ece6a   | muted green — pass/complete           |
+ * | working   | #ffb454   | active work — warm amber              |
+ * | warning   | #e0af68   | muted amber — warn/approval           |
+ * | error     | #f7768e   | muted red — failure                   |
+ * | info      | #7aa2f7   | muted blue — links/commands           |
  */
 
 export const COLORS = {
-  /** LiTT brand — purple/magenta. Used for LiTT identity, brain, brand elements */
-  brand: "magenta",
-  brandBright: "magentaBright",
+  /** LiTT accent — warm amber/orange. Identity, focus, active action. */
+  brand: "#ff9e64",
+  brandBright: "#ffc777",
 
-  /** Success, ready, pass, complete */
-  success: "green",
-  successBright: "greenBright",
+  /** Assistant body — warm near-white, never pure white. */
+  text: "#e4e1da",
 
-  /** Active work, in-progress, streaming */
-  working: "cyan",
-  workingBright: "cyanBright",
+  /** User text / important results — brighter than metadata. */
+  textBright: "#f7f5f0",
 
-  /** Warnings, approval needed, rate-limited */
-  warning: "yellow",
-  warningBright: "yellowBright",
+  /** Metadata — medium gray. */
+  secondary: "#8d897f",
 
-  /** Errors, failures, denied */
-  error: "red",
-  errorBright: "redBright",
+  /** Slightly brighter gray — branch names, emphasized metadata. */
+  secondaryBright: "#a8a499",
 
-  /** Secondary text, dim labels, inactive items */
-  secondary: "gray",
+  /** Dim gray — de-emphasized (routing footers, inactive states). */
+  secondaryDim: "#5f5c55",
 
-  /** Primary text, main content */
-  text: "white",
+  /** Success, pass, complete — muted green. */
+  success: "#9ece6a",
 
-  /** Links, info, active model name */
-  info: "blue",
+  /** Active work, in-progress, streaming — warm amber. */
+  working: "#ffb454",
+
+  /** Warnings, approval needed — muted amber. */
+  warning: "#e0af68",
+
+  /** Errors, failures, denied — muted red. */
+  error: "#f7768e",
+
+  /** Links, commands, info — muted blue. */
+  info: "#7aa2f7",
 } as const;
 
 /** Agent lifecycle state → color */
@@ -56,12 +75,10 @@ export function stateColor(state: string): string {
     case "UNDERSTANDING":
     case "THINKING":
     case "PLANNING":
-      return COLORS.working;
     case "READING":
     case "EDITING":
     case "RUNNING":
     case "TESTING":
-      return COLORS.working;
     case "VERIFYING":
       return COLORS.working;
     case "COMPLETE":

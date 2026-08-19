@@ -146,10 +146,10 @@ export function ModelPicker({
   let flatIdx = 0;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
       {/* Title bar with tab indicator */}
       <Box marginBottom={1}>
-        <Text bold color={COLORS.brand}>LiTT BRAIN</Text>
+        <Text bold color={COLORS.text}>LiTT BRAIN</Text>
         <Text dimColor>  </Text>
         <Text color={tab === "routing" ? COLORS.brand : COLORS.secondary} bold={tab === "routing"}>
           {tab === "routing" ? "[Routing]" : " Routing "}
@@ -169,8 +169,8 @@ export function ModelPicker({
             <Text color={COLORS.brand} bold>{routingMode.toUpperCase()}</Text>
           </Box>
           <Box marginBottom={1}>
-            <Box width={14}><Text dimColor bold>ACTIVE</Text></Box>
-            <Text color={COLORS.info} bold>{activeLabel}</Text>
+            <Box width={14}><Text dimColor>ACTIVE</Text></Box>
+            <Text color={COLORS.text} bold>{activeLabel}</Text>
           </Box>
 
           {/* Routing mode options */}
@@ -193,8 +193,8 @@ export function ModelPicker({
 
           {/* Provider info */}
           <Box marginTop={1}>
-            <Text dimColor bold>Provider   </Text>
-            <Text color={COLORS.working}>{source}</Text>
+            <Text dimColor>Provider   </Text>
+            <Text color={COLORS.secondaryBright}>{source}</Text>
           </Box>
         </Box>
       )}
