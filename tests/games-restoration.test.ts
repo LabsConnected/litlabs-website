@@ -67,16 +67,16 @@ describe("Games Restoration — Navigation & Feature Flags", () => {
 
 describe("Games Restoration — Route Files Exist", () => {
   const routes = [
-    "src/app/games/page.tsx",
-    "src/app/games/layout.tsx",
-    "src/app/games/retro/page.tsx",
-    "src/app/games/retro/layout.tsx",
-    "src/app/games/retro/play/[gameId]/page.tsx",
-    "src/app/games/retro/play/[gameId]/layout.tsx",
-    "src/app/games/dos/page.tsx",
-    "src/app/games/dos/layout.tsx",
-    "src/app/games/cloud/page.tsx",
-    "src/app/games/cloud/layout.tsx",
+    "src/app/(app)/games/page.tsx",
+    "src/app/(app)/games/layout.tsx",
+    "src/app/(app)/games/retro/page.tsx",
+    "src/app/(app)/games/retro/layout.tsx",
+    "src/app/(app)/games/retro/play/[gameId]/page.tsx",
+    "src/app/(app)/games/retro/play/[gameId]/layout.tsx",
+    "src/app/(app)/games/dos/page.tsx",
+    "src/app/(app)/games/dos/layout.tsx",
+    "src/app/(app)/games/cloud/page.tsx",
+    "src/app/(app)/games/cloud/layout.tsx",
   ];
 
   for (const route of routes) {

@@ -40,7 +40,7 @@ export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
   }
 
   const payload = parseTokenPayload(encodedPayload, "");
-  if (!payload) throw new Error("Invalid terminal token");
+  if (!payload) throw new Error("Expired or invalid terminal token");
   return payload;
 }
 

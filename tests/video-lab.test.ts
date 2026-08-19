@@ -69,7 +69,7 @@ describe("Video Lab — Model capabilities", () => {
   });
 
   it("unavailable models cannot be selected in VideoTool", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("AVAILABLE_MODELS");
     expect(content).toContain("UNAVAILABLE_MODELS");
     expect(content).toContain("Coming later");
@@ -87,7 +87,7 @@ describe("Video Lab — Model capabilities", () => {
   });
 
   it("VideoTool sends imageBytes for Veo when reference image is uploaded", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("uploadedImageBase64");
     expect(content).toContain("imageBytes");
     expect(content).toContain("caps.supportsReferenceImage");
@@ -96,19 +96,19 @@ describe("Video Lab — Model capabilities", () => {
 
 describe("Video Lab — UI redesign", () => {
   it("VideoTool is renamed to LiTT Video Lab", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("LiTT Video Lab");
   });
 
   it("VideoTool has three creation modes", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain('"quick"');
     expect(content).toContain('"animate"');
     expect(content).toContain('"director"');
   });
 
   it("VideoTool has camera/motion/look/composition shot controls", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("CAMERA_OPTIONS");
     expect(content).toContain("MOTION_OPTIONS");
     expect(content).toContain("LOOK_OPTIONS");
@@ -116,25 +116,25 @@ describe("Video Lab — UI redesign", () => {
   });
 
   it("VideoTool has Enhance with LiTT feature", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("Enhance with LiTT");
     expect(content).toContain("enhancedPrompt");
     expect(content).toContain("showEnhanced");
   });
 
   it("VideoTool uses AbortController for polling cancellation", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("AbortController");
     expect(content).toContain("ac.signal.aborted");
   });
 
   it("VideoTool revokes object URLs on cleanup", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("revokeObjectURL");
   });
 
   it("VideoTool honors prefers-reduced-motion", () => {
-    const content = read("src/app/studio/tools/VideoTool.tsx");
+    const content = read("src/app/(app)/studio/tools/VideoTool.tsx");
     expect(content).toContain("useReducedMotion");
   });
 });

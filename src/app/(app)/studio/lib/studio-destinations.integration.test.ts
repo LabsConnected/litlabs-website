@@ -64,28 +64,28 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(r.mode).toBe("forge");
     });
 
-    it("?tool=image → Create / Image", () => {
+    it("?tool=image → Studio / LiTT image mode (canonical chat surface)", () => {
       const r = mapLegacyToolToDestination("image");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("image");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("image");
     });
 
-    it("?tool=video → Create / Video", () => {
+    it("?tool=video → Studio / LiTT video mode", () => {
       const r = mapLegacyToolToDestination("video");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("video");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("video");
     });
 
-    it("?tool=audio → Create / Audio", () => {
+    it("?tool=audio → Studio / LiTT music mode", () => {
       const r = mapLegacyToolToDestination("audio");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("audio");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("music");
     });
 
-    it("?tool=color → Create / Image (color tool removed, legacy redirect)", () => {
+    it("?tool=color → Studio / LiTT image mode (color tool removed, legacy redirect)", () => {
       const r = mapLegacyToolToDestination("color");
-      expect(r.destination).toBe("create");
-      expect(r.mode).toBe("image");
+      expect(r.destination).toBe("studio");
+      expect(r.littMode).toBe("image");
     });
 
     it("?tool=assets → Assets", () => {
@@ -101,8 +101,8 @@ describe("Phase 1.1 — Legacy routing integration", () => {
       expect(mapLegacyToolToDestination("plugins").mode).toBe("plugins");
       expect(mapLegacyToolToDestination("camera").destination).toBe("studio");
       expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
-      expect(mapLegacyToolToDestination("space").destination).toBe("create");
-      expect(mapLegacyToolToDestination("space").mode).toBe("environment");
+      expect(mapLegacyToolToDestination("space").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("space").mode).toBe("work");
       expect(mapLegacyToolToDestination("clibridge").destination).toBe("more");
       expect(mapLegacyToolToDestination("clibridge").mode).toBe("clibridge");
       expect(mapLegacyToolToDestination("workflows").destination).toBe("missions");
