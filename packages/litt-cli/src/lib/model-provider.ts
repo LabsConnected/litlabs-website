@@ -39,16 +39,12 @@ import type {
 } from "@litt/agent-core";
 import { getProvider, type ProviderId } from "@litt/models";
 import type { RoutedModel } from "./model-runtime.js";
-
-/** OpenAI-compatible native function schema (the `tools` request field). */
-interface NativeToolSchema {
-  type: "function";
-  function: {
-    name: string;
-    description?: string;
-    parameters: Record<string, unknown>;
-  };
-}
+import {
+  type NativeToolSchema,
+  type OpenAiToolNameMap,
+  toOpenAiToolSchemas,
+  resolveCanonicalToolId,
+} from "./openai-tool-names.js";
 
 // ─── Model Truth Types ─────────────────────────────────────────────
 
@@ -366,6 +362,12 @@ export class OpenRouterModelProvider implements ModelProvider {
   private readonly _idleStallMs: number;
   /** Native OpenAI-compatible tool schemas — null when not provided. */
   private readonly _tools: NativeToolSchema[] | null;
+  /**
+   * Reverse map: OpenAI-safe function name -> canonical LiTT tool ID.
+   * Used to translate incoming native `tool_calls` back to the canonical ID
+   * the ToolRegistry expects. Null when no tools are provided.
+   */
+  private readonly _toolNameMap: OpenAiToolNameMap | null;
   /** The active model — set after the first stream() meta event. */
   private _activeModel: string | null = null;
 
@@ -377,16 +379,17 @@ export class OpenRouterModelProvider implements ModelProvider {
     this._profile = options.profile ?? "smart";
     this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
-    this._tools = options.tools && options.tools.length > 0
-      ? options.tools.map((t) => ({
-          type: "function" as const,
-          function: {
-            name: t.id,
-            description: t.description,
-            parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
-          },
-        }))
-      : null;
+    // Build sanitized OpenAI-safe tool schemas. toOpenAiToolSchemas throws
+    // (here, in the constructor — BEFORE any API request) on collision or
+    // invalid names so we never send an OpenAI-rejected tool set.
+    if (options.tools && options.tools.length > 0) {
+      const { schemas, map } = toOpenAiToolSchemas(options.tools);
+      this._tools = schemas;
+      this._toolNameMap = map;
+    } else {
+      this._tools = null;
+      this._toolNameMap = null;
+    }
 
     // Resolution: explicit override > profile > default
     if (options.model) {
@@ -615,6 +618,11 @@ export class OpenRouterModelProvider implements ModelProvider {
       // each call as LiTT's `tool_call` fence block so the agent loop's
       // single parser executes it — the loop never learns about the
       // transport protocol, and the model output stays model-shaped.
+      //
+      // REVERSE MAPPING: OpenAI called the sanitized function name
+      // (e.g. `project_status`). Translate it back to the canonical LiTT
+      // tool ID (e.g. `project.status`) so ToolRegistry.execute() dispatches
+      // to the right tool.
       const nativeBlocks = nativeToolCalls
         .filter((tc) => tc.name)
         .map((tc) => {
@@ -626,7 +634,8 @@ export class OpenRouterModelProvider implements ModelProvider {
               inputs = {};
             }
           }
-          return `\`\`\`tool_call\n${JSON.stringify({ tool: tc.name, inputs }, null, 2)}\n\`\`\``;
+          const canonicalToolId = resolveCanonicalToolId(tc.name, this._toolNameMap);
+          return `\`\`\`tool_call\n${JSON.stringify({ tool: canonicalToolId, inputs }, null, 2)}\n\`\`\``;
         })
         .join("\n");
       if (nativeBlocks) {
@@ -735,6 +744,12 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
   private readonly _maxTokens: number;
   private readonly _idleStallMs: number;
   private readonly _tools: NativeToolSchema[] | null;
+  /**
+   * Reverse map: OpenAI-safe function name -> canonical LiTT tool ID.
+   * Used to translate incoming native `tool_calls` back to the canonical ID
+   * the ToolRegistry expects. Null when no tools are provided.
+   */
+  private readonly _toolNameMap: OpenAiToolNameMap | null;
   private _activeModel: string | null = null;
 
   constructor(options: OpenAICompatibleModelOptions) {
@@ -751,16 +766,17 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     this._profile = options.profile ?? "smart";
     this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
-    this._tools = options.tools && options.tools.length > 0
-      ? options.tools.map((t) => ({
-          type: "function" as const,
-          function: {
-            name: t.id,
-            description: t.description,
-            parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
-          },
-        }))
-      : null;
+    // Build sanitized OpenAI-safe tool schemas. toOpenAiToolSchemas throws
+    // (here, in the constructor — BEFORE any API request) on collision or
+    // invalid names so we never send an OpenAI-rejected tool set.
+    if (options.tools && options.tools.length > 0) {
+      const { schemas, map } = toOpenAiToolSchemas(options.tools);
+      this._tools = schemas;
+      this._toolNameMap = map;
+    } else {
+      this._tools = null;
+      this._toolNameMap = null;
+    }
   }
 
   get configuredModel(): string {
@@ -816,8 +832,24 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           model: this._model,
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
-          max_tokens: this._maxTokens,
+          // Provider-boundary parameter translation: OpenAI's newer model
+          // families (gpt-5.x, o1, o3, etc.) reject the legacy `max_tokens`
+          // parameter and require `max_completion_tokens`. Other
+          // OpenAI-compatible providers (xai, deepseek, kimi, mistral, qwen)
+          // still use `max_tokens`. Send the right one per provider.
+          ...(this.providerId === "openai"
+            ? { max_completion_tokens: this._maxTokens }
+            : { max_tokens: this._maxTokens }),
           ...(this._tools ? { tools: this._tools } : {}),
+          // OpenAI reasoning models (gpt-5.x) default to a non-none
+          // reasoning_effort that is incompatible with function tools on
+          // /chat/completions. When tools are present, explicitly disable
+          // reasoning so the model can call functions. Without this OpenAI
+          // returns 400: "Function tools with reasoning_effort are not
+          // supported ... set reasoning_effort to 'none'."
+          ...(this.providerId === "openai" && this._tools
+            ? { reasoning_effort: "none" }
+            : {}),
         }),
         signal: abort.signal,
       });
@@ -893,6 +925,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       }
 
       // Native tool_calls → internal fence format (same as OpenRouter).
+      //
+      // REVERSE MAPPING: OpenAI called the sanitized function name
+      // (e.g. `project_status`). Translate it back to the canonical LiTT
+      // tool ID (e.g. `project.status`) so ToolRegistry.execute() dispatches
+      // to the right tool.
       const nativeBlocks = nativeToolCalls
         .filter((tc) => tc.name)
         .map((tc) => {
@@ -900,7 +937,8 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           if (tc.args) {
             try { inputs = JSON.parse(tc.args); } catch { inputs = {}; }
           }
-          return `\`\`\`tool_call\n${JSON.stringify({ tool: tc.name, inputs }, null, 2)}\n\`\`\``;
+          const canonicalToolId = resolveCanonicalToolId(tc.name, this._toolNameMap);
+          return `\`\`\`tool_call\n${JSON.stringify({ tool: canonicalToolId, inputs }, null, 2)}\n\`\`\``;
         })
         .join("\n");
       if (nativeBlocks) {

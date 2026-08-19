@@ -34,6 +34,7 @@
 import type {
   ChatMessage,
   ModelProvider,
+  ModelResult,
   ModelStreamEvent,
   ToolDefinition,
   ToolResult,
@@ -486,9 +487,10 @@ export async function runAgentLoop(
     // Call the model
     let modelContent = "";
     const modelEvents: ModelStreamEvent[] = [];
+    let modelResult: ModelResult | null = null;
 
     try {
-      await activeModel.stream(messages, (event) => {
+      modelResult = await activeModel.stream(messages, (event) => {
         modelEvents.push(event);
         if (options.onModelStream) {
           try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
@@ -544,6 +546,18 @@ export async function runAgentLoop(
     // Never silently accept an empty model turn.
     // Empty output is not a successful assistant response and must not
     // become a blank completed turn in CLI/Desktop surfaces.
+    //
+    // EXCEPTION: when the model emitted ONLY native tool_calls (no prose
+    // deltas), the provider attaches the translated `tool_call` fence block
+    // to the returned ModelResult.content (not as a delta event, since the
+    // block is a LiTT-internal construct, not model prose). In that case
+    // modelContent is empty but modelResult.content carries the tool call —
+    // adopt it so the loop's single parser can execute the tool instead of
+    // misclassifying the turn as an empty response.
+    if (!modelContent.trim() && modelResult?.content?.trim()) {
+      modelContent = modelResult.content;
+    }
+
     if (!modelContent.trim()) {
       // Track empty responses as content failures (not counted toward
       // escalation by default, but recorded for audit).

@@ -65,7 +65,12 @@ describe("OpenRouterModelProvider — native tool schemas are declared", () => {
     const tools = recorded.body.tools as Array<{ type: string; function: { name: string; description: string; parameters: unknown } }>;
     expect(Array.isArray(tools)).toBe(true);
     expect(tools[0].type).toBe("function");
-    expect(tools[0].function.name).toBe("project.status");
+    // OpenAI requires function names to match ^[a-zA-Z0-9_-]+$, so the
+    // dotted canonical id `project.status` is sanitized to `project_status`
+    // at the provider boundary. The reverse mapping translates it back to
+    // `project.status` when the model calls it (see tests below).
+    expect(tools[0].function.name).toBe("project_status");
+    expect(tools[0].function.name).toMatch(/^[a-zA-Z0-9_-]+$/);
     expect(tools[0].function.description).toContain("Get project status");
     expect(tools[0].function.parameters).toEqual({ type: "object", properties: {} });
   });
@@ -84,7 +89,7 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
     // The model emits a native function call with arguments split across
     // deltas — exactly what OpenAI-compatible streaming returns.
     const lines = [
-      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"project.status\",\"arguments\":\"\"}}]}}]}",
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"project_status\",\"arguments\":\"\"}}]}}]}",
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{}\"}}]}}]}",
       "data: [DONE]",
     ];
@@ -109,7 +114,7 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
   it("appends native tool calls after prose content without corrupting the text", async () => {
     const lines = [
       "data: {\"choices\":[{\"delta\":{\"content\":\"Let me check\"}}]}",
-      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project.status\",\"arguments\":\"{\\\"check\\\":\\\"clean\\\"}\"}}]}}]}",
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project_status\",\"arguments\":\"{\\\"check\\\":\\\"clean\\\"}\"}}]}}]}",
       "data: [DONE]",
     ];
     globalThis.fetch = recordingFetch(lines, { body: null });
@@ -129,8 +134,15 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
   });
 
   it("multiple native tool calls in one response translate to multiple blocks (first wins in the loop)", async () => {
+    const BRANCH_TOOL: ToolDefinition = {
+      id: "project.branch",
+      name: "branch",
+      description: "Get current git branch name",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    };
     const lines = [
-      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project.status\",\"arguments\":\"{}\"}},{\"index\":1,\"function\":{\"name\":\"project.branch\",\"arguments\":\"{}\"}}]}}]}",
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project_status\",\"arguments\":\"{}\"}},{\"index\":1,\"function\":{\"name\":\"project_branch\",\"arguments\":\"{}\"}}]}}]}",
       "data: [DONE]",
     ];
     globalThis.fetch = recordingFetch(lines, { body: null });
@@ -138,18 +150,20 @@ describe("OpenRouterModelProvider — native tool_calls translate to the interna
     const provider = new OpenRouterModelProvider({
       apiKey: "sk-test",
       model: "openai/gpt-5.6-luna",
-      tools: [STATUS_TOOL],
+      tools: [STATUS_TOOL, BRANCH_TOOL],
     });
     const result = await provider.stream([{ role: "user", content: "hi" }], () => {});
 
     const first = parseToolCall(result.content);
     expect(first?.toolId).toBe("project.status");
+    // The second native call (project_branch) reverse-maps to the canonical
+    // project.branch id in its fence block.
     expect(result.content).toContain("project.branch");
   });
 
   it("a malformed arguments string degrades to empty inputs, never a crash", async () => {
     const lines = [
-      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project.status\",\"arguments\":\"NOT-JSON\"}}]}}]}",
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"project_status\",\"arguments\":\"NOT-JSON\"}}]}}]}",
       "data: [DONE]",
     ];
     globalThis.fetch = recordingFetch(lines, { body: null });
