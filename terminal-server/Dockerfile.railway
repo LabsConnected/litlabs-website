@@ -92,7 +92,7 @@ COPY --from=builder /app/terminal-server/node_modules terminal-server/node_modul
 COPY --from=builder /app/packages/litt-agent-core/dist packages/litt-agent-core/dist
 COPY --from=builder /app/packages/litt-agent-core/node_modules packages/litt-agent-core/node_modules
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json pnpm-workspace.yaml ./
+COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/terminal-server/package.json terminal-server/package.json
 COPY --from=builder /app/packages/litt-agent-core/package.json packages/litt-agent-core/package.json
 
