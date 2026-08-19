@@ -190,6 +190,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 // ─── Clerk auth + route protection ────────────────────────────────
 
 const isProtectedRoute = createRouteMatcher([
+  "/studio(.*)",
   "/settings(.*)",
   "/profile(.*)",
   "/wallet(.*)",

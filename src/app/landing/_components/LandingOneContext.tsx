@@ -24,7 +24,7 @@ import Link from "next/link";
 const CAPABILITIES = [
   {
     title: "Studio",
-    href: "/studio",
+    href: "/sign-up",
     image: "/studio/creative-engine-hero.png",
     label: "Command center",
     desc: "Plan missions, chat with LiTT, approve changes, and watch work happen in real time.",
@@ -32,7 +32,7 @@ const CAPABILITIES = [
   },
   {
     title: "Code",
-    href: "/studio?tool=code",
+    href: "/sign-up",
     image: "/gallery/museum/neural-network.png",
     label: "Live editor",
     desc: "LiTT reads, writes, and tests real project files — not sandboxes, not mockups.",
@@ -40,7 +40,7 @@ const CAPABILITIES = [
   },
   {
     title: "Terminal",
-    href: "/studio?tool=terminal",
+    href: "/sign-up",
     image: "/gallery/museum/cyber-samurai.png",
     label: "Real shell",
     desc: "Structured argv execution through the hardened CommandExecutor pipeline.",
@@ -56,7 +56,7 @@ const CAPABILITIES = [
   },
   {
     title: "Video",
-    href: "/studio?tool=video",
+    href: "/sign-up",
     image: "/gallery/museum/ethereal-dreamscape.png",
     label: "Media pipeline",
     desc: "Create and process video content without leaving the LiTT workspace.",

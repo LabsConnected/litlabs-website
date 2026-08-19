@@ -78,7 +78,7 @@ export function LandingCTA() {
                 />
               </Link>
               <Link
-                href="/studio"
+                href="#product"
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-8 py-4 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/25 hover:bg-white/8"
               >
                 Explore the product

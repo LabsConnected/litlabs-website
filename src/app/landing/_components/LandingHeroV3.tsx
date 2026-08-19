@@ -143,7 +143,7 @@ export function LandingHeroV3() {
                 <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
-                href="/studio"
+                href="#how"
                 className="inline-flex h-[56px] items-center gap-2.5 rounded-2xl border border-white/12 bg-white/5 px-7 text-base font-semibold text-white backdrop-blur-md transition hover:border-violet-400/30 hover:bg-white/8 hover:scale-[1.02]"
               >
                 <Play size={16} className="text-violet-300" />

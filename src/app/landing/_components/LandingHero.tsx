@@ -74,7 +74,7 @@ export function LandingHero() {
             <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
           </Link>
           <Link
-            href="/studio"
+            href="#how"
             className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/20 hover:bg-white/8"
           >
             <Play size={13} className="text-orange-300" />
