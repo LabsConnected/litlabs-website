@@ -42,7 +42,7 @@ import type { CockpitStore, ActivitySemantic, RoutingMode } from "./cockpit-stor
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
@@ -983,15 +983,38 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // Set the CONFIGURED model label — the actual ACTIVE model is
           // confirmed after streaming sees the runtime response model.
           store.actions.setActiveModel(routed.label);
-          // Declare the project tools NATIVELY on the transport — the
-          // model sees real tool schemas, so it never claims tools are
-          // unavailable (the dogfood "unable to access project.status"
-          // failure). Native tool_calls are translated back into LiTT's
-          // tool_call fence format by the provider.
-          const model = new OpenRouterModelProvider({
-            model: routed.openRouterModelId ?? routed.id,
+          // Resolve the provider adapter from the routing decision.
+          // Configured direct (BYOK) keys take precedence over the
+          // OpenRouter fallback — when servedBy === "openai" and
+          // OPENAI_API_KEY is set, the native OpenAI adapter is used and
+          // the request goes to api.openai.com, never openrouter.ai.
+          // OpenRouter is only used when explicitly selected or when the
+          // native provider cannot service the model (no direct key / no
+          // native adapter). The model id is NEVER rewritten and
+          // max_tokens is NEVER lowered to make a request pass.
+          // ─── TEMPORARY DIAGNOSTIC (CHAT path) ─────────────────────
+          process.stderr.write(
+            `[litt-diag][CHAT] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
+            `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
+            `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
+            `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
+            `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
+            `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+          );
+          const model = resolveProviderAdapter(routed, {
             tools: tools.list(),
           });
+          process.stderr.write(
+            `[litt-diag][CHAT] adapter.providerId=${model.providerId} ` +
+            `adapter.configuredModel=${model.configuredModel}\n`,
+          );
+          // Set the ACTUAL served provider from the resolved adapter
+          // BEFORE the request starts. `routed.servedBy` is routing
+          // intent; `model.providerId` is execution truth — the adapter
+          // that will actually carry the request. Setting it here (not
+          // from servedBy) means the header never lies even if the
+          // adapter fell back to OpenRouter or streaming throws early.
+          store.actions.setActiveProvider(model.providerId);
 
           // Persist a streaming assistant message — the live preview.
           // Finalized ONCE with result.content when the loop completes.
@@ -1056,6 +1079,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             },
           });
           if (model.activeModel) store.actions.setActiveModel(model.activeModel);
+          // Re-affirm the served provider post-completion. The value was
+          // already set pre-stream from model.providerId (execution truth,
+          // not routed.servedBy intent); this is an idempotent no-op that
+          // guards against any mid-stream state reset.
+          store.actions.setActiveProvider(model.providerId);
           // ─── Finalize the assistant message ONCE ───
           // result.content is the canonical final response (tool_call
           // blocks stripped by the agent loop). Persist it exactly once.
@@ -1185,13 +1213,33 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // Set the CONFIGURED model label — the actual ACTIVE model is
         // confirmed after streaming sees the runtime response model.
         store.actions.setActiveModel(routed.label);
-        // Native tool schemas on the transport — the model sees the real
-        // project tools (dogfood P0: it must never claim project.status
-        // is unavailable in this session).
-        const model = new OpenRouterModelProvider({
-          model: routed.openRouterModelId ?? routed.id,
+        // Resolve the provider adapter from the routing decision.
+        // Configured direct (BYOK) keys take precedence over the
+        // OpenRouter fallback. See the CHAT path above for the full
+        // contract — the same resolver serves both paths so routing
+        // truth is identical across CHAT and MISSION.
+        // ─── TEMPORARY DIAGNOSTIC (MISSION path) ───────────────────
+        process.stderr.write(
+          `[litt-diag][MISSION] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
+          `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
+          `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
+          `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
+          `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
+          `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+        );
+        const model = resolveProviderAdapter(routed, {
           tools: tools.list(),
         });
+        process.stderr.write(
+          `[litt-diag][MISSION] adapter.providerId=${model.providerId} ` +
+          `adapter.configuredModel=${model.configuredModel}\n`,
+        );
+        // Set the ACTUAL served provider from the resolved adapter
+        // BEFORE the request starts. `routed.servedBy` is routing
+        // intent; `model.providerId` is execution truth. Setting it
+        // here (not from servedBy) means the header never lies even if
+        // the adapter fell back to OpenRouter or streaming throws early.
+        store.actions.setActiveProvider(model.providerId);
 
         // Persist a streaming assistant message — live preview during
         // the mission. Finalized ONCE with result.content when the loop
@@ -1514,6 +1562,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
 
         if (model.activeModel) store.actions.setActiveModel(model.activeModel);
+        // Re-affirm the served provider post-completion (idempotent —
+        // already set pre-stream from model.providerId execution truth).
+        store.actions.setActiveProvider(model.providerId);
 
         // ─── Finalize the assistant message ONCE ───
         // result.content is the canonical final response (tool_call

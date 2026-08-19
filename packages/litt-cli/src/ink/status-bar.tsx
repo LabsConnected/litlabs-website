@@ -27,6 +27,7 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
 import { truncateTail, shortModelName } from "./text-wrap.js";
+import { providerLabel } from "../lib/model-provider.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
 
 function isWorking(h: HoloState): boolean {
@@ -42,6 +43,8 @@ export interface StatusBarProps {
   holoState: HoloState;
   brain: string;
   activeModel: string | null;
+  /** The provider that ACTUALLY served the most recent request (e.g. "openai"). */
+  activeProvider: string | null;
   mode: "plan" | "act";
   isProcessing: boolean;
   busySince: number | null;
@@ -51,7 +54,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
-  project, branch, localRuntime, holoState, brain, activeModel,
+  project, branch, localRuntime, holoState, brain, activeModel, activeProvider,
   mode, isProcessing, busySince, missionState, gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -89,8 +92,11 @@ export function StatusBar({
     right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
   }
 
-  // ── Line 1: brain → active   |   Plan/Act ──
+  // ── Line 1: brain → active · PROVIDER   |   Plan/Act ──
+  // The provider is the REAL served provider (source truth), not just
+  // the friendly model name. e.g. "LiTT Auto → GPT-5.6 Luna · OpenAI".
   const modelShort = activeModel ? shortModelName(activeModel) : null;
+  const providerShort = activeProvider ? providerLabel(activeProvider) : null;
   const planDot = mode === "plan" ? "●" : "○";
   const actDot = mode === "act" ? "●" : "○";
   const right1Text = `${planDot} Plan   ${actDot} Act`;
@@ -114,7 +120,14 @@ export function StatusBar({
       {modelShort && (
         <>
           <Text dimColor> → </Text>
-          <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - 18))}</Text>
+          <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - 18 - (providerShort ? providerShort.length + 3 : 0)))}</Text>
+
+          {providerShort && (
+            <>
+              <Text dimColor> · </Text>
+              <Text color={COLORS.secondaryBright}>{providerShort}</Text>
+            </>
+          )}
         </>
       )}
     </Text>

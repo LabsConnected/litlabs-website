@@ -37,6 +37,8 @@ import type {
   ModelProfile,
   ToolDefinition,
 } from "@litt/agent-core";
+import { getProvider, type ProviderId } from "@litt/models";
+import type { RoutedModel } from "./model-runtime.js";
 
 /** OpenAI-compatible native function schema (the `tools` request field). */
 interface NativeToolSchema {
@@ -237,6 +239,8 @@ export function hasOpenRouterKey(): boolean {
 }
 
 export class OpenRouterModelProvider implements ModelProvider {
+  /** This adapter always serves via OpenRouter (source truth for the controller). */
+  readonly providerId = "openrouter" as const;
   private readonly _apiKey: string;
   private readonly _model: string;
   private readonly _profile: ModelProfile;
@@ -324,6 +328,11 @@ export class OpenRouterModelProvider implements ModelProvider {
     }
 
     try {
+      // ─── TEMPORARY DIAGNOSTIC (OpenRouter fetch) ─────────────────
+      process.stderr.write(
+        `[litt-diag][FETCH-OR] providerId=openrouter host=openrouter.ai ` +
+        `model=${this._model} max_tokens=${this._maxTokens}\n`,
+      );
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -488,4 +497,384 @@ export class OpenRouterModelProvider implements ModelProvider {
       return 0;
     }
   }
+}
+
+// ─── Native OpenAI-compatible provider adapter ─────────────────────
+//
+// Many LiTT providers (OpenAI, xAI, DeepSeek, Kimi/Moonshot, Mistral,
+// Qwen/DashScope) expose an OpenAI-compatible /chat/completions endpoint.
+// This adapter calls the provider's NATIVE API directly with the user's
+// direct (BYOK) key, using the provider-native model id (providerModelId),
+// NOT the OpenRouter slug.
+//
+// This is what makes configured OpenAI BYOK take precedence over the
+// OpenRouter fallback: when the registry resolves servedBy === "openai"
+// (because OPENAI_API_KEY is set), the resolver below picks this adapter
+// and the request goes to api.openai.com, never openrouter.ai.
+//
+// Anthropic and Google/Gemini have non-OpenAI-compatible APIs and are
+// NOT handled here — they fall back to OpenRouter until dedicated
+// adapters are added.
+
+/**
+ * Providers served by this native OpenAI-compatible adapter.
+ * Each must have a `chatUrl` in PROVIDERS (from @litt/models).
+ */
+export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "openai",
+  "xai",
+  "deepseek",
+  "kimi",
+  "mistral",
+  "qwen",
+]);
+
+export interface OpenAICompatibleModelOptions {
+  /** The native provider this adapter serves (e.g. "openai", "xai"). */
+  providerId: ProviderId;
+  /** The provider's chat completions endpoint (from PROVIDERS.chatUrl). */
+  endpoint: string;
+  /** Direct API key for the provider (BYOK). Required. */
+  apiKey: string;
+  /** The provider-native model id (e.g. "gpt-5.6-luna"). Required. */
+  model: string;
+  profile?: ModelProfile;
+  maxTokens?: number;
+  tools?: ToolDefinition[];
+  idleStallMs?: number;
+}
+
+/**
+ * OpenAI-compatible native provider adapter.
+ *
+ * Streams from the provider's own /chat/completions endpoint using the
+ * user's direct key. Surfaces upstream errors (rate limits, credit
+ * errors, model unavailable) by throwing — never converts a provider
+ * error into an empty content response. Reports `provider: <providerId>`
+ * in meta/result so the controller can display the REAL served provider.
+ */
+export class OpenAICompatibleModelProvider implements ModelProvider {
+  readonly providerId: ProviderId;
+  private readonly _endpoint: string;
+  private readonly _apiKey: string;
+  private readonly _model: string;
+  private readonly _profile: ModelProfile;
+  private readonly _maxTokens: number;
+  private readonly _idleStallMs: number;
+  private readonly _tools: NativeToolSchema[] | null;
+  private _activeModel: string | null = null;
+
+  constructor(options: OpenAICompatibleModelOptions) {
+    this.providerId = options.providerId;
+    this._endpoint = options.endpoint;
+    this._apiKey = options.apiKey;
+    if (!this._apiKey) {
+      throw new Error(`${options.providerId} API key is required for OpenAICompatibleModelProvider`);
+    }
+    this._model = options.model;
+    if (!this._model) {
+      throw new Error(`${options.providerId} model id is required for OpenAICompatibleModelProvider`);
+    }
+    this._profile = options.profile ?? "smart";
+    this._maxTokens = options.maxTokens ?? 4096;
+    this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
+    this._tools = options.tools && options.tools.length > 0
+      ? options.tools.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.id,
+            description: t.description,
+            parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+          },
+        }))
+      : null;
+  }
+
+  get configuredModel(): string {
+    return this._model;
+  }
+
+  get activeModel(): string | null {
+    return this._activeModel;
+  }
+
+  get profile(): ModelProfile {
+    return this._profile;
+  }
+
+  async stream(
+    messages: ChatMessage[],
+    emit: (event: ModelStreamEvent) => void,
+  ): Promise<ModelResult> {
+    // Emit meta — provider is the NATIVE provider actually serving.
+    emit({
+      type: "meta",
+      provider: this.providerId,
+      model: this._model,
+      profile: this._profile,
+    });
+
+    // Transport stall watchdog (same discipline as OpenRouter adapter).
+    const abort = new AbortController();
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const armStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (!abort.signal.aborted) abort.abort();
+      }, this._idleStallMs);
+    };
+    if (this._idleStallMs > 0) armStallTimer();
+
+    try {
+      // ─── TEMPORARY DIAGNOSTIC (native OpenAI-compatible fetch) ───
+      let diagHost = this._endpoint;
+      try { diagHost = new URL(this._endpoint).host; } catch { /* keep endpoint */ }
+      process.stderr.write(
+        `[litt-diag][FETCH-NATIVE] providerId=${this.providerId} host=${diagHost} ` +
+        `model=${this._model} max_tokens=${this._maxTokens}\n`,
+      );
+      const response = await fetch(this._endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this._apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this._model,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          stream: true,
+          max_tokens: this._maxTokens,
+          ...(this._tools ? { tools: this._tools } : {}),
+        }),
+        signal: abort.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "unknown error");
+        throw new Error(`${this.providerId} API error ${response.status}: ${errorText}`);
+      }
+      if (!response.body) {
+        throw new Error(`${this.providerId} returned no response body`);
+      }
+
+      let content = "";
+      let totalTokens = 0;
+      let resolvedModel = this._model;
+      const nativeToolCalls: Array<{ name: string; args: string }> = [];
+      const accumulateToolCalls = (calls: unknown): void => {
+        if (!Array.isArray(calls)) return;
+        for (const tc of calls as Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>) {
+          const idx = tc.index ?? 0;
+          nativeToolCalls[idx] ??= { name: "", args: "" };
+          if (tc.function?.name) nativeToolCalls[idx].name = tc.function.name;
+          if (tc.function?.arguments) nativeToolCalls[idx].args += tc.function.arguments;
+        }
+      };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        armStallTimer();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            // Surface upstream errors embedded in SSE chunks (rate limits,
+            // credit errors, model unavailable). Without this the provider
+            // silently returns empty content and the caller never learns
+            // why the stream produced no deltas.
+            if (parsed.error) {
+              const errMsg = parsed.error.message ?? `${this.providerId} stream error`;
+              throw new Error(`${this.providerId} stream error: ${errMsg}`);
+            }
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              content += delta.content;
+              emit({ type: "delta", text: delta.content });
+            }
+            accumulateToolCalls(delta?.tool_calls);
+            accumulateToolCalls(parsed.choices?.[0]?.message?.tool_calls);
+            if (parsed.model) resolvedModel = parsed.model as string;
+            if (parsed.usage?.total_tokens) totalTokens = parsed.usage.total_tokens;
+          } catch (e) {
+            // Re-throw upstream provider errors so the agent loop surfaces
+            // them instead of silently retrying on empty content.
+            if (e instanceof Error && e.message.includes("stream error:")) {
+              throw e;
+            }
+            // Skip malformed/unparseable chunks
+          }
+        }
+      }
+
+      // Native tool_calls → internal fence format (same as OpenRouter).
+      const nativeBlocks = nativeToolCalls
+        .filter((tc) => tc.name)
+        .map((tc) => {
+          let inputs: unknown = {};
+          if (tc.args) {
+            try { inputs = JSON.parse(tc.args); } catch { inputs = {}; }
+          }
+          return `\`\`\`tool_call\n${JSON.stringify({ tool: tc.name, inputs }, null, 2)}\n\`\`\``;
+        })
+        .join("\n");
+      if (nativeBlocks) {
+        content = content ? `${content}\n${nativeBlocks}` : nativeBlocks;
+      }
+
+      this._activeModel = resolvedModel;
+
+      return {
+        content,
+        model: resolvedModel,
+        provider: this.providerId,
+        usage: { total_tokens: totalTokens || Math.ceil(content.length / 4) },
+        timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
+        profile: this._profile,
+      };
+    } catch (err) {
+      if (abort.signal.aborted) {
+        throw new Error(
+          `${this.providerId} stream stalled — no data received for a while. ` +
+          "The connection appears to have been dropped, so the run was stopped instead of hanging.",
+        );
+      }
+      throw err;
+    } finally {
+      if (stallTimer) clearTimeout(stallTimer);
+    }
+  }
+
+  async health(): Promise<number> {
+    const def = getProvider(this.providerId);
+    if (!def?.modelsUrl) return 0;
+    try {
+      const response = await fetch(def.modelsUrl, {
+        headers: { "Authorization": `Bearer ${this._apiKey}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      return response.ok ? 1 : 0;
+    } catch {
+      return 0;
+    }
+  }
+}
+
+// ─── Provider resolver — picks the adapter by servedBy ──────────────
+//
+// This is the bridge between the routing layer (which knows servedBy:
+// the provider that SHOULD serve the call) and the adapter layer (which
+// actually issues the HTTP request). The resolver honors the routing
+// decision: configured direct (BYOK) keys take precedence over the
+// OpenRouter fallback because the registry already encodes that
+// precedence into servedBy.
+//
+// Routing precedence (enforced here):
+//   1. Explicit OpenRouter selection (servedBy === "openrouter") → OpenRouter
+//   2. Native OpenAI-compatible provider with a direct key → native adapter
+//   3. OpenRouter fallback only when the native provider has no adapter
+//      (Anthropic/Google) OR no direct key, and OpenRouter can service it.
+//
+// The adapter's `providerId` is the source of truth for which provider
+// ACTUALLY handled the request — the controller reads it after streaming
+// to display the real served provider, not merely the intended one.
+
+/** A union of both adapter types the resolver can return. */
+export type ResolvedModelProvider = OpenRouterModelProvider | OpenAICompatibleModelProvider;
+
+export interface ResolveProviderAdapterOptions {
+  /** Native tool definitions to declare on the transport. */
+  tools?: ToolDefinition[];
+  /** Override max_tokens (defaults to 4096, existing production behavior). */
+  maxTokens?: number;
+  /** Override the stall watchdog (tests inject a tiny value). */
+  idleStallMs?: number;
+}
+
+/**
+ * Resolve which adapter should serve a routed model, and construct it.
+ *
+ * Throws a clear error when no adapter can service the model (e.g. the
+ * native provider has no direct key AND no OpenRouter fallback is
+ * available) — never silently falls back to a provider that will fail.
+ */
+export function resolveProviderAdapter(
+  routed: RoutedModel,
+  options: ResolveProviderAdapterOptions = {},
+): ResolvedModelProvider {
+  const tools = options.tools;
+  const maxTokens = options.maxTokens;
+  const idleStallMs = options.idleStallMs;
+  const servedBy = routed.servedBy;
+
+  // 1. Native OpenAI-compatible provider with a direct key → native adapter.
+  if (OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)) {
+    const def = getProvider(servedBy);
+    const apiKey = def?.envKey ? process.env[def.envKey] : undefined;
+    if (def?.chatUrl && apiKey) {
+      const modelId = routed.providerModelId ?? routed.openRouterModelId;
+      if (!modelId) {
+        throw new Error(`No provider model id for ${routed.label} (servedBy ${servedBy})`);
+      }
+      return new OpenAICompatibleModelProvider({
+        providerId: servedBy,
+        endpoint: def.chatUrl,
+        apiKey,
+        model: modelId,
+        tools,
+        maxTokens,
+        idleStallMs,
+      });
+    }
+    // Direct key missing — fall through to OpenRouter fallback below.
+  }
+
+  // 2. OpenRouter — either explicitly selected, or fallback for a native
+  //    provider whose direct key is not configured / has no native adapter.
+  if (routed.openRouterModelId && hasOpenRouterKey()) {
+    return new OpenRouterModelProvider({
+      model: routed.openRouterModelId,
+      tools,
+      maxTokens,
+      idleStallMs,
+    });
+  }
+
+  // 3. Nothing can service this model — surface a clear error instead of
+  //    silently constructing an adapter that will fail with a confusing
+  //    credit/auth error at stream time.
+  const needed = servedBy === "openrouter"
+    ? "OPENROUTER_API_KEY"
+    : OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)
+      ? `${getProvider(servedBy)?.envKey ?? servedBy.toUpperCase() + "_API_KEY"} (or OPENROUTER_API_KEY as fallback)`
+      : `a direct ${servedBy} key or OPENROUTER_API_KEY`;
+  throw new Error(
+    `No provider adapter can service ${routed.label}: ${needed} is not configured. ` +
+    `Routing resolved servedBy="${servedBy}" but no matching credential is available.`,
+  );
+}
+
+// ─── Provider display label ─────────────────────────────────────────
+
+/**
+ * Human label for a provider id, for the status bar / header.
+ *   "openai" → "OpenAI", "openrouter" → "OpenRouter", etc.
+ */
+export function providerLabel(id: ProviderId | string | null | undefined): string {
+  if (!id) return "";
+  const def = getProvider(id as ProviderId);
+  if (def) return def.label;
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }

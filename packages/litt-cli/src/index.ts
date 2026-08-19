@@ -129,6 +129,31 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  // ─── TEMPORARY STARTUP DIAGNOSTIC (provider-routing trace) ───────
+  // Proves which code is actually executing: package path, version, and
+  // git commit SHA. Remove once the routing investigation is resolved.
+  try {
+    const { execSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const { dirname, resolve } = await import("node:path");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = resolve(here, "..");
+    let sha = "unknown";
+    try {
+      sha = execSync("git rev-parse HEAD", { cwd: pkgRoot, encoding: "utf8" }).trim();
+    } catch { /* not a git repo or git missing */ }
+    let pkgVersion = "unknown";
+    try {
+      const pkgJson = await import(resolve(pkgRoot, "package.json"), { with: { type: "json" } });
+      pkgVersion = pkgJson.default?.version ?? pkgJson.version ?? "unknown";
+    } catch { /* package.json unreadable */ }
+    process.stderr.write(
+      `[litt-diag] executing package: ${pkgRoot}\n` +
+      `[litt-diag] version: ${pkgVersion}  commit: ${sha}\n` +
+      `[litt-diag] OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}  OPENROUTER_API_KEY set: ${!!process.env.OPENROUTER_API_KEY}\n`,
+    );
+  } catch { /* diagnostic must never break startup */ }
+
   const args = process.argv.slice(2);
 
   // Resolve dispatch through the single shared routing module.

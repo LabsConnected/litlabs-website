@@ -42,7 +42,7 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
-import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -122,7 +122,12 @@ export function CockpitApp({
 
   const modelReady = hasOpenRouterKey();
   const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
-  const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+  // Source truth: show the REAL served provider (from the last run's
+  // adapter), not a hardcoded "OpenRouter" label. Before the first run,
+  // fall back to whichever provider is configured.
+  const source = store.state.activeProvider
+    ? `${providerLabel(store.state.activeProvider)} • BYOK ✓`
+    : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
   const overlay = store.state.overlay;
@@ -404,6 +409,7 @@ export function CockpitApp({
             localRuntime={store.state.localRuntime}
             brain={brain}
             activeModel={store.state.activeModel}
+            activeProvider={store.state.activeProvider}
             mode={store.state.mode}
           />
         </>

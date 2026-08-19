@@ -302,6 +302,13 @@ export function useCockpitStore() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
   const [activeModel, setActiveModel] = useState<string | null>(null);
+  // The provider that ACTUALLY served the most recent request (source
+  // truth). Set optimistically from routed.servedBy before streaming,
+  // then confirmed from the adapter's providerId after streaming. null
+  // until the first run. Displayed in the status bar as
+  // "GPT-5.6 Luna · OpenAI" — the real served provider, not just the
+  // friendly model name.
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [overlay, setOverlayState] = useState<Overlay>("none");
   const [mission, setMission] = useState<string | null>(null);
   const [missionState, setMissionState] = useState<MissionState | null>(null);
@@ -615,6 +622,7 @@ export function useCockpitStore() {
       selectedModel,
       routingMode,
       activeModel,
+      activeProvider,
       overlay,
       mission,
       missionState,
@@ -650,6 +658,7 @@ export function useCockpitStore() {
       setSelectedModel,
       setRoutingMode,
       setActiveModel,
+      setActiveProvider,
       setOverlay,
       setMission,
       startMission,

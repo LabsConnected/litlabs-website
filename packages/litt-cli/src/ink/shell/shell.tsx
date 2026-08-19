@@ -79,6 +79,7 @@ export interface LiTTShellProps {
   localRuntime: string;
   brain: string;
   activeModel: string | null;
+  activeProvider: string | null;
   mode: "plan" | "act";
 }
 
@@ -90,7 +91,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     onOpenPalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
-    project, branch, localRuntime, brain, activeModel, mode,
+    project, branch, localRuntime, brain, activeModel, activeProvider, mode,
   } = props;
 
   const { stdout } = useStdout();
@@ -193,6 +194,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         holoState={holoState}
         brain={brain}
         activeModel={activeModel}
+        activeProvider={activeProvider}
         mode={mode}
         isProcessing={isProcessing}
         busySince={busySince}
