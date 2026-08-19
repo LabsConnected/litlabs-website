@@ -88,6 +88,10 @@
   are large local artifacts and are excluded from `tsconfig.json`. Don't import from them.
 
 [DEPLOYMENT]
+- Branch policy: start from `main`, create a feature branch (feat/, fix/, chore/, docs/, experiment/),
+  never push directly to `main`, merge through a PR after checks pass.
 - Vercel: `git push origin main` triggers CI via `.github/workflows/build.yml` and Lighthouse via `.github/workflows/lighthouse.yml`.
 - Docker: `docker build -t litlab .` (or use `docker/Dockerfile.terminal` for the terminal server).
 - Heavy studio work (`/studio`, image generation) should run on GitHub Codespaces, not locally.
+- `AGENTS.md` is a committed canonical repo-level agent instructions file (no longer local-only).
+  Cline-specific behavior stays in this `.clinerules` file; do not duplicate AGENTS.md content here.
