@@ -167,10 +167,10 @@ async function runVerify(
 
     if (result.proven) {
       store.actions.setHoloState("COMPLETE");
-      setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+      store.actions.scheduleIdle(1500);
     } else {
       store.actions.setHoloState("FAILED");
-      setTimeout(() => store.actions.setHoloState("IDLE"), 2500);
+      store.actions.scheduleIdle(2500);
     }
   } catch (err) {
     store.actions.addActivity({
@@ -180,7 +180,7 @@ async function runVerify(
       text: `Verification error: ${err instanceof Error ? err.message : String(err)}`,
     });
     store.actions.setHoloState("FAILED");
-    setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+    store.actions.scheduleIdle(2000);
   }
 }
 
@@ -876,16 +876,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             refreshBranch(session.getCwd(), store.state.branch, store.actions.setBranch);
           }
           store.actions.setHoloState("COMPLETE");
-          setTimeout(() => store.actions.setHoloState("IDLE"), 1500);
+          store.actions.scheduleIdle(1500);
         } else if (result.result.status === "cancelled") {
           store.actions.setHoloState("CANCELLED");
-          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+          store.actions.scheduleIdle(2000);
         } else if (result.result.status === "timeout") {
           store.actions.setHoloState("TIMEOUT");
-          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+          store.actions.scheduleIdle(2000);
         } else {
           store.actions.setHoloState("FAILED");
-          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+          store.actions.scheduleIdle(2000);
         }
       } catch (err) {
         store.actions.addActivity({
@@ -895,7 +895,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           text: `Error: ${err instanceof Error ? err.message : String(err)}`,
         });
         store.actions.setHoloState("FAILED");
-        setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+        store.actions.scheduleIdle(2000);
       }
       return;
     }
@@ -990,8 +990,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // the request goes to api.openai.com, never openrouter.ai.
           // OpenRouter is only used when explicitly selected or when the
           // native provider cannot service the model (no direct key / no
-          // native adapter). The model id is NEVER rewritten and
-          // max_tokens is NEVER lowered to make a request pass.
+          // native adapter). The model id is NEVER rewritten. max_tokens
+          // is NEVER lowered by the resolver — the only place it steps
+          // down is the OpenRouter adapter's insufficient-credits retry
+          // (a confirmed credit rejection, surfaced via [litt-diag]), so
+          // a low balance never kills a run with an ugly "Model error".
           // ─── TEMPORARY DIAGNOSTIC (CHAT path) ─────────────────────
           process.stderr.write(
             `[litt-diag][CHAT] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
@@ -1129,7 +1132,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             status: "error",
           });
           store.actions.setHoloState("FAILED");
-          setTimeout(() => store.actions.setHoloState("IDLE"), 2000);
+          store.actions.scheduleIdle(2000);
         } finally {
           // ONE canonical transition out of a run: every terminal
           // outcome (success, failed, provider error, tool error, stall)

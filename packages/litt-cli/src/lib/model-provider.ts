@@ -205,7 +205,7 @@ export interface OpenRouterModelOptions {
   apiKey?: string;
   model?: string;
   profile?: ModelProfile;
-  /** Max response tokens. Defaults to 4096 (existing production behavior). */
+  /** Max response tokens. Defaults to LITT_MAX_TOKENS env or 3000. */
   maxTokens?: number;
   /**
    * Native tool definitions (OpenAI-compatible `tools` request field).
@@ -234,6 +234,124 @@ export interface OpenRouterModelOptions {
 /** Default stall threshold — 90s without a single stream byte. */
 export const DEFAULT_IDLE_STALL_MS = 90_000;
 
+// ─── Max tokens policy ──────────────────────────────────────────────
+//
+// Configurable max response tokens. Previously hardcoded to 4096, which
+// OpenRouter rejects when the remaining credit balance can't cover that
+// many output tokens — the request dies BEFORE the model answers with an
+// ugly "Model error" reaching the user.
+//
+//   LITT_MAX_TOKENS env var → explicit override (highest priority)
+//   explicit option.maxTokens → caller override (tests, profiles)
+//   DEFAULT_MAX_TOKENS        → 3000 (conservative production default)
+//
+// The configurable limit is the clean fix. The insufficient-credits
+// retry ladder (below) is the graceful-degradation backstop on top of it.
+
+/** Conservative default max response tokens (avoids OpenRouter credit rejections). */
+export const DEFAULT_MAX_TOKENS = 3000;
+
+/**
+ * Resolve the max_tokens for a request.
+ *
+ * Priority: explicit numeric override > LITT_MAX_TOKENS env > DEFAULT_MAX_TOKENS.
+ * A non-positive override is ignored (falls through to env/default) so a
+ * misconfigured profile can't zero out the request.
+ */
+export function resolveMaxTokens(override?: number): number {
+  if (typeof override === "number" && override > 0) return Math.floor(override);
+  const env = Number(process.env.LITT_MAX_TOKENS);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  return DEFAULT_MAX_TOKENS;
+}
+
+// ─── Insufficient-credits retry ─────────────────────────────────────
+//
+// OpenRouter rejects a request when the remaining credit balance can't
+// cover the requested max_tokens. The error surfaces either as HTTP 402
+// or as an SSE error chunk mentioning credits/balance. This is a
+// SPECIFIC, identifiable condition — not a generic failure — so a
+// graceful stepped retry is safe and never silently degrades other
+// failure modes (rate limits, auth, network, model unavailable all
+// still surface as hard errors).
+//
+// This is the ONLY place max_tokens is lowered, and ONLY on a confirmed
+// insufficient-credits error. The resolver (resolveProviderAdapter)
+// never lowers max_tokens — the existing "no silent max_tokens lowering"
+// contract holds at the routing layer.
+
+/**
+ * Error thrown when the provider rejects a request because the remaining
+ * credit/balance can't cover the requested max_tokens. Carries the
+ * affordable token count when OpenRouter surfaces it.
+ */
+export class InsufficientCreditsError extends Error {
+  /** Tokens the provider said the balance could cover, if reported. */
+  readonly affordableTokens?: number;
+  constructor(message: string, affordableTokens?: number) {
+    super(message);
+    this.name = "InsufficientCreditsError";
+    this.affordableTokens = affordableTokens;
+  }
+}
+
+/** True when `err` is an InsufficientCreditsError. */
+export function isInsufficientCreditsError(err: unknown): err is InsufficientCreditsError {
+  return err instanceof InsufficientCreditsError;
+}
+
+// Credit-error signature: HTTP 402, or message mentions credits/balance/
+// "insufficient" tokens / "payment required". Kept deliberately narrow so
+// unrelated failures (auth, rate limit, model gone) are NOT retried by
+// lowering max_tokens — they surface as hard errors.
+const CREDIT_ERROR_RE = /\b(credit|balance|insufficient|payment required|afford)\b/i;
+
+/**
+ * Promote a generic provider Error into an InsufficientCreditsError when
+ * its message matches the credit-error signature. Returns the original
+ * error unchanged otherwise. Never returns null — call sites rethrow.
+ */
+export function classifyStreamError(err: unknown): Error {
+  if (err instanceof Error) {
+    if (isInsufficientCreditsError(err)) return err;
+    if (CREDIT_ERROR_RE.test(err.message)) {
+      // OpenRouter's message often contains the affordable token count
+      // (e.g. "...only supports 3624"). Pull the largest 3-4 digit number.
+      const match = err.message.match(/(\d{3,5})/g);
+      const affordable = match
+        ? match.map((n) => Number(n)).reduce((a, b) => (b > a ? b : a), 0)
+        : undefined;
+      return new InsufficientCreditsError(
+        err.message,
+        affordable && Number.isFinite(affordable) ? affordable : undefined,
+      );
+    }
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * Stepped max_tokens fallback ladder for insufficient-credits retry.
+ *   [initial, 75% of initial, 50% of initial] with a 256-token floor.
+ * Dedups so a small initial never produces a no-op ladder. Each step is
+ * only attempted when OpenRouter explicitly rejected the previous value
+ * for insufficient credits — never for other failures.
+ */
+export function buildMaxTokensLadder(initial: number): number[] {
+  const floor = 256;
+  const rawSteps = [initial, Math.round(initial * 0.75), Math.round(initial * 0.5)];
+  const seen = new Set<number>();
+  const ladder: number[] = [];
+  for (const s of rawSteps) {
+    const v = Math.max(floor, Math.floor(s));
+    if (!seen.has(v)) {
+      seen.add(v);
+      ladder.push(v);
+    }
+  }
+  return ladder;
+}
+
 export function hasOpenRouterKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY;
 }
@@ -257,7 +375,7 @@ export class OpenRouterModelProvider implements ModelProvider {
       throw new Error("OPENROUTER_API_KEY is required for OpenRouterModelProvider");
     }
     this._profile = options.profile ?? "smart";
-    this._maxTokens = options.maxTokens ?? 4096;
+    this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
     this._tools = options.tools && options.tools.length > 0
       ? options.tools.map((t) => ({
@@ -298,7 +416,10 @@ export class OpenRouterModelProvider implements ModelProvider {
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
   ): Promise<ModelResult> {
-    // Emit meta — this is where activeModel becomes known
+    // Emit meta ONCE — this is where activeModel becomes known. Retries
+    // (insufficient-credits stepped fallback) re-issue the fetch with a
+    // lower max_tokens but do NOT re-emit meta; the model/provider are
+    // unchanged, only the token budget is stepped down.
     emit({
       type: "meta",
       provider: "openrouter",
@@ -306,6 +427,57 @@ export class OpenRouterModelProvider implements ModelProvider {
       profile: this._profile,
     });
 
+    // ─── Insufficient-credits graceful retry ───────────────────────
+    // OpenRouter rejects a request when the remaining credit balance
+    // can't cover max_tokens — usually as HTTP 402 BEFORE the model
+    // answers, killing the run with an ugly "Model error". We step
+    // max_tokens down the ladder (initial → 75% → 50%) and retry, but
+    // ONLY when no deltas have been emitted yet on the failing attempt
+    // (otherwise retrying would corrupt the transcript with duplicated
+    // partial content). Non-credit failures surface as hard errors.
+    const ladder = buildMaxTokensLadder(this._maxTokens);
+    let lastErr: unknown;
+    for (let i = 0; i < ladder.length; i++) {
+      const attemptMax = ladder[i];
+      const state = { emittedDelta: false };
+      if (i > 0) {
+        // Surfaced (not silent) — consistent with the [litt-diag] pattern.
+        process.stderr.write(
+          `[litt-diag][OR-CREDIT-RETRY] insufficient credits for max_tokens=${ladder[i - 1]} ` +
+          `→ retrying at max_tokens=${attemptMax} (step ${i + 1}/${ladder.length})\n`,
+        );
+      }
+      try {
+        return await this.streamOnce(messages, emit, attemptMax, state);
+      } catch (err) {
+        // Never retry once content has started streaming to the user —
+        // a partial response must not be followed by a second one.
+        if (state.emittedDelta) throw err;
+        const classified = classifyStreamError(err);
+        if (isInsufficientCreditsError(classified) && i < ladder.length - 1) {
+          lastErr = classified;
+          continue;
+        }
+        throw classified;
+      }
+    }
+    // Unreachable when the ladder has ≥1 step, but keeps TS happy and
+    // surfaces the last credit error if the ladder were ever empty.
+    throw lastErr ?? new Error("OpenRouter stream exhausted credit-retry ladder with no result");
+  }
+
+  /**
+   * Single streaming attempt against OpenRouter at a fixed max_tokens.
+   * Throws on any error (HTTP non-ok, SSE error chunk, stall abort).
+   * Sets `state.emittedDelta = true` on the first content delta so the
+   * retry loop knows never to retry after partial content has streamed.
+   */
+  private async streamOnce(
+    messages: ChatMessage[],
+    emit: (event: ModelStreamEvent) => void,
+    maxTokens: number,
+    state: { emittedDelta: boolean },
+  ): Promise<ModelResult> {
     // ─── Transport stall watchdog (dogfood P0) ─────────────────────
     // A silently-dropped SSE connection (network cut, proxy hang) can
     // otherwise leave reader.read() pending forever → the run stays
@@ -331,7 +503,7 @@ export class OpenRouterModelProvider implements ModelProvider {
       // ─── TEMPORARY DIAGNOSTIC (OpenRouter fetch) ─────────────────
       process.stderr.write(
         `[litt-diag][FETCH-OR] providerId=openrouter host=openrouter.ai ` +
-        `model=${this._model} max_tokens=${this._maxTokens}\n`,
+        `model=${this._model} max_tokens=${maxTokens}\n`,
       );
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -345,7 +517,7 @@ export class OpenRouterModelProvider implements ModelProvider {
           model: this._model,
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
-          max_tokens: this._maxTokens,
+          max_tokens: maxTokens,
           // Declare the project tools NATIVELY (OpenAI function calling).
           // The model sees real tool schemas — it no longer has to guess
           // from a prompt-only protocol (the "unable to access the tool"
@@ -411,6 +583,7 @@ export class OpenRouterModelProvider implements ModelProvider {
             }
             const delta = parsed.choices?.[0]?.delta;
             if (delta?.content) {
+              if (!state.emittedDelta) state.emittedDelta = true;
               content += delta.content;
               emit({ type: "delta", text: delta.content });
             }
@@ -576,7 +749,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       throw new Error(`${options.providerId} model id is required for OpenAICompatibleModelProvider`);
     }
     this._profile = options.profile ?? "smart";
-    this._maxTokens = options.maxTokens ?? 4096;
+    this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
     this._tools = options.tools && options.tools.length > 0
       ? options.tools.map((t) => ({
@@ -797,7 +970,7 @@ export type ResolvedModelProvider = OpenRouterModelProvider | OpenAICompatibleMo
 export interface ResolveProviderAdapterOptions {
   /** Native tool definitions to declare on the transport. */
   tools?: ToolDefinition[];
-  /** Override max_tokens (defaults to 4096, existing production behavior). */
+  /** Override max_tokens (defaults to LITT_MAX_TOKENS env or 3000). */
   maxTokens?: number;
   /** Override the stall watchdog (tests inject a tiny value). */
   idleStallMs?: number;
