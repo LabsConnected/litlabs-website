@@ -28,27 +28,24 @@ test.describe("Navigation @public", () => {
     // Wait for nav to render — Clerk hydration may delay nav rendering
     await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
 
-    // Collect all nav link hrefs upfront before Clerk hydration re-renders.
-    // We capture hrefs as strings so we're not affected by DOM re-renders
-    // during the click→navigate→goBack loop below.
-    let navLinks = page.locator('[data-testid^="nav-"]');
-    let count = await navLinks.count();
+    // Collect all nav link hrefs in a single DOM evaluation — this avoids
+    // stale locator references when Clerk hydration re-renders the nav
+    // between individual getAttribute() calls. evaluateAll runs once in the
+    // browser context and returns plain strings, immune to later re-renders.
+    let hrefs = await page.locator('[data-testid^="nav-"]').evaluateAll(
+      (els) => els.map((el) => el.getAttribute("href")).filter((h): h is string => !!h),
+    );
 
-    if (count === 0) {
-      navLinks = page.locator("nav a[href]");
-      count = await navLinks.count();
+    if (hrefs.length < 3) {
+      hrefs = await page.locator("nav a[href]").evaluateAll(
+        (els) => els.map((el) => el.getAttribute("href")).filter((h): h is string => !!h),
+      );
     }
 
-    expect(count, "Homepage should have nav links").toBeGreaterThanOrEqual(3);
+    expect(hrefs.length, "Homepage should have nav links").toBeGreaterThanOrEqual(3);
 
-    // Snapshot the hrefs before any navigation — Clerk hydration can
-    // re-render the nav and cause stale locator references.
-    const hrefs: string[] = [];
-    for (let i = 0; i < Math.min(count, 3); i++) {
-      const href = await navLinks.nth(i).getAttribute("href", { timeout: 20_000 });
-      expect(href, `Nav link ${i} must have an href`).toBeTruthy();
-      hrefs.push(href!);
-    }
+    // Use only the first 3 to avoid timeout
+    hrefs = hrefs.slice(0, 3);
 
     // Now navigate to each href directly — this avoids stale locator
     // issues from Clerk re-rendering the nav after goBack().
