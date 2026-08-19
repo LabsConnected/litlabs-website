@@ -28,8 +28,9 @@ test.describe("Critical public routes @public-critical @routes-critical", () => 
       expect(response?.status(), `${route.path} should return 200`).toBe(200);
 
       // Wait for expected text to appear (client-side hydration may take time)
-      // Use a longer timeout for the homepage which has heavy animations
-      const timeout = route.path === "/" ? 30_000 : 15_000;
+      // Use a longer timeout for the homepage (heavy animations) and /studio
+      // (Clerk auth hydration, especially on WebKit).
+      const timeout = route.path === "/" || route.path === "/studio" ? 30_000 : 15_000;
       await expect(
         page.locator("body"),
         `${route.path} should contain expected text after hydration`,

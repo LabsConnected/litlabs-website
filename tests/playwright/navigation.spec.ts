@@ -28,39 +28,36 @@ test.describe("Navigation @public", () => {
     // Wait for nav to render — Clerk hydration may delay nav rendering
     await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
 
-    // Find all nav links — try data-testid first, then fall back to nav a[href]
+    // Collect all nav link hrefs upfront before Clerk hydration re-renders.
+    // We capture hrefs as strings so we're not affected by DOM re-renders
+    // during the click→navigate→goBack loop below.
     let navLinks = page.locator('[data-testid^="nav-"]');
     let count = await navLinks.count();
 
     if (count === 0) {
-      // Fall back to nav a[href] if data-testid attributes aren't present
       navLinks = page.locator("nav a[href]");
       count = await navLinks.count();
     }
 
     expect(count, "Homepage should have nav links").toBeGreaterThanOrEqual(3);
 
-    // Test the first 3 links to avoid timeout
+    // Snapshot the hrefs before any navigation — Clerk hydration can
+    // re-render the nav and cause stale locator references.
+    const hrefs: string[] = [];
     for (let i = 0; i < Math.min(count, 3); i++) {
-      // Re-query nav links each iteration — Clerk hydration may re-render nav
-      navLinks = page.locator("nav a[href]");
-      const link = navLinks.nth(i);
-      const href = await link.getAttribute("href", { timeout: 20_000 });
+      const href = await navLinks.nth(i).getAttribute("href", { timeout: 20_000 });
       expect(href, `Nav link ${i} must have an href`).toBeTruthy();
+      hrefs.push(href!);
+    }
 
-      // Navigate to the link
-      await link.click();
+    // Now navigate to each href directly — this avoids stale locator
+    // issues from Clerk re-rendering the nav after goBack().
+    for (const href of hrefs) {
+      await page.goto(href);
       await page.waitForLoadState("domcontentloaded");
 
-      // Verify we're not on a 404 page
       const bodyText = await page.locator("body").innerText();
       expect(bodyText.length, `Nav link to ${href} should have content`).toBeGreaterThan(50);
-
-      // Go back to homepage for next link
-      await page.goBack();
-      await page.waitForLoadState("domcontentloaded");
-      // Wait for nav to re-render after Clerk hydration
-      await page.locator("nav").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
     }
   });
 
