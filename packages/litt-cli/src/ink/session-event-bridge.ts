@@ -59,24 +59,30 @@ export class SessionEventBridge {
 
     switch (event.type) {
       // ─── Exactly-once contract ─────────────────────────────────────────
-      // The agent loop (runAgentLoop) emits TWO parallel event streams for a
+      // The agent loop (runAgentLoop) emits THREE parallel event streams for a
       // single tool execution:
       //   (a) agent_tool_call / agent_tool_result  via the `emitter` callback
       //   (b) command_start / command_end           via store.commandStart/End
-      //	Both are legitimate internal events — (a) carries the tool identity
-      //	(toolCallId), (b) carries the run identity (runId "agent_<toolCallId>").
-      //	If we projected BOTH, one tool would yield two RUNs and two results
-      //	(observed live as `RUN RUN / DONE PASS`).
+      //   (c) tool_call / tool_result               via CommandExecutor.emit
+      //	All three are legitimate internal events — (a) carries the tool
+      //	identity (toolCallId + data.tool), (b) carries the run identity
+      //	(runId "agent_<toolCallId>"), (c) carries command/args/label but
+      //	NOT a `tool` field. If we projected ALL THREE, one tool would yield
+      //	three STARTs and three results (observed live as `RUN RUN → unknown
+      //	/ DONE PASS ✓ tool`).
       //
       //	The canonical UI START/RESULT for an agent execution is the TOOL-level
       //	event (agent_tool_call → tool.started, agent_tool_result →
       //	tool.completed). The agent-loop command_start/command_end are internal
       //	RuntimeStore bookkeeping (phase, activeCommand, heartbeat, lastResult)
-      //	and must NOT also project. We still track the run identity.
+      //	and must NOT also project. The CommandExecutor's tool_call/tool_result
+      //	are internal execution-layer events and must NOT project either —
+      //	they lack the `tool` name and would show as `→ unknown` / `✓ tool`.
+      //	We still track the run identity.
       //
       //	Non-agent executions (slash /run shell commands, direct store.command*)
       //	do not carry the "agent_" runId prefix, so their run.started/run.completed
-      //	projections are preserved.
+      //	AND tool.started/tool.completed projections are preserved.
       case "command_start": {
         const runnerRunId = (data.runId as string) ?? event.runId ?? "";
         if (runnerRunId) this.currentRunId = runnerRunId;
@@ -111,10 +117,26 @@ export class SessionEventBridge {
         };
       }
 
-      case "tool_call":
+      case "tool_call": {
+        // Agent-loop tool_call is bookkeeping — the paired agent_tool_call
+        // has already emitted the canonical `tool.started` WITH the real
+        // tool name. The CommandExecutor's tool_call event carries
+        // { command, args, label } but NOT a `tool` field, so projecting
+        // it would produce a duplicate `→ unknown` entry. Suppress for
+        // agent runs (runId starts with "agent_"), same as command_start.
+        const runnerRunId = (data.runId as string) ?? runId;
+        if (runnerRunId.startsWith("agent_")) return null;
         return { type: "tool.started", runId, toolCallId, ts, data };
+      }
 
       case "tool_result": {
+        // Agent-loop tool_result is bookkeeping — the paired
+        // agent_tool_result emitted the canonical result WITH the real
+        // tool name. The CommandExecutor's tool_result event lacks a
+        // `tool` field, so projecting it would produce a duplicate
+        // `✓ tool · Xms` entry. Suppress for agent runs.
+        const runnerRunId = (data.runId as string) ?? runId;
+        if (runnerRunId.startsWith("agent_")) return null;
         const status = data.status as string;
         const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
         switch (status) {

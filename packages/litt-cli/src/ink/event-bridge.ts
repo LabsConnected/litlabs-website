@@ -44,6 +44,29 @@ function makeEntry(
   };
 }
 
+/**
+ * Resolve a human-readable tool label from event data.
+ *
+ * Priority: data.tool (canonical agent event) > data.label
+ * (CommandExecutor human-readable label) > data.command
+ * (CommandExecutor command name) > "tool" (last resort).
+ *
+ * This ensures the activity feed NEVER shows `→ unknown` or `✓ tool`
+ * when a real tool name or command is available in the event payload.
+ * The canonical path (agent_tool_call/agent_tool_result) always sets
+ * data.tool; this fallback covers CommandExecutor-level events that
+ * carry label/command instead.
+ */
+function toolLabel(data: Record<string, unknown>): string {
+  const tool = data.tool;
+  if (typeof tool === "string" && tool.length > 0) return tool;
+  const label = data.label;
+  if (typeof label === "string" && label.length > 0) return label;
+  const command = data.command;
+  if (typeof command === "string" && command.length > 0) return command;
+  return "tool";
+}
+
 function holoFromEvent(event: LifecycleEvent): HoloState | null {
   switch (event.type) {
     case "run.started": return "RUNNING";
@@ -85,7 +108,7 @@ export function useEventBridge(
         store.actions.setCurrentRunId(event.runId);
         break;
       case "tool.started":
-        entry = makeEntry("tool.started", `${event.data.tool ?? "unknown"}`, event);
+        entry = makeEntry("tool.started", toolLabel(event.data), event);
         break;
       case "tool.stdout": {
         const chunk = String(event.data.chunk ?? "");
@@ -98,16 +121,16 @@ export function useEventBridge(
         break;
       }
       case "tool.completed":
-        entry = makeEntry("tool.completed", `${event.data.tool ?? "tool"} · ${event.data.durationMs ?? 0}ms`, event);
+        entry = makeEntry("tool.completed", `${toolLabel(event.data)} · ${event.data.durationMs ?? 0}ms`, event);
         break;
       case "tool.failed":
-        entry = makeEntry("tool.failed", `${event.data.tool ?? "tool"} — ${event.data.error ?? "error"}`, event);
+        entry = makeEntry("tool.failed", `${toolLabel(event.data)} — ${event.data.error ?? "error"}`, event);
         break;
       case "tool.cancelled":
-        entry = makeEntry("tool.cancelled", `${event.data.tool ?? "tool"}`, event);
+        entry = makeEntry("tool.cancelled", `${toolLabel(event.data)}`, event);
         break;
       case "tool.timeout":
-        entry = makeEntry("tool.timeout", `${event.data.tool ?? "tool"} · ${event.data.timeoutMs ?? 0}ms`, event);
+        entry = makeEntry("tool.timeout", `${toolLabel(event.data)} · ${event.data.timeoutMs ?? 0}ms`, event);
         break;
       case "run.completed": {
         const status = event.data.status as string ?? "unknown";
