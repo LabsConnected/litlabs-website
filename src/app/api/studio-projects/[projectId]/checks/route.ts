@@ -6,7 +6,6 @@ import { listPendingApprovals } from "@/lib/missions/mission-repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 const CHECK_IDS = ["build", "typecheck", "lint", "test", "security", "accessibility", "performance"] as const;
 type CheckId = (typeof CHECK_IDS)[number];

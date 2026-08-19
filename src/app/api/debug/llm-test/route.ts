@@ -5,7 +5,6 @@ import { isOwnerClerkId } from "@/lib/mission-control";
 import { getRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * GET /api/debug/llm-test

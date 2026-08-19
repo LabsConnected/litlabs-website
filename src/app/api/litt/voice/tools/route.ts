@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { executeBusinessTool, type ToolContext } from "@/lib/business-operations";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * POST /api/litt/voice/tools

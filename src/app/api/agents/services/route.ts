@@ -9,16 +9,16 @@ async function checkUrl(url: string): Promise<boolean> {
 }
 
 export async function GET() {
-  const [gemini, supabase, vercel] = await Promise.all([
+  const [gemini, supabase, railway] = await Promise.all([
     checkUrl("https://generativelanguage.googleapis.com"),
     checkUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || "https://supabase.com"),
-    checkUrl("https://vercel.com"),
+    checkUrl("https://railway.app"),
   ]);
 
   const services: Record<string, string> = {
     "Gemini API":    gemini   ? "active" : "degraded",
     "Supabase DB":   supabase ? "active" : "degraded",
-    "Vercel Edge":   vercel   ? "active" : "degraded",
+    "Railway":       railway  ? "active" : "degraded",
     "Clerk Auth":    "active",
     "Hive Mind API": "active",
   };

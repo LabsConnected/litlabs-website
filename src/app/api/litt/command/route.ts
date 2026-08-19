@@ -7,7 +7,6 @@ import { isAdmin } from "@/lib/roles";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
 
 const execFileAsync = promisify(execFile);
 type CheckAction = "typecheck" | "lint" | "test" | "build" | "terminal-build";

@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
-import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
+import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
 // ─── Bot detection ────────────────────────────────────────────────
 // Merged from the former src/middleware.ts. Next.js 16 forbids having
@@ -215,7 +215,7 @@ const clerkConfigured = isClerkConfigured();
  * PLAYWRIGHT_AUTH_DISABLED is ONLY accepted when ALL of these are true:
  *   - CI === "true"
  *   - PLAYWRIGHT_TEST === "true"
- *   - VERCEL env var is absent (not a deployed environment)
+ *   - Not in a deployed environment (VERCEL / RAILWAY_ENVIRONMENT absent)
  *
  * Any deployed environment (Vercel, Railway, Docker, etc.) will reject this
  * flag and fail fast if Clerk is not configured.
@@ -224,18 +224,18 @@ const isTestAuthDisabled =
   process.env.PLAYWRIGHT_AUTH_DISABLED === "true" &&
   process.env.CI === "true" &&
   process.env.PLAYWRIGHT_TEST === "true" &&
-  !process.env.VERCEL;
+  !isDeployed();
 
 /**
  * Whether anonymous dev mode is allowed.
  *
  * ALLOW_ANONYMOUS_DEV=true lets local dev run without Clerk. In production
- * (NODE_ENV=production) this is only honored when VERCEL is absent — i.e.
- * local `next start` testing. On Vercel, production always requires real Clerk
- * keys.
+ * (NODE_ENV=production) this is only honored when not deployed — i.e.
+ * local `next start` testing. On Railway/Vercel, production always requires
+ * real Clerk keys.
  */
 function isAnonymousModeAllowed(): boolean {
-  if (process.env.VERCEL) return false; // deployed — never allow anonymous
+  if (isDeployed()) return false; // deployed — never allow anonymous
   return isAnonymousDevAllowed() || process.env.ALLOW_ANONYMOUS_DEV === "true";
 }
 
@@ -252,7 +252,7 @@ function validateAuthConfig(): void {
         "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY, " +
         "or set ALLOW_ANONYMOUS_DEV=true for local development. " +
         "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
-        "and VERCEL is absent.",
+        "and not in a deployed environment.",
     );
   }
 
@@ -260,7 +260,7 @@ function validateAuthConfig(): void {
   if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
     throw new Error(
       "FATAL: PLAYWRIGHT_AUTH_DISABLED is set but not in a valid test environment. " +
-        "This flag requires CI=true, PLAYWRIGHT_TEST=true, and VERCEL absent.",
+        "This flag requires CI=true, PLAYWRIGHT_TEST=true, and not deployed.",
     );
   }
 }

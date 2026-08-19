@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * POST /api/voice/realtime-token

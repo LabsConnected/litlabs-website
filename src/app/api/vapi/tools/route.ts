@@ -55,7 +55,6 @@ import { executeProjectTool } from "@/lib/project-tools/registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 // ─── Dispatch ───────────────────────────────────────────────────
 

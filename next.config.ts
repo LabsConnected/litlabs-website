@@ -4,6 +4,12 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig: NextConfig = {
   reactCompiler: true,
 
+  // Standalone output — produces a minimal self-contained server in
+  // .next/standalone that doesn't need node_modules at runtime. This is
+  // the recommended mode for Docker deployments (Railway). The Dockerfile
+  // copies .next/standalone + .next/static + public into the runtime image.
+  output: "standalone",
+
   // Type checking is run separately via `pnpm type-check` (tsc --noEmit)
   // which passes cleanly. Next.js 16's build-time type check uses generated
   // validator files in .next/types/ that can have module resolution issues
@@ -329,7 +335,4 @@ export default withSentryConfig(nextConfig, {
 
   // Automatically tree-shake Sentry logger statements to reduce bundle size.
   disableLogger: true,
-
-  // Enables automatic instrumentation of Vercel Cron Monitors.
-  automaticVercelMonitors: true,
 });

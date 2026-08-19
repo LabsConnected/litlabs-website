@@ -57,8 +57,8 @@ export function hasConsentRecord(): boolean {
  *
  * @example
  * gateOnConsent("analytics", () => {
- *   // Load Vercel Analytics or other tracking here
- *   import("@vercel/analytics").then(({ Analytics }) => { ... });
+ *   // Load analytics or other tracking here
+ *   import("some-analytics-lib").then(({ init }) => init());
  * });
  */
 export function gateOnConsent(

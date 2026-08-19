@@ -9,7 +9,6 @@ import {
 } from "@/lib/business-operations";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 interface RouteParams {
   params: Promise<{ bookingId: string }>;

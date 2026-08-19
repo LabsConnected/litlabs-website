@@ -15,7 +15,6 @@ import {
 } from "@/lib/litt-intelligence/browser-session-manager";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 /**
  * POST /api/litt/browser/session

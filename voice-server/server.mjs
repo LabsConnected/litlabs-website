@@ -2,7 +2,7 @@ import { createServer } from "http";
 import { createHmac } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
-const PORT = process.env.VOICE_PROXY_PORT || 4002;
+const PORT = process.env.PORT || process.env.VOICE_PROXY_PORT || 4002;
 const PATH = "/voice";
 const INWORLD_ENDPOINT =
   "wss://api.inworld.ai/api/v1/realtime/session";
@@ -314,8 +314,8 @@ wss.on("connection", (browserWs, req) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[voice-proxy] Listening on ws://localhost:${PORT}${PATH}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`[voice-proxy] Listening on ws://0.0.0.0:${PORT}${PATH}`);
   console.log(`[voice-proxy] Proxying to ${INWORLD_ENDPOINT}`);
 });
 

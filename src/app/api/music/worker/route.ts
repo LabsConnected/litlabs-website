@@ -4,7 +4,6 @@ import { processPendingGenerations } from "@/lib/music/generation-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 /**
  * Timing-safe string comparison. Returns false if lengths differ.

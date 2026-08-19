@@ -1,0 +1,13 @@
+{
+  "name": "@litlabs/music-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent Railway worker — processes pending music generations every 2 minutes by calling the web app's /api/music/worker endpoint.",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

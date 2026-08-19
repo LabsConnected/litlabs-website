@@ -511,14 +511,16 @@ export function resolvePlatformServices(isOwner: boolean): PlatformService[] {
     lastChecked: now,
   });
 
-  // Vercel deployment
-  const vercelEnv = process.env.VERCEL || process.env.VERCEL_URL;
+  // Deployment platform (Railway or Vercel)
+  const deployed = process.env.RAILWAY_ENVIRONMENT || process.env.VERCEL || process.env.VERCEL_URL;
   services.push({
     id: "deployment",
     label: "Deployment",
     category: "Platform",
-    state: vercelEnv ? "operational" : "operational",
-    detail: vercelEnv ? "Operational" : "Local / preview",
+    state: "operational",
+    detail: deployed
+      ? `Operational (${process.env.RAILWAY_ENVIRONMENT ? "Railway" : "Vercel"})`
+      : "Local / preview",
     lastChecked: now,
   });
 

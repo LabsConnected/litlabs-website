@@ -163,6 +163,25 @@ export interface EnvValidationResult {
   warnings: string[];
 }
 
+/**
+ * Detect whether the app is running in a deployed (non-local) environment.
+ *
+ * Checks for platform-specific env vars that hosting providers inject:
+ *   - Railway: RAILWAY_ENVIRONMENT, RAILWAY_PROJECT_ID
+ *   - Vercel:  VERCEL (kept for backward compat during transition)
+ *
+ * This replaces the old `process.env.VERCEL` checks scattered across the
+ * codebase, which would incorrectly return false on Railway and allow
+ * test-auth bypass / anonymous mode in production.
+ */
+export function isDeployed(): boolean {
+  return Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.VERCEL,
+  );
+}
+
 function validateCategory(
   category: EnvCategory,
   schema: z.ZodTypeAny,

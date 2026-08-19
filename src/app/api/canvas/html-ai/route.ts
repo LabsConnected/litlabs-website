@@ -6,7 +6,6 @@ import { jsonError, newRequestId } from "@/lib/api-route-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 /**
  * POST /api/canvas/html-ai

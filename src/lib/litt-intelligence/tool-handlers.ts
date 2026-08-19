@@ -427,7 +427,7 @@ export async function handleImageGenerate(inputs: Record<string, unknown>): Prom
     return { success: false, error: "Prompt must be at least 3 characters" };
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const url = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
 
   try {

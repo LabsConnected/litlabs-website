@@ -11,7 +11,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 // 504 HTML page instead of a JSON error.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;

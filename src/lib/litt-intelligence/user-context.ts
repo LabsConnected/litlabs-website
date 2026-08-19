@@ -116,10 +116,12 @@ const DEFAULT_CAPS_TO_CHECK: CapabilityId[] = [
 // ─── Vercel Geo Header Parsing ──────────────────────────────────
 
 /**
- * Parse Vercel's native geolocation headers to determine user location.
+ * Parse platform-native geolocation headers to determine user location.
+ *
  * Vercel injects x-vercel-ip-city, x-vercel-ip-latitude, etc. on all
- * Edge and Serverless deployments. This is the production-safe way to
- * auto-detect location — no third-party API calls needed.
+ * Edge and Serverless deployments. Railway does NOT inject these headers,
+ * so this function returns null on Railway and the caller falls back to
+ * DEFAULT_CONTEXT.location. This is safe — no third-party API calls needed.
  *
  * @see https://vercel.com/changelog/ip-geolocation-for-serverless-functions
  */
@@ -153,7 +155,8 @@ export async function getUserContext(
   ]);
 
   if (!prefs) {
-    // No preferences row — try Vercel geo headers if available
+    // No preferences row — try platform geo headers if available (Vercel only;
+    // Railway doesn't inject geo headers, so this returns null on Railway)
     let location: UserLocation = { ...DEFAULT_CONTEXT.location };
     if (options?.headers) {
       const geo = parseVercelGeoHeaders(options.headers);

@@ -17,7 +17,6 @@ import { resolveInternalUserId } from "@/lib/generation/identity";
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 

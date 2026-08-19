@@ -38,7 +38,6 @@ import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import type { ConversationTurn } from "@/lib/litt-intelligence/turn-resolver";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;

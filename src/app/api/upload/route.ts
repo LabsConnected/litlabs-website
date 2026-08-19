@@ -11,7 +11,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 // Size limits by media type
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB

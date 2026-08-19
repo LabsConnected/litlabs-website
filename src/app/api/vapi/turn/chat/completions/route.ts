@@ -20,5 +20,4 @@ export { POST };
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 55;
 export const fetchCache = "force-no-store";

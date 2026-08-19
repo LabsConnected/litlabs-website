@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { getMission, updateMissionStatus, type MissionResult, type Mission } from "@/lib/missions";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 interface RouteParams { params: Promise<{ missionId: string }>; }
 

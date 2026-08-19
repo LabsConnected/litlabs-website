@@ -5,10 +5,8 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "node dist/worker/livekit-agent.js start",
-    "healthcheckPath": "/health/live",
-    "healthcheckTimeout": 30,
-    "restartPolicyType": "ON_FAILURE",
+    "startCommand": "node worker.js",
+    "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10
   }
 }

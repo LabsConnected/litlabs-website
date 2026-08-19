@@ -145,11 +145,13 @@ export interface LittUserContext {
   fetchedAt: number;
 }
 
-// ─── Request Geo (Vercel native) ────────────────────────────────
+// ─── Request Geo (platform-native, Vercel only) ────────────────
 
 /**
  * Vercel provides geolocation data via `request.geo` on Edge/Serverless.
  * This interface mirrors what Vercel injects. Not all fields are guaranteed.
+ * Railway does NOT inject these headers — extractVercelGeo returns null on
+ * Railway and callers should handle that gracefully.
  *
  * @see https://vercel.com/changelog/ip-geolocation-for-serverless-functions
  */

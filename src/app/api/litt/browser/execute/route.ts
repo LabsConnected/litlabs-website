@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { toolRegistry } from "@/lib/litt-intelligence/tool-registry";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 /**
  * POST /api/litt/browser/execute

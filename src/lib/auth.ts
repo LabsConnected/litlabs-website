@@ -1,6 +1,6 @@
 import { auth as clerkAuth, verifyToken } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
-import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
+import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
 export interface AuthResult {
   userId: string | null;
@@ -9,14 +9,14 @@ export interface AuthResult {
 
 /**
  * Test-only auth bypass ΓÇö same conditions as middleware.
- * Only valid when CI=true, PLAYWRIGHT_TEST=true, and VERCEL is absent.
+ * Only valid when CI=true, PLAYWRIGHT_TEST=true, and not in a deployed env.
  */
 function isTestAuthDisabled(): boolean {
   return (
     process.env.PLAYWRIGHT_AUTH_DISABLED === "true" &&
     process.env.CI === "true" &&
     process.env.PLAYWRIGHT_TEST === "true" &&
-    !process.env.VERCEL
+    !isDeployed()
   );
 }
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 10;
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
@@ -68,7 +67,9 @@ export async function GET() {
   // Build/deploy identity
   checks.build = {
     status: "ok",
-    detail: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+    detail: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ??
+      process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
+      "dev",
   };
 
   // Database connectivity
