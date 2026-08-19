@@ -27,8 +27,13 @@ describe("CLI ↔ agent-mission git agreement", () => {
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
 
-    expect(cli.branch).toBe(direct);
-    expect(project.branch).toBe(direct);
+    // On CI (actions/checkout), HEAD is detached — git branch --show-current
+    // returns '' while getGitState/resolveProjectContext return null for the
+    // same state. Normalize both sides so the agreement holds everywhere.
+    // Use String() to coerce null/undefined to "null"/"undefined" first,
+    // then compare. This avoids any ?? operator transpilation issues.
+    expect(String(cli.branch || "")).toBe(String(direct || ""));
+    expect(String(project.branch || "")).toBe(String(direct || ""));
   });
 
   it("change counts agree: getGitState === agent project.status tool", async () => {
