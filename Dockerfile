@@ -11,7 +11,7 @@
 #   Stage 3 (runner)  — minimal runtime image with standalone output
 
 # ─── Stage 1: Dependencies ─────────────────────────────────────────
-FROM node:20-slim AS deps
+FROM node:22-slim AS deps
 
 # Install build tools for native modules (sharp, etc.)
 RUN apt-get update && apt-get install -y \
@@ -43,7 +43,7 @@ COPY cli/package.json ./cli/
 RUN pnpm install --frozen-lockfile
 
 # ─── Stage 2: Builder ──────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -69,7 +69,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
 # ─── Stage 3: Runtime ──────────────────────────────────────────────
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 
 # Install libvips for sharp image optimization at runtime.
 # The standalone output includes sharp's JS + prebuilt binary, but the
