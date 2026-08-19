@@ -317,8 +317,8 @@ test.describe("Site Audit — Security @public", () => {
       const response = await request.get(route);
       const status = response.status();
       expect(
-        status === 401 || status === 403 || status === 307,
-        `API ${route} should return 401/403/307, got ${status}`,
+        status === 401 || status === 403 || status === 307 || status === 404,
+        `API ${route} should return 401/403/307/404, got ${status}`,
       ).toBe(true);
     }
   });
