@@ -1,11 +1,11 @@
 "use client";
 
 import { Suspense, useState, useEffect, useCallback } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import CommandStudio from "./components/CommandStudio";
-import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
+import { Terminal, Loader2 } from "lucide-react";
 
 /**
  * Studio initialization phases.
@@ -122,6 +122,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { tokens } = useTheme();
+  const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
 
   const handleRetry = useCallback(() => {
@@ -131,75 +132,23 @@ function StudioHub() {
     setRetryKey((k) => k + 1);
   }, []);
 
+  // Defense-in-depth: middleware already redirects signed-out users
+  // to /sign-in before this page renders. This client-side guard
+  // handles session expiry while the page is open.
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.replace("/sign-in?redirect_url=%2Fstudio");
+    }
+  }, [isLoaded, isSignedIn, router]);
+
   if (!isLoaded) {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
   if (!isSignedIn) {
-    return (
-      <div
-        className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
-        style={{ backgroundColor: tokens.background }}
-        data-testid="studio-unauthenticated"
-      >
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full blur-[100px] opacity-10"
-            style={{ backgroundColor: tokens.primary }}
-          />
-          <div
-            className="absolute bottom-1/4 right-1/4 h-48 w-48 rounded-full blur-[80px] opacity-8"
-            style={{ backgroundColor: "#a855f7" }}
-          />
-        </div>
-        <div
-          className="relative max-w-sm w-full rounded-2xl border p-8 text-center"
-          style={{
-            backgroundColor: tokens.surface,
-            borderColor: `${tokens.primary}20`,
-          }}
-        >
-          <div
-            className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-2xl"
-            style={{
-              backgroundColor: `${tokens.primary}12`,
-              boxShadow: `0 0 32px ${tokens.primary}25`,
-            }}
-          >
-            <Lock size={28} style={{ color: tokens.primary }} />
-          </div>
-          <div
-            className="mb-1 text-base font-black"
-            style={{ color: tokens.text }}
-          >
-            Studio is member-only
-          </div>
-          <div
-            className="mb-6 text-xs leading-relaxed"
-            style={{ color: tokens.textMuted }}
-          >
-            Sign in to access your AI crew, projects, and creative workspace.
-          </div>
-          <Link
-            href="/sign-in?redirect_url=/studio?tool=chat"
-            className="mb-3 flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
-            style={{
-              backgroundColor: tokens.primary,
-              boxShadow: `0 0 20px ${tokens.primary}40`,
-            }}
-          >
-            <Sparkles size={14} /> Sign in to Studio
-          </Link>
-          <Link
-            href="/sign-up"
-            className="flex items-center justify-center gap-1 rounded-xl border px-5 py-2.5 text-xs font-bold transition-all hover:opacity-70"
-            style={{ borderColor: tokens.border, color: tokens.textMuted }}
-          >
-            Create free account
-          </Link>
-        </div>
-      </div>
-    );
+    // Brief loading state while the redirect fires — never a custom
+    // "member-only" screen (middleware is the source of truth).
+    return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
   return <CommandStudio />;
