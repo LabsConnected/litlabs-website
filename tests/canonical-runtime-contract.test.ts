@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
 import * as path from "path";
 import {
   getRuntimeStore,
@@ -183,7 +184,7 @@ describe("PHASE 3: One operator brain path", () => {
     // Verify that litt-code.ts does not import or instantiate RuntimeStore.
     // It's a pure model transport — no runtime, no tools, no gateway.
     // We check by verifying the module doesn't reference RuntimeStore.
-    const littCodeSource = require("fs").readFileSync(
+    const littCodeSource = fs.readFileSync(
       path.join(repoRoot, "terminal-server", "litt-code.ts"),
       "utf-8",
     );
@@ -266,7 +267,7 @@ describe("PHASE 8: Operator context — identity & intent", () => {
   it("the canonical operator system prompt includes project context", () => {
     // The system prompt is built inside litt-operator.ts. We verify
     // by reading the source that it includes the key context fields.
-    const source = require("fs").readFileSync(
+    const source = fs.readFileSync(
       path.join(repoRoot, "terminal-server", "litt-operator.ts"),
       "utf-8",
     );
@@ -287,7 +288,7 @@ describe("PHASE 8: Operator context — identity & intent", () => {
   });
 
   it("the legacy litt-code prompt also includes identity context", () => {
-    const source = require("fs").readFileSync(
+    const source = fs.readFileSync(
       path.join(repoRoot, "terminal-server", "litt-code.ts"),
       "utf-8",
     );
@@ -299,7 +300,7 @@ describe("PHASE 8: Operator context — identity & intent", () => {
     // The buildOperatorSystemPrompt function calls getRuntimeStore()
     // to include live runtime context (phase, model, online, branch).
     // We verify by checking the source references getRuntimeStore.
-    const source = require("fs").readFileSync(
+    const source = fs.readFileSync(
       path.join(repoRoot, "terminal-server", "litt-operator.ts"),
       "utf-8",
     );

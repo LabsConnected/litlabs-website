@@ -20,7 +20,7 @@
  * The same runId, toolCallId, and operation digest flow through.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   runAgentLoop,
   planMission,
@@ -176,9 +176,9 @@ export interface CockpitControllerOptions {
 
 export function useCockpitController({ session, store, approvalBridge, onExit, projectName, branch, modelRuntime }: CockpitControllerOptions) {
   // Telemetry store is controller-local (not model truth).
-  const telemetryStoreRef = useRef<TelemetryStore | null>(null);
-  if (!telemetryStoreRef.current) telemetryStoreRef.current = new TelemetryStore();
-  const telemetryStore = telemetryStoreRef.current;
+  // useState lazy initializer keeps a single stable instance for the
+  // hook's lifetime without touching refs during render.
+  const [telemetryStore] = useState(() => new TelemetryStore());
 
   // Trigger background discovery on mount — populates model availability
   // from real OpenRouter /models endpoint. Non-blocking. The shared

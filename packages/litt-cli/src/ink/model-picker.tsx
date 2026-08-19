@@ -17,7 +17,7 @@
  * Uses the OverlayManager — no direct useInput call.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, isTab, isUpArrow, isDownArrow } from "./keyboard-utils.js";
@@ -58,9 +58,9 @@ export function ModelPicker({
   modelRuntime: injectedRuntime,
 }: ModelPickerProps): React.ReactElement {
   const [tab, setTab] = useState<"routing" | "models">("routing");
-  const runtimeRef = useRef<ModelRuntime | null>(null);
-  if (!runtimeRef.current) runtimeRef.current = injectedRuntime ?? new ModelRuntime();
-  const runtime = runtimeRef.current;
+  // Stable runtime for the picker's lifetime — the injected shared
+  // ModelRuntime when provided, otherwise a picker-local instance.
+  const [runtime] = useState(() => injectedRuntime ?? new ModelRuntime());
 
   const [allModels, setAllModels] = useState<ModelDefinition[]>([]);
   const [loading, setLoading] = useState(true);

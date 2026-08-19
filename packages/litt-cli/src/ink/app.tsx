@@ -19,7 +19,7 @@
  *   After overlay closes, focus returns to the prompt.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import { buildCanonicalMission, sameCanonicalMission } from "./canonical-mission.js";
 import { useCockpitStore } from "./cockpit-store.js";
@@ -102,9 +102,7 @@ export function CockpitApp({
   // Created at the app owner level and shared with the controller,
   // Model Center (F2), Model Picker (/model), and the header.
   // /model and F2 operate on the same canonical ModelRuntime.
-  const modelRuntimeRef = useRef<ModelRuntime | null>(null);
-  if (!modelRuntimeRef.current) modelRuntimeRef.current = new ModelRuntime();
-  const modelRuntime = modelRuntimeRef.current;
+  const [modelRuntime] = useState(() => new ModelRuntime());
 
   const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch, modelRuntime });
 
