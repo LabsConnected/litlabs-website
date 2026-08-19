@@ -32,7 +32,9 @@ export function useCursorBlink(
   const [steady, setSteady] = useState(false);
   const steadyUntilRef = useRef(0);
   const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   const poke = useCallback(() => {
     steadyUntilRef.current = Date.now() + steadyMs;

@@ -142,7 +142,7 @@ export function DiffViewer({ cwd, files, onClose, onRevert, onOpen, onAccept }: 
                 const maxLines = Math.max(10, Math.min(28, Math.floor((stdout?.rows ?? 24) / 2)));
                 if (i >= maxLines) return null;
                 let color: string = COLORS.secondary;
-                let bold = false;
+                const bold = false;
                 if (line.startsWith("+") && !line.startsWith("+++")) { color = COLORS.success; }
                 else if (line.startsWith("-") && !line.startsWith("---")) { color = COLORS.error; }
                 else if (line.startsWith("@@")) { color = COLORS.secondaryDim; }

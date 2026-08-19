@@ -288,6 +288,28 @@ export type Overlay =
  */
 export type RoutingMode = "auto" | "fixed" | "budget" | "max";
 
+/**
+ * Pure decision function for the race-safe terminal → IDLE transition.
+ *
+ * A stale idle timer (scheduled by a previous run's terminal state)
+ * must NOT override a new run that started during the delay window.
+ * The timer's functional updater calls this with the CURRENT holoState:
+ *   - terminal state (COMPLETE/FAILED/CANCELLED/TIMEOUT) → IDLE
+ *   - anything else (a new run's UNDERSTANDING/RUNNING/etc.) → unchanged
+ *
+ * Exported so the regression test can pin the contract without a React
+ * testing environment (the repo's established pure-logic test pattern).
+ */
+export function idleTransitionFromTerminal(prev: HoloState): HoloState {
+  if (
+    prev === "COMPLETE" || prev === "FAILED" ||
+    prev === "CANCELLED" || prev === "TIMEOUT"
+  ) {
+    return "IDLE";
+  }
+  return prev;
+}
+
 export function useCockpitStore() {
   const [selectedPanel, setSelectedPanel] = useState<CockpitPanel>("runtime");
   const [holoState, setHoloState] = useState<HoloState>("IDLE");
@@ -329,11 +351,9 @@ export function useCockpitStore() {
   // The tracker decides exactly-once restoration transitions; the React
   // state is only a mirror so renders stay reactive. Epoch 1 = focused
   // at launch (the allowed initial focus moment).
-  const focusTrackerRef = useRef<FocusEpochTracker | null>(null);
-  if (focusTrackerRef.current === null) {
-    focusTrackerRef.current = new FocusEpochTracker({ overlay: "none" });
-  }
-  const [focusEpoch, setFocusEpoch] = useState<number>(() => focusTrackerRef.current!.epoch);
+  const [focusTracker] = useState<FocusEpochTracker>(() => new FocusEpochTracker({ overlay: "none" }));
+  const focusTrackerRef = useRef<FocusEpochTracker>(focusTracker);
+  const [focusEpoch, setFocusEpoch] = useState<number>(() => focusTracker.epoch);
   const [transcriptPage, setTranscriptPage] = useState(5);
   // The transcript is owned by a pure ChatTranscriptStore (testable in
   // node env without a React renderer). The hook mirrors its snapshot
@@ -571,6 +591,30 @@ export function useCockpitStore() {
     setFocusEpoch(tracker.epoch);
   }, []);
 
+  // ─── Terminal → IDLE auto-transition (race-safe) ─────────────────
+  // After a run settles (COMPLETE/FAILED/CANCELLED/TIMEOUT), the UI
+  // auto-transitions back to IDLE after a short display delay. The old
+  // approach was `setTimeout(() => setHoloState("IDLE"), N)` — fire-and-
+  // forget. If the user started a NEW run within the delay window, the
+  // stale timer would override the new run's UNDERSTANDING/RUNNING state
+  // back to IDLE, causing the composer to unblock mid-run and the status
+  // bar to drop "Working".
+  //
+  // scheduleIdle fixes this with TWO guards:
+  //   1. Only ONE idle timer is pending at a time (previous is cleared).
+  //   2. The timer uses the functional updater `setHoloState((prev) => …)`
+  //      so it reads the CURRENT state, not the stale closure state. It
+  //      only transitions to IDLE from a terminal state — a new run that
+  //      started during the delay window is left untouched.
+  const terminalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleIdle = useCallback((delayMs: number) => {
+    if (terminalIdleTimerRef.current) clearTimeout(terminalIdleTimerRef.current);
+    terminalIdleTimerRef.current = setTimeout(() => {
+      terminalIdleTimerRef.current = null;
+      setHoloState(idleTransitionFromTerminal);
+    }, delayMs);
+  }, []);
+
   /** Explicit focus restoration (e.g. typing returns from history). */
   const bumpFocus = useCallback(() => {
     const tracker = focusTrackerRef.current!;
@@ -688,6 +732,7 @@ export function useCockpitStore() {
       setOverlayQuery,
       startBusy,
       stopBusy,
+      scheduleIdle,
       bumpFocus,
       setTranscriptAnchor,
       setTranscriptPage,
