@@ -193,3 +193,7 @@ tests/playwright/test_output*.txt
 
 # Package tarballs
 *.tgz
+
+.vercel
+
+.env.railway-import
