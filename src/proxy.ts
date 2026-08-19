@@ -322,6 +322,11 @@ const innerMiddleware = useClerkMiddleware
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
     })
   : function passthroughMiddleware(req: NextRequest) {
+      // When test auth is disabled (Playwright CI), allow all routes through
+      // so E2E tests can access protected pages without authentication.
+      if (isTestAuthDisabled) {
+        return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
+      }
       // Redirect protected routes to sign-in when Clerk is not configured
       return protectRoute(req);
     };

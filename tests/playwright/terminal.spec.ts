@@ -18,14 +18,17 @@ import { monitorApplicationErrors, assertNoErrors } from "./helpers";
 test.describe("Terminal — public behavior @public", () => {
   test.describe.configure({ mode: "parallel" });
 
-  test("/litt-terminal redirects to /studio", async ({ page }) => {
+  test("/litt-terminal redirects to /studio or sign-in", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
 
     await page.goto("/litt-terminal");
 
-    // The page calls redirect("/studio") — Playwright follows redirects
-    await page.waitForURL(/\/studio/);
-    expect(page.url()).toContain("/studio");
+    // /litt-terminal calls redirect("/studio"). In CI with auth disabled,
+    // this lands on /studio. In production, /studio is protected so the
+    // middleware further redirects to /sign-in. Both are valid.
+    await page.waitForURL(/\/(studio|sign-in)/);
+    const url = page.url();
+    expect(url).toMatch(/\/(studio|sign-in)/);
 
     assertNoErrors(errors);
   });
@@ -48,17 +51,23 @@ test.describe("Terminal — public behavior @public", () => {
     expect(resp.status()).toBe(401);
   });
 
-  test("Studio page loads and contains terminal-related UI elements", async ({ page }) => {
+  test("Studio page loads or redirects to sign-in", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
 
     const response = await page.goto("/studio", { waitUntil: "domcontentloaded" });
-    expect(response?.status()).toBe(200);
+    // In CI with auth disabled, /studio returns 200. In production,
+    // /studio is protected and redirects to /sign-in (307).
+    const status = response?.status() ?? 0;
+    expect(
+      status === 200 || status === 307,
+      `/studio should return 200 or redirect to sign-in, got ${status}`,
+    ).toBe(true);
 
     // Wait for either the sign-in screen or studio UI to render
     await page.waitForLoadState("networkidle");
 
     const url = page.url();
-    expect(url).toContain("/studio");
+    expect(url).toMatch(/\/(studio|sign-in)/);
 
     // The page should have some rendered content — use innerHTML which
     // includes rendered React content even if text is minimal (loading states)
