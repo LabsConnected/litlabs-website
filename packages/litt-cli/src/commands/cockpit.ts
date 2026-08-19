@@ -27,18 +27,46 @@ import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c } from "../lib/utils.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 import { getGitState } from "../lib/git-state.js";
-import { launchShellWindow } from "../lib/window-launcher.js";
+import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
+
+// Belt-and-suspenders: the shell renders a SOFTWARE cursor (Ink hides the
+// native one). Paths that bypass Ink's unmount — e.g. the session SIGINT
+// handler's process.exit(130), a hard crash, or an unexpected throw —
+// would otherwise leave the terminal cursor invisible. Show it again on
+// any process exit. Idempotent: harmless when Ink already restored it.
+const SHOW_CURSOR = "\x1b[?25h";
+function installCursorRestore(): void {
+  process.on("exit", () => {
+    try {
+      if (process.stdout.isTTY) process.stdout.write(SHOW_CURSOR);
+    } catch {
+      // ignore — best-effort restoration
+    }
+  });
+}
 
 export async function cockpitCommand(args: string[]): Promise<number> {
+  installCursorRestore();
+
   // `litt shell --window` / `litt cockpit -w` — open a dedicated LiTT
   // terminal window (Windows Terminal profile) and return immediately.
   if (args[0] === "--window" || args[0] === "-w") {
-    const launched = launchShellWindow(process.cwd());
-    if (!launched) {
+    // Re-launch THIS build (node.exe + the running CLI entry) so the new
+    // window can never drift to an older global `litt` install.
+    // Default (useSizing omitted): dedicated WT window at the user's
+    // native size — no hard dependency on `--size`. The 118×36 sized
+    // vector stays available for visual acceptance via useSizing:true.
+    const result = launchShellWindow(process.cwd(), currentCliCommand(["shell"]));
+    if (!result.ok) {
       fail("Could not open a LiTT window. Run 'litt shell' inside a terminal instead.");
       return 1;
     }
-    console.log("⚡ LiTT window launched.");
+    const detail = result.path === "wt-sized"
+      ? "dedicated Windows Terminal window"
+      : result.path === "wt-unsized"
+        ? "dedicated Windows Terminal window (no sizing)"
+        : "PowerShell window";
+    console.log(`⚡ LiTT window launched (${detail}).`);
     return 0;
   }
 
