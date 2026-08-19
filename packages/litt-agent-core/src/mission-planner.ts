@@ -18,6 +18,13 @@
  *   - If the model is unavailable or returns garbage, fall back to a
  *     goal-derived default plan so the mission still has semantic steps
  *     before execution. We never silently skip planning.
+ *
+ * The fallback is INTENT-SAFE: it classifies the goal's domain
+ * (repository/dev, system/PC, informational, unknown) and only derives
+ * plans for that domain. PC/system goals get system-inspection steps,
+ * never repository steps. Goals matching no safe domain FAIL CLOSED with
+ * an honest message instead of inventing work, and unproven fallback
+ * plans never perform mutations automatically — even in Act mode.
  */
 
 import type { ChatMessage, ModelProvider, ModelStreamEvent } from "./types.js";
@@ -39,8 +46,29 @@ export interface SemanticPlan {
   steps: SemanticStepSpec[];
   /** Where the plan came from. */
   source: "model" | "fallback";
+  /** Classified domain when the fallback was used (source === "fallback"). */
+  fallbackDomain?: FallbackDomain;
   /** Raw model text if source === "model" (for debugging/audit). */
   rawModelText?: string;
+}
+
+/**
+ * Domains the deterministic fallback planner is allowed to derive a plan
+ * for. Anything outside these domains fails closed — the planner never
+ * invents work for an intent it cannot safely classify.
+ */
+export type FallbackDomain = "repo" | "system" | "info" | "unknown";
+
+/**
+ * Thrown when planning must fail closed instead of inventing work
+ * (e.g. the model failed to plan AND the goal has no safe fallback
+ * domain). The message preserves the original user goal.
+ */
+export class MissionPlanningError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MissionPlanningError";
+  }
 }
 
 export interface PlanMissionOptions {
@@ -84,6 +112,12 @@ Rules:
 - 4–9 steps is ideal. Fewer is fine if the goal is simple.
 - Each step has a short "title" (≤60 chars) and optional "description".
 - The final step should be verification ("Verify production readiness" or similar).
+- DOMAIN SAFETY: the goal decides the domain. Include repository steps
+  (git status, typecheck, tests, build) ONLY when the goal is about a
+  repository, project, app, or code. For a PC/system goal, plan system
+  inspection (CPU, memory, disk, processes) — never repository steps.
+  For an informational goal, plan research/summary steps. Never copy
+  repository steps into a plan for a goal that is not about a repository.
 
 Output ONLY a JSON array, no prose, no code fences:
 [
@@ -165,7 +199,142 @@ export function parseSemanticPlan(text: string): SemanticStepSpec[] | null {
  * stabilize-and-verify plan; a goal like "Add a login page" maps to a
  * simpler inspect→implement→verify plan.
  */
-export function fallbackPlan(goal: string): SemanticStepSpec[] {
+/**
+ * Classify the goal's domain so the deterministic fallback planner never
+ * substitutes a repository mission for an unrelated user intent.
+ *
+ * Priority order (first match wins):
+ *   1. "system" — explicit machine terms (pc, computer, laptop, cpu, ram,
+ *      disk, startup, driver, windows, ...). PC/system requests get
+ *      system-inspection steps, NEVER repository steps.
+ *   2. "info" — read-only questions and research requests.
+ *   3. "repo" — repository, project, app, or code work.
+ *   4. "unknown" — fail closed: the planner must NOT invent work.
+ *
+ * "inspect my PC, find what is slowing it down, fix what is safe"
+ * → "system" (strong term "pc") — it will never see repository steps.
+ */
+export function classifyGoalDomain(goal: string): FallbackDomain {
+  const g = goal.toLowerCase();
+
+  const systemKeywords = [
+    "pc", "computer", "laptop", "desktop", "machine", "cpu", "processor",
+    "ram", "hard drive", "hdd", "ssd", "task manager", "driver", "drivers",
+    "windows", "operating system", "hardware", "malware", "virus",
+    "bloatware", "autostart", "registry", "blue screen", "bsod", "startup",
+    "booting", "boot time", "boot up", "perfmon", "resource monitor",
+    "sysmain", "superfetch", "my system", "this system", "my machine",
+    "this machine", "my computer", "my laptop", "my desktop", "my pc",
+    "slow startup", "slow boot", "slow pc", "slow computer", "slow laptop",
+    "system performance", "system is slow", "system slow", "pc performance",
+    "memory usage", "high cpu", "high memory", "disk usage", "overheat",
+    "overheating", "temp files", "startup programs", "background processes",
+    "running processes", "startup items", "boot items", "process explorer",
+    "slowdown", "slowing", "slowing down", "lag",
+  ];
+  if (systemKeywords.some((k) => g.includes(k))) return "system";
+
+  const infoKeywords = [
+    "explain", "what is", "what are", "what does", "what happened",
+    "how does", "how do", "how to", "tell me", "summarize", "summary",
+    "research", "look up", "define", "meaning", "compare", "difference",
+    "differences", "list of", "report on", "find out", "learn about",
+    "understand", "documentation", "docs", "why is", "why does",
+    "overview", "background", "history of", "walk me through",
+    "information about", "information on", "facts about",
+    "information regarding",
+  ];
+  if (infoKeywords.some((k) => g.includes(k))) return "info";
+
+  const repoKeywords = [
+    "repository", "repo", "monorepo", "project", "codebase", "source code",
+    "code", "app", "application", "website", "web app", "frontend",
+    "backend", "api", "build", "typecheck", "type check", "test suite",
+    "tests", "test", "deploy", "deployment", "production", "npm", "yarn",
+    "pnpm", "package.json", "commit", "pull request", "branch", "ci",
+    "lint", "bug", "compile", "compiler", "typescript", "javascript",
+    "git", "github", "vercel", "stabilize", "stabilization", "stability",
+    "stable", "refactor", "feature", "component", "dependency",
+    "dependencies", "bundle", "bundler", "login page", "pipeline",
+    "readme", "package", "config file", "script", "module", "worker",
+    "server", "database", "sql", "docker", "terraform", "cloudflare",
+    "react", "next.js", "node", "vite", "jest", "vitest", "eslint",
+    "prettier", "tsc", "broken build", "build fails", "test failures",
+    "fix the build", "pages", "route", "auth", "supabase", "clerk",
+    "stripe",
+  ];
+  if (repoKeywords.some((k) => g.includes(k))) return "repo";
+
+  return "unknown";
+}
+
+/** Scopes that perform automatic mutations under a fallback plan. */
+const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
+
+/**
+ * True when a step would mutate state (files, system, commands with side
+ * effects) under a fallback plan. Fallback plans are unproven — the model
+ * failed to plan — so these steps must never execute automatically.
+ */
+export function isMutationStep(step: SemanticStepSpec): boolean {
+  return MUTATION_SCOPES.has(step.scope ?? "");
+}
+
+/**
+ * Replace an auto-mutation step with a read-only approval-proposal step.
+ * The user's intent is preserved ("fix what is safe") but nothing is
+ * changed without explicit approval.
+ */
+function mutationSafeStep(step: SemanticStepSpec): SemanticStepSpec {
+  switch (step.scope) {
+    case "repair":
+      return {
+        title: "Propose repairs for approval",
+        description: "Present diagnosed issues and proposed fixes — no changes are applied without explicit approval",
+        scope: "report",
+      };
+    case "implement":
+      return {
+        title: "Propose implementation for approval",
+        description: "Present the implementation plan — no changes are applied without explicit approval",
+        scope: "plan",
+      };
+    case "act":
+      return {
+        title: "Report findings and recommended actions",
+        description: "Present findings and recommended actions — no changes are applied automatically",
+        scope: "report",
+      };
+    default:
+      return step;
+  }
+}
+
+/** System/PC inspection plan — read-only, NEVER repository steps. */
+function systemFallbackPlan(): SemanticStepSpec[] {
+  return [
+    { title: "Inspect system performance state", description: "Gather CPU, memory, disk, and running-process metrics", scope: "inspect" },
+    { title: "Diagnose slowdown causes", description: "Identify processes or services consuming resources", scope: "diagnose" },
+    { title: "Report findings and safe-fix proposals", description: "Present findings and propose safe fixes — no changes are applied automatically", scope: "report" },
+    { title: "Verify the report", description: "Confirm the findings address the user's goal", scope: "verify" },
+  ];
+}
+
+/** Informational/read-only plan — research, summarize, verify. */
+function infoFallbackPlan(): SemanticStepSpec[] {
+  return [
+    { title: "Research the topic", description: "Gather authoritative, current information relevant to the goal", scope: "investigate" },
+    { title: "Summarize findings", description: "Present a clear, sourced summary that answers the goal", scope: "report" },
+    { title: "Verify the summary", description: "Confirm the summary fully addresses the goal", scope: "verify" },
+  ];
+}
+
+/**
+ * Repository/dev fallback plans. ONLY reached when classifyGoalDomain()
+ * returned "repo" — the goal is explicitly about a repository, project,
+ * app, or code, so repository steps are intent-safe.
+ */
+function repoFallbackPlan(goal: string): SemanticStepSpec[] {
   const g = goal.toLowerCase();
 
   const stabilizeKeywords = ["stable", "stabilize", "stability", "production", "ready", "fix", "broken", "deploy"];
@@ -197,13 +366,54 @@ export function fallbackPlan(goal: string): SemanticStepSpec[] {
     ];
   }
 
-  // Generic inspect → verify plan
+  // Generic inspect → verify plan (repo domain)
   return [
     { title: "Inspect repository baseline", description: "Capture current project state", scope: "inspect" },
     { title: "Investigate", description: "Gather evidence relevant to the goal", scope: "investigate" },
     { title: "Take action", description: "Perform the work the goal requires", scope: "act" },
     { title: "Verify", description: "Final verification gate", requiredEvidence: ["verification_result"], scope: "verify" },
   ];
+}
+
+/**
+ * Derive a reasonable default semantic plan from the goal text when the
+ * model is unavailable or returns an unparseable response.
+ *
+ * INTENT SAFETY: the plan is derived ONLY for the classified domain of
+ * the goal. PC/system goals get system-inspection steps; informational
+ * goals get research/summary steps; repository goals keep the repo
+ * plans. Goals that match no safe domain return [] — the caller fails
+ * closed with an honest message instead of inventing work.
+ *
+ * ACT MODE SAFETY: an unproven fallback (the model failed to plan) never
+ * performs mutations automatically — even in Act mode. Steps that would
+ * mutate (repair/implement/act scopes) become read-only approval
+ * proposals.
+ */
+export function fallbackPlan(goal: string, mode?: "plan" | "act" | "auto"): SemanticStepSpec[] {
+  const domain = classifyGoalDomain(goal);
+
+  let steps: SemanticStepSpec[];
+  switch (domain) {
+    case "system":
+      steps = systemFallbackPlan();
+      break;
+    case "info":
+      steps = infoFallbackPlan();
+      break;
+    case "repo":
+      steps = repoFallbackPlan(goal);
+      break;
+    default:
+      // unknown — fail closed. Never invent work for an intent the
+      // fallback cannot safely classify.
+      return [];
+  }
+
+  if (mode === "act") {
+    steps = steps.map(mutationSafeStep);
+  }
+  return steps;
 }
 
 // ─── Main entry: planMission ───────────────────────────────────────
@@ -251,11 +461,15 @@ export async function planMission(
     if (modelSteps && modelSteps.length > 0) {
       plan = { steps: modelSteps, source: "model", rawModelText: modelText };
     } else {
-      plan = { steps: fallbackPlan(options.goal), source: "fallback", rawModelText: modelText };
+      plan = await buildFallbackOrBlock(options, modelText);
     }
-  } catch {
-    // Model unavailable — fall back to a goal-derived plan
-    plan = { steps: fallbackPlan(options.goal), source: "fallback" };
+  } catch (err) {
+    // A fail-closed planning result must propagate — never mask it by
+    // falling back again. The honest message is the deliverable.
+    if (err instanceof MissionPlanningError) throw err;
+    // Model unavailable — fall back to a goal-derived plan (which may
+    // itself fail closed with an honest message for unknown domains).
+    plan = await buildFallbackOrBlock(options, undefined);
   }
 
   // 2. Persist each step on the canonical mission
@@ -270,13 +484,59 @@ export async function planMission(
     if (step) steps.push(step);
   }
 
-  // 3. Return the plan + persisted steps
+  // 3. Record planning truth on the mission (source, domain, raw text)
   const finalMission = options.store.getMission();
   if (!finalMission) {
     throw new Error("planMission: mission disappeared from the store during planning.");
   }
+  finalMission.metadata = {
+    ...finalMission.metadata,
+    plan: {
+      source: plan.source,
+      domain: plan.fallbackDomain ?? null,
+      stepCount: plan.steps.length,
+      rawModelText: plan.rawModelText ?? null,
+    },
+  };
+  await options.store.persistMissionNow();
 
   return { plan, steps, mission: finalMission };
+}
+
+/**
+ * Build the deterministic fallback plan for the goal, or FAIL CLOSED.
+ *
+ * The fallback only ever derives plans for the classified domain of the
+ * goal (repo/system/info). A goal with no safe domain returns [] here —
+ * the planner refuses to invent work and surfaces an honest message that
+ * preserves the original user goal. The failure is also recorded on the
+ * mission's metadata so the planning failure survives persistence.
+ */
+async function buildFallbackOrBlock(
+  options: PlanMissionOptions,
+  modelText: string | undefined,
+): Promise<SemanticPlan> {
+  const mission = options.store.getMission();
+  const domain = classifyGoalDomain(options.goal);
+  const steps = fallbackPlan(options.goal, mission?.mode);
+
+  if (steps.length === 0) {
+    const failureReason =
+      `Planning failed: the model planner could not produce a plan, and "${options.goal}" ` +
+      `does not match a safe fallback domain (repository/dev, system/PC, or informational). ` +
+      `No work was started and nothing was changed.`;
+    const m = options.store.getMission();
+    if (m) {
+      m.metadata = {
+        ...m.metadata,
+        plan: { source: "fallback", domain, failureReason, stepCount: 0 },
+      };
+      await options.store.persistMissionNow();
+    }
+    throw new MissionPlanningError(failureReason);
+  }
+
+  return { steps, source: "fallback", fallbackDomain: domain, rawModelText: modelText };
 }
 
 // ─── Step attachment ───────────────────────────────────────────────

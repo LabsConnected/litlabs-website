@@ -32,6 +32,7 @@ import {
   updateToolResultOnStep,
   progressMissionStepAfterTool,
   toolToEvidenceType,
+  MissionPlanningError,
   type RuntimeEvent,
   type StreamChunk,
   type VerificationResult,
@@ -1201,8 +1202,26 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           ts: Date.now(),
           type: "info",
           tag: "PLAN",
-          text: `Plan (${plan.source}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
+          text: `Plan (${plan.source}${plan.fallbackDomain ? ` · ${plan.fallbackDomain}` : ""}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
         });
+
+        // Fallback plans are unproven (the model failed to plan) — make
+        // the safety posture explicit in the activity feed.
+        if (plan.source === "fallback") {
+          const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
+          const hasMutationStep = plannedSteps.some((s) =>
+            s.allowedActionScope.some((scope) => MUTATION_SCOPES.has(scope)),
+          );
+          store.actions.addActivity({
+            id: `act_${Date.now()}_planfallback`,
+            ts: Date.now(),
+            type: "info",
+            tag: "PLAN",
+            text: hasMutationStep
+              ? "Fallback plan — mutation steps are approval-gated"
+              : "Fallback plan is read-only — no automatic mutations",
+          });
+        }
 
         // The semantic steps now exist on the canonical mission BEFORE
         // the first tool call. Execution begins; tools attach to steps.
@@ -1599,7 +1618,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
         persistSession();
       } catch (err) {
-        const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
+        // Fail-closed planning (MissionPlanningError) is already an
+        // honest, user-facing message — surface it verbatim so the
+        // planning failure is unmistakable instead of a blank SERVED.
+        const errText = err instanceof MissionPlanningError
+          ? err.message
+          : `Agent error: ${err instanceof Error ? err.message : String(err)}`;
         store.actions.addActivity({
           id: `act_${Date.now()}_err`,
           ts: Date.now(), type: "error", tag: "ERROR",

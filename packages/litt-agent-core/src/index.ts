@@ -180,10 +180,16 @@ export type {
 // execution and persists it to the canonical RuntimeStore. Tools then
 // attach to existing steps via toolHistory/actionHistory/evidence.
 // One step may cover many tool calls; one tool may serve many steps.
+// The deterministic fallback is intent-safe: it classifies the goal's
+// domain (repo/system/info/unknown) and fails closed rather than
+// substituting a repository plan for an unrelated user intent.
 export {
   planMission,
   parseSemanticPlan,
   fallbackPlan,
+  classifyGoalDomain,
+  isMutationStep,
+  MissionPlanningError,
   resolveStepForTool,
   attachToolToStep,
   progressMissionStepAfterTool,
@@ -196,6 +202,7 @@ export type {
   SemanticPlan,
   PlanMissionOptions,
   PlanMissionResult,
+  FallbackDomain,
 } from "./mission-planner.js";
 
 // VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)

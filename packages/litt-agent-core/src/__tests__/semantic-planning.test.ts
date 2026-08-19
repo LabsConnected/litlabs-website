@@ -20,6 +20,9 @@ import {
   planMission,
   parseSemanticPlan,
   fallbackPlan,
+  classifyGoalDomain,
+  isMutationStep,
+  MissionPlanningError,
   resolveStepForTool,
   attachToolToStep,
   updateToolResultOnStep,
@@ -187,11 +190,90 @@ describe("Semantic Mission Planning", () => {
       assert.ok(titles.includes("Verify"));
     });
 
-    it("produces a generic inspect→verify plan for unknown goals", () => {
-      const steps = fallbackPlan("Analyze performance");
+    it("produces a generic inspect→verify plan for repo-dev goals", () => {
+      const steps = fallbackPlan("Analyze performance of the codebase");
       assert.ok(steps.length >= 3);
       assert.equal(steps[0].title, "Inspect repository baseline");
       assert.equal(steps[steps.length - 1].title, "Verify");
+    });
+
+    it("fails closed (empty steps) for goals with no safe fallback domain", () => {
+      // Ambiguous goal — the planner must NOT invent work.
+      assert.deepEqual(fallbackPlan("Analyze performance"), []);
+      assert.deepEqual(fallbackPlan("Something totally unclear"), []);
+    });
+
+    // ─── INTENT-SAFETY REGRESSIONS ─────────────────────────────────
+
+    it("REGRESSION: PC/system goals get system-inspection steps, never repo steps", () => {
+      const steps = fallbackPlan("inspect my PC, find what is slowing it down, fix what is safe");
+      const titles = steps.map((s) => s.title);
+      const joined = titles.join("\n").toLowerCase();
+
+      // Zero repository build/typecheck/test steps — the exact prompt
+      // must never fall back to the repository verification plan.
+      assert.ok(!/repository baseline|typecheck|run tests|production build|revalidate/.test(joined));
+
+      // System-inspection steps, not repo steps.
+      assert.ok(/inspect system/.test(joined));
+      assert.ok(/diagnose/.test(joined));
+      assert.ok(/report/.test(joined));
+
+      // Read-only — the fallback must not contain mutation scopes.
+      assert.ok(steps.length > 0);
+      assert.ok(steps.every((s) => !["repair", "implement", "act"].includes(s.scope ?? "")));
+    });
+
+    it("REGRESSION: in Act mode an unproven fallback never auto-mutates", () => {
+      // PC goal in act mode — still read-only.
+      const pcAct = fallbackPlan("inspect my PC, find what is slowing it down, fix what is safe", "act");
+      assert.ok(pcAct.length > 0);
+      assert.ok(pcAct.every((s) => !["repair", "implement", "act"].includes(s.scope ?? "")));
+
+      // Repo stabilize goal in act mode — the mutation step becomes a
+      // read-only approval proposal; in plan mode it is unchanged.
+      const repoAct = fallbackPlan("Get my website stable and ready for production.", "act");
+      const repoActTitles = repoAct.map((s) => s.title);
+      assert.ok(!repoActTitles.includes("Apply approved repairs"));
+      assert.ok(repoActTitles.includes("Propose repairs for approval"));
+      assert.ok(repoAct.every((s) => !["repair", "implement", "act"].includes(s.scope ?? "")));
+
+      const repoPlan = fallbackPlan("Get my website stable and ready for production.", "plan");
+      assert.ok(repoPlan.map((s) => s.title).includes("Apply approved repairs"));
+    });
+
+    it("REGRESSION: informational goals get read-only research steps", () => {
+      const steps = fallbackPlan("Explain how DNS works");
+      const titles = steps.map((s) => s.title);
+      assert.ok(titles.some((t) => /research/i.test(t)));
+      assert.ok(titles.some((t) => /summarize/i.test(t)));
+      assert.ok(steps.every((s) => !["repair", "implement", "act"].includes(s.scope ?? "")));
+    });
+  });
+
+  // ─── classifyGoalDomain ──────────────────────────────────────────
+
+  describe("classifyGoalDomain", () => {
+    it("classifies PC/system requests as system", () => {
+      assert.equal(classifyGoalDomain("inspect my PC, find what is slowing it down, fix what is safe"), "system");
+      assert.equal(classifyGoalDomain("Why is my laptop so slow to boot?"), "system");
+      assert.equal(classifyGoalDomain("Check high memory usage on this machine"), "system");
+    });
+
+    it("classifies repository/dev requests as repo", () => {
+      assert.equal(classifyGoalDomain("Get my website stable and ready for production."), "repo");
+      assert.equal(classifyGoalDomain("Fix the broken build"), "repo");
+      assert.equal(classifyGoalDomain("Add a login page"), "repo");
+    });
+
+    it("classifies informational requests as info", () => {
+      assert.equal(classifyGoalDomain("Explain how DNS works"), "info");
+      assert.equal(classifyGoalDomain("Summarize the differences between SQL and NoSQL"), "info");
+    });
+
+    it("classifies ambiguous goals as unknown", () => {
+      assert.equal(classifyGoalDomain("Analyze performance"), "unknown");
+      assert.equal(classifyGoalDomain("Something totally unclear"), "unknown");
     });
   });
 
@@ -291,6 +373,89 @@ describe("Semantic Mission Planning", () => {
         }),
         /no active mission/,
       );
+    });
+
+    // ─── INTENT-SAFETY REGRESSIONS (planMission) ───────────────────
+
+    it("REGRESSION: PC goal with failing model → system-inspection fallback, zero repo steps", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({
+        goal: "inspect my PC, find what is slowing it down, fix what is safe",
+        mode: "act",
+        projectRoot: tmpDir,
+      });
+
+      const { plan, steps } = await planMission({
+        model: createFailingModel(),
+        store,
+        goal: "inspect my PC, find what is slowing it down, fix what is safe",
+      });
+
+      assert.equal(plan.source, "fallback");
+      assert.equal(plan.fallbackDomain, "system");
+      assert.ok(steps.length > 0);
+      const joined = steps.map((s) => s.title).join("\n").toLowerCase();
+      // The exact regression prompt must contain zero repo build/
+      // typecheck/test steps.
+      assert.ok(!/repository baseline|typecheck|run tests|production build|revalidate/.test(joined));
+      // Act mode + unproven fallback → no mutation steps.
+      assert.ok(steps.every((s) => !isMutationStep(s)));
+      // Mission metadata records the plan's source + domain.
+      const meta = store.getMission()?.metadata.plan as Record<string, unknown> | undefined;
+      assert.equal(meta?.source, "fallback");
+      assert.equal(meta?.domain, "system");
+    });
+
+    it("REGRESSION: planMission fails closed with an honest message for unknown-domain goals", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({
+        goal: "Analyze performance",
+        mode: "act",
+        projectRoot: tmpDir,
+      });
+
+      await assert.rejects(
+        () => planMission({
+          model: createGarbageModel(),
+          store,
+          goal: "Analyze performance",
+        }),
+        (err: unknown) => {
+          // Explicit narrowing — does not depend on assert.ok's `asserts`
+          // signature resolving from @types/node in every toolchain.
+          if (!(err instanceof MissionPlanningError)) throw err;
+          // The original user goal is preserved in the failure message.
+          assert.match(err.message, /Analyze performance/);
+          assert.match(err.message, /No work was started and nothing was changed/);
+          return true;
+        },
+      );
+
+      // No steps were invented on the mission…
+      assert.equal(store.getMission()?.steps.length, 0);
+      // …and the planning failure is recorded on the mission metadata.
+      const meta = store.getMission()?.metadata.plan as Record<string, unknown> | undefined;
+      assert.equal(meta?.source, "fallback");
+      assert.equal(meta?.domain, "unknown");
+      assert.ok(typeof meta?.failureReason === "string");
+    });
+
+    it("REGRESSION: model plan wins; garbage model output for a repo goal still falls back to repo steps", async () => {
+      const store = new RuntimeStore({ projectRoot: tmpDir });
+      await store.createMission({
+        goal: "Fix the broken build",
+        mode: "act",
+        projectRoot: tmpDir,
+      });
+
+      const { plan } = await planMission({
+        model: createMockPlannerModel(`[{ "title": "Inspect baseline", "description": "Check state" }]`),
+        store,
+        goal: "Fix the broken build",
+      });
+
+      assert.equal(plan.source, "model");
+      assert.equal(plan.steps.length, 1);
     });
   });
 
