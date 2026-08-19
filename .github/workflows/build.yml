@@ -37,6 +37,11 @@ jobs:
         env:
           CI: true
 
+      - name: Build @litt/models
+        run: pnpm --filter @litt/models build
+        env:
+          CI: true
+
       - name: Build @litt/agent-core
         run: pnpm --filter @litt/agent-core build
         env:

@@ -212,7 +212,7 @@ export class ModelRuntime {
    */
   getProviderStatuses(): ProviderStatus[] {
     const healthResults = this.discovery.healthCache.getAll();
-    return healthResults.map((h) => ({
+    return healthResults.map((h: ProviderHealthResult) => ({
       providerId: h.providerId,
       label: h.providerId.charAt(0).toUpperCase() + h.providerId.slice(1),
       tier: h.tier,

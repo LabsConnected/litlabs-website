@@ -21,8 +21,8 @@ jobs:
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            https://litlabs.net
-            https://litlabs.net/studio
+            https://www.litlabs.net
+            https://www.litlabs.net/studio
           budgetPath: .github/budget.config.json
 
       - name: Upload Lighthouse reports
