@@ -118,6 +118,11 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        {/* ClerkProvider wraps the app when a publishable key is available.
+            In production, the key is always set via environment variables.
+            When absent (local build without Clerk), we skip ClerkProvider and
+            render a fallback context so auth hooks return a signed-out state
+            instead of crashing. */}
         {hasClerk ? (
           <ClerkProvider
             publishableKey={clerkKey!}
@@ -125,11 +130,11 @@ export default function RootLayout({
             signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
             signInFallbackRedirectUrl={
               process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-              "/dashboard"
+              "/studio"
             }
             signUpFallbackRedirectUrl={
               process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-              "/dashboard"
+              "/studio"
             }
             appearance={{
               variables: {

@@ -27,7 +27,7 @@ const BARE_PUBLIC_PATHS = [
 
 // Routes that are bare-public ONLY when signed out.
 // When signed in, they get the AppShell sidebar.
-const HYBRID_PUBLIC_PATHS = ["/hire"];
+const HYBRID_PUBLIC_PATHS = ["/hire", "/marketplace"];
 
 // Routes that render their own custom interactive chrome (e.g. cloud emulator)
 const SELF_CONTAINED_CHROME = ["/games/cloud"];

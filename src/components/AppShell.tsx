@@ -341,6 +341,7 @@ function DesktopSidebar({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
+  const { isSignedIn } = useClerkAuth();
   const { balance } = useWallet();
   const littHealth = useLittHealth();
 
@@ -437,26 +438,28 @@ function DesktopSidebar({
               </span>
             )}
           </div>
-          {/* BITS */}
-          {!collapsed && (
+          {/* BITS — only show for signed-in users */}
+          {!collapsed && isSignedIn && (
             <span className="text-[10px] font-bold" style={{ color: T.textMuted }}>
               {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
             </span>
           )}
         </div>
 
-        {/* Utility items — Wallet + Settings (Profile is in the identity dock) */}
-        <div className="space-y-0.5">
-          {APP_NAV_BOTTOM.map((item) => (
-            <DesktopNavItem
-              key={item.label}
-              item={item}
-              active={checkActive(item.href ?? "")}
-              collapsed={collapsed}
-              T={T}
-            />
-          ))}
-        </div>
+        {/* Utility items — Wallet + Settings (only for signed-in users) */}
+        {isSignedIn && (
+          <div className="space-y-0.5">
+            {APP_NAV_BOTTOM.map((item) => (
+              <DesktopNavItem
+                key={item.label}
+                item={item}
+                active={checkActive(item.href ?? "")}
+                collapsed={collapsed}
+                T={T}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Identity dock — Clerk avatar + name + role + account menu */}
         <div className={`mt-2 ${collapsed ? "" : "border-t pt-2"}`} style={{ borderColor: `${T.borderColor}10` }}>
@@ -537,6 +540,7 @@ function MobileDrawer({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
+  const { isSignedIn } = useClerkAuth();
   const { balance } = useWallet();
 
   const checkActive = useCallback(
@@ -673,9 +677,11 @@ function MobileDrawer({
               </span>
               <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">LiTT Online</span>
             </div>
-            <span className="text-[11px] font-bold" style={{ color: T.textMuted }}>
-              {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
-            </span>
+            {isSignedIn && (
+              <span className="text-[11px] font-bold" style={{ color: T.textMuted }}>
+                {balance.toLocaleString()} <span style={{ color: T.accentColor }}>BITS</span>
+              </span>
+            )}
           </div>
           {/* Identity dock — same component as desktop, always expanded in mobile drawer */}
           <IdentityDock collapsed={false} />
