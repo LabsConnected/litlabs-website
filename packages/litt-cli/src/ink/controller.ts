@@ -1467,6 +1467,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const tools = gateway.getTools();
         const agentStore = session.getStore();
 
+        // ─── Track mission total duration ───
+        // The mission lifecycle spans: creation → planning → execution →
+        // verification. The agent loop's result.durationMs only covers
+        // execution (model + tool calls). The displayed duration must
+        // reflect the FULL mission lifecycle, not just the agent loop.
+        const missionStartTime = Date.now();
+
         // ─── Create a REAL Mission in the canonical RuntimeStore ───
         const mission = await agentStore.createMission({
           goal: input,
@@ -2043,7 +2050,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
 
         // ─── Mission completion — driven by VerificationGate, not model ───
-        const seconds = (result.durationMs / 1000).toFixed(1);
+        // Display the FULL mission duration (creation → verification),
+        // not just the agent loop duration. The agent loop's
+        // result.durationMs only covers model+tool execution; the
+        // mission total includes planning, mission creation, and
+        // verification gate time.
+        const missionTotalMs = Date.now() - missionStartTime;
+        const agentLoopMs = result.durationMs;
+        const seconds = (missionTotalMs / 1000).toFixed(1);
+        const agentSeconds = (agentLoopMs / 1000).toFixed(1);
         if (missionComplete) {
           // Read-only inspection missions: the plan steps (inspect →
           // verify → report) are satisfied by the collected evidence +
@@ -2070,7 +2085,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             ts: Date.now(),
             type: "agent.complete",
             tag: "DONE",
-            text: `Mission verified · ${seconds}s`,
+            text: `Mission verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
           });
         } else {
@@ -2088,7 +2103,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             ts: Date.now(),
             type: "agent.stopped",
             tag: "FAIL",
-            text: `Mission not verified · ${seconds}s`,
+            text: `Mission not verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
           });
         }
