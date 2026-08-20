@@ -70,6 +70,31 @@ export {
 // Tool registry
 export { ToolRegistry, createDefaultRegistry } from "./tools.js";
 
+// Realtime internet capability — shared SSRF-safe fetch, web search,
+// NWS weather forecast, and the tool entries that merge into the default
+// ToolRegistry. The ONE implementation every surface adapts.
+export {
+  safeFetch,
+  assertSafeUrl,
+  assertPublicHostname,
+  isPrivateIp,
+  webSearch,
+  weatherForecast,
+  SafeFetchError,
+  defaultDnsResolver,
+  REALTIME_TOOL_ENTRIES,
+  REALTIME_TOOL_IDS,
+} from "./realtime.js";
+export type {
+  SafeFetchOptions,
+  SafeFetchResult,
+  ForecastPeriod,
+  WeatherForecastResult,
+  WebSearchResult,
+  UrlSafetyViolation,
+  DnsResolver,
+} from "./realtime.js";
+
 // Command router
 export { CommandRouter } from "./router.js";
 export type { CommandResult } from "./router.js";

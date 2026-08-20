@@ -10,6 +10,9 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
+// Shared realtime capability from @litt/agent-core — the ONE implementation.
+// The web registry delegates to it so CLI and Studio have the same capability.
+import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast as coreWeatherForecast, SafeFetchError } from "@litt/agent-core";
 
 type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
 
@@ -98,6 +101,42 @@ const lazyHandlers: Record<string, () => Promise<ToolHandler>> = {
   "browser.close": async () => {
     const h = (await import("./browser-tool-handlers")).browserToolHandlers["browser.close"];
     return ((inputs: Record<string, unknown>) => h({ sessionId: inputs.sessionId as string, userId: inputs.userId as string }, inputs)) as ToolHandler;
+  },
+  // ─── Realtime internet tools — delegate to @litt/agent-core ──
+  // The ONE shared implementation (SSRF-safe fetch, NWS weather, DuckDuckGo
+  // search). Surfaces adapt it; they never reimplement the network logic.
+  "web.search": async () => {
+    return (async (inputs: Record<string, unknown>) => {
+      const query = typeof inputs.query === "string" ? inputs.query : "";
+      if (!query) return { ok: false, error: "Missing required field: query" };
+      try {
+        return { ok: true, result: await coreWebSearch(query) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }) as ToolHandler;
+  },
+  "web.fetch": async () => {
+    return (async (inputs: Record<string, unknown>) => {
+      const url = typeof inputs.url === "string" ? inputs.url : "";
+      if (!url) return { ok: false, error: "Missing required field: url" };
+      try {
+        return { ok: true, result: await coreSafeFetch(url) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }) as ToolHandler;
+  },
+  "weather.forecast": async () => {
+    return (async (inputs: Record<string, unknown>) => {
+      const zip = typeof inputs.zip === "string" ? inputs.zip : "";
+      if (!zip) return { ok: false, error: "Missing required field: zip" };
+      try {
+        return { ok: true, result: await coreWeatherForecast(zip) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }) as ToolHandler;
   },
 };
 
@@ -447,8 +486,9 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: false, // No handler implemented
+        enabled: true,
       },
+      handler: lazyHandlers["web.search"],
     },
     {
       tool: {
@@ -467,8 +507,30 @@ export function registerInternalTools(): void {
         idempotent: true,
         readOnly: true,
         permissionLevel: 'read',
-        enabled: false, // No handler implemented
+        enabled: true,
       },
+      handler: lazyHandlers["web.fetch"],
+    },
+    {
+      tool: {
+        id: "weather.forecast",
+        name: "Weather Forecast",
+        description: "Get a real current U.S. weather forecast for a 5-digit ZIP code from the National Weather Service. Returns structured periods with temperature, conditions, wind, and precipitation probability.",
+        source: "internal",
+        version: "1.0.0",
+        inputSchema: { type: "object", properties: { zip: { type: "string" } }, required: ["zip"] },
+        outputSchema: { type: "object" },
+        requiredCapabilities: ["web_search"],
+        requiredPermissions: ["web:fetch"],
+        risk: "low",
+        approvalPolicy: READ_ONLY_APPROVAL,
+        timeoutMs: 20000,
+        idempotent: true,
+        readOnly: true,
+        permissionLevel: 'read',
+        enabled: true,
+      },
+      handler: lazyHandlers["weather.forecast"],
     },
     {
       tool: {

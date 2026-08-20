@@ -4,7 +4,10 @@
  * This is the interface that existing registries (project-tools,
  * litt-intelligence, connectors) will be adapted into.
  *
- * Phase 1 only registers read-only project tools.
+ * Registers read-only project tools PLUS the shared realtime internet
+ * tools (web.fetch, web.search, weather.forecast) so every surface using
+ * @litt/agent-core has the same external-data capability. See realtime.ts
+ * for the SSRF defense and the single network implementation.
  */
 
 import type {
@@ -16,6 +19,7 @@ import type {
   ToolResult,
   ShellExecutor,
 } from "./types.js";
+import { REALTIME_TOOL_ENTRIES } from "./realtime.js";
 import {
   gitStatus,
   gitDiff,
@@ -275,6 +279,8 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.test": { definition: TEST_DEF, handler: testHandler, metadata: READ_ONLY_META },
   "project.build": { definition: BUILD_DEF, handler: buildHandler, metadata: READ_ONLY_META },
   "project.run": { definition: RUN_DEF, handler: runHandler, metadata: READ_ONLY_META },
+  // Shared realtime internet capability — see realtime.ts.
+  ...REALTIME_TOOL_ENTRIES,
 };
 
 export class ToolRegistry {
