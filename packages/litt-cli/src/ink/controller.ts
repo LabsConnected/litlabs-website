@@ -61,6 +61,17 @@ import {
 } from "../lib/mission-verification.js";
 import { buildPromptWithContext } from "../lib/context-resolver.js";
 import { getGitState } from "../lib/git-state.js";
+import {
+  shipWorkflow as safeShipWorkflow,
+  createOrSwitchBranch as safeCreateOrSwitchBranch,
+  stageFiles as safeStageFiles,
+  commitStaged as safeCommitStaged,
+  pushBranch as safePushBranch,
+  createDraftPR as safeCreateDraftPR,
+  isProtectedBranch,
+  generateBranchName,
+  isBlockedGitCommand,
+} from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
@@ -464,32 +475,56 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       act(store, "Ship blocked: verification gate has not proven the work.", "error", "failed", "SHIP");
       return { ok: false, message: "Verification gate not proven — fix failures, then re-open /ship to re-verify before committing." };
     }
-    const gateway = session.getGateway();
     const cwd = session.getCwd();
-    const run = async (args: string[]) => {
-      const r = await gateway.execute({
-        toolId: "project.run",
-        inputs: { command: "git", args },
-        cwd,
-        mode: session.getMode(),
-        identity: CLI_IDENTITY,
-      });
-      if (!r.result.success) throw new Error(r.result.message || `git ${args[0]} failed`);
-      return r;
-    };
+    const gs = getGitState(cwd);
+    if (!gs.isGitRepo) {
+      act(store, "Ship blocked: not a git repository.", "error", "failed", "SHIP");
+      return { ok: false, message: "Not a git repository" };
+    }
+
+    // SAFE STAGE: Collect only the changed files from the porcelain output.
+    // NEVER uses `git add -A`, `git add .`, or `git add --all`.
+    // Unrelated dirty/untracked files are preserved.
+    const changedFiles: string[] = [];
+    for (const line of gs.files) {
+      // Porcelain v1 format: "XY path" where X/Y are status codes
+      // Skip pure untracked files (??) — only stage tracked changes
+      // unless the user explicitly includes them via the ship overlay.
+      if (line.startsWith("??")) continue;
+      const filePath = line.slice(3).trim();
+      if (filePath) changedFiles.push(filePath);
+    }
+
+    if (changedFiles.length === 0) {
+      act(store, "Ship blocked: no tracked changes to commit.", "error", "failed", "SHIP");
+      return { ok: false, message: "No tracked changes to commit" };
+    }
+
     try {
-      await run(["add", "-A"]);
-      await run(["commit", "-m", message]);
-      if (push) await run(["push"]);
-      const gs = getGitState(cwd);
-      store.actions.setWorkspace({
-        gitModified: gs.changed,
-        gitUntracked: gs.untracked,
-        branch: gs.branch ?? store.state.branch,
+      // Use the safe ship workflow — never commits to main, never uses git add -A
+      const result = await safeShipWorkflow({
+        cwd,
+        files: changedFiles,
+        message,
+        push,
+        createPR: false, // V1: PR creation is a separate explicit step
       });
-      act(store, push ? `Shipped: committed + pushed` : `Shipped: committed`, "info", "success", "SHIP");
-      persistSession();
-      return { ok: true, message: push ? `Committed + pushed — ${message}` : `Committed — ${message}` };
+
+      const updatedGs = getGitState(cwd);
+      store.actions.setWorkspace({
+        gitModified: updatedGs.changed,
+        gitUntracked: updatedGs.untracked,
+        branch: updatedGs.branch ?? store.state.branch,
+      });
+
+      if (result.ok) {
+        act(store, push ? `Shipped: committed + pushed (${result.branch})` : `Shipped: committed (${result.branch})`, "info", "success", "SHIP");
+        persistSession();
+        return { ok: true, message: push ? `Committed + pushed — ${message} (${result.branch})` : `Committed — ${message} (${result.branch})` };
+      } else {
+        act(store, `Ship failed: ${result.message}`, "error", "failed", "SHIP");
+        return { ok: false, message: result.message };
+      }
     } catch (err) {
       act(store, `Ship failed: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "SHIP");
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -595,22 +630,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     if (input.startsWith("/branch ")) {
       const name = input.slice(8).trim();
-      const gateway = session.getGateway();
-      try {
-        const result = await gateway.execute({
-          toolId: "project.run",
-          inputs: { command: "git", args: ["switch", "-c", name] },
-          cwd: session.getCwd(),
-          mode: session.getMode(),
-          identity: CLI_IDENTITY,
-        });
-        act(store, result.result.success ? `Branch created + switched: ${name}` : `Branch failed: ${result.result.message}`, result.result.success ? "info" : "error", result.result.success ? "decision" : "failed", "BRANCH");
-        if (result.result.success) {
-          const gs = getGitState(session.getCwd());
-          store.actions.setWorkspace({ branch: gs.branch ?? name });
-        }
-      } catch (err) {
-        act(store, `Branch error: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "BRANCH");
+      // Use the safe branch creation — blocks protected branch names
+      const branchResult = safeCreateOrSwitchBranch(session.getCwd(), name);
+      act(store, branchResult.ok ? `Branch ${branchResult.created ? "created" : "switched"}: ${branchResult.branch}` : `Branch failed: ${branchResult.message}`, branchResult.ok ? "info" : "error", branchResult.ok ? "decision" : "failed", "BRANCH");
+      if (branchResult.ok) {
+        const gs = getGitState(session.getCwd());
+        store.actions.setWorkspace({ branch: gs.branch ?? name });
       }
       return;
     }
@@ -622,6 +647,33 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // ─── Ship flow ────────────────────────────────────────────────
     if (input === "/ship") {
       store.actions.setOverlay("ship");
+      return;
+    }
+    // ─── Draft PR creation ────────────────────────────────────────
+    if (input === "/pr" || input.startsWith("/pr ")) {
+      const title = input.startsWith("/pr ") ? input.slice(4).trim() : "";
+      const cwd = session.getCwd();
+      const gs = getGitState(cwd);
+      if (!gs.isGitRepo) {
+        act(store, "PR failed: not a git repository", "error", "failed", "PR");
+        return;
+      }
+      if (!gs.branch || isProtectedBranch(gs.branch)) {
+        act(store, `PR failed: on protected branch '${gs.branch}'. Switch to a feature branch first.`, "error", "failed", "PR");
+        return;
+      }
+      const prTitle = title || `Changes from ${gs.branch}`;
+      act(store, `Creating draft PR for ${gs.branch}...`, "info", undefined, "PR");
+      const prResult = safeCreateDraftPR(cwd, {
+        branch: gs.branch,
+        title: prTitle,
+        body: `## Summary\n\n${prTitle}\n\nGenerated with [LiTT](https://litlabs.net)`,
+      });
+      if (prResult.ok) {
+        act(store, `PR ${prResult.created ? "created" : "reused"}: ${prResult.prUrl}`, "info", "success", "PR");
+      } else {
+        act(store, `PR failed: ${prResult.message}`, "error", "failed", "PR");
+      }
       return;
     }
     // ─── Runtime details ──────────────────────────────────────────
