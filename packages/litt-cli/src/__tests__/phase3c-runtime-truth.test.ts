@@ -65,9 +65,7 @@ function makeState(overrides: Partial<RuntimeState> = {}): RuntimeState {
 function createClient(): RuntimeClient {
   return new RuntimeClient({
     terminalUrl: "http://127.0.0.1:4001",
-    authSecret: "test-auth-secret-" + "a".repeat(32),
-    internalKey: "test-internal-key-" + "b".repeat(32),
-    userId: "test-user",
+    terminalToken: "test-terminal-jwt-token",
   });
 }
 

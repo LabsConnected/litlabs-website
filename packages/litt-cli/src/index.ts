@@ -223,8 +223,8 @@ async function main(): Promise<number> {
     if (message.includes("OPENROUTER_API_KEY")) {
       console.error(`${c.dim}  Get an API key at https://openrouter.ai and set it:${c.reset}`);
       console.error(`${c.dim}  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
-    } else if (message.includes("TERMINAL_INTERNAL_SERVICE_KEY")) {
-      console.error(`${c.dim}  --remote requires a terminal-server running with TERMINAL_INTERNAL_SERVICE_KEY set.${c.reset}`);
+    } else if (message.includes("Clerk token")) {
+      console.error(`${c.dim}  --remote requires a Clerk token. Set LITT_CLERK_TOKEN or run 'litt login'.${c.reset}`);
       console.error(`${c.dim}  Run without --remote for local execution.${c.reset}`);
     } else if (message.includes("ENOENT") || message.includes("not found")) {
       console.error(`${c.dim}  The command was not found. Check that it's installed and in your PATH.${c.reset}`);

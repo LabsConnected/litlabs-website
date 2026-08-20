@@ -119,6 +119,11 @@ export function Composer({
       if (current) {
         onChangeRef.current("");
         setCaret(0);
+        // Synchronously update refs — when multiple useInput calls fire
+        // in the same macrotask (same stdin read), useEffect hasn't run
+        // yet, so valueRef/caretRef would be stale for the next call.
+        valueRef.current = "";
+        caretRef.current = 0;
         pokeRef.current();
       }
       return;
@@ -134,6 +139,9 @@ export function Composer({
       if (prev !== null) {
         onChangeRef.current(prev);
         setCaret(prev.length);
+        // Synchronously update refs (see Esc comment above).
+        valueRef.current = prev;
+        caretRef.current = prev.length;
         pokeRef.current();
       }
       return;
@@ -143,15 +151,35 @@ export function Composer({
     if (isBackspace(key)) {
       if (pos === 0) return;
       const next = current.slice(0, pos - 1) + current.slice(pos);
+      const nextCaret = Math.max(0, pos - 1);
       onChangeRef.current(next);
-      setCaret(Math.max(0, pos - 1));
+      setCaret(nextCaret);
+      // Synchronously update refs — critical for fast typing where
+      // multiple useInput calls (type + backspace) arrive in the same
+      // stdin read. Without this, the backspace handler reads stale
+      // valueRef/caretRef from before the typing handler ran, sees
+      // pos=0, and becomes a no-op.
+      valueRef.current = next;
+      caretRef.current = nextCaret;
       pokeRef.current();
       return;
     }
 
     // Left / Right caret movement.
-    if (key.leftArrow && pos > 0) { setCaret(pos - 1); pokeRef.current(); return; }
-    if (key.rightArrow && pos < current.length) { setCaret(pos + 1); pokeRef.current(); return; }
+    if (key.leftArrow && pos > 0) {
+      const nextCaret = pos - 1;
+      setCaret(nextCaret);
+      caretRef.current = nextCaret;
+      pokeRef.current();
+      return;
+    }
+    if (key.rightArrow && pos < current.length) {
+      const nextCaret = pos + 1;
+      setCaret(nextCaret);
+      caretRef.current = nextCaret;
+      pokeRef.current();
+      return;
+    }
 
     // Printable input — insert at caret. Paste arrives as a multi-char string.
     if (input && !key.ctrl && !key.meta && key.tab === false) {
@@ -162,8 +190,12 @@ export function Composer({
       if (scrolledRef.current) onReturnToLiveRef.current?.();
 
       const next = current.slice(0, pos) + input + current.slice(pos);
+      const nextCaret = pos + input.length;
       onChangeRef.current(next);
-      setCaret(pos + input.length);
+      setCaret(nextCaret);
+      // Synchronously update refs (see Backspace comment above).
+      valueRef.current = next;
+      caretRef.current = nextCaret;
       pokeRef.current();
 
       // / and @ triggers fire when the draft STARTS with them (typed at

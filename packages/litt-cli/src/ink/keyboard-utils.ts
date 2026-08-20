@@ -63,8 +63,7 @@ export function isDownArrow(key: KeyInfo): boolean {
 
 /** Is this Backspace or Delete? */
 export function isBackspace(key: KeyInfo): boolean {
-  return key.backspace === true || key.delete === true
-    || (key as { delete?: boolean }).delete === true;
+  return key.backspace === true || key.delete === true;
 }
 
 /** Is this a Ctrl+key combination? */

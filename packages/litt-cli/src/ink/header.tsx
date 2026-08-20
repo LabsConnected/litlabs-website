@@ -2,13 +2,15 @@
  * Header — the one-line LiTT brand band.
  *
  * ```
- *   ⚡ LiTT                                      LOCAL
+ *   ⚡ LiTT                              ● LOCAL  ● REMOTE
  * ```
  *
  * The header ONLY brands the surface. Project, branch, model, and
  * runtime state live in the status bar — never duplicated. The LOCAL
- * indicator is the single state dot (muted; the status bar owns the
- * details). On narrow terminals the indicator drops off.
+ * and REMOTE indicators are independent truth sources — LOCAL is always
+ * available (RuntimeSession), REMOTE reflects the actual transport
+ * connection state to terminal-server. On narrow terminals the
+ * indicators drop off.
  */
 
 import React from "react";
@@ -35,21 +37,42 @@ export interface HeaderProps {
 
 export function Header({
   localRuntime,
+  remoteRuntime,
 }: HeaderProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
 
+  // ─── LOCAL indicator (always available — RuntimeSession) ──────────
   const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
   const localColor = localRuntime === "ready" ? COLORS.success
     : localRuntime === "error" ? COLORS.error : COLORS.warning;
   const localLabel = localRuntime === "ready" ? "LOCAL"
     : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
 
+  // ─── REMOTE indicator (reflects actual transport connection state) ──
+  // Only shown when remote is not "offline" (i.e. when --remote was used
+  // or a RuntimeClient was created). When offline, the indicator is
+  // omitted entirely — LOCAL is the only active runtime.
+  const showRemote = remoteRuntime !== "offline";
+  const remoteIcon = remoteRuntime === "connected" ? "●"
+    : remoteRuntime === "error" ? "✗" : "○";
+  const remoteColor = remoteRuntime === "connected" ? COLORS.success
+    : remoteRuntime === "error" ? COLORS.error : COLORS.warning;
+  const remoteLabel = remoteRuntime === "connected" ? "REMOTE"
+    : remoteRuntime === "connecting" ? "REMOTE…"
+    : remoteRuntime === "reconnecting" ? "REMOTE↻"
+    : remoteRuntime === "error" ? "REMOTE ERR" : "REMOTE";
+
   return (
     <Box justifyContent="space-between">
       <Text bold color={COLORS.brand}>⚡ LiTT</Text>
       {width >= 60 && (
-        <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
+        <Box gap={2}>
+          <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
+          {showRemote && (
+            <Text color={remoteColor} dimColor={remoteRuntime === "connected"}>{remoteIcon} {remoteLabel}</Text>
+          )}
+        </Box>
       )}
     </Box>
   );

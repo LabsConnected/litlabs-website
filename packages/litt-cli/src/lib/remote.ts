@@ -12,6 +12,29 @@
  * This means `litt build --remote` and `/build` in Studio execute
  * the same dispatcher and share the same runId.
  *
+ * Authentication (token exchange flow):
+ *   The CLI NEVER holds TERMINAL_AUTH_SECRET or CLERK_SECRET_KEY.
+ *   Instead:
+ *     1. The user provides a Clerk token (LITT_CLERK_TOKEN env var
+ *        or obtained via `litt login`)
+ *     2. The CLI sends the Clerk token to /api/token-exchange
+ *     3. terminal-server verifies the Clerk token server-side
+ *     4. terminal-server mints a short-lived terminal JWT (5 min)
+ *     5. The CLI uses the terminal JWT for /api/command, /api/runtime, etc.
+ *     6. The terminal JWT is cached and refreshed when it expires
+ *
+ * LITT_CLERK_TOKEN is a TEMPORARY acceptance-test auth mechanism.
+ * It is NOT the final CLI login UX. The final UX will be `litt login`
+ * which opens a browser-based Clerk OAuth flow and stores the session
+ * token in the OS keychain. LITT_CLERK_TOKEN exists only to enable
+ * automated acceptance tests and manual remote testing before the
+ * full login flow is implemented. It should never be documented as
+ * a user-facing feature.
+ *
+ * The internal service key (TERMINAL_INTERNAL_SERVICE_KEY) is NOT
+ * used for user-facing CLI dispatch. That key is reserved for
+ * service-to-service calls (Next.js → terminal-server).
+ *
  * Protocol: imports the ONE shared `RemoteCommandRequest` /
  * `RemoteCommandResponse` contract from `@litt/agent-core`. The server
  * decodes the exact same schema. No duplicate interface definitions,
@@ -26,17 +49,104 @@ import type {
 } from "@litt/agent-core";
 import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
 
+// Re-export for CLI consumers (index.ts imports these from remote.ts)
+export { isRemoteError, hasRemoteResult };
+
 export interface RemoteDispatchOptions {
   terminalUrl?: string;
-  internalKey?: string;
+  /** Clerk token for authentication (obtained via `litt login` or LITT_CLERK_TOKEN env) */
+  clerkToken?: string;
+  /** Pre-exchanged terminal JWT (skip token exchange if provided) */
+  terminalToken?: string;
   cwd?: string;
   mode?: MissionMode;
 }
 
 const DEFAULT_TERMINAL_URL = "http://127.0.0.1:4001";
 
+// ─── Terminal JWT cache (per-process) ─────────────────────────────
+
+interface CachedToken {
+  token: string;
+  expiresAt: number; // epoch ms
+}
+
+let cachedTerminalToken: CachedToken | null = null;
+
 /**
- * Send a command to terminal-server's /internal/command endpoint.
+ * Exchange a Clerk token for a short-lived terminal JWT via
+ * POST /api/token-exchange. The terminal JWT is cached and reused
+ * until it expires (with a 30s safety margin).
+ *
+ * The client NEVER touches TERMINAL_AUTH_SECRET — the server mints
+ * the terminal JWT using the secret, server-side.
+ */
+export async function exchangeClerkToken(
+  clerkToken: string,
+  terminalUrl: string = process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL,
+): Promise<string> {
+  const response = await fetch(`${terminalUrl}/api/token-exchange`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${clerkToken}`,
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Token exchange failed (${response.status})`);
+  }
+
+  const payload = await response.json() as {
+    terminalToken: string;
+    expiresIn: number;
+    userId: string;
+  };
+
+  // Cache with 30s safety margin
+  cachedTerminalToken = {
+    token: payload.terminalToken,
+    expiresAt: Date.now() + (payload.expiresIn - 30) * 1000,
+  };
+
+  return payload.terminalToken;
+}
+
+/**
+ * Get a valid terminal JWT, exchanging the Clerk token if needed.
+ * Uses the cache if the token is still valid.
+ */
+async function getTerminalToken(options: RemoteDispatchOptions): Promise<string> {
+  // Pre-exchanged token takes priority
+  if (options.terminalToken) return options.terminalToken;
+
+  // Check cache
+  if (cachedTerminalToken && Date.now() < cachedTerminalToken.expiresAt) {
+    return cachedTerminalToken.token;
+  }
+
+  // Need to exchange a Clerk token
+  const clerkToken = options.clerkToken ?? process.env.LITT_CLERK_TOKEN ?? "";
+  if (!clerkToken) {
+    throw new Error(
+      "No Clerk token available. Set LITT_CLERK_TOKEN or run `litt login` " +
+      "to authenticate. Run without --remote for local execution.",
+    );
+  }
+
+  const terminalUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+  return exchangeClerkToken(clerkToken, terminalUrl);
+}
+
+/**
+ * Send a command to terminal-server's /api/command endpoint.
+ *
+ * Uses the token exchange flow: the CLI sends a terminal JWT (obtained
+ * by exchanging a Clerk token via /api/token-exchange). The server
+ * verifies the terminal JWT and extracts userId from it — NOT from
+ * the request body.
+ *
  * Returns the canonical RemoteCommandResponse — the SAME schema the
  * server produces. Structured argv is preserved end-to-end (never
  * encoded into a shell string).
@@ -47,14 +157,7 @@ export async function dispatchRemote(
   options: RemoteDispatchOptions = {},
 ): Promise<RemoteCommandResponse> {
   const baseUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
-  const key = options.internalKey ?? process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-
-  if (key.length < 32) {
-    throw new Error(
-      "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars). " +
-      "Set it in your environment or run without --remote for local execution.",
-    );
-  }
+  const token = await getTerminalToken(options);
 
   const requestBody: RemoteCommandRequest = {
     command,
@@ -63,11 +166,11 @@ export async function dispatchRemote(
     mode: options.mode,
   };
 
-  const response = await fetch(`${baseUrl}/internal/command`, {
+  const response = await fetch(`${baseUrl}/api/command`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Internal-Service-Key": key,
+      "Authorization": `Bearer ${token}`,
     },
     body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(240_000),
@@ -96,20 +199,27 @@ export async function dispatchRemote(
 }
 
 /**
- * Check if terminal-server is reachable.
+ * Check if the terminal-server is reachable and healthy.
+ * Does NOT require authentication — just hits the public health endpoint.
  */
-export async function isRemoteAvailable(options: RemoteDispatchOptions = {}): Promise<boolean> {
+export async function isRemoteAvailable(
+  options: { terminalUrl?: string } = {},
+): Promise<boolean> {
   const baseUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
   try {
-    const res = await fetch(`${baseUrl}/health/live`, {
-      signal: AbortSignal.timeout(3000),
+    const response = await fetch(`${baseUrl}/health/live`, {
+      signal: AbortSignal.timeout(5000),
     });
-    return res.ok;
+    return response.ok;
   } catch {
     return false;
   }
 }
 
-// Re-export the type guards so callers (index.ts) can branch on typed
-// errors without re-importing from agent-core.
-export { isRemoteError, hasRemoteResult };
+/**
+ * Clear the cached terminal token. Called on disconnect or when
+ * the user explicitly logs out.
+ */
+export function clearTerminalTokenCache(): void {
+  cachedTerminalToken = null;
+}

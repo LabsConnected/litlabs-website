@@ -150,17 +150,35 @@ export class DesktopRuntimeClient {
   }
 
   private async getAuthToken(): Promise<string> {
-    // Use Tauri invoke to get auth token from Rust backend
-    // Secret handling stays in native boundary
+    // The desktop app NEVER holds TERMINAL_AUTH_SECRET. It exchanges a
+    // Clerk token (from the webview's Clerk session) for a short-lived
+    // terminal JWT via the terminal-server's /api/token-exchange endpoint.
+    //
+    // In local dev mode (no Clerk token available), falls back to an
+    // unsigned dev token that only works when the server has no
+    // TERMINAL_AUTH_SECRET configured.
     try {
       const { invoke } = await import("@tauri-apps/api/core");
+
+      // Try to get a Clerk token from the webview session
+      // (injected by the frontend Clerk provider)
+      const clerkToken = (window as any).__clerkToken as string | undefined;
+      if (clerkToken) {
+        const terminalToken = await invoke<string>("exchange_clerk_token", {
+          clerkToken,
+          terminalUrl: TERMINAL_SERVER_URL,
+        });
+        return terminalToken;
+      }
+
+      // Dev fallback: unsigned dev token (only works in local dev mode)
       const canonicalCwd = this.cwd;
-      console.log("[DesktopRuntime] Token payload cwd:", canonicalCwd);
-      const token = await invoke<string>("generate_desktop_token", { cwd: canonicalCwd });
+      console.log("[DesktopRuntime] No Clerk token — using dev token. cwd:", canonicalCwd);
+      const token = await invoke<string>("generate_dev_token", { cwd: canonicalCwd });
       return token;
     } catch {
-      // Dev fallback: unsigned dev token (only works if TERMINAL_AUTH_SECRET is unset/null)
-      const userId = "desktop-local";
+      // Last-resort dev fallback: unsigned dev token
+      const userId = "desktop-local-dev";
       const timestamp = Math.floor(Date.now() / 1000);
       const payload = { sub: userId, aud: "littree-terminal", iat: timestamp, exp: timestamp + 3600 };
       const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");

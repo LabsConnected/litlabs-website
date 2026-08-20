@@ -62,9 +62,7 @@ function makeState(overrides: Partial<RuntimeState> = {}): RuntimeState {
 function createClient(): RuntimeClient {
   return new RuntimeClient({
     terminalUrl: "http://127.0.0.1:4001",
-    authSecret: "test-auth-secret-" + "a".repeat(32),
-    internalKey: "test-internal-key-" + "b".repeat(32),
-    userId: "test-user",
+    terminalToken: "test-terminal-jwt-token",
   });
 }
 
@@ -278,7 +276,7 @@ describe("SignalHandler", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:4001/internal/cancel",
+      "http://127.0.0.1:4001/api/cancel",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ runId: "run_sigint_123" }),
