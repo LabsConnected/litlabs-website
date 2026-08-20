@@ -47,6 +47,7 @@ import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from 
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
+import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -1024,6 +1025,165 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // so neither path's `intent_classified → route` span silently bundles
     // context resolution into routing latency.
     perf.mark("context_resolved");
+
+    // ─── READ lane — bounded read-only project inspection ───────────
+    // Sits between LOCAL (deterministic fast lane) and MISSION (full
+    // agent lifecycle). Executes canonical read-only tools through the
+    // gateway, then optionally makes one synthesis model call to format
+    // results. Does NOT create a Mission, invoke the planner, or run
+    // VerificationGate.
+    if (intent === "read") {
+      const readMatch = matchReadTools(input);
+      if (readMatch) {
+        perf.mark("read_match");
+
+        // Refresh branch (same as CHAT path — keeps header truthful).
+        refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
+
+        // Surface the read query in the operator feed.
+        store.actions.addActivity({
+          id: `act_${Date.now()}_read`,
+          ts: Date.now(),
+          type: "agent.chat",
+          tag: "READ",
+          text: truncateActivity(input, 40),
+          fullText: input,
+        });
+        // Persist user message to the chat transcript.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.setIsProcessing(true);
+        store.actions.startBusy();
+        try {
+          const gateway = session.getGateway();
+          const cwd = session.getCwd();
+
+          // Execute read tools in parallel through the canonical gateway.
+          for (const call of readMatch.calls) {
+            perf.mark(`tool_start:${call.toolId}`);
+          }
+          const readResults = await executeReadTools(
+            readMatch.calls,
+            async (toolId, args) => {
+              const r = await gateway.execute({
+                toolId,
+                inputs: args,
+                cwd,
+                mode: session.getMode(),
+                identity: CLI_IDENTITY,
+              });
+              return r.result;
+            },
+          );
+          for (const r of readResults) {
+            perf.mark(`tool_end:${r.toolId}`);
+            // Surface truthful tool activity.
+            act(
+              store,
+              `${r.label}: ${r.result.success ? r.result.message : r.result.message}`,
+              r.result.success ? "info" : "error",
+              r.result.success ? "success" : "failed",
+              "READ",
+            );
+          }
+
+          // ─── Optional synthesis ───
+          if (readMatch.needsSynthesis && hasOpenRouterKey()) {
+            perf.mark("synthesis_start");
+            const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
+            const routed = modelRuntime.route(
+              store.state.routingMode,
+              store.state.selectedModel,
+              synthesisPrompt,
+            );
+            store.actions.setActiveModel(routed.label);
+            const adapter = resolveProviderAdapter(routed);
+            store.actions.setActiveProvider(adapter.providerId);
+            // Start the assistant message for streaming synthesis.
+            store.actions.addChatMessage({
+              role: "assistant",
+              content: "",
+              ts: Date.now(),
+              status: "streaming",
+              servedModel: routed.label,
+            });
+            let synthesized = "";
+            const modelResult = await adapter.stream(
+              [{ role: "user", content: synthesisPrompt }],
+              (event) => {
+                if (event.type === "delta") {
+                  synthesized += event.text;
+                  perf.mark("first_token");
+                  store.actions.appendAssistantDelta(event.text);
+                }
+              },
+            );
+            perf.mark("finalize");
+            store.actions.finalizeAssistantMessage({
+              content: synthesized || modelResult.content || "No synthesis produced.",
+              status: "complete",
+              servedModel: routed.label,
+            });
+          } else {
+            // No synthesis — format raw tool results as the answer.
+            const rawAnswer = readResults.map((r) => {
+              const d = r.result.data;
+              const lines = [`${r.label}:`];
+              if (d && typeof d === "object") {
+                for (const [k, v] of Object.entries(d)) {
+                  lines.push(`  ${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);
+                }
+              } else {
+                lines.push(`  ${r.result.message}`);
+              }
+              return lines.join("\n");
+            }).join("\n\n");
+            perf.mark("finalize");
+            store.actions.addChatMessage({
+              role: "assistant",
+              content: rawAnswer,
+              ts: Date.now(),
+              status: "complete",
+              servedModel: "read-tools",
+            });
+          }
+
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: "info",
+            tag: "READ",
+            text: `Read complete — ${readMatch.summary}`,
+          });
+        } catch (err) {
+          const errText = err instanceof Error ? err.message : String(err);
+          perf.mark("finalize");
+          store.actions.finalizeAssistantMessage({
+            content: `Read failed: ${errText}`,
+            status: "error",
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}_err`,
+            ts: Date.now(),
+            type: "error",
+            tag: "READ",
+            text: `Read error: ${errText}`,
+          });
+        } finally {
+          store.actions.setIsProcessing(false);
+          store.actions.stopBusy();
+          perf.end("read");
+          persistSession();
+        }
+        return;
+      }
+      // If readMatch is null, fall through to CHAT (shouldn't happen
+      // if intent classification is correct, but defensive).
+    }
 
     if (hasOpenRouterKey()) {
       // CHAT intent — casual response, no mission lifecycle.

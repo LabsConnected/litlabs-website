@@ -244,4 +244,79 @@ describe("classifyIntent", () => {
       expect(classifyIntent("deploy the app")).toBe("mission");
     });
   });
+
+  // ─── READ intent — bounded read-only project inspection ───────────
+  describe("read intent — bounded project inspection queries", () => {
+    it("'what framework is this' is read", () => {
+      expect(classifyIntent("what framework is this")).toBe("read");
+    });
+
+    it("'what package manager is this' is read", () => {
+      expect(classifyIntent("what package manager is this")).toBe("read");
+    });
+
+    it("'what scripts are available' is read", () => {
+      expect(classifyIntent("what scripts are available")).toBe("read");
+    });
+
+    it("'what dependencies does this use' is read", () => {
+      expect(classifyIntent("what dependencies does this use")).toBe("read");
+    });
+
+    it("'what files changed' is read", () => {
+      expect(classifyIntent("what files changed")).toBe("read");
+    });
+
+    it("'show recent commits' is read", () => {
+      expect(classifyIntent("show recent commits")).toBe("read");
+    });
+
+    it("'tell me the framework and branch' is read", () => {
+      expect(classifyIntent("tell me the framework and branch")).toBe("read");
+    });
+
+    it("'what framework and branch is this' is read", () => {
+      expect(classifyIntent("what framework and branch is this")).toBe("read");
+    });
+
+    it("'which package manager' is read", () => {
+      expect(classifyIntent("which package manager")).toBe("read");
+    });
+  });
+
+  describe("read vs chat boundary", () => {
+    it("'what is TypeScript' is chat (general knowledge, not project state)", () => {
+      expect(classifyIntent("what is TypeScript")).toBe("chat");
+    });
+
+    it("'what is the meaning of life' is chat (not project state)", () => {
+      expect(classifyIntent("what is the meaning of life")).toBe("chat");
+    });
+
+    it("'explain what framework means' is chat (info prefix)", () => {
+      expect(classifyIntent("explain what framework means")).toBe("chat");
+    });
+
+    it("'what does npm run build do' is chat (info prefix)", () => {
+      expect(classifyIntent("what does npm run build do")).toBe("chat");
+    });
+  });
+
+  describe("read vs mission boundary", () => {
+    it("'inspect this repo and tell me the framework and branch' is mission", () => {
+      expect(classifyIntent("inspect this repo and tell me the framework and branch")).toBe("mission");
+    });
+
+    it("'scan this repo and tell me what needs attention' is mission", () => {
+      expect(classifyIntent("scan this repo and tell me what needs attention")).toBe("mission");
+    });
+
+    it("'audit the repo' is mission", () => {
+      expect(classifyIntent("audit the repo")).toBe("mission");
+    });
+
+    it("'fix the framework' is mission", () => {
+      expect(classifyIntent("fix the framework")).toBe("mission");
+    });
+  });
 });

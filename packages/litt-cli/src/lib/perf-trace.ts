@@ -79,7 +79,7 @@ export class PerfTrace {
    *
    * `kind` is the run class: "chat" / "mission" for model-backed turns,
    * "local" for the deterministic Local Fast Lane (no model/provider). */
-  end(kind: "chat" | "mission" | "local"): void {
+  end(kind: "chat" | "mission" | "local" | "read"): void {
     if (!this.enabled || this.ended) return;
     this.ended = true;
     const total = Date.now() - this.t0;
