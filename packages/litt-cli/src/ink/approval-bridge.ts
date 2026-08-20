@@ -21,6 +21,35 @@
 
 import type { ExecutionRequest, RiskAssessment } from "@litt/agent-core";
 
+/**
+ * Human-readable description of a non-shell tool's pending action, shown
+ * in the approval prompt. Shell commands (project.run) already get a
+ * readable "<command> <args>" string from the risk assessment branch —
+ * this covers tools where the risky part is in the structured inputs,
+ * not a raw argv (e.g. project.ship's files/message/branch/push/PR).
+ */
+function describeToolAction(toolId: string, inputs: Record<string, unknown>): string {
+  if (toolId === "project.ship") {
+    const files = Array.isArray(inputs.files)
+      ? inputs.files.filter((f): f is string => typeof f === "string")
+      : [];
+    const message = typeof inputs.message === "string" ? inputs.message : "";
+    const branch = typeof inputs.branch === "string" && inputs.branch.trim().length > 0
+      ? inputs.branch
+      : "(auto-generated branch)";
+    const push = inputs.push !== false;
+    const createPR = inputs.createPR !== false;
+    const fileList = files.length <= 4
+      ? files.join(", ")
+      : `${files.slice(0, 4).join(", ")}, +${files.length - 4} more`;
+    const steps = ["stage", "commit"];
+    if (push) steps.push("push");
+    if (createPR) steps.push("draft PR");
+    return `ship [${fileList}] → "${message}" on ${branch} → ${steps.join(" → ")}`;
+  }
+  return toolId;
+}
+
 export interface PendingApproval {
   runId: string;
   toolCallId: string;
@@ -51,7 +80,7 @@ export class ApprovalBridge {
 
     const action = risk
       ? `${request.inputs.command ?? ""} ${(request.inputs.args as string[] ?? []).join(" ")}`.trim()
-      : request.toolId;
+      : describeToolAction(request.toolId, request.inputs);
 
     this._pending = {
       runId: request.runId ?? "",
