@@ -124,6 +124,8 @@ export function LandingFooter() {
                   key={label}
                   href={href}
                   aria-label={label}
+                  rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
+                  target={href.startsWith("http") ? "_blank" : undefined}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/8 bg-white/[0.02] text-neutral-400 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
                 >
                   <Icon />
