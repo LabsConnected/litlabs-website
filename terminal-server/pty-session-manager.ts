@@ -68,6 +68,162 @@ export const OUTPUT_DROP_WARN_INTERVAL_MS = 5_000;
 /** Max cwd path length. */
 const MAX_CWD_LENGTH = 4096;
 
+// ─── PTY environment allowlist ────────────────────────────────────
+
+/**
+ * Allowlist of environment variables that are SAFE to pass into a
+ * user-controlled PTY. These are standard shell/runtime variables
+ * that contain no secrets.
+ *
+ * This is an ALLOWLIST, not a denylist. Any environment variable NOT
+ * in this list (or in the LiTT_* prefix set below) is stripped from
+ * the PTY environment. This ensures that future server secrets
+ * added to the terminal-server's environment cannot accidentally
+ * leak into remote shells.
+ *
+ * Variables are matched case-sensitively on POSIX and
+ * case-insensitively on Windows (Windows env vars are case-insensitive).
+ */
+const SAFE_ENV_ALLOWLIST: readonly string[] = [
+  // Shell / terminal basics
+  "TERM",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  "LC_TIME",
+  "LC_COLLATE",
+  "LC_NUMERIC",
+  "LC_MONETARY",
+  // User identity (not secrets — just usernames)
+  "USER",
+  "USERNAME",
+  "LOGNAME",
+  // Home + temp directories
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  // Path / executable search
+  "PATH",
+  // Windows-specific shell/runtime
+  "SystemRoot",
+  "COMSPEC",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "PROGRAMDATA",
+  "NUMBER_OF_PROCESSORS",
+  "OS",
+  "PROCESSOR_ARCHITECTURE",
+  "PSModulePath",
+  // Color / terminal cosmetics
+  "COLORTERM",
+  "FORCE_COLOR",
+  "NO_COLOR",
+  // Editor (not a secret — user preference)
+  "EDITOR",
+  "VISUAL",
+  // Pager (not a secret — user preference)
+  "PAGER",
+  "LESS",
+  // Timezone (not a secret)
+  "TZ",
+];
+
+/**
+ * LiTT workspace variables that are explicitly injected into the PTY
+ * environment. These are NOT secrets — they identify the workspace
+ * context for the shell session.
+ */
+const LITT_ENV_PREFIX = "LITTREE_";
+
+/**
+ * Build a safe PTY environment from the server's process.env using
+ * an allowlist. Server secrets (auth keys, database URLs, API keys,
+ * Railway-provided secrets, etc.) are NEVER passed into the PTY.
+ *
+ * The returned environment contains:
+ *   - Only variables in SAFE_ENV_ALLOWLIST (case-insensitive on Windows)
+ *   - Explicitly injected LiTT workspace variables (LITTREE_*)
+ *   - TERM forced to "xterm-256color"
+ *
+ * It does NOT contain:
+ *   - process.env wholesale (no ...process.env spread)
+ *   - Any secret/key/token/password/credential variable
+ *   - RAILWAY_* variables
+ *   - TERMINAL_AUTH_SECRET, TERMINAL_INTERNAL_SERVICE_KEY
+ *   - DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ *   - OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY
+ *   - Any future server-only secret
+ */
+export function buildPtyEnv(
+  serverEnv: NodeJS.ProcessEnv = process.env,
+  littVars: {
+    userId: string;
+    sessionId: string;
+    workspaceId?: string | null;
+    projectId?: string | null;
+  },
+): Record<string, string> {
+  const isWindows = process.platform === "win32";
+  const allowSet = new Set(
+    isWindows
+      ? SAFE_ENV_ALLOWLIST.map((v) => v.toUpperCase())
+      : SAFE_ENV_ALLOWLIST,
+  );
+
+  const safeEnv: Record<string, string> = {};
+
+  // Copy only allowlisted variables from the server environment
+  for (const [key, value] of Object.entries(serverEnv)) {
+    if (value === undefined) continue;
+    const matchKey = isWindows ? key.toUpperCase() : key;
+    if (allowSet.has(matchKey)) {
+      safeEnv[key] = value;
+    }
+  }
+
+  // Force TERM for consistent terminal emulation
+  safeEnv.TERM = "xterm-256color";
+
+  // Inject LiTT workspace context (NOT secrets)
+  safeEnv[`${LITT_ENV_PREFIX}USER_ID`] = littVars.userId;
+  safeEnv[`${LITT_ENV_PREFIX}SESSION_ID`] = littVars.sessionId;
+  safeEnv[`${LITT_ENV_PREFIX}WORKSPACE_ID`] = littVars.workspaceId ?? "";
+  safeEnv[`${LITT_ENV_PREFIX}PROJECT_ID`] = littVars.projectId ?? "";
+
+  return safeEnv;
+}
+
+/**
+ * Known server secrets that must NEVER appear in a PTY environment.
+ * This is a defense-in-depth check — the allowlist should already
+ * prevent these from leaking, but this list is used in tests and
+ * runtime assertions to PROVE they are absent.
+ */
+export const KNOWN_SECRETS_TO_REJECT: readonly string[] = [
+  "TERMINAL_AUTH_SECRET",
+  "TERMINAL_INTERNAL_SERVICE_KEY",
+  "DATABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_URL",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
+  "STRIPE_SECRET_KEY",
+  "CLERK_SECRET_KEY",
+  "LIVEKIT_API_KEY",
+  "LIVEKIT_API_SECRET",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_ACCESS_KEY_ID",
+  "REDIS_URL",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+];
+
 // ─── Workspace boundary validation ────────────────────────────────
 
 /**
@@ -382,47 +538,19 @@ export class PtySessionManager {
       session.bpWarnPending = true;
     };
 
-    // ─── Spawn PTY via factory ────────────────────────────────────
-    let handle: PtyProcessHandle;
+    // ─── Create session record BEFORE spawning ─────────────────────
+    // The session must be in the map before the PTY is spawned so that
+    // the wrappedOnData / onExit callbacks (which look up the session by
+    // ID) can find it. Without this, early PTY output or an immediate
+    // exit would be silently dropped — the callbacks would see no session
+    // and return early. We use a placeholder handle that is swapped for
+    // the real one after a successful spawn.
+    const placeholderHandle: PtyProcessHandle = {
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+    };
 
-    try {
-      if (opts.useDocker) {
-        handle = this.spawnFactory.spawnDocker({
-          userId: opts.userId,
-          sessionId,
-          cwd: safeCwd,
-          onData: wrappedOnData,
-          onExit: ({ exitCode, signal }) => {
-            this.markExited(sessionId, exitCode);
-            opts.onExit({ sessionId, exitCode, signal });
-          },
-        });
-      } else {
-        handle = this.spawnFactory.spawnHost({
-          shell,
-          cwd: safeCwd,
-          env: {
-            ...process.env as Record<string, string>,
-            TERM: "xterm-256color",
-            LITTREE_USER_ID: opts.userId,
-            LITTREE_SESSION_ID: sessionId,
-            LITTREE_WORKSPACE_ID: opts.workspaceId ?? "",
-            LITTREE_PROJECT_ID: opts.projectId ?? "",
-            HOME: safeCwd,
-          },
-          onData: wrappedOnData,
-          onExit: ({ exitCode, signal }) => {
-            this.markExited(sessionId, exitCode);
-            opts.onExit({ sessionId, exitCode, signal });
-          },
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start PTY";
-      throw new Error(message);
-    }
-
-    // ─── Create session record ────────────────────────────────────
     const session: PtySession = {
       sessionId,
       userId: opts.userId,
@@ -432,7 +560,7 @@ export class PtySessionManager {
       shell: process.platform === "win32" ? "powershell" : (process.env.SHELL || "bash"),
       createdAt: now,
       lastActivityAt: now,
-      handle,
+      handle: placeholderHandle,
       exited: false,
       exitCode: null,
       totalOutputDelivered: 0,
@@ -456,6 +584,50 @@ export class PtySessionManager {
     };
 
     this.sessions.set(sessionId, session);
+
+    // ─── Spawn PTY via factory ────────────────────────────────────
+    let handle: PtyProcessHandle;
+
+    try {
+      if (opts.useDocker) {
+        handle = this.spawnFactory.spawnDocker({
+          userId: opts.userId,
+          sessionId,
+          cwd: safeCwd,
+          onData: wrappedOnData,
+          onExit: ({ exitCode, signal }) => {
+            this.markExited(sessionId, exitCode);
+            opts.onExit({ sessionId, exitCode, signal });
+          },
+        });
+      } else {
+        handle = this.spawnFactory.spawnHost({
+          shell,
+          cwd: safeCwd,
+          env: buildPtyEnv(process.env, {
+            userId: opts.userId,
+            sessionId,
+            workspaceId: opts.workspaceId,
+            projectId: opts.projectId,
+          }),
+          onData: wrappedOnData,
+          onExit: ({ exitCode, signal }) => {
+            this.markExited(sessionId, exitCode);
+            opts.onExit({ sessionId, exitCode, signal });
+          },
+        });
+      }
+    } catch (err) {
+      // Spawn failed — clean up the placeholder session so it doesn't
+      // leak as a ghost entry with a no-op handle.
+      this.clearTimers(session);
+      this.sessions.delete(sessionId);
+      const message = err instanceof Error ? err.message : "Failed to start PTY";
+      throw new Error(message);
+    }
+
+    // ─── Swap placeholder handle for the real one ──────────────────
+    session.handle = handle;
 
     // ─── Start timers ─────────────────────────────────────────────
     this.resetIdleTimer(sessionId);

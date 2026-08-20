@@ -24,7 +24,6 @@ import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
 import { dispatchMobileCommand } from "./mobile-commands";
-import { bearerToken, verifyTerminalToken } from "./auth";
 import {
   initRuntime,
   runtimeCommandStart,
@@ -52,6 +51,8 @@ import {
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
+import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
+import { verifyClerkToken } from "./clerk-verify";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -191,6 +192,122 @@ app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedReq
   res.json(getRuntimeState());
 });
 
+// ─── Token exchange: Clerk token → short-lived terminal JWT ───────
+// POST /api/token-exchange
+//
+// Security chain:
+//   CLI/Desktop/Mobile (authenticated Clerk user)
+//     → sends Clerk-issued JWT (Authorization: Bearer <clerk-token>)
+//     → terminal-server verifies Clerk token server-side (CLERK_SECRET_KEY)
+//     → server derives userId from verified Clerk token (NOT from request body)
+//     → server mints short-lived terminal JWT (5 min TTL) using TERMINAL_AUTH_SECRET
+//     → returns terminal JWT to client
+//     → client uses terminal JWT for /api/command, /api/runtime, /api/cancel
+//
+// The client NEVER touches TERMINAL_AUTH_SECRET or CLERK_SECRET_KEY.
+// The terminal JWT is short-lived (5 min) and must be refreshed via
+// another token exchange.
+app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const clerkToken = bearerToken(req.headers.authorization);
+    if (!clerkToken) {
+      res.status(401).json({ error: "Missing Clerk token" });
+      return;
+    }
+
+    // ─── 1. Verify the Clerk token server-side ────────────────────
+    // userId comes from the verified token, NOT from the request body.
+    const verified = await verifyClerkToken(clerkToken);
+    const userId = verified.userId;
+
+    // ─── 2. Workspace/project authorization (server-side) ────────
+    // If the client requests a specific workspaceId, verify the
+    // workspace exists AND belongs to the authenticated user.
+    // This prevents cross-user workspace access.
+    //
+    // The workspaceId is NOT trusted from the request body for
+    // identity — it's only used for authorization after the user
+    // has been verified via the Clerk token.
+    const body = req.body ?? {};
+    const requestedWorkspaceId = typeof body.workspaceId === "string" ? body.workspaceId : null;
+    let authorizedWorkspaceId: string | undefined;
+    let authorizedProjectId: string | undefined;
+    let authorizedWorkspaceRoot: string | undefined;
+
+    if (requestedWorkspaceId) {
+      const ws = getWorkspace(requestedWorkspaceId);
+      if (!ws) {
+        res.status(404).json({ error: "Workspace not found" });
+        return;
+      }
+      // ─── Ownership check: workspace must belong to the verified user ──
+      if (ws.userId !== userId) {
+        res.status(403).json({
+          error: "Forbidden — workspace does not belong to the authenticated user",
+        });
+        return;
+      }
+      authorizedWorkspaceId = ws.workspaceId;
+      authorizedProjectId = ws.projectId;
+      authorizedWorkspaceRoot = ws.root;
+    }
+
+    // ─── 3. Mint a short-lived terminal JWT (5 min TTL) ──────────
+    // The terminal JWT embeds the verified userId and optionally the
+    // authorized workspaceId/projectId. The client cannot forge these
+    // claims — they come from server-side verification.
+    const terminalToken = authorizedWorkspaceId
+      ? mintTerminalToken(userId, 300, {
+          workspaceId: authorizedWorkspaceId,
+          projectId: authorizedProjectId,
+          cwd: authorizedWorkspaceRoot,
+        })
+      : mintTerminalToken(userId, 300);
+
+    res.json({
+      terminalToken,
+      expiresIn: 300,
+      userId, // returned for client convenience; the token is the authority
+      workspaceId: authorizedWorkspaceId,
+      projectId: authorizedProjectId,
+      workspaceRoot: authorizedWorkspaceRoot,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Token exchange failed";
+    res.status(401).json({ error: message });
+  }
+});
+
+// ─── User-authenticated runtime state endpoint ────────────────────
+// GET /api/runtime — returns the canonical runtime snapshot using
+// USER authentication (terminal JWT minted by /api/token-exchange).
+app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    verifyTerminalToken(bearerToken(req.headers.authorization));
+    res.json(getRuntimeState());
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+});
+
+// ─── User-authenticated cancel endpoint ───────────────────────────
+// POST /api/cancel — cancel the currently active run using USER auth.
+app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    verifyTerminalToken(bearerToken(req.headers.authorization));
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const runId = String(req.body?.runId ?? "");
+  if (!runId) {
+    res.status(400).json({ error: "Missing 'runId'" });
+    return;
+  }
+  // TODO: wire to actual cancel — for now returns ok
+  res.json({ ok: true, runId });
+});
+
 // ─── Command bridge endpoint ──────────────────────────────────────
 // POST /internal/command — dispatch a slash command through the
 // canonical command registry. Both Studio Web, `litt --remote`, and
@@ -222,6 +339,87 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── User-authenticated command endpoint ──────────────────────────
+// POST /api/command — dispatch a command through the canonical command
+// registry using USER authentication (terminal JWT), NOT the internal
+// service key. This is the endpoint `litt --remote` should use.
+//
+// Security chain:
+//   CLI authenticated user
+//     → signed user token (Authorization: Bearer <token>)
+//     → terminal-server verifies identity via verifyTerminalToken
+//     → userId extracted from JWT (NOT from request body)
+//     → authorized workspace/project
+//     → ExecutionGateway
+//
+// A user CANNOT specify another userId, workspaceId, or project and
+// gain access — the userId comes from the verified JWT, and workspace
+// ownership is validated against that userId.
+app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
+  // ─── 1. Verify user JWT ──────────────────────────────────────────
+  let userId: string;
+  try {
+    const token = bearerToken(req.headers.authorization);
+    const payload = verifyTerminalToken(token);
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
+    return;
+  }
+
+  // ─── 2. Validate request body ────────────────────────────────────
+  const body = req.body as RemoteCommandRequest;
+  if (!body?.command || typeof body.command !== "string") {
+    res.status(400).json({ error: "Missing 'command' field" });
+    return;
+  }
+  if (body.args !== undefined && !Array.isArray(body.args)) {
+    res.status(400).json({ error: "'args' must be a string[] (structured argv)" });
+    return;
+  }
+
+  // ─── 3. Build authenticated request ──────────────────────────────
+  // userId comes from the VERIFIED JWT — NOT from the request body.
+  // A user cannot impersonate another user by setting userId in the body.
+  // workspaceId/cwd are validated against the user's workspace root.
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const userWorkspaceRoot = workspaceRoot
+    ? resolve(workspaceRoot, userId)
+    : process.cwd();
+
+  // If the request specifies a cwd, validate it's within the user's workspace.
+  // This prevents cross-user workspace access.
+  let cwd = body.cwd ?? userWorkspaceRoot;
+  if (workspaceRoot) {
+    const resolvedCwd = resolve(cwd);
+    const resolvedUserRoot = resolve(userWorkspaceRoot);
+    const rel = relative(resolvedUserRoot, resolvedCwd);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      res.status(403).json({
+        error: "Forbidden — cwd is outside your workspace",
+      });
+      return;
+    }
+  }
+
+  const normalizedReq: RemoteCommandRequest = {
+    ...body,
+    args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
+    // userId from the JWT — overrides any value in the body
+    userId,
+    // cwd validated to be within the user's workspace
+    cwd,
+  };
+
+  try {
+    const result = await dispatchCommand(normalizedReq);
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

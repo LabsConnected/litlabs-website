@@ -40,6 +40,8 @@ import { join } from "path";
 import {
   PtySessionManager,
   validateWorkspacePath,
+  buildPtyEnv,
+  KNOWN_SECRETS_TO_REJECT,
   MAX_INPUT_SIZE,
   MAX_COLS,
   MAX_ROWS,
@@ -57,6 +59,8 @@ interface MockHandle extends PtyProcessHandle {
   written: string[];
   resizeCalls: Array<{ cols: number; rows: number }>;
   killed: boolean;
+  /** The environment passed to spawnHost — for env isolation tests. */
+  spawnEnv: Record<string, string>;
   /** Trigger a natural exit (simulates the PTY process dying). */
   simulateExit: (exitCode: number) => void;
   /** Emit output to the manager's onData callback (simulates PTY stdout). */
@@ -73,6 +77,7 @@ function createMockFactory(): PtySpawnFactory & {
   function makeMockHandle(
     onData: (data: string) => void,
     onExit: (info: { exitCode: number | null; signal?: number }) => void,
+    spawnEnv: Record<string, string> = {},
   ): MockHandle {
     let exitCb = onExit;
     let dataCb = onData;
@@ -80,6 +85,7 @@ function createMockFactory(): PtySpawnFactory & {
       written: [],
       resizeCalls: [],
       killed: false,
+      spawnEnv,
       write(data: string) { handle.written.push(data); },
       resize(cols: number, rows: number) { handle.resizeCalls.push({ cols, rows }); },
       kill() { handle.killed = true; },
@@ -92,8 +98,8 @@ function createMockFactory(): PtySpawnFactory & {
   return {
     hostSpawns,
     dockerSpawns,
-    spawnHost({ onData, onExit }): PtyProcessHandle {
-      const h = makeMockHandle(onData, onExit);
+    spawnHost({ onData, onExit, env }): PtyProcessHandle {
+      const h = makeMockHandle(onData, onExit, env);
       hostSpawns.push(h);
       return h;
     },
@@ -718,6 +724,372 @@ describe("PtySessionManager", () => {
     manager.kill(snap.sessionId, "test", "user-1");
     // Session is gone — getOutputStats returns null.
     expect(manager.getOutputStats(snap.sessionId, "user-1")).toBe(null);
+  });
+
+  // ─── Race condition: early PTY output during spawn ──────────────
+
+  it("EARLY OUTPUT: data emitted synchronously during spawn is NOT dropped", () => {
+    // Use a custom factory that emits data synchronously inside spawnHost,
+    // before create() has returned. This simulates a PTY that writes a
+    // banner or prompt immediately on spawn.
+    const received: string[] = [];
+    const earlyOutput = "Welcome to LiTT shell\r\n";
+    const earlyExitCode = 0;
+
+    const raceFactory: PtySpawnFactory = {
+      spawnHost({ onData, onExit }): PtyProcessHandle {
+        // Emit data BEFORE returning the handle — the session must
+        // already be in the map for wrappedOnData to find it.
+        onData(earlyOutput);
+        onExit({ exitCode: earlyExitCode });
+        return {
+          write: () => {},
+          resize: () => {},
+          kill: () => {},
+        };
+      },
+      spawnDocker(): PtyProcessHandle {
+        throw new Error("not used");
+      },
+    };
+
+    const raceManager = new PtySessionManager(
+      { maxConcurrentPerUser: 3, idleTimeoutMs: 10_000, absoluteLifetimeMs: 60_000 },
+      raceFactory,
+    );
+
+    try {
+      const onExit = vi.fn();
+      const snap = raceManager.create({
+        userId: "user-1",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        cwd: tempRoot,
+        allowedRoot: tempRoot,
+        useDocker: false,
+        onData: (data) => received.push(data),
+        onExit,
+      });
+
+      // The early output was delivered, not silently dropped.
+      expect(received).toEqual([earlyOutput]);
+
+      // The early exit was recorded — the snapshot already reflects it
+      // because the session was in the map before spawn (the fix).
+      expect(snap.exited).toBe(true);
+      expect(snap.exitCode).toBe(earlyExitCode);
+      const afterExit = raceManager.get(snap.sessionId, "user-1");
+      expect(afterExit).not.toBe(null);
+      expect(afterExit!.exited).toBe(true);
+      expect(afterExit!.exitCode).toBe(earlyExitCode);
+
+      // onExit callback was fired.
+      expect(onExit).toHaveBeenCalledWith({
+        sessionId: snap.sessionId,
+        exitCode: earlyExitCode,
+        signal: undefined,
+      });
+    } finally {
+      raceManager.shutdown();
+    }
+  });
+
+  it("EARLY OUTPUT: spawn failure cleans up the placeholder session", () => {
+    const failFactory: PtySpawnFactory = {
+      spawnHost(): PtyProcessHandle {
+        throw new Error("spawn failed");
+      },
+      spawnDocker(): PtyProcessHandle {
+        throw new Error("not used");
+      },
+    };
+
+    const failManager = new PtySessionManager(
+      { maxConcurrentPerUser: 3, idleTimeoutMs: 10_000, absoluteLifetimeMs: 60_000 },
+      failFactory,
+    );
+
+    try {
+      expect(() =>
+        failManager.create({
+          userId: "user-1",
+          projectId: "proj-1",
+          workspaceId: "ws-1",
+          cwd: tempRoot,
+          allowedRoot: tempRoot,
+          useDocker: false,
+          onData: vi.fn(),
+          onExit: vi.fn(),
+        }),
+      ).toThrow(/spawn failed/);
+
+      // The placeholder session was cleaned up — no ghost entry.
+      expect(failManager.size).toBe(0);
+    } finally {
+      failManager.shutdown();
+    }
+  });
+});
+
+// ─── PTY environment isolation tests ──────────────────────────────
+//
+// A remote LiTT shell must NEVER inherit the terminal server's own
+// credentials. These tests prove that:
+//   1. Safe env vars (PATH, HOME, TERM, etc.) reach the PTY
+//   2. Known server secrets do NOT reach the PTY
+//   3. An arbitrary newly-added secret does NOT automatically propagate
+//   4. PATH and required shell variables still work
+//   5. The synchronous early-output/early-exit regression remains fixed
+//   6. Spawn failure still removes the placeholder session
+
+describe("PTY environment isolation", () => {
+  let factory: ReturnType<typeof createMockFactory>;
+  let manager: PtySessionManager;
+  let tempRoot: string;
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    factory = createMockFactory();
+    manager = new PtySessionManager(
+      { maxConcurrentPerUser: 3, idleTimeoutMs: 10_000, absoluteLifetimeMs: 60_000 },
+      factory,
+    );
+    tempRoot = mkdtempSync(join(tmpdir(), "pty-env-test-"));
+    // Save and restore process.env so tests can inject fake secrets
+    // without leaking them to other test suites.
+    savedEnv = { ...process.env };
+  });
+
+  afterEach(() => {
+    // Restore process.env
+    for (const key of Object.keys(process.env)) {
+      if (!(key in savedEnv)) delete process.env[key];
+    }
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    manager.shutdown();
+    vi.useRealTimers();
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it("safe environment variables reach the PTY", () => {
+    // Set safe vars in process.env
+    process.env.PATH = "/usr/local/bin:/usr/bin:/bin";
+    process.env.HOME = "/home/testuser";
+    process.env.USER = "testuser";
+    process.env.SHELL = "/bin/bash";
+    process.env.LANG = "en_US.UTF-8";
+    process.env.TZ = "America/New_York";
+    process.env.EDITOR = "vim";
+
+    manager.create(makeOpts({ allowedRoot: tempRoot }));
+
+    const env = factory.hostSpawns[0].spawnEnv;
+    expect(env.PATH).toBe("/usr/local/bin:/usr/bin:/bin");
+    expect(env.HOME).toBe("/home/testuser");
+    expect(env.USER).toBe("testuser");
+    expect(env.SHELL).toBe("/bin/bash");
+    expect(env.LANG).toBe("en_US.UTF-8");
+    expect(env.TZ).toBe("America/New_York");
+    expect(env.EDITOR).toBe("vim");
+    // TERM is always forced
+    expect(env.TERM).toBe("xterm-256color");
+  });
+
+  it("known server secrets do NOT reach the PTY", () => {
+    // Inject all known secrets into process.env
+    for (const secret of KNOWN_SECRETS_TO_REJECT) {
+      process.env[secret] = `fake-${secret}-value`;
+    }
+    // Also add RAILWAY_* vars
+    process.env.RAILWAY_PROJECT_ID = "fake-project-id";
+    process.env.RAILWAY_SERVICE_ID = "fake-service-id";
+    process.env.RAILWAY_ENVIRONMENT = "production";
+    process.env.RAILWAY_STATIC_URL = "fake.railway.app";
+
+    manager.create(makeOpts({ allowedRoot: tempRoot }));
+
+    const env = factory.hostSpawns[0].spawnEnv;
+    // Every known secret must be absent
+    for (const secret of KNOWN_SECRETS_TO_REJECT) {
+      expect(env).not.toHaveProperty(secret);
+    }
+    // RAILWAY_* must be absent
+    expect(env).not.toHaveProperty("RAILWAY_PROJECT_ID");
+    expect(env).not.toHaveProperty("RAILWAY_SERVICE_ID");
+    expect(env).not.toHaveProperty("RAILWAY_ENVIRONMENT");
+    expect(env).not.toHaveProperty("RAILWAY_STATIC_URL");
+  });
+
+  it("an arbitrary newly-added secret does NOT automatically propagate", () => {
+    // Simulate a future secret that doesn't exist in any denylist.
+    // The allowlist approach means this should NEVER leak.
+    process.env.FUTURE_SECRET_API_KEY = "sk-future-12345";
+    process.env.SOME_NEW_DATABASE_TOKEN = "tok-abcde";
+    process.env.MY_COMPANY_INTERNAL_SECRET = "secret-xyz";
+
+    manager.create(makeOpts({ allowedRoot: tempRoot }));
+
+    const env = factory.hostSpawns[0].spawnEnv;
+    expect(env).not.toHaveProperty("FUTURE_SECRET_API_KEY");
+    expect(env).not.toHaveProperty("SOME_NEW_DATABASE_TOKEN");
+    expect(env).not.toHaveProperty("MY_COMPANY_INTERNAL_SECRET");
+  });
+
+  it("PATH and required shell variables still work", () => {
+    process.env.PATH = "/usr/bin:/bin";
+    process.env.HOME = "/home/user";
+    // Set SystemRoot with the canonical Windows casing
+    process.env.SystemRoot = "C:\\Windows";
+
+    manager.create(makeOpts({ allowedRoot: tempRoot }));
+
+    const env = factory.hostSpawns[0].spawnEnv;
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.HOME).toBe("/home/user");
+    // SystemRoot is in the allowlist — should pass through.
+    // On Windows, env var matching is case-insensitive, so "SystemRoot"
+    // in the allowlist matches "SystemRoot" in process.env.
+    // The key is preserved with its original casing from process.env.
+    const systemRootKey = Object.keys(env).find(
+      (k) => k.toUpperCase() === "SYSTEMROOT",
+    );
+    expect(systemRootKey).toBeTruthy();
+    expect(env[systemRootKey!]).toBe("C:\\Windows");
+  });
+
+  it("LiTT workspace variables are injected and are NOT secrets", () => {
+    manager.create(makeOpts({
+      allowedRoot: tempRoot,
+      userId: "user-42",
+      workspaceId: "ws-99",
+      projectId: "proj-7",
+    }));
+
+    const env = factory.hostSpawns[0].spawnEnv;
+    expect(env.LITTREE_USER_ID).toBe("user-42");
+    expect(env.LITTREE_SESSION_ID).toBeTruthy();
+    expect(env.LITTREE_WORKSPACE_ID).toBe("ws-99");
+    expect(env.LITTREE_PROJECT_ID).toBe("proj-7");
+    // These are workspace context, not secrets — no key/token/password patterns
+    expect(env.LITTREE_USER_ID).not.toMatch(/key|token|secret|password/i);
+  });
+
+  it("buildPtyEnv unit test — allowlist only, no process.env spread", () => {
+    const fakeServerEnv: NodeJS.ProcessEnv = {
+      PATH: "/usr/bin",
+      HOME: "/home/test",
+      TERM: "dumb", // should be overridden to xterm-256color
+      OPENAI_API_KEY: "sk-leaked",
+      DATABASE_URL: "postgres://user:pass@host/db",
+      RAILWAY_PROJECT_ID: "proj-123",
+      TERMINAL_AUTH_SECRET: "super-secret",
+      SOME_RANDOM_VAR: "should-not-pass",
+    };
+
+    const env = buildPtyEnv(fakeServerEnv, {
+      userId: "u1",
+      sessionId: "s1",
+      workspaceId: "w1",
+      projectId: "p1",
+    });
+
+    // Safe vars pass through
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HOME).toBe("/home/test");
+    // TERM is forced
+    expect(env.TERM).toBe("xterm-256color");
+    // LiTT vars injected
+    expect(env.LITTREE_USER_ID).toBe("u1");
+    expect(env.LITTREE_SESSION_ID).toBe("s1");
+    expect(env.LITTREE_WORKSPACE_ID).toBe("w1");
+    expect(env.LITTREE_PROJECT_ID).toBe("p1");
+
+    // Secrets are absent
+    expect(env).not.toHaveProperty("OPENAI_API_KEY");
+    expect(env).not.toHaveProperty("DATABASE_URL");
+    expect(env).not.toHaveProperty("RAILWAY_PROJECT_ID");
+    expect(env).not.toHaveProperty("TERMINAL_AUTH_SECRET");
+    expect(env).not.toHaveProperty("SOME_RANDOM_VAR");
+  });
+
+  it("the synchronous early-output/early-exit regression remains fixed", () => {
+    // This is a re-confirmation of the race fix, in the env isolation suite,
+    // to ensure the env allowlist change didn't break the spawn-before-map fix.
+    const received: string[] = [];
+    const earlyOutput = "banner\r\n";
+    const earlyExitCode = 0;
+
+    const raceFactory: PtySpawnFactory = {
+      spawnHost({ onData, onExit }): PtyProcessHandle {
+        onData(earlyOutput);
+        onExit({ exitCode: earlyExitCode });
+        return { write: () => {}, resize: () => {}, kill: () => {} };
+      },
+      spawnDocker(): PtyProcessHandle {
+        throw new Error("not used");
+      },
+    };
+
+    const raceManager = new PtySessionManager(
+      { maxConcurrentPerUser: 3, idleTimeoutMs: 10_000, absoluteLifetimeMs: 60_000 },
+      raceFactory,
+    );
+
+    try {
+      const snap = raceManager.create({
+        userId: "user-1",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        cwd: tempRoot,
+        allowedRoot: tempRoot,
+        useDocker: false,
+        onData: (data) => received.push(data),
+        onExit: vi.fn(),
+      });
+      expect(received).toEqual([earlyOutput]);
+      expect(snap.exited).toBe(true);
+      expect(snap.exitCode).toBe(earlyExitCode);
+    } finally {
+      raceManager.shutdown();
+    }
+  });
+
+  it("spawn failure still removes the placeholder session", () => {
+    const failFactory: PtySpawnFactory = {
+      spawnHost(): PtyProcessHandle {
+        throw new Error("spawn failed");
+      },
+      spawnDocker(): PtyProcessHandle {
+        throw new Error("not used");
+      },
+    };
+
+    const failManager = new PtySessionManager(
+      { maxConcurrentPerUser: 3, idleTimeoutMs: 10_000, absoluteLifetimeMs: 60_000 },
+      failFactory,
+    );
+
+    try {
+      expect(() =>
+        failManager.create({
+          userId: "user-1",
+          projectId: "proj-1",
+          workspaceId: "ws-1",
+          cwd: tempRoot,
+          allowedRoot: tempRoot,
+          useDocker: false,
+          onData: vi.fn(),
+          onExit: vi.fn(),
+        }),
+      ).toThrow(/spawn failed/);
+      expect(failManager.size).toBe(0);
+    } finally {
+      failManager.shutdown();
+    }
   });
 });
 
