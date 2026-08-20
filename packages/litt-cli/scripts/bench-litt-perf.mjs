@@ -56,7 +56,7 @@ async function main() {
 
   // ─── 1. Intent Classification ────────────────────────────────
   log("--- Intent Classification ---");
-  const { classifyIntent } = await import("../src/lib/intent.js");
+  const { classifyIntent } = await import("../src/lib/intent.ts");
   for (const q of QUERIES) {
     const { ms, result } = await time(() => classifyIntent(q));
     log(`  [${fmtMs(ms)}] "${q}" → ${result}`);
@@ -66,27 +66,25 @@ async function main() {
   // ─── 2. Local Fast Lane (if available) ───────────────────────
   log("--- Local Fast Lane ---");
   let fastLaneAvailable = false;
-  let tryLocalFastLane = null;
+  let matchLocalFastPath = null;
   try {
-    const mod = await import("../src/lib/local-fast-lane.js");
-    tryLocalFastLane = mod.tryLocalFastLane;
-    fastLaneAvailable = typeof tryLocalFastLane === "function";
+    const mod = await import("../src/lib/local-fast-lane.ts");
+    matchLocalFastPath = mod.matchLocalFastPath;
+    fastLaneAvailable = typeof matchLocalFastPath === "function";
   } catch {
     // Module doesn't exist on this branch
   }
 
   if (fastLaneAvailable) {
     log("  (available)");
-    const { createShellExecutor } = await import("@litt/agent-core");
-    const shell = createShellExecutor(repoRoot);
-    const ctx = { cwd: repoRoot, projectRoot: repoRoot, mode: "act", shell };
+    const fastCtx = { cwd: repoRoot, projectName: "litlabs-website", mode: "act" };
     for (const q of QUERIES) {
-      const { ms, result } = await time(() => tryLocalFastLane(q, ctx));
-      const matched = result ? "LOCAL_MATCH" : "no match";
+      const { ms, result } = await time(() => matchLocalFastPath(q, fastCtx));
+      const matched = result ? `LOCAL_MATCH (${result.route})` : "no match";
       log(`  [${fmtMs(ms)}] "${q}" → ${matched}`);
     }
   } else {
-    log("  (not available on this branch — on perf/litt-local-fast-lane)");
+    log("  (not available on this branch)");
     for (const q of QUERIES) {
       log(`  [N/A] "${q}" → (would go through normal classifyIntent path)`);
     }
