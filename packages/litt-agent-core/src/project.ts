@@ -498,11 +498,16 @@ export async function runCommand(
 /**
  * Run an npm/pnpm script from package.json.
  * Detects the package manager (pnpm > yarn > npm) and runs the script.
+ *
+ * Callers may optionally override the default command timeout via
+ * `options.timeoutMs`. When omitted, the canonical `runCommand` default
+ * (120_000 ms) is used — preserving existing behavior for build/check/run.
  */
 export async function runScript(
   shell: ShellExecutor,
   scriptName: string,
   cwd?: string,
+  options?: { timeoutMs?: number },
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -533,7 +538,11 @@ export async function runScript(
   const hasYarn = fs.existsSync(path.join(root, "yarn.lock"));
   const pm = hasPnpm ? "pnpm" : hasYarn ? "yarn" : "npm";
 
-  return runCommand(shell, pm, ["run", scriptName], { cwd: root });
+  const runOpts: { cwd: string; timeoutMs?: number } = { cwd: root };
+  if (options?.timeoutMs !== undefined) {
+    runOpts.timeoutMs = options.timeoutMs;
+  }
+  return runCommand(shell, pm, ["run", scriptName], runOpts);
 }
 
 /**
@@ -561,12 +570,17 @@ export async function runTypecheck(
 
 /**
  * Run tests via the project's test script.
+ *
+ * Tests are given an extended 300_000 ms (5 minute) budget because the
+ * canonical root suite (vitest) takes ~144s and previously hit the
+ * 120_000 ms default runCommand timeout. This is the ONLY script runner
+ * that overrides the default — build/check/run keep 120s.
  */
 export async function runTest(
   shell: ShellExecutor,
   cwd?: string,
 ): Promise<ToolResult> {
-  return runScript(shell, "test", cwd ?? shell.cwd);
+  return runScript(shell, "test", cwd ?? shell.cwd, { timeoutMs: 300_000 });
 }
 
 /**
