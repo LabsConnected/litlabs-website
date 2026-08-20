@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { ArrowRight, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, Play, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
+import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { RealCreations } from "@/components/landing/RealCreations";
 import { WhyDifferent } from "@/components/landing/WhyDifferent";
@@ -15,50 +15,36 @@ import { TrustSection } from "@/components/landing/TrustSection";
 /* ── Navigation ────────────────────────────────────────────────── */
 
 function Header() {
-  const { isLoaded, isSignedIn } = useClerkAuth();
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-[#03050a]/80 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
         <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
-          <span className="relative h-9 w-9 overflow-hidden rounded-xl border border-[#a8ff2f]/30 shadow-[0_0_25px_rgba(168,255,47,.18)]">
-            <Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="36px" className="object-cover" priority />
+          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_25px_rgba(168,255,47,.18)]">
+            <Bot size={18} />
           </span>
-          <span className="hidden sm:inline">LiTTree LabStudios</span>
-          <span className="sm:hidden">LiTTree</span>
+          <span>LiTTree LabStudios</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
           <a href="#product" className="transition hover:text-[#a8ff2f]">Product</a>
           <a href="#creations" className="transition hover:text-[#a8ff2f]">Creations</a>
           <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
-          <Link href="/games" className="transition hover:text-[#a8ff2f]">Games</Link>
+          <Link href="/discover" className="transition hover:text-[#a8ff2f]">Community</Link>
           <Link href="/marketplace" className="transition hover:text-[#a8ff2f]">Marketplace</Link>
-          <Link href="/hire" className="transition hover:text-[#a8ff2f]">Hire Us</Link>
           <Link href="/pricing" className="transition hover:text-[#a8ff2f]">Pricing</Link>
         </nav>
         <div className="flex items-center gap-2">
-          {isLoaded && isSignedIn ? (
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
-            >
-              Dashboard <ArrowRight size={14} />
-            </Link>
-          ) : (
-            <>
-              <Link
-                href="/sign-in"
-                className="hidden px-3 py-2 text-sm font-bold text-white/60 transition hover:text-white sm:block"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/sign-up"
-                className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
-              >
-                Start free <ArrowRight size={14} />
-              </Link>
-            </>
-          )}
+          <Link
+            href="/sign-in"
+            className="hidden px-3 py-2 text-sm font-bold text-white/60 transition hover:text-white sm:block"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/sign-up"
+            className="inline-flex items-center gap-2 rounded-full bg-linear-to-r from-[#a8ff2f] to-[#62f6c4] px-4 py-2 text-sm font-black text-[#03050a] shadow-[0_0_28px_rgba(168,255,47,.2)] transition hover:scale-[1.03] hover:shadow-[0_0_38px_rgba(168,255,47,.35)]"
+          >
+            Start free <ArrowRight size={14} />
+          </Link>
         </div>
       </div>
     </header>
@@ -81,7 +67,7 @@ function LandingPage() {
           <div className="relative z-10">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 px-4 py-2 text-[11px] font-black uppercase tracking-[.18em] text-[#a8ff2f]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
-              LitLabs · AI Creative Platform
+              AI project workspace
             </div>
             <h1 className="max-w-2xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl">
               Bring the idea.
@@ -90,9 +76,9 @@ function LandingPage() {
               </span>
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/60">
-              LitLabs by LiTTree LabStudios is an AI creative platform where LiTT
-              helps people build apps, create media, preserve project context,
-              collaborate and ship real work from Studio.
+              LiTTree is an AI project workspace where LiTT helps you turn ideas
+              into working apps, websites, and creative media—with project memory,
+              real files, human approvals, and deployment from inside Studio.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
@@ -109,7 +95,7 @@ function LandingPage() {
                 <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> See how it works
               </a>
             </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/55">
+            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/40">
               <span>Free to join</span>
               <span>No credit card</span>
               <span>Your work stays yours</span>
@@ -117,34 +103,7 @@ function LandingPage() {
           </div>
 
           <div className="relative z-10">
-            <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-[#090b12] shadow-[0_35px_100px_rgba(0,0,0,.65)]">
-              <video
-                className="aspect-[16/10] w-full object-cover motion-reduce:hidden"
-                autoPlay
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                poster="/brand/litt-alive-poster.webp"
-                aria-label="LiTT, the LiTTree creative operator"
-              >
-                <source src="/brand/litt-alive.mp4" type="video/mp4" />
-              </video>
-              <div className="relative hidden aspect-[16/10] w-full motion-reduce:block">
-                <Image src="/brand/litt-alive-poster.webp" alt="LiTT, the LiTTree creative operator" fill priority sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover" />
-              </div>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-[#03050a] via-[#03050a]/75 to-transparent px-5 pb-5 pt-16">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/25 bg-black/65 px-3 py-1.5 text-[10px] font-black uppercase tracking-[.15em] text-[#a8ff2f] backdrop-blur-xl"><span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f] shadow-[0_0_10px_#a8ff2f]" />LiTT · Operator online</span>
-                  <span className="rounded-full border border-white/12 bg-black/65 px-3 py-1.5 text-[10px] font-bold text-white/65 backdrop-blur-xl">Official character media</span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px] font-bold text-white/55">
-              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#65f4ff]">REAL FILES</span>Project workspace</div>
-              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#a8ff2f]">REAL TERMINAL</span>Execute + verify</div>
-              <div className="rounded-xl border border-white/8 bg-white/3 px-2 py-3"><span className="mb-1 block text-[#b58cff]">HUMAN CONTROL</span>Approval gates</div>
-            </div>
+            <MissionSequence />
           </div>
         </div>
       </section>
@@ -157,11 +116,11 @@ function LandingPage() {
               Not a chat. An operating system.
             </div>
             <h2 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em] sm:text-5xl">
-              See how the operating loop works.
+              Explore the workflow.
             </h2>
             <p className="mt-5 text-lg leading-8 text-white/50">
-              This guided product demonstration mirrors implemented LiTT surfaces:
-              missions, project files, preview, approval gates, and deployment preparation.
+              Click through each stage to see exactly how LiTTree takes a project
+              from prompt to deployment.
             </p>
           </div>
           <div className="mt-12">
@@ -182,9 +141,9 @@ function LandingPage() {
             {[
               {
                 title: "Build working products",
-                copy: "Sites, apps, dashboards, and tools—generated with real code, organized in your workspace, and deployed with one click. File management and checkpoints are in beta.",
+                copy: "Sites, apps, dashboards, and tools—generated with real code, organized in your workspace, and deployed with one click.",
                 accent: "#65f4ff",
-                steps: ["Describe the outcome", "LiTT creates a plan", "Files are generated", "Preview and approve", "Deploy when ready"],
+                steps: ["Describe the outcome", "LiTT creates a plan", "Files are generated", "Preview and approve", "Deploy to live URL"],
               },
               {
                 title: "Create complete media and branding",
@@ -194,9 +153,9 @@ function LandingPage() {
               },
               {
                 title: "Preserve context and finish the work",
-                copy: "Project memory, version history, and human approvals keep the work moving forward—so projects get finished, not abandoned. Checkpoints are in beta.",
+                copy: "Project memory, version history, and human approvals keep the work moving forward—so projects get finished, not abandoned.",
                 accent: "#a8ff2f",
-                steps: ["Start a project", "Decisions are saved", "Checkpoints (beta)", "Approve sensitive actions", "Roll back if needed"],
+                steps: ["Start a project", "Decisions are saved", "Checkpoints created", "Approve sensitive actions", "Roll back if needed"],
               },
             ].map((cap) => (
               <div
@@ -234,11 +193,12 @@ function LandingPage() {
               See the workflow
             </div>
             <h2 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em] sm:text-5xl">
-              Real product surfaces and media.
+              Product demonstrations.
             </h2>
             <p className="mt-5 text-lg leading-8 text-white/50">
-              Every item below comes from the repository or a live product catalog.
-              Internal samples are labeled as samples, and third-party games retain attribution.
+              These are illustrative simulations showing how LiTTree takes a prompt
+              through mission, plan, build, and result. Each demo walks through the
+              complete workflow.
             </p>
           </div>
           <div className="mt-12">
@@ -270,14 +230,16 @@ function LandingPage() {
 
       {/* ═══ FOOTER ═══ */}
       <footer className="bg-[#050706] px-5 py-8 lg:px-10">
-        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/50 sm:flex-row">
+        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
           <div className="flex items-center gap-2 font-black text-white">
             <Sparkles size={14} className="text-[#a8ff2f]" /> LiTTree LabStudios
           </div>
           <div className="flex flex-wrap gap-5">
             <Link href="/studio">Studio</Link>
-            <Link href="/games">Games</Link>
             <Link href="/marketplace">Marketplace</Link>
+            <Link href="/gallery">Gallery</Link>
+            <Link href="/games">Games</Link>
+            <Link href="/discover">Community</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>

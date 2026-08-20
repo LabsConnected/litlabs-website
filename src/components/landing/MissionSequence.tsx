@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Image from "next/image";
 import {
   ArrowRight,
   Check,
@@ -80,12 +79,12 @@ export function MissionSequence() {
   const advance = useCallback(() => {
     setStageIndex((prev) => {
       if (prev >= STAGES.length - 1) {
+        setCompleted(true);
         return prev;
       }
       return prev + 1;
     });
-    setCompleted((prev) => prev || stageIndex >= STAGES.length - 2);
-  }, [stageIndex]);
+  }, []);
 
   useEffect(() => {
     // Reduced-motion users: immediately show the final static state.
@@ -97,13 +96,6 @@ export function MissionSequence() {
       return;
     }
     if (paused || completed) return;
-    // When we've reached the final stage, mark as completed instead of
-    // calling setCompleted inside the setStageIndex updater (which caused
-    // React error #185 — nested setState during render).
-    if (stageIndex >= STAGES.length - 1) {
-      setCompleted(true);
-      return;
-    }
     const timer = setTimeout(advance, STAGE_DURATION);
     return () => clearTimeout(timer);
   }, [stageIndex, paused, completed, reducedMotion, advance]);
@@ -126,10 +118,10 @@ export function MissionSequence() {
     >
       {/* Interactive product demonstration label */}
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[10px] font-black uppercase tracking-[.18em] text-white/50">
+        <span className="text-[10px] font-black uppercase tracking-[.18em] text-white/30">
           Interactive product demonstration
         </span>
-        <span className="text-[10px] font-bold text-white/50">
+        <span className="text-[10px] font-bold text-white/20">
           Illustrative simulation
         </span>
       </div>
@@ -140,10 +132,10 @@ export function MissionSequence() {
           <span className="h-3 w-3 rounded-full bg-amber-400/60" />
           <span className="h-3 w-3 rounded-full bg-green-400/60" />
           <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40">
-            <span className="relative h-5 w-5 overflow-hidden rounded"><Image src="/brand/litt-mascot-avatar.png" alt="LiTT" fill sizes="20px" className="object-cover" /></span>
+            <span className="grid h-5 w-5 place-items-center rounded bg-[#a8ff2f]/15 text-[10px] text-[#a8ff2f]">L</span>
             LiTTree Studio
           </div>
-          <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/50">
+          <div className="ml-auto flex items-center gap-1.5 text-[10px] font-bold text-white/30">
             <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
             Connected
           </div>
@@ -152,21 +144,21 @@ export function MissionSequence() {
         <div className="relative min-h-[340px] sm:min-h-[380px]">
           <div className="flex h-full">
             <div className="hidden w-44 shrink-0 border-r border-white/8 bg-[#080a10] p-3 sm:block">
-              <div className="mb-3 text-[10px] font-black uppercase tracking-wider text-white/50">Workspace</div>
+              <div className="mb-3 text-[10px] font-black uppercase tracking-wider text-white/30">Workspace</div>
               <div className="space-y-1">
                 {["mission.md", "index.html", "styles.css", "assets/"].map((file, i) => (
                   <div
                     key={file}
-                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors duration-500 ${
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-all duration-500 ${
                       stageIndex >= 2 && i <= (stageIndex >= 5 ? 3 : stageIndex - 1)
                         ? "bg-white/5 text-white/70"
-                        : "text-white/50"
+                        : "text-white/20"
                     }`}
                   >
                     {file.endsWith("/") ? (
                       <Folder size={12} className="shrink-0 text-[#65f4ff]/50" />
                     ) : (
-                      <FileCode size={12} className="shrink-0 text-white/50" />
+                      <FileCode size={12} className="shrink-0 text-white/30" />
                     )}
                     {file}
                   </div>
@@ -185,7 +177,7 @@ export function MissionSequence() {
                 <span className="text-sm font-black" style={{ color: currentStage.accent }}>
                   {currentStage.label}
                 </span>
-                <span className="ml-auto text-[10px] font-bold text-white/50">
+                <span className="ml-auto text-[10px] font-bold text-white/25">
                   {stageIndex + 1} / {STAGES.length}
                 </span>
               </div>
@@ -199,7 +191,7 @@ export function MissionSequence() {
 
         <div className="h-0.5 bg-white/5">
           <div
-            className="h-full transition-[width] duration-700 ease-out"
+            className="h-full transition-all duration-700 ease-out"
             style={{ width: `${progress}%`, backgroundColor: currentStage.accent }}
           />
         </div>
@@ -223,7 +215,7 @@ function StageContent({ stage }: { stage: StageId }) {
       return (
         <div className="space-y-3">
           <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/50">User</div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-white/30">User</div>
             <div className="flex items-start gap-2">
               <span className="mt-0.5 text-sm text-white/80">
                 Build a premium launch page for an independent music artist named After Midnight. Create the visual direction, write the release copy, organize the project files, produce a responsive preview, and ask me before preparing it for deployment.
@@ -231,7 +223,7 @@ function StageContent({ stage }: { stage: StageId }) {
               <Send size={14} className="mt-0.5 shrink-0 text-[#a8ff2f]" />
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-white/50">
+          <div className="flex items-center gap-2 text-xs text-white/30">
             <div className="h-1 w-1 animate-pulse rounded-full bg-[#a8ff2f]" />
             LiTT is reading the request...
           </div>
@@ -250,7 +242,7 @@ function StageContent({ stage }: { stage: StageId }) {
               Goal: A polished, responsive launch page with visual direction, release copy, organized files, and a preview — with deployment requiring user approval.
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-white/50">
+          <div className="flex items-center gap-2 text-xs text-white/30">
             <ArrowRight size={12} className="text-[#65f4ff]" /> Generating plan...
           </div>
         </div>
@@ -267,7 +259,7 @@ function StageContent({ stage }: { stage: StageId }) {
             "Request approval before deployment",
             "Prepare for deployment on approval",
           ].map((step, i) => (
-            <div key={step} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-3 py-2 transition-[opacity,transform] duration-300" style={{ opacity: i <= 3 ? 1 : 0.3, transform: `translateX(${i <= 3 ? 0 : 8}px)` }}>
+            <div key={step} className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/3 px-3 py-2 transition-all duration-300" style={{ opacity: i <= 3 ? 1 : 0.3, transform: `translateX(${i <= 3 ? 0 : 8}px)` }}>
               <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-[#65f4ff]/10 text-[10px] font-black text-[#65f4ff]">{i + 1}</span>
               <span className="text-xs text-white/70">{step}</span>
               {i < 3 && <Check size={12} className="ml-auto shrink-0 text-[#a8ff2f]" />}
@@ -288,7 +280,7 @@ function StageContent({ stage }: { stage: StageId }) {
             </div>
             <div className="mt-2 text-[10px] text-white/40">Deep purple base, neon green accent, midnight black canvas</div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-white/50">
+          <div className="flex items-center gap-2 text-xs text-white/30">
             <Check size={11} className="text-[#a8ff2f]" /> Visual direction approved
           </div>
         </div>
@@ -305,7 +297,7 @@ function StageContent({ stage }: { stage: StageId }) {
             </div>
             <div className="mt-2 text-[10px] text-white/40">Artist bio, release notes, and social copy generated</div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-white/50">
+          <div className="flex items-center gap-2 text-xs text-white/30">
             <Check size={11} className="text-[#a8ff2f]" /> Release copy written
           </div>
         </div>

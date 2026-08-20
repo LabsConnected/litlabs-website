@@ -1,52 +1,50 @@
-import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, Gamepad2, ImageIcon, Palette } from "lucide-react";
+import { Music, Code2, BarChart3 } from "lucide-react";
 
 /**
- * Repository-backed product/media proof. These are deliberately not presented
- * as customer projects. Each card identifies its real source and status.
+ * RealCreations — three product demonstration cards.
+ *
+ * These are NOT real deployed projects. They are illustrative simulations
+ * showing the LiTTree workflow. No fake durations, file sizes, or deployment
+ * claims are made. Each card links to a demo page with the workflow steps.
  */
 
-interface ProductSurface {
-  href: string;
+interface DemoProject {
+  slug: string;
   title: string;
-  description: string;
-  image: string;
-  label: string;
-  source: string;
-  icon: typeof Palette;
+  prompt: string;
+  outcome: string;
+  tools: string[];
+  icon: typeof Music;
   accent: string;
 }
 
-const SURFACES: ProductSurface[] = [
+const PROJECTS: DemoProject[] = [
   {
-    href: "/studio",
-    title: "Creative Engine",
-    description: "Official repository artwork for LiTT's image, video, audio, and campaign creation toolset inside Studio.",
-    image: "/studio/creative-engine-hero.png",
-    label: "Official Studio media",
-    source: "LiTTree Studio",
-    icon: Palette,
+    slug: "artist-launch-site",
+    title: "Artist Launch Site",
+    prompt: "Build a premium website for a music artist with a hero, player, tour dates, and merch link.",
+    outcome: "A responsive artist website with an embedded music player and social integration.",
+    tools: ["HTML", "CSS", "JavaScript", "Image Gen", "Audio"],
+    icon: Music,
     accent: "#b58cff",
   },
   {
-    href: "/gallery",
-    title: "Neon Cyber City",
-    description: "A LiTTree LabStudios internal gallery sample used to exercise the real image and gallery pipeline.",
-    image: "/gallery/museum/neon-cyber-city.png",
-    label: "Internal media sample",
-    source: "LiTTree demo gallery",
-    icon: ImageIcon,
+    slug: "small-business-dashboard",
+    title: "Small Business Dashboard",
+    prompt: "Create a data dashboard for a small business showing sales, inventory, and customer metrics.",
+    outcome: "An interactive dashboard with charts, filters, and exportable reports.",
+    tools: ["React", "Charts", "Data", "Responsive"],
+    icon: BarChart3,
     accent: "#65f4ff",
   },
   {
-    href: "/games",
-    title: "XQuest in LiTT Games",
-    description: "A playable open-source title available through the LiTT Games catalog, with original MIT attribution preserved.",
-    image: "/games/artwork/xquest.png",
-    label: "Playable · Open source",
-    source: "Scott Rippey · MIT",
-    icon: Gamepad2,
+    slug: "music-campaign",
+    title: "Music Campaign",
+    prompt: "Generate cover artwork, promotional copy, and social assets for a single release campaign.",
+    outcome: "Cover art, three social posts, and a press kit — all brand-consistent.",
+    tools: ["Image Gen", "Copy", "Social", "Branding"],
+    icon: Code2,
     accent: "#a8ff2f",
   },
 ];
@@ -54,23 +52,63 @@ const SURFACES: ProductSurface[] = [
 export function RealCreations() {
   return (
     <div className="grid gap-5 lg:grid-cols-3">
-      {SURFACES.map((surface) => {
-        const Icon = surface.icon;
+      {PROJECTS.map((project) => {
+        const Icon = project.icon;
         return (
           <article
-            key={surface.title}
+            key={project.slug}
             className="group flex flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] transition duration-300 hover:-translate-y-1 hover:border-white/25"
           >
-            <div className="relative h-52 overflow-hidden border-b border-white/8">
-              <Image src={surface.image} alt={surface.title} fill sizes="(max-width: 1024px) 100vw, 33vw" className="object-cover transition duration-700 group-hover:scale-[1.03]" />
-              <div className="absolute inset-0 bg-linear-to-t from-[#0a0d14] via-transparent to-transparent" />
-              <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/65 px-3 py-1.5 text-[9px] font-black uppercase tracking-[.12em] text-white/80 backdrop-blur-xl"><Icon size={11} style={{ color: surface.accent }} />{surface.label}</div>
+            {/* Visual header */}
+            <div
+              className="relative flex h-32 items-center justify-center overflow-hidden"
+              style={{
+                background: `linear-gradient(135deg, ${project.accent}15, transparent 60%)`,
+              }}
+            >
+              <div
+                className="grid h-14 w-14 place-items-center rounded-2xl border transition duration-300 group-hover:scale-110"
+                style={{
+                  borderColor: `${project.accent}30`,
+                  backgroundColor: `${project.accent}10`,
+                  color: project.accent,
+                }}
+              >
+                <Icon size={24} />
+              </div>
             </div>
+
+            {/* Content */}
             <div className="flex flex-1 flex-col p-5">
-              <h3 className="text-lg font-black text-white">{surface.title}</h3>
-              <p className="mt-2 text-xs leading-5 text-white/50">{surface.description}</p>
-              <div className="mt-4 text-[10px] font-bold text-white/40">Source: {surface.source}</div>
-              <Link href={surface.href} className="mt-5 inline-flex items-center gap-2 text-xs font-black" style={{ color: surface.accent }}>Open product surface <ArrowUpRight size={13} /></Link>
+              <h3 className="text-lg font-black text-white">{project.title}</h3>
+              <p className="mt-2 text-xs leading-5 text-white/50">{project.prompt}</p>
+
+              {/* Tools */}
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {project.tools.map((tool) => (
+                  <span
+                    key={tool}
+                    className="rounded-md border border-white/8 bg-white/3 px-2 py-1 text-[10px] font-bold text-white/50"
+                  >
+                    {tool}
+                  </span>
+                ))}
+              </div>
+
+              {/* Demo label */}
+              <div className="mt-4 text-[10px] font-bold uppercase tracking-wider text-white/30">
+                Product demonstration
+              </div>
+
+              {/* Actions */}
+              <div className="mt-auto pt-5">
+                <Link
+                  href={`/showcase/${project.slug}`}
+                  className="block w-full rounded-lg border border-white/12 py-2.5 text-center text-xs font-bold text-white/70 transition hover:bg-white/5"
+                >
+                  View workflow
+                </Link>
+              </div>
             </div>
           </article>
         );
