@@ -1,0 +1,32 @@
+name: Cron — Deploy Digest
+
+on:
+  schedule:
+    # Weekdays 09:00 UTC — replaces the former Vercel Cron schedule
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call deploy digest endpoint
+        env:
+          DIGEST_URL: ${{ vars.DIGEST_URL || 'https://www.litlabs.net' }}
+          INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          if [ -z "$INTERNAL_API_KEY" ]; then
+            echo "::error::INTERNAL_API_KEY secret is not set"
+            exit 1
+          fi
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer $INTERNAL_API_KEY" \
+            "${DIGEST_URL}/api/deployments/digest")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "HTTP status: $HTTP_CODE"
+          echo "Response body: $BODY"
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Deploy digest endpoint returned HTTP $HTTP_CODE"
+            exit 1
+          fi

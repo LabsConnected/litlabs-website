@@ -16,7 +16,7 @@ Terminal Server (Node.js + node-pty) [run on VPS / Railway / Fly.io / Render]
 Docker sandbox (optional, recommended for production)
 ```
 
-**Important:** The terminal server does NOT run on Vercel. It must run on a separate Linux machine or container platform.
+**Important:** The terminal server runs as a separate Railway service. It does not run inside the Next.js web service.
 
 ## Install
 
@@ -192,10 +192,9 @@ services:
 
 1. Run `pnpm dev:all` locally and test the terminal.
 2. Apply the Supabase migrations in `supabase/migrations/`.
-3. Deploy the terminal server using Railway, Render, Fly.io, or Docker.
-4. Set `NEXT_PUBLIC_TERMINAL_WS_URL` in Vercel to the deployed terminal server URL.
-5. Set `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` for the Deploy button.
-6. Build the sandbox image (`pnpm terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.
+3. Deploy the terminal server and voice worker as separate Railway services.
+4. Set `NEXT_PUBLIC_TERMINAL_WS_URL` on the Railway web service to the deployed terminal server URL.
+5. Build the sandbox image (`pnpm terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.
 
 ## Phase roadmap
 

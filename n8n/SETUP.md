@@ -8,7 +8,7 @@ All webhooks are **HMAC-SHA256 signed** for integrity and replay protection.
 ```
 External services (Stripe, GitHub, Gmail, custom)
          ↓ POST (signed payload)
-  automate.litlabs.net/api/n8n/webhook/{path}   ← Vercel (public, authenticated)
+  automate.litlabs.net/api/n8n/webhook/{path}   ← Railway (public, authenticated)
          ↓ verify HMAC-SHA256 signature + timestamp
   n8n on Railway (private, no public URL)
          ↓
@@ -110,11 +110,11 @@ railway domain  # for the n8n service
 ```
 
 Set this as `N8N_WEBHOOK_URL` and `WEBHOOK_URL` in the n8n service variables.
-Also set `N8N_WEBHOOK_URL` in your Vercel env vars so the bridge knows where to forward.
+Also set `N8N_WEBHOOK_URL` on the Railway web service so the bridge knows where to forward.
 
-## Step 4: Set Vercel environment variables
+## Step 4: Set Railway environment variables
 
-In your Vercel project settings (or `.env.local` for dev):
+In your Railway web service variables (or `.env.local` for dev):
 
 ```bash
 # The Railway n8n URL (e.g. https://n8n-production.up.railway.app)
