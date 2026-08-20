@@ -131,11 +131,12 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
   ): Promise<NextResponse> {
     const { pathname } = req.nextUrl;
 
-    // Validate auth config on first request, not at module load.
-    // This prevents the blanket 500 that made production debugging impossible.
-    validateAuthConfig();
-
-    // Skip webhooks + health checks + metrics — they verify themselves
+    // Skip webhooks + health checks + metrics — they verify themselves.
+    // This check MUST come before validateAuthConfig() so that health probes
+    // (Railway/Vercel healthcheck at /api/health) succeed even when Clerk env
+    // vars are not yet configured. Without this ordering, the middleware throws
+    // on every request including /api/health, causing a blanket 500 that makes
+    // the deployment fail healthcheck and blocks all debugging.
     if (isWebhookPath(pathname) || isHealthPath(pathname)) {
       return (inner(req as never, ...rest as never[]) as Promise<NextResponse>) ??
         NextResponse.next();
@@ -158,6 +159,15 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
     if (isAllowedCrawler(userAgent)) {
       return (inner(req as never, ...rest as never[]) as Promise<NextResponse>) ??
         NextResponse.next();
+    }
+
+    // Validate auth config only for protected routes, on first request
+    // (not at module load). Public routes (landing page, pricing, etc.) must
+    // render even when Clerk env vars are not yet configured. Without this
+    // guard, the middleware throws on every request including public pages,
+    // causing a blanket 500 that blocks the entire site.
+    if (isProtectedRoute(req)) {
+      validateAuthConfig();
     }
 
     // Block known malicious bots
