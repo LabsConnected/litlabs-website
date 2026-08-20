@@ -18,7 +18,7 @@ Status: Phase 1 (Discovery) complete, Phase 2 (Classification) in progress
 | **D — Discovery** | GREEN | file-tree.ts, context-picker, 5000-file cap, skip node_modules/.git. 4 tests. | None |
 | **E — Editing** | YELLOW | edit_file/read_file tools via agent-core, path containment in live tests. | No unit tests for edit operations, no patch semantics tests |
 | **F — Filesystem** | GREEN | validateWorkspacePath with symlink escape prevention, ownership checks. 7 boundary tests + production PTY env smoke test. | None |
-| **G — Git** | YELLOW | status/diff read-only via git-state.ts, diff-view.ts. **NEW: git-workflow.ts with safe branch/stage/commit/push/PR.** 55 tests (8 + 47 new). | Live proof pending (need real push + PR to GitHub) |
+| **G — Git** | GREEN | status/diff read-only via git-state.ts, diff-view.ts. **NEW: git-workflow.ts with safe branch/stage/commit/push/PR.** 55 tests (8 + 47 new). | **Live proof: commit ef9c99e7 pushed, draft PR #92 created** |
 | **H — Health** | GREEN | /health, /health/live, /health/ready with auth/workspace/docker checks. Production verified. | Web /api/health not separately tested |
 | **I — Intelligence** | GREEN | ModelRuntime, provider registry, fallback executor, 11 providers. 30+ tests. | None |
 | **J — Jobs** | YELLOW | Long-running PTY sessions, backpressure buffering. | No specific job tracking tests, no UI freeze prevention tests |
@@ -36,14 +36,14 @@ Status: Phase 1 (Discovery) complete, Phase 2 (Classification) in progress
 | **V — Voice** | RED | LiveKit agent implemented (livekit-agent.ts, 311 lines). | **NO tests. Deploy FAILED.** Voice pipeline untested. |
 | **W — Website** | YELLOW | Landing live (8 markers verified), auth green, chat green, 285+ API routes. | No complete E2E pass (signup → studio → project → LiTT → preview → deploy) |
 | **X — External tools** | YELLOW | GitHub App integration, Railway deploy CLI, Supabase client. | No scoping/audit tests for external tool access |
-| **Y — Your claims** | RED | Marketing claims on landing page (LiTBits, model selection, games, multi-agent, voice, cloud handoff, marketplace). | **No explicit claim-to-test matrix exists.** |
+| **Y — Your claims** | GREEN | Marketing claim matrix built (MARKETING-CLAIM-MATRIX.md). 17 GREEN, 2 YELLOW (voice beta, simulations disclosed), 0 RED. | Landing page verified live |
 | **Z — Zero-surprise release** | YELLOW | Git history clean, commits pushed. | No backup/rollback/recovery docs, no release tag, no rollback procedure |
 
 ## Critical Blockers (RED)
 
-1. **G — Git commit/push/PR**: ~~CLI has no write git operations.~~ **IMPLEMENTED** — git-workflow.ts with safe branch/stage/commit/push/PR. 47 regression tests passing. Needs live proof (real push + PR to GitHub).
+1. **G — Git commit/push/PR**: ~~CLI has no write git operations.~~ **GREEN** — git-workflow.ts with safe branch/stage/commit/push/PR. 47 regression tests passing. Live proof: commit ef9c99e7 pushed, draft PR #92 created.
 2. **V — Voice**: No tests, deploy failed. Voice pipeline untested.
-3. **Y — Marketing claim matrix**: No mapping from landing page claims to acceptance tests.
+3. ~~**Y — Marketing claim matrix**~~: **GREEN** — MARKETING-CLAIM-MATRIX.md built. 17 GREEN, 2 YELLOW (voice beta, simulations disclosed), 0 RED.
 
 ## Primary E2E Scenario Blockers
 
