@@ -29,6 +29,7 @@ import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } fro
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
+import { SHIP_TOOL_ENTRY } from "../lib/ship-tool.js";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -63,13 +64,16 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const store = new RuntimeStore();
   const shell = createShellExecutor(projectRoot);
   const executor = new CommandExecutor(shell, store);
-  const tools = new ToolRegistry();
+  const tools = new ToolRegistry({ "project.ship": SHIP_TOOL_ENTRY });
   const gateway = new ExecutionGateway({
     tools,
     shell,
     executor,
     store,
     projectId: projectRoot,
+    // No onApprovalRequired here — `litt ask` is non-interactive, so any
+    // require_approval tool (including project.ship) fails closed rather
+    // than silently executing. This is intentional, not a gap.
   });
 
   // Route through the same ModelRuntime as the TUI — picks the best

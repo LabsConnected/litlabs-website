@@ -42,6 +42,7 @@ import {
   type BrowserVerifier,
   type RecoveryResult,
 } from "@litt/agent-core";
+import { SHIP_TOOL_ENTRY } from "./ship-tool.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -269,7 +270,7 @@ export class RuntimeSession {
   getGateway(): ExecutionGateway {
     if (this._gateway) return this._gateway;
     this._gateway = new ExecutionGateway({
-      tools: new ToolRegistry(),
+      tools: new ToolRegistry({ "project.ship": SHIP_TOOL_ENTRY }),
       shell: this._shell,
       executor: this._executor,
       store: this._store,

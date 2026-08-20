@@ -832,6 +832,38 @@ export class ExecutionGateway {
    * Request approval for an elevated/dangerous action.
    * Returns a VerifiedApproval if approved, null if denied/pending.
    */
+  /**
+   * Human-readable description of a non-shell tool's pending action, used
+   * in the approval audit trail (ApprovalRequestInput.operation.action).
+   * Shell commands (project.run) get a readable "<command> <args>" string
+   * from the risk-assessment branch in requestApproval() already — this
+   * covers tools where the risk lives in structured inputs, not a raw
+   * argv, e.g. project.ship's files/message/branch/push/PR flags. Keeps
+   * the audit trail truthful about what was actually approved, not just
+   * the bare tool id.
+   */
+  private describeStructuredToolAction(toolId: string, inputs: Record<string, unknown>): string {
+    if (toolId === "project.ship") {
+      const files = Array.isArray(inputs.files)
+        ? inputs.files.filter((f): f is string => typeof f === "string")
+        : [];
+      const message = typeof inputs.message === "string" ? inputs.message : "";
+      const branch = typeof inputs.branch === "string" && inputs.branch.trim().length > 0
+        ? inputs.branch
+        : "(auto-generated branch)";
+      const push = inputs.push !== false;
+      const createPR = inputs.createPR !== false;
+      const fileList = files.length <= 4
+        ? files.join(", ")
+        : `${files.slice(0, 4).join(", ")}, +${files.length - 4} more`;
+      const steps = ["stage", "commit"];
+      if (push) steps.push("push");
+      if (createPR) steps.push("draft PR");
+      return `ship [${fileList}] → "${message}" on ${branch} → ${steps.join(" → ")}`;
+    }
+    return toolId;
+  }
+
   private async requestApproval(
     request: ExecutionRequest,
     runId: string,
@@ -841,7 +873,7 @@ export class ExecutionGateway {
   ): Promise<VerifiedApproval | null> {
     const action = risk
       ? `${request.inputs.command} ${(request.inputs.args as string[] ?? []).join(" ")}`
-      : request.toolId;
+      : this.describeStructuredToolAction(request.toolId, request.inputs);
 
     const approvalInput: ApprovalRequestInput = {
       tenantId: request.identity.tenantId,
