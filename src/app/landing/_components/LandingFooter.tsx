@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
+import { FooterSystemStatus } from "./FooterSystemStatus";
 
 const COLS: Array<{
   title: string;
@@ -18,17 +19,13 @@ const COLS: Array<{
     title: "Build",
     links: [
       { label: "Docs", href: "/docs" },
-      { label: "API", href: "/docs" },
       { label: "Showcase", href: "/showcase" },
     ],
   },
   {
     title: "Company",
     links: [
-      { label: "About", href: "/profile" },
-      { label: "Blog", href: "/discover" },
-      { label: "Careers", href: "/discover" },
-      { label: "Contact", href: "/discover" },
+      { label: "About", href: "/about" },
     ],
   },
   {
@@ -37,7 +34,6 @@ const COLS: Array<{
       { label: "Privacy", href: "/privacy" },
       { label: "Terms", href: "/terms" },
       { label: "Cookies", href: "/cookies" },
-      { label: "Security", href: "/docs" },
     ],
   },
 ];
@@ -70,20 +66,6 @@ function TwitterIcon() {
   );
 }
 
-function DiscordIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M19.27 5.33a17.84 17.84 0 0 0-4.39-1.36.07.07 0 0 0-.07.03c-.19.33-.4.77-.55 1.12a16.5 16.5 0 0 0-4.97 0 11 11 0 0 0-.56-1.12.07.07 0 0 0-.07-.03 17.86 17.86 0 0 0-4.39 1.36.06.06 0 0 0-.03.03C1.5 9.62.7 13.78 1.1 17.9a.08.08 0 0 0 .03.05 17.93 17.93 0 0 0 5.4 2.72.07.07 0 0 0 .08-.02c.41-.57.78-1.17 1.1-1.8a.07.07 0 0 0-.04-.1 11.8 11.8 0 0 1-1.68-.8.07.07 0 0 1 0-.12c.11-.08.23-.17.34-.26a.07.07 0 0 1 .07-.01c3.52 1.6 7.33 1.6 10.81 0a.07.07 0 0 1 .07.01c.11.09.22.18.34.26a.07.07 0 0 1 0 .12c-.53.31-1.09.57-1.68.8a.07.07 0 0 0-.04.1c.32.63.69 1.23 1.1 1.8a.07.07 0 0 0 .08.02 17.87 17.87 0 0 0 5.41-2.72.08.08 0 0 0 .03-.05c.5-4.77-.78-8.9-3.3-12.55a.06.06 0 0 0-.03-.02zM8.52 15.38c-1.07 0-1.94-.97-1.94-2.16 0-1.19.86-2.17 1.94-2.17 1.09 0 1.96.98 1.94 2.17 0 1.19-.86 2.16-1.94 2.16zm6.97 0c-1.07 0-1.94-.97-1.94-2.16 0-1.19.86-2.17 1.94-2.17 1.09 0 1.96.98 1.94 2.17 0 1.19-.85 2.16-1.94 2.16z" />
-    </svg>
-  );
-}
-
 const SOCIALS: Array<{
   label: string;
   href: string;
@@ -95,7 +77,6 @@ const SOCIALS: Array<{
     Icon: GitHubIcon,
   },
   { label: "Twitter", href: "https://twitter.com/litlabs", Icon: TwitterIcon },
-  { label: "Discord", href: "/discover", Icon: DiscordIcon },
 ];
 
 export function LandingFooter() {
@@ -124,6 +105,8 @@ export function LandingFooter() {
                   key={label}
                   href={href}
                   aria-label={label}
+                  rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
+                  target={href.startsWith("http") ? "_blank" : undefined}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/8 bg-white/[0.02] text-neutral-400 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
                 >
                   <Icon />
@@ -158,10 +141,7 @@ export function LandingFooter() {
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/5 pt-6 text-xs text-neutral-500 sm:flex-row">
           <div>© {new Date().getFullYear()} LiTTree LabStudios™. LiTT™ and Spark™ are LiTTree LabStudios trademarks.</div>
-          <div className="flex items-center gap-2 font-mono text-neutral-600">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-            System status: Operational
-          </div>
+          <FooterSystemStatus />
         </div>
       </div>
     </footer>

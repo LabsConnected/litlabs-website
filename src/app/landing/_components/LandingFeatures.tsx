@@ -70,7 +70,7 @@ const FEATURES: Array<{
     icon: Rocket,
     title: "Deployment Control",
     desc: "Connect the stack you already use.",
-    bullets: ["Vercel deployments", "GitHub PRs", "Supabase projects", "Build logs & previews"],
+    bullets: ["Railway deployments", "GitHub PRs", "Supabase projects", "Build logs & previews"],
     color: "#818cf8",
   },
 ];

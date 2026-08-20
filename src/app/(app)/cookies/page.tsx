@@ -44,15 +44,7 @@ export default function CookiesPage() {
                 </p>
               </div>
 
-              <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
-                <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>📊 Analytics</h3>
-                <p className="opacity-80">
-                  We may use Vercel Analytics to collect basic, anonymous usage
-                  metrics (page views, performance). Vercel Analytics does not
-                  use cross-site tracking cookies. No advertising or marketing
-                  cookies are used.
-                </p>
-              </div>
+
             </div>
           </section>
 

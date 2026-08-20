@@ -14,7 +14,7 @@ import {
 
 const LOGOS = [
   { name: "GitHub", icon: GitBranch, color: "text-neutral-300" },
-  { name: "Vercel", icon: Zap, color: "text-white" },
+  { name: "Railway", icon: Zap, color: "text-white" },
   { name: "Supabase", icon: Database, color: "text-emerald-400" },
   { name: "Clerk", icon: Shield, color: "text-violet-400" },
   { name: "OpenAI", icon: Cpu, color: "text-cyan-300" },

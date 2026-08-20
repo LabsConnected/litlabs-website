@@ -1,42 +1,29 @@
 /**
  * LandingRoadmap — truthful V1 roadmap.
  *
+ * Consume the canonical capability registry (src/config/product-capabilities.ts).
+ * No hand-maintained statuses — the registry is the single source of truth.
+ *
  * V1 spec: label truthfully as LIVE / BETA / COMING.
  * Do NOT pretend future features are live.
  */
 
-type RoadmapStatus = "LIVE" | "BETA" | "COMING";
+import { allCapabilities, type ProductCapability } from "@/config/product-capabilities";
 
-const ROADMAP: Array<{
-  status: RoadmapStatus;
-  title: string;
-  desc: string;
-}> = [
-  { status: "LIVE", title: "Code read / search / edit", desc: "Read, search, and edit real project files through the hardened executor." },
-  { status: "LIVE", title: "Terminal execution", desc: "Run commands with real exit codes, cancellation, and process-tree kill." },
-  { status: "LIVE", title: "VerificationGate", desc: "Typecheck + test + build + browser checks. COMPLETE = runtime proved it passed." },
-  { status: "LIVE", title: "Git diff / status", desc: "See exactly what changed before anything ships." },
-  { status: "LIVE", title: "Approval before dangerous actions", desc: "Human approval gate for destructive or production-affecting operations." },
-  { status: "LIVE", title: "CLI cockpit", desc: "The LiTT terminal cockpit — connected to the same runtime as Studio." },
-  { status: "BETA", title: "Studio (web workspace)", desc: "Prompt ↔ Canvas ↔ Code ↔ Preview ↔ Files in the browser." },
-  { status: "BETA", title: "Project memory", desc: "LiTT remembers your project across sessions." },
-  { status: "BETA", title: "Deploy to Vercel + GitHub PRs", desc: "Review, approve, and ship from inside the mission." },
-  { status: "BETA", title: "LiTBits accounting", desc: "Pay for what you use. Free entry, low-cost LiTBits, BYOK." },
-  { status: "BETA", title: "Model selection / BYOK", desc: "Bring your own OpenRouter key. Route to fast / smart / long profiles." },
-  { status: "COMING", title: "Games pipeline", desc: "Build, verify, and ship playable browser games end-to-end." },
-  { status: "COMING", title: "Multi-agent crews", desc: "Specialized agents (Forge, Visionary, Research, QA) on one mission." },
-  { status: "COMING", title: "Voice mode", desc: "Talk to LiTT. Spoken responses, camera-assisted context." },
-  { status: "COMING", title: "Cloud handoff", desc: "Run long missions in the cloud and pick them up anywhere." },
-  { status: "COMING", title: "Marketplace", desc: "Share and install LiTT plugins, tools, and project templates." },
-];
+const STATUS_LABELS: Record<string, "LIVE" | "BETA" | "COMING"> = {
+  live: "LIVE",
+  beta: "BETA",
+  coming: "COMING",
+};
 
-const STATUS_STYLES: Record<RoadmapStatus, { color: string; bg: string; border: string }> = {
+const STATUS_STYLES: Record<"LIVE" | "BETA" | "COMING", { color: string; bg: string; border: string }> = {
   LIVE: { color: "#34d399", bg: "rgba(52,211,153,0.1)", border: "rgba(52,211,153,0.3)" },
   BETA: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)" },
   COMING: { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)" },
 };
 
 export function LandingRoadmap() {
+  const capabilities = allCapabilities();
   return (
     <section id="roadmap" className="relative z-10 px-4 py-24 md:py-32">
       <div className="mx-auto max-w-6xl">
@@ -60,22 +47,23 @@ export function LandingRoadmap() {
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
-          {ROADMAP.map((item) => {
-            const s = STATUS_STYLES[item.status];
+          {capabilities.map((cap: ProductCapability) => {
+            const label = STATUS_LABELS[cap.status] ?? "COMING";
+            const s = STATUS_STYLES[label];
             return (
               <div
-                key={item.title}
+                key={cap.id}
                 className="flex items-start gap-4 rounded-xl border border-white/8 bg-white/2 p-4 transition-all duration-500 hover:border-white/12 hover:bg-white/3"
               >
                 <span
                   className="mt-0.5 shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-widest"
                   style={{ color: s.color, borderColor: s.border, background: s.bg }}
                 >
-                  {item.status}
+                  {label}
                 </span>
                 <div>
-                  <div className="text-sm font-bold text-white">{item.title}</div>
-                  <div className="mt-0.5 text-xs leading-relaxed text-neutral-500">{item.desc}</div>
+                  <div className="text-sm font-bold text-white">{cap.name}</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-neutral-500">{cap.description}</div>
                 </div>
               </div>
             );

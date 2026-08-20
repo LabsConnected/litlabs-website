@@ -36,6 +36,10 @@ import {
   BrainCircuit,
   Gamepad2,
   MessageCircle,
+  FolderKanban,
+  Library,
+  Rocket,
+  FlaskConical,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -52,24 +56,37 @@ const UsageBadge = dynamic(
 );
 
 /* ------------------------------------------------------------------ */
-/*  Primary nav links — ALL surfaced, no hidden dropdown               */
+/*  Primary nav — LiTT-centered IA                                      */
+/*  Primary: Home · Dashboard · Studio · Projects                       */
+/*  Secondary: Library · Deployments · Marketplace                      */
+/*  Labs: Games, Discover (feature-flagged experimental)               */
+/*  Account: Wallet · Settings · Profile (in profile menu)             */
 /* ------------------------------------------------------------------ */
-const leftNavLinks = [
+const primaryNavLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: Bot },
   { href: "/studio", label: "Studio", icon: Wand2 },
-  { href: "/showcase", label: "Showcase", icon: Sparkles },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
+];
+
+const secondaryNavLinks = [
+  { href: "/library", label: "Library", icon: Library },
+  { href: "/deployments", label: "Deployments", icon: Rocket },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+];
+
+const labsNavLinks = [
   { href: "/games", label: "Games", icon: Gamepad2 },
   { href: "/discover", label: "Discover", icon: MessageCircle },
-  { href: "/pricing", label: "Pricing", icon: Sparkles },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/showcase", label: "Showcase", icon: Sparkles },
 ].filter((link) => {
-  // Feature flag filtering for v1 release
   if (link.href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
   if (link.href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
   return true;
 });
+
+// Combined for desktop rendering
+const leftNavLinks = [...primaryNavLinks, ...secondaryNavLinks, ...labsNavLinks];
 
 const agentsLink = { href: "/agents", label: "Agents", icon: BrainCircuit };
 const AgentsIcon = agentsLink.icon;
@@ -78,14 +95,36 @@ const AgentsIcon = agentsLink.icon;
 /*  Utility items for mobile drawer                                    */
 /* ------------------------------------------------------------------ */
 const mobileDrawerGroups = [
-  { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
-  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/showcase", label: "Showcase", icon: Sparkles }] },
-  { label: "Discover", links: [{ href: "/discover", label: "Discover Feed", icon: MessageCircle }, { href: "/marketplace", label: "Marketplace", icon: ShoppingBag }] },
-  { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
-  { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },
+  { label: "Home", links: [
+    { href: "/dashboard", label: "Dashboard", icon: Bot },
+    { href: "/studio", label: "Studio", icon: Wand2 },
+    { href: "/projects", label: "Projects", icon: FolderKanban },
+  ] },
+  { label: "Library", links: [
+    { href: "/library", label: "Library", icon: Library },
+    { href: "/deployments", label: "Deployments", icon: Rocket },
+    { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+  ] },
+  { label: "Labs", links: [
+    { href: "/games", label: "Games", icon: Gamepad2 },
+    { href: "/discover", label: "Discover", icon: MessageCircle },
+    { href: "/showcase", label: "Showcase", icon: Sparkles },
+  ] },
+  { label: "Account", links: [
+    { href: "/wallet", label: "Wallet", icon: Coins },
+    { href: "/profile", label: "Profile", icon: User },
+    { href: "/settings", label: "Settings", icon: Settings },
+  ] },
 ].filter((group) => {
-  if (group.label === "Discover" && !isFeatureEnabled("communitySocial")) return false;
-  if (group.label === "Games" && !isFeatureEnabled("retroGameRuntime")) return false;
+  if (group.label === "Labs") {
+    // Filter out disabled labs items
+    group.links = group.links.filter((link) => {
+      if (link.href === "/games" && !isFeatureEnabled("retroGameRuntime")) return false;
+      if (link.href === "/discover" && !isFeatureEnabled("communitySocial")) return false;
+      return true;
+    });
+    return group.links.length > 0;
+  }
   return true;
 });
 

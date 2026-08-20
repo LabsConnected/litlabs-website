@@ -2540,7 +2540,7 @@ export default function ImageTool() {
                     >
                       <span
                         className={`w-1.5 h-1.5 rounded-full shrink-0 ${ready ? "bg-green-400" : "bg-amber-400"}`}
-                        title={ready ? "Configured" : "Not configured — set API key in Vercel env vars"}
+                        title={ready ? "Configured" : "Not configured — set API key in environment variables"}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">

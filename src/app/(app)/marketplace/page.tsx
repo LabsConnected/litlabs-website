@@ -118,7 +118,7 @@ const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
 const CONNECTION_LABELS: Record<string, string> = {
   github: "GitHub repository",
   terminal: "Terminal (PTY)",
-  vercel: "Vercel account",
+  vercel: "Railway account",
   supabase: "Supabase project",
 };
 
@@ -661,7 +661,7 @@ function MarketplaceInner() {
               <div className="mt-1 text-2xl font-black text-white">$39/month</div>
               <div className="text-[10px] text-white/40">Beta pricing · later $49</div>
               <div className="mt-3 space-y-1">
-                {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Vercel deployment"].map((f) => (
+                {["25 active projects", "20,000 monthly AI credits", "Terminal runtime", "Railway deployment"].map((f) => (
                   <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
                     <Check size={11} className="shrink-0 text-violet-400" /> {f}
                   </div>

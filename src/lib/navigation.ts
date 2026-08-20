@@ -68,34 +68,38 @@ export const GROUP_ACCENTS: Record<string, string> = {
   More: "#94a3b8",
 };
 
-/* ─── Canonical App Shell navigation (COMMAND / CREATE / EXPLORE) ─── */
+/* ─── Canonical App Shell navigation — LiTT-centered IA ─── */
+/* Primary: Home · Studio · Projects                                    */
+/* Secondary: Library · Deployments · Marketplace                       */
+/* Labs: Games, Discover, Showcase (experimental)                      */
+/* Account: Wallet · Settings · Profile (in profile menu)              */
 
 export const APP_NAV_SECTIONS: NavSection[] = [
   {
-    id: "command",
-    label: "Command",
+    id: "primary",
+    label: "Primary",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, shortcut: "⌘D" },
       { label: "Studio", href: "/studio", icon: Sparkles, shortcut: "⌘S" },
+      { label: "Projects", href: "/projects", icon: FolderKanban },
     ],
   },
   {
-    id: "create",
-    label: "Create",
+    id: "secondary",
+    label: "Library",
     items: [
-      { label: "Create", href: "/studio?tool=image", icon: Sparkles },
-      { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Showcase", href: "/showcase", icon: Image },
+      { label: "Library", href: "/library", icon: FileText },
+      { label: "Deployments", href: "/deployments", icon: Rocket },
+      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
     ],
   },
   {
-    id: "explore",
-    label: "Explore",
+    id: "labs",
+    label: "Labs",
     items: [
       { label: "Games", href: "/games", icon: GamesIcon },
       { label: "Discover", href: "/discover", icon: Compass },
-      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-      { label: "Hire LiTTree", href: "/hire", icon: Rocket },
+      { label: "Showcase", href: "/showcase", icon: Image },
     ],
   },
 ];
@@ -111,11 +115,11 @@ export const APP_NAV_BOTTOM: NavItem[] = [
 export const APP_MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Discover", href: "/discover", icon: Compass },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Me", href: "/profile", icon: User },
 ];
 
-/* Legacy compat — still used by dead Sidebar.tsx, keep for safety */
+/* Legacy compat — still used by Sidebar.tsx, simplified to LiTT-centered IA */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Dashboard",
@@ -124,7 +128,6 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Dashboard,
     items: [
       { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-      { label: "LiTT Assistant", href: "/litt", icon: Brain },
     ],
   },
   {
@@ -133,11 +136,11 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Sparkles,
     accent: GROUP_ACCENTS.Studio,
     items: [
-      { label: "Create", href: "/studio?tool=chat", icon: Sparkles },
+      { label: "Chat", href: "/studio?tool=chat", icon: Sparkles },
       { label: "Image", href: "/studio?tool=image", icon: Image },
       { label: "Video", href: "/studio?tool=video", icon: Video },
       { label: "Music", href: "/studio?tool=music", icon: Music },
-      { label: "Workflow Forge", href: "/studio?tool=pipeline", icon: Workflow },
+      { label: "Terminal", href: "/studio?tool=terminal", icon: Terminal },
     ],
   },
   {
@@ -147,20 +150,8 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Projects,
     items: [
       { label: "All Projects", href: "/projects", icon: FolderKanban },
-      { label: "Code Workspace", href: "/code", icon: Code2 },
-      { label: "Files", href: "/library/files", icon: FileText },
-      { label: "Saved", href: "/library/saved", icon: Bookmark },
-    ],
-  },
-  {
-    label: "Gallery",
-    href: "/gallery",
-    icon: Image,
-    accent: GROUP_ACCENTS.Gallery,
-    items: [
-      { label: "Overview", href: "/gallery", icon: Image },
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Showcase", href: "/showcase", icon: Star },
+      { label: "Library", href: "/library", icon: FileText },
+      { label: "Deployments", href: "/deployments", icon: Rocket },
     ],
   },
   {
@@ -169,30 +160,28 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: ShoppingBag,
     accent: GROUP_ACCENTS.Marketplace,
     items: [
-      { label: "Browse Agents", href: "/marketplace", icon: Store },
-      { label: "AI Credits", href: "/marketplace?tab=littbits", icon: Wallet },
-      { label: "Purchases", href: "/wallet?tab=history", icon: Receipt },
-      { label: "Creator Hub", href: "/creator", icon: BarChart3 },
+      { label: "Browse", href: "/marketplace", icon: Store },
+      { label: "LiTBits", href: "/wallet", icon: Wallet },
     ],
   },
   {
-    label: "Discover",
-    href: "/discover",
-    icon: Users,
-    accent: GROUP_ACCENTS.Social,
+    label: "Labs",
+    href: "/games",
+    icon: GamesIcon,
+    accent: GROUP_ACCENTS.More,
     items: [
-      { label: "Feed", href: "/discover", icon: Users },
-      { label: "Gallery", href: "/gallery", icon: Image },
+      { label: "Games", href: "/games", icon: GamesIcon },
+      { label: "Discover", href: "/discover", icon: Compass },
+      { label: "Showcase", href: "/showcase", icon: Star },
     ],
   },
   {
-    label: "More",
+    label: "Account",
     href: "/wallet",
     icon: Menu,
     accent: GROUP_ACCENTS.More,
     items: [
       { label: "Wallet", href: "/wallet", icon: Wallet },
-      { label: "Docs", href: "/docs", icon: FileText },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Profile", href: "/profile", icon: User },
     ],

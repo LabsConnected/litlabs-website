@@ -6,8 +6,8 @@ import { newRequestId, jsonError } from "@/lib/api-route-helpers";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 // ── Route configuration ──────────────────────────────────────────
-// Node.js runtime (uses Node-only SDKs). maxDuration gives Vercel enough
-// headroom for LLM calls; without it, a slow provider triggers a Vercel
+// Node.js runtime (uses Node-only SDKs). maxDuration gives Railway enough
+// headroom for LLM calls; without it, a slow provider triggers a Railway
 // 504 HTML page instead of a JSON error.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,7 +61,7 @@ Generate clean, modern, working code that is immediately useful.
 
 ## BRAND CONTEXT
 - Product: LiTTree LabStudios — an AI software factory, not a chat app.
-- Stack: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Supabase, Clerk, Stripe, Vercel.
+- Stack: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Supabase, Clerk, Stripe, Railway.
 - Design: Glassmorphic dark theme. Colors: neon green (#a8ff2f), purple (#a970ff), cyan (#00f0ff), black (#03050a).
 - Icons: Lucide. No Bootstrap, Material UI, or external CSS frameworks.
 

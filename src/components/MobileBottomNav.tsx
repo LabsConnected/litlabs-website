@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { Home, Sparkles, Plus, Compass, User } from "lucide-react";
+import { Home, Sparkles, Plus, FolderKanban, User } from "lucide-react";
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
@@ -20,8 +20,8 @@ export default function MobileBottomNav() {
   ];
 
   const rightItems = [
-    { label: "Discover", href: "/discover", icon: Compass, active: pathname?.startsWith("/discover") },
-    { label: "Me", href: "/profile", icon: User, active: pathname?.startsWith("/profile") || pathname?.startsWith("/settings") },
+    { label: "Projects", href: "/projects", icon: FolderKanban, active: pathname?.startsWith("/projects") },
+    { label: "Me", href: "/profile", icon: User, active: pathname?.startsWith("/profile") || pathname?.startsWith("/settings") || pathname?.startsWith("/wallet") },
   ];
 
   return (
