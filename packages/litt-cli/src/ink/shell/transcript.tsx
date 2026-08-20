@@ -21,8 +21,10 @@ import React from "react";
 import { Box, Text } from "ink";
 import { COLORS } from "../colors.js";
 import { ChatMessageView } from "../chat-transcript.js";
+import { ToolProgress, estimateToolProgressHeight } from "../tool-progress.js";
 import { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS, type ViewportResult } from "../scroll-model.js";
 import type { ActivityEntry, ChatMessage, MissionState, ActivitySemantic } from "../cockpit-store.js";
+import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import { MissionResultBlock } from "./summary.js";
 
 /** Tiny-vocabulary glyphs. */
@@ -148,6 +150,10 @@ export interface TranscriptAreaProps {
   mission: MissionState | null;
   gitModified: number;
   gitUntracked: number;
+  /** Structured per-tool progress — fills the main content area during
+   *  mission execution with friendly per-tool blocks. Rendered between
+   *  the chat messages and the activity feed (live mode only). */
+  toolProgress: ToolProgressSnapshot | null;
 }
 
 export function TranscriptArea({
@@ -158,6 +164,7 @@ export function TranscriptArea({
   mission,
   gitModified,
   gitUntracked,
+  toolProgress,
 }: TranscriptAreaProps): React.ReactElement | null {
   if (messages.length === 0 || viewport.start >= viewport.end) return null;
 
@@ -175,6 +182,15 @@ export function TranscriptArea({
           <ChatMessageView msg={msg} width={contentWidth} />
         </Box>
       ))}
+
+      {/* Tool progress — structured per-tool blocks during mission execution.
+       *  Fills the main content area with live, friendly tool feedback
+       *  instead of an empty streaming placeholder. Live mode only. */}
+      {viewport.atBottom && toolProgress && toolProgress.entries.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <ToolProgress progress={toolProgress} width={contentWidth} />
+        </Box>
+      )}
 
       {/* DONE/FAILED result block — live mode only (belongs to the newest turn) */}
       {viewport.atBottom && terminalMission && mission && (

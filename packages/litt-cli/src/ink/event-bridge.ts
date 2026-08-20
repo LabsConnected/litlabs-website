@@ -112,6 +112,63 @@ export function useEventBridge(
   store: CockpitStore,
   sessionBridge: SessionEventBridge | null,
 ): void {
+  // ─── Tool progress — drive the structured per-tool view ──────────
+  // Maps lifecycle events to ToolProgressStore mutations. This is the
+  // canonical wiring: tool.started → startTool, tool.completed →
+  // completeTool, tool.stdout/stderr → appendChunk, mission.* →
+  // mission lifecycle. The renderer reads from store.state.toolProgress.
+  const updateToolProgress = useCallback((event: LifecycleEvent) => {
+    switch (event.type) {
+      case "mission.created":
+      case "mission.started":
+        store.actions.startToolProgressMission();
+        break;
+      case "mission.completed":
+        store.actions.completeToolProgressMission();
+        break;
+      case "mission.failed":
+        store.actions.failToolProgressMission();
+        break;
+      case "tool.started": {
+        const toolId = (event.data.toolId as string) ?? (event.data.tool as string) ?? "";
+        const toolName = (event.data.tool as string) ?? toolId;
+        store.actions.startToolProgress(event.toolCallId ?? "", toolId, toolName);
+        break;
+      }
+      case "tool.completed": {
+        const success = (event.data.success as boolean) ?? true;
+        const message = (event.data.message as string) ?? "";
+        const durationMs = event.data.durationMs as number | undefined;
+        store.actions.completeToolProgress(event.toolCallId ?? "", success, message, durationMs);
+        break;
+      }
+      case "tool.failed": {
+        const message = (event.data.error as string) ?? (event.data.message as string) ?? "error";
+        const durationMs = event.data.durationMs as number | undefined;
+        store.actions.failToolProgress(event.toolCallId ?? "", message, durationMs);
+        break;
+      }
+      case "tool.cancelled": {
+        const message = (event.data.message as string) ?? "cancelled";
+        store.actions.terminalToolProgress(event.toolCallId ?? "", "cancelled", message);
+        break;
+      }
+      case "tool.timeout": {
+        const message = (event.data.message as string) ?? "timed out";
+        store.actions.terminalToolProgress(event.toolCallId ?? "", "timeout", message);
+        break;
+      }
+      case "tool.stdout":
+      case "tool.stderr": {
+        const chunk = String(event.data.chunk ?? "");
+        if (chunk) store.actions.appendToolProgressChunk(event.toolCallId ?? "", chunk);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [store]);
+
   const onLifecycle = useCallback((event: LifecycleEvent) => {
     // Map event to activity entry
     let entry: ActivityEntry | null = null;
@@ -221,6 +278,12 @@ export function useEventBridge(
       store.actions.addActivity(entry);
     }
 
+    // ─── Tool progress updates ────────────────────────────────────
+    // Drive the structured ToolProgressStore from the same lifecycle
+    // events. This fills the main content area during tool execution
+    // with friendly per-tool blocks instead of an empty streaming area.
+    updateToolProgress(event);
+
     // Map event to Holo state
     const holo = holoFromEvent(event);
     if (holo) {
@@ -237,9 +300,7 @@ export function useEventBridge(
         }
       }
     }
-  }, [store]);
-
-  // Remote connection state: maps RuntimeClient ConnectionState to
+  }, [store, updateToolProgress]);
   // the cockpit's remoteRuntime field. This is INDEPENDENT of local runtime.
   // Local runtime readiness is set once on mount — it does not flap.
   const onConnection = useCallback((state: string) => {

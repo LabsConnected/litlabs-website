@@ -32,6 +32,7 @@ import { Composer } from "./composer.js";
 import { StatusBar } from "../status-bar.js";
 import { CONTENT_MEASURE } from "../chat-transcript.js";
 import type { ActivityEntry, ChatMessage, HoloState, MissionState } from "../cockpit-store.js";
+import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
@@ -49,6 +50,10 @@ export interface LiTTShellProps {
   missionState: MissionState | null;
   gitModified: number;
   gitUntracked: number;
+
+  /** Structured per-tool progress — fills the main content area during
+   *  mission execution with friendly per-tool blocks. */
+  toolProgress: ToolProgressSnapshot | null;
 
   // Composer wiring
   composerValue: string;
@@ -86,7 +91,7 @@ export interface LiTTShellProps {
 export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
-    gitModified, gitUntracked,
+    gitModified, gitUntracked, toolProgress,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
@@ -165,6 +170,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             mission={missionState}
             gitModified={gitModified}
             gitUntracked={gitUntracked}
+            toolProgress={toolProgress}
           />
         ) : (
           <Welcome />

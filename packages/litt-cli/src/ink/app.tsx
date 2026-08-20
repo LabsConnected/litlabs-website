@@ -182,6 +182,7 @@ export function CockpitApp({
       store.actions.setIsProcessing(false);
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
+      store.actions.clearToolProgress();
       store.actions.stopBusy();
       return;
     }
@@ -199,6 +200,7 @@ export function CockpitApp({
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
+        store.actions.clearToolProgress();
         store.actions.stopBusy();
       } else {
         exit();
@@ -211,6 +213,7 @@ export function CockpitApp({
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
       store.actions.clearChatTranscript();
+      store.actions.clearToolProgress();
       store.actions.stopBusy();
     } else if (isCtrl(input, key, "d")) {
       controller.openDiffViewer();
@@ -383,6 +386,7 @@ export function CockpitApp({
             missionState={store.state.missionState}
             gitModified={store.state.gitModified}
             gitUntracked={store.state.gitUntracked}
+            toolProgress={store.state.toolProgress}
             composerValue={store.state.composerValue}
             onComposerChange={(v) => store.actions.setComposerValue(v)}
             onSubmit={(v) => {

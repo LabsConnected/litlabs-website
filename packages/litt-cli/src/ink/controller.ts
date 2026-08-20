@@ -438,6 +438,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const newSession = useCallback(() => {
     store.actions.clearChatTranscript();
     store.actions.clearMission();
+    store.actions.clearToolProgress();
     store.actions.setHoloState("IDLE");
     store.actions.setIsProcessing(false);
     store.actions.setOverlay("none");
@@ -510,6 +511,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
       store.actions.clearChatTranscript();
+      store.actions.clearToolProgress();
       return;
     }
     if (input === "/help") {
@@ -1434,6 +1436,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
       store.actions.startMission(input);
       store.actions.startBusy();
+      store.actions.startToolProgressMission();
       store.actions.setHoloState("UNDERSTANDING");
       // ─── Git BASELINE at mission start (dogfood P0) ──────────────
       // The repo's pre-existing dirty files are recorded BEFORE any
@@ -2086,6 +2089,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
           store.actions.setMissionRuntimeProven(true);
+          store.actions.completeToolProgressMission();
           settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
@@ -2104,6 +2108,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED");
           store.actions.setMissionRuntimeProven(false);
+          store.actions.failToolProgressMission();
           settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
@@ -2138,6 +2143,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
+        store.actions.failToolProgressMission();
         settled = true;
         store.actions.stopBusy();
         // Fail the canonical mission if one was created
@@ -2155,6 +2161,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.stopBusy();
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED");
+          store.actions.failToolProgressMission();
         }
       }
       perf.end("mission");
