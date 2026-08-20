@@ -75,8 +75,11 @@ export class PerfTrace {
     this.marks.push({ label, ts: Date.now() });
   }
 
-  /** Print the report and freeze. Safe to call once (idempotent). */
-  end(kind: "chat" | "mission"): void {
+  /** Print the report and freeze. Safe to call once (idempotent).
+   *
+   * `kind` is the run class: "chat" / "mission" for model-backed turns,
+   * "local" for the deterministic Local Fast Lane (no model/provider). */
+  end(kind: "chat" | "mission" | "local"): void {
     if (!this.enabled || this.ended) return;
     this.ended = true;
     const total = Date.now() - this.t0;

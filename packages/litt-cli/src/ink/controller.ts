@@ -46,6 +46,7 @@ import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
+import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -911,6 +912,98 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     //   mission  — tasks that require tools/execution.
     //              Starts the full agent lifecycle with progress + steps.
     //   command  — slash commands (handled above)
+    const projectRoot = session.getCwd();
+
+    // ─── Local Fast Lane — deterministic local queries (no model) ───────
+    // A NARROW, explicit fast-path that answers a fixed set of canonical
+    // phrasings from local runtime state BEFORE model routing. No model
+    // request, no provider adapter, no mission, no VerificationGate.
+    // Ambiguous wording falls through to the normal chat/mission path.
+    // See lib/local-fast-lane.ts for the phrase set + truthfulness rules.
+    const local = matchLocalFastPath(input, {
+      cwd: projectRoot,
+      projectName,
+      mode: store.state.mode,
+    });
+    if (local) {
+      // Local perf trace — truthful labels only. The Local Fast Lane runs
+      // BEFORE classifyIntent(), so the trace MUST NOT claim
+      // "intent_classified" — that classifier is intentionally bypassed.
+      // The truthful local boundaries are:
+      //   submit → local_match → finalize
+      // No provider/model marks are emitted because no provider or model
+      // is involved.
+      const localPerf = PerfTrace.start("local");
+      localPerf.mark("local_match");
+
+      // Bare exit/quit — exit locally without calling the model.
+      if (local.kind === "exit") {
+        localPerf.mark("finalize");
+        localPerf.end("local");
+        // Render the farewell into the transcript before exiting so the
+        // turn is not a missing-content gap.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: local.text,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "local",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_local`,
+          ts: Date.now(),
+          type: "info",
+          tag: "LOCAL",
+          text: truncateActivity(local.text, 60),
+        });
+        onExit?.();
+        return;
+      }
+
+      // Persist the user message to the chat transcript (rendered once).
+      store.actions.addChatMessage({
+        role: "user",
+        content: input,
+        ts: Date.now(),
+        status: "complete",
+      });
+      // Surface the local query in the operator feed.
+      store.actions.addActivity({
+        id: `act_${Date.now()}_chat`,
+        ts: Date.now(),
+        type: "agent.chat",
+        tag: "LOCAL",
+        text: truncateActivity(input, 40),
+        fullText: input,
+      });
+      // Assistant answer — finalized immediately as complete. servedModel
+      // is "local" so the routing footer truthfully shows no provider.
+      store.actions.addChatMessage({
+        role: "assistant",
+        content: local.text,
+        ts: Date.now(),
+        status: "complete",
+        servedModel: "local",
+      });
+      store.actions.addActivity({
+        id: `act_${Date.now()}_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "LOCAL",
+        text: truncateActivity(local.text, 60),
+      });
+      localPerf.mark("finalize");
+      localPerf.end("local");
+      persistSession();
+      return;
+    }
+
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
     // P0 perf instrumentation — no-op unless LITT_PERF=1.
@@ -921,7 +1014,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // The transcript shows the original input (@tokens intact); the
     // MODEL receives the resolved context prompt. Unresolvable tokens
     // (emails, stray @s) stay in the prompt untouched.
-    const projectRoot = session.getCwd();
     const contextResult = buildPromptWithContext(input, projectRoot, {
       terminalLog: terminalLog.current,
       errorLog: errorLog.current,
