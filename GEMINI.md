@@ -25,7 +25,7 @@
 - pnpm 9.15+ · Node 22+ · TypeScript 5 (strict)
 - Clerk auth · Supabase DB · Stripe payments · Cloudflare R2 storage
 - AI: OpenRouter, Gemini, Together, Fal, MiniMax, Alibaba
-- Deployed on Vercel; Docker available for self-hosting
+- Deployed on Railway; Docker available for self-hosting
 
 ## Commands
 

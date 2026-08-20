@@ -36,6 +36,6 @@ The app uses the LiTT surfaces at `/litt` and `/litt-terminal`; older routes suc
 
 ## Deployment
 
-Production deploys run through Vercel. The terminal service can be built with Docker using the provided Dockerfiles. Heavy Studio and media builds are intended for GitHub Codespaces, as described in `.devin-config.json`.
+Production deploys run through Railway. The terminal service and voice worker are deployed as separate Railway services. See `RAILWAY.md` for the full deployment guide. Heavy Studio and media builds are intended for GitHub Codespaces, as described in `.devin-config.json`.
 
 Never commit `.env.local` or any secret-bearing environment file.

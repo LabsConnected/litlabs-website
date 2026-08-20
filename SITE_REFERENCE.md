@@ -538,11 +538,12 @@ Terminal server requires Docker for workspace isolation. Railway doesn't provide
 
 ## 10. CI / Deploy
 
-- **GitHub Actions:** build/type-check, terminal deployment, Lighthouse workflows
+- **GitHub Actions:** build/type-check, terminal deployment, Lighthouse, deploy-digest cron
 - **Build workflow** is the required quality gate for PRs (lint + tests + TS + prod build)
-- **Vercel project ID:** `prj_EnE4JStJUENM89PWov574Y9q7mTy`
-- **Deploy:** `pnpm build` → Vercel. Heavy builds (`/studio`, image gen) belong in GitHub Codespaces
-- **vercel.json** uses `next build` (standard)
+- **Railway:** web, terminal-server, voice-worker, music-worker services (see `railway.json` and `RAILWAY.md`)
+- **Deploy:** push to `main` triggers Railway deployment. Heavy builds (`/studio`, image gen) belong in GitHub Codespaces
+- **Music worker:** persistent Railway service (2-min interval, not GitHub Actions cron)
+- **Deploy digest:** GitHub Actions cron weekdays 09:00 UTC (replaced former Vercel Cron)
 
 ---
 
