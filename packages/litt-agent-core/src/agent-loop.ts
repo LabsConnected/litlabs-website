@@ -355,6 +355,62 @@ export function parseToolCall(content: string): ParsedToolCall | null {
 }
 
 /**
+ * Parse ALL tool calls from a model response (multi-tool support).
+ *
+ * Extracts every fenced ```tool_call block AND every bare JSON tool
+ * object from the content, returning them in document order. This
+ * enables parallel execution of independent read-only tools in a
+ * single model turn, reducing round-trips for compound queries like
+ * "what framework and branch is this".
+ *
+ * Returns an empty array if no tool calls are found. The first element
+ * is always the same call that `parseToolCall` would return (backward
+ * compatibility), but callers using `parseToolCalls` get ALL calls.
+ *
+ * Deduplication: identical tool calls (same toolId + same inputs) are
+ * deduplicated to prevent the model from accidentally double-executing
+ * the same tool. The first occurrence wins.
+ */
+export function parseToolCalls(content: string): ParsedToolCall[] {
+  const calls: ParsedToolCall[] = [];
+  const seen = new Set<string>();
+
+  const add = (parsed: ParsedToolCall | null) => {
+    if (!parsed) return;
+    const key = `${parsed.toolId}::${JSON.stringify(parsed.inputs)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    calls.push(parsed);
+  };
+
+  // 1. ALL fenced ```tool_call ... ``` blocks (global regex).
+  const fenceRe = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  while ((m = fenceRe.exec(content)) !== null) {
+    add(parseToolJson(m[1]));
+  }
+
+  // 2. ALL bare JSON tool objects on their own lines.
+  const bareRe = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/gm;
+  let bm: RegExpExecArray | null;
+  while ((bm = bareRe.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf("\n", bm.index) + 1;
+    const jsonText = content.slice(lineStart).split("\n")[0] ?? "";
+    add(parseToolJson(jsonText));
+  }
+
+  // 3. ALL bare JSON tool objects anywhere (mid-prose).
+  for (let idx = 0; idx < content.length; idx++) {
+    if (content[idx] !== "{") continue;
+    const span = balancedJsonSpan(content, idx);
+    if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+    add(parseToolJson(span));
+  }
+
+  return calls;
+}
+
+/**
  * Extract the text content without the tool_call blocks.
  * Uses the same tolerant matching as parseToolCall so a block that was
  * parsed as a tool call is always stripped from the final response text
@@ -590,8 +646,11 @@ export async function runAgentLoop(
       continue;
     }
 
-    // Check for tool calls in the response
-    const toolCall = parseToolCall(modelContent);
+    // Check for tool calls in the response.
+    // parseToolCalls extracts ALL tool calls (multi-tool support),
+    // enabling parallel execution of independent read-only tools.
+    const allToolCalls = parseToolCalls(modelContent);
+    const toolCall = allToolCalls[0] ?? null;
 
     if (!toolCall) {
       // Requests for repository/runtime evidence cannot honestly complete
@@ -763,181 +822,221 @@ export async function runAgentLoop(
       continue;
     }
 
-    // Look up the tool in the registry
-    const toolEntry: ToolEntry | null = options.tools.get(toolCall.toolId);
-    if (!toolEntry) {
-      // Unknown tool — tell the model and continue
+    // ─── Multi-tool parallel execution ──────────────────────────────
+    // When the model emits multiple tool calls in one turn AND all of
+    // them are read-only (no mutations, no approvals needed), execute
+    // them in parallel through the gateway. This reduces round-trips
+    // for compound read-only queries like "what framework and branch".
+    //
+    // Safety rules:
+    //   - ALL tools must be read-only (readOnly: true, mutating: false)
+    //   - If ANY tool is mutating or requires approval, fall back to
+    //     sequential execution of only the FIRST tool call (backward
+    //     compatibility — the remaining tools are handled in the next
+    //     loop round after the model sees the first result).
+    //   - Each tool gets its own canonical toolCallId, runtime event,
+    //     and gateway dispatch — no shortcuts around security.
+    //   - Results are normalized in document order before feeding back
+    //     to the model so the conversation is deterministic.
+
+    // Resolve all tool entries and check if parallel execution is safe.
+    const allEntries: Array<{ call: ParsedToolCall; entry: ToolEntry | null }> =
+      allToolCalls.map((c) => ({ call: c, entry: options.tools.get(c.toolId) }));
+
+    // Check if ALL tool calls are for known read-only tools.
+    const allReadOnly = allEntries.length > 0 && allEntries.every(
+      ({ entry }) => entry !== null &&
+        entry.definition.readOnly === true &&
+        entry.metadata.mutating === false,
+    );
+
+    // If only one tool call, or if not all read-only, execute just the
+    // first one sequentially (preserves existing behavior for mutations
+    // and dependent tool chains).
+    const callsToExecute = (allReadOnly && allEntries.length > 1)
+      ? allEntries
+      : allEntries.slice(0, 1);
+
+    // If the first tool is unknown, report and continue (backward compat).
+    if (callsToExecute.length > 0 && callsToExecute[0].entry === null) {
       messages.push({ role: "assistant", content: modelContent });
       messages.push({
         role: "user",
-        content: `Error: Unknown tool "${toolCall.toolId}". Available tools: ${toolDefs.map((t) => t.id).join(", ")}`,
+        content: `Error: Unknown tool "${callsToExecute[0].call.toolId}". Available tools: ${toolDefs.map((t) => t.id).join(", ")}`,
       });
       continue;
     }
 
-    // Generate canonical tool call ID
-    const toolCallId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    // Emit agent_tool_call event
-    if (options.emitter) {
-      options.emitter({
-        type: "litt_event",
-        subtype: "agent_tool_call",
-        ts: Date.now(),
-        toolCallId,
-        data: {
-          tool: toolEntry.definition.name,
-          toolId: toolEntry.definition.id,
-          inputs: toolCall.inputs,
-        },
-      });
-    }
-
-    // Track command start in the runtime store
-    if (options.store) {
-      options.store.commandStart(
-        toolEntry.definition.name,
-        [],
-        options.cwd,
-        `agent_${toolCallId}`,
-      );
-    }
-
-    // Dispatch the tool call through the ExecutionGateway.
-    //
-    // The gateway is the ONE canonical execution authority. It enforces:
-    //   - Identity verification
-    //   - Grant verification
-    //   - Policy decision (PLAN/ACT/AUTO + capability classification)
-    //   - Approval enforcement
-    //   - Credential lease
-    //
-    // For project.run: gateway → CommandExecutor → runCommand() (hardened)
-    // For other tools: gateway → ToolRegistry → handler (after policy check)
-    //
-    // The legacy ToolRegistry.execute() bypass is ONLY available when no
-    // gateway is provided — this is for unit tests with mock tools only.
-    // In production, the gateway MUST be provided.
+    // ─── Execute tool calls (parallel if all read-only, else single) ───
     const toolStartTime = Date.now();
-    let result: ToolResult;
-    try {
-      if (options.gateway) {
-        // ─── CANONICAL path: ExecutionGateway ───
-        const gwResult = await options.gateway.execute({
-          toolId: toolCall.toolId,
-          inputs: toolCall.inputs,
-          cwd: options.cwd,
-          mode: options.mode ?? "act",
-          identity: {
-            tenantId: "agent-tenant",
-            userId: options.userId ?? "agent-user",
-            actorId: options.userId ?? "agent-user",
-            trusted: false, // model-originated execution is untrusted
-            interaction: "interactive",
+    const executeOne = async (
+      parsed: ParsedToolCall,
+      entry: ToolEntry,
+    ): Promise<{ toolCallId: string; result: ToolResult; durationMs: number }> => {
+      const tcId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      // Emit agent_tool_call event
+      if (options.emitter) {
+        options.emitter({
+          type: "litt_event",
+          subtype: "agent_tool_call",
+          ts: Date.now(),
+          toolCallId: tcId,
+          data: {
+            tool: entry.definition.name,
+            toolId: entry.definition.id,
+            inputs: parsed.inputs,
           },
-          runId: `agent_${toolCallId}`,
-          toolCallId,
-          onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
         });
-        result = gwResult.result;
-      } else if (options.executor) {
-        // ─── Deprecated: direct CommandExecutor (for backward compat) ───
-        const cmdResult = await options.executor.execute(
-          toolEntry.definition.name,
-          extractArgsFromToolCall(toolEntry.definition.name, toolCall.inputs),
-          {
-            cwd: options.cwd,
-            mode: options.mode,
-            runId: `agent_${toolCallId}`,
-            toolCallId,
-            commandLabel: toolEntry.definition.name,
-            onStream: options.onToolStream,
-          },
-        );
-        result = cmdResult.result;
-      } else {
-        // ─── TEST ONLY: direct ToolRegistry.execute() (no security) ───
-        // This bypasses ALL security boundaries. Only for unit tests.
-        result = await options.tools.execute(toolCall.toolId, {
-          cwd: options.cwd,
-          projectId: null,
-          userId: options.userId ?? null,
-          shell: options.shell,
-        }, toolCall.inputs);
       }
-    } catch (err) {
-      result = {
-        status: "failed",
-        success: false,
-        message: `Tool execution error: ${err instanceof Error ? err.message : String(err)}`,
-        data: {},
-      };
-    }
-    const toolDurationMs = Date.now() - toolStartTime;
 
-    // Track command end in the runtime store
-    if (options.store) {
-      options.store.commandEnd(
-        toolEntry.definition.name,
-        result.success,
-        result.data?.exitCode as number | null ?? null,
-        toolDurationMs,
-        result.message,
-        `agent_${toolCallId}`,
-      );
-    }
+      // Track command start in the runtime store
+      if (options.store) {
+        options.store.commandStart(
+          entry.definition.name,
+          [],
+          options.cwd,
+          `agent_${tcId}`,
+        );
+      }
 
-    const toolCallRecord: AgentToolCallRecord = {
-      toolCallId,
-      toolId: toolEntry.definition.id,
-      toolName: toolEntry.definition.name,
-      inputs: toolCall.inputs,
-      result,
-      durationMs: toolDurationMs,
+      let res: ToolResult;
+      try {
+        if (options.gateway) {
+          // ─── CANONICAL path: ExecutionGateway ───
+          const gwResult = await options.gateway.execute({
+            toolId: parsed.toolId,
+            inputs: parsed.inputs,
+            cwd: options.cwd,
+            mode: options.mode ?? "act",
+            identity: {
+              tenantId: "agent-tenant",
+              userId: options.userId ?? "agent-user",
+              actorId: options.userId ?? "agent-user",
+              trusted: false, // model-originated execution is untrusted
+              interaction: "interactive",
+            },
+            runId: `agent_${tcId}`,
+            toolCallId: tcId,
+            onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
+          });
+          res = gwResult.result;
+        } else if (options.executor) {
+          // ─── Deprecated: direct CommandExecutor (for backward compat) ───
+          const cmdResult = await options.executor.execute(
+            entry.definition.name,
+            extractArgsFromToolCall(entry.definition.name, parsed.inputs),
+            {
+              cwd: options.cwd,
+              mode: options.mode,
+              runId: `agent_${tcId}`,
+              toolCallId: tcId,
+              commandLabel: entry.definition.name,
+              onStream: options.onToolStream,
+            },
+          );
+          res = cmdResult.result;
+        } else {
+          // ─── TEST ONLY: direct ToolRegistry.execute() (no security) ───
+          res = await options.tools.execute(parsed.toolId, {
+            cwd: options.cwd,
+            projectId: null,
+            userId: options.userId ?? null,
+            shell: options.shell,
+          }, parsed.inputs);
+        }
+      } catch (err) {
+        res = {
+          status: "failed",
+          success: false,
+          message: `Tool execution error: ${err instanceof Error ? err.message : String(err)}`,
+          data: {},
+        };
+      }
+      const dur = Date.now() - toolStartTime;
+      return { toolCallId: tcId, result: res, durationMs: dur };
     };
-    toolCalls.push(toolCallRecord);
 
-    // Emit agent_tool_result event
-    if (options.emitter) {
-      options.emitter({
-        type: "litt_event",
-        subtype: "agent_tool_result",
-        ts: Date.now(),
+    // Execute all calls — parallel if all read-only, else single.
+    const execResults = callsToExecute.length > 1
+      ? await Promise.all(callsToExecute.map(({ call, entry }) => executeOne(call, entry!)))
+      : [await executeOne(callsToExecute[0].call, callsToExecute[0].entry!)];
+
+    // ─── Normalize results in document order ───────────────────────
+    // Process results in the same order as the tool calls appeared in
+    // the model response. This ensures deterministic evidence ordering.
+    for (let i = 0; i < execResults.length; i++) {
+      const { toolCallId, result, durationMs } = execResults[i];
+      const { call, entry } = callsToExecute[i];
+      const toolEntry = entry!;
+
+      // Track command end in the runtime store
+      if (options.store) {
+        options.store.commandEnd(
+          toolEntry.definition.name,
+          result.success,
+          result.data?.exitCode as number | null ?? null,
+          durationMs,
+          result.message,
+          `agent_${toolCallId}`,
+        );
+      }
+
+      const toolCallRecord: AgentToolCallRecord = {
         toolCallId,
-        data: {
-          tool: toolEntry.definition.name,
-          toolId: toolEntry.definition.id,
-          status: result.status,
-          success: result.success,
-          message: result.message,
-          durationMs: toolDurationMs,
-        },
-      });
+        toolId: toolEntry.definition.id,
+        toolName: toolEntry.definition.name,
+        inputs: call.inputs,
+        result,
+        durationMs,
+      };
+      toolCalls.push(toolCallRecord);
+
+      // Emit agent_tool_result event
+      if (options.emitter) {
+        options.emitter({
+          type: "litt_event",
+          subtype: "agent_tool_result",
+          ts: Date.now(),
+          toolCallId,
+          data: {
+            tool: toolEntry.definition.name,
+            toolId: toolEntry.definition.id,
+            status: result.status,
+            success: result.success,
+            message: result.message,
+            durationMs,
+          },
+        });
+      }
+
+      // Escalation: track tool success/failure.
+      if (missionId && escalation) {
+        if (result.success) {
+          escalation.recordSuccess(missionId);
+        } else {
+          escalation.recordFailure(missionId, "tool", result.message);
+          tryEscalate();
+        }
+      }
     }
 
-    // Append the assistant's tool call and the tool result to the conversation
+    // Append the assistant's tool call(s) and ALL tool results to the
+    // conversation. For parallel execution, all results are combined
+    // into a single user message so the model sees all evidence at once.
     messages.push({ role: "assistant", content: modelContent });
-    messages.push({
-      role: "user",
-      content: `Tool "${toolEntry.definition.name}" returned:\n${JSON.stringify({
+    const resultLines = execResults.map(({ result }, i) => {
+      const { entry } = callsToExecute[i];
+      return `Tool "${entry!.definition.name}" returned:\n${JSON.stringify({
         status: result.status,
         message: result.message,
         data: result.data,
-      }, null, 2)}`,
+      }, null, 2)}`;
     });
-
-    // Escalation: track tool success/failure. Repeated tool failures
-    // (the model is too weak to call tools correctly) trigger
-    // escalation to a stronger model. The tool result is already in
-    // the conversation, so the new model sees what went wrong.
-    if (missionId && escalation) {
-      if (result.success) {
-        escalation.recordSuccess(missionId);
-      } else {
-        escalation.recordFailure(missionId, "tool", result.message);
-        tryEscalate();
-      }
-    }
+    messages.push({
+      role: "user",
+      content: resultLines.join("\n\n"),
+    });
   }
 
   if (rounds >= maxRounds && termination === "complete") {

@@ -161,6 +161,7 @@ export { askLiTTCode, handleLiTTCodeCommand } from "./compat.js";
 export {
   runAgentLoop,
   parseToolCall,
+  parseToolCalls,
   stripToolCallBlocks,
   buildDefaultSystemPrompt,
   classifyAgentFailure,
