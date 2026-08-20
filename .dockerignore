@@ -3,6 +3,7 @@ dist
 .next
 .env
 .env.local
+.env.*.local
 *.log
 .git
 .vscode
@@ -14,3 +15,33 @@ work/
 meta/
 docs/
 supabase/
+# Build artifacts — Docker builds from source
+packages/litt-agent-core/dist
+packages/litt-cli/dist
+packages/litt-models/dist
+packages/litt-shell/dist
+terminal-server/dist
+voice-server/dist
+# Test artifacts
+test-results/
+playwright-report/
+coverage/
+# Docker / Railway configs for other services (not needed in web build)
+terminal-server/Dockerfile
+voice-server/Dockerfile
+worker/Dockerfile
+n8n/Dockerfile
+docker/
+# IDE / agent configs
+.devcontainer/
+.devin/
+.windsurf/
+.cursorrules
+.clinerules
+# Misc
+.tmp/
+memory/
+prds/
+tasks/
+prompts/
+grafana/

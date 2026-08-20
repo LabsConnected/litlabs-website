@@ -235,6 +235,18 @@ export interface RoutingResult {
   /** Which provider will actually serve the call (source truth). */
   servedBy: ProviderId;
   credentialSource: CredentialSource;
+  /**
+   * If the requested policy could not be honored and a fallback was chosen,
+   * this explains why (e.g. "GPT-5.6 Sol unavailable → Claude Sonnet 5 selected").
+   * null when the requested policy was honored exactly.
+   */
+  fallbackReason: string | null;
+  /**
+   * The policy that was actually applied. May differ from the requested
+   * policy when a FIXED model is unavailable and strict=false (falls back
+   * to AUTO). When strict=true, the router throws instead.
+   */
+  appliedPolicy: "auto" | "pinned" | "ask" | "budget" | "max";
 }
 
 // ─── Run-pinning ───────────────────────────────────────────────────

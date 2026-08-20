@@ -23,7 +23,6 @@ import {
 import { getSourceRegistry } from "@/lib/litt-intelligence/source-registry";
 
 export const runtime = "nodejs";
-export const maxDuration = 120; // Browser operations can take a while
 
 // ─── POST: Execute a web intelligence operation ─────────────────
 

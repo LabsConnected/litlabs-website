@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { desktopRuntime, type ConnectionState, type WorkspaceState, type RuntimeState } from "./runtime-client";
 
-// Status indicator helper
-const getStatusIcon = (connected: boolean) => connected ? "?" : "?";
+// Status indicator helper — ● when connected to the shared runtime,
+// ○ when offline. Mirrors the Ink cockpit header (header.tsx localIcon).
+const getStatusIcon = (connected: boolean) => connected ? "●" : "○";
 
 // Phase display names
 const getPhaseLabel = (phase: string) => {
@@ -156,7 +157,7 @@ export function App() {
       <div className="litt-shell-content">
         {/* LiTT Brand */}
         <div className="litt-brand">
-          <div className="litt-logo">?</div>
+          <div className="litt-logo">⚡</div>
           <span className="litt-name">LiTT</span>
         </div>
 

@@ -3,7 +3,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { runLiTT, runLiTTStream, type LiTTRunRequest } from "@/lib/litt-runtime";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
 
 /**
  * POST /api/litt/voice/v1/chat/completions

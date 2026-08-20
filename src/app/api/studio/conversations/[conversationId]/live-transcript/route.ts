@@ -9,7 +9,6 @@ import {
 import type { LiveTurnPair } from "@/lib/litt/live/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 10;
 
 /**
  * POST /api/studio/conversations/[conversationId]/live-transcript

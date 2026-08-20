@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { checkAvailability, type BusinessResult } from "@/lib/business-operations";
 
 export const runtime = "nodejs";
-export const maxDuration = 15;
 
 /**
  * GET /api/business/bookings/availability?startTime=...&endTime=...

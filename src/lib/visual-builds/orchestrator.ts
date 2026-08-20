@@ -32,7 +32,7 @@ import { storeProjectAsset } from "./storage";
 import { emitVisualBuildEvent } from "./observability";
 import { type AssetManifest, type PreviewCapture, type ProjectAsset, type VisualBuild, type VisualBuildRequest, type VisualPlan, type VisualReview } from "./types";
 
-const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const TERMINAL_BASE = () => {
   const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ??
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??

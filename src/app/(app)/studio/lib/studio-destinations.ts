@@ -164,10 +164,10 @@ export function legacyToolToLiTTMode(tool: string | null): LiTTMode | null {
       return "music";
     case "code":
       return "code";
-    case "build":
-    case "canvas":
-    case "design":
-      return "website";
+    // build/canvas/design are workspace stages, not LiTT creation modes.
+    // They fall through to the switch in mapLegacyToolToDestination which
+    // sets the correct legacyTool and mode (files/design/work) with
+    // littMode: "website" explicitly.
     default:
       return null;
   }

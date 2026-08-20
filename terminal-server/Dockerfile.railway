@@ -1,0 +1,104 @@
+# Railway Dockerfile for terminal-server + voice worker
+# Build context: REPOSITORY ROOT (Railway root directory = "/")
+# This is required because terminal-server depends on @litt/agent-core
+# via "workspace:*" — a pnpm monorepo dependency.
+#
+# Railway service config:
+#   Root Directory:   /
+#   Dockerfile Path:  terminal-server/Dockerfile.railway
+#   Start Command:    node terminal-server/dist/server.js
+#
+# For the voice worker, use the same image with:
+#   Start Command:    node terminal-server/dist/worker/livekit-agent.js start
+#
+# Local test:
+#   docker build -f terminal-server/Dockerfile.railway -t litt-terminal-railway-test .
+
+# ─── Stage 1: Dependencies ─────────────────────────────────────────
+FROM node:22-bookworm-slim AS deps
+
+# Install build tools for native modules (node-pty, sharp) and runtime deps (ffmpeg)
+RUN apt-get update && apt-get install -y \
+    python3 make g++ bash git curl \
+    ffmpeg libvips-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Enable pnpm via corepack — matches packageManager: pnpm@9.15.0
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Copy workspace config files for dependency caching
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+
+# Copy package.json files for the workspace packages we need
+COPY packages/litt-agent-core/package.json packages/litt-agent-core/package.json
+COPY terminal-server/package.json terminal-server/package.json
+COPY terminal-server/tsconfig.json terminal-server/tsconfig.json
+COPY terminal-server/tsconfig.worker.json terminal-server/tsconfig.worker.json
+
+# Install dependencies for terminal-server and its workspace deps (@litt/agent-core)
+# --filter terminal-server... resolves the workspace closure
+# We override ignore-scripts=true (from root .npmrc) for native builds (node-pty, sharp)
+RUN pnpm install --frozen-lockfile \
+    --filter terminal-server... \
+    --config.ignore-scripts=false
+
+# ─── Stage 2: Builder ──────────────────────────────────────────────
+FROM node:22-bookworm-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Copy installed node_modules from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
+COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
+
+# Copy workspace config
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+
+# Copy source code for the packages we need
+COPY packages/litt-agent-core packages/litt-agent-core
+COPY terminal-server terminal-server
+
+# Build @litt/agent-core first (terminal-server depends on it)
+RUN pnpm --filter @litt/agent-core build
+
+# Build terminal-server (compiles both server and worker)
+RUN pnpm --filter terminal-server build
+
+# ─── Stage 3: Runtime ──────────────────────────────────────────────
+FROM node:22-bookworm-slim AS runner
+
+# Install runtime dependencies (ffmpeg for LiveKit audio, libvips for sharp)
+RUN apt-get update && apt-get install -y \
+    ffmpeg libvips \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV TERMINAL_WORKSPACE_ROOT=/data/littree-workspaces
+# PORT is provided by Railway at runtime
+
+# Create the workspace directory (Railway volume mount point)
+RUN mkdir -p /data/littree-workspaces
+
+# Copy the built terminal-server and its dependencies
+COPY --from=builder /app/terminal-server/dist terminal-server/dist
+COPY --from=builder /app/terminal-server/node_modules terminal-server/node_modules
+COPY --from=builder /app/packages/litt-agent-core/dist packages/litt-agent-core/dist
+COPY --from=builder /app/packages/litt-agent-core/node_modules packages/litt-agent-core/node_modules
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/terminal-server/package.json terminal-server/package.json
+COPY --from=builder /app/packages/litt-agent-core/package.json packages/litt-agent-core/package.json
+
+# Railway assigns $PORT dynamically — terminal server reads process.env.PORT
+EXPOSE ${PORT:-4001}
+
+# Default: start the terminal server
+# Voice worker overrides this with: node terminal-server/dist/worker/livekit-agent.js start
+CMD ["node", "terminal-server/dist/server.js"]

@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { AccessToken, RoomServiceClient, AgentDispatchClient } from "livekit-server-sdk";
 
 export const runtime = "nodejs";
-export const maxDuration = 10;
 
 /**
  * POST /api/voice/livekit-token

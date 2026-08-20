@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { listServices, createService, type BusinessResult } from "@/lib/business-operations";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * GET /api/business/services?activeOnly=true

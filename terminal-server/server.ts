@@ -23,7 +23,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { createDockerSession } from "./docker-manager";
-import { handleLiTTCodeCommand, streamLiTTCode, type LiTTEvent } from "./litt-code";
+import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
+import { streamLiTTOperator } from "./litt-agent";
+import { runLiTTOperator, operatorAvailable } from "./litt-operator";
 import { dispatchMobileCommand } from "./mobile-commands";
 import { bearerToken, verifyTerminalToken } from "./auth";
 import {
@@ -32,6 +34,7 @@ import {
   runtimeCommandEnd,
   runtimeSetPhase,
   getRuntimeState,
+  getExecutionGateway,
 } from "./runtime";
 import {
   prepareWorkspace,
@@ -49,7 +52,8 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
-import { dispatchCommand, type CommandRequest } from "./command-bridge";
+import { dispatchCommand } from "./command-bridge";
+import type { RemoteCommandRequest } from "@litt/agent-core";
 
 // ─── Service-to-service auth ───────────────────────────────────
 // Internal endpoints (under /internal/*) use a shared secret via
@@ -225,16 +229,29 @@ app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedReq
 // The command registry is the single source of truth for all commands.
 // Unknown commands produce a controlled error response — never a crash.
 app.post("/internal/command", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const body = req.body as CommandRequest;
+  const body = req.body as RemoteCommandRequest;
   if (!body?.command || typeof body.command !== "string") {
     res.status(400).json({ error: "Missing 'command' field" });
     return;
   }
+  // Normalize: ensure `args` is always a string[] (never undefined).
+  // The canonical protocol requires structured argv; we coerce here
+  // rather than reject so legacy clients sending `{command, args: {...}}`
+  // get a controlled failure instead of a 500.
+  if (body.args !== undefined && !Array.isArray(body.args)) {
+    res.status(400).json({ error: "'args' must be a string[] (structured argv)" });
+    return;
+  }
+  const normalizedReq: RemoteCommandRequest = {
+    ...body,
+    args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
+    userId: body.userId ?? req.terminalUserId ?? null,
+  };
   try {
-    const result = await dispatchCommand(body);
-    // Unknown commands return ok:false with kind "error" — HTTP 200
-    // so the client can display the error message. Only server errors
-    // get HTTP 500.
+    const result = await dispatchCommand(normalizedReq);
+    // Unknown commands and command-level failures return HTTP 200 with
+    // ok:false so the client can display the typed error. Only server
+    // errors get HTTP 500.
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -481,39 +498,58 @@ app.post("/internal/workspace/:workspaceId/exec", requireInternalServiceAuth, as
 
   auditCommand(userId, workspaceId, command, false);
 
-  const { execFile } = await import("child_process");
+  // ─── Route through the canonical ExecutionGateway ───────────────
+  // This endpoint previously called child_process.execFile directly
+  // with `bash -c <command>` — bypassing the ExecutionGateway, risk
+  // classification, mode/policy enforcement, and RuntimeStore lifecycle.
+  //
+  // Now it routes through getExecutionGateway() → project.run, which
+  // enforces the canonical authority. The command is parsed into
+  // structured argv (command + args) to avoid shell-string interpolation.
   const startTime = Date.now();
+  const parts = command.trim().split(/\s+/);
+  const cmd = parts[0] ?? "";
+  const cmdArgs = parts.slice(1);
 
-  // Determine the shell
-  const isWin = process.platform === "win32";
-  const shell = isWin ? "powershell.exe" : "bash";
-  const shellArgs = isWin ? ["-NoProfile", "-Command", command] : ["-c", command];
-
-  const child = execFile(
-    shell,
-    shellArgs,
-    {
+  try {
+    const gateway = getExecutionGateway(ws.root, "act");
+    const gwResult = await gateway.execute({
+      toolId: "project.run",
+      inputs: { command: cmd, args: cmdArgs, stdin: stdinInput },
       cwd: ws.root,
-      timeout: 120000, // 2 minute timeout
-      maxBuffer: 2 * 1024 * 1024, // 2MB
-      env: { ...process.env, HOME: ws.root },
-    },
-    (err, stdout, stderr) => {
-      const durationMs = Date.now() - startTime;
-      const exitCode = err ? (err as { code?: number }).code ?? -1 : 0;
+      mode: "act",
+      identity: {
+        tenantId: "terminal-server",
+        userId,
+        actorId: userId,
+        trusted: true, // service-to-service, authenticated at boundary
+        interaction: "headless",
+      },
+      timeoutMs: 120_000,
+    });
 
-      res.json({
-        exitCode,
-        stdout: Buffer.isBuffer(stdout) ? stdout.toString("utf-8") : (stdout ?? ""),
-        stderr: Buffer.isBuffer(stderr) ? stderr.toString("utf-8") : (stderr ?? ""),
-        durationMs,
-      });
-    },
-  );
+    const result = gwResult.result;
+    const exitCode = (result.data.exitCode as number | null) ?? (result.success ? 0 : 1);
+    const durationMs = Date.now() - startTime;
 
-  // Pipe stdin to the child process if provided (e.g. for `git commit --file=-`)
-  if (stdinInput !== undefined && child.stdin) {
-    child.stdin.end(stdinInput);
+    res.json({
+      exitCode,
+      stdout: (result.data.stdout as string) ?? "",
+      stderr: (result.data.stderr as string) ?? "",
+      durationMs,
+      // Gateway enforcement metadata
+      runId: gwResult.runId,
+      policyEffect: gwResult.policyEffect,
+      approved: gwResult.approved,
+    });
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: "Execution failed",
+      message,
+      durationMs,
+    });
   }
 });
 
@@ -1191,11 +1227,47 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
-    runtimeSetPhase("thinking");
     const cmdStart = Date.now();
+    const userId = socket.data.userId || "unknown";
+
+    // ─── Canonical operator path ───────────────────────────────────
+    // Route through runLiTTOperator → runAgentLoop → ExecutionGateway.
+    // This gives the NL path: tools, gateway enforcement, canonical
+    // runId, RuntimeStore lifecycle events, and cross-surface identity.
+    //
+    // Falls back to the legacy askLiTTCode path ONLY if the model
+    // provider is unreachable (no Ollama + no OPENROUTER_API_KEY).
+    const canUseOperator = await operatorAvailable().catch(() => false);
+
+    if (canUseOperator) {
+      try {
+        const result = await runLiTTOperator({
+          prompt: input,
+          cwd: workspace,
+          userId,
+          mode: "act",
+          onModelStream: (event) => {
+            if (event.type === "delta") {
+              socket.emit("terminal:output", event.text.replace(/\n/g, "\r\n"));
+            }
+          },
+        });
+
+        socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
+        socket.emit("terminal:output", result.content.replace(/\n/g, "\r\n") + "\r\n");
+        socket.emit("terminal:output", `\r\n\x1b[2mrunId: ${result.runId} (${result.termination}, ${result.rounds} rounds)\x1b[0m\r\n`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "LiTT operator failed";
+        socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
+      }
+      return;
+    }
+
+    // ─── Legacy fallback (no model provider available) ─────────────
+    runtimeSetPhase("thinking");
     try {
       const reply = await handleLiTTCodeCommand(input);
-      runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied");
+      runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied (legacy)");
       socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
       socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
     } catch (err) {
@@ -1226,10 +1298,23 @@ io.on("connection", (socket) => {
 
     // Call the canonical natural-language entrypoint
     try {
-      await streamLiTTCode(message, (event: LiTTEvent) => {
-        // Re-emit with turnId for correlation
-        socket.emit("litt:event", { ...event, turnId });
-      });
+      if (!desktopCwd) {
+        socket.emit("litt:event", {
+          type: "error",
+          turnId,
+          message: "Authenticated Desktop project cwd is unavailable.",
+        });
+        return;
+      }
+
+      await streamLiTTOperator(
+        message,
+        desktopCwd,
+        (event: LiTTEvent) => {
+          // Re-emit only to the originating authenticated Desktop turn.
+          socket.emit("litt:event", { ...event, turnId });
+        },
+      );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
       socket.emit("litt:event", { type: "error", turnId, message: errorMsg });

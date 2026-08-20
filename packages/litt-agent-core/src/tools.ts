@@ -176,6 +176,12 @@ const statusHandler: ToolHandler = async (ctx) => {
   const { resolveProjectContext } = await import("./project.js");
   const project = await resolveProjectContext(ctx.shell, ctx.cwd);
   const statusResult = await gitStatus(ctx.shell, ctx.cwd);
+  const porcelain = typeof statusResult.data?.porcelain === "string"
+    ? (statusResult.data.porcelain as string)
+    : "";
+  const lines = porcelain.split("\n").filter((l) => l.trim());
+  const untracked = lines.filter((l) => l.startsWith("??")).length;
+  const changed = lines.length - untracked;
   return {
     status: "success",
     success: true,
@@ -186,6 +192,9 @@ const statusHandler: ToolHandler = async (ctx) => {
       isGitRepo: project.isGitRepo,
       branch: project.branch,
       remote: project.remote,
+      clean: lines.length === 0,
+      changed,
+      untracked,
       gitStatus: statusResult.data,
     },
   };

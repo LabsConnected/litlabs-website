@@ -34,6 +34,7 @@
 import type {
   ChatMessage,
   ModelProvider,
+  ModelResult,
   ModelStreamEvent,
   ToolDefinition,
   ToolResult,
@@ -46,7 +47,7 @@ import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { ExecutionGateway } from "./execution-gateway.js";
-import type { VerificationGate, VerificationResult } from "./verification-gate.js";
+import type { VerificationResult } from "./verification-gate.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -100,6 +101,10 @@ export interface AgentLoopOptions {
   /**
    * Optional VerificationGate — the runtime truth boundary.
    *
+   * Structural type (see VerificationGateLike): any object with
+   * verify(). The concrete VerificationGate class satisfies it, as do
+   * surface-level adapters (e.g. the CLI's read-only mission gate).
+   *
    * When provided, the loop enforces the single most important rule:
    *   COMPLETE ≠ model says done
    *   COMPLETE = runtime proved it passed
@@ -115,7 +120,34 @@ export interface AgentLoopOptions {
    * = "complete"). This preserves backward compatibility for tests and
    * surfaces that don't yet wire the gate.
    */
-  verificationGate?: VerificationGate | null;
+  verificationGate?: VerificationGateLike | null;
+  /**
+   * Optional escalation hook — when provided with missionId + modelResolver,
+   * repeated model failures (tool/reasoning) automatically escalate to a
+   * stronger model and the loop continues. This is the Autopilot reliability
+   * path: a weak model that keeps failing gets replaced mid-mission.
+   */
+  escalation?: EscalationHook | null;
+  /** Mission id for escalation tracking. Required for escalation to activate. */
+  missionId?: string;
+  /** Model id of the initial `model` provider — used for escalation tracking. */
+  modelId?: string;
+  /**
+   * Resolves a model id to a ModelProvider. Required for escalation to
+   * construct the new (stronger) provider mid-loop.
+   */
+  modelResolver?: ModelResolver | null;
+  /** Task kind for escalation model selection (default: "coding"). */
+  taskKind?: string;
+}
+
+/**
+ * Structural verification-gate contract — the loop only calls verify().
+ * The concrete VerificationGate class satisfies this; surfaces may also
+ * provide adapters (e.g. read-only evidence gates) without extending it.
+ */
+export interface VerificationGateLike {
+  verify(): Promise<VerificationResult>;
 }
 
 export interface AgentLoopResult {
@@ -145,6 +177,12 @@ export interface AgentLoopResult {
    * when a gate is in use.
    */
   verification?: VerificationResult;
+  /**
+   * Escalation events that occurred during this loop run.
+   * Each entry records a model swap from a weaker to a stronger model
+   * after repeated failures. Present only when escalation was activated.
+   */
+  escalations?: EscalationRecord[];
 }
 
 export interface AgentToolCallRecord {
@@ -154,6 +192,65 @@ export interface AgentToolCallRecord {
   inputs: Record<string, unknown>;
   result: ToolResult;
   durationMs: number;
+}
+
+// ─── Escalation ────────────────────────────────────────────────────
+
+/**
+ * Failure kind classification — mirrors @litt/models classifyFailure.
+ * Kept local so agent-core stays platform-independent (no litt-models dep).
+ */
+export type AgentFailureKind = "tool" | "reasoning" | "network" | "rate-limit" | "auth" | "content" | "unknown";
+
+/**
+ * Classify a raw error into a failure kind. Used to decide whether to
+ * escalate (tool/reasoning failures) vs fallback (network/rate-limit).
+ */
+export function classifyAgentFailure(error: unknown): AgentFailureKind {
+  if (!(error instanceof Error)) return "unknown";
+  const msg = error.message.toLowerCase();
+  if (msg.includes("429") || msg.includes("rate limit")) return "rate-limit";
+  if (msg.includes("401") || msg.includes("403") || msg.includes("unauthorized") || msg.includes("forbidden")) return "auth";
+  if (msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("network") || msg.includes("econnreset") || msg.includes("timeout")) return "network";
+  if (msg.includes("tool") || msg.includes("function call") || msg.includes("invalid arguments")) return "tool";
+  if (msg.includes("invalid json") || msg.includes("parse") || msg.includes("malformed")) return "content";
+  if (msg.includes("reason") || msg.includes("wrong") || msg.includes("incorrect")) return "reasoning";
+  return "unknown";
+}
+
+/**
+ * Escalation hook — the abstraction the agent loop uses to track
+ * per-mission failures and decide when to swap to a stronger model.
+ *
+ * The real implementation is @litt/models EscalationTracker. The
+ * controller adapts it to this interface. agent-core stays pure
+ * (no litt-models dependency).
+ */
+export interface EscalationHook {
+  startMission(missionId: string, modelId: string): void;
+  recordFailure(missionId: string, kind: AgentFailureKind, message?: string): void;
+  recordSuccess(missionId: string): void;
+  shouldEscalate(missionId: string): boolean;
+  pickEscalatedModel(missionId: string, taskKind: string): { modelId: string; reason: string } | null;
+  commitEscalation(missionId: string, toModelId: string, reason: string, runId?: string): { fromModelId: string; toModelId: string; reason: string; at: string } | null;
+  currentModel(missionId: string): string | null;
+  endMission(missionId: string): void;
+}
+
+/**
+ * Resolves a model id to a ModelProvider — needed for escalation to
+ * construct the new (stronger) provider mid-loop.
+ */
+export type ModelResolver = (modelId: string) => ModelProvider | null;
+
+/**
+ * Record of an escalation that occurred during a loop run.
+ */
+export interface EscalationRecord {
+  fromModelId: string;
+  toModelId: string;
+  reason: string;
+  at: string;
 }
 
 // ─── Tool call parsing ─────────────────────────────────────────────
@@ -166,29 +263,92 @@ export interface AgentToolCallRecord {
  *   ```tool_call
  *   { "tool": "project.status", "inputs": {} }
  *   ```
+ *
+ * The parser is deliberately tolerant of real-world model output:
+ *   - CRLF line endings (`\r\n`)
+ *   - whitespace after the ```tool_call opener (or none at all)
+ *   - a missing newline before the closing fence (```tool_call{...}```)
+ *   - a bare JSON tool object on its own line (no fences):
+ *       tool_call
+ *       { "tool": "project.status", "inputs": {} }
+ *   - an inline `tool_call:` prefix before the JSON object
  */
 export interface ParsedToolCall {
   toolId: string;
   inputs: Record<string, unknown>;
 }
 
-export function parseToolCall(content: string): ParsedToolCall | null {
-  // Look for ```tool_call ... ``` blocks
-  const match = content.match(/```tool_call\s*\n([\s\S]*?)\n```/);
-  if (!match) return null;
-
+/** Fenced ```tool_call block — tolerant of spacing/CRLF and a missing
+ *  newline before the closing fence. */
+const TOOL_CALL_FENCE_RE = /```tool_call[ \t]*\r?\n?([\s\S]*?)```/i;
+/** A line that looks like a bare JSON tool object (single line). */
+const BARE_TOOL_JSON_RE = /^[ \t]*\{[^\n]*?"tool"[ \t]*:/m;
+function parseToolJson(raw: string): ParsedToolCall | null {
   try {
-    const parsed = JSON.parse(match[1]);
-    if (typeof parsed.tool === "string") {
+    const parsed = JSON.parse(raw.trim());
+    if (parsed && typeof parsed === "object" && typeof (parsed as { tool?: unknown }).tool === "string") {
+      const inputs = (parsed as { inputs?: unknown }).inputs;
       return {
-        toolId: parsed.tool,
-        inputs: typeof parsed.inputs === "object" && parsed.inputs !== null
-          ? parsed.inputs as Record<string, unknown>
+        toolId: (parsed as { tool: string }).tool,
+        inputs: typeof inputs === "object" && inputs !== null
+          ? inputs as Record<string, unknown>
           : {},
       };
     }
   } catch {
     // Malformed JSON — not a valid tool call
+  }
+  return null;
+}
+
+/**
+ * Extract a balanced brace span starting at the given `{` index.
+ * Returns null when the braces never balance (malformed object).
+ */
+function balancedJsonSpan(content: string, openIdx: number): string | null {
+  let depth = 0;
+  for (let i = openIdx; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return content.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
+
+export function parseToolCall(content: string): ParsedToolCall | null {
+  // 1. Fenced ```tool_call ... ``` block.
+  const match = content.match(TOOL_CALL_FENCE_RE);
+  if (match) {
+    const parsed = parseToolJson(match[1]);
+    if (parsed) return parsed;
+  }
+
+  // 2. Bare JSON tool object on its own line (the model sometimes skips
+  //    the fences entirely, e.g. `tool_call` then a JSON line).
+  const bareMatch = content.match(BARE_TOOL_JSON_RE);
+  if (bareMatch && bareMatch.index !== undefined) {
+    // Snip the JSON object out of the surrounding text and try to parse it.
+    const lineStart = content.lastIndexOf("\n", bareMatch.index) + 1;
+    const jsonText = content.slice(lineStart).split("\n")[0] ?? "";
+    const parsed = parseToolJson(jsonText);
+    if (parsed) return parsed;
+  }
+
+  // 3. Bare JSON tool object ANYWHERE (mid-prose, no newline before it).
+  //    A missed tool call is worse than a missed answer: the model keeps
+  //    re-claiming failure and the tool result never reaches the next
+  //    turn (the observed "unable to access the tool" → tool succeeded
+  //    contradiction). Scan every brace-balanced span that contains a
+  //    `"tool":` key and try to parse it.
+  for (let idx = 0; idx < content.length; idx++) {
+    if (content[idx] !== "{") continue;
+    const span = balancedJsonSpan(content, idx);
+    if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+    const parsed = parseToolJson(span);
+    if (parsed) return parsed;
   }
 
   return null;
@@ -196,10 +356,32 @@ export function parseToolCall(content: string): ParsedToolCall | null {
 
 /**
  * Extract the text content without the tool_call blocks.
+ * Uses the same tolerant matching as parseToolCall so a block that was
+ * parsed as a tool call is always stripped from the final response text
+ * (never leaked into the user chat). Strips both fenced blocks AND bare
+ * JSON tool objects anywhere in the text.
  */
 export function stripToolCallBlocks(content: string): string {
-  return content.replace(/```tool_call\s*\n[\s\S]*?\n```/g, "").trim();
+  let stripped = content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "");
+  // Strip bare JSON tool objects (fenced handling above; this covers
+  // unfenced `{ "tool": ... }` objects that models emit without fences,
+  // even when split from the surrounding prose by a newline or not).
+  for (let guard = 0; guard < 8; guard++) {
+    let removed = false;
+    for (let idx = 0; idx < stripped.length; idx++) {
+      if (stripped[idx] !== "{") continue;
+      const span = balancedJsonSpan(stripped, idx);
+      if (!span || !/"tool"[ \t]*:/.test(span)) continue;
+      stripped = stripped.slice(0, idx) + stripped.slice(idx + span.length);
+      removed = true;
+      break;
+    }
+    if (!removed) break;
+  }
+  return stripped.trim();
 }
+
+// ─── Mission Planning ──────────────────────────────────────────────
 
 // ─── Agent Loop ────────────────────────────────────────────────────
 
@@ -235,15 +417,80 @@ export async function runAgentLoop(
 
   let termination: AgentLoopResult["termination"] = "complete";
 
+  // ─── Escalation setup ──────────────────────────────────────────
+  // When an escalation hook + missionId + modelResolver are provided,
+  // repeated model failures (tool/reasoning) automatically swap to a
+  // stronger model and the loop continues. This is the Autopilot
+  // reliability path: a weak model that keeps failing gets replaced
+  // mid-mission, preserving the same conversation/context.
+  const missionId = options.missionId;
+  const escalation = options.escalation;
+  const taskKind = options.taskKind ?? "coding";
+  let activeModel = options.model;
+  let activeModelId = options.modelId ?? "unknown";
+  const escalationEvents: EscalationRecord[] = [];
+
+  if (missionId && escalation) {
+    if (escalation.currentModel(missionId) === null) {
+      escalation.startMission(missionId, activeModelId);
+    } else {
+      activeModelId = escalation.currentModel(missionId)!;
+    }
+  }
+
+  /**
+   * Check if the mission should escalate, and if so, swap to a stronger
+   * model. Returns true if escalation happened (caller should continue
+   * the loop with the new model), false otherwise.
+   */
+  function tryEscalate(): boolean {
+    if (!missionId || !escalation) return false;
+    if (!escalation.shouldEscalate(missionId)) return false;
+    const pick = escalation.pickEscalatedModel(missionId, taskKind);
+    if (!pick) return false;
+    if (!options.modelResolver) return false;
+    const newModel = options.modelResolver(pick.modelId);
+    if (!newModel) return false;
+    const fromId = activeModelId;
+    const event = escalation.commitEscalation(missionId, pick.modelId, pick.reason);
+    if (event) {
+      escalationEvents.push({
+        fromModelId: event.fromModelId,
+        toModelId: event.toModelId,
+        reason: event.reason,
+        at: event.at,
+      });
+    } else {
+      escalationEvents.push({
+        fromModelId: fromId,
+        toModelId: pick.modelId,
+        reason: pick.reason,
+        at: new Date().toISOString(),
+      });
+    }
+    activeModel = newModel;
+    activeModelId = pick.modelId;
+    if (options.emitter) {
+      options.emitter({
+        type: "litt_event",
+        subtype: "model_escalated",
+        ts: Date.now(),
+        data: { fromModelId: fromId, toModelId: pick.modelId, reason: pick.reason, missionId },
+      });
+    }
+    return true;
+  }
+
   for (let round = 0; round < maxRounds; round++) {
     rounds++;
 
     // Call the model
     let modelContent = "";
     const modelEvents: ModelStreamEvent[] = [];
+    let modelResult: ModelResult | null = null;
 
     try {
-      await options.model.stream(messages, (event) => {
+      modelResult = await activeModel.stream(messages, (event) => {
         modelEvents.push(event);
         if (options.onModelStream) {
           try { options.onModelStream(event); } catch { /* listener errors don't crash the loop */ }
@@ -253,6 +500,31 @@ export async function runAgentLoop(
         }
       });
     } catch (err) {
+      // Escalation path: record the failure. If the threshold is
+      // reached, swap to a stronger model and continue. If below
+      // threshold, continue the loop to accumulate more failures
+      // (the model will fail again on the next round). The maxRounds
+      // limit prevents unbounded retries.
+      if (missionId && escalation) {
+        escalation.recordFailure(
+          missionId,
+          classifyAgentFailure(err),
+          err instanceof Error ? err.message : String(err),
+        );
+        if (tryEscalate()) {
+          // Escalated to a stronger model — continue with it.
+          continue;
+        }
+        // Below threshold — continue to accumulate failures.
+        // Push a retry prompt so the conversation has context.
+        messages.push({
+          role: "user",
+          content:
+            `The previous model call failed: ${err instanceof Error ? err.message : String(err)}. ` +
+            `Retry now. You MUST either call an available tool or return a final answer.`,
+        });
+        continue;
+      }
       termination = "error";
       return {
         content: `Model error: ${err instanceof Error ? err.message : String(err)}`,
@@ -261,6 +533,7 @@ export async function runAgentLoop(
         durationMs: Date.now() - startTime,
         usage: { total_tokens: totalTokens },
         termination,
+        escalations: escalationEvents.length ? escalationEvents : undefined,
       };
     }
 
@@ -270,10 +543,133 @@ export async function runAgentLoop(
       totalTokens += doneEvent.usage.total_tokens;
     }
 
+    // Never silently accept an empty model turn.
+    // Empty output is not a successful assistant response and must not
+    // become a blank completed turn in CLI/Desktop surfaces.
+    //
+    // EXCEPTION: when the model emitted ONLY native tool_calls (no prose
+    // deltas), the provider attaches the translated `tool_call` fence block
+    // to the returned ModelResult.content (not as a delta event, since the
+    // block is a LiTT-internal construct, not model prose). In that case
+    // modelContent is empty but modelResult.content carries the tool call —
+    // adopt it so the loop's single parser can execute the tool instead of
+    // misclassifying the turn as an empty response.
+    if (!modelContent.trim() && modelResult?.content?.trim()) {
+      modelContent = modelResult.content;
+    }
+
+    if (!modelContent.trim()) {
+      // Track empty responses as content failures (not counted toward
+      // escalation by default, but recorded for audit).
+      if (missionId && escalation) {
+        escalation.recordFailure(missionId, "content", "empty model response");
+      }
+      if (round >= maxRounds - 1) {
+        return {
+          content:
+            "LiTT received an empty model response after retrying. " +
+            "The turn was not completed and no success is being claimed.",
+          toolCalls,
+          rounds,
+          durationMs: Date.now() - startTime,
+          usage: { total_tokens: totalTokens },
+          termination: "error",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
+        };
+      }
+
+      messages.push({
+        role: "user",
+        content:
+          "Your previous response was empty. Retry now. " +
+          "You MUST either call an available tool using a valid tool_call block " +
+          "or return a non-empty final answer. " +
+          "If the request requires project evidence, use the project tools yourself.",
+      });
+
+      continue;
+    }
+
     // Check for tool calls in the response
     const toolCall = parseToolCall(modelContent);
 
     if (!toolCall) {
+      // Requests for repository/runtime evidence cannot honestly complete
+      // before at least one project tool has SUCCEEDED. A recorded call
+      // is not evidence — a failed/unavailable tool must never be masked
+      // as a successful repository inspection.
+      const requiresProjectEvidence =
+        /\b(inspect|working tree|git status|project status|current project|use (?:your )?(?:project )?tools|verify (?:the )?(?:project|repo|build|tests?)|run (?:the )?(?:build|tests?|typecheck)|read (?:the )?(?:repo|repository|file)|search (?:the )?(?:repo|repository|codebase))\b/i.test(prompt);
+
+      const hasSuccessfulToolEvidence = toolCalls.some((tc) => tc.result.success);
+      const cleanContent = stripToolCallBlocks(modelContent);
+
+      if (requiresProjectEvidence && !hasSuccessfulToolEvidence) {
+        // An honest failure report IS an acceptable answer: the model
+        // recorded the failed attempt and explicitly states verification
+        // could not be completed. A fabricated success is NOT — that is
+        // re-prompted until the model either produces real evidence or
+        // an honest failure explanation.
+        const lastFailure = toolCalls[toolCalls.length - 1];
+        const acknowledgesFailure =
+          lastFailure !== undefined &&
+          !lastFailure.result.success &&
+          /\b(could not|couldn't|failed|unable|not available|not able|did not (?:run|execute)|was not (?:run|executed)|error)\b/i.test(cleanContent);
+
+        if (acknowledgesFailure) {
+          // Accept the honest failure — the loop records it and never
+          // claims verified repository state.
+          if (missionId && escalation) escalation.recordFailure(missionId, "tool", lastFailure.result.message);
+          return {
+            content: cleanContent,
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: "verification_failed",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+
+        if (round >= maxRounds - 1) {
+          const failureDetails = toolCalls.length > 0
+            ? `\n\nTool failures:\n${toolCalls.map((tc) => `- ${tc.toolId}: ${tc.result.message}`).join("\n")}`
+            : "";
+          return {
+            content:
+              "LiTT could not obtain required project evidence before reaching the tool-call round limit. " +
+              "No project-state claim is being made." + failureDetails,
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: toolCalls.length > 0 ? "verification_failed" : "max_rounds",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+
+        messages.push({
+          role: "assistant",
+          content: modelContent,
+        });
+
+        const failureContext = toolCalls.length > 0
+          ? `\n\nYour previous tool call(s) failed:\n${toolCalls.map((tc) => `- ${tc.toolId}: ${tc.result.message}`).join("\n")}\n` +
+            `Do NOT claim repository state as verified. Retry with an available tool, or state plainly that verification could not be completed.`
+          : "";
+
+        messages.push({
+          role: "user",
+          content:
+            "You have not gathered successful project evidence yet. " +
+            "Do not answer from memory and do not ask the user to run commands. " +
+            "Call the appropriate project tool now. For repository identity and Git state, begin with project.status." +
+            failureContext,
+        });
+
+        continue;
+      }
+
       // No tool call — the model claims it is done.
       //
       // THE CRITICAL V1 RULE:
@@ -285,10 +681,10 @@ export async function runAgentLoop(
       // If the gate fails, we feed the failures back to the model as a
       // repair request and continue the loop — the model must actually
       // fix the failures and reach a state the runtime can prove.
-      const cleanContent = stripToolCallBlocks(modelContent);
-
       if (!options.verificationGate) {
         // No gate — preserve original behavior (model "done" = complete)
+        // Record success — the model gave a non-empty final answer.
+        if (missionId && escalation) escalation.recordSuccess(missionId);
         return {
           content: cleanContent,
           toolCalls,
@@ -296,6 +692,7 @@ export async function runAgentLoop(
           durationMs: Date.now() - startTime,
           usage: { total_tokens: totalTokens },
           termination: "complete",
+          escalations: escalationEvents.length ? escalationEvents : undefined,
         };
       }
 
@@ -305,6 +702,7 @@ export async function runAgentLoop(
 
       if (verification.proven) {
         // The runtime PROVED it. This is the only honest "complete".
+        if (missionId && escalation) escalation.recordSuccess(missionId);
         return {
           content: cleanContent,
           toolCalls,
@@ -313,6 +711,7 @@ export async function runAgentLoop(
           usage: { total_tokens: totalTokens },
           termination: "complete",
           verification,
+          escalations: escalationEvents.length ? escalationEvents : undefined,
         };
       }
 
@@ -331,6 +730,15 @@ export async function runAgentLoop(
               .map((c) => ({ id: c.id, status: c.status, message: c.message, stderr: c.stderr })),
           },
         });
+      }
+
+      // Escalation: the model claimed done but the gate proved it wrong.
+      // This is a reasoning failure. Record it and try a stronger model.
+      // The repair feedback (pushed below) is still added to the
+      // conversation so the new (stronger) model sees what to fix.
+      if (missionId && escalation) {
+        escalation.recordFailure(missionId, "reasoning", verification.message);
+        tryEscalate();
       }
 
       messages.push({ role: "assistant", content: modelContent });
@@ -498,7 +906,9 @@ export async function runAgentLoop(
         toolCallId,
         data: {
           tool: toolEntry.definition.name,
+          toolId: toolEntry.definition.id,
           status: result.status,
+          success: result.success,
           message: result.message,
           durationMs: toolDurationMs,
         },
@@ -515,6 +925,19 @@ export async function runAgentLoop(
         data: result.data,
       }, null, 2)}`,
     });
+
+    // Escalation: track tool success/failure. Repeated tool failures
+    // (the model is too weak to call tools correctly) trigger
+    // escalation to a stronger model. The tool result is already in
+    // the conversation, so the new model sees what went wrong.
+    if (missionId && escalation) {
+      if (result.success) {
+        escalation.recordSuccess(missionId);
+      } else {
+        escalation.recordFailure(missionId, "tool", result.message);
+        tryEscalate();
+      }
+    }
   }
 
   if (rounds >= maxRounds && termination === "complete") {
@@ -541,6 +964,7 @@ export async function runAgentLoop(
     usage: { total_tokens: totalTokens },
     termination,
     verification: lastVerification,
+    escalations: escalationEvents.length ? escalationEvents : undefined,
   };
 }
 
@@ -571,6 +995,13 @@ All tool calls execute in this project. Do not assume a different project.`
 
   return `You are LiTT, the AI development agent for LiTTree Lab Studios.
 You help users build software by calling tools and providing insights.
+
+CRITICAL OPERATOR RULES:
+- Never return an empty response.
+- When the user asks you to inspect, verify, check, test, build, search, read, or examine the current project, you MUST gather evidence with the available project tools before giving the final answer.
+- Never ask the user to run a command that an available project tool can run for you.
+- Do not claim project state, Git state, test state, build state, or file contents without tool evidence.
+- If a tool fails, report the actual failure instead of pretending the inspection succeeded.
 ${projectSection}
 
 Available tools:

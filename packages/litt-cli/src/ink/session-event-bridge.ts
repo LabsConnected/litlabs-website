@@ -58,36 +58,85 @@ export class SessionEventBridge {
     const data = event.data ?? {};
 
     switch (event.type) {
-      case "command_start":
-        if (this.currentRunId && this.currentRunId !== runId) {
-          // new run — old run is done
-        }
-        this.currentRunId = runId;
-        return { type: "run.started", runId, ts, data };
+      // ─── Exactly-once contract ─────────────────────────────────────────
+      // The agent loop (runAgentLoop) emits THREE parallel event streams for a
+      // single tool execution:
+      //   (a) agent_tool_call / agent_tool_result  via the `emitter` callback
+      //   (b) command_start / command_end           via store.commandStart/End
+      //   (c) tool_call / tool_result               via CommandExecutor.emit
+      //	All three are legitimate internal events — (a) carries the tool
+      //	identity (toolCallId + data.tool), (b) carries the run identity
+      //	(runId "agent_<toolCallId>"), (c) carries command/args/label but
+      //	NOT a `tool` field. If we projected ALL THREE, one tool would yield
+      //	three STARTs and three results (observed live as `RUN RUN → unknown
+      //	/ DONE PASS ✓ tool`).
+      //
+      //	The canonical UI START/RESULT for an agent execution is the TOOL-level
+      //	event (agent_tool_call → tool.started, agent_tool_result →
+      //	tool.completed). The agent-loop command_start/command_end are internal
+      //	RuntimeStore bookkeeping (phase, activeCommand, heartbeat, lastResult)
+      //	and must NOT also project. The CommandExecutor's tool_call/tool_result
+      //	are internal execution-layer events and must NOT project either —
+      //	they lack the `tool` name and would show as `→ unknown` / `✓ tool`.
+      //	We still track the run identity.
+      //
+      //	Non-agent executions (slash /run shell commands, direct store.command*)
+      //	do not carry the "agent_" runId prefix, so their run.started/run.completed
+      //	AND tool.started/tool.completed projections are preserved.
+      case "command_start": {
+        const runnerRunId = (data.runId as string) ?? event.runId ?? "";
+        if (runnerRunId) this.currentRunId = runnerRunId;
+        // Agent-loop command_start is bookkeeping — the paired agent_tool_call
+        // has already emitted the canonical `tool.started`. Do not project.
+        if (runnerRunId.startsWith("agent_")) return null;
+        return { type: "run.started", runId: runnerRunId || this.currentRunId || "", ts, data };
+      }
 
       case "command_end": {
+        const runnerRunId = (data.runId as string) ?? event.runId ?? this.currentRunId ?? "";
+        if (runnerRunId) this.currentRunId = runnerRunId;
+        // Agent-loop command_end is bookkeeping — the paired agent_tool_result
+        // emits the canonical result projection. Do not project.
+        if (runnerRunId.startsWith("agent_")) return null;
+
         const success = data.success as boolean;
         const cancelled = data.cancelled as boolean;
         const timedOut = data.timedOut as boolean;
 
         if (cancelled) {
-          return { type: "run.completed", runId, ts, data: { ...data, status: "cancelled" } };
+          return { type: "run.completed", runId: runnerRunId, ts, data: { ...data, status: "cancelled" } };
         }
         if (timedOut) {
-          return { type: "run.completed", runId, ts, data: { ...data, status: "timeout" } };
+          return { type: "run.completed", runId: runnerRunId, ts, data: { ...data, status: "timeout" } };
         }
         return {
           type: "run.completed",
-          runId,
+          runId: runnerRunId,
           ts,
           data: { ...data, status: success ? "success" : "failed" },
         };
       }
 
-      case "tool_call":
+      case "tool_call": {
+        // Agent-loop tool_call is bookkeeping — the paired agent_tool_call
+        // has already emitted the canonical `tool.started` WITH the real
+        // tool name. The CommandExecutor's tool_call event carries
+        // { command, args, label } but NOT a `tool` field, so projecting
+        // it would produce a duplicate `→ unknown` entry. Suppress for
+        // agent runs (runId starts with "agent_"), same as command_start.
+        const runnerRunId = (data.runId as string) ?? runId;
+        if (runnerRunId.startsWith("agent_")) return null;
         return { type: "tool.started", runId, toolCallId, ts, data };
+      }
 
       case "tool_result": {
+        // Agent-loop tool_result is bookkeeping — the paired
+        // agent_tool_result emitted the canonical result WITH the real
+        // tool name. The CommandExecutor's tool_result event lacks a
+        // `tool` field, so projecting it would produce a duplicate
+        // `✓ tool · Xms` entry. Suppress for agent runs.
+        const runnerRunId = (data.runId as string) ?? runId;
+        if (runnerRunId.startsWith("agent_")) return null;
         const status = data.status as string;
         const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
         switch (status) {
@@ -117,6 +166,57 @@ export class SessionEventBridge {
 
       case "phase_change":
         return null;
+
+      case "litt_event": {
+        // Agent loop events — agent_tool_call / agent_tool_result /
+        // verification_failed_repair. Map these to LifecycleEvents so
+        // the EventBridge can surface them in the cockpit activity feed
+        // and drive holo state from canonical runtime truth (not toolId
+        // string matching in the controller).
+        const subtype = event.subtype;
+        if (subtype === "agent_tool_call") {
+          const tool = (data.tool as string) ?? "unknown";
+          const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          return { type: "tool.started", runId, toolCallId: toolCallIdFromData, ts, data: { tool, ...data } };
+        }
+        if (subtype === "agent_tool_result") {
+          const success = (data.success as boolean) ?? true;
+          const tool = (data.tool as string) ?? "unknown";
+          const toolCallIdFromData = (data.toolCallId as string) ?? toolCallId;
+          return {
+            type: success ? "tool.completed" : "tool.failed",
+            runId,
+            toolCallId: toolCallIdFromData,
+            ts,
+            data: { tool, ...data },
+          };
+        }
+
+        // Mission lifecycle events — map to mission.* LifecycleEvents
+        // so EventBridge can project them into CockpitStore.
+        const missionSubtypeMap: Record<string, LifecycleEvent["type"]> = {
+          "mission:created": "mission.created",
+          "mission:started": "mission.started",
+          "mission:step_created": "mission.step_created",
+          "mission:step_started": "mission.step_started",
+          "mission:step_passed": "mission.step_passed",
+          "mission:step_failed": "mission.step_failed",
+          "mission:step_working": "mission.step_started",
+          "mission:step_verifying": "mission.step_started",
+          "mission:step_blocked": "mission.step_failed",
+          "mission:verifying": "mission.verifying",
+          "mission:completed": "mission.completed",
+          "mission:failed": "mission.failed",
+          "mission:restored": "mission.restored",
+        };
+        const mappedType = missionSubtypeMap[subtype ?? ""];
+        if (mappedType) {
+          return { type: mappedType, runId, ts, data };
+        }
+
+        // other litt_event subtypes (verification_failed_repair, etc.)
+        return null;
+      }
 
       default:
         return null;

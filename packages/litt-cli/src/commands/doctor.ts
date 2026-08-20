@@ -11,12 +11,14 @@
  */
 
 import { exec, hasCommand, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
+import { getGitState } from "../lib/git-state.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
 import { ensureConfig, getConfigPath } from "../lib/config.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createRequire } from "node:module";
 
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
@@ -80,13 +82,23 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     warn("No package.json found in current directory");
   }
 
-  if (project.hasGit) {
-    ok(`Git branch: ${project.gitBranch}`);
-    const changedLines = project.gitStatus ? project.gitStatus.split("\n").filter(Boolean) : [];
-    if (changedLines.length > 0) {
-      warn(`${changedLines.length} uncommitted changes`);
-    } else {
+  // Canonical git state — same helper as litt status and the cockpit
+  // FILES counter, so all surfaces always agree.
+  const gitState = getGitState(project.rootDir);
+  if (gitState.isGitRepo) {
+    ok(`Git branch: ${gitState.branch ?? "detached"}`);
+    if (gitState.clean) {
       ok("Working tree clean");
+    } else {
+      warn(
+        `${gitState.changed} modified · ${gitState.untracked} untracked (${gitState.changed + gitState.untracked} total)`,
+      );
+      for (const change of gitState.files.slice(0, 10)) {
+        console.log(`  ${c.gray}${change}${c.reset}`);
+      }
+      if (gitState.files.length > 10) {
+        console.log(`  ${c.dim}... and ${gitState.files.length - 10} more${c.reset}`);
+      }
     }
   } else {
     warn("Not a git repository");
@@ -131,12 +143,16 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   console.log(`${label("CLI Path:")} ${value(process.argv[1] ?? "unknown", c.dim)}`);
   console.log(`${label("Node:")} ${value(process.version, c.dim)}`);
   try {
-    const agentCorePkg = await import("@litt/agent-core/package.json" as string, { with: { type: "json" } }).catch(() => null);
-    if (agentCorePkg) {
-      console.log(`${label("agent-core:")} ${value((agentCorePkg as { version?: string }).version ?? "unknown", c.dim)}`);
-    }
+    // Read agent-core's package.json via its resolved main entry — the
+    // package's exports map does not expose "./package.json", so a bare
+    // subpath import would fail (and does fail under vitest).
+    const req = createRequire(import.meta.url);
+    const entry = req.resolve("@litt/agent-core");
+    const pkgPath = path.join(path.dirname(entry), "..", "package.json");
+    const agentCorePkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
+    console.log(`${label("agent-core:")} ${value(agentCorePkg.version ?? "unknown", c.dim)}`);
   } catch {
-    // package.json import may fail in some setups
+    // package.json read may fail in some setups
   }
   console.log(`${label("ExecutionGateway:")} ${value("available", c.green)}`);
   console.log(`${label("Model Provider:")} ${hasOpenRouterKey() ? value("OpenRouter (key set)", c.green) : value("not configured", c.yellow)}`);

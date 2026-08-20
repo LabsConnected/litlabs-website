@@ -1,75 +1,58 @@
 /**
- * CockpitApp — the Ink cockpit composition root.
+ * CockpitApp — the LiTT shell composition root.
  *
- * Priority order (what must always be visible):
- *   1. Header (compact in small terminals)
- *   2. LiTT state (holo)
- *   3. Current mission
- *   4. Activity
- *   5. Prompt (ALWAYS visible)
- *   6. Status bar
+ * Minimal surface (everything powerful stays available; almost nothing
+ * is visible until you need it):
  *
- * Files / quick actions / extra telemetry collapse first
- * when the terminal is too short.
+ *   ⚡ LiTT                                  LOCAL        ← header (1 line)
+ *   (Welcome | transcript + semantic feed + DONE)
+ *   › Ask LiTT anything...                                ← composer
+ *   ─────────────────────────────────────────────────────
+ *   LiTT Auto → GPT-5.6              ○ Plan   ● Act       ← status bar
+ *   litlabs-website · main · LOCAL          clean
+ *
+ * Overlays (/ palette, @ picker, /diff, /ship, /workspace, /resume,
+ * model center, help) take the screen above this. The RuntimeStore
+ * remains the single authority underneath — the shell invents no state.
  *
  * Input system:
- *   Global useInput ONLY consumes Ctrl+M/K/L/C and Esc.
- *   All printable characters fall through to TextInput.
- *   After overlay closes, focus returns to the prompt.
+ *   OverlayKeyboardProvider — single dispatch: overlay owners get keys
+ *   when open; otherwise ctrl/escape/tab go to the app shortcuts
+ *   (F2/Ctrl+K/L/D/N/R/O, Tab=Plan/Act, ?=help) and printable chars go
+ *   to the Composer's own useInput.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Box, Text, useApp, useStdout } from "ink";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Box, useApp, useStdout } from "ink";
 import { useCockpitStore } from "./cockpit-store.js";
 import { useEventBridge } from "./event-bridge.js";
 import { useCockpitController } from "./controller.js";
 import { OverlayKeyboardProvider, type KeyboardHandler } from "./overlay-manager.js";
-import { isEnter, isEscape, isCtrl } from "./keyboard-utils.js";
+import { isCtrl, isRawF2 } from "./keyboard-utils.js";
 import { useTerminalSize } from "./use-terminal-size.js";
-import { HelpOverlay } from "./help-overlay.js";
 import { Header } from "./header.js";
-import { Subsystems } from "./subsystems.js";
-import { LiTTHoloPanel } from "./holo-panel.js";
-import { MissionSection } from "./mission-section.js";
-import { ActivityStream } from "./activity-stream.js";
-import { FilesInfo } from "./files-info.js";
-import { QuickActions } from "./quick-actions.js";
-import { CommandDock } from "./command-dock.js";
+import { LiTTShell } from "./shell/shell.js";
 import { ApprovalUX } from "./approval-ux.js";
-import { StatusBar } from "./status-bar.js";
+import { HelpOverlay } from "./help-overlay.js";
 import { ModelPicker } from "./model-picker.js";
 import { ModelCenter } from "./model-center.js";
 import { CommandPalette, DEFAULT_ACTIONS } from "./command-palette.js";
-import { hasOpenRouterKey } from "../lib/model-provider.js";
-import { brainLabel, type ModelChoice } from "../lib/model-routing.js";
+import { ContextPicker } from "./overlays/context-picker.js";
+import { DiffViewer } from "./overlays/diff-viewer.js";
+import { WorkspacePicker } from "./overlays/workspace-picker.js";
+import { ResumePicker } from "./overlays/resume-picker.js";
+import { ShipFlow } from "./overlays/ship-flow.js";
+import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { ModelRuntime } from "../lib/model-runtime.js";
+import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
+import { getDiffData, suggestCommitMessage } from "../lib/diff-view.js";
+import { discoverWorkspaces } from "../lib/workspace-store.js";
+import { listSessions } from "../lib/session-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
-
-type LayoutMode = "full" | "medium" | "compact";
-
-/**
- * Layout thresholds based on actual row budget.
- *
- * Reserved rows (always visible):
- *   Header:       ~4 rows (compact) to ~10 rows (full)
- *   Mission:      ~3 rows
- *   Activity:     ~5 rows (shrinks in compact)
- *   Prompt:       ~2 rows
- *   Status bar:   ~3 rows
- *   Separators:   ~2 rows
- *
- * FULL    >= 42 rows  — everything visible
- * MEDIUM  30-41 rows  — hide files, quick actions; compact header
- * COMPACT < 30 rows   — hide holo, subsystems, files, quick actions; minimal header
- */
-function getLayoutMode(rows: number): LayoutMode {
-  if (rows >= 42) return "full";
-  if (rows >= 30) return "medium";
-  return "compact";
-}
 
 export interface CockpitAppProps {
   session: RuntimeSession;
@@ -87,53 +70,121 @@ export interface CockpitAppProps {
 
 export function CockpitApp({
   session, client, approvalBridge, sessionBridge,
-  project, branch, model, cwd, mode, gitModified, gitUntracked,
+  project, branch, cwd, mode, gitModified, gitUntracked,
 }: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
   const { stdout } = useStdout();
   useEventBridge(client, store, sessionBridge);
-  const { submit, handleApproval } = useCockpitController({ session, store, approvalBridge, onExit: () => exit(), projectName: project, branch: store.state.branch });
 
-  // Responsive layout — reactive terminal viewport (spec §9).
-  const { rows } = useTerminalSize(stdout);
-  const layoutMode = getLayoutMode(rows);
+  // ─── Canonical ModelRuntime — ONE instance for the whole app ───
+  const [modelRuntime] = useState(() => new ModelRuntime());
 
-  const modelReady = hasOpenRouterKey();
-  const brain = brainLabel(store.state.routingMode, store.state.selectedModel);
-  const activeModel = store.state.activeModel;
-  const source = modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+  const controller = useCockpitController({
+    session, store, approvalBridge, sessionBridge,
+    onExit: () => exit(), projectName: project, branch: store.state.branch, modelRuntime,
+  });
+  const { submit, handleApproval } = controller;
 
-  // Initialize store branch from prop, then refresh from the same cwd
-  // the tools use. This ensures the header branch matches what
-  // project.status and other git tools report — one source of truth.
-  // Branch detection is delegated to lib/project-state.ts — the UI
-  // component never calls child_process directly (spec §4/§58).
+  // Seed shell context from the launcher (once). After that, /workspace
+  // and branch refreshes own these via the store.
+  useEffect(() => {
+    store.actions.setWorkspace({
+      project: project || store.state.project,
+      cwd: cwd || store.state.cwd,
+      branch: branch && branch !== "unknown" ? branch : store.state.branch,
+      gitModified,
+      gitUntracked,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mode prop → session + store (initial).
+  useEffect(() => {
+    if (mode === "plan" || mode === "act") {
+      store.actions.setMode(mode);
+      session.setMode(mode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Branch refresh from the same cwd the tools use — one source of truth.
   useEffect(() => {
     if (branch && branch !== "unknown") {
       store.actions.setBranch(branch);
     }
-    applyBranchRefresh(session.getCwd(), store.actions.setBranch, branch ?? "unknown");
-  }, [branch, session, store]);
+    applyBranchRefresh(session.getCwd(), store.actions.setBranch, store.state.branch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
-  // Seed startup activity (only once, when local runtime becomes ready)
-  useEffect(() => {
-    if (store.state.localRuntime === "ready" && store.state.activityLog.length === 0) {
-      const now = Date.now();
-      store.actions.addActivity({ id: `act_${now}_0`, ts: now, type: "info", text: `Project detected: ${project}` });
-      store.actions.addActivity({ id: `act_${now}_1`, ts: now + 1, type: "info", text: `Runtime initialized` });
-      if (modelReady) {
-        store.actions.addActivity({ id: `act_${now}_2`, ts: now + 2, type: "info", text: `Provider: OpenRouter • BYOK ✓` });
-      }
-      store.actions.addActivity({ id: `act_${now}_3`, ts: now + 3, type: "info", text: `LiTT ready` });
-    }
-  }, [store.state.localRuntime, store.state.activityLog.length, project, modelReady, store]);
+  // Responsive layout — the shell adapts but never reflows content.
+  useTerminalSize(stdout);
 
-  // App-level shortcut handler — ONLY handles Ctrl+M/K/L/C and Ctrl+C.
-  // This is passed to the OverlayKeyboardProvider, which dispatches it
-  // ONLY when no overlay owns the keyboard. All printable characters
-  // fall through to TextInput in the CommandDock.
+  const modelReady = hasOpenRouterKey();
+  const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
+  // Source truth: show the REAL served provider (from the last run's
+  // adapter), not a hardcoded "OpenRouter" label. Before the first run,
+  // fall back to whichever provider is configured.
+  const source = store.state.activeProvider
+    ? `${providerLabel(store.state.activeProvider)} • BYOK ✓`
+    : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+
+  // ─── Overlay data (computed on open, memoized until close) ──────
+  const overlay = store.state.overlay;
+  const diffData = useMemo(() => {
+    if (overlay !== "diff-viewer" && overlay !== "ship") return null;
+    return getDiffData(store.state.cwd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, store.state.cwd, controller.diffRefreshKey]);
+
+
+  const workspaces = useMemo(() => {
+    if (overlay !== "workspace-picker") return [];
+    return discoverWorkspaces(store.state.cwd);
+  }, [overlay, store.state.cwd]);
+
+  const sessions = useMemo(() => {
+    if (overlay !== "resume-picker") return [];
+    return listSessions();
+  }, [overlay]);
+
+  const shipSuggested = useMemo(() => {
+    if (overlay !== "ship" || !diffData) return "";
+    return suggestCommitMessage(store.state.cwd, diffData.files);
+  }, [overlay, diffData, store.state.cwd]);
+
+  // ─── App shortcuts (only when no overlay owns the keyboard) ─────
   const appShortcutHandler = useCallback<KeyboardHandler>((input, key) => {
+    if (isRawF2(input)) {
+      store.actions.setOverlay("model-center");
+      return;
+    }
+    // Transcript scroll — PgUp/PgDn/Home/End. Works even while busy
+    // (browsing history during a run). Never steals Up/Down (history).
+    if (key.pageUp) { store.actions.scrollPgUp(); return; }
+    if (key.pageDown) { store.actions.scrollPgDn(); return; }
+    if (key.home) { store.actions.scrollHome(); return; }
+    if (key.end) { store.actions.scrollEnd(); return; }
+    if (key.tab) {
+      // Tab → Plan/Act toggle. Never mid-processing.
+      if (!store.state.isProcessing) controller.toggleMode();
+      return;
+    }
+    // Esc while working — cancel the active mission/chat (the composer
+    // shows "Esc to stop"; this makes it true). Esc when idle is the
+    // composer's own "clear draft" — the app handler ignores it here.
+    if (key.escape && (store.state.isProcessing
+      || store.state.holoState === "RUNNING" || store.state.holoState === "UNDERSTANDING"
+      || store.state.holoState === "PLANNING"
+      || store.state.holoState === "READING" || store.state.holoState === "EDITING"
+      || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
+      session.cancel().catch(() => {});
+      store.actions.setIsProcessing(false);
+      store.actions.setHoloState("IDLE");
+      store.actions.clearMission();
+      store.actions.stopBusy();
+      return;
+    }
     if (isCtrl(input, key, "c")) {
       if (store.state.holoState === "APPROVAL") {
         approvalBridge.cancel();
@@ -148,199 +199,218 @@ export function CockpitApp({
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
+        store.actions.stopBusy();
       } else {
         exit();
       }
-    } else if (isCtrl(input, key, "m")) {
-      store.actions.setOverlay("model-picker");
     } else if (isCtrl(input, key, "k")) {
       store.actions.setOverlay("command-palette");
+      store.actions.setOverlayQuery("");
     } else if (isCtrl(input, key, "l")) {
+      // Ctrl+L — clear the transcript (and any active mission view).
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
+      store.actions.clearChatTranscript();
+      store.actions.stopBusy();
+    } else if (isCtrl(input, key, "d")) {
+      controller.openDiffViewer();
+    } else if (isCtrl(input, key, "n")) {
+      controller.newSession();
+    } else if (isCtrl(input, key, "r")) {
+      store.actions.setOverlay("resume-picker");
+    } else if (isCtrl(input, key, "o")) {
+      store.actions.setOverlay("workspace-picker");
     } else if (input === "?") {
-      // ? → Help (spec §16). Only when idle so it doesn't intercept mid-run.
       if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
-  }, [session, store, approvalBridge, exit]);
+  }, [controller, session, store, approvalBridge, exit]);
 
   const disabled = store.state.isProcessing
     || store.state.holoState === "RUNNING"
     || store.state.holoState === "UNDERSTANDING"
     || store.state.holoState === "PLANNING" || store.state.holoState === "READING"
     || store.state.holoState === "EDITING" || store.state.holoState === "TESTING"
-    || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL"
-    || store.state.overlay !== "none";
+    || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL";
 
   const handleModelSelect = useCallback((selected: ModelChoice) => {
     store.actions.setSelectedModel(selected.id);
     store.actions.setOverlay("none");
-    store.actions.addActivity({
-      id: `act_${Date.now()}`,
-      ts: Date.now(),
-      type: "model.changed",
-      text: `Brain: ${selected.label} (${selected.id})`,
-    });
+    store.actions.setOverlayQuery("");
   }, [store]);
 
-  const handleRoutingModeSelect = useCallback((mode: typeof store.state.routingMode) => {
-    store.actions.setRoutingMode(mode);
-    store.actions.addActivity({
-      id: `act_${Date.now()}`,
-      ts: Date.now(),
-      type: "model.changed",
-      text: `Routing mode: ${mode.toUpperCase()}`,
-    });
+  const handleRoutingModeSelect = useCallback((routing: typeof store.state.routingMode) => {
+    store.actions.setRoutingMode(routing);
+    store.actions.setOverlayQuery("");
   }, [store]);
 
   const handlePaletteSelect = useCallback((action: typeof DEFAULT_ACTIONS[number]) => {
     store.actions.setOverlay("none");
+    store.actions.setOverlayQuery("");
+    store.actions.setComposerValue("");
     submit(action.id);
   }, [store, submit]);
 
-  // Debug key callback — writes key info to Activity (NOT console.log)
-  const handleDebugKey = useCallback((info: string) => {
-    store.actions.addActivity({
-      id: `act_${Date.now()}_key`,
-      ts: Date.now(),
-      type: "info",
-      tag: "KEY",
-      text: info,
-    });
+  const closeOverlay = useCallback(() => {
+    store.actions.setOverlay("none");
+    store.actions.setOverlayQuery("");
   }, [store]);
 
-  // Show overlays on top, hide the main content
-  const overlayOpen = store.state.overlay !== "none";
+  const overlayOpen = overlay !== "none";
 
   return (
     <OverlayKeyboardProvider appShortcutHandler={appShortcutHandler}>
     <Box flexDirection="column">
-      {/* Header — always visible, compact in medium/compact mode */}
+      {/* Header — the one-line brand band (always compact in the shell). */}
       <Header
-        project={project}
-        projectRoot={cwd}
+        project={store.state.project}
+        projectRoot={store.state.cwd}
         branch={store.state.branch}
         brain={brain}
-        activeModel={activeModel}
+        activeModel={store.state.activeModel}
         source={source}
         connected={store.state.connected}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
-        mode={mode}
-        compact={layoutMode !== "full"}
+        mode={store.state.mode}
+        compact
       />
 
       {/* Overlays take over the screen when open */}
       {overlayOpen ? (
         <>
-          {store.state.overlay === "model-picker" && (
+          {overlay === "model-picker" && (
             <ModelPicker
               selectedModelId={store.state.selectedModel}
               routingMode={store.state.routingMode}
               onSelectModel={handleModelSelect}
               onSelectRoutingMode={handleRoutingModeSelect}
-              onCancel={() => store.actions.setOverlay("none")}
+              onCancel={closeOverlay}
+              activeModel={store.state.activeModel}
+              source={source}
+              modelRuntime={modelRuntime}
             />
           )}
-          {store.state.overlay === "model-center" && (
+          {overlay === "model-center" && (
             <ModelCenter
               routingMode={store.state.routingMode}
               selectedModelId={store.state.selectedModel}
+              activeModel={store.state.activeModel}
               hasApiKey={modelReady}
-              onCancel={() => store.actions.setOverlay("none")}
+              onCancel={closeOverlay}
+              onSelectRoutingMode={handleRoutingModeSelect}
+              onSelectModel={handleModelSelect}
+              modelRuntime={modelRuntime}
             />
           )}
-          {store.state.overlay === "command-palette" && (
+          {overlay === "command-palette" && (
             <CommandPalette
               actions={DEFAULT_ACTIONS}
+              initialQuery={store.state.overlayQuery}
               onSelect={handlePaletteSelect}
-              onCancel={() => store.actions.setOverlay("none")}
+              onCancel={closeOverlay}
             />
           )}
-          {store.state.overlay === "help" && (
-            <HelpOverlay onCancel={() => store.actions.setOverlay("none")} />
+          {overlay === "context-picker" && (
+            <ContextPicker
+              cwd={store.state.cwd}
+              initialQuery={store.state.overlayQuery}
+              onSelect={controller.attachToken}
+              onCancel={closeOverlay}
+            />
           )}
+          {overlay === "file-picker" && (
+            <ContextPicker
+              mode="files"
+              cwd={store.state.cwd}
+              initialQuery=""
+              onSelect={controller.attachToken}
+              onCancel={closeOverlay}
+            />
+          )}
+          {overlay === "diff-viewer" && diffData && (
+            <DiffViewer
+              cwd={store.state.cwd}
+              files={diffData.files}
+              onClose={closeOverlay}
+              onRevert={controller.revertFile}
+              onOpen={controller.openFileInEditor}
+              onAccept={controller.acceptDiff}
+            />
+          )}
+          {overlay === "workspace-picker" && (
+            <WorkspacePicker
+              workspaces={workspaces}
+              onSelect={controller.switchWorkspace}
+              onCancel={closeOverlay}
+            />
+          )}
+          {overlay === "resume-picker" && (
+            <ResumePicker
+              sessions={sessions}
+              onSelect={controller.restoreSession}
+              onCancel={closeOverlay}
+            />
+          )}
+          {overlay === "ship" && diffData && (
+            <ShipFlow
+              cwd={store.state.cwd}
+              project={store.state.project}
+              branch={store.state.branch}
+              files={diffData.files}
+              suggestedMessage={shipSuggested}
+              onVerify={controller.runShipVerify}
+              onCommit={controller.runShipCommit}
+              onReview={controller.openDiffViewer}
+              onClose={closeOverlay}
+            />
+          )}
+          {overlay === "help" && <HelpOverlay onCancel={closeOverlay} />}
         </>
       ) : (
         <>
-          {/* Holo + Subsystems — only in full layout (collapses first) */}
-          {layoutMode === "full" && (
-            <Box flexDirection="row" gap={2}>
-              <LiTTHoloPanel
-                state={store.state.holoState}
-                activeModel={store.state.activeModel}
-                routingReason={store.state.mission}
-                missionStartedAt={store.state.missionState?.startedAt ?? null}
-              />
-              <Box flexDirection="column">
-                <Subsystems
-                  selected={store.state.selectedPanel}
-                  onSelect={(p) => store.actions.setSelectedPanel(p as import("./cockpit-store.js").CockpitPanel)}
-                  localRuntime={store.state.localRuntime}
-                  remoteRuntime={store.state.remoteRuntime}
-                  holoState={store.state.holoState}
-                  modelReady={modelReady}
-                />
-              </Box>
-            </Box>
-          )}
-
-          {/* Mission section — always visible */}
-          <MissionSection
-            holoState={store.state.holoState}
-            mission={store.state.mission}
-            missionState={store.state.missionState}
-            lastCompletedMission={store.state.lastCompletedMission}
-          />
-
           {/* Approval UX (when needed) — registers as keyboard owner */}
           {store.state.approvalPrompt && (
             <ApprovalUX prompt={store.state.approvalPrompt} onDecision={handleApproval} />
           )}
 
-          {/* Activity stream — always visible, shrinks in compact mode */}
-          <ActivityStream
-            entries={store.state.activityLog}
-            maxEntries={layoutMode === "full" ? 10 : layoutMode === "medium" ? 6 : 4}
-          />
-
-          {/* Files info — hide in medium/compact */}
-          {layoutMode === "full" && (
-            <FilesInfo
-              modified={gitModified}
-              untracked={gitUntracked}
-              missionFiles={store.state.missionState?.filesTouched ?? []}
-            />
-          )}
-
-          {/* Quick actions — hide in medium/compact */}
-          {layoutMode === "full" && <QuickActions />}
-
-          {/* Command dock — ALWAYS visible */}
-          <CommandDock
-            history={store.state.commandHistory}
-            onSubmit={submit}
-            onNavigateHistory={store.actions.navigateHistory}
-            onDebugKey={handleDebugKey}
-            disabled={disabled}
-          />
-
-          {/* Status bar — always visible: project + branch + model + ctx (spec §31) */}
-          <StatusBar
-            connected={store.state.connected}
-            localRuntime={store.state.localRuntime}
-            remoteRuntime={store.state.remoteRuntime}
-            cwd={cwd}
-            project={project}
-            branch={store.state.branch}
+          {/* The minimal shell — welcome/transcript, composer, status bar */}
+          <LiTTShell
+            messages={store.state.chatTranscript}
+            activityLog={store.state.activityLog}
             holoState={store.state.holoState}
+            isProcessing={store.state.isProcessing}
+            busySince={store.state.busySince}
+            missionState={store.state.missionState}
+            gitModified={store.state.gitModified}
+            gitUntracked={store.state.gitUntracked}
+            composerValue={store.state.composerValue}
+            onComposerChange={(v) => store.actions.setComposerValue(v)}
+            onSubmit={(v) => {
+              store.actions.setComposerValue("");
+              submit(v);
+            }}
+            onNavigateHistory={store.actions.navigateHistory}
+            onOpenPalette={controller.openPalette}
+            onOpenContext={controller.openContext}
+            composerDisabled={disabled}
+            composerScrolled={store.state.transcriptAnchor !== null}
+            composerFocusEpoch={store.state.focusEpoch}
+            onComposerReturnToLive={() => {
+              // Typing while scrolled: return to live AND restore the
+              // caret exactly once (the allowed explicit focus moment).
+              store.actions.setTranscriptAnchor(null);
+              store.actions.bumpFocus();
+            }}
+            transcriptAnchor={store.state.transcriptAnchor}
+            onTranscriptPageChange={store.actions.setTranscriptPage}
+            onTranscriptAnchorChange={store.actions.setTranscriptAnchor}
+            project={store.state.project}
+            branch={store.state.branch}
+            localRuntime={store.state.localRuntime}
             brain={brain}
-            activeModel={activeModel}
-            source={source}
-            mode={mode}
-            runId={store.state.currentRunId}
-            gitModified={gitModified}
-            gitUntracked={gitUntracked}
+            activeModel={store.state.activeModel}
+            activeProvider={store.state.activeProvider}
+            mode={store.state.mode}
           />
         </>
       )}

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 10;
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
@@ -21,14 +20,20 @@ async function checkDatabase(): Promise<{ status: string; detail?: string }> {
 }
 
 async function checkTerminalServer(): Promise<{ status: string; detail?: string }> {
+  // Use HTTP URLs for the health check — wss:// URLs cannot be fetched
   const terminalUrl = process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
+    process.env.TERMINAL_SERVER_URL ??
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
     null;
   if (!terminalUrl) return { status: "degraded", detail: "Terminal server URL not configured" };
+  // Normalize: strip wss:// → https://, ws:// → http:// for the fetch
+  const httpUrl = terminalUrl
+    .replace(/^wss:\/\//, "https://")
+    .replace(/^ws:\/\//, "http://");
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const resp = await fetch(`${terminalUrl}/health`, { signal: controller.signal });
+    const resp = await fetch(`${httpUrl}/health`, { signal: controller.signal });
     clearTimeout(timeout);
     if (!resp.ok) return { status: "degraded", detail: `Terminal server returned ${resp.status}` };
     return { status: "ok" };
@@ -68,7 +73,9 @@ export async function GET() {
   // Build/deploy identity
   checks.build = {
     status: "ok",
-    detail: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+    detail: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ??
+      process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
+      "dev",
   };
 
   // Database connectivity
@@ -81,17 +88,17 @@ export async function GET() {
   checks.storage = checkStorage();
 
   // Determine overall status
+  // - "ok" or "degraded" → HTTP 200 (service is alive, Railway healthcheck passes)
+  // - "error" → HTTP 503 (service is broken, Railway will restart)
+  const hasError = Object.values(checks).some((c) => c.status === "error");
   const allOk = Object.values(checks).every((c) => c.status === "ok");
-  const degraded = Object.values(checks).every(
-    (c) => c.status === "ok" || c.status === "degraded",
-  );
 
   return NextResponse.json(
     {
-      status: allOk ? "ok" : degraded ? "degraded" : "error",
+      status: allOk ? "ok" : hasError ? "error" : "degraded",
       checks,
       timestamp: new Date().toISOString(),
     },
-    { status: allOk ? 200 : 503 },
+    { status: hasError ? 503 : 200 },
   );
 }

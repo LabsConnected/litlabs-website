@@ -39,27 +39,30 @@ test.describe("Error states @public @error-states", () => {
     assertNoErrors(errors);
   });
 
-  test("Marketplace install API returns 401 or 503", async ({ page }) => {
+  test("Marketplace install API returns 401, 503, 307, or 405", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
 
     const response = await page.goto("/api/marketplace/agents/test-agent-id/install");
     const status = response?.status() ?? 0;
+    // 405 is valid — the route is POST-only, so a GET probe gets Method Not Allowed.
+    // That proves the route exists and is protected by method routing.
     expect(
-      status === 401 || status === 503 || status === 307,
-      `Marketplace install should return 401/503/307, got ${status}`,
+      status === 401 || status === 503 || status === 307 || status === 405,
+      `Marketplace install should return 401/503/307/405, got ${status}`,
     ).toBe(true);
 
     assertNoErrors(errors);
   });
 
-  test("Marketplace checkout API returns 401 or 503", async ({ page }) => {
+  test("Marketplace checkout API returns 401, 503, 307, or 405", async ({ page }) => {
     const errors = monitorApplicationErrors(page);
 
     const response = await page.goto("/api/marketplace/agents/test-agent-id/checkout");
     const status = response?.status() ?? 0;
+    // 405 is valid — the route is POST-only, so a GET probe gets Method Not Allowed.
     expect(
-      status === 401 || status === 503 || status === 307,
-      `Marketplace checkout should return 401/503/307, got ${status}`,
+      status === 401 || status === 503 || status === 307 || status === 405,
+      `Marketplace checkout should return 401/503/307/405, got ${status}`,
     ).toBe(true);
 
     assertNoErrors(errors);

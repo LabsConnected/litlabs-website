@@ -16,7 +16,19 @@
  */
 
 import { Server } from "socket.io";
-import { RuntimeStore, createInitialState } from "@litt/agent-core";
+import {
+  RuntimeStore,
+  createInitialState,
+  createShellExecutor,
+  createCommandExecutor,
+  createExecutionGateway,
+  createDefaultRegistry,
+  type ExecutionGateway,
+  type MissionMode,
+  type ToolRegistry,
+  type ShellExecutor,
+  type CommandExecutor,
+} from "@litt/agent-core";
 import type { RuntimeEvent, RuntimeState } from "@litt/agent-core";
 
 // ─── Singleton store ──────────────────────────────────────────────
@@ -152,4 +164,94 @@ export function runtimeSetModel(model: string | null, profile: string | null): v
  */
 export function runtimeSetPhase(phase: "idle" | "thinking" | "verifying" | "complete" | "failed" | "running"): void {
   store.setPhase(phase);
+}
+
+// ─── ExecutionGateway — the ONE canonical execution authority ──────
+//
+// terminal-server previously had NO gateway instance. Slash commands
+// like `/do` called child_process.execFile directly, bypassing the
+// canonical ExecutionGateway → CommandExecutor → ShellExecutor path.
+//
+// This singleton is the ONE gateway for terminal-server. It shares the
+// same RuntimeStore as everything else. `/do` (and any other mutating
+// command) must route through `getExecutionGateway()` — never call
+// execFile directly.
+//
+// The gateway is created lazily on first access so module-load order
+// does not matter (the store must exist first).
+//
+// The tool registry, shell executor, and command executor are also
+// exposed so the canonical LiTT operator (runAgentLoop) can reuse the
+// SAME instances — no second tool registry, no second shell.
+
+let gateway: ExecutionGateway | null = null;
+let gatewayCwd: string | null = null;
+let canonicalShell: ShellExecutor | null = null;
+let canonicalTools: ToolRegistry | null = null;
+let canonicalExecutor: CommandExecutor | null = null;
+
+/**
+ * Build (or rebuild) the canonical execution stack for a given cwd.
+ * All pieces share the same RuntimeStore.
+ */
+function buildCanonicalStack(cwd: string): void {
+  canonicalShell = createShellExecutor(cwd);
+  canonicalExecutor = createCommandExecutor(canonicalShell, store, null);
+  canonicalTools = createDefaultRegistry();
+  gateway = createExecutionGateway({
+    tools: canonicalTools,
+    shell: canonicalShell,
+    executor: canonicalExecutor,
+    store,
+    projectId: "terminal-server",
+  });
+  gatewayCwd = cwd;
+}
+
+/**
+ * Get the canonical ExecutionGateway for terminal-server.
+ * The gateway is bound to a working directory — calling this with a
+ * different cwd rebuilds the stack for that cwd (the ShellExecutor is
+ * cwd-bound). The RuntimeStore is shared across all instances.
+ */
+export function getExecutionGateway(cwd: string, mode: MissionMode = "act"): ExecutionGateway {
+  if (gateway && gatewayCwd === cwd) {
+    return gateway;
+  }
+  buildCanonicalStack(cwd);
+  return gateway!;
+}
+
+/**
+ * Get the canonical ToolRegistry — the SAME instance used by the
+ * ExecutionGateway. The LiTT operator (runAgentLoop) must use this,
+ * never create its own ToolRegistry.
+ */
+export function getCanonicalToolRegistry(cwd: string): ToolRegistry {
+  if (!canonicalTools || gatewayCwd !== cwd) {
+    buildCanonicalStack(cwd);
+  }
+  return canonicalTools!;
+}
+
+/**
+ * Get the canonical ShellExecutor — the SAME instance used by the
+ * ExecutionGateway and CommandExecutor.
+ */
+export function getCanonicalShell(cwd: string): ShellExecutor {
+  if (!canonicalShell || gatewayCwd !== cwd) {
+    buildCanonicalStack(cwd);
+  }
+  return canonicalShell!;
+}
+
+/**
+ * Get the canonical CommandExecutor — the SAME instance used by the
+ * ExecutionGateway.
+ */
+export function getCanonicalCommandExecutor(cwd: string): CommandExecutor {
+  if (!canonicalExecutor || gatewayCwd !== cwd) {
+    buildCanonicalStack(cwd);
+  }
+  return canonicalExecutor!;
 }

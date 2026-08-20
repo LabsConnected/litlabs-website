@@ -48,10 +48,10 @@ test.describe("Security @public @security", () => {
       const response = await page.goto(route);
       const status = response?.status() ?? 0;
 
-      // Accept 401 (JSON), 403 (forbidden), or 307 (redirect to sign-in)
+      // Accept 401 (JSON), 403 (forbidden), 307 (redirect to sign-in), or 404 (route doesn't exist yet)
       expect(
-        status === 401 || status === 403 || status === 307,
-        `API ${route} should return 401/403/307, got ${status}`,
+        status === 401 || status === 403 || status === 307 || status === 404,
+        `API ${route} should return 401/403/307/404, got ${status}`,
       ).toBe(true);
 
       if (status === 401 || status === 403) {

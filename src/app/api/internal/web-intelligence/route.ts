@@ -21,7 +21,6 @@ import {
 } from "@/lib/litt-intelligence/web-intelligence";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
 
 function safeSecretEqual(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate);

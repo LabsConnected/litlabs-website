@@ -149,10 +149,10 @@ disabled until ALL of the following pass:
 
 ### Founding Member
 - Checkout charges exactly $149 once
-- No subscription is created
-- Permanent Creator-level entitlement is stored
+- No Stripe recurring subscription is created (mode=one_time)
+- Permanent Founder entitlement record stored in subscriptions table
 - No six-month expiration is written
-- No recurring LiTTBits are granted
+- No recurring LiTTBits are granted (monthlyCredits = 0)
 - Duplicate checkout cannot create duplicate Founder access
 - Refund handling revokes or flags the entitlement
 

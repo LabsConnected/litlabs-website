@@ -8,8 +8,8 @@ const COLS: Array<{
   {
     title: "Product",
     links: [
-      { label: "Studio", href: "/studio" },
-      { label: "Missions", href: "/studio?tool=workflows" },
+      { label: "How it works", href: "#how" },
+      { label: "Product overview", href: "#product" },
       { label: "Marketplace (Beta)", href: "/marketplace" },
       { label: "Pricing", href: "/pricing" },
     ],

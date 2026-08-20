@@ -23,7 +23,6 @@ import { resolveInternalUserId } from "@/lib/generation/identity";
 // ── Route configuration ──────────────────────────────────────────
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 // ── Environment variables ────────────────────────────────────────
 const HF_API_KEY = process.env.HUGGING_FACE_API_KEY;

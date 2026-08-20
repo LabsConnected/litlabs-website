@@ -10,7 +10,9 @@
  * about itself (which panel is selected, what the user typed, etc).
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { ChatTranscriptStore } from "./chat-transcript-store.js";
+import { FocusEpochTracker } from "./focus-state.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -46,14 +48,63 @@ export interface ApprovalPrompt {
 }
 
 /**
+ * Chat transcript message — the canonical assistant/user conversation.
+ *
+ * This is the PERSISTED response body. The activity feed is a truncated
+ * operator log; the transcript is the full, rendered assistant content.
+ *
+ * Lifecycle:
+ *   - On submit: a "user" message is appended.
+ *   - During streaming: an "assistant" message with status "streaming"
+ *     is appended and its body grows as deltas arrive (live preview).
+ *   - On completion: the streaming message is finalized to status
+ *     "complete" with result.content (the canonical final response,
+ *     persisted ONCE — never duplicated).
+ *   - On error: the streaming message is finalized to status "error"
+ *     with the error text (never blank).
+ *
+ * Routing trace (assistant messages only):
+ *   - requestedModel: the brain/policy label (what the user configured)
+ *   - resolvedModel:  the routed model label (what route() picked)
+ *   - servedModel:    the model the provider actually served (after
+ *     streaming confirms it; null until then)
+ *   - fallbackReason: why the resolved model differs from the requested
+ *     policy, if applicable (null when the policy was honored exactly)
+ */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+  status: "streaming" | "complete" | "error";
+  /** Routing trace — assistant messages only. */
+  requestedModel?: string;
+  resolvedModel?: string;
+  servedModel?: string | null;
+  fallbackReason?: string | null;
+  /** Turn duration (ms) — stamped once at finalize; drives the
+   *  collapsed "Model · 9.0s" routing footer. */
+  durationMs?: number | null;
+}
+
+/**
+ * Activity vocabulary — the tiny semantic set the shell renders.
+ * The whole runtime surface maps onto these five glyphs:
+ *   → working   ✓ success   ! warning   × failed   ◆ decision
+ */
+export type ActivitySemantic = "working" | "success" | "warning" | "failed" | "decision";
+
+/**
  * Activity entry — operator feed format.
  * tag is the short verb (THINK, ROUTE, READ, EDIT, RUN, PASS, VERIFY, etc.)
+ * semantic is the tiny-vocabulary classification used by the shell feed.
  */
 export interface ActivityEntry {
   id: string;
   ts: number;
   type: string;
   tag?: string;
+  semantic?: ActivitySemantic;
   runId?: string;
   toolCallId?: string;
   /** Display text — truncated for the feed. */
@@ -89,6 +140,53 @@ export interface MissionState {
   buildPassed: boolean | null;
   /** Runtime verification proven */
   runtimeProven: boolean | null;
+  /** Git porcelain file paths captured at mission start — the baseline
+   *  pre-existing repo state. NEVER attributed to this mission. */
+  baselineGitFiles: string[];
+  /** Files changed BY this mission (baseline vs terminal git snapshot).
+   *  null until the mission reaches a terminal state. */
+  missionDeltaFiles: string[] | null;
+  /** True when the mission only read (no mutation tools succeeded).
+   *  Read-only missions NEVER claim "verification passed" for code
+   *  changes — they were not executing a verification gate. */
+  readOnly: boolean | null;
+  /** Every tool id invoked during the mission (for honest summaries). */
+  toolsUsed: string[];
+}
+
+/**
+ * Canonical mission projection — a lightweight projection of
+ * RuntimeStore.mission that the UI renders directly. This is NOT
+ * a competing authority — it's a render cache of canonical truth.
+ *
+ * RuntimeStore.mission remains the single source of truth.
+ * The useRuntimeMissionProjection hook updates this from canonical
+ * mission:* events.
+ */
+export interface CanonicalMissionProjection {
+  /** Mission ID from RuntimeStore.mission.id */
+  id: string;
+  /** Mission goal from RuntimeStore.mission.goal */
+  goal: string;
+  /** Mission status from RuntimeStore.mission.status */
+  status: string;
+  /** Current step ID from RuntimeStore.mission.currentStepId */
+  currentStepId: string | null;
+  /** Steps projected from RuntimeStore.mission.steps */
+  steps: Array<{
+    id: string;
+    title: string;
+    status: string;
+    sequence: number;
+  }>;
+  /** Verification proven — from mission evidence */
+  verificationProven: boolean | null;
+  /** Mission was restored from disk on startup */
+  restored: boolean;
+  /** Completion reason (if complete) */
+  completionReason: string | null;
+  /** Failure reason (if failed) */
+  failureReason: string | null;
 }
 
 /**
@@ -124,16 +222,62 @@ export interface CockpitUIState {
   missionState: MissionState | null;
   /** Last completed mission (retained for display) */
   lastCompletedMission: MissionState | null;
+  /** Canonical mission projection from RuntimeStore.mission.
+   *  This is a render cache — RuntimeStore.mission is the authority. */
+  canonicalMission: CanonicalMissionProjection | null;
   /** CHAT processing flag — independent of mission holoState.
    *  CHAT does NOT use UNDERSTANDING/PLANNING/etc. It sets isProcessing
    *  to block the composer while keeping holoState = IDLE. */
   isProcessing: boolean;
   /** Live git branch — refreshed before each submit to match tool truth. */
   branch: string;
+  /** Chat transcript — persisted assistant/user conversation body.
+   *  Survives rerender and overlay open/close. Bounded to last 50 messages. */
+  chatTranscript: ChatMessage[];
+  /** Execution mode — PLAN (read-only) or ACT (full). Tab toggles. */
+  mode: "plan" | "act";
+  /** Workspace context — display truth for the shell. Updated by
+   *  /workspace switches and branch refreshes. */
+  project: string;
+  cwd: string;
+  gitModified: number;
+  gitUntracked: number;
+  /** Composer draft — lifted into the store so / and @ overlays can
+   *  read/append to the in-progress input. */
+  composerValue: string;
+  /** Query seeded into the next opened overlay (palette/picker). */
+  overlayQuery: string;
+  /** When the shell entered a busy state (chat/mission) — for the
+   *  status bar's "◉ Working · Ns" timer. Null when idle. */
+  busySince: number | null;
+  /** Transcript scroll anchor — index of the top visible message.
+   *  null = LIVE (auto-follow the newest). The logical transcript is
+   *  NEVER mutated by the viewport; this is pure scroll position. */
+  transcriptAnchor: number | null;
+  /** Page size (messages per PgUp/PgDn) — set by the shell from the
+   *  live-mode visible count. */
+  transcriptPage: number;
+  /** Focus epoch — bumped EXACTLY ONCE per composer-restoration
+   *  transition (overlay close, run settle, explicit return-to-live).
+   *  The composer restarts its steady caret on change. Never bumped by
+   *  renders, stream chunks, or timer ticks (focus-state.ts). */
+  focusEpoch: number;
 }
 
 /** Overlay type — which modal/picker is open */
-export type Overlay = "none" | "model-picker" | "command-palette" | "model-center" | "activity" | "help";
+export type Overlay =
+  | "none"
+  | "model-picker"
+  | "command-palette"
+  | "model-center"
+  | "activity"
+  | "help"
+  | "context-picker"
+  | "file-picker"
+  | "diff-viewer"
+  | "workspace-picker"
+  | "resume-picker"
+  | "ship";
 
 /**
  * Routing mode — how LiTT chooses models.
@@ -143,6 +287,28 @@ export type Overlay = "none" | "model-picker" | "command-palette" | "model-cente
  *   max    — prefer strongest available model
  */
 export type RoutingMode = "auto" | "fixed" | "budget" | "max";
+
+/**
+ * Pure decision function for the race-safe terminal → IDLE transition.
+ *
+ * A stale idle timer (scheduled by a previous run's terminal state)
+ * must NOT override a new run that started during the delay window.
+ * The timer's functional updater calls this with the CURRENT holoState:
+ *   - terminal state (COMPLETE/FAILED/CANCELLED/TIMEOUT) → IDLE
+ *   - anything else (a new run's UNDERSTANDING/RUNNING/etc.) → unchanged
+ *
+ * Exported so the regression test can pin the contract without a React
+ * testing environment (the repo's established pure-logic test pattern).
+ */
+export function idleTransitionFromTerminal(prev: HoloState): HoloState {
+  if (
+    prev === "COMPLETE" || prev === "FAILED" ||
+    prev === "CANCELLED" || prev === "TIMEOUT"
+  ) {
+    return "IDLE";
+  }
+  return prev;
+}
 
 export function useCockpitStore() {
   const [selectedPanel, setSelectedPanel] = useState<CockpitPanel>("runtime");
@@ -158,12 +324,43 @@ export function useCockpitStore() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
   const [activeModel, setActiveModel] = useState<string | null>(null);
-  const [overlay, setOverlay] = useState<Overlay>("none");
+  // The provider that ACTUALLY served the most recent request (source
+  // truth). Set optimistically from routed.servedBy before streaming,
+  // then confirmed from the adapter's providerId after streaming. null
+  // until the first run. Displayed in the status bar as
+  // "GPT-5.6 Luna · OpenAI" — the real served provider, not just the
+  // friendly model name.
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [overlay, setOverlayState] = useState<Overlay>("none");
   const [mission, setMission] = useState<string | null>(null);
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [lastCompletedMission, setLastCompletedMission] = useState<MissionState | null>(null);
+  const [canonicalMission, setCanonicalMission] = useState<CanonicalMissionProjection | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [branch, setBranch] = useState<string>("unknown");
+  const [mode, setMode] = useState<"plan" | "act">("act");
+  const [project, setProject] = useState<string>("");
+  const [cwd, setCwd] = useState<string>("");
+  const [gitModified, setGitModified] = useState<number>(0);
+  const [gitUntracked, setGitUntracked] = useState<number>(0);
+  const [composerValue, setComposerValue] = useState("");
+  const [overlayQuery, setOverlayQuery] = useState("");
+  const [busySince, setBusySince] = useState<number | null>(null);
+  const [transcriptAnchor, setTranscriptAnchor] = useState<number | null>(null);
+  // ─── Focus epoch — the single event-based focus authority ────────
+  // The tracker decides exactly-once restoration transitions; the React
+  // state is only a mirror so renders stay reactive. Epoch 1 = focused
+  // at launch (the allowed initial focus moment).
+  const [focusTracker] = useState<FocusEpochTracker>(() => new FocusEpochTracker({ overlay: "none" }));
+  const focusTrackerRef = useRef<FocusEpochTracker>(focusTracker);
+  const [focusEpoch, setFocusEpoch] = useState<number>(() => focusTracker.epoch);
+  const [transcriptPage, setTranscriptPage] = useState(5);
+  // The transcript is owned by a pure ChatTranscriptStore (testable in
+  // node env without a React renderer). The hook mirrors its snapshot
+  // into React state so renders stay reactive. useState with a lazy
+  // initializer creates the store once and never re-creates it.
+  const [transcriptStore] = useState(() => new ChatTranscriptStore());
+  const [chatTranscript, setChatTranscript] = useState<ChatMessage[]>(() => transcriptStore.snapshot());
 
   const addActivity = useCallback((entry: ActivityEntry) => {
     // Bound the store: keep last 200 entries, and cap fullText at 4KB
@@ -174,6 +371,54 @@ export function useCockpitStore() {
       : entry;
     setActivityLog((prev) => [...prev.slice(-200), bounded]);
   }, []);
+
+  // ─── Chat transcript actions ─────────────────────────────────────
+  // The transcript is the PERSISTED assistant response body. All
+  // mutations go through the pure ChatTranscriptStore (testable without
+  // a React renderer) and the result is mirrored into React state.
+  const syncTranscript = useCallback(() => {
+    setChatTranscript(transcriptStore.snapshot());
+  }, [transcriptStore]);
+
+  /** Append a new user or assistant message. Returns the message id. */
+  const addChatMessage = useCallback((msg: Omit<ChatMessage, "id">): string => {
+    const id = transcriptStore.add(msg);
+    syncTranscript();
+    return id;
+  }, [transcriptStore, syncTranscript]);
+
+  /**
+   * Append a delta to the LAST assistant message (streaming live preview).
+   * If the last message is not a streaming assistant message, this is a
+   * no-op (the caller must have added one first). Idempotent per delta.
+   */
+  const appendAssistantDelta = useCallback((text: string) => {
+    transcriptStore.appendDelta(text);
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
+
+  /**
+   * Finalize the LAST assistant message with canonical content + status.
+   * Called ONCE when the agent loop completes (success) or errors.
+   * Replaces the streaming body with the authoritative result.content so
+   * the persisted message is exactly what the runtime produced — never a
+   * partial stream, never duplicated. Also stamps the served model.
+   */
+  const finalizeAssistantMessage = useCallback((options: {
+    content: string;
+    status: "complete" | "error";
+    servedModel?: string | null;
+    durationMs?: number | null;
+  }) => {
+    transcriptStore.finalize(options);
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
+
+  /** Clear the chat transcript (e.g. /clear). */
+  const clearChatTranscript = useCallback(() => {
+    transcriptStore.clear();
+    syncTranscript();
+  }, [transcriptStore, syncTranscript]);
 
   /** Start a new mission */
   const startMission = useCallback((text: string, runId: string | null = null) => {
@@ -190,6 +435,34 @@ export function useCockpitStore() {
       typecheckPassed: null,
       buildPassed: null,
       runtimeProven: null,
+      baselineGitFiles: [],
+      missionDeltaFiles: null,
+      readOnly: null,
+      toolsUsed: [],
+    });
+  }, []);
+
+  /** Record the git baseline captured at mission start. */
+  const setMissionBaseline = useCallback((files: string[]) => {
+    setMissionState((prev) => prev ? { ...prev, baselineGitFiles: files } : prev);
+  }, []);
+
+  /** Record the mission delta computed at completion (baseline vs now). */
+  const setMissionDelta = useCallback((files: string[]) => {
+    setMissionState((prev) => prev ? { ...prev, missionDeltaFiles: files } : prev);
+  }, []);
+
+  /** Record whether the mission was read-only (no mutation tools). */
+  const setMissionReadOnly = useCallback((readOnly: boolean) => {
+    setMissionState((prev) => prev ? { ...prev, readOnly } : prev);
+  }, []);
+
+  /** Record a tool invocation (for honest read-only summaries). */
+  const addMissionTool = useCallback((toolId: string) => {
+    setMissionState((prev) => {
+      if (!prev) return prev;
+      if (prev.toolsUsed.includes(toolId)) return prev;
+      return { ...prev, toolsUsed: [...prev.toolsUsed, toolId] };
     });
   }, []);
 
@@ -276,6 +549,101 @@ export function useCockpitStore() {
 
   const clearApproval = useCallback(() => setApprovalPrompt(null), []);
 
+  /** Toggle execution mode (Tab). PLAN = read-only, ACT = full. */
+  const toggleMode = useCallback(() => {
+    setMode((prev) => prev === "act" ? "plan" : "act");
+  }, []);
+
+  /** Set workspace context (project name / root / git counts). */
+  const setWorkspace = useCallback((p: { project?: string; cwd?: string; branch?: string; gitModified?: number; gitUntracked?: number }) => {
+    if (p.project !== undefined) setProject(p.project);
+    if (p.cwd !== undefined) setCwd(p.cwd);
+    if (p.branch !== undefined) setBranch(p.branch);
+    if (p.gitModified !== undefined) setGitModified(p.gitModified);
+    if (p.gitUntracked !== undefined) setGitUntracked(p.gitUntracked);
+  }, []);
+
+  // ─── Overlay + busy transitions drive the focus epoch ────────────
+  // Exactly-once restoration: opening an overlay does NOT bump; closing
+  // one DOES. Starting a run does NOT bump; the run settling (busy →
+  // idle) DOES. The tracker is transition-based, so repeated no-op
+  // calls (stale closures, double stopBusy) never double-bump.
+  const setOverlay = useCallback((next: Overlay) => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setOverlay(next);
+    setOverlayState(next);
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  /** Mark the shell busy (status bar "◉ Working · Ns" timer). */
+  const startBusy = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setBusy(true);
+    setBusySince(Date.now());
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  /** End the busy state — restores composer focus exactly once. */
+  const stopBusy = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.setBusy(false);
+    setBusySince(null);
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  // ─── Terminal → IDLE auto-transition (race-safe) ─────────────────
+  // After a run settles (COMPLETE/FAILED/CANCELLED/TIMEOUT), the UI
+  // auto-transitions back to IDLE after a short display delay. The old
+  // approach was `setTimeout(() => setHoloState("IDLE"), N)` — fire-and-
+  // forget. If the user started a NEW run within the delay window, the
+  // stale timer would override the new run's UNDERSTANDING/RUNNING state
+  // back to IDLE, causing the composer to unblock mid-run and the status
+  // bar to drop "Working".
+  //
+  // scheduleIdle fixes this with TWO guards:
+  //   1. Only ONE idle timer is pending at a time (previous is cleared).
+  //   2. The timer uses the functional updater `setHoloState((prev) => …)`
+  //      so it reads the CURRENT state, not the stale closure state. It
+  //      only transitions to IDLE from a terminal state — a new run that
+  //      started during the delay window is left untouched.
+  const terminalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleIdle = useCallback((delayMs: number) => {
+    if (terminalIdleTimerRef.current) clearTimeout(terminalIdleTimerRef.current);
+    terminalIdleTimerRef.current = setTimeout(() => {
+      terminalIdleTimerRef.current = null;
+      setHoloState(idleTransitionFromTerminal);
+    }, delayMs);
+  }, []);
+
+  /** Explicit focus restoration (e.g. typing returns from history). */
+  const bumpFocus = useCallback(() => {
+    const tracker = focusTrackerRef.current!;
+    tracker.bump();
+    setFocusEpoch(tracker.epoch);
+  }, []);
+
+  // ─── Transcript scroll (viewport position — never mutates history) ──
+  const scrollPgUp = useCallback(() => {
+    const page = Math.max(1, transcriptPage);
+    setTranscriptAnchor((prev) => {
+      const base = prev ?? chatTranscript.length;
+      return Math.max(0, base - page);
+    });
+  }, [transcriptPage, chatTranscript.length]);
+
+  const scrollPgDn = useCallback(() => {
+    const page = Math.max(1, transcriptPage);
+    setTranscriptAnchor((prev) => {
+      if (prev === null) return null;
+      const next = prev + page;
+      return next >= chatTranscript.length ? null : next;
+    });
+  }, [transcriptPage, chatTranscript.length]);
+
+  const scrollHome = useCallback(() => setTranscriptAnchor(0), []);
+  const scrollEnd = useCallback(() => setTranscriptAnchor(null), []);
+  const resetTranscriptScroll = useCallback(() => setTranscriptAnchor(null), []);
+
   // Auto-clear approval prompt when holoState transitions away from APPROVAL
   useEffect(() => {
     if (holoState !== "APPROVAL" && approvalPrompt) {
@@ -298,12 +666,26 @@ export function useCockpitStore() {
       selectedModel,
       routingMode,
       activeModel,
+      activeProvider,
       overlay,
       mission,
       missionState,
       lastCompletedMission,
+      canonicalMission,
       isProcessing,
       branch,
+      chatTranscript,
+      mode,
+      project,
+      cwd,
+      gitModified,
+      gitUntracked,
+      composerValue,
+      overlayQuery,
+      busySince,
+      transcriptAnchor,
+      transcriptPage,
+      focusEpoch,
     },
     actions: {
       setSelectedPanel,
@@ -320,6 +702,7 @@ export function useCockpitStore() {
       setSelectedModel,
       setRoutingMode,
       setActiveModel,
+      setActiveProvider,
       setOverlay,
       setMission,
       startMission,
@@ -330,9 +713,34 @@ export function useCockpitStore() {
       setMissionTypecheck,
       setMissionBuild,
       setMissionRuntimeProven,
+      setMissionBaseline,
+      setMissionDelta,
+      setMissionReadOnly,
+      addMissionTool,
       clearMission,
+      setCanonicalMission,
       setIsProcessing,
       setBranch,
+      addChatMessage,
+      appendAssistantDelta,
+      finalizeAssistantMessage,
+      clearChatTranscript,
+      setMode,
+      toggleMode,
+      setWorkspace,
+      setComposerValue,
+      setOverlayQuery,
+      startBusy,
+      stopBusy,
+      scheduleIdle,
+      bumpFocus,
+      setTranscriptAnchor,
+      setTranscriptPage,
+      scrollPgUp,
+      scrollPgDn,
+      scrollHome,
+      scrollEnd,
+      resetTranscriptScroll,
     },
   };
 }

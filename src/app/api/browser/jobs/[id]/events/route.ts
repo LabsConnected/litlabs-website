@@ -5,7 +5,6 @@ import { getJob, getJobEvents, serializeJobEvent } from "@/lib/browser-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 /**
  * GET /api/browser/jobs/[id]/events

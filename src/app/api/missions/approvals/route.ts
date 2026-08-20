@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { listPendingApprovals, resolveApproval, type MissionResult } from "@/lib/missions";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * GET /api/missions/approvals

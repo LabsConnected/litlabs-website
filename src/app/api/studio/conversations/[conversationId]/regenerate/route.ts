@@ -21,7 +21,6 @@ import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/l
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>;

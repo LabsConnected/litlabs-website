@@ -348,11 +348,13 @@ function MarketplaceInner() {
             Extend LiTT and Spark with real tools, workflows, integrations, and creative packs.
           </p>
 
-          {/* Stats row */}
+          {/* Stats row — only show "Installed" for signed-in users */}
           <div className="mt-6 flex flex-wrap gap-3">
             {[
               { label: "Available", value: stats.availableItems, icon: Sparkles },
-              { label: "Installed", value: stats.installedItems, icon: Check },
+              ...(isSignedIn
+                ? [{ label: "Installed", value: stats.installedItems, icon: Check }]
+                : []),
               { label: "Coming soon", value: stats.comingSoonItems, icon: ShieldCheck },
             ].map((stat) => {
               const Icon = stat.icon;
@@ -379,9 +381,15 @@ function MarketplaceInner() {
           </div>
 
           <div className="mt-5 flex gap-3">
-            <Link href="/studio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
-              Open in Studio <ArrowRight size={14} />
-            </Link>
+            {isSignedIn ? (
+              <Link href="/studio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
+                Open in Studio <ArrowRight size={14} />
+              </Link>
+            ) : (
+              <Link href="/sign-up?redirect_url=%2Fstudio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
+                Start Building Free <ArrowRight size={14} />
+              </Link>
+            )}
             <button onClick={() => setActiveTab("beta")} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15">
               Beta Access
             </button>
@@ -499,7 +507,7 @@ function MarketplaceInner() {
                       textMuted={T.textMuted}
                       headerColor={T.headerColor}
                       isSignedIn={isSignedIn}
-                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect_url=%2Fmarketplace"}
                       onToast={showToast}
                     />
                   ) : (
@@ -510,6 +518,7 @@ function MarketplaceInner() {
                       onInstall={() => installItem(item)}
                       onUninstall={() => uninstallItem(item)}
                       onToggleEnabled={() => toggleEnabled(item)}
+                      isSignedIn={isSignedIn}
                       accentColor={T.accentColor}
                       borderColor={T.borderColor}
                       boxBg={T.boxBg}
@@ -566,7 +575,7 @@ function MarketplaceInner() {
                       textMuted={T.textMuted}
                       headerColor={T.headerColor}
                       isSignedIn={isSignedIn}
-                      onSignInRequired={() => window.location.href = "/sign-in?redirect=/marketplace"}
+                      onSignInRequired={() => window.location.href = "/sign-in?redirect_url=%2Fmarketplace"}
                       onToast={showToast}
                     />
                   ) : (
@@ -577,6 +586,7 @@ function MarketplaceInner() {
                       onInstall={() => installItem(item)}
                       onUninstall={() => uninstallItem(item)}
                       onToggleEnabled={() => toggleEnabled(item)}
+                      isSignedIn={isSignedIn}
                       accentColor={T.accentColor}
                       borderColor={T.borderColor}
                       boxBg={T.boxBg}
@@ -728,6 +738,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
   onInstall,
   onUninstall,
   onToggleEnabled,
+  isSignedIn,
   accentColor,
   borderColor,
   boxBg,
@@ -739,6 +750,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
   onInstall: () => void;
   onUninstall: () => void;
   onToggleEnabled: () => void;
+  isSignedIn: boolean;
   accentColor: string;
   borderColor: string;
   boxBg: string;
@@ -862,6 +874,14 @@ const MarketplaceCard = memo(function MarketplaceCard({
             >
               Coming soon
             </span>
+          ) : !isSignedIn ? (
+            <Link
+              href={`/sign-in?redirect_url=${encodeURIComponent("/marketplace")}`}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
+              style={{ background: categoryColor }}
+            >
+              {(item.price_cents || 0) === 0 ? "Sign in to install" : "Sign in to purchase"}
+            </Link>
           ) : isInstalled ? (
             <div className="flex gap-2">
               {isEnabled ? (

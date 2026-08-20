@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 /**
  * POST /api/studio/command

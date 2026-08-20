@@ -19,7 +19,6 @@ import { executeBrowserJob } from "@/lib/browser-job-executor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
 
 /**
  * POST /api/browser/jobs

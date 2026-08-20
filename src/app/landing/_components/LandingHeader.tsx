@@ -7,12 +7,12 @@ import { LandingHeaderAuth } from "./LandingHeaderAuth";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const NAV_LINKS = [
-  { label: "Studio", href: "/studio" },
-  { label: "Missions", href: "/studio?tool=workflows" },
+  { label: "Product", href: "#product" },
+  { label: "How it works", href: "#how" },
   { label: "Marketplace", href: "/marketplace", badge: "Beta" },
   { label: "Pricing", href: "/pricing" },
-  { label: "How it works", href: "#how" },
   { label: "Docs", href: "/docs" },
+  { label: "Showcase", href: "/showcase" },
 ];
 
 export function LandingHeader() {

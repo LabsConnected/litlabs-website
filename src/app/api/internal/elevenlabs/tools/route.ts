@@ -41,7 +41,6 @@ import {
 import { recallMemories } from "@/lib/studio/memory-service";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
 
 function safeSecretEqual(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate);
@@ -234,9 +233,8 @@ async function executeMyaiosTool(
   conversationId: string,
 ): Promise<string> {
   // Forward to the unified Myaios Brain endpoint
-  const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL
-    ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-    : process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
 
   const response = await fetch(`${baseUrl}/api/internal/elevenlabs/myaios`, {
     method: "POST",

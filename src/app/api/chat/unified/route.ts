@@ -9,7 +9,6 @@ import { chargeLlmUsage } from "@/lib/llm-billing";
 import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 

@@ -4,7 +4,6 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { generateText } from "@/lib/llm";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 /**
  * POST /api/gemini

@@ -293,13 +293,13 @@ describe("Discovery regression — JSON-LD structured data", () => {
 describe("Discovery regression — About page", () => {
   it("page file exists", () => {
     expect(
-      existsSync(path.resolve(__dirname, "../src/app/about/page.tsx"))
+      existsSync(path.resolve(__dirname, "../src/app/(app)/about/page.tsx"))
     ).toBe(true);
   });
 
   it("exports metadata with buildMetadata", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/about/page.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/about/page.tsx"),
       "utf-8"
     );
     expect(src).toContain("buildMetadata");
@@ -309,14 +309,14 @@ describe("Discovery regression — About page", () => {
 
 // ── Canonical domain redirect ───────────────────────────
 describe("Discovery regression — canonical domain redirect", () => {
-  it("next.config.ts redirects www.litlabs.net to litlabs.net", () => {
-    const configSrc = readFileSync(
-      path.resolve(__dirname, "../next.config.ts"),
+  it("Cloudflare Worker redirects www.litlabs.net to litlabs.net", () => {
+    const workerSrc = readFileSync(
+      path.resolve(__dirname, "../cf-www-redirect/src/index.ts"),
       "utf-8"
     );
-    expect(configSrc).toContain("www.litlabs.net");
-    expect(configSrc).toContain("https://litlabs.net/:path*");
-    expect(configSrc).toContain("permanent: true");
+    expect(workerSrc).toContain("litlabs.net");
+    expect(workerSrc).toContain("301");
+    expect(workerSrc).toContain("Location");
   });
 });
 
@@ -358,7 +358,7 @@ describe("Discovery regression — studio noindex", () => {
 describe("Discovery regression — showcase metadata", () => {
   it("showcase layout exports buildMetadata", () => {
     const src = readFileSync(
-      path.resolve(__dirname, "../src/app/showcase/layout.tsx"),
+      path.resolve(__dirname, "../src/app/(app)/showcase/layout.tsx"),
       "utf-8"
     );
     expect(src).toContain("buildMetadata");

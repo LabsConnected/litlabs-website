@@ -14,33 +14,41 @@ import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, type KeyInfo } from "./keyboard-utils.js";
 
 const CONTROLS: Array<[string, string]> = [
-  ["Tab", "Agents (soon — no agent registry yet)"],
-  ["Ctrl+P", "Command palette"],
-  ["Ctrl+K", "Model selector"],
-  ["Ctrl+L", "Activity / log view"],
-  ["Ctrl+O", "Context / files (soon)"],
-  ["Esc", "Close overlay OR cancel active run"],
-  ["Ctrl+C", "Cancel current run (exit when idle)"],
-  ["Ctrl+D", "Exit when idle"],
-  ["?", "This help screen"],
+  ["/ or Ctrl+K", "Command palette"],
+  ["@", "Context picker"],
+  ["Tab", "Plan / Act toggle"],
+  ["F2", "Model center"],
+  ["Ctrl+L", "Clear transcript"],
+  ["Ctrl+N", "New session"],
+  ["Ctrl+R", "Resume session"],
+  ["Ctrl+O", "Switch workspace"],
+  ["Ctrl+D", "Diff view"],
+  ["Esc", "Close overlay / stop working"],
+  ["Ctrl+C", "Cancel run (exit when idle)"],
   ["↑ / ↓", "Input history (or picker navigation)"],
+  ["?", "This help screen"],
 ];
 
 const COMMANDS: Array<[string, string]> = [
-  ["/build", "Build project"],
-  ["/check", "Typecheck"],
-  ["/test", "Run tests"],
+  ["/new", "New conversation"],
+  ["/resume", "Resume previous session"],
+  ["/inspect", "Inspect project"],
+  ["/fix", "Diagnose + fix"],
+  ["/plan", "Plan only — read-only"],
+  ["/act", "Act — full execution"],
   ["/verify", "Runtime truth gate"],
-  ["/diff", "Show git diff"],
-  ["/status", "Runtime + project status"],
-  ["/run", "Run arbitrary command"],
+  ["/diff", "Review changes"],
+  ["/ship", "Commit / push"],
+  ["/workspace", "Switch project"],
+  ["/branch", "Switch/create branch"],
+  ["/files", "Find project files"],
   ["/model", "Quick model switch"],
   ["/models", "Model center"],
-  ["/route", "Routing information"],
-  ["/activity", "Full activity log"],
-  ["/clear", "Clear activity"],
-  ["/help", "This help screen"],
-  ["/exit", "Exit cockpit"],
+  ["/status", "Runtime details"],
+  ["/doctor", "Diagnose LiTT"],
+  ["/run", "Run arbitrary command"],
+  ["/clear", "Clear transcript"],
+  ["/exit", "Exit LiTT"],
 ];
 
 export interface HelpOverlayProps {
@@ -53,29 +61,32 @@ export function HelpOverlay({ onCancel }: HelpOverlayProps): React.ReactElement 
   }, [onCancel]));
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.brand} paddingX={1}>
-      <Text bold color={COLORS.brand}>{" LiTT — Help "}</Text>
-      <Text dimColor>{"─".repeat(44)}</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
+      <Text bold color={COLORS.text}>LiTT — Help</Text>
 
-      <Text bold color={COLORS.working}>{" Controls"}</Text>
-      {CONTROLS.map(([key, desc]) => (
-        <Box key={key}>
-          <Text color={COLORS.info}>{key.padEnd(10)}</Text>
-          <Text dimColor>{`  ${desc}`}</Text>
-        </Box>
-      ))}
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>Controls</Text>
+        {CONTROLS.map(([key, desc]) => (
+          <Box key={key}>
+            <Text color={COLORS.info}>{key.padEnd(10)}</Text>
+            <Text dimColor>{`  ${desc}`}</Text>
+          </Box>
+        ))}
+      </Box>
 
-      <Text dimColor>{"─".repeat(44)}</Text>
-      <Text bold color={COLORS.working}>{" Slash Commands"}</Text>
-      {COMMANDS.map(([cmd, desc]) => (
-        <Box key={cmd}>
-          <Text color={COLORS.brand}>{cmd.padEnd(12)}</Text>
-          <Text dimColor>{`  ${desc}`}</Text>
-        </Box>
-      ))}
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>Slash Commands</Text>
+        {COMMANDS.map(([cmd, desc]) => (
+          <Box key={cmd}>
+            <Text color={COLORS.text} bold>{cmd.padEnd(12)}</Text>
+            <Text dimColor>{`  ${desc}`}</Text>
+          </Box>
+        ))}
+      </Box>
 
-      <Text dimColor>{"─".repeat(44)}</Text>
-      <Text dimColor>{" Esc / Enter / ? to close"}</Text>
+      <Box marginTop={1}>
+        <Text dimColor>Esc / Enter / ? to close</Text>
+      </Box>
     </Box>
   );
 }

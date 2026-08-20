@@ -2,7 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import { ArrowRight, Play, Folder, FileCode, ChevronRight, Circle, CheckCircle2, Loader2, Terminal as TerminalIcon } from "lucide-react";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 /* ────────────────────────────────────────────────────────────────────
  * LandingHeroV3 — Pass 2: Scaled composition, LiTT as operator
@@ -52,6 +54,14 @@ const FILE_TREE = [
 ] as const;
 
 export function LandingHeroV3() {
+  const { isSignedIn } = useClerkAuth();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // Default to /sign-up for SSG; switch to /studio after mount if signed in.
+  const primaryCtaHref = mounted && isSignedIn ? "/studio" : "/sign-up";
+  const primaryCtaLabel = mounted && isSignedIn ? "Enter Studio" : "Start Building Free";
+
   return (
     <section className="relative z-10 px-6 pt-6 pb-10 md:px-10 md:pt-10 md:pb-14 lg:pt-14">
       {/* ── Ambient depth layer (hero-local) ── */}
@@ -136,14 +146,14 @@ export function LandingHeroV3() {
             {/* CTAs — premium, 56px high */}
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row lg:items-start">
               <Link
-                href="/sign-up"
+                href={primaryCtaHref}
                 className="group inline-flex h-[56px] items-center gap-2.5 rounded-2xl bg-white px-8 text-base font-black text-black shadow-[0_0_40px_rgba(168,85,247,0.25)] transition hover:shadow-[0_0_60px_rgba(168,85,247,0.45)] hover:scale-[1.02]"
               >
-                Start Building Free
+                {primaryCtaLabel}
                 <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
-                href="/studio"
+                href="#how"
                 className="inline-flex h-[56px] items-center gap-2.5 rounded-2xl border border-white/12 bg-white/5 px-7 text-base font-semibold text-white backdrop-blur-md transition hover:border-violet-400/30 hover:bg-white/8 hover:scale-[1.02]"
               >
                 <Play size={16} className="text-violet-300" />

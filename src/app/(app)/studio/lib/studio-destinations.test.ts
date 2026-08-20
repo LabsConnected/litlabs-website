@@ -18,11 +18,13 @@ describe("studio-destinations", () => {
         destination: "studio",
         legacyTool: "chat",
         mode: "work",
+        littMode: "auto",
       });
       expect(mapLegacyToolToDestination("chat")).toEqual({
         destination: "studio",
         legacyTool: "chat",
         mode: "work",
+        littMode: "auto",
       });
     });
 
@@ -65,19 +67,20 @@ describe("studio-destinations", () => {
       expect(result.mode).toBe("forge");
     });
 
-    it("maps image/video/audio to Create with correct modes", () => {
+    it("maps image/video/audio to Studio with LiTT modes (canonical chat surface)", () => {
       expect(mapLegacyToolToDestination("image")).toEqual({
-        destination: "create",
-        legacyTool: "image",
-        mode: "image",
+        destination: "studio",
+        legacyTool: "chat",
+        mode: "work",
+        littMode: "image",
       });
-      expect(mapLegacyToolToDestination("video").mode).toBe("video");
-      expect(mapLegacyToolToDestination("audio").mode).toBe("audio");
+      expect(mapLegacyToolToDestination("video").littMode).toBe("video");
+      expect(mapLegacyToolToDestination("audio").littMode).toBe("music");
     });
 
-    it("maps legacy color to Create/Image (color tool removed)", () => {
-      expect(mapLegacyToolToDestination("color").destination).toBe("create");
-      expect(mapLegacyToolToDestination("color").mode).toBe("image");
+    it("maps legacy color to Studio/Image LiTT mode (color tool removed)", () => {
+      expect(mapLegacyToolToDestination("color").destination).toBe("studio");
+      expect(mapLegacyToolToDestination("color").littMode).toBe("image");
     });
 
     it("maps assets to Assets", () => {
@@ -96,17 +99,17 @@ describe("studio-destinations", () => {
       expect(mapLegacyToolToDestination("screen").destination).toBe("studio");
     });
 
-    it("maps space to Create / Environment", () => {
+    it("maps space to Studio / Work (skybox is a LiTT capability)", () => {
       const result = mapLegacyToolToDestination("space");
-      expect(result.destination).toBe("create");
-      expect(result.mode).toBe("environment");
+      expect(result.destination).toBe("studio");
+      expect(result.mode).toBe("work");
     });
 
-    it("maps game to Create / Game (routing slot, no visible tab yet)", () => {
+    it("maps game to Studio / Work (routing slot, no visible tab yet)", () => {
       const result = mapLegacyToolToDestination("game");
-      expect(result.destination).toBe("create");
-      expect(result.legacyTool).toBe("game");
-      expect(result.mode).toBe("game");
+      expect(result.destination).toBe("studio");
+      expect(result.legacyTool).toBe("chat");
+      expect(result.mode).toBe("work");
     });
 
     it("maps more tools to More with correct modes", () => {

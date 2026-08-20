@@ -4,6 +4,12 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig: NextConfig = {
   reactCompiler: true,
 
+  // Standalone output — produces a minimal self-contained server in
+  // .next/standalone that doesn't need node_modules at runtime. This is
+  // the recommended mode for Docker deployments (Railway). The Dockerfile
+  // copies .next/standalone + .next/static + public into the runtime image.
+  output: "standalone",
+
   // Type checking is run separately via `pnpm type-check` (tsc --noEmit)
   // which passes cleanly. Next.js 16's build-time type check uses generated
   // validator files in .next/types/ that can have module resolution issues
@@ -130,8 +136,8 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
-              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
+              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
               "script-src-attr 'none'",
               "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
@@ -139,7 +145,7 @@ const nextConfig: NextConfig = {
               "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               `connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone https://backend.leadconnectorhq.com https://link.msgsndr.com https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://*.livekit.cloud wss://*.livekit.cloud${process.env.NODE_ENV === "development" ? " ws://localhost:4001 http://localhost:4001 ws://127.0.0.1:4001 http://127.0.0.1:4001" : ""}`,
               "frame-src 'self' blob: data: https://open.spotify.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://*.browserbase.com https://www.browserbase.com",
-              "worker-src 'self' blob: https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
+              "worker-src 'self' blob: https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
               "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
@@ -252,12 +258,6 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
-      {
-        source: "/:path*",
-        has: [{ type: "host", value: "www.litlabs.net" }],
-        destination: "https://litlabs.net/:path*",
-        permanent: true,
-      },
       { source: "/builder", destination: "/studio", permanent: false },
       { source: "/ai-builder", destination: "/studio", permanent: false },
       { source: "/chat", destination: "/studio?tool=chat", permanent: true },
@@ -329,7 +329,4 @@ export default withSentryConfig(nextConfig, {
 
   // Automatically tree-shake Sentry logger statements to reduce bundle size.
   disableLogger: true,
-
-  // Enables automatic instrumentation of Vercel Cron Monitors.
-  automaticVercelMonitors: true,
 });

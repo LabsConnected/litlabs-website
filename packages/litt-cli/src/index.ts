@@ -2,23 +2,37 @@
 /**
  * LiTT CLI — AI operating system for your terminal.
  *
+ * Two user surfaces share one canonical RuntimeSession:
+ *   1. Ink/PowerShell operator cockpit  — bare `litt` / `litt shell` / `litt cockpit` / `litt tui`
+ *   2. Desktop/Tauri GUI application    — `litt desktop`
+ *
+ * Bare `litt` stays inside the current terminal and renders the Ink cockpit.
+ * It never opens a GUI window. Both surfaces connect to the same shared
+ * RuntimeSession / RuntimeStore / AgentLoop — one brain, one truth.
+ *
  * Commands:
- *   litt doctor    — Check system health (Node, Git, pnpm, network, auth)
- *   litt version   — Show CLI version
- *   litt status    — Show project + git status (via @litt/agent-core)
- *   litt diff      — Show git diff (via @litt/agent-core)
- *   litt check     — Run typecheck (via @litt/agent-core)
- *   litt test      — Run tests (via @litt/agent-core)
- *   litt build     — Run build (via @litt/agent-core)
- *   litt run       — Run arbitrary command through hardened CommandExecutor
- *   litt inspect   — Deep repo inspection (framework, scripts, deploy)
- *   litt ask       — Ask LiTT a question about your project
- *   litt explain   — Pipe errors/diffs and get actionable advice
+ *   litt            — Launch the Ink operator cockpit (default)
+ *   litt shell      — Explicit alias for the Ink cockpit
+ *   litt cockpit    — Alias for the Ink cockpit
+ *   litt tui        — Alias for the Ink cockpit
+ *   litt desktop    — Launch the Desktop/Tauri GUI application
+ *   litt doctor     — Check system health (Node, Git, pnpm, network, auth)
+ *   litt version    — Show CLI version
+ *   litt status     — Show project + git status (via @litt/agent-core)
+ *   litt diff       — Show git diff (via @litt/agent-core)
+ *   litt check      — Run typecheck (via @litt/agent-core)
+ *   litt test       — Run tests (via @litt/agent-core)
+ *   litt build      — Run build (via @litt/agent-core)
+ *   litt run        — Run arbitrary command through hardened CommandExecutor
+ *   litt inspect    — Deep repo inspection (framework, scripts, deploy)
+ *   litt ask        — Ask LiTT a question about your project
+ *   litt explain    — Pipe errors/diffs and get actionable advice
  *
  * Options:
  *   --remote       Dispatch through terminal-server's canonical CommandRouter
  *                  (shares the same RuntimeStore as Studio Web — same runId)
  *   --mode <mode>  Permission mode: plan, act, or auto (default: act)
+ *   --tui          Redundant — bare `litt` already launches the cockpit (kept for compat)
  */
 
 import { doctorCommand } from "./commands/doctor.js";
@@ -33,10 +47,11 @@ import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
-import { dispatchRemote } from "./lib/remote.js";
+import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
+import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
@@ -48,8 +63,38 @@ const lazyCockpit = async (): Promise<CommandHandler> =>
 
 const VERSION = CLI_VERSION;
 
-/** Commands that can be dispatched remotely through terminal-server */
-const REMOTEABLE_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "explain", "desktop"]);
+/**
+ * Commands that can be dispatched remotely through terminal-server.
+ *
+ * This is a deliberately curated subset of the server's command
+ * registry (see terminal-server/command-registry.ts). Commands that
+ * require local resources (doctor probes the local machine, run streams
+ * a local PTY, ask/explain hit the LLM directly) are NOT remoteable.
+ *
+ * The server is the source of truth: if a command is sent remotely that
+ * the server doesn't support, the server returns a typed
+ * `unknown_command` error (see RemoteCommandError) and the CLI reports
+ * it cleanly — never a crash, never undefined dereferencing.
+ */
+const REMOTEABLE_COMMANDS = new Set([
+  "status",
+  "diff",
+  "check",
+  "test",
+  "build",
+  "desktop",
+  // Brain/system commands that the server registry supports and that
+  // make sense to dispatch remotely (no local-only resources).
+  "git",
+  "ask",
+  "do",
+  "web",
+  "model",
+  "doctor",
+  "studio",
+  "local",
+  "help",
+]);
 
 /** Commands that use the RuntimeSession (shared runtime truth). */
 const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask"]);
@@ -67,11 +112,12 @@ const COMMANDS: Record<string, CommandHandler> = {
   ask: askCommand,
   explain: explainCommand,
   desktop: desktopCommand,
-  // cockpit is lazy-loaded below (heavy Ink/React dependency)
+  // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
-/** Commands that require lazy loading (heavy deps like Ink/React) */
-const LAZY_COMMANDS = new Set(["cockpit", "tui"]);
+/** Commands that require lazy loading (heavy deps like Ink/React).
+ *  `shell` is an explicit alias for the same Ink cockpit as bare `litt`. */
+const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
 
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
@@ -83,58 +129,62 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  // ─── TEMPORARY STARTUP DIAGNOSTIC (provider-routing trace) ───────
+  // Proves which code is actually executing: package path, version, and
+  // git commit SHA. Remove once the routing investigation is resolved.
+  try {
+    const { execSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const { dirname, resolve } = await import("node:path");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = resolve(here, "..");
+    let sha = "unknown";
+    try {
+      sha = execSync("git rev-parse HEAD", { cwd: pkgRoot, encoding: "utf8" }).trim();
+    } catch { /* not a git repo or git missing */ }
+    let pkgVersion = "unknown";
+    try {
+      const pkgJson = await import(resolve(pkgRoot, "package.json"), { with: { type: "json" } });
+      pkgVersion = pkgJson.default?.version ?? pkgJson.version ?? "unknown";
+    } catch { /* package.json unreadable */ }
+    process.stderr.write(
+      `[litt-diag] executing package: ${pkgRoot}\n` +
+      `[litt-diag] version: ${pkgVersion}  commit: ${sha}\n` +
+      `[litt-diag] OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}  OPENROUTER_API_KEY set: ${!!process.env.OPENROUTER_API_KEY}\n`,
+    );
+  } catch { /* diagnostic must never break startup */ }
+
   const args = process.argv.slice(2);
 
-  // Extract --remote flag (can appear anywhere before or after command)
-  const remoteIdx = args.indexOf("--remote");
-  const useRemote = remoteIdx !== -1;
-  const cleanArgs = remoteIdx !== -1
-    ? [...args.slice(0, remoteIdx), ...args.slice(remoteIdx + 1)]
-    : args;
+  // Resolve dispatch through the single shared routing module.
+  // This is the canonical routing contract:
+  //   litt             → cockpit (Ink, current terminal)
+  //   litt shell       → cockpit (Ink, explicit alias)
+  //   litt desktop     → desktop (Tauri GUI)
+  // Both surfaces share one RuntimeSession — one brain, one truth.
+  const dispatch = resolveDispatch(args);
 
-  // Extract --mode flag
-  const modeIdx = cleanArgs.indexOf("--mode");
-  let mode: "plan" | "act" | "auto" = "act";
-  let finalArgs = cleanArgs;
-  if (modeIdx !== -1 && modeIdx + 1 < cleanArgs.length) {
-    const modeVal = cleanArgs[modeIdx + 1];
-    if (modeVal === "plan" || modeVal === "act" || modeVal === "auto") {
-      mode = modeVal;
-    }
-    finalArgs = [...cleanArgs.slice(0, modeIdx), ...cleanArgs.slice(modeIdx + 2)];
-  }
-
-  // Strip --tui flag before extracting command (similar to --mode)
-  const tuiIdx = finalArgs.indexOf("--tui");
-  const forceTui = tuiIdx !== -1;
-  const argsWithoutTui = forceTui
-    ? [...finalArgs.slice(0, tuiIdx), ...finalArgs.slice(tuiIdx + 1)]
-    : finalArgs;
-
-  const requestedCommand = argsWithoutTui[0];
-
-  // --help / -h always prints help (never launches cockpit)
-  if (requestedCommand === "--help" || requestedCommand === "-h") {
+  if (dispatch.isHelp) {
     printHelp();
     return 0;
   }
 
-  if (requestedCommand === "--version" || requestedCommand === "-v") {
+  if (dispatch.isVersion) {
     console.log(`litt ${VERSION}`);
     return 0;
   }
 
-  // Bare 'litt' defaults to desktop; --tui forces cockpit
-  const command = requestedCommand ?? (forceTui ? "cockpit" : "desktop");
-  const rest = requestedCommand ? argsWithoutTui.slice(1) : [];
+  const command = dispatch.command!;
+  const rest = dispatch.rest;
+  const mode = dispatch.mode;
 
   // --remote: dispatch through terminal-server's canonical CommandRouter
-  if (useRemote) {
+  if (dispatch.useRemote) {
     if (!REMOTEABLE_COMMANDS.has(command)) {
       console.error(`--remote is only supported for: ${[...REMOTEABLE_COMMANDS].join(", ")}`);
       return 1;
     }
-    return await runRemote(command, rest);
+    return await runRemote(command, rest, mode);
   }
 
   // Resolve handler — lazy-load heavy commands (Ink/React) on demand
@@ -187,30 +237,55 @@ async function main(): Promise<number> {
 }
 
 /**
- * Dispatch a command through terminal-server's canonical CommandRouter.
- * The same CommandRouter that Studio Web uses — so CLI and Studio share
- * the same RuntimeStore, same runId, same Socket.IO broadcasts.
+ * Dispatch a command through terminal-server's canonical command
+ * dispatcher. The same dispatcher that Studio Web uses — so CLI and
+ * Studio share the same RuntimeStore, same runId, same Socket.IO
+ * broadcasts.
+ *
+ * Protocol: sends a RemoteCommandRequest (structured argv preserved
+ * end-to-end) and decodes a RemoteCommandResponse (single-level
+ * `result` ToolResult — no triple-deref). Typed errors are branched
+ * on `error.code` instead of string-matching.
  */
-async function runRemote(command: string, _args: string[]): Promise<number> {
+async function runRemote(
+  command: string,
+  args: string[],
+  mode: "plan" | "act" | "auto" = "act",
+): Promise<number> {
   header(`${command} (remote)`);
   try {
-    const result = await dispatchRemote(command, undefined, {
+    const response = await dispatchRemote(command, args, {
       cwd: detectProject().rootDir,
+      mode,
     });
 
-    if (!result.ok) {
-      fail(result.result.result.message);
-      const stderr = result.result.result.data?.stderr as string | undefined;
-      if (stderr) console.log(`${c.gray}${stderr}${c.reset}`);
+    // Protocol-level error (unknown command, gateway denial, etc.)
+    if (isRemoteError(response)) {
+      const err = response.error;
+      fail(`${err.code}: ${err.message}`);
+      if (err.code === "unknown_command" && err.availableCommands?.length) {
+        console.error(`${c.dim}  Available: ${err.availableCommands.join(", ")}${c.reset}`);
+      }
+      console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
       return 1;
     }
 
-    ok(result.result.result.message);
-    const stdout = result.result.result.data?.stdout as string | undefined;
+    // Command-level failure (e.g. build exited non-zero)
+    if (!response.ok || !hasRemoteResult(response)) {
+      fail(response.result?.message ?? `Remote command failed (kind=${response.kind})`);
+      const stderr = response.result?.data?.stderr as string | undefined;
+      if (stderr) console.log(`${c.gray}${stderr}${c.reset}`);
+      console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
+      return 1;
+    }
+
+    ok(response.result.message);
+    const stdout = response.result.data?.stdout as string | undefined;
     if (stdout) console.log(`${c.gray}${stdout}${c.reset}`);
 
-    // Show runId for cross-surface verification
-    console.log(`${c.gray}runId: ${result.runId}${c.reset}`);
+    // Show runId for cross-surface verification — this is the ACTUAL
+    // runtime execution runId, not a second identity minted by the bridge.
+    console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
     return 0;
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
@@ -224,9 +299,17 @@ LiTT CLI v${VERSION} — AI operating system for your terminal
 
 Usage: litt [command] [options]
 
-  Bare 'litt' launches the desktop app. Use --tui for the interactive cockpit.
+  Bare 'litt' launches the Ink operator cockpit inside the current terminal.
+  Use 'litt desktop' to open the Desktop/Tauri GUI surface.
+  Both surfaces share one canonical RuntimeSession — same brain, same truth.
 
 Commands:
+  (default)  Launch the LiTT shell in the current terminal
+  shell      Explicit alias for the LiTT shell (same as bare 'litt')
+  shell --window  Open LiTT in a dedicated terminal window (Windows Terminal)
+  cockpit    Alias for the LiTT shell
+  tui        Alias for the LiTT shell
+  desktop    Launch the LiTT Desktop (Tauri) GUI application
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version
   status     Show project + git status (via @litt/agent-core)
@@ -238,20 +321,18 @@ Commands:
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice
-  desktop    Launch LiTT Desktop app
-  cockpit    Interactive runtime cockpit (Socket.IO live state from terminal-server)
-  tui        Alias for cockpit (interactive runtime cockpit)
 
 Options:
   -h, --help     Show this help
   -v, --version  Show version
   --remote       Dispatch through terminal-server (shared RuntimeStore with Studio)
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
-  --tui          Launch interactive Ink cockpit (instead of desktop)
+  --tui          Redundant — bare 'litt' already launches the cockpit (kept for compat)
 
 Examples:
-  litt                     (launch desktop app)
-  litt --tui               (launch interactive cockpit)
+  litt                     (Ink cockpit in current terminal)
+  litt shell               (explicit alias for the Ink cockpit)
+  litt desktop             (launch Desktop GUI app)
   litt doctor
   litt status
   litt diff
@@ -262,9 +343,7 @@ Examples:
   litt build --remote    (Studio sees the same run)
   litt run echo hello    (streaming + Ctrl+C cancel)
   litt run pnpm test --mode auto
-  litt desktop              (explicit desktop launch)
-  litt cockpit              (live runtime cockpit via Socket.IO)
-  litt cockpit check        (dispatch check via cockpit)
+  litt cockpit check     (dispatch check via cockpit)
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"

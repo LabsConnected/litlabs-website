@@ -57,7 +57,7 @@ import type { CommandExecutor, CommandExecutorResult } from "./command-executor.
 // ─── Types ─────────────────────────────────────────────────────────
 
 /** The set of checks the gate can run. */
-export type VerificationCheckId = "typecheck" | "test" | "build" | "browser";
+export type VerificationCheckId = "typecheck" | "test" | "build" | "browser" | "evidence";
 
 /**
  * Per-project verification configuration.
@@ -168,6 +168,7 @@ const CHECK_LABELS: Record<VerificationCheckId, string> = {
   test: "Tests",
   build: "Build",
   browser: "Browser",
+  evidence: "Evidence",
 };
 
 // ─── VerificationGate ──────────────────────────────────────────────

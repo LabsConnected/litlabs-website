@@ -37,7 +37,6 @@ import { timingSafeEqual } from "crypto";
 import * as Brain from "@/lib/myaios/myaios-brain";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 function safeSecretEqual(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate);

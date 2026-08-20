@@ -26,8 +26,50 @@ import { RuntimeClient } from "../lib/runtime-client.js";
 import { ensureConfig } from "../lib/config.js";
 import { detectProject, fail, header, c } from "../lib/utils.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
+import { getGitState } from "../lib/git-state.js";
+import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
+
+// Belt-and-suspenders: the shell renders a SOFTWARE cursor (Ink hides the
+// native one). Paths that bypass Ink's unmount — e.g. the session SIGINT
+// handler's process.exit(130), a hard crash, or an unexpected throw —
+// would otherwise leave the terminal cursor invisible. Show it again on
+// any process exit. Idempotent: harmless when Ink already restored it.
+const SHOW_CURSOR = "\x1b[?25h";
+function installCursorRestore(): void {
+  process.on("exit", () => {
+    try {
+      if (process.stdout.isTTY) process.stdout.write(SHOW_CURSOR);
+    } catch {
+      // ignore — best-effort restoration
+    }
+  });
+}
 
 export async function cockpitCommand(args: string[]): Promise<number> {
+  installCursorRestore();
+
+  // `litt shell --window` / `litt cockpit -w` — open a dedicated LiTT
+  // terminal window (Windows Terminal profile) and return immediately.
+  if (args[0] === "--window" || args[0] === "-w") {
+    // Re-launch THIS build (node.exe + the running CLI entry) so the new
+    // window can never drift to an older global `litt` install.
+    // Default (useSizing omitted): dedicated WT window at the user's
+    // native size — no hard dependency on `--size`. The 118×36 sized
+    // vector stays available for visual acceptance via useSizing:true.
+    const result = launchShellWindow(process.cwd(), currentCliCommand(["shell"]));
+    if (!result.ok) {
+      fail("Could not open a LiTT window. Run 'litt shell' inside a terminal instead.");
+      return 1;
+    }
+    const detail = result.path === "wt-sized"
+      ? "dedicated Windows Terminal window"
+      : result.path === "wt-unsized"
+        ? "dedicated Windows Terminal window (no sizing)"
+        : "PowerShell window";
+    console.log(`⚡ LiTT window launched (${detail}).`);
+    return 0;
+  }
+
   // Check for TTY — Ink requires raw mode on stdin
   if (!process.stdin.isTTY) {
     fail("LiTT cockpit requires an interactive terminal (TTY).");
@@ -75,6 +117,17 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   });
   session.installSigintHandler();
 
+  // ─── Startup recovery ───
+  // Load any persisted active mission from disk. This is the automatic
+  // restart/checkpoint recovery path. Non-terminal missions (working,
+  // verifying, blocked) are restored; terminal missions (complete,
+  // failed, cancelled) are NOT restored.
+  const recovery = await session.startup();
+  if (recovery.recovered && recovery.mission) {
+    // The mission:restored event was already emitted by loadWithRecovery.
+    // The SessionEventBridge will project it to the cockpit UI.
+  }
+
   // Try to connect to terminal-server for realtime events
   let client: RuntimeClient | null = null;
   try {
@@ -116,10 +169,11 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     return result.result.success ? 0 : 1;
   }
 
-  // Parse git status for file counts
-  const gitStatus = project.gitStatus ?? "";
-  const gitModified = (gitStatus.match(/^.M/gm) ?? []).length;
-  const gitUntracked = (gitStatus.match(/^\?\?/gm) ?? []).length;
+  // FILES counter — canonical git state (same source as litt doctor,
+  // litt status, and the agent mission's project.status tool).
+  const gitState = getGitState(projectRoot);
+  const gitModified = gitState.changed;
+  const gitUntracked = gitState.untracked;
 
   // Launch the Ink cockpit, wrapped in an error boundary (spec §39).
   const { waitUntilExit } = render(

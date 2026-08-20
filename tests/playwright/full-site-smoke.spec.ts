@@ -552,52 +552,18 @@ test.describe("Page load timing (FCP, LCP)", () => {
 test.describe("Studio page — sign-in prompt or studio UI", () => {
   test.setTimeout(60_000);
 
-  test("studio loads and shows either sign-in prompt or studio UI", async ({ page }) => {
+  test("studio redirects to sign-in when unauthenticated", async ({ page }) => {
     const response = await page.goto(`${BASE_URL}/studio`, { waitUntil: "domcontentloaded" });
-    expect(response?.status()).toBe(200);
     await page.waitForTimeout(2000);
 
+    // Middleware redirects signed-out users to /sign-in.
     const url = page.url();
-    expect(url).toContain("/studio");
+    expect(url).toContain("/sign-in");
 
-    // Check for sign-in prompt indicators
-    const signInTexts = [
-      "Sign in to Studio",
-      "Create free account",
-      "member-only",
-      "Sign in",
-      "sign in",
-      "Log in",
-      "log in",
-    ];
-    let hasSignInPrompt = 0;
-    for (const text of signInTexts) {
-      const count = await page.locator(`text=${text}`).count();
-      if (count > 0) {
-        hasSignInPrompt += count;
-        console.log(`Studio sign-in indicator found: "${text}" (${count})`);
-      }
-    }
-
-    // Check for studio UI indicators (if authenticated — unlikely in smoke test)
-    const studioUiTexts = ["Studio", "Canvas", "Agent", "Chat", "Build", "Generate"];
-    let hasStudioUi = 0;
-    for (const text of studioUiTexts) {
-      const count = await page.locator(`text=${text}`).count();
-      if (count > 0) {
-        hasStudioUi += count;
-      }
-    }
-
-    // At least one of these must be present — the page must render *something*
+    // The sign-in page must render content
     const bodyContent = await page.locator("body *").count();
-    expect(bodyContent, "Studio page should render body content").toBeGreaterThan(0);
+    expect(bodyContent, "Sign-in page should render body content").toBeGreaterThan(0);
 
-    console.log(
-      `Studio: status=200, url=${url}, signInIndicators=${hasSignInPrompt}, studioUiIndicators=${hasStudioUi}, bodyElements=${bodyContent}`,
-    );
-
-    // Either a sign-in prompt or studio UI content should be present
-    expect(hasSignInPrompt + hasStudioUi).toBeGreaterThan(0);
+    console.log(`Studio (unauth): redirected to url=${url}, bodyElements=${bodyContent}`);
   });
 });

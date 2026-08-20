@@ -5,7 +5,6 @@ import { GoogleGenAI, type AuthToken } from "@google/genai";
 import { LIVE_MODEL_ID } from "@/lib/litt/live/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 10;
 
 /**
  * POST /api/live/session-token

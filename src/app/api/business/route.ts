@@ -11,7 +11,6 @@ import {
 } from "@/lib/business-operations";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
 
 /**
  * GET /api/business

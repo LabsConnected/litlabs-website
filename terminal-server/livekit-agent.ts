@@ -288,8 +288,8 @@ if (isMainWorkerProcess) {
     );
   });
 
-  healthServer.listen(HEALTH_PORT, () => {
-    console.log(`[litt-agent] liveness endpoint listening on :${HEALTH_PORT}/`);
+  healthServer.listen(HEALTH_PORT, "0.0.0.0", () => {
+    console.log(`[litt-agent] liveness endpoint listening on 0.0.0.0:${HEALTH_PORT}/`);
   });
 
   // Run via the LiveKit agents CLI (spawns/coordinates worker processes).

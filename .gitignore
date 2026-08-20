@@ -24,6 +24,7 @@ prod-only.json
 .kilo/
 .kilocode/
 .quadcodeai/
+.litt/
 
 # Screenshot artifacts (generated during dev/testing)
 studio-after.png
@@ -192,3 +193,7 @@ tests/playwright/test_output*.txt
 
 # Package tarballs
 *.tgz
+
+.vercel
+
+.env.railway-import

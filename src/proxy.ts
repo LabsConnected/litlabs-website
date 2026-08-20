@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
-import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
+import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
 // ─── Bot detection ────────────────────────────────────────────────
 // Merged from the former src/middleware.ts. Next.js 16 forbids having
@@ -188,13 +188,68 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 }
 
 // ─── Clerk auth + route protection ────────────────────────────────
+//
+// ONE SOURCE OF TRUTH for public vs protected routes.
+//
+// Public page routes (explicitly NOT in the protected list):
+//   /              — landing page
+//   /pricing       — public pricing
+//   /docs          — public documentation
+//   /about         — public about
+//   /privacy       — public privacy policy
+//   /terms         — public terms of service
+//   /cookies       — public cookie policy
+//   /sign-in/*     — Clerk sign-in (catch-all)
+//   /sign-up/*     — Clerk sign-up (catch-all)
+//   /login         — legacy redirect → /sign-in
+//   /gallery/*     — public gallery viewing
+//   /games/*       — public games
+//   /hire          — public hiring page
+//   /resources/*   — public resources
+//   /discover      — public discover
+//   /showcase/*    — public showcase
+//   /marketplace/* — public marketplace browsing (install/checkout are protected APIs)
+//   /voice         — public voice playground
+//   /social        — public social feed
+//   /generate      — public generate page
+//   /creator       — public creator page
+//   /chat          — public chat
+//   /agent         — public agent info
+//   /builder       — public builder
+//   /ai-builder    — public AI builder
+//
+// Protected page routes (require authentication):
+//   /dashboard, /studio/*, /projects, /wallet,
+//   /deployments, /settings/*, /profile/*, /admin/*, /owner,
+//   /library/*, /memories, /flow, /code, /agent-chat,
+//   /ai-builder, /builder, /chat, /generate,
+//   /litt, /litt-terminal, /runtime-test, /order/*
 
 const isProtectedRoute = createRouteMatcher([
+  // Protected page routes
+  "/studio(.*)",
+  "/dashboard(.*)",
+  "/projects(.*)",
+  "/wallet(.*)",
+  "/deployments(.*)",
   "/settings(.*)",
   "/profile(.*)",
-  "/wallet(.*)",
-  "/dashboard(.*)",
+  "/admin(.*)",
+  "/owner(.*)",
+  "/library(.*)",
+  "/memories(.*)",
+  "/flow(.*)",
+  "/code(.*)",
   "/agent-chat(.*)",
+  "/ai-builder(.*)",
+  "/builder(.*)",
+  "/chat(.*)",
+  "/generate(.*)",
+  "/litt(.*)",
+  "/litt-terminal(.*)",
+  "/runtime-test(.*)",
+  "/order(.*)",
+  // Protected API routes
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
   "/api/settings/(.*)",
@@ -215,7 +270,7 @@ const clerkConfigured = isClerkConfigured();
  * PLAYWRIGHT_AUTH_DISABLED is ONLY accepted when ALL of these are true:
  *   - CI === "true"
  *   - PLAYWRIGHT_TEST === "true"
- *   - VERCEL env var is absent (not a deployed environment)
+ *   - Not in a deployed environment (VERCEL / RAILWAY_ENVIRONMENT absent)
  *
  * Any deployed environment (Vercel, Railway, Docker, etc.) will reject this
  * flag and fail fast if Clerk is not configured.
@@ -224,18 +279,18 @@ const isTestAuthDisabled =
   process.env.PLAYWRIGHT_AUTH_DISABLED === "true" &&
   process.env.CI === "true" &&
   process.env.PLAYWRIGHT_TEST === "true" &&
-  !process.env.VERCEL;
+  !isDeployed();
 
 /**
  * Whether anonymous dev mode is allowed.
  *
  * ALLOW_ANONYMOUS_DEV=true lets local dev run without Clerk. In production
- * (NODE_ENV=production) this is only honored when VERCEL is absent — i.e.
- * local `next start` testing. On Vercel, production always requires real Clerk
- * keys.
+ * (NODE_ENV=production) this is only honored when not deployed — i.e.
+ * local `next start` testing. On Railway/Vercel, production always requires
+ * real Clerk keys.
  */
 function isAnonymousModeAllowed(): boolean {
-  if (process.env.VERCEL) return false; // deployed — never allow anonymous
+  if (isDeployed()) return false; // deployed — never allow anonymous
   return isAnonymousDevAllowed() || process.env.ALLOW_ANONYMOUS_DEV === "true";
 }
 
@@ -252,7 +307,7 @@ function validateAuthConfig(): void {
         "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY, " +
         "or set ALLOW_ANONYMOUS_DEV=true for local development. " +
         "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
-        "and VERCEL is absent.",
+        "and not in a deployed environment.",
     );
   }
 
@@ -260,7 +315,7 @@ function validateAuthConfig(): void {
   if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
     throw new Error(
       "FATAL: PLAYWRIGHT_AUTH_DISABLED is set but not in a valid test environment. " +
-        "This flag requires CI=true, PLAYWRIGHT_TEST=true, and VERCEL absent.",
+        "This flag requires CI=true, PLAYWRIGHT_TEST=true, and not deployed.",
     );
   }
 }
@@ -289,7 +344,7 @@ function protectRoute(req: NextRequest): NextResponse {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const signInUrl = new URL("/sign-in", req.url);
-  signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+  signInUrl.searchParams.set("redirect_url", req.nextUrl.pathname + req.nextUrl.search);
   return NextResponse.redirect(signInUrl);
 }
 
@@ -314,13 +369,18 @@ const innerMiddleware = useClerkMiddleware
           );
         }
         const signInUrl = new URL("/sign-in", req.url);
-        signInUrl.searchParams.set("redirect", req.nextUrl.pathname);
+        signInUrl.searchParams.set("redirect_url", req.nextUrl.pathname + req.nextUrl.search);
         return NextResponse.redirect(signInUrl);
       }
 
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
     })
   : function passthroughMiddleware(req: NextRequest) {
+      // When test auth is disabled (Playwright CI), allow all routes through
+      // so E2E tests can access protected pages without authentication.
+      if (isTestAuthDisabled) {
+        return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
+      }
       // Redirect protected routes to sign-in when Clerk is not configured
       return protectRoute(req);
     };

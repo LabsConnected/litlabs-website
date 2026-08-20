@@ -18,7 +18,6 @@ import { parseAgentSelection } from "@/lib/agent-selection";
 import { AGENTS } from "@/lib/agents";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 const DEFAULT_AGENT_SLUG = "litt";
 

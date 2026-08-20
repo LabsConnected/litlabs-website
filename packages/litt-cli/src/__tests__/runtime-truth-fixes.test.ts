@@ -318,7 +318,6 @@ describe("Branch refresh", () => {
     // Use a path that is definitely not a git repo (Windows temp root).
     function refreshBranch(cwd: string): string {
       try {
-        const { execSync } = require("child_process") as typeof import("child_process");
         const branch = execSync("git branch --show-current", {
           cwd, encoding: "utf-8", timeout: 100, stdio: ["pipe", "pipe", "pipe"],
         }).trim();
