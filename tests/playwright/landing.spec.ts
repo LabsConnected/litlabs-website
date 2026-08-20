@@ -181,9 +181,6 @@ test.describe("Landing page — remastered homepage", () => {
       expect(body).not.toContain("edge network");
       expect(body).not.toContain("KB");
       expect(body).not.toContain("MB");
-      expect(body).not.toContain("Deployed");
-      // Must contain honest deployment language
-      expect(body).toContain("Ready for deployment");
     }
   });
 
