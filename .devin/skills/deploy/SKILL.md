@@ -1,23 +1,26 @@
 ---
 name: deploy
-description: Deploy the web app to Vercel — build, check config, and deploy
+description: Deploy the web app to Railway — build, check config, and deploy
 ---
 
 1. Read deployment config:
-   - Check `vercel.json` for settings
+   - Check `railway.json` for settings
    - Check `next.config.ts` for build options
-   - Ensure `.env.local` has all required secrets
+   - Ensure Railway service environment variables are set (see `RAILWAY.md`)
 
 2. Run a production build locally to verify:
    ```powershell
    pnpm build
    ```
 
-3. If build succeeds, deploy:
-   ```powershell
-   npx vercel --prod
-   ```
+3. If build succeeds, deploy via Railway:
+   - Push to `main` triggers automatic Railway deployment
+   - Or manually trigger via Railway dashboard / CLI:
+     ```powershell
+     railway up
+     ```
 
-4. Verify the deployment URL responds with HTTP 200.
+4. Verify the deployment URL responds with HTTP 200:
+   - `https://www.litlabs.net/api/health`
 
 If the build fails, do not deploy. Report the error and suggest fixes.

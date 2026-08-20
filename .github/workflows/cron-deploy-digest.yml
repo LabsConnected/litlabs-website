@@ -1,0 +1,24 @@
+name: Cron — Daily Deploy Digest
+
+# Replaces the former Vercel Cron job (vercel.json: /api/deployments/digest).
+# Runs weekdays at 09:00 UTC, hits the endpoint with Bearer token auth.
+
+on:
+  schedule:
+    # 0 9 * * 1-5 — weekdays at 09:00 UTC
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    name: Daily Deploy Digest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy digest
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.INTERNAL_API_KEY }}" \
+            "${{ vars.PRODUCTION_URL || 'https://www.litlabs.net' }}/api/deployments/digest"

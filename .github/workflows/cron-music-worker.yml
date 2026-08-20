@@ -1,0 +1,24 @@
+name: Cron — Music Worker
+
+# Replaces the former Vercel Cron job (vercel.json: /api/music/worker).
+# Runs every 2 minutes, hits the endpoint with Bearer token auth.
+
+on:
+  schedule:
+    # */2 * * * * — every 2 minutes
+    - cron: "*/2 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Music Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger music worker
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.PRODUCTION_URL || 'https://www.litlabs.net' }}/api/music/worker"

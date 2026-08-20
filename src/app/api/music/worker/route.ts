@@ -68,7 +68,7 @@ function isAuthorized(req: NextRequest): boolean {
  * Durable worker endpoint that processes pending and stale music generations.
  *
  * Triggered by:
- *   - Vercel Cron (vercel.json schedule) — Authorization: Bearer CRON_SECRET
+ *   - GitHub Actions Cron (.github/workflows/cron-music-worker.yml) — Authorization: Bearer CRON_SECRET
  *   - Internal server kick (after generation creation) — x-worker-secret
  *   - Manual admin call
  *

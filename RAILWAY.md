@@ -2,7 +2,7 @@
 
 LiTLabs runs on Railway as a multi-service project. This document describes
 the architecture, service configuration, environment variables, and external
-service updates required for the Vercel→Railway migration.
+service configuration.
 
 ## Architecture
 
@@ -160,7 +160,7 @@ TERMINAL_INTERNAL_SERVICE_KEY
 
 ### Web service
 
-All env vars that were on Vercel must be set on the Railway web service.
+All production env vars must be set on the Railway web service.
 
 **Critical URL vars (MUST set correctly for Railway):**
 - `NEXT_PUBLIC_SITE_URL=https://litlabs.net`
@@ -302,7 +302,7 @@ services to point to the new Railway domain:
 - Set `META_REDIRECT_URI` env var to match
 
 ### n8n Webhooks
-- Update any n8n workflows that reference Vercel URLs to use `https://litlabs.net`
+- Update any n8n workflows that reference old deployment URLs to use `https://www.litlabs.net`
 
 ## Domain Setup
 
@@ -325,22 +325,22 @@ The terminal-server needs a persistent volume for workspace storage:
 Without this volume, all workspaces and cloned repositories will be lost
 on every redeploy (Railway's filesystem is ephemeral outside volumes).
 
-## Migration from Vercel
+## Migration from Vercel — COMPLETE
 
-1. Deploy all services to Railway (web, terminal-server, voice-server, worker, n8n, music-worker)
-2. Verify the web service is healthy (`/api/health` returns 200)
-3. Set up the deployment-digest Cron Job in Railway dashboard
-4. Verify the music-worker is running (check logs for `[music-worker] OK`)
-5. Update external services (Clerk, Stripe, GitHub, Vapi, Meta) — see above
-6. Update DNS to point to Railway
-7. Monitor for 24h before canceling Vercel
+The Vercel→Railway migration is complete. Railway is the canonical production platform.
 
-**Files to remove after migration is confirmed:**
-- `vercel.json` — Vercel build config + crons + function timeouts
-- `nixpacks.toml` — if no longer needed (terminal-server uses Dockerfile)
-- `.vercelignore` — harmless, can remove later
+**Removed:**
+- `vercel.json` — Vercel build config + crons + function timeouts (crons migrated to GitHub Actions)
+- `.vercelignore` — Vercel deployment ignore rules
+- `scripts/VERCEL_ENV_VARS.md` — Vercel CLI env setup guide
+- `scripts/setup-env.sh` — Vercel CLI env setup script
+- `scripts/fix-all-env.sh` — Vercel CLI env pull script
 
-**Code changes already made for Railway compatibility:**
+**Cron jobs migrated to GitHub Actions:**
+- `/api/deployments/digest` → `.github/workflows/cron-deploy-digest.yml` (weekdays 09:00 UTC)
+- `/api/music/worker` → `.github/workflows/cron-music-worker.yml` (every 2 minutes)
+
+**Code changes made for Railway compatibility:**
 - `next.config.ts`: `output: "standalone"` enabled, `automaticVercelMonitors` removed
 - All 53 `export const maxDuration` declarations removed (Vercel-specific)
 - `export const runtime = "edge"` → `"nodejs"` in OG image route
@@ -350,3 +350,8 @@ on every redeploy (Railway's filesystem is ephemeral outside volumes).
 - LiveKit agent binds to `0.0.0.0` explicitly
 - `@vercel/analytics` + `@vercel/speed-insights` removed (unused)
 - Vercel geo headers documented as gracefully degrading (return null on Railway)
+
+**Remaining Vercel references in code are intentional product features:**
+- `vercel_project_id` in projects/mission-control/dashboard — allows users to deploy their projects to Vercel
+- `VERCEL_TOKEN` / `VERCEL_PROJECT_ID` in connectors — user-provided Vercel integration credentials
+- `process.env.VERCEL` fallback in `env.ts` / `system-health.ts` — harmless compatibility detection
