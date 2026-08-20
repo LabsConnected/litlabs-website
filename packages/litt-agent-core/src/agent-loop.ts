@@ -599,7 +599,7 @@ export async function runAgentLoop(
       // is not evidence — a failed/unavailable tool must never be masked
       // as a successful repository inspection.
       const requiresProjectEvidence =
-        /\b(inspect|working tree|git status|project status|current project|use (?:your )?(?:project )?tools|verify (?:the )?(?:project|repo|build|tests?)|run (?:the )?(?:build|tests?|typecheck)|read (?:the )?(?:repo|repository|file)|search (?:the )?(?:repo|repository|codebase))\b/i.test(prompt);
+        /\b(inspect|working tree|git status|project status|current project|use (?:your )?(?:project )?tools|verify (?:the )?(?:project|repo|build|tests?)|run (?:the )?(?:build|tests?|typecheck)|read (?:the )?(?:repo|repository|file)|search (?:the )?(?:repo|repository|codebase)|scan(?:\s+(?:the\s+)?(?:project|repo|repository|codebase))?|audit(?:\s+(?:the\s+)?(?:project|repo|repository))?|diagnose(?:\s+(?:this|the)\s+(?:project|repo|repository))?)\b/i.test(prompt);
 
       const hasSuccessfulToolEvidence = toolCalls.some((tc) => tc.result.success);
       const cleanContent = stripToolCallBlocks(modelContent);
@@ -952,12 +952,45 @@ export async function runAgentLoop(
     }
   }
 
-  return {
-    content: termination === "max_rounds"
-      ? "I reached the maximum number of tool-call rounds without a final answer."
-      : termination === "verification_failed"
+  // Build a truthful partial answer when the loop exhausted its rounds.
+  // If tool calls were made, summarize what actually happened — never
+  // discard useful tool evidence behind a generic "ran out of rounds" message.
+  function buildMaxRoundsContent(): string {
+    if (toolCalls.length === 0) {
+      return termination === "verification_failed"
         ? "I could not get the verification gate to pass within the round limit. The mission is NOT runtime-proven COMPLETE."
-        : "",
+        : "I reached the maximum number of tool-call rounds without a final answer.";
+    }
+
+    // Summarize actual tool evidence — truthful, never fabricated.
+    const succeeded = toolCalls.filter((tc) => tc.result.success);
+    const failed = toolCalls.filter((tc) => !tc.result.success);
+
+    const parts: string[] = [];
+    parts.push("I inspected the project but couldn't finish the full task before the execution limit.");
+
+    if (succeeded.length > 0) {
+      parts.push("\nCompleted:");
+      for (const tc of succeeded) {
+        const detail = tc.result.message ? `: ${tc.result.message.slice(0, 200)}` : "";
+        parts.push(`- ${tc.toolId}${detail}`);
+      }
+    }
+
+    if (failed.length > 0) {
+      parts.push("\nFailed:");
+      for (const tc of failed) {
+        const detail = tc.result.message ? `: ${tc.result.message.slice(0, 200)}` : "";
+        parts.push(`- ${tc.toolId}${detail}`);
+      }
+    }
+
+    parts.push("\nI did not verify the project as fully healthy.");
+    return parts.join("\n");
+  }
+
+  return {
+    content: buildMaxRoundsContent(),
     toolCalls,
     rounds,
     durationMs: Date.now() - startTime,
