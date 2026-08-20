@@ -345,3 +345,97 @@ describe("Agent loop evidence discipline", () => {
     assert.ok(result.content.length > 0);
   });
 });
+
+// ─── Max-rounds truthful partial answer ─────────────────────────────
+
+describe("Agent loop max-rounds — truthful partial answer from tool evidence", () => {
+  it("returns evidence-based partial answer when maxRounds is reached with tool calls", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = new ToolRegistry({
+      "project.status": {
+        definition: {
+          id: "project.status",
+          name: "status",
+          description: "Get project status",
+          inputSchema: { type: "object", properties: {} },
+          readOnly: true,
+        },
+        handler: async () => ({
+          status: "success",
+          success: true,
+          message: "Branch: main, 2 modified files",
+          data: {},
+        }),
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+      "project.check": {
+        definition: {
+          id: "project.check",
+          name: "check",
+          description: "Run typecheck",
+          inputSchema: { type: "object", properties: {} },
+          readOnly: true,
+        },
+        handler: async () => ({
+          status: "failed",
+          success: false,
+          message: "Typecheck timed out after 120s",
+          data: {},
+        }),
+        metadata: { projectScoped: false, mutating: false, readOnly: true },
+      },
+    });
+
+    // Model keeps calling tools — never gives a final answer.
+    // This exhausts maxRounds with mixed success/failure tool evidence.
+    const model = makeMockModel([
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      '```tool_call\n{ "tool": "project.check", "inputs": {} }\n```',
+      '```tool_call\n{ "tool": "project.status", "inputs": {} }\n```',
+      '```tool_call\n{ "tool": "project.check", "inputs": {} }\n```',
+    ]);
+
+    const result = await runAgentLoop("scan and see whats needed", {
+      model, tools, shell, store, cwd: process.cwd(), maxRounds: 4,
+    });
+
+    // Must NOT be the generic "I reached the maximum number of tool-call rounds" message.
+    assert.ok(!result.content.includes("I reached the maximum number of tool-call rounds without a final answer."),
+      "max-rounds with tool evidence must NOT return the generic message");
+
+    // Must summarize what actually happened.
+    assert.ok(result.content.includes("project.status"), "partial answer must mention successful tool");
+    assert.ok(result.content.includes("project.check"), "partial answer must mention failed tool");
+    assert.ok(result.content.includes("Typecheck timed out"), "partial answer must include actual failure detail");
+    assert.ok(result.content.includes("did not verify"), "partial answer must state it did not verify the project");
+
+    // Termination and tool call count.
+    assert.equal(result.termination, "max_rounds");
+    assert.ok(result.toolCalls.length > 0);
+  });
+
+  it("returns generic message only when no tool calls were made", async () => {
+    const shell = new NodeShellExecutor(process.cwd());
+    const store = new RuntimeStore(() => {});
+    const tools = new ToolRegistry({});
+
+    // Model gives non-tool responses. Without a verification gate, the
+    // loop treats the first non-tool response as a final answer (complete).
+    // This test verifies that no tool calls were made and the loop did
+    // NOT produce a fabricated evidence-based partial answer.
+    const model = makeMockModel([
+      "I'm not sure what to do here.",
+    ]);
+
+    const result = await runAgentLoop("hello world", {
+      model, tools, shell, store, cwd: process.cwd(), maxRounds: 4,
+    });
+
+    // No tool calls — the model gave a conversational answer.
+    assert.equal(result.toolCalls.length, 0);
+    // The content is the model's own answer, not a fabricated partial summary.
+    assert.ok(!result.content.includes("inspected the project"));
+    assert.ok(!result.content.includes("did not verify"));
+  });
+});
