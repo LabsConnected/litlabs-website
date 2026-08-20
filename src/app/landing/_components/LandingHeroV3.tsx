@@ -17,8 +17,8 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
  *              testing, remembering, and shipping real projects.
  *
  * Composition:
- *   - LiTT character behind the Studio interface (z-1)
- *   - Real Studio product frame on top (z-3) with file tree + canvas
+ *   - Studio product frame behind LiTT (z-10) with file tree + canvas
+ *   - LiTT character in front, overlapping Studio (z-20)
  *   - Mission / Runtime / Terminal panels below — readable, not microscopic
  *   - Container: max-w-[1500px], small gutters, hero fills viewport
  *   - Headline: clamp(48px, 5vw, 94px) — dominant
@@ -89,7 +89,7 @@ export function LandingHeroV3() {
 
       {/* ── Hero grid: text + product proof ── */}
       <div className="relative mx-auto max-w-[1500px]">
-        <div className="grid items-center gap-6 lg:grid-cols-[1fr_1.25fr] lg:gap-10">
+        <div className="grid items-start gap-6 lg:grid-cols-[42%_58%] lg:gap-8">
           {/* ══════════ LEFT: Messaging + CTAs ══════════ */}
           <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
             {/* Eyebrow */}
@@ -179,16 +179,16 @@ export function LandingHeroV3() {
           </div>
 
           {/* ══════════ RIGHT: LiTT + Studio operating environment ══════════ */}
-          {/* LiTT is the base layer (z-1), Studio UI floats on top (z-3).
+          {/* LiTT is the front layer (z-20), Studio panel sits behind it (z-10).
               On mobile, everything stacks vertically. */}
-          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[720px]">
-            {/* ── LiTT mascot — base visual layer (z-1) ── */}
-            {/* Positioned to the right so head + upper body clear the centered
-                Studio UI stack (Mission/Runtime/Terminal) on top (z-3).
-                Shifted right + scaled to keep LiTT on-screen at 1920px width. */}
+          <div className="relative flex flex-col items-center overflow-visible lg:min-h-[580px]">
+            {/* ── LiTT agent — front visual layer (z-20) ── */}
+            {/* Positioned to the right, overlapping the Studio panel (z-10) below.
+                LiTT's lower body crosses over Studio's upper-right area.
+                Shifted right to keep LiTT on-screen at 1920px width. */}
             <div
-              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-[2%] lg:-top-32 lg:z-[1] xl:right-[-5%] xl:-top-24 2xl:right-[-8%] 2xl:-top-20 litt-hero-mascot"
-              style={{ minHeight: "min(560px, 65vh)" }}
+              className="relative flex items-end justify-center overflow-visible lg:absolute lg:right-0 lg:-top-8 lg:z-[20] xl:right-[-4%] xl:-top-6 2xl:right-[-6%] 2xl:-top-4 litt-hero-mascot"
+              style={{ minHeight: "min(460px, 56vh)" }}
             >
               {/* Helmet glow ring — behind the head, breathing */}
               <div
@@ -260,12 +260,12 @@ export function LandingHeroV3() {
                 style={{ animation: "litt-float 6s ease-in-out infinite" }}
               >
                 <div
-                  className="relative w-[280px] sm:w-[360px] lg:w-[320px] xl:w-[360px] 2xl:w-[400px] litt-hero-mascot-img"
-                  style={{ height: "min(520px, 62vh)" }}
+                  className="relative w-[280px] sm:w-[340px] lg:w-[300px] xl:w-[340px] 2xl:w-[380px] litt-hero-mascot-img"
+                  style={{ height: "min(440px, 56vh)" }}
                 >
                   <Image
-                    src="/brand/litt-mascot-hero.png"
-                    alt="LiTT — the AI creative operating system character, full body with helmet, visor, headphones, and streetwear"
+                    src="/brand/litt-agent-hero-v2.png"
+                    alt="LiTT — the AI creative operating system agent, full body with helmet, visor, headphones, and streetwear"
                     fill
                     priority
                     sizes="(max-width: 640px) 280px, (max-width: 1024px) 360px, (max-width: 1280px) 320px, (max-width: 1536px) 400px, 440px"
@@ -275,10 +275,10 @@ export function LandingHeroV3() {
               </div>
             </div>
 
-            {/* ── Studio operating environment — on top of LiTT (z-3) ── */}
-            {/* Desktop: absolute, positioned to overlap LiTT's lower body while
-                leaving head + shoulders visible above. Mobile: stacks below. */}
-            <div className="relative z-[3] mt-4 w-full max-w-[560px] lg:absolute lg:bottom-0 lg:left-1/2 lg:max-w-[620px] lg:-translate-x-1/2">
+            {/* ── Studio operating environment — behind LiTT (z-10) ── */}
+            {/* Desktop: absolute at bottom-left of right column; LiTT (z-20) overlaps
+                its right portion. Mobile: stacks naturally below LiTT. */}
+            <div className="relative z-[10] mt-4 w-full max-w-[560px] lg:absolute lg:bottom-0 lg:left-0 lg:max-w-[580px]">
               {/* ── Studio product frame — real product UI ── */}
               <div
                 className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a14] shadow-[0_12px_80px_rgba(0,0,0,0.7)] transition-all duration-500 hover:border-violet-400/20 hover:shadow-[0_16px_100px_rgba(168,85,247,0.2)]"
@@ -493,15 +493,15 @@ export function LandingHeroV3() {
           [style*="litt-particle-drift"],
           [style*="litt-card-float"] { animation: none !important; }
         }
-        /* At wide viewports, shift LiTT to the right of the card stack
-           instead of peeking above it. Below 1700px, LiTT peeks above. */
+        /* At very wide viewports (1700px+) give LiTT a bit more room to the right
+           and bump up the image size so it doesn't look undersized on ultrawide. */
         @media (min-width: 1700px) {
           .litt-hero-mascot {
-            right: -15% !important;
-            top: -0.25rem !important;
+            right: -10% !important;
+            top: 0rem !important;
           }
           .litt-hero-mascot-img {
-            width: 440px !important;
+            width: 420px !important;
           }
         }
       `}</style>
