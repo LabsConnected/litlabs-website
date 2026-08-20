@@ -25,7 +25,8 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 
@@ -71,7 +72,15 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     projectId: projectRoot,
   });
 
-  const model = new OpenRouterModelProvider();
+  // Route through the same ModelRuntime as the TUI — picks the best
+  // available provider (OpenAI direct, OpenRouter, etc.) and passes
+  // native tool schemas so the model can call tools.
+  const modelRuntime = new ModelRuntime();
+  await modelRuntime.refresh();
+  const routed = modelRuntime.route("auto", null, question);
+  const model = resolveProviderAdapter(routed, {
+    tools: tools.list(),
+  });
 
   console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 

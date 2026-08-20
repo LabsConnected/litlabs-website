@@ -81,6 +81,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "project.status: ok",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
 
     const result = await gate.verify();
@@ -88,7 +90,7 @@ describe("MissionVerificationGate", () => {
     expect(result.proven).toBe(true);
     expect(result.status).toBe("proven");
     expect(result.checks[0].id).toBe("evidence");
-    expect(result.message).toContain("verified");
+    expect(result.message).toContain("Evidence collected");
     expect(fullGate.called()).toBe(0);
     expect(store.getState().phase).toBe("complete");
   });
@@ -102,13 +104,15 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => false,
       evidenceSummary: () => "no tool evidence collected",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
 
     const result = await gate.verify();
 
     expect(result.proven).toBe(false);
     expect(result.status).toBe("failed");
-    expect(result.message).toContain("could not be verified");
+    expect(result.message).toContain("No successful tool evidence");
     expect(fullGate.called()).toBe(0);
     expect(store.getState().phase).toBe("failed");
   });
@@ -122,6 +126,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => false,
       hasSuccessfulEvidence: () => false,
       evidenceSummary: () => "irrelevant",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
 
     const result = await gate.verify();
@@ -145,7 +151,9 @@ describe("MissionVerificationGate", () => {
       store: new RuntimeStore(() => {}),
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
     });
 
     const result = await gate.verify();
@@ -179,6 +187,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "project.status: ok",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
     const verification = await gate.verify();
     expect(verification.proven).toBe(true);
@@ -204,6 +214,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "project.status: ok",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
 
     await gate.verify();
@@ -225,6 +237,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => false,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "irrelevant",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
 
     await gate.verify();
@@ -261,6 +275,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "project.list_files: ok",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
     const verification = await gate.verify();
     expect(verification.proven).toBe(true);
@@ -296,6 +312,8 @@ describe("MissionVerificationGate", () => {
       isReadOnly: () => true,
       hasSuccessfulEvidence: () => true,
       evidenceSummary: () => "ok",
+      hasFailedEvidence: () => false,
+      failedSummary: () => "",
     });
     // Verifies the loop can consume it as a VerificationGate.
     await expect(gate.verify()).resolves.toMatchObject({ proven: true });

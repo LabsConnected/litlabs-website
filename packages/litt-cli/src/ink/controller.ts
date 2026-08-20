@@ -1722,7 +1722,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             emitter: (event) => session.emitAgentEvent(event),
             isReadOnly: evidenceTracker.isReadOnly,
             hasSuccessfulEvidence: evidenceTracker.hasSuccessfulEvidence,
+            hasFailedEvidence: evidenceTracker.hasFailedEvidence,
             evidenceSummary: evidenceTracker.summary,
+            failedSummary: evidenceTracker.failedSummary,
           }),
           // ─── Wire the EscalationHook into the agent loop ───
           // The mission id + model id + resolver let the loop track
@@ -2065,6 +2067,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // the delivered answer. Mark them passed so the canonical
           // mission can honestly reach "complete" instead of stalling
           // at "verifying" (which would resurrect on restart).
+          //
+          // IMPORTANT: only mark steps complete when there are NO failed
+          // objectives. If any tool failed (e.g., weather lookup failed
+          // while repo inspection succeeded), the gate returns
+          // proven=false and this branch is not reached — the mission
+          // fails honestly with a truthful partial-success message.
           if (evidenceTracker.isReadOnly()) {
             await markInspectionStepsComplete(
               agentStore,
