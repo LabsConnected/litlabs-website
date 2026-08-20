@@ -48,6 +48,7 @@ import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
+import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -1557,58 +1558,100 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // BEFORE any tool runs. Tools then execute UNDER an existing
         // semantic step — they do NOT define the step. One step may
         // cover many tool calls; one tool may serve many steps.
-        store.actions.setHoloState("UNDERSTANDING");
-        store.actions.addActivity({
-          id: `act_${Date.now()}_plan`,
-          ts: Date.now(),
-          type: "info",
-          tag: "PLAN",
-          text: "Planning mission steps",
-        });
-        // Semantic planning boundary — planMission may call the model to
-        // produce steps. Without this mark the planning round is hidden
-        // inside the provider_ready → tool_start span. (plan_first_token
-        // is not emitted: planMission does not stream deltas to the
-        // controller, so a per-token mark would require architecture
-        // changes — out of scope for this instrumentation pass.)
-        perf.mark("plan_start");
+        //
+        // ─── Smart planning — skip for simple missions ───
+        // Simple missions (single-action, bounded scope) skip the
+        // ~2.1s planning round and go directly to execution with a
+        // default single step. Complex missions use the full planner.
+        const complexity = classifyMissionComplexity(input);
+        let plan: { source: string; fallbackDomain?: string };
+        let plannedSteps: Array<{ id: string; title: string; allowedActionScope: string[] }>;
 
-        const { plan, steps: plannedSteps } = await planMission({
-          model,
-          store: agentStore,
-          goal: input,
-          projectContext: {
-            name: projectName ?? "unnamed",
-            root: projectRoot,
-            branch: freshBranch ?? branch ?? "unknown",
-          },
-        });
-        perf.mark("plan_end");
-
-        store.actions.addActivity({
-          id: `act_${Date.now()}_plansteps`,
-          ts: Date.now(),
-          type: "info",
-          tag: "PLAN",
-          text: `Plan (${plan.source}${plan.fallbackDomain ? ` · ${plan.fallbackDomain}` : ""}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
-        });
-
-        // Fallback plans are unproven (the model failed to plan) — make
-        // the safety posture explicit in the activity feed.
-        if (plan.source === "fallback") {
-          const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
-          const hasMutationStep = plannedSteps.some((s) =>
-            s.allowedActionScope.some((scope) => MUTATION_SCOPES.has(scope)),
-          );
+        if (shouldSkipPlanning(input)) {
+          // Simple mission — skip planning, create a default step.
+          perf.mark("plan_skipped");
+          store.actions.setHoloState("UNDERSTANDING");
           store.actions.addActivity({
-            id: `act_${Date.now()}_planfallback`,
+            id: `act_${Date.now()}_plan`,
             ts: Date.now(),
             type: "info",
             tag: "PLAN",
-            text: hasMutationStep
-              ? "Fallback plan — mutation steps are approval-gated"
-              : "Fallback plan is read-only — no automatic mutations",
+            text: `Direct execution (simple mission) — skipping planning round`,
           });
+
+          // Create a single default step on the mission.
+          const missionNow = agentStore.getMission();
+          if (missionNow) {
+            await agentStore.addMissionStep({
+              title: input.slice(0, 80),
+              description: input,
+              allowedActionScope: ["act"],
+            });
+          }
+          plan = { source: "skip", fallbackDomain: undefined };
+          const m = agentStore.getMission();
+          plannedSteps = (m?.steps ?? []).map((s) => ({
+            id: s.id,
+            title: s.title,
+            allowedActionScope: s.allowedActionScope,
+          }));
+        } else {
+          // Complex mission — use full semantic planning.
+          store.actions.setHoloState("UNDERSTANDING");
+          store.actions.addActivity({
+            id: `act_${Date.now()}_plan`,
+            ts: Date.now(),
+            type: "info",
+            tag: "PLAN",
+            text: "Planning mission steps",
+          });
+          // Semantic planning boundary — planMission may call the model to
+          // produce steps. Without this mark the planning round is hidden
+          // inside the provider_ready → tool_start span. (plan_first_token
+          // is not emitted: planMission does not stream deltas to the
+          // controller, so a per-token mark would require architecture
+          // changes — out of scope for this instrumentation pass.)
+          perf.mark("plan_start");
+
+          const planResult = await planMission({
+            model,
+            store: agentStore,
+            goal: input,
+            projectContext: {
+              name: projectName ?? "unnamed",
+              root: projectRoot,
+              branch: freshBranch ?? branch ?? "unknown",
+            },
+          });
+          plan = planResult.plan;
+          plannedSteps = planResult.steps as Array<{ id: string; title: string; allowedActionScope: string[] }>;
+          perf.mark("plan_end");
+
+          store.actions.addActivity({
+            id: `act_${Date.now()}_plansteps`,
+            ts: Date.now(),
+            type: "info",
+            tag: "PLAN",
+            text: `Plan (${plan.source}${plan.fallbackDomain ? ` · ${plan.fallbackDomain}` : ""}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
+          });
+
+          // Fallback plans are unproven (the model failed to plan) — make
+          // the safety posture explicit in the activity feed.
+          if (plan.source === "fallback") {
+            const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
+            const hasMutationStep = plannedSteps.some((s) =>
+              s.allowedActionScope.some((scope) => MUTATION_SCOPES.has(scope)),
+            );
+            store.actions.addActivity({
+              id: `act_${Date.now()}_planfallback`,
+              ts: Date.now(),
+              type: "info",
+              tag: "PLAN",
+              text: hasMutationStep
+                ? "Fallback plan — mutation steps are approval-gated"
+                : "Fallback plan is read-only — no automatic mutations",
+            });
+          }
         }
 
         // The semantic steps now exist on the canonical mission BEFORE
