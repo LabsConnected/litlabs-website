@@ -57,6 +57,20 @@ function makeEntry(
  * data.tool; this fallback covers CommandExecutor-level events that
  * carry label/command instead.
  */
+/**
+ * Build the activity-feed text for a mission step lifecycle event.
+ *
+ * CONTRACT: returns ICON-FREE text. The transcript renderer owns the
+ * semantic glyph (semanticOf() → SEMANTIC_GLYPH). Baking "→"/"✓"/"✗"
+ * here caused the observed `→ → Run static validation` /
+ * `✓ ✓ Run automated tests` duplicate-marker bug. Exported so the
+ * icon-free contract can be locked by regression tests.
+ */
+export function missionStepText(data: Record<string, unknown>): string {
+  const title = data.title ?? data.stepId ?? "";
+  return typeof title === "string" ? title : String(title ?? "");
+}
+
 function toolLabel(data: Record<string, unknown>): string {
   const tool = data.tool;
   if (typeof tool === "string" && tool.length > 0) return tool;
@@ -174,13 +188,18 @@ export function useEventBridge(
         entry = makeEntry("mission.step_created", `Step: ${event.data.title ?? event.data.stepId ?? ""}`, event);
         break;
       case "mission.step_started":
-        entry = makeEntry("mission.step_started", `→ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        // Icon-free text: the transcript renderer owns the semantic glyph
+        // (semanticOf() → SEMANTIC_GLYPH). Baking "→" here caused the
+        // observed `→ → Run static validation` duplicate-marker bug.
+        entry = makeEntry("mission.step_started", missionStepText(event.data), event);
         break;
       case "mission.step_passed":
-        entry = makeEntry("mission.step_passed", `✓ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        // Icon-free text — renderer prepends ✓ via SEMANTIC_GLYPH.success.
+        entry = makeEntry("mission.step_passed", missionStepText(event.data), event);
         break;
       case "mission.step_failed":
-        entry = makeEntry("mission.step_failed", `✗ ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        // Icon-free text — renderer prepends × via SEMANTIC_GLYPH.failed.
+        entry = makeEntry("mission.step_failed", missionStepText(event.data), event);
         break;
       case "mission.verifying":
         entry = makeEntry("mission.verifying", "Verifying mission", event);
