@@ -503,6 +503,7 @@ export async function runScript(
   shell: ShellExecutor,
   scriptName: string,
   cwd?: string,
+  timeoutMs?: number,
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -533,7 +534,7 @@ export async function runScript(
   const hasYarn = fs.existsSync(path.join(root, "yarn.lock"));
   const pm = hasPnpm ? "pnpm" : hasYarn ? "yarn" : "npm";
 
-  return runCommand(shell, pm, ["run", scriptName], { cwd: root });
+  return runCommand(shell, pm, ["run", scriptName], { cwd: root, timeoutMs });
 }
 
 /**
@@ -546,17 +547,21 @@ export async function runTypecheck(
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
 
+  // Typecheck on large monorepos can legitimately take >120s (the default
+  // runCommand timeout). Use 180s to avoid spurious timeouts on real projects.
+  const TYPECHECK_TIMEOUT_MS = 180_000;
+
   if (fs.existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       if (pkg.scripts?.typecheck) {
-        return runScript(shell, "typecheck", root);
+        return runScript(shell, "typecheck", root, TYPECHECK_TIMEOUT_MS);
       }
     } catch { /* fall through to tsc */ }
   }
 
   // Fallback: run tsc --noEmit directly
-  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root });
+  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root, timeoutMs: TYPECHECK_TIMEOUT_MS });
 }
 
 /**
