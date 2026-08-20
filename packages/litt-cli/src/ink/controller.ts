@@ -46,6 +46,7 @@ import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
+import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
 import { porcelainPaths, computeMissionDelta } from "../lib/mission-delta.js";
@@ -912,6 +913,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     //   command  — slash commands (handled above)
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
+    // P0 perf instrumentation — no-op unless LITT_PERF=1.
+    const perf = PerfTrace.start(intent);
+    perf.mark("intent_classified");
 
     // ─── @mention context resolution ──────────────────────────────
     // The transcript shows the original input (@tokens intact); the
@@ -923,6 +927,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       errorLog: errorLog.current,
     });
     const modelInput = opts?.promptOverride ?? contextResult.prompt;
+    // Context (@mentions, terminal/error log) resolved into the model
+    // prompt. Shared by CHAT and MISSION — emitted before the path split
+    // so neither path's `intent_classified → route` span silently bundles
+    // context resolution into routing latency.
+    perf.mark("context_resolved");
 
     if (hasOpenRouterKey()) {
       // CHAT intent — casual response, no mission lifecycle.
@@ -967,6 +976,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const tools = gateway.getTools();
           const agentStore = session.getStore();
           const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, modelInput);
+        perf.mark("route");
           // Routing trace — requested (brain/policy) vs resolved (route()).
           // The brain label is the configured policy identity; the resolved
           // label is what route() actually picked for this input. If they
@@ -995,22 +1005,30 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // down is the OpenRouter adapter's insufficient-credits retry
           // (a confirmed credit rejection, surfaced via [litt-diag]), so
           // a low balance never kills a run with an ugly "Model error".
-          // ─── TEMPORARY DIAGNOSTIC (CHAT path) ─────────────────────
-          process.stderr.write(
-            `[litt-diag][CHAT] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
-            `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
-            `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
-            `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
-            `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
-            `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
-          );
+          // ─── DIAGNOSTIC (CHAT path) — gated by LITT_DIAG=1 ─────────
+          if (process.env.LITT_DIAG === "1") {
+            process.stderr.write(
+              `[litt-diag][CHAT] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
+              `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
+              `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
+              `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
+              `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
+              `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+            );
+          }
           const model = resolveProviderAdapter(routed, {
             tools: tools.list(),
           });
-          process.stderr.write(
-            `[litt-diag][CHAT] adapter.providerId=${model.providerId} ` +
-            `adapter.configuredModel=${model.configuredModel}\n`,
-          );
+          // Truthful label: this marks the provider adapter being READY,
+          // not an outbound request. The actual request fires inside
+          // runAgentLoop below; we do not claim provider latency here.
+          perf.mark("provider_ready");
+          if (process.env.LITT_DIAG === "1") {
+            process.stderr.write(
+              `[litt-diag][CHAT] adapter.providerId=${model.providerId} ` +
+              `adapter.configuredModel=${model.configuredModel}\n`,
+            );
+          }
           // Set the ACTUAL served provider from the resolved adapter
           // BEFORE the request starts. `routed.servedBy` is routing
           // intent; `model.providerId` is execution truth — the adapter
@@ -1055,6 +1073,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 // model protocol internals to the chat transcript.
                 const visible = toolCallFilter.next(event.text);
                 if (!visible) return;
+                // First VISIBLE model prose (after tool-call filtering),
+                // matching MISSION behavior. De-duplicated by PerfTrace so
+                // the first occurrence wins — truthful time-to-first-token.
+                perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
                 store.actions.appendAssistantDelta(visible);
@@ -1097,6 +1119,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             : "LiTT returned an empty response. The turn was not completed.";
           const finalStatus: "complete" | "error" =
             result.termination === "complete" ? "complete" : "error";
+          perf.mark("finalize");
           store.actions.finalizeAssistantMessage({
             content: finalContent,
             status: finalStatus,
@@ -1127,6 +1150,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
           // Finalize the streaming assistant message as an ERROR —
           // never leave it blank or partially streamed.
+          perf.mark("finalize");
           store.actions.finalizeAssistantMessage({
             content: errText,
             status: "error",
@@ -1141,12 +1165,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setIsProcessing(false);
           store.actions.stopBusy();
         }
+        perf.end("chat");
         return;
       }
 
       // MISSION intent — full agent lifecycle with real Mission state
       // Refresh branch from the same cwd the tools use
       const freshBranch = refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
+      perf.mark("branch_refreshed");
 
       // Surface attached context as a decision event (visible but quiet).
       if (contextResult.resolved.length > 0) {
@@ -1173,6 +1199,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         ts: Date.now(),
         status: "complete",
       });
+      // Cockpit-side mission state initialized (holoState, baseline, user
+      // message) — distinct from the canonical RuntimeStore mission below.
+      perf.mark("mission_initialized");
 
       // Every terminal outcome must reconcile the shell out of Working
       // state. `settled` tracks whether a branch already handled the
@@ -1194,6 +1223,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           workspaceId: null,
           metadata: { source: "nl-mission", branch: freshBranch ?? branch ?? "unknown" },
         });
+        // Canonical RuntimeStore mission now exists — the durable record
+        // tools/evidence attach to. Distinct from cockpit mission_initialized.
+        perf.mark("mission_created");
 
         store.actions.addActivity({
           id: `act_${Date.now()}_mission`,
@@ -1204,6 +1236,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
 
         const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, modelInput);
+        perf.mark("route");
         // Routing trace — requested (brain/policy) vs resolved (route()).
         const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
         store.actions.addActivity({
@@ -1221,22 +1254,29 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // OpenRouter fallback. See the CHAT path above for the full
         // contract — the same resolver serves both paths so routing
         // truth is identical across CHAT and MISSION.
-        // ─── TEMPORARY DIAGNOSTIC (MISSION path) ───────────────────
-        process.stderr.write(
-          `[litt-diag][MISSION] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
-          `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
-          `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
-          `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
-          `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
-          `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
-        );
+        // ─── DIAGNOSTIC (MISSION path) — gated by LITT_DIAG=1 ───────
+        if (process.env.LITT_DIAG === "1") {
+          process.stderr.write(
+            `[litt-diag][MISSION] selectedModelId=${store.state.selectedModel ?? "(null)"} ` +
+            `routed.id=${routed.id} routed.servedBy=${routed.servedBy} ` +
+            `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
+            `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
+            `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
+            `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+          );
+        }
         const model = resolveProviderAdapter(routed, {
           tools: tools.list(),
         });
-        process.stderr.write(
-          `[litt-diag][MISSION] adapter.providerId=${model.providerId} ` +
-          `adapter.configuredModel=${model.configuredModel}\n`,
-        );
+        // Truthful label: provider adapter READY, not an outbound request.
+        // The actual request fires inside runAgentLoop below.
+        perf.mark("provider_ready");
+        if (process.env.LITT_DIAG === "1") {
+          process.stderr.write(
+            `[litt-diag][MISSION] adapter.providerId=${model.providerId} ` +
+            `adapter.configuredModel=${model.configuredModel}\n`,
+          );
+        }
         // Set the ACTUAL served provider from the resolved adapter
         // BEFORE the request starts. `routed.servedBy` is routing
         // intent; `model.providerId` is execution truth. Setting it
@@ -1273,6 +1313,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           tag: "PLAN",
           text: "Planning mission steps",
         });
+        // Semantic planning boundary — planMission may call the model to
+        // produce steps. Without this mark the planning round is hidden
+        // inside the provider_ready → tool_start span. (plan_first_token
+        // is not emitted: planMission does not stream deltas to the
+        // controller, so a per-token mark would require architecture
+        // changes — out of scope for this instrumentation pass.)
+        perf.mark("plan_start");
 
         const { plan, steps: plannedSteps } = await planMission({
           model,
@@ -1284,6 +1331,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             branch: freshBranch ?? branch ?? "unknown",
           },
         });
+        perf.mark("plan_end");
 
         store.actions.addActivity({
           id: `act_${Date.now()}_plansteps`,
@@ -1340,6 +1388,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // leak into the live chat preview, even split across deltas.
         const toolCallFilter = createToolCallStreamFilter();
 
+        // Agent execution loop boundary — the first outbound provider
+        // request and all tool rounds happen inside runAgentLoop. This
+        // separates planning (plan_start → plan_end) from execution.
+        perf.mark("agent_loop_start");
+
         const result = await runAgentLoop(modelInput, {
           model, tools, shell: session.getShell(),
           gateway,
@@ -1387,6 +1440,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             if (event.type === "delta") {
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
+              perf.mark("first_token");
               store.actions.appendAssistantDelta(visible);
             }
           },
@@ -1403,6 +1457,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
             if (event.subtype === "agent_tool_call") {
               const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+              perf.mark(`tool_start:${toolId}`);
               // The loop emits toolCallId at the event's top level.
               const toolCallId = (event as { toolCallId?: string }).toolCallId
                 ?? (event.data as { toolCallId?: string }).toolCallId
@@ -1461,6 +1516,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const success = (event.data as { success?: boolean }).success ?? true;
               const toolName = (event.data as { tool?: string }).tool ?? "unknown";
               const toolId = (event.data as { toolId?: string }).toolId ?? "";
+              perf.mark(`tool_end:${toolId}`);
               const message = (event.data as { message?: string }).message ?? "";
               const durationMs = (event.data as { durationMs?: number }).durationMs;
 
@@ -1580,6 +1636,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             : "LiTT returned an empty response. The mission turn was not completed.";
           const finalStatus: "complete" | "error" =
             result.termination === "complete" ? "complete" : "error";
+          perf.mark("finalize");
           store.actions.finalizeAssistantMessage({
             content: finalContent,
             status: finalStatus,
@@ -1756,6 +1813,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         // Finalize the streaming assistant message as an ERROR —
         // never leave it blank or partially streamed.
+        perf.mark("finalize");
         store.actions.finalizeAssistantMessage({
           content: errText,
           status: "error",
@@ -1781,6 +1839,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.updateMissionState("FAILED");
         }
       }
+      perf.end("mission");
       return;
     }
 

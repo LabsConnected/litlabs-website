@@ -362,6 +362,53 @@ export function useCockpitStore() {
   const [transcriptStore] = useState(() => new ChatTranscriptStore());
   const [chatTranscript, setChatTranscript] = useState<ChatMessage[]>(() => transcriptStore.snapshot());
 
+  // ─── P1: coalesced transcript UI flush (~30fps) ──────────────────
+  // The canonical ChatTranscriptStore receives EVERY streamed delta
+  // (so finalize/last see the full content), but the React state mirror
+  // is flushed at most every FLUSH_INTERVAL_MS. Without this, every
+  // model token triggered setChatTranscript → a full CockpitApp rerender
+  // (useCockpitStore lives at the composition root), causing sluggish
+  // streaming, caret jank, and high CPU. Tunable via LITT_FLUSH_MS.
+  const FLUSH_INTERVAL_MS = (() => {
+    const env = process.env.LITT_FLUSH_MS;
+    if (env) {
+      const n = Number.parseInt(env, 10);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    return 33; // ~30fps — the sweet spot (not 200-500ms, which feels dead)
+  })();
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Immediate flush — cancels any pending coalesced flush first. */
+  const syncTranscript = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    setChatTranscript(transcriptStore.snapshot());
+  }, [transcriptStore]);
+
+  /** Coalesced flush — schedules at most one setChatTranscript per
+   *  FLUSH_INTERVAL_MS. Used by the streaming hot path. */
+  const flushTranscriptSoon = useCallback(() => {
+    if (flushTimerRef.current !== null) return; // already scheduled
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      setChatTranscript(transcriptStore.snapshot());
+    }, FLUSH_INTERVAL_MS);
+  }, [transcriptStore, FLUSH_INTERVAL_MS]);
+
+  // Flush any pending coalesced update on unmount so the last batch of a
+  // stream is never lost when the component tears down mid-stream.
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current !== null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const addActivity = useCallback((entry: ActivityEntry) => {
     // Bound the store: keep last 200 entries, and cap fullText at 4KB
     // to prevent giant stdout streams from growing memory forever.
@@ -376,10 +423,9 @@ export function useCockpitStore() {
   // The transcript is the PERSISTED assistant response body. All
   // mutations go through the pure ChatTranscriptStore (testable without
   // a React renderer) and the result is mirrored into React state.
-  const syncTranscript = useCallback(() => {
-    setChatTranscript(transcriptStore.snapshot());
-  }, [transcriptStore]);
-
+  // add/finalize/clear use the IMMEDIATE syncTranscript (rare, need to
+  // show right away). appendAssistantDelta uses the COALESCED flush so
+  // streaming doesn't rerender the whole shell on every token.
   /** Append a new user or assistant message. Returns the message id. */
   const addChatMessage = useCallback((msg: Omit<ChatMessage, "id">): string => {
     const id = transcriptStore.add(msg);
@@ -391,11 +437,16 @@ export function useCockpitStore() {
    * Append a delta to the LAST assistant message (streaming live preview).
    * If the last message is not a streaming assistant message, this is a
    * no-op (the caller must have added one first). Idempotent per delta.
+   *
+   * P1: Uses the coalesced flush — the canonical store gets every delta,
+   * but the React snapshot is refreshed at most every FLUSH_INTERVAL_MS
+   * (~30fps). This is the streaming hot path; the immediate syncTranscript
+   * would rerender the entire CockpitApp on every token.
    */
   const appendAssistantDelta = useCallback((text: string) => {
     transcriptStore.appendDelta(text);
-    syncTranscript();
-  }, [transcriptStore, syncTranscript]);
+    flushTranscriptSoon();
+  }, [transcriptStore, flushTranscriptSoon]);
 
   /**
    * Finalize the LAST assistant message with canonical content + status.
