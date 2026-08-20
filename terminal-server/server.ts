@@ -16,13 +16,10 @@ import express from "express";
 import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
-import * as pty from "node-pty";
-import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
-import { createDockerSession } from "./docker-manager";
 import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
@@ -53,32 +50,9 @@ import {
   type PreviewStatus,
 } from "./preview/PreviewManager";
 import { dispatchCommand } from "./command-bridge";
+import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
+import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import type { RemoteCommandRequest } from "@litt/agent-core";
-
-// ─── Service-to-service auth ───────────────────────────────────
-// Internal endpoints (under /internal/*) use a shared secret via
-// the X-Internal-Service-Key header. This is separate from the
-// user-facing terminal JWT auth and is only for Next.js → terminal-server calls.
-function requireInternalServiceAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const expectedKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-  if (expectedKey.length < 32) {
-    res.status(503).json({ error: "Internal service auth not configured" });
-    return;
-  }
-  const providedKey = req.headers["x-internal-service-key"] as string | undefined;
-  if (!providedKey || providedKey.length !== expectedKey.length) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  // Timing-safe comparison
-  const a = Buffer.from(providedKey);
-  const b = Buffer.from(expectedKey);
-  if (a.length !== b.length || !a.equals(b)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  next();
-}
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGINS = [
@@ -195,15 +169,11 @@ const io = new Server(server, {
 // server.ts does NOT create another parallel state object.
 initRuntime(io);
 
-interface Session {
-  ptyProcess: pty.IPty;
-  createdAt: Date;
-  userId: string;
-  sessionId: string;
-  cwd: string;
-}
-
-const sessions = new Map<string, Session>();
+// ─── PTY session manager ───────────────────────────────────────────
+// Canonical PTY lifecycle: create/input/resize/kill/snapshot with
+// idle timeout, absolute lifetime, and max concurrent PTYs per user.
+const ptyManager = new PtySessionManager();
+ptyManager.startSweeper();
 
 app.get("/health/live", (_req, res) => {
   res.json({
@@ -308,7 +278,7 @@ app.get("/health", async (_req, res) => {
     service: "terminal-server",
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
-    activeSessions: sessions.size,
+    activeSessions: ptyManager.size,
     timestamp: new Date().toISOString(),
     readiness: allReady ? "ready" : "not_ready",
     checks: {
@@ -332,6 +302,17 @@ app.get("/health", async (_req, res) => {
 app.get("/internal/audit-log", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
   const limit = Math.min(Number(req.query?.limit) || 100, 1000);
   res.json({ entries: getAuditLog(limit) });
+});
+
+// ─── PTY session status endpoint ──────────────────────────────────
+// Returns active PTY session snapshots (safe shape — no ptyProcess handle).
+// Service-to-service only (requires internal service key).
+app.get("/internal/sessions", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.terminalUserId;
+  const sessions = userId
+    ? ptyManager.snapshotByUser(userId)
+    : ptyManager.snapshot();
+  res.json({ sessions });
 });
 
 // ─── Internal workspace endpoints (service-to-service) ─────────
@@ -814,12 +795,6 @@ function safePath(userId: string, filePath: string) {
   return target;
 }
 
-type AuthenticatedRequest = Request & {
-  terminalUserId?: string;
-  workspaceId?: string;
-  workspaceRoot?: string;
-};
-
 function requireTerminalAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -1106,7 +1081,6 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   const userId = String(socket.data.userId);
-  const sessionId = randomUUID();
   const workspaceId = socket.data.workspaceId as string | undefined;
   const projectId = socket.data.projectId as string | undefined;
   const desktopCwd = socket.data.cwd as string | undefined;
@@ -1116,39 +1090,58 @@ io.on("connection", (socket) => {
   const workspace = (socket.data.workspaceRoot as string | undefined) ?? resolve(WORKSPACE_ROOT, userId);
   mkdirSync(workspace, { recursive: true });
 
-  console.log("[Terminal] Connected:", { userId, sessionId, workspaceId: workspaceId ?? "default", projectId: projectId ?? "none" });
+  console.log("[Terminal] Connected:", { userId, workspaceId: workspaceId ?? "default", projectId: projectId ?? "none" });
   if (desktopCwd) {
     console.log("[Terminal] Authenticated desktop cwd:", desktopCwd);
   }
 
-  let ptyProcess: pty.IPty;
-
+  // ─── Create PTY session via the canonical manager ───────────────
+  // PtySessionManager handles: spawn, metadata, idle/lifetime timers,
+  // max concurrent enforcement, workspace boundary validation, and cleanup.
+  // The allowedRoot is the server-side resolved workspace root — the
+  // manager validates that cwd is within this root before spawning.
+  let session: PtySessionSnapshot;
   try {
-    if (USE_DOCKER) {
-      ptyProcess = createDockerSession({
-        userId,
-        sessionId,
-        workspace,
-        onData: (data: string) => socket.emit("terminal:output", data),
-      });
-    } else {
-      const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "bash";
-      ptyProcess = pty.spawn(shell, [], {
-        name: "xterm-256color",
-        cols: 120,
-        rows: 32,
-        cwd: workspace,
-        env: {
-          ...process.env,
-          TERM: "xterm-256color",
-          LITTREE_USER_ID: userId,
-          LITTREE_SESSION_ID: sessionId,
-          LITTREE_WORKSPACE_ID: workspaceId ?? "",
-          LITTREE_PROJECT_ID: projectId ?? "",
-          HOME: workspace,
-        },
-      });
-    }
+    session = ptyManager.create({
+      userId,
+      projectId: projectId ?? null,
+      workspaceId: workspaceId ?? null,
+      cwd: workspace,
+      allowedRoot: workspace,
+      useDocker: USE_DOCKER,
+      onData: (data: string) => socket.emit("terminal:output", data),
+      onExit: ({ sessionId, exitCode, signal }) => {
+        console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
+        socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
+      },
+      onOutputDropped: ({ sessionId, dropped }) => {
+        console.warn("[Terminal] Output dropped:", { sessionId, dropped });
+      },
+      // ─── Backpressure protection ───────────────────────────────
+      // Predicate: is the Socket.IO transport ready to accept output?
+      // Checks both disconnection and Engine.IO sendBuffer buildup.
+      // When this returns false, PtySessionManager buffers output up
+      // to MAX_PENDING_OUTPUT_BYTES, then drops to prevent OOM.
+      isTransportWritable: () => {
+        if (socket.disconnected) return false;
+        // Engine.IO sendBuffer: packets queued waiting for the transport.
+        // If it's backing up (slow client), stop feeding it more data.
+        const conn = (socket as any).conn;
+        if (conn?.sendBuffer && Array.isArray(conn.sendBuffer) && conn.sendBuffer.length > 64) {
+          return false;
+        }
+        return true;
+      },
+      // Throttled user-visible warning — emitted once when the transport
+      // recovers and buffered output is flushed, if any output was dropped.
+      onBackpressureWarning: ({ droppedChunks, droppedBytes }) => {
+        const kb = Math.max(1, Math.round(droppedBytes / 1024));
+        socket.emit(
+          "terminal:output",
+          `\r\n\x1b[33m\u26A0 Terminal output dropped (${droppedChunks} chunks, ~${kb} KiB) \u2014 connection too slow.\x1b[0m\r\n`,
+        );
+      },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start terminal";
     console.error("[Terminal] Start failed:", message);
@@ -1157,31 +1150,14 @@ io.on("connection", (socket) => {
     return;
   }
 
-  const session: Session = {
-    ptyProcess,
-    createdAt: new Date(),
-    userId,
-    sessionId,
-    cwd: workspace,
-  };
+  const sessionId = session.sessionId;
 
-  sessions.set(sessionId, session);
   socket.emit("session:ready", {
     sessionId,
     cwd: workspace,
     workspaceId: workspaceId ?? null,
     projectId: projectId ?? null,
-    shell: process.platform === "win32" ? "powershell" : process.env.SHELL || "bash",
-  });
-
-  ptyProcess.onData((data) => {
-    socket.emit("terminal:output", data);
-  });
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
-    socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
-    sessions.delete(sessionId);
+    shell: session.shell,
   });
 
   socket.on("terminal:input", (data: string) => {
@@ -1209,7 +1185,10 @@ io.on("connection", (socket) => {
     }
 
     auditCommand(userId, sessionId, data, false);
-    ptyProcess.write(data);
+    if (!ptyManager.input(sessionId, data, userId)) {
+      // input rejected — wrong owner, exited, or oversized
+      socket.emit("terminal:output", "\r\n\x1b[33m⚠ Input rejected (session ended or too large).\x1b[0m\r\n");
+    }
   });
 
     socket.on("litt-code:command", async (input: string) => {
@@ -1222,7 +1201,7 @@ io.on("connection", (socket) => {
       const userId = socket.data.userId || "unknown";
       auditCommand(userId, sessionId, mobileCmd.shellCommand, false);
       socket.emit("terminal:output", `\r\n\x1b[36m📱 ${mobileCmd.label}\x1b[0m\r\n`);
-      ptyProcess.write(mobileCmd.shellCommand + "\r");
+      ptyManager.input(sessionId, mobileCmd.shellCommand + "\r", userId);
       return;
     }
 
@@ -1279,7 +1258,7 @@ io.on("connection", (socket) => {
 
   socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
     if (typeof cols === "number" && typeof rows === "number") {
-      ptyProcess.resize(cols, rows);
+      ptyManager.resize(sessionId, cols, rows, userId);
     }
   });
 
@@ -1323,8 +1302,9 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("[Terminal] Disconnected:", sessionId);
-    ptyProcess.kill();
-    sessions.delete(sessionId);
+    // Kill the session — the socket owns it, so we pass the authenticated userId.
+    // This is safe because userId came from the JWT, not the client.
+    ptyManager.kill(sessionId, "client_disconnect", userId);
   });
 });
 
@@ -1338,12 +1318,7 @@ server.listen(PORT, "0.0.0.0", () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`[terminal-server] Received ${signal}, shutting down...`);
-  for (const [id, session] of sessions) {
-    try {
-      session.ptyProcess.kill();
-    } catch {}
-    sessions.delete(id);
-  }
+  ptyManager.shutdown();
   io.close(() => {
     server.close(() => {
       console.log("[terminal-server] All connections closed.");
