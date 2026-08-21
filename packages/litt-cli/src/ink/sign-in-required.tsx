@@ -68,7 +68,7 @@ export function SignInRequired({ error, configAvailable }: SignInRequiredProps):
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>Press any key to exit (or run 'litt login' in your terminal).</Text>
+        <Text dimColor>Press any key to exit (or run &apos;litt login&apos; in your terminal).</Text>
       </Box>
     </Box>
   );

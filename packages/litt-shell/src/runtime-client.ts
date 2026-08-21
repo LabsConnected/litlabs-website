@@ -162,7 +162,7 @@ export class DesktopRuntimeClient {
 
       // Try to get a Clerk token from the webview session
       // (injected by the frontend Clerk provider)
-      const clerkToken = (window as any).__clerkToken as string | undefined;
+      const clerkToken = (window as Window & { __clerkToken?: string }).__clerkToken;
       if (clerkToken) {
         const terminalToken = await invoke<string>("exchange_clerk_token", {
           clerkToken,
