@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { ArrowRight, Bot, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
+import { LandingHeroV3 } from "@/app/landing/_components/LandingHeroV3";
 import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
 import { RealCreations } from "@/components/landing/RealCreations";
@@ -58,58 +59,34 @@ function LandingPage() {
     <main className="min-h-screen overflow-hidden bg-[#03050a] text-white selection:bg-[#a970ff] selection:text-white">
       <Header />
 
-      {/* ═══ 1. HERO ═══ */}
-      <section className="relative min-h-[90vh] border-b border-white/8 pt-16">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_40%,rgba(168,255,47,.08),transparent_40%)]" />
-        <div className="absolute inset-0 opacity-[0.04] bg-[linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] bg-size-[64px_64px]" />
+      {/* ═══ 1. PREMIUM HERO — LandingHeroV3 (LiTT agent + Studio) ═══ */}
+      <div className="pt-16">
+        <LandingHeroV3 />
+      </div>
 
-        <div className="relative mx-auto grid max-w-screen-2xl items-center gap-12 px-5 py-16 lg:grid-cols-[1fr_1.1fr] lg:px-10 lg:py-20">
-          <div className="relative z-10">
-            <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/20 bg-[#a8ff2f]/5 px-4 py-2 text-[11px] font-black uppercase tracking-[.18em] text-[#a8ff2f]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#a8ff2f]" />
-              AI project workspace
+      {/* ═══ 2. LiTT IN ACTION — MissionSequence as product proof ═══ */}
+      <section id="how" className="relative border-b border-white/8 bg-[#05070d] px-5 py-16 lg:px-10 lg:py-20">
+        <div className="mx-auto max-w-screen-2xl">
+          <div className="mx-auto mb-10 max-w-3xl text-center">
+            <div className="text-xs font-black uppercase tracking-[.2em] text-violet-300">
+              LiTT in action
             </div>
-            <h1 className="max-w-2xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl">
-              Bring the idea.
-              <span className="mt-3 block bg-linear-to-r from-[#a8ff2f] via-[#7efbff] to-[#a970ff] bg-clip-text text-transparent">
-                LiTT helps you build the rest.
-              </span>
-            </h1>
-            <p className="mt-7 max-w-xl text-lg leading-8 text-white/60">
-              LiTTree is an AI project workspace where LiTT helps you turn ideas
-              into working apps, websites, and creative media—with project memory,
-              real files, human approvals, and deployment from inside Studio.
+            <h2 className="mt-3 text-3xl font-black leading-[1] tracking-[-.04em] sm:text-4xl">
+              Watch a mission actually run.
+            </h2>
+            <p className="mt-4 text-base leading-7 text-white/50">
+              Not a chat. A real execution loop — prompt, plan, files, preview,
+              verification, ship. Click through each stage.
             </p>
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/sign-up"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#a8ff2f] to-[#5df5d0] px-6 py-4 text-sm font-black text-[#03050a] shadow-[0_0_40px_rgba(168,255,47,.18)] transition hover:-translate-y-1 hover:shadow-[0_0_55px_rgba(168,255,47,.32)]"
-              >
-                Start building free <ArrowRight size={16} />
-              </Link>
-              <a
-                href="#product"
-                data-testid="cta-watch-product"
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-bold text-white transition hover:border-[#65f4ff]/50 hover:bg-white/10"
-              >
-                <Play size={15} fill="currentColor" className="text-[#65f4ff]" /> See how it works
-              </a>
-            </div>
-            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/40">
-              <span>Free to join</span>
-              <span>No credit card</span>
-              <span>Your work stays yours</span>
-            </div>
           </div>
-
-          <div className="relative z-10">
+          <div className="mx-auto max-w-5xl">
             <MissionSequence />
           </div>
         </div>
       </section>
 
-      {/* ═══ 2. INTERACTIVE PRODUCT DEMONSTRATION ═══ */}
-      <section id="product" className="relative border-b border-white/8 bg-[#05070d] px-5 py-20 lg:px-10 lg:py-28">
+      {/* ═══ 3. INTERACTIVE PRODUCT DEMONSTRATION ═══ */}
+      <section id="product" className="relative border-b border-white/8 bg-[#070912] px-5 py-20 lg:px-10 lg:py-28">
         <div className="mx-auto max-w-screen-2xl">
           <div className="mx-auto max-w-3xl text-center">
             <div className="text-xs font-black uppercase tracking-[.2em] text-[#65f4ff]">
@@ -129,7 +106,7 @@ function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ 3. THREE CAPABILITIES ═══ */}
+      {/* ═══ 4. THREE CAPABILITIES ═══ */}
       <section className="relative border-b border-white/8 bg-[#060912] px-5 py-20 lg:px-10 lg:py-28">
         <div className="mx-auto max-w-screen-2xl">
           <div className="mx-auto max-w-3xl text-center">
@@ -185,7 +162,7 @@ function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ 4. PRODUCT DEMONSTRATIONS ═══ */}
+      {/* ═══ 5. PRODUCT DEMONSTRATIONS ═══ */}
       <section id="creations" className="relative border-b border-white/8 bg-[#05070d] px-5 py-20 lg:px-10 lg:py-28">
         <div className="mx-auto max-w-screen-2xl">
           <div className="mx-auto max-w-3xl text-center">
@@ -207,7 +184,7 @@ function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ 5. WHY LiTTree IS DIFFERENT ═══ */}
+      {/* ═══ 6. WHY LiTTree IS DIFFERENT ═══ */}
       <section className="relative border-b border-white/8 bg-[#060912] px-5 py-20 lg:px-10 lg:py-28">
         <div className="mx-auto max-w-screen-2xl">
           <div className="mx-auto max-w-3xl text-center">
@@ -225,7 +202,7 @@ function LandingPage() {
         </div>
       </section>
 
-      {/* ═══ 6. TRUST + FINAL CTA ═══ */}
+      {/* ═══ 7. TRUST + FINAL CTA ═══ */}
       <TrustSection />
 
       {/* ═══ FOOTER ═══ */}
