@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import {
   runAgentLoop,
   planMission,
@@ -979,7 +979,33 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const local = matchLocalFastPath(input, {
       cwd: projectRoot,
       projectName,
+      repoName: basename(projectRoot),
       mode: store.state.mode,
+      // Sync the header with the freshly resolved HEAD state so the
+      // cockpit stays truthful after external branch switches AND
+      // detached-HEAD checkouts. The SAME resolved state feeds both
+      // the response and the header — they can never disagree.
+      onHeadResolved: (state) => {
+        if (state.kind === "branch") {
+          if (state.branch !== store.state.branch) {
+            store.actions.setBranch(state.branch);
+          }
+        } else if (state.kind === "detached") {
+          // Use the same "DETACHED · shortSha" display form as
+          // refreshProjectBranch so the header is consistent.
+          const display = `DETACHED · ${state.commit}`;
+          if (display !== store.state.branch) {
+            store.actions.setBranch(display);
+          }
+        } else if (state.kind === "not-git") {
+          // The old branch must NOT remain displayed — it is no longer
+          // truthful. Clear it so the status bar doesn't show a stale
+          // branch from a previous repository context.
+          if (store.state.branch !== "unknown" && store.state.branch !== "(not a git repo)") {
+            store.actions.setBranch("(not a git repo)");
+          }
+        }
+      },
     });
     if (local) {
       // Local perf trace — truthful labels only. The Local Fast Lane runs
@@ -1093,7 +1119,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         perf.mark("read_match");
 
         // Refresh branch (same as CHAT path — keeps header truthful).
-        refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
+        // Skip if the read match already includes project.branch — the tool
+        // will read the branch itself, so a separate refreshBranch call is
+        // redundant (eliminates one duplicate git read).
+        const hasBranchTool = readMatch.calls.some((c) => c.toolId === "project.branch");
+        if (!hasBranchTool) {
+          refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
+        }
 
         // Surface the read query in the operator feed.
         store.actions.addActivity({
