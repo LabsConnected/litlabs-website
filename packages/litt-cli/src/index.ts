@@ -342,8 +342,11 @@ async function runRemote(
 ): Promise<number> {
   header(`${command} (remote)`);
   try {
+    // Remote commands execute on terminal-server's filesystem. We do NOT
+    // pass the local project root because the server authorizes cwd against
+    // its own user workspace root. The server will use its configured
+    // user workspace root when no cwd is supplied.
     const response = await dispatchRemote(command, args, {
-      cwd: detectProject().rootDir,
       mode,
     });
 

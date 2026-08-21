@@ -174,9 +174,16 @@ export async function dispatchRemote(
   const requestBody: RemoteCommandRequest = {
     command,
     args,
-    cwd: options.cwd ?? process.cwd(),
     mode: options.mode,
   };
+
+  // Only pass cwd when the caller explicitly provides one. The
+  // terminal-server will use the user's authorized workspace root when
+  // cwd is omitted, which is the correct behavior for remote commands
+  // that execute on the server's filesystem.
+  if (options.cwd) {
+    requestBody.cwd = options.cwd;
+  }
 
   const response = await fetch(`${baseUrl}/api/command`, {
     method: "POST",

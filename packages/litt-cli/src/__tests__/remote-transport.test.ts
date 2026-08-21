@@ -34,6 +34,8 @@ import {
 } from "../lib/remote.js";
 import { resolveDispatch } from "../lib/dispatch.js";
 import { DEFAULT_TERMINAL_URL } from "../lib/auth/auth-config.js";
+import { getAuthSession, resetAuthSession } from "../lib/auth/auth-session.js";
+import { createCredentialStore } from "../lib/auth/credential-store.js";
 
 // ─── Mock fetch ───────────────────────────────────────────────────
 
@@ -56,12 +58,16 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
   clearTerminalTokenCache();
+  // Isolate tests from the real credential store and any persisted session.
+  resetAuthSession();
+  getAuthSession({ storage: createCredentialStore("memory") });
 });
 
 afterEach(() => {
   fetchSpy.mockRestore();
   vi.restoreAllMocks();
   clearTerminalTokenCache();
+  resetAuthSession();
 });
 
 // ─── dispatchRemote with pre-exchanged terminalToken ──────────────
@@ -292,13 +298,13 @@ describe("dispatchRemote (pre-exchanged terminalToken)", () => {
     expect(body.mode).toBe("plan");
   });
 
-  it("defaults cwd to process.cwd() when not specified", async () => {
+  it("omits cwd from the request body when not specified", async () => {
     fetchSpy.mockResolvedValue(mockFetchResponse({ ok: true, runId: "r", kind: "test", result: {}, timestamp: 0, durationMs: 0 }));
 
     await dispatchRemote("test", [], { terminalToken: TERMINAL_JWT });
 
     const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
-    expect(body.cwd).toBe(process.cwd());
+    expect(body.cwd).toBeUndefined();
   });
 });
 

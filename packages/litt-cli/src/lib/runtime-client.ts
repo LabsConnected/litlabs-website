@@ -451,7 +451,7 @@ export class RuntimeClient {
       body: JSON.stringify({
         command,
         args,
-        cwd: cwd ?? process.cwd(),
+        cwd,
       }),
       signal: AbortSignal.timeout(240_000),
     });
