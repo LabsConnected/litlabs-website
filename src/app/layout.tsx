@@ -85,7 +85,6 @@ export const metadata: Metadata = {
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const hasClerk = !!clerkKey && clerkKey.length > 10;
 
 export default function RootLayout({
   children,
@@ -118,89 +117,83 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        {/* ClerkProvider wraps the app when a publishable key is available.
-            In production, the key is always set via environment variables.
-            When absent (local build without Clerk), we skip ClerkProvider and
-            render a fallback context so auth hooks return a signed-out state
-            instead of crashing. */}
-        {hasClerk ? (
-          <ClerkProvider
-            publishableKey={clerkKey!}
-            signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
-            signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
-            signInFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-              "/studio"
-            }
-            signUpFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-              "/studio"
-            }
-            appearance={{
-              variables: {
-                colorPrimary: "#a970ff",
-                colorBackground: "#060914",
-                colorText: "#eef4ff",
-                colorTextSecondary: "#9ba7c7",
-                colorDanger: "#ef4444",
-                colorSuccess: "#22c55e",
-                borderRadius: "8px",
+        {/* ClerkProvider ALWAYS wraps the app. Previously this was conditional
+            on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY being present at build time,
+            which caused useSession/useUser to crash with "can only be used
+            within ClerkProvider" when the key wasn't baked into the bundle.
+            Now ClerkProvider is always mounted; if the key is missing, Clerk
+            hooks return a signed-out state instead of throwing. */}
+        <ClerkProvider
+          publishableKey={clerkKey}
+          signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
+          signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
+          signInFallbackRedirectUrl={
+            process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
+            "/studio"
+          }
+          signUpFallbackRedirectUrl={
+            process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
+            "/studio"
+          }
+          appearance={{
+            variables: {
+              colorPrimary: "#a970ff",
+              colorBackground: "#060914",
+              colorText: "#eef4ff",
+              colorTextSecondary: "#9ba7c7",
+              colorDanger: "#ef4444",
+              colorSuccess: "#22c55e",
+              borderRadius: "8px",
+            },
+            elements: {
+              card: {
+                backgroundColor: "#090d1b",
+                border: "1px solid #29345e",
+                boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(169,112,255,.12)",
               },
-              elements: {
-                card: {
-                  backgroundColor: "#090d1b",
-                  border: "1px solid #29345e",
-                  boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(169,112,255,.12)",
-                },
-                userButtonPopoverCard: {
-                  backgroundColor: "#0b1020",
-                  border: "1px solid #3b4773",
-                  boxShadow: "0 24px 70px rgba(0,0,0,.68), 0 0 42px rgba(169,112,255,.18)",
-                },
-                userButtonPopoverActionButton: {
-                  color: "#eef4ff",
-                  fontWeight: "600",
-                  minHeight: "44px",
-                  "&:hover": {
-                    color: "#ffffff",
-                    backgroundColor: "rgba(169,112,255,0.2)",
-                  },
-                },
-                userButtonPopoverActionButtonText: {
-                  color: "#eef4ff",
-                },
-                userButtonPopoverActionButtonIcon: {
-                  color: "#c4b5fd",
-                },
-                userPreviewMainIdentifier: {
+              userButtonPopoverCard: {
+                backgroundColor: "#0b1020",
+                border: "1px solid #3b4773",
+                boxShadow: "0 24px 70px rgba(0,0,0,.68), 0 0 42px rgba(169,112,255,.18)",
+              },
+              userButtonPopoverActionButton: {
+                color: "#eef4ff",
+                fontWeight: "600",
+                minHeight: "44px",
+                "&:hover": {
                   color: "#ffffff",
-                  fontWeight: "700",
-                },
-                userPreviewSecondaryIdentifier: {
-                  color: "#b7c2df",
-                },
-                userButtonPopoverFooter: {
-                  backgroundColor: "#080c18",
-                  borderTop: "1px solid #29345e",
-                },
-                badge: {
-                  backgroundColor: "#a970ff",
+                  backgroundColor: "rgba(169,112,255,0.2)",
                 },
               },
-            }}
-          >
-            <ClerkAuthContextProvider clerkAvailable={true}>
-              <GhlAffiliateSignupTracker />
-              <AuthorityJsonLd />
-              {shell}
-            </ClerkAuthContextProvider>
-          </ClerkProvider>
-        ) : (
-          <ClerkAuthContextProvider clerkAvailable={false}>
+              userButtonPopoverActionButtonText: {
+                color: "#eef4ff",
+              },
+              userButtonPopoverActionButtonIcon: {
+                color: "#c4b5fd",
+              },
+              userPreviewMainIdentifier: {
+                color: "#ffffff",
+                fontWeight: "700",
+              },
+              userPreviewSecondaryIdentifier: {
+                color: "#b7c2df",
+              },
+              userButtonPopoverFooter: {
+                backgroundColor: "#080c18",
+                borderTop: "1px solid #29345e",
+              },
+              badge: {
+                backgroundColor: "#a970ff",
+              },
+            },
+          }}
+        >
+          <ClerkAuthContextProvider clerkAvailable={true}>
+            <GhlAffiliateSignupTracker />
             <AuthorityJsonLd />
             {shell}
           </ClerkAuthContextProvider>
-        )}
+        </ClerkProvider>
       </body>
     </html>
   );
