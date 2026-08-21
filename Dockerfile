@@ -65,7 +65,24 @@ RUN pnpm --filter @litt/agent-core build
 # Next.js standalone output copies only the needed node_modules into
 # .next/standalone/node_modules — the runtime image won't need the full
 # node_modules tree.
+#
+# NEXT_PUBLIC_* vars are inlined into the JS bundle at build time by Next.js.
+# Railway injects service variables as Docker build ARGs, so we must declare
+# them with ARG and then export as ENV before `next build` so they're
+# available to the Next.js compiler.
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL
+ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL
+ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL
+ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL
+ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL
+ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL
+ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
+ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
+ARG NEXT_PUBLIC_CLERK_FRONTEND_API_URL
+ENV NEXT_PUBLIC_CLERK_FRONTEND_API_URL=$NEXT_PUBLIC_CLERK_FRONTEND_API_URL
 RUN pnpm build
 
 # ─── Stage 3: Runtime ──────────────────────────────────────────────

@@ -84,6 +84,16 @@ export const metadata: Metadata = {
     : undefined,
 };
 
+// ClerkProvider must ALWAYS wrap the app so hooks like useSession/useUser
+// don't crash with "can only be used within ClerkProvider". Previously this
+// was conditional on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY being present at build
+// time — but if the key wasn't baked into the bundle during next build,
+// the NoClerkAuth fallback was permanent, causing the live sign-in page to
+// crash with "useSession can only be used within ClerkProvider".
+//
+// The Dockerfile now declares ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (and
+// the other NEXT_PUBLIC_CLERK_* vars) so Railway injects them at build time,
+// making the real pk_live key available to Next.js during SSG.
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 export default function RootLayout({
@@ -117,12 +127,6 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        {/* ClerkProvider ALWAYS wraps the app. Previously this was conditional
-            on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY being present at build time,
-            which caused useSession/useUser to crash with "can only be used
-            within ClerkProvider" when the key wasn't baked into the bundle.
-            Now ClerkProvider is always mounted; if the key is missing, Clerk
-            hooks return a signed-out state instead of throwing. */}
         <ClerkProvider
           publishableKey={clerkKey}
           signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
