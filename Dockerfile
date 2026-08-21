@@ -83,7 +83,13 @@ ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
 ARG NEXT_PUBLIC_CLERK_FRONTEND_API_URL
 ENV NEXT_PUBLIC_CLERK_FRONTEND_API_URL=$NEXT_PUBLIC_CLERK_FRONTEND_API_URL
-RUN pnpm build
+# Use webpack (not Turbopack) for the production build. Turbopack creates
+# duplicate module instances of @clerk/clerk-react — one in the @clerk/nextjs
+# chunk and one in the @clerk/clerk-react chunk — each with its own
+# createContext(). ClerkProvider sets context A, useSession() reads context B,
+# and /sign-in crashes with "useSession can only be used within ClerkProvider".
+# Webpack's module deduplication keeps a single ClerkInstanceContext.
+RUN pnpm build:webpack
 
 # ─── Stage 3: Runtime ──────────────────────────────────────────────
 FROM node:22-slim AS runner

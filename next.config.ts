@@ -39,11 +39,23 @@ const nextConfig: NextConfig = {
     optimizePackageImports: [
       "@supabase/supabase-js",
       "lucide-react",
-      "@clerk/nextjs",
       "react-markdown",
       "zustand",
     ],
   },
+
+  // Clerk must be transpiled by Next.js so that ClerkProvider (root layout)
+  // and useSession() (used inside <SignIn/>) share ONE React context instance.
+  // Without this, Turbopack can emit two separate copies of @clerk/clerk-react
+  // in the client bundle — each with its own createContext() — so the context
+  // ClerkProvider sets is not the same context useSession reads from, causing
+  // "useSession can only be used within the <ClerkProvider /> component" on the
+  // /sign-in page even though ClerkProvider is present in the tree.
+  transpilePackages: [
+    "@clerk/nextjs",
+    "@clerk/clerk-react",
+    "@clerk/shared",
+  ],
 
   // Externalize jose from middleware bundling (fixes NFT build error)
   serverExternalPackages: ["jose"],
