@@ -47,12 +47,16 @@ import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
+import { loginCommand } from "./commands/login.js";
+import { logoutCommand } from "./commands/logout.js";
+import { whoamiCommand } from "./commands/whoami.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
+import { getAuthSession } from "./lib/auth/auth-session.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
@@ -112,12 +116,31 @@ const COMMANDS: Record<string, CommandHandler> = {
   ask: askCommand,
   explain: explainCommand,
   desktop: desktopCommand,
+  login: loginCommand,
+  logout: logoutCommand,
+  whoami: whoamiCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
 /** Commands that require lazy loading (heavy deps like Ink/React).
  *  `shell` is an explicit alias for the same Ink cockpit as bare `litt`. */
 const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
+
+/**
+ * Commands allowed while signed out (no valid user session).
+ *
+ * These commands don't require authentication:
+ *   login    — the auth flow itself
+ *   logout   — clearing credentials (no-op if already signed out)
+ *   whoami   — shows "not signed in" when signed out
+ *   doctor   — system health check (doesn't require auth)
+ *   version  — version info
+ *   help     — help text
+ *
+ * Everything else — including the interactive cockpit — requires a
+ * valid user session. The auth gate enforces this before dispatching.
+ */
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "doctor", "version", "help"]);
 
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
@@ -179,6 +202,69 @@ async function main(): Promise<number> {
   const command = dispatch.command!;
   const rest = dispatch.rest;
   const mode = dispatch.mode;
+
+  // ─── Auth gate ──────────────────────────────────────────────────
+  // Commands that require a valid user session are blocked when signed
+  // out. Only login, logout, whoami, doctor, version, and help work
+  // without authentication. The interactive cockpit (bare `litt`,
+  // `litt shell`, `litt cockpit`, `litt tui`) and all runtime/project
+  // commands require authentication.
+  //
+  // LITT_CLERK_TOKEN (temporary acceptance-test mechanism) bypasses the
+  // gate — it's kept only so existing automated tests don't break.
+  //
+  // The CLI ships safe production defaults for the Clerk issuer, OAuth
+  // client_id, and terminal-server URL. Auth is ALWAYS configured for a
+  // normal installed CLI — env overrides are for dev/staging/testing
+  // only. The gate therefore ALWAYS engages (except for LITT_CLERK_TOKEN
+  // test bypass). Absence of env overrides must NOT disable mandatory
+  // authentication.
+  if (
+    !LOGGED_OUT_ALLOWED.has(command) &&
+    !process.env.LITT_CLERK_TOKEN
+  ) {
+    const authSession = getAuthSession();
+    const signedIn = await authSession.isSignedIn();
+
+    if (!signedIn) {
+      // Non-interactive commands: print a clear message and exit
+      if (command !== "cockpit" && command !== "shell" && command !== "tui") {
+        console.error(`${c.red}✗${c.reset} Authentication required.`);
+        console.error(`${c.dim}  Run 'litt login' to sign in, then try again.${c.reset}`);
+        return 1;
+      }
+
+      // Interactive cockpit: render the sign-in-required screen
+      const authState = await authSession.getAuthState();
+      const { render } = await import("ink");
+      const React = await import("react");
+      const { SignInRequired } = await import("./ink/sign-in-required.js");
+      const { CockpitErrorBoundary } = await import("./ink/cockpit-error-boundary.js");
+
+      // Check TTY — Ink requires raw mode on stdin
+      if (!process.stdin.isTTY) {
+        console.error(`${c.red}✗${c.reset} Not signed in.`);
+        console.error(`${c.dim}  Run 'litt login' to sign in.${c.reset}`);
+        if (authState.error) {
+          console.error(`${c.dim}  ${authState.error}${c.reset}`);
+        }
+        return 1;
+      }
+
+      const { waitUntilExit } = render(
+        React.createElement(CockpitErrorBoundary, null,
+          React.createElement(SignInRequired, {
+            error: authState.error,
+            // The gate only runs when auth is configured, so login is always
+            // an available action on this screen.
+            configAvailable: true,
+          }),
+        ),
+      );
+      await waitUntilExit();
+      return 0;
+    }
+  }
 
   // --remote: dispatch through terminal-server's canonical CommandRouter
   if (dispatch.useRemote) {
@@ -312,6 +398,9 @@ Commands:
   cockpit    Alias for the LiTT shell
   tui        Alias for the LiTT shell
   desktop    Launch the LiTT Desktop (Tauri) GUI application
+  login      Sign in via Clerk OAuth (browser-based PKCE flow)
+  logout     Sign out and clear local credentials
+  whoami     Show the current authenticated identity
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version
   status     Show project + git status (via @litt/agent-core)

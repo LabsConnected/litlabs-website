@@ -369,7 +369,7 @@ describe("Client and server decode the same schema", () => {
   function installBridgeFetch(): void {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (!url.endsWith("/internal/command")) {
+      if (!url.endsWith("/api/command")) {
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -389,7 +389,7 @@ describe("Client and server decode the same schema", () => {
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "x".repeat(40);
     const resp = await dispatchRemote("status", [], {
       cwd: repoRoot,
-      internalKey: "x".repeat(40),
+      terminalToken: "test-terminal-token",
     });
     expect(resp.ok).toBe(true);
     expect(resp.kind).toBe("status");
@@ -402,7 +402,7 @@ describe("Client and server decode the same schema", () => {
     installBridgeFetch();
     const resp = await dispatchRemote("nonexistent_cmd", [], {
       cwd: repoRoot,
-      internalKey: "x".repeat(40),
+      terminalToken: "test-terminal-token",
     });
     expect(isRemoteError(resp)).toBe(true);
     expect(resp.error!.code).toBe("unknown_command");
@@ -414,7 +414,7 @@ describe("Client and server decode the same schema", () => {
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = "x".repeat(40);
     const resp = await dispatchRemote("local", [], {
       cwd: repoRoot,
-      internalKey: "x".repeat(40),
+      terminalToken: "test-terminal-token",
     });
     expect(resp.kind).toBe("local_info");
     expect(resp.result!.data.cwd).toBe(repoRoot);
@@ -424,12 +424,11 @@ describe("Client and server decode the same schema", () => {
     // A Termux client is just a fetch caller. We simulate one inline
     // to prove the protocol is HTTP-client-agnostic.
     installBridgeFetch();
-    process.env.TERMINAL_INTERNAL_SERVICE_KEY = "k".repeat(40);
-    const termuxResp = await fetch("http://127.0.0.1:4001/internal/command", {
+    const termuxResp = await fetch("http://127.0.0.1:4001/api/command", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Service-Key": "k".repeat(40),
+        "Authorization": "Bearer test-terminal-token",
       },
       body: JSON.stringify({
         command: "status",

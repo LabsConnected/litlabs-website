@@ -14,7 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@clerk/backend": "^3.11.4",
+    "@clerk/backend": "^3.16.10",
+    "@clerk/shared": "^4.29.3",
     "@litt/agent-core": "workspace:*",
     "@livekit/agents": "^1.6.2",
     "@livekit/agents-plugin-openai": "^1.6.2",

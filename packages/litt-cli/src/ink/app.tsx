@@ -66,11 +66,16 @@ export interface CockpitAppProps {
   mode: string;
   gitModified: number;
   gitUntracked: number;
+  /** Auth email for header display (null when unknown). */
+  authEmail?: string | null;
+  /** Whether the user is signed in. */
+  signedIn?: boolean;
 }
 
 export function CockpitApp({
   session, client, approvalBridge, sessionBridge,
   project, branch, cwd, mode, gitModified, gitUntracked,
+  authEmail, signedIn,
 }: CockpitAppProps): React.ReactElement {
   const { exit } = useApp();
   const store = useCockpitStore();
@@ -275,6 +280,8 @@ export function CockpitApp({
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={store.state.mode}
+        authEmail={authEmail}
+        signedIn={signedIn}
         compact
       />
 

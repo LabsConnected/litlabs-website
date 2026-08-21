@@ -15,6 +15,7 @@ import { getGitState } from "../lib/git-state.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
 import { ensureConfig, getConfigPath } from "../lib/config.js";
+import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -122,9 +123,11 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   ok(`Config: ${getConfigPath()}`);
   console.log(`${c.dim}  mode: ${config.defaultMode} | model: ${config.defaultModel} | initialized: ${config.initialized}${c.reset}`);
 
-  // Terminal-server connectivity (optional)
+  // Terminal-server connectivity (optional — production default URL is
+  // shipped in the CLI, but REMOTE only counts as connected after a
+  // successful health check here).
   header("Terminal Server");
-  const terminalUrl = process.env.LITT_TERMINAL_URL ?? "http://127.0.0.1:4001";
+  const terminalUrl = getTerminalUrl();
   try {
     const response = await fetch(`${terminalUrl}/health`, { signal: AbortSignal.timeout(3000) });
     if (response.ok) {

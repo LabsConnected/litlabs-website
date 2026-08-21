@@ -3,14 +3,6 @@ import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwr
 import path from "path";
 
 const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
-const VERCEL_BYPASS_SECRET = process.env.VERCEL_PROTECTION_BYPASS_SECRET;
-const isVercelPreview = !!VERCEL_BYPASS_SECRET;
-
-function bypassHeaders(): Record<string, string> {
-  return isVercelPreview && VERCEL_BYPASS_SECRET
-    ? { "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET }
-    : {};
-}
 
 const userAEmail = process.env.CLERK_TEST_USER_A_EMAIL;
 const userBEmail = process.env.CLERK_TEST_USER_B_EMAIL;
@@ -33,11 +25,7 @@ setup("clerk global setup", async () => {
 setup("authenticate User A and save storage state", async ({ page, context }) => {
   expect(userAEmail, "CLERK_TEST_USER_A_EMAIL must be set").toBeDefined();
 
-  // Set bypass header on ALL requests (including page navigation) so Vercel
-  // SSO protection doesn't intercept the Clerk sign-in flow.
-  if (isVercelPreview && VERCEL_BYPASS_SECRET) {
-    context.setExtraHTTPHeaders({ "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET });
-  }
+
 
   // Set up the Clerk testing token before navigating, so the Development
   // instance allows passwordless sign-in via clerk.signIn().
@@ -47,9 +35,7 @@ setup("authenticate User A and save storage state", async ({ page, context }) =>
   await clerk.signIn({ page, emailAddress: userAEmail! });
 
   // Verify server-side auth by hitting a protected API endpoint
-  const resp = await context.request.get(`${DEPLOYMENT_URL}/api/studio-projects`, {
-    headers: bypassHeaders(),
-  });
+  const resp = await context.request.get(`${DEPLOYMENT_URL}/api/studio-projects`);
   expect(resp.status(), `User A auth check: expected non-401, got ${resp.status()}`).not.toBe(401);
   console.log(`[Setup] User A authenticated: GET /api/studio-projects => ${resp.status()}`);
 
@@ -60,11 +46,7 @@ setup("authenticate User A and save storage state", async ({ page, context }) =>
 setup("authenticate User B and save storage state", async ({ page, context }) => {
   expect(userBEmail, "CLERK_TEST_USER_B_EMAIL must be set").toBeDefined();
 
-  // Set bypass header on ALL requests (including page navigation) so Vercel
-  // SSO protection doesn't intercept the Clerk sign-in flow.
-  if (isVercelPreview && VERCEL_BYPASS_SECRET) {
-    context.setExtraHTTPHeaders({ "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET });
-  }
+
 
   // Set up the Clerk testing token before navigating, so the Development
   // instance allows passwordless sign-in via clerk.signIn().
@@ -74,9 +56,7 @@ setup("authenticate User B and save storage state", async ({ page, context }) =>
   await clerk.signIn({ page, emailAddress: userBEmail! });
 
   // Verify server-side auth by hitting a protected API endpoint
-  const resp = await context.request.get(`${DEPLOYMENT_URL}/api/studio-projects`, {
-    headers: bypassHeaders(),
-  });
+  const resp = await context.request.get(`${DEPLOYMENT_URL}/api/studio-projects`);
   expect(resp.status(), `User B auth check: expected non-401, got ${resp.status()}`).not.toBe(401);
   console.log(`[Setup] User B authenticated: GET /api/studio-projects => ${resp.status()}`);
 

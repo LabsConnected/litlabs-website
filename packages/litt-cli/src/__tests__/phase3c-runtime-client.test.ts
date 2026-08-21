@@ -24,6 +24,18 @@ vi.mock("socket.io-client", () => ({
   io: vi.fn(() => mockSocket),
 }));
 
+// ─── Auth session mock ───────────────────────────────────────────
+// RuntimeClient calls getAuthSession().getAccessToken() when no
+// explicit clerkToken is provided. Mock it to return null by default
+// so tests don't read the real keychain. Individual tests that need
+// a token use the `terminalToken` constructor option instead.
+vi.mock("../lib/auth/auth-session.js", () => ({
+  getAuthSession: vi.fn(() => ({
+    getAccessToken: vi.fn(async () => null),
+  })),
+  resetAuthSession: vi.fn(),
+}));
+
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
 
@@ -122,7 +134,7 @@ describe("RuntimeClient", () => {
     const client = new RuntimeClient({
       terminalUrl: "http://127.0.0.1:4001",
     });
-    await expect(client.connect()).rejects.toThrow("Clerk token");
+    await expect(client.connect()).rejects.toThrow("Not authenticated");
   });
 
   it("notifies connection listeners on connect", async () => {
@@ -395,7 +407,7 @@ describe("RuntimeClient", () => {
       terminalUrl: "http://127.0.0.1:4001",
     });
 
-    await expect(client.dispatchCommand("check")).rejects.toThrow("Clerk token");
+    await expect(client.dispatchCommand("check")).rejects.toThrow("Not authenticated");
   });
 
   it("fetches state via REST fallback", async () => {

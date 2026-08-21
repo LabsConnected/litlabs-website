@@ -1,36 +1,19 @@
+
 /**
  * System Health — canonical connection-state resolver for the Dashboard.
  *
- * Replaces the old model that only checked `integration_accounts` and
- * reported a meaningless "2/5 services connected" score. This module
- * splits health into three honest categories:
- *
- *   1. Workspace Connections  — GitHub, Vercel, Supabase (user project)
- *   2. AI Providers           — Gemini, OpenRouter (real probes, cached)
- *   3. Platform Services      — Clerk, Supabase DB, Stripe, Terminal, …
- *
- * GitHub state is resolved from ALL canonical sources, in priority order:
- *   - integration_projects (active repository)
- *   - projects (legacy)
- *   - github_installations (authorized, no repo selected)
- *   - integration_accounts (token state)
- *
- * AI provider health is probed with a real lightweight request and cached
- * for 45 seconds to avoid unnecessary provider charges.
+ * GitHub state is resolved from every supported connection source so the
+ * dashboard reports the repository LiTT can actually build from.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
 export type HealthState =
   | "connected"
-  | "authorized" // GitHub installation exists but no repo selected
-  | "linked" // Vercel project linked
-  | "live" // Vercel deployment live
-  | "configured" // key present, not yet verified
+  | "authorized"
+  | "linked"
+  | "live"
+  | "configured"
   | "checking"
   | "healthy"
   | "degraded"
@@ -44,19 +27,18 @@ export type HealthState =
   | "disconnected";
 
 export interface WorkspaceConnection {
-  id: string; // "github" | "vercel" | "supabase_project"
+  id: string;
   label: string;
   category: "Workspace";
   state: HealthState;
   detail: string;
-  /** Optional sub-state for Vercel (account vs project vs deployment). */
   subState?: string;
-  lastChecked: string; // ISO
+  lastChecked: string;
   action?: { label: string; href: string };
 }
 
 export interface AiProviderHealth {
-  id: string; // "gemini" | "openrouter"
+  id: string;
   label: string;
   category: "AI";
   state: HealthState;
@@ -78,9 +60,7 @@ export interface PlatformService {
 
 export interface SystemHealthSummary {
   headline: string;
-  /** Count of optional integrations that still need setup. */
   optionalPending: number;
-  /** True when a platform-critical service is down. */
   platformDegraded: boolean;
 }
 
@@ -92,10 +72,6 @@ export interface SystemHealthResponse {
   isOwner: boolean;
   generatedAt: string;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Workspace connection resolution                                    */
-/* ------------------------------------------------------------------ */
 
 interface RawDashboardData {
   accounts: Array<{
@@ -126,25 +102,13 @@ interface RawDashboardData {
 const SETTINGS_CONNECTIONS = "/settings?section=connections&returnTo=/dashboard";
 const STUDIO_GITHUB = "/studio/github";
 
-/**
- * Resolve GitHub connection state from all canonical sources.
- *
- * Priority:
- *   1. integration_projects with a repository_full_name → "connected"
- *   2. legacy projects with a repository_full_name       → "connected"
- *   3. github_installations present                      → "authorized"
- *   4. integration_accounts row with error/expired       → "reconnect_required"
- *   5. integration_accounts row healthy but no repo      → "authorized"
- *   6. nothing                                           → "not_connected"
- */
 export function resolveGitHub(data: RawDashboardData): WorkspaceConnection {
   const now = new Date().toISOString();
-  const ghAccount = data.accounts.find((a) => a.provider === "github");
-
-  // 1. Active repository in integration_projects
+  const account = data.accounts.find((item) => item.provider === "github");
   const activeProject = data.projects.find(
-    (p) => p.repository_full_name && p.sync_status !== "error",
+    (project) => project.repository_full_name && project.sync_status !== "error",
   );
+
   if (activeProject?.repository_full_name) {
     return {
       id: "github",
@@ -157,23 +121,21 @@ export function resolveGitHub(data: RawDashboardData): WorkspaceConnection {
     };
   }
 
-  // 2. Legacy project with a repository
-  const legacyWithRepo = data.legacyProjects.find(
-    (p) => p.repository_full_name && p.connection_status !== "disconnected",
+  const legacyProject = data.legacyProjects.find(
+    (project) => project.repository_full_name && project.connection_status !== "disconnected",
   );
-  if (legacyWithRepo?.repository_full_name) {
+  if (legacyProject?.repository_full_name) {
     return {
       id: "github",
       label: "GitHub Repository",
       category: "Workspace",
       state: "connected",
-      detail: legacyWithRepo.repository_full_name,
+      detail: legacyProject.repository_full_name,
       lastChecked: now,
       action: { label: "Manage", href: STUDIO_GITHUB },
     };
   }
 
-  // 3. GitHub installation exists but no repository selected
   if (data.installations.length > 0) {
     return {
       id: "github",
@@ -186,33 +148,30 @@ export function resolveGitHub(data: RawDashboardData): WorkspaceConnection {
     };
   }
 
-  // 4. Account row with error → reconnect required
-  if (ghAccount && (ghAccount.last_error || ghAccount.status === "error" || ghAccount.status === "expired")) {
+  if (account && (account.last_error || account.status === "error" || account.status === "expired")) {
     return {
       id: "github",
       label: "GitHub Repository",
       category: "Workspace",
       state: "reconnect_required",
-      detail: ghAccount.last_error || "Token expired or revoked",
+      detail: account.last_error || "Token expired or revoked",
       lastChecked: now,
       action: { label: "Reconnect", href: STUDIO_GITHUB },
     };
   }
 
-  // 5. Account row healthy but no installation / repo
-  if (ghAccount) {
+  if (account) {
     return {
       id: "github",
       label: "GitHub Repository",
       category: "Workspace",
       state: "authorized",
-      detail: ghAccount.provider_account_name || "Authorized",
+      detail: account.provider_account_name || "Authorized",
       lastChecked: now,
       action: { label: "Select repository", href: STUDIO_GITHUB },
     };
   }
 
-  // 6. Nothing
   return {
     id: "github",
     label: "GitHub Repository",
@@ -224,57 +183,6 @@ export function resolveGitHub(data: RawDashboardData): WorkspaceConnection {
   };
 }
 
-/**
- * Resolve Vercel connection state.
- *
- * Distinguishes: account connected → project linked → deployment live.
- */
-export function resolveVercel(data: RawDashboardData): WorkspaceConnection {
-  const now = new Date().toISOString();
-  const vercelAccount = data.accounts.find((a) => a.provider === "vercel");
-
-  // Project linked (vercel_project_id present in integration_projects)
-  const linkedProject = data.projects.find((p) => p.vercel_project_id);
-  if (linkedProject?.vercel_project_id) {
-    const isLive = linkedProject.vercel_status === "ready" || linkedProject.vercel_status === "READY";
-    return {
-      id: "vercel",
-      label: "Vercel Project",
-      category: "Workspace",
-      state: isLive ? "live" : "linked",
-      detail: isLive
-        ? linkedProject.vercel_production_url || "Deployment live"
-        : "Project linked — no live deployment",
-      subState: isLive ? "Deployment live" : "Project linked",
-      lastChecked: now,
-      action: { label: "Manage", href: SETTINGS_CONNECTIONS },
-    };
-  }
-
-  // Account connected but no project linked
-  if (vercelAccount) {
-    return {
-      id: "vercel",
-      label: "Vercel Project",
-      category: "Workspace",
-      state: "authorized",
-      detail: vercelAccount.provider_account_name || "Account connected — no project linked",
-      subState: "Account connected",
-      lastChecked: now,
-      action: { label: "Link project", href: SETTINGS_CONNECTIONS },
-    };
-  }
-
-  return {
-    id: "vercel",
-    label: "Vercel Project",
-    category: "Workspace",
-    state: "not_connected",
-    detail: "Not linked",
-    lastChecked: now,
-    action: { label: "Connect Vercel", href: SETTINGS_CONNECTIONS },
-  };
-}
 
 /**
  * Resolve Supabase — labeled as "Project Integration" to avoid confusing
@@ -308,7 +216,7 @@ export function resolveSupabaseProject(data: RawDashboardData): WorkspaceConnect
 }
 
 export function resolveWorkspaceConnections(data: RawDashboardData): WorkspaceConnection[] {
-  return [resolveGitHub(data), resolveVercel(data), resolveSupabaseProject(data)];
+  return [resolveGitHub(data), resolveSupabaseProject(data)];
 }
 
 /* ------------------------------------------------------------------ */
@@ -597,7 +505,7 @@ export function buildHealthSummary(
 
   const parts: string[] = ["Platform operational"];
   if (optionalPending > 0) {
-    parts.push(`${optionalPending} optional integration${optionalPending === 1 ? "" : "s"} need setup`);
+    parts.push(`${optionalPending} optional integration${optionalPending === 1 ? " needs" : "s need"} setup`);
   }
   if (aiDown.length > 0) {
     parts.push(`${aiDown.length} AI provider${aiDown.length === 1 ? "" : "s"} need a key`);

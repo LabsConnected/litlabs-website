@@ -112,8 +112,7 @@ describe("project types — legacyRowToCanonical", () => {
       default_branch: "main",
       working_branch: "dev",
       workspace_id: null,
-      vercel_project_id: null,
-      status: "offline",
+            status: "offline",
       connection_status: "disconnected",
       connection_error: null,
       connected_at: null,
@@ -122,6 +121,7 @@ describe("project types — legacyRowToCanonical", () => {
       repository_full_name: "someorg/somerepo",
       repository_html_url: "https://github.com/someorg/somerepo",
       repository_private: false,
+      vercel_project_id: null,
       created_at: "2026-07-20T00:00:00Z",
       updated_at: "2026-07-20T00:00:00Z",
     };

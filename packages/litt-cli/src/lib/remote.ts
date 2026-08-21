@@ -48,6 +48,7 @@ import type {
   MissionMode,
 } from "@litt/agent-core";
 import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
+import { getTerminalUrl } from "./auth/auth-config.js";
 
 // Re-export for CLI consumers (index.ts imports these from remote.ts)
 export { isRemoteError, hasRemoteResult };
@@ -61,8 +62,6 @@ export interface RemoteDispatchOptions {
   cwd?: string;
   mode?: MissionMode;
 }
-
-const DEFAULT_TERMINAL_URL = "http://127.0.0.1:4001";
 
 // ─── Terminal JWT cache (per-process) ─────────────────────────────
 
@@ -83,7 +82,7 @@ let cachedTerminalToken: CachedToken | null = null;
  */
 export async function exchangeClerkToken(
   clerkToken: string,
-  terminalUrl: string = process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL,
+  terminalUrl: string = getTerminalUrl(),
 ): Promise<string> {
   const response = await fetch(`${terminalUrl}/api/token-exchange`, {
     method: "POST",
@@ -116,6 +115,12 @@ export async function exchangeClerkToken(
 /**
  * Get a valid terminal JWT, exchanging the Clerk token if needed.
  * Uses the cache if the token is still valid.
+ *
+ * The Clerk token is obtained from:
+ *   1. options.clerkToken (explicit override)
+ *   2. AuthSession.getAccessToken() — the real OAuth credential store
+ *      (auto-refreshes if the access token is expired)
+ *   3. LITT_CLERK_TOKEN env var (temporary — automated acceptance tests)
  */
 async function getTerminalToken(options: RemoteDispatchOptions): Promise<string> {
   // Pre-exchanged token takes priority
@@ -126,16 +131,23 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     return cachedTerminalToken.token;
   }
 
-  // Need to exchange a Clerk token
-  const clerkToken = options.clerkToken ?? process.env.LITT_CLERK_TOKEN ?? "";
+  // Get the Clerk token — prefer explicit override, then AuthSession
+  let clerkToken = options.clerkToken ?? "";
+  if (!clerkToken) {
+    // Use the AuthSession (OAuth credential store with auto-refresh)
+    const { getAuthSession } = await import("./auth/auth-session.js");
+    const authSession = getAuthSession();
+    clerkToken = await authSession.getAccessToken() ?? "";
+  }
+
   if (!clerkToken) {
     throw new Error(
-      "No Clerk token available. Set LITT_CLERK_TOKEN or run `litt login` " +
-      "to authenticate. Run without --remote for local execution.",
+      "Not authenticated. Run `litt login` to sign in. " +
+      "Run without --remote for local execution.",
     );
   }
 
-  const terminalUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+  const terminalUrl = options.terminalUrl ?? getTerminalUrl();
   return exchangeClerkToken(clerkToken, terminalUrl);
 }
 
@@ -156,7 +168,7 @@ export async function dispatchRemote(
   args: string[] = [],
   options: RemoteDispatchOptions = {},
 ): Promise<RemoteCommandResponse> {
-  const baseUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+  const baseUrl = options.terminalUrl ?? getTerminalUrl();
   const token = await getTerminalToken(options);
 
   const requestBody: RemoteCommandRequest = {
@@ -205,7 +217,7 @@ export async function dispatchRemote(
 export async function isRemoteAvailable(
   options: { terminalUrl?: string } = {},
 ): Promise<boolean> {
-  const baseUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+  const baseUrl = options.terminalUrl ?? getTerminalUrl();
   try {
     const response = await fetch(`${baseUrl}/health/live`, {
       signal: AbortSignal.timeout(5000),

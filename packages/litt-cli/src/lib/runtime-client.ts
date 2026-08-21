@@ -71,10 +71,9 @@ export type ErrorListener = (error: { code: string; message: string }) => void;
 // for a terminal JWT via /api/token-exchange, then uses that JWT.
 
 import { exchangeClerkToken, clearTerminalTokenCache } from "./remote.js";
+import { getTerminalUrl } from "./auth/auth-config.js";
 
 // ─── RuntimeClient ────────────────────────────────────────────────
-
-const DEFAULT_TERMINAL_URL = "http://127.0.0.1:4001";
 
 export class RuntimeClient {
   private socket: Socket | null = null;
@@ -123,7 +122,7 @@ export class RuntimeClient {
   private _exchangedToken: string | null = null;
 
   constructor(options: RuntimeClientOptions = {}) {
-    this.terminalUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+    this.terminalUrl = options.terminalUrl ?? getTerminalUrl();
     this.clerkToken = options.clerkToken ?? process.env.LITT_CLERK_TOKEN ?? "";
     this.terminalToken = options.terminalToken ?? null;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
@@ -141,19 +140,33 @@ export class RuntimeClient {
    * Get a terminal JWT for authentication. Uses the pre-exchanged
    * token if provided, otherwise exchanges the Clerk token via
    * /api/token-exchange. The client NEVER holds TERMINAL_AUTH_SECRET.
+   *
+   * The Clerk token is obtained from:
+   *   1. this.clerkToken (constructor option — explicit override)
+   *   2. AuthSession.getAccessToken() — the real OAuth credential store
+   *      (auto-refreshes if the access token is expired)
+   *   3. LITT_CLERK_TOKEN env var (temporary — automated acceptance tests)
    */
   private async getAuthToken(): Promise<string> {
     if (this.terminalToken) return this.terminalToken;
     if (this._exchangedToken) return this._exchangedToken;
 
-    if (!this.clerkToken) {
+    let clerkToken = this.clerkToken;
+    if (!clerkToken) {
+      // Use the AuthSession (OAuth credential store with auto-refresh)
+      const { getAuthSession } = await import("./auth/auth-session.js");
+      const authSession = getAuthSession();
+      clerkToken = await authSession.getAccessToken() ?? "";
+    }
+
+    if (!clerkToken) {
       throw new Error(
-        "No Clerk token available. Set LITT_CLERK_TOKEN or run `litt login`. " +
+        "Not authenticated. Run `litt login` to sign in. " +
         "Run without --remote for local execution.",
       );
     }
 
-    this._exchangedToken = await exchangeClerkToken(this.clerkToken, this.terminalUrl);
+    this._exchangedToken = await exchangeClerkToken(clerkToken, this.terminalUrl);
     return this._exchangedToken;
   }
 

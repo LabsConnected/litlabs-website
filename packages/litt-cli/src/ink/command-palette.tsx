@@ -81,7 +81,7 @@ export function CommandPalette({ actions, onSelect, onCancel, initialQuery = "" 
       if (filtered[selectedIdx]) onSelect(filtered[selectedIdx]);
     } else if (isEscape(key, input)) {
       onCancel();
-    } else if (isBackspace(key)) {
+    } else if (isBackspace(key, input)) {
       setQuery((prev) => prev.slice(0, -1));
       setSelectedIdx(0);
     } else if (isPrintable(input, key)) {

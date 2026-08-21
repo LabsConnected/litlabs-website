@@ -28,6 +28,7 @@ import { detectProject, fail, header, c } from "../lib/utils.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 import { getGitState } from "../lib/git-state.js";
 import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
+import { getAuthSession } from "../lib/auth/auth-session.js";
 
 // Belt-and-suspenders: the shell renders a SOFTWARE cursor (Ink hides the
 // native one). Paths that bypass Ink's unmount — e.g. the session SIGINT
@@ -175,6 +176,20 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   const gitModified = gitState.changed;
   const gitUntracked = gitState.untracked;
 
+  // ─── Auth state for header display ──────────────────────────────
+  // The auth gate in index.ts already verified the user is signed in
+  // before reaching here. We fetch the auth state for the header UX
+  // (email display). This is non-blocking — if it fails, the cockpit
+  // still launches with signedIn=true (the gate already confirmed it).
+  let authEmail: string | null = null;
+  try {
+    const authSession = getAuthSession();
+    const authState = await authSession.getAuthState();
+    authEmail = authState.email;
+  } catch {
+    // Non-fatal — cockpit launches without email in header
+  }
+
   // Launch the Ink cockpit, wrapped in an error boundary (spec §39).
   const { waitUntilExit } = render(
     React.createElement(CockpitErrorBoundary, null,
@@ -190,6 +205,8 @@ export async function cockpitCommand(args: string[]): Promise<number> {
         mode: session.getMode(),
         gitModified,
         gitUntracked,
+        authEmail,
+        signedIn: true,
       }),
     ),
   );

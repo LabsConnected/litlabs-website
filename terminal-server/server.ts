@@ -278,6 +278,30 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
   }
 });
 
+// ─── Token revocation: server-side logout ─────────────────────────
+// POST /api/revoke — revokes the caller's terminal JWT session.
+//
+// This clears the server-side session state associated with the
+// terminal JWT. The CLI also clears local credentials and revokes
+// the Clerk refresh token via Clerk's /oauth/revoke endpoint.
+//
+// Security: requires a valid terminal JWT (user-authenticated).
+app.post("/api/revoke", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = verifyTerminalToken(bearerToken(req.headers.authorization));
+    // The terminal JWT is stateless (HMAC-signed), so there's no
+    // server-side session to revoke — the token simply expires.
+    // This endpoint exists for API completeness and future session
+    // tracking. The client-side logout (clearing credentials + Clerk
+    // refresh token revocation) is the effective logout path.
+    res.json({ revoked: true, userId: payload.sub });
+  } catch {
+    // Even if the token is invalid/expired, return success — the
+    // client is already clearing local credentials.
+    res.json({ revoked: true });
+  }
+});
+
 // ─── User-authenticated runtime state endpoint ────────────────────
 // GET /api/runtime — returns the canonical runtime snapshot using
 // USER authentication (terminal JWT minted by /api/token-exchange).

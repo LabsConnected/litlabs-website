@@ -33,6 +33,7 @@ import {
   type RemoteDispatchOptions,
 } from "../lib/remote.js";
 import { resolveDispatch } from "../lib/dispatch.js";
+import { DEFAULT_TERMINAL_URL } from "../lib/auth/auth-config.js";
 
 // ─── Mock fetch ───────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ afterEach(() => {
 
 describe("dispatchRemote (pre-exchanged terminalToken)", () => {
   const TERMINAL_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImxpdHRyZWUtdGVybWluYWwifQ.signature";
-  const DEFAULT_URL = "http://127.0.0.1:4001";
+  const DEFAULT_URL = DEFAULT_TERMINAL_URL;
 
   it("sends a well-formed POST to /api/command with the command and args", async () => {
     fetchSpy.mockResolvedValue(
@@ -154,7 +155,7 @@ describe("dispatchRemote (pre-exchanged terminalToken)", () => {
 
     try {
       await dispatchRemote("test", [], { terminalToken: TERMINAL_JWT });
-      expect(fetchSpy.mock.calls[0][0]).toBe("http://127.0.0.1:4001/api/command");
+      expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/command`);
     } finally {
       if (oldEnv !== undefined) process.env.LITT_TERMINAL_URL = oldEnv;
     }
@@ -306,7 +307,10 @@ describe("dispatchRemote (pre-exchanged terminalToken)", () => {
 describe("token exchange (Clerk token → terminal JWT)", () => {
   const CLERK_TOKEN = "clerk-session-jwt-token-here";
   const TERMINAL_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.signature";
-  const DEFAULT_URL = "http://127.0.0.1:4001";
+  // exchangeClerkToken is called with an explicit URL below, so this
+  // local constant is fine for the direct-call test. dispatchRemote
+  // tests that don't pass terminalUrl use DEFAULT_TERMINAL_URL.
+  const EXCHANGE_URL = "http://127.0.0.1:4001";
 
   it("exchangeClerkToken sends Clerk token to /api/token-exchange", async () => {
     fetchSpy.mockResolvedValue(mockFetchResponse({
@@ -315,10 +319,10 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
       userId: "alice",
     }));
 
-    const token = await exchangeClerkToken(CLERK_TOKEN, DEFAULT_URL);
+    const token = await exchangeClerkToken(CLERK_TOKEN, EXCHANGE_URL);
 
     expect(token).toBe(TERMINAL_JWT);
-    expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_URL}/api/token-exchange`);
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${EXCHANGE_URL}/api/token-exchange`);
     const init = fetchSpy.mock.calls[0][1];
     expect(init?.method).toBe("POST");
     expect(init?.headers?.["Authorization"]).toBe(`Bearer ${CLERK_TOKEN}`);
@@ -339,10 +343,10 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
     await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    // First call: token exchange
-    expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_URL}/api/token-exchange`);
+    // First call: token exchange (uses DEFAULT_TERMINAL_URL — no terminalUrl option)
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/token-exchange`);
     // Second call: command dispatch with exchanged token
-    expect(fetchSpy.mock.calls[1][0]).toBe(`${DEFAULT_URL}/api/command`);
+    expect(fetchSpy.mock.calls[1][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/command`);
     const authHeader = fetchSpy.mock.calls[1][1]?.headers?.["Authorization"];
     expect(authHeader).toBe(`Bearer ${TERMINAL_JWT}`);
   });
@@ -375,7 +379,7 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
     delete process.env.LITT_CLERK_TOKEN;
 
     try {
-      await expect(dispatchRemote("test", [])).rejects.toThrow(/Clerk token/);
+      await expect(dispatchRemote("test", [])).rejects.toThrow(/Not authenticated/);
     } finally {
       if (oldEnv !== undefined) process.env.LITT_CLERK_TOKEN = oldEnv;
     }
@@ -396,8 +400,8 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
 
     try {
       await dispatchRemote("test", []);
-      // Should have exchanged the env-provided Clerk token
-      expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_URL}/api/token-exchange`);
+      // Should have exchanged the env-provided Clerk token (uses DEFAULT_TERMINAL_URL)
+      expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/token-exchange`);
     } finally {
       if (oldEnv === undefined) delete process.env.LITT_CLERK_TOKEN;
       else process.env.LITT_CLERK_TOKEN = oldEnv;
@@ -407,7 +411,7 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
   it("token exchange failure throws with server error", async () => {
     fetchSpy.mockResolvedValue(mockFetchResponse({ error: "Invalid Clerk token" }, 401));
 
-    await expect(exchangeClerkToken(CLERK_TOKEN, DEFAULT_URL)).rejects.toThrow(
+    await expect(exchangeClerkToken(CLERK_TOKEN, EXCHANGE_URL)).rejects.toThrow(
       /Invalid Clerk token/,
     );
   });
@@ -421,7 +425,7 @@ describe("isRemoteAvailable", () => {
 
     const result = await isRemoteAvailable();
     expect(result).toBe(true);
-    expect(fetchSpy.mock.calls[0][0]).toBe("http://127.0.0.1:4001/health/live");
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/health/live`);
   });
 
   it("returns false when /health/live responds non-200", async () => {

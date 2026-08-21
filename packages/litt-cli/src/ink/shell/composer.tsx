@@ -148,7 +148,7 @@ export function Composer({
     }
 
     // Backspace / Delete.
-    if (isBackspace(key)) {
+    if (isBackspace(key, input)) {
       if (pos === 0) return;
       const next = current.slice(0, pos - 1) + current.slice(pos);
       const nextCaret = Math.max(0, pos - 1);
