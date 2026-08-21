@@ -331,6 +331,10 @@ function validateAuthConfig(): void {
 }
 
 function setCacheHeaders(response: NextResponse, pathname: string): NextResponse {
+  if (pathname === "/") {
+    response.headers.set("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+  }
+
   if (["/docs", "/pricing"].includes(pathname)) {
     response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
   }

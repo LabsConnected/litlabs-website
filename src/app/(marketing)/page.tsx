@@ -9,6 +9,9 @@ import {
   buildMetadata,
 } from "@/lib/seo";
 
+// ISR — revalidate every 60s so CDN picks up new deploys without manual purge.
+export const revalidate = 60;
+
 export const metadata: Metadata = {
   ...buildMetadata({
     title: "Bring the idea. LiTT helps you build the rest.",
