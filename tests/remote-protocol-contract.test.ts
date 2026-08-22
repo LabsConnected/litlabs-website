@@ -40,9 +40,30 @@ import {
   hasRemoteResult,
   successResponse,
   errorResponse,
+  CommandRouter,
   type RemoteCommandRequest,
   type RemoteCommandResponse,
 } from "@litt/agent-core";
+
+// Mock doctor.js to avoid real diagnostic subprocesses that exceed the
+// default 5s test timeout under full-suite CPU contention. The protocol
+// contract tests verify request/response shape, not diagnostic execution.
+vi.mock("../terminal-server/doctor.js", () => ({
+  runDoctor: vi.fn().mockResolvedValue({
+    kind: "doctor",
+    ok: true,
+    data: { overall: "PASS", probes: [], summary: "ok" },
+    durationMs: 1,
+    message: "all probes passed",
+  }),
+  runDoctorDeep: vi.fn().mockResolvedValue({
+    kind: "doctor",
+    ok: true,
+    data: { overall: "PASS", probes: [], summary: "ok", deep: true },
+    durationMs: 1,
+    message: "all deep probes passed",
+  }),
+}));
 
 const repoRoot = path.resolve(__dirname, "..");
 
@@ -124,16 +145,28 @@ const STUB_STATUS_RESULT = {
   },
 };
 
+const STUB_DIFF_RESULT = {
+  command: "diff",
+  result: {
+    status: "success" as const,
+    success: true,
+    message: "no changes",
+    data: { staged: false, output: "" },
+  },
+};
+
 describe("Server: dispatchCommand contract", () => {
   let statusSpy: ReturnType<typeof vi.spyOn>;
+  let diffSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    const agentCore = require("@litt/agent-core") as typeof import("@litt/agent-core");
-    statusSpy = vi.spyOn(agentCore.CommandRouter.prototype, "status").mockResolvedValue(STUB_STATUS_RESULT);
+    statusSpy = vi.spyOn(CommandRouter.prototype, "status" as never).mockResolvedValue(STUB_STATUS_RESULT as never);
+    diffSpy = vi.spyOn(CommandRouter.prototype, "diff" as never).mockResolvedValue(STUB_DIFF_RESULT as never);
   });
 
   afterEach(() => {
     statusSpy?.mockRestore();
+    diffSpy?.mockRestore();
   });
 
   it("status remote request returns a RemoteCommandResponse with single-level result", async () => {
@@ -158,8 +191,7 @@ describe("Server: dispatchCommand contract", () => {
       command: "build",
       result: { status: "success" as const, success: true, message: "build ok", data: { exitCode: 0 } },
     };
-    const agentCore = await import("@litt/agent-core");
-    const routerSpy = vi.spyOn(agentCore.CommandRouter.prototype, "build").mockResolvedValue(stubResult);
+    const routerSpy = vi.spyOn(CommandRouter.prototype, "build" as never).mockResolvedValue(stubResult as never);
     try {
       const resp = await dispatchCommand(makeRequest({ command: "build" }));
       expect(resp.kind).toBe("build");
@@ -177,8 +209,7 @@ describe("Server: dispatchCommand contract", () => {
       command: "test",
       result: { status: "failed" as const, success: false, message: "2 tests failed", data: { exitCode: 1 } },
     };
-    const agentCore = await import("@litt/agent-core");
-    const routerSpy = vi.spyOn(agentCore.CommandRouter.prototype, "test").mockResolvedValue(stubResult);
+    const routerSpy = vi.spyOn(CommandRouter.prototype, "test" as never).mockResolvedValue(stubResult as never);
     try {
       const resp = await dispatchCommand(makeRequest({ command: "test" }));
       expect(resp.kind).toBe("test");
@@ -254,6 +285,19 @@ describe("Server: dispatchCommand contract", () => {
 // ─── runId correlation ────────────────────────────────────────────
 
 describe("runId correlation with runtime execution", () => {
+  let statusSpy: ReturnType<typeof vi.spyOn>;
+  let diffSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    statusSpy = vi.spyOn(CommandRouter.prototype, "status" as never).mockResolvedValue(STUB_STATUS_RESULT as never);
+    diffSpy = vi.spyOn(CommandRouter.prototype, "diff" as never).mockResolvedValue(STUB_DIFF_RESULT as never);
+  });
+
+  afterEach(() => {
+    statusSpy?.mockRestore();
+    diffSpy?.mockRestore();
+  });
+
   it("the bridge does NOT mint a second runId separate from the runtime", async () => {
     // The bridge generates runId and passes it THROUGH ctx.runId to the
     // registry handlers, which forward it to CommandRouter.check/test/build.
@@ -276,8 +320,7 @@ describe("runId correlation with runtime execution", () => {
       command: "check",
       result: { status: "success" as const, success: true, message: "check ok", data: {} },
     };
-    const agentCore = await import("@litt/agent-core");
-    const routerSpy = vi.spyOn(agentCore.CommandRouter.prototype, "check").mockResolvedValue(stubResult);
+    const routerSpy = vi.spyOn(CommandRouter.prototype, "check" as never).mockResolvedValue(stubResult as never);
     try {
       const resp = await dispatchCommand(
         makeRequest({ command: "check", requestId: "req-xyz" }),
@@ -381,13 +424,21 @@ describe("Client and server decode the same schema", () => {
   // server whose response is produced by the REAL dispatchCommand
   // (the server bridge). This proves both sides agree on the schema.
   const originalFetch = globalThis.fetch;
+  let statusSpy: ReturnType<typeof vi.spyOn>;
+  let diffSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.resetModules();
+    // Re-spied after resetModules — uses the statically imported
+    // CommandRouter (same prototype dispatchCommand uses).
+    statusSpy = vi.spyOn(CommandRouter.prototype, "status" as never).mockResolvedValue(STUB_STATUS_RESULT as never);
+    diffSpy = vi.spyOn(CommandRouter.prototype, "diff" as never).mockResolvedValue(STUB_DIFF_RESULT as never);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    statusSpy?.mockRestore();
+    diffSpy?.mockRestore();
     vi.restoreAllMocks();
   });
 
@@ -472,6 +523,19 @@ describe("Client and server decode the same schema", () => {
 // ─── PHASE 6: PLAN / ACT / AUTO mode enforcement ─────────────────
 
 describe("PHASE 6: Mode enforcement on remote path", () => {
+  let statusSpy: ReturnType<typeof vi.spyOn>;
+  let diffSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    statusSpy = vi.spyOn(CommandRouter.prototype, "status" as never).mockResolvedValue(STUB_STATUS_RESULT as never);
+    diffSpy = vi.spyOn(CommandRouter.prototype, "diff" as never).mockResolvedValue(STUB_DIFF_RESULT as never);
+  });
+
+  afterEach(() => {
+    statusSpy?.mockRestore();
+    diffSpy?.mockRestore();
+  });
+
   it("PLAN mode denies genuinely mutating /do (node = arbitrary_code)", async () => {
     const resp = await dispatchCommand(
       makeRequest({ command: "do", args: ["node", "-e", "1"], mode: "plan" }),
