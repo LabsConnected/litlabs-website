@@ -10,6 +10,7 @@
 
 import type { MutationEvidence } from "./mutation-evidence";
 import type { CheckEvidence } from "./check-evidence";
+import type { AcceptanceEvidence } from "./acceptance-evidence";
 
 export type RunStatus =
   | "planning"
@@ -30,7 +31,12 @@ export interface AcceptanceCriterion {
 export interface DeriveRunStatusInput {
   mutationEvidence: MutationEvidence[];
   checkEvidence: CheckEvidence[];
-  acceptanceCriteria: AcceptanceCriterion[];
+  /** Acceptance evidence records (Phase 9). If provided, these are used
+   *  instead of the simplified acceptanceCriteria. */
+  acceptanceEvidence?: AcceptanceEvidence[];
+  /** Simplified acceptance criteria (Phase 8 backward compat).
+   *  Ignored if acceptanceEvidence is provided. */
+  acceptanceCriteria?: AcceptanceCriterion[];
   /** Blocking events that prevent ready-for-review (e.g. unresolved approval denials) */
   unresolvedBlockingEvents: Array<{ id: string; type: string }>;
   /** Whether checks are currently running */
@@ -48,6 +54,12 @@ export interface DeriveRunStatusResult {
   skippedRequiredChecks: CheckEvidence[];
   /** Checks that are stale (code changed after check ran) */
   staleChecks: CheckEvidence[];
+  /** Required acceptance criteria that failed */
+  failedAcceptanceCriteria: AcceptanceEvidence[];
+  /** Required acceptance criteria that were skipped or unverifiable */
+  skippedAcceptanceCriteria: AcceptanceEvidence[];
+  /** Acceptance evidence that is stale */
+  staleAcceptanceEvidence: AcceptanceEvidence[];
 }
 
 /**
@@ -63,9 +75,14 @@ export interface DeriveRunStatusResult {
  * 7. No stale checks
  */
 export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusResult {
-  const { mutationEvidence, checkEvidence, acceptanceCriteria, unresolvedBlockingEvents, checksRunning } = input;
+  const { mutationEvidence, checkEvidence, acceptanceEvidence, acceptanceCriteria, unresolvedBlockingEvents, checksRunning } = input;
 
   const blockers: string[] = [];
+  const emptyResult = {
+    failedAcceptanceCriteria: [] as AcceptanceEvidence[],
+    skippedAcceptanceCriteria: [] as AcceptanceEvidence[],
+    staleAcceptanceEvidence: [] as AcceptanceEvidence[],
+  };
 
   // 1. Must have mutations
   if (mutationEvidence.length === 0) {
@@ -76,6 +93,7 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks: [],
       skippedRequiredChecks: [],
       staleChecks: [],
+      ...emptyResult,
     };
   }
 
@@ -90,6 +108,7 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks: [],
       skippedRequiredChecks: [],
       staleChecks: [],
+      ...emptyResult,
     };
   }
 
@@ -106,6 +125,7 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks: [],
       skippedRequiredChecks: [],
       staleChecks: [],
+      ...emptyResult,
     };
   }
 
@@ -137,6 +157,7 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks,
       skippedRequiredChecks,
       staleChecks,
+      ...emptyResult,
     };
   }
 
@@ -150,13 +171,56 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks,
       skippedRequiredChecks,
       staleChecks,
+      ...emptyResult,
     };
   }
 
-  // 9. All acceptance criteria must be verified
-  const unverifiedCriteria = acceptanceCriteria.filter((c) => c.status !== "verified");
-  if (unverifiedCriteria.length > 0) {
-    blockers.push(`${unverifiedCriteria.length} acceptance criteria not verified`);
+  // 9. Acceptance criteria verification
+  //
+  // If acceptanceEvidence is provided (Phase 9), use it.
+  // Otherwise fall back to simplified acceptanceCriteria (Phase 8 compat).
+  let failedAcceptanceCriteria: AcceptanceEvidence[] = [];
+  let skippedAcceptanceCriteria: AcceptanceEvidence[] = [];
+  let staleAcceptanceEvidence: AcceptanceEvidence[] = [];
+
+  if (acceptanceEvidence && acceptanceEvidence.length > 0) {
+    // Phase 9: use structured acceptance evidence
+
+    // 9a. Find stale acceptance evidence
+    staleAcceptanceEvidence = acceptanceEvidence.filter((e) => e.stale);
+    if (staleAcceptanceEvidence.length > 0) {
+      blockers.push(`${staleAcceptanceEvidence.length} acceptance evidence record(s) stale`);
+    }
+
+    // 9b. Required acceptance criteria must be verified
+    const requiredAcceptance = acceptanceEvidence.filter((e) => e.required && !e.stale);
+
+    failedAcceptanceCriteria = requiredAcceptance.filter((e) => e.status === "failed");
+    if (failedAcceptanceCriteria.length > 0) {
+      blockers.push(`${failedAcceptanceCriteria.length} required acceptance criterion/criteria failed`);
+    }
+
+    // Skipped or unverifiable required criteria
+    skippedAcceptanceCriteria = requiredAcceptance.filter(
+      (e) => e.status === "skipped" || e.status === "queued" || e.status === "verifying",
+    );
+    if (skippedAcceptanceCriteria.length > 0) {
+      blockers.push(`${skippedAcceptanceCriteria.length} required acceptance criterion/criteria not verified`);
+    }
+
+    // Required criteria with no evidence refs cannot be verified
+    const noEvidence = requiredAcceptance.filter(
+      (e) => e.status === "verified" && e.evidenceRefs.length === 0,
+    );
+    if (noEvidence.length > 0) {
+      blockers.push(`${noEvidence.length} required acceptance criterion/criteria verified without evidence references`);
+    }
+  } else if (acceptanceCriteria && acceptanceCriteria.length > 0) {
+    // Phase 8 backward compat: simplified criteria
+    const unverifiedCriteria = acceptanceCriteria.filter((c) => c.status !== "verified");
+    if (unverifiedCriteria.length > 0) {
+      blockers.push(`${unverifiedCriteria.length} acceptance criteria not verified`);
+    }
   }
 
   // 10. No unresolved blocking events
@@ -173,6 +237,9 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
       failedRequiredChecks,
       skippedRequiredChecks,
       staleChecks,
+      failedAcceptanceCriteria,
+      skippedAcceptanceCriteria,
+      staleAcceptanceEvidence,
     };
   }
 
@@ -183,5 +250,8 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
     failedRequiredChecks: [],
     skippedRequiredChecks: [],
     staleChecks: [],
+    failedAcceptanceCriteria: [],
+    skippedAcceptanceCriteria: [],
+    staleAcceptanceEvidence: [],
   };
 }

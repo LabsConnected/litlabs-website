@@ -30,6 +30,7 @@ import StudioProjectFiles from "./StudioProjectFiles";
 import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { StudioChangesPanel } from "./StudioChangesPanel";
 import { StudioChecksPanel } from "./StudioChecksPanel";
+import { StudioAcceptancePanel } from "./StudioAcceptancePanel";
 import { useRunEvidence } from "../hooks/useRunEvidence";
 
 /**
@@ -102,7 +103,7 @@ function InspectorSection({ title, children }: { title: string; children: React.
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
   const { capabilities, messages } = data;
   const lastMessage = messages[messages.length - 1];
-  const { evidence, checks, loading: evidenceLoading } = useRunEvidence({
+  const { evidence, checks, acceptance, loading: evidenceLoading } = useRunEvidence({
     projectId: capabilities.projectId ?? null,
   });
 
@@ -152,7 +153,12 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "approvals") {
-    return <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />;
+    return (
+      <div className="space-y-3">
+        <StudioAcceptancePanel acceptance={acceptance} loading={evidenceLoading} />
+        <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />
+      </div>
+    );
   }
 
   if (tab === "browser") {

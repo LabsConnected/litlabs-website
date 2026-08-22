@@ -4,11 +4,13 @@ import { useEffect, useState, useCallback } from "react";
 import type { MutationEvidence } from "@/lib/litt-intelligence/mutation-evidence";
 import type { RunEvent } from "@/lib/litt-intelligence/run-events";
 import type { CheckEvidence } from "@/lib/litt-intelligence/check-evidence";
+import type { AcceptanceEvidence } from "@/lib/litt-intelligence/acceptance-evidence";
 
 interface EvidenceResponse {
   evidence: MutationEvidence[];
   events: RunEvent[];
   checks: CheckEvidence[];
+  acceptance: AcceptanceEvidence[];
 }
 
 interface UseRunEvidenceOptions {
@@ -22,6 +24,7 @@ interface UseRunEvidenceResult {
   evidence: MutationEvidence[];
   events: RunEvent[];
   checks: CheckEvidence[];
+  acceptance: AcceptanceEvidence[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -44,6 +47,7 @@ export function useRunEvidence({
   const [evidence, setEvidence] = useState<MutationEvidence[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [checks, setChecks] = useState<CheckEvidence[]>([]);
+  const [acceptance, setAcceptance] = useState<AcceptanceEvidence[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +56,7 @@ export function useRunEvidence({
       setEvidence([]);
       setEvents([]);
       setChecks([]);
+      setAcceptance([]);
       return;
     }
 
@@ -71,6 +76,7 @@ export function useRunEvidence({
       setEvidence(data.evidence ?? []);
       setEvents(data.events ?? []);
       setChecks(data.checks ?? []);
+      setAcceptance(data.acceptance ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load evidence");
     } finally {
@@ -89,5 +95,5 @@ export function useRunEvidence({
     return () => clearInterval(interval);
   }, [refresh, pollIntervalMs]);
 
-  return { evidence, events, checks, loading, error, refresh };
+  return { evidence, events, checks, acceptance, loading, error, refresh };
 }
