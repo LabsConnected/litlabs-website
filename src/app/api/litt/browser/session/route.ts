@@ -12,6 +12,9 @@ import {
   dbGetActions,
   takeScreenshot,
   closeIdleSessions,
+  cancelSessionAction,
+  getSessionErrors,
+  clearSessionErrors,
 } from "@/lib/litt-intelligence/browser-session-manager";
 
 export const runtime = "nodejs";
@@ -148,6 +151,33 @@ async function handler(req: NextRequest) {
         if (!screenshot) return NextResponse.json({ error: "Failed to capture screenshot" }, { status: 500 });
 
         return NextResponse.json({ screenshot });
+      }
+
+      // ── Cancel in-flight action (Stop button) ─────────────────
+      case "cancel": {
+        const sessionId = body.sessionId as string;
+        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+
+        const cancelled = cancelSessionAction(sessionId);
+        return NextResponse.json({ cancelled });
+      }
+
+      // ── Get console/network errors ────────────────────────────
+      case "get_errors": {
+        const sessionId = body.sessionId as string;
+        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+
+        const errors = getSessionErrors(sessionId);
+        return NextResponse.json(errors);
+      }
+
+      // ── Clear console/network errors ──────────────────────────
+      case "clear_errors": {
+        const sessionId = body.sessionId as string;
+        if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+
+        clearSessionErrors(sessionId);
+        return NextResponse.json({ success: true });
       }
 
       default:

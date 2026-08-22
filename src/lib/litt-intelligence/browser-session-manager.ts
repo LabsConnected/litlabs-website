@@ -81,11 +81,20 @@ interface ActiveSession {
   stagehand: Stagehand;
   session: BrowserSession;
   lastActivity: number;
+  /** AbortController for the currently-running action, if any. */
+  abortController: AbortController | null;
+  /** Console errors captured from the page. */
+  consoleErrors: string[];
+  /** Network errors captured from the page. */
+  networkErrors: string[];
 }
 
 const activeSessions = new Map<string, ActiveSession>();
 
 const SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Maximum number of console/network errors to retain per session. */
+const MAX_ERRORS = 100;
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -252,6 +261,38 @@ export async function startSession(
 
   await stagehand.init();
 
+  // Attach console + network error listeners to the first page
+  const consoleErrors: string[] = [];
+  const networkErrors: string[] = [];
+  try {
+    // Use a loosely-typed page reference — Stagehand's Page type is narrower
+    // than Playwright's, but the runtime supports all Playwright events.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const page: any = stagehand.context.pages()[0];
+    if (page) {
+      // Capture console errors (severity === "error")
+      page.on("console", (msg: { type(): string; text(): string }) => {
+        if (msg.type() === "error") {
+          consoleErrors.push(msg.text());
+          if (consoleErrors.length > MAX_ERRORS) consoleErrors.shift();
+        }
+      });
+      // Capture uncaught page errors
+      page.on("pageerror", (err: Error) => {
+        consoleErrors.push(`Uncaught: ${err.message}`);
+        if (consoleErrors.length > MAX_ERRORS) consoleErrors.shift();
+      });
+      // Capture failed network requests
+      page.on("requestfailed", (req: { url(): string; failure(): { errorText: string } | null }) => {
+        const failure = req.failure();
+        networkErrors.push(`${req.url()} — ${failure?.errorText ?? "failed"}`);
+        if (networkErrors.length > MAX_ERRORS) networkErrors.shift();
+      });
+    }
+  } catch {
+    // Listeners are best-effort — don't fail session start if they can't attach
+  }
+
   const browserbaseSessionId = stagehand.browserbaseSessionID ?? null;
   const liveViewUrl = browserbaseSessionId
     ? `https://www.browserbase.com/sessions/${browserbaseSessionId}`
@@ -285,6 +326,9 @@ export async function startSession(
     stagehand,
     session,
     lastActivity: Date.now(),
+    abortController: null,
+    consoleErrors,
+    networkErrors,
   });
 
   return session;
@@ -398,6 +442,11 @@ export async function closeSession(
 ): Promise<void> {
   const active = activeSessions.get(sessionId);
   if (active) {
+    // Cancel any in-flight action before closing
+    if (active.abortController) {
+      active.abortController.abort();
+      active.abortController = null;
+    }
     await active.stagehand.close().catch(() => {});
     activeSessions.delete(sessionId);
   }
@@ -406,6 +455,47 @@ export async function closeSession(
     status: "closed",
     closed_at: new Date().toISOString(),
   });
+}
+
+/**
+ * Cancel the currently-running browser action for a session.
+ * Returns true if an action was cancelled, false if no action was running.
+ *
+ * This is the "Stop" button's backend — it aborts the AbortController
+ * associated with the in-flight executeBrowserAction() call, causing
+ * the action to throw an AbortError which is caught and converted to
+ * a "cancelled" result.
+ */
+export function cancelSessionAction(sessionId: string): boolean {
+  const active = activeSessions.get(sessionId);
+  if (!active || !active.abortController) return false;
+  active.abortController.abort();
+  return true;
+}
+
+/**
+ * Get console and network errors captured for a session.
+ */
+export function getSessionErrors(sessionId: string): {
+  consoleErrors: string[];
+  networkErrors: string[];
+} {
+  const active = activeSessions.get(sessionId);
+  if (!active) return { consoleErrors: [], networkErrors: [] };
+  return {
+    consoleErrors: [...active.consoleErrors],
+    networkErrors: [...active.networkErrors],
+  };
+}
+
+/**
+ * Clear console and network errors for a session.
+ */
+export function clearSessionErrors(sessionId: string): void {
+  const active = activeSessions.get(sessionId);
+  if (!active) return;
+  active.consoleErrors = [];
+  active.networkErrors = [];
 }
 
 /**
@@ -474,15 +564,38 @@ export async function executeBrowserAction(
     };
   }
 
+  // Set up cancellation — each action gets its own AbortController.
+  // cancelSessionAction() will abort it, causing the action to throw
+  // an AbortError which we catch and convert to a "cancelled" result.
+  const active = activeSessions.get(sessionId);
+  const abortController = new AbortController();
+  if (active) {
+    active.abortController = abortController;
+  }
+
   let result: BrowserActionResult;
   try {
     result = await fn(stagehand);
   } catch (err) {
-    result = {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-      durationMs: Date.now() - start,
-    };
+    // Check if this was a cancellation
+    if (abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+      result = {
+        success: false,
+        error: "Action cancelled by user",
+        durationMs: Date.now() - start,
+      };
+    } else {
+      result = {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+      };
+    }
+  } finally {
+    // Clear the abort controller so cancelSessionAction knows nothing is running
+    if (active) {
+      active.abortController = null;
+    }
   }
 
   // Ensure durationMs is set
