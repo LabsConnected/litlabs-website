@@ -104,6 +104,47 @@
   --studio-anim-normal: 200ms;
   --studio-anim-slow: 300ms;
 
+  /* Phase 10.2 — Consolidated Studio design tokens */
+  --studio-canvas: #08060f;
+  --studio-shell: #0d0916;
+  --studio-surface: #120e1c;
+  --studio-card: rgba(20, 15, 31, 0.72);
+  --studio-elevated: rgba(29, 20, 44, 0.85);
+  --studio-overlay: rgba(8, 6, 15, 0.80);
+  --studio-text-primary: #f5f1fa;
+  --studio-text-secondary: #a29aaf;
+  --studio-text-muted: #8a8299;
+  --studio-text-disabled: #5a5468;
+  --studio-border: rgba(155, 77, 255, 0.12);
+  --studio-border-strong: rgba(155, 77, 255, 0.22);
+  --studio-border-neutral: rgba(255, 255, 255, 0.06);
+  --studio-border-focused: rgba(155, 77, 255, 0.45);
+  --studio-violet: #9b4dff;
+  --studio-violet-soft: rgba(155, 77, 255, 0.15);
+  --studio-blue: #5b9bf5;
+  --studio-blue-soft: rgba(91, 155, 245, 0.12);
+  --studio-green: #4ade80;
+  --studio-green-soft: rgba(74, 222, 128, 0.10);
+  --studio-amber: #fbb244;
+  --studio-amber-soft: rgba(251, 178, 68, 0.10);
+  --studio-red: #f87171;
+  --studio-red-soft: rgba(248, 113, 113, 0.10);
+  --studio-gray: #6b7280;
+  --studio-gray-soft: rgba(107, 114, 128, 0.10);
+  --studio-radius-sm: 4px;
+  --studio-radius-md: 6px;
+  --studio-radius-lg: 8px;
+  --studio-radius-xl: 12px;
+  --studio-radius-full: 9999px;
+  --studio-space-1: 2px;
+  --studio-space-2: 4px;
+  --studio-space-4: 8px;
+  --studio-space-6: 12px;
+  --studio-space-8: 16px;
+  --studio-space-12: 24px;
+  --studio-space-16: 32px;
+  --studio-space-20: 40px;
+
   /* ============================================================
      LiTTree Glass OS — Unified design tokens
      Dark solid base + selective glass panels + purple AI glow
@@ -3454,6 +3495,17 @@ main {
 
 .litt-flicker-error {
   animation: litt-flicker-error 0.8s ease-in-out infinite;
+}
+
+/* ─── Phase 10.2 — Primitive animations ─── */
+
+@keyframes studio-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes studio-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
