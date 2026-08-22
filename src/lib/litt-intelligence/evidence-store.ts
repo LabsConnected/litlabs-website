@@ -50,7 +50,7 @@ export interface ApprovalStore {
 
 // ─── In-Memory Implementations ───────────────────────────────────
 
-class InMemoryEvidenceStore implements MutationEvidenceStore {
+export class InMemoryEvidenceStore implements MutationEvidenceStore {
   private records = new Map<string, MutationEvidence>();
 
   async insert(evidence: MutationEvidence): Promise<void> {
@@ -76,7 +76,7 @@ class InMemoryEvidenceStore implements MutationEvidenceStore {
   }
 }
 
-class InMemoryApprovalStore implements ApprovalStore {
+export class InMemoryApprovalStore implements ApprovalStore {
   private tokens = new Map<string, ApprovalToken>();
 
   async issue(input: {
@@ -132,26 +132,40 @@ class InMemoryApprovalStore implements ApprovalStore {
   }
 }
 
-// ─── Singletons (swapped for Supabase-backed in production) ──────
+// ─── Singletons ──────────────────────────────────────────────────
+//
+// In production, these use Supabase-backed persistent stores.
+// In tests (resetStores()), these use in-memory stores.
+// The mutation-service.ts calls getEvidenceStore()/getApprovalStore()
+// which are the canonical entry points.
 
 let evidenceStoreInstance: MutationEvidenceStore | null = null;
 let approvalStoreInstance: ApprovalStore | null = null;
 
 export function getEvidenceStore(): MutationEvidenceStore {
   if (!evidenceStoreInstance) {
-    evidenceStoreInstance = new InMemoryEvidenceStore();
+    // Lazy-load persistent store to avoid circular import at module load
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createPersistentEvidenceStore } = require("./persistent-evidence-store") as {
+      createPersistentEvidenceStore: () => MutationEvidenceStore;
+    };
+    evidenceStoreInstance = createPersistentEvidenceStore();
   }
   return evidenceStoreInstance;
 }
 
 export function getApprovalStore(): ApprovalStore {
   if (!approvalStoreInstance) {
-    approvalStoreInstance = new InMemoryApprovalStore();
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createPersistentApprovalStore } = require("./persistent-evidence-store") as {
+      createPersistentApprovalStore: () => ApprovalStore;
+    };
+    approvalStoreInstance = createPersistentApprovalStore();
   }
   return approvalStoreInstance;
 }
 
-/** Reset stores — for testing only */
+/** Reset stores — for testing only. Forces in-memory. */
 export function resetStores(): void {
   evidenceStoreInstance = new InMemoryEvidenceStore();
   approvalStoreInstance = new InMemoryApprovalStore();

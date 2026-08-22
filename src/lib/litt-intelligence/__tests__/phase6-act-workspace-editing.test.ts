@@ -344,6 +344,11 @@ describe("Phase 6 — ACT workspace editing acceptance test", () => {
       expect(succeeded!.paths).toEqual(["src/example.ts"]);
       expect(succeeded!.startedAt).toBeDefined();
       expect(succeeded!.completedAt).toBeDefined();
+      // SHA semantics: uncommitted edit doesn't change HEAD
+      expect(succeeded!.headShaAfter).toBe(succeeded!.headShaBefore);
+      // Working tree should be dirty (uncommitted changes)
+      expect(succeeded!.workingTreeDirty).toBe(true);
+      expect(succeeded!.workingTreeDiffHash).toBeDefined();
     });
 
     it("step 13: main was never modified", async () => {
@@ -383,6 +388,33 @@ describe("Phase 6 — ACT workspace editing acceptance test", () => {
           transport,
         ),
       ).rejects.toThrow(MutationError);
+    });
+  });
+
+  describe("negative: symlink escape", () => { beforeEach(() => resetStores());
+    it("rejects symlink inside workspace pointing outside", () => {
+      // Create a symlink inside the workspace that points outside
+      const { symlinkSync } = require("fs");
+      const outsideTarget = mkdtempSync(join(tmpdir(), "litt-outside-"));
+      const symlinkPath = join(repoDir, "src", "evil-link");
+      try {
+        // Remove if exists from previous test
+        try { rmSync(symlinkPath); } catch { /* ok */ }
+        symlinkSync(outsideTarget, symlinkPath, "dir");
+      } catch {
+        // Symlink creation may fail on Windows without admin — skip test
+        rmSync(outsideTarget, { recursive: true, force: true });
+        return;
+      }
+
+      // Try to write through the symlink
+      const validation = validateWorkspacePath("src/evil-link/escape.txt", repoDir);
+      expect(validation.valid).toBe(false);
+      expect(validation.reason).toContain("symlink");
+
+      // Cleanup
+      try { rmSync(symlinkPath); } catch { /* ok */ }
+      rmSync(outsideTarget, { recursive: true, force: true });
     });
   });
 

@@ -61,6 +61,15 @@ export interface MutationEvidence {
   /** Unified diff of the mutation (may be truncated for large diffs) */
   diff?: string;
 
+  /**
+   * Hash of the working-tree diff (git diff) captured after the mutation.
+   * This changes when the worktree changes, even if HEAD does not.
+   * Distinct from headSha which only changes on commit.
+   */
+  workingTreeDiffHash?: string;
+  /** Whether the working tree has uncommitted changes after the mutation */
+  workingTreeDirty?: boolean;
+
   /** Status of the mutation */
   status: MutationStatus;
   /** When the mutation started */

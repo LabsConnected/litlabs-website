@@ -15,8 +15,9 @@
  */
 
 import { randomUUID } from "crypto";
-import { resolve, relative, isAbsolute, sep } from "path";
+import { resolve, relative, isAbsolute, sep, dirname } from "path";
 import { createHash } from "crypto";
+import { realpathSync, existsSync } from "fs";
 import type { WorkspaceTransport } from "./workspace-transport";
 import type { MutationEvidence } from "./mutation-evidence";
 import { isProtectedBranch } from "./mutation-evidence";
@@ -54,12 +55,23 @@ export class MutationError extends Error {
 // ─── Path Validation ─────────────────────────────────────────────
 
 /**
- * Validate that a path resolves inside the workspace root.
+ * Validate that a path resolves inside the workspace root, with
+ * symlink containment.
+ *
  * Rejects:
  * - Absolute paths outside workspace root
  * - Path traversal (../)
- * - Symlink escapes (checked by the terminal server, but we also
- *   reject obvious traversal patterns here as defense-in-depth)
+ * - Symlink escapes (a symlink inside the workspace whose target
+ *   points outside the real workspace root)
+ *
+ * Symlink containment is enforced by:
+ * 1. Resolving the workspace root with realpathSync (collapses symlinks)
+ * 2. Resolving the target's nearest existing parent with realpathSync
+ * 3. Proving the resolved parent is inside the real workspace root
+ *
+ * This is defense-in-depth — the terminal server also enforces
+ * workspace boundaries. But this prevents symlink escapes from
+ * reaching the server in the first place.
  */
 export function validateWorkspacePath(
   path: string,
@@ -79,12 +91,51 @@ export function validateWorkspacePath(
     ? resolve(path)
     : resolve(workspaceRoot, path);
 
-  // Check the resolved path is inside workspace root
+  // Check the resolved path is inside workspace root (lexical check)
   const rel = relative(workspaceRoot, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     return {
       valid: false,
       reason: `Path "${path}" resolves outside workspace root`,
+    };
+  }
+
+  // Symlink containment: resolve the real workspace root and the
+  // target's nearest existing parent, then verify containment.
+  let realWorkspaceRoot: string;
+  try {
+    realWorkspaceRoot = realpathSync(workspaceRoot);
+  } catch {
+    // Workspace root doesn't exist or can't be resolved — fail safe
+    return { valid: false, reason: "Workspace root does not exist or cannot be resolved" };
+  }
+
+  // Find the nearest existing ancestor of the target path.
+  // The target file may not exist yet (we're creating it), but its
+  // parent directory should exist or be creatable inside the workspace.
+  let targetToResolve = resolved;
+  while (!existsSync(targetToResolve)) {
+    const parent = dirname(targetToResolve);
+    if (parent === targetToResolve) {
+      // Reached filesystem root without finding an existing directory
+      return { valid: false, reason: "Cannot resolve target path — no existing parent found" };
+    }
+    targetToResolve = parent;
+  }
+
+  let realTarget: string;
+  try {
+    realTarget = realpathSync(targetToResolve);
+  } catch {
+    return { valid: false, reason: "Target path cannot be resolved (symlink loop or permission denied)" };
+  }
+
+  // Verify the real target is inside the real workspace root
+  const realRel = relative(realWorkspaceRoot, realTarget);
+  if (realRel.startsWith("..") || isAbsolute(realRel)) {
+    return {
+      valid: false,
+      reason: `Path "${path}" escapes workspace root via symlink (real target: ${realTarget})`,
     };
   }
 
@@ -230,16 +281,32 @@ export async function executeMutation(
     }
   }
 
-  // ── 9. Capture git diff ───────────────────────────────────────
+  // ── 9. Capture git diff + working tree state ──────────────────
   let diff: string | undefined;
+  let workingTreeDiffHash: string | undefined;
+  let workingTreeDirty: boolean | undefined;
   try {
     const diffResult = await transport.gitDiff({ path: paths.join(" ") });
     diff = diffResult.diff || undefined;
+    // Hash the diff content to detect worktree changes independent of HEAD
+    if (diff) {
+      workingTreeDiffHash = createHash("sha256").update(diff, "utf-8").digest("hex");
+    }
   } catch {
     // Diff capture is best-effort — don't fail the mutation
   }
+  // Check if the working tree is dirty (has uncommitted changes)
+  try {
+    const postStatus = await transport.gitStatus();
+    workingTreeDirty = !postStatus.clean;
+  } catch {
+    // Best-effort
+  }
 
   // ── 10. Capture headShaAfter ──────────────────────────────────
+  // NOTE: For uncommitted file edits, headShaAfter === headShaBefore.
+  // HEAD only changes on commit. The workingTreeDiffHash + workingTreeDirty
+  // fields capture the worktree state that HEAD cannot.
   let headShaAfter: string | undefined;
   try {
     const log = await transport.gitLog({ maxCount: 1 });
@@ -266,6 +333,8 @@ export async function executeMutation(
       afterHashes,
       diff,
       headShaAfter,
+      workingTreeDiffHash,
+      workingTreeDirty,
       completedAt: new Date().toISOString(),
     });
     throw new MutationError(
@@ -280,6 +349,8 @@ export async function executeMutation(
     afterHashes,
     diff,
     headShaAfter,
+    workingTreeDiffHash,
+    workingTreeDirty,
     completedAt: new Date().toISOString(),
   });
 
