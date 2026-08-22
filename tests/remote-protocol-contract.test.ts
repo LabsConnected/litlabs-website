@@ -110,7 +110,32 @@ describe("Remote protocol: shared schema", () => {
 
 // ─── Server: dispatchCommand (the bridge) ─────────────────────────
 
+// Stub result for CommandRouter.status — avoids running real git
+// subprocesses that can exceed the default 5s test timeout under
+// full-suite CPU contention. The protocol contract tests verify
+// request/response shape, not subprocess execution.
+const STUB_STATUS_RESULT = {
+  command: "status",
+  result: {
+    status: "success" as const,
+    success: true,
+    message: "branch=main changes=0",
+    data: { branch: "main", changeCount: 0, root: repoRoot, isGitRepo: true },
+  },
+};
+
 describe("Server: dispatchCommand contract", () => {
+  let statusSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    const agentCore = require("@litt/agent-core") as typeof import("@litt/agent-core");
+    statusSpy = vi.spyOn(agentCore.CommandRouter.prototype, "status").mockResolvedValue(STUB_STATUS_RESULT);
+  });
+
+  afterEach(() => {
+    statusSpy?.mockRestore();
+  });
+
   it("status remote request returns a RemoteCommandResponse with single-level result", async () => {
     const resp = await dispatchCommand(makeRequest({ command: "status" }));
     expect(resp.ok).toBe(true);
