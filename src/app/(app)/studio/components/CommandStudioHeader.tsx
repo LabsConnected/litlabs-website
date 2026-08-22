@@ -57,6 +57,8 @@ export default function CommandStudioHeader({
   onOpenTerminalAction,
   onOpenInspectorAction,
   onProjectSelectAction,
+  onStartBlankAction,
+  onConnectRepoAction,
   onClearChatAction,
   onNewChatAction,
   onDeleteChatAction,
@@ -79,6 +81,8 @@ export default function CommandStudioHeader({
   onOpenTerminalAction?: () => void;
   onOpenInspectorAction?: () => void;
   onProjectSelectAction?: (projectId: string) => void;
+  onStartBlankAction?: () => void;
+  onConnectRepoAction?: () => void;
   onClearChatAction?: () => void;
   onNewChatAction?: () => void;
   onDeleteChatAction?: () => void;
@@ -194,6 +198,8 @@ export default function CommandStudioHeader({
         projectId={capabilities.projectId}
         projectName={capabilities.projectName}
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
+        onStartBlank={onStartBlankAction}
+        onConnectRepo={onConnectRepoAction}
       />
 
       {/* Branch — only when a repo is connected; repo name is already

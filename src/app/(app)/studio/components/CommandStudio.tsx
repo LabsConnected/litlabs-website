@@ -768,6 +768,20 @@ function CommandStudioContent() {
           // ignore
         }
       }
+      // Persist as the active project server-side so it survives reload/new tab
+      try {
+        await fetch("/api/project/active", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ projectId: project.id }),
+        });
+      } catch {
+        // Non-fatal — localStorage + URL still work for the current session.
+      }
       // Update URL with project ID
       const params = new URLSearchParams(searchParams.toString());
       params.set("project", project.id);
@@ -792,14 +806,34 @@ function CommandStudioContent() {
     }
   }, []);
 
-  const handleSelectProject = useCallback((projectId: string) => {
+  const handleSelectProject = useCallback(async (projectId: string) => {
+    // Persist the active project server-side so it survives reload/new tab.
+    // The URL update is for the current session; the API call is for persistence.
+    try {
+      const token = await getToken?.();
+      await fetch("/api/project/active", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ projectId }),
+      });
+    } catch {
+      // Non-fatal — URL update still works for the current session.
+      // The server-side persistence will retry on next selection.
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", projectId);
     params.delete("conversation");
     params.delete("agentInstance");
     setWorkspaceRevision(0);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [pathname, router, searchParams]);
+    // Refresh runtime so project identity propagates immediately
+    void refreshCapabilities();
+  }, [pathname, router, searchParams, getToken, refreshCapabilities]);
 
   // Header actions — truthful.
   const handlePreview = useCallback(() => {
@@ -1207,6 +1241,8 @@ function CommandStudioContent() {
           onOpenTerminalAction={handleOpenTerminal}
           onOpenInspectorAction={handleOpenContextInspector}
           onProjectSelectAction={handleSelectProject}
+          onStartBlankAction={handleStartBlank}
+          onConnectRepoAction={handleConnectRepo}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
           onDeleteChatAction={() => { void conversation.deleteConversation(); }}
