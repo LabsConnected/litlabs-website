@@ -49,9 +49,11 @@ import type {
 } from "@litt/agent-core";
 import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
 import { getTerminalUrl } from "./auth/auth-config.js";
+import { RemoteUnavailableError } from "./remote-unavailable.js";
 
 // Re-export for CLI consumers (index.ts imports these from remote.ts)
 export { isRemoteError, hasRemoteResult };
+export { RemoteUnavailableError, isRemoteUnavailable } from "./remote-unavailable.js";
 
 export interface RemoteDispatchOptions {
   terminalUrl?: string;
@@ -84,17 +86,35 @@ export async function exchangeClerkToken(
   clerkToken: string,
   terminalUrl: string = getTerminalUrl(),
 ): Promise<string> {
-  const response = await fetch(`${terminalUrl}/api/token-exchange`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${clerkToken}`,
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${terminalUrl}/api/token-exchange`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${clerkToken}`,
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    // DNS failure, connection refused, timeout — the service is not
+    // reachable. Fail closed with the reason, never degrade to local.
+    throw new RemoteUnavailableError(
+      "service_unavailable",
+      error instanceof Error ? `${error.message}.` : "Network error.",
+    );
+  }
 
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? `Token exchange failed (${response.status})`);
+    // 401/403 mean the credential itself is bad — surface that distinctly
+    // so the caller clears it rather than retrying with the same token.
+    const reason = response.status === 401 || response.status === 403
+      ? "auth_revoked"
+      : "session_failed";
+    throw new RemoteUnavailableError(
+      reason,
+      body?.error ?? `Token exchange failed (${response.status}).`,
+    );
   }
 
   const payload = await response.json() as {
@@ -137,14 +157,20 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     // Use the AuthSession (OAuth credential store with auto-refresh)
     const { getAuthSession } = await import("./auth/auth-session.js");
     const authSession = getAuthSession();
-    clerkToken = await authSession.getAccessToken() ?? "";
+    // Strict accessor: throws RemoteUnavailableError("auth_expired") when
+    // credentials exist but refresh failed, instead of collapsing that
+    // into an indistinguishable null. The distinction matters because an
+    // expired session must also be CLEARED, not merely reported.
+    clerkToken = await authSession.getAccessTokenStrict() ?? "";
   }
 
   if (!clerkToken) {
-    throw new Error(
-      "Not authenticated. Run `litt login` to sign in. " +
-      "Run without --remote for local execution.",
-    );
+    // Fail closed. Note what this deliberately does NOT say: the previous
+    // message suggested "run without --remote for local execution", which
+    // nudged operators to silently relocate the command to a different
+    // machine after an auth failure. Auth failure is never permission to
+    // execute somewhere else.
+    throw new RemoteUnavailableError("not_authenticated");
   }
 
   const terminalUrl = options.terminalUrl ?? getTerminalUrl();
@@ -185,15 +211,23 @@ export async function dispatchRemote(
     requestBody.cwd = options.cwd;
   }
 
-  const response = await fetch(`${baseUrl}/api/command`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(240_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/command`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(240_000),
+    });
+  } catch (error) {
+    throw new RemoteUnavailableError(
+      "service_unavailable",
+      error instanceof Error ? `${error.message}.` : "Network error.",
+    );
+  }
 
   const payload = await response.json().catch(() => null) as
     | (RemoteCommandResponse & { error?: string })
@@ -207,11 +241,15 @@ export async function dispatchRemote(
       ? (payload.error as { message?: string }).message
       : undefined;
     const legacyMessage = typeof payload?.error === "string" ? payload.error : undefined;
-    throw new Error(typedMessage ?? legacyMessage ?? `Remote command failed (${response.status})`);
+    const detail = typedMessage ?? legacyMessage ?? `Remote command failed (${response.status}).`;
+    if (response.status === 401 || response.status === 403) {
+      throw new RemoteUnavailableError("auth_revoked", detail);
+    }
+    throw new RemoteUnavailableError("execution_failed", detail);
   }
 
   if (!payload) {
-    throw new Error("No response from terminal server");
+    throw new RemoteUnavailableError("service_unavailable", "No response from terminal server.");
   }
 
   return payload as RemoteCommandResponse;

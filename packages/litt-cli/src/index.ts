@@ -51,6 +51,8 @@ import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
+import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
+import { executeCommand } from "./lib/command-execution.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
@@ -266,13 +268,32 @@ async function main(): Promise<number> {
     }
   }
 
-  // --remote: dispatch through terminal-server's canonical CommandRouter
+  // --remote: dispatch through terminal-server's canonical CommandRouter.
+  // Routed via executeCommand() so the fail-closed guarantee lives in ONE
+  // tested function rather than being re-asserted here by hand. On any
+  // remote failure this returns without ever reaching the local handler
+  // resolution below.
   if (dispatch.useRemote) {
-    if (!REMOTEABLE_COMMANDS.has(command)) {
-      console.error(`--remote is only supported for: ${[...REMOTEABLE_COMMANDS].join(", ")}`);
-      return 1;
-    }
-    return await runRemote(command, rest, mode);
+    const outcome = await executeCommand(command, {
+      useRemote: true,
+      isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
+      remoteExecutor: () => runRemote(command, rest, mode),
+      // Unreachable by contract when useRemote is true. If this ever runs,
+      // the fail-closed guarantee has been broken and we want a loud crash
+      // rather than a silent relocation of the user's command.
+      localExecutor: () => {
+        throw new Error(
+          "fail-closed violation: local executor reached on the --remote path",
+        );
+      },
+      onError: (msg) => {
+        console.error(`${c.red}✗${c.reset} ${msg}`);
+        if (msg.includes("--remote is not supported")) {
+          console.error(`${c.dim}  Supported: ${[...REMOTEABLE_COMMANDS].join(", ")}${c.reset}`);
+        }
+      },
+    });
+    return outcome.exitCode;
   }
 
   // Resolve handler — lazy-load heavy commands (Ink/React) on demand
@@ -310,8 +331,7 @@ async function main(): Promise<number> {
       console.error(`${c.dim}  Get an API key at https://openrouter.ai and set it:${c.reset}`);
       console.error(`${c.dim}  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
     } else if (message.includes("Clerk token")) {
-      console.error(`${c.dim}  --remote requires a Clerk token. Set LITT_CLERK_TOKEN or run 'litt login'.${c.reset}`);
-      console.error(`${c.dim}  Run without --remote for local execution.${c.reset}`);
+      console.error(`${c.dim}  --remote requires authentication. Run 'litt login'.${c.reset}`);
     } else if (message.includes("ENOENT") || message.includes("not found")) {
       console.error(`${c.dim}  The command was not found. Check that it's installed and in your PATH.${c.reset}`);
     }
@@ -379,6 +399,9 @@ async function runRemote(
     console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
     return 0;
   } catch (error) {
+    // Re-throw typed remote failures so executeCommand() classifies them
+    // and reports the reason. Nothing here re-routes to local execution.
+    if (isRemoteUnavailable(error)) throw error;
     fail(error instanceof Error ? error.message : String(error));
     return 1;
   }
