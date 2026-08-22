@@ -81,10 +81,17 @@ export class AuthSession {
     try {
       return await this.auth.getAccessToken();
     } catch (error) {
-      // Refresh failed (expired/revoked refresh token) — return null
-      // so the caller can show the sign-in-required screen.
+      // Refresh/exchange failure makes the stored session unusable. Clear it
+      // and preserve the typed failure so REMOTE callers fail closed instead
+      // of treating it like permission to continue on another transport.
       if (error instanceof AuthError && (error.code === "token_refresh" || error.code === "token_exchange")) {
-        return null;
+        try {
+          await this.auth.logout();
+        } catch {
+          // Preserve the original authentication failure. logout() already
+          // treats server-side revocation as best effort.
+        }
+        this._cachedState = null;
       }
       throw error;
     }

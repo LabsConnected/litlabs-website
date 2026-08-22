@@ -272,7 +272,7 @@ describe("dispatchRemote (pre-exchanged terminalToken)", () => {
     } as MockResponse);
 
     await expect(dispatchRemote("test", [], { terminalToken: TERMINAL_JWT })).rejects.toThrow(
-      /No response from terminal server/,
+      /REMOTE unavailable: terminal server returned no usable response/,
     );
   });
 
@@ -385,7 +385,7 @@ describe("token exchange (Clerk token → terminal JWT)", () => {
     delete process.env.LITT_CLERK_TOKEN;
 
     try {
-      await expect(dispatchRemote("test", [])).rejects.toThrow(/Not authenticated/);
+      await expect(dispatchRemote("test", [])).rejects.toThrow(/REMOTE unavailable: not authenticated/i);
     } finally {
       if (oldEnv !== undefined) process.env.LITT_CLERK_TOKEN = oldEnv;
     }

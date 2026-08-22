@@ -418,6 +418,7 @@ export function CockpitApp({
             project={store.state.project}
             branch={store.state.branch}
             localRuntime={store.state.localRuntime}
+            remoteRuntime={store.state.remoteRuntime}
             brain={brain}
             activeModel={store.state.activeModel}
             activeProvider={store.state.activeProvider}

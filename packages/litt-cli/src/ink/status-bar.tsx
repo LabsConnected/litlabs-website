@@ -29,6 +29,7 @@ import { COLORS } from "./colors.js";
 import { truncateTail, shortModelName } from "./text-wrap.js";
 import { providerLabel } from "../lib/model-provider.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
+import { projectTransport } from "./transport-projection.js";
 
 function isWorking(h: HoloState): boolean {
   return h === "UNDERSTANDING" || h === "PLANNING" || h === "READING"
@@ -40,6 +41,7 @@ export interface StatusBarProps {
   project: string;
   branch: string;
   localRuntime: string;
+  remoteRuntime: string;
   holoState: HoloState;
   brain: string;
   activeModel: string | null;
@@ -54,7 +56,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
-  project, branch, localRuntime, holoState, brain, activeModel, activeProvider,
+  project, branch, localRuntime, remoteRuntime, holoState, brain, activeModel, activeProvider,
   mode, isProcessing, busySince, missionState, gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -105,8 +107,9 @@ export function StatusBar({
   const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
   const localColor = localRuntime === "ready" ? COLORS.success
     : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL"
-    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  const localLabel = remoteRuntime === "offline"
+    ? (localRuntime === "ready" ? "TOOLS" : localRuntime === "error" ? "TOOLS ERR" : "TOOLS…")
+    : projectTransport(remoteRuntime);
 
   // Right-segment widths for overlap-free truncation.
   const rightWidth = Math.max(5, measure(right));

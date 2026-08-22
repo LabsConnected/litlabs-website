@@ -63,6 +63,21 @@ export interface RemoteDispatchOptions {
   mode?: MissionMode;
 }
 
+export class RemoteUnavailableError extends Error {
+  readonly code = "remote_unavailable";
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(`REMOTE unavailable: ${message}`, options);
+    this.name = "RemoteUnavailableError";
+  }
+}
+
+function remoteUnavailable(error: unknown, fallback: string): RemoteUnavailableError {
+  if (error instanceof RemoteUnavailableError) return error;
+  const message = error instanceof Error ? error.message : fallback;
+  return new RemoteUnavailableError(message || fallback, { cause: error });
+}
+
 // ─── Terminal JWT cache (per-process) ─────────────────────────────
 
 interface CachedToken {
@@ -84,17 +99,22 @@ export async function exchangeClerkToken(
   clerkToken: string,
   terminalUrl: string = getTerminalUrl(),
 ): Promise<string> {
-  const response = await fetch(`${terminalUrl}/api/token-exchange`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${clerkToken}`,
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${terminalUrl}/api/token-exchange`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${clerkToken}`,
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    throw remoteUnavailable(error, "authentication service could not be reached");
+  }
 
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? `Token exchange failed (${response.status})`);
+    throw new RemoteUnavailableError(body?.error ?? `token exchange failed (${response.status})`);
   }
 
   const payload = await response.json() as {
@@ -137,14 +157,15 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     // Use the AuthSession (OAuth credential store with auto-refresh)
     const { getAuthSession } = await import("./auth/auth-session.js");
     const authSession = getAuthSession();
-    clerkToken = await authSession.getAccessToken() ?? "";
+    try {
+      clerkToken = await authSession.getAccessToken() ?? "";
+    } catch (error) {
+      throw remoteUnavailable(error, "authentication refresh failed");
+    }
   }
 
   if (!clerkToken) {
-    throw new Error(
-      "Not authenticated. Run `litt login` to sign in. " +
-      "Run without --remote for local execution.",
-    );
+    throw new RemoteUnavailableError("not authenticated. Run `litt login` to sign in.");
   }
 
   const terminalUrl = options.terminalUrl ?? getTerminalUrl();
@@ -185,15 +206,20 @@ export async function dispatchRemote(
     requestBody.cwd = options.cwd;
   }
 
-  const response = await fetch(`${baseUrl}/api/command`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(240_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/command`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(240_000),
+    });
+  } catch (error) {
+    throw remoteUnavailable(error, "terminal service could not be reached");
+  }
 
   const payload = await response.json().catch(() => null) as
     | (RemoteCommandResponse & { error?: string })
@@ -207,11 +233,11 @@ export async function dispatchRemote(
       ? (payload.error as { message?: string }).message
       : undefined;
     const legacyMessage = typeof payload?.error === "string" ? payload.error : undefined;
-    throw new Error(typedMessage ?? legacyMessage ?? `Remote command failed (${response.status})`);
+    throw new RemoteUnavailableError(typedMessage ?? legacyMessage ?? `command failed (${response.status})`);
   }
 
   if (!payload) {
-    throw new Error("No response from terminal server");
+    throw new RemoteUnavailableError("terminal server returned no usable response");
   }
 
   return payload as RemoteCommandResponse;

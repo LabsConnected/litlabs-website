@@ -23,6 +23,7 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { projectTransport } from "./transport-projection.js";
 
 export interface HeaderProps {
   project: string;
@@ -74,8 +75,8 @@ export function Header({
   const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
   const localColor = localRuntime === "ready" ? COLORS.success
     : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL"
-    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  const localLabel = localRuntime === "ready" ? "TOOLS"
+    : localRuntime === "error" ? "TOOLS ERR" : "TOOLS…";
 
   // ─── REMOTE indicator (reflects actual transport connection state) ──
   // Only shown when remote is not "offline" (i.e. when --remote was used
@@ -88,10 +89,7 @@ export function Header({
     : remoteRuntime === "error" ? "✗" : "○";
   const remoteColor = remoteRuntime === "connected" ? COLORS.success
     : remoteRuntime === "error" ? COLORS.error : COLORS.warning;
-  const remoteLabel = remoteRuntime === "connected" ? "REMOTE"
-    : remoteRuntime === "connecting" ? "REMOTE…"
-    : remoteRuntime === "reconnecting" ? "REMOTE↻"
-    : remoteRuntime === "error" ? "REMOTE ERR" : "REMOTE";
+  const remoteLabel = projectTransport(remoteRuntime);
 
   // ─── Email suffix — shown when signed in (e.g. "· user@email.com") ──
   // Truncated on narrow terminals to avoid wrapping.
@@ -113,9 +111,6 @@ export function Header({
       {width >= 50 && (
         <Box gap={2}>
           {primaryIndicator}
-          {showRemote && width >= 80 && (
-            <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
-          )}
         </Box>
       )}
     </Box>
