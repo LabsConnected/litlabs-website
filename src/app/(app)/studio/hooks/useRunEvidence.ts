@@ -5,12 +5,14 @@ import type { MutationEvidence } from "@/lib/litt-intelligence/mutation-evidence
 import type { RunEvent } from "@/lib/litt-intelligence/run-events";
 import type { CheckEvidence } from "@/lib/litt-intelligence/check-evidence";
 import type { AcceptanceEvidence } from "@/lib/litt-intelligence/acceptance-evidence";
+import type { ReviewCheckpoint } from "@/lib/litt-intelligence/review-checkpoint";
 
 interface EvidenceResponse {
   evidence: MutationEvidence[];
   events: RunEvent[];
   checks: CheckEvidence[];
   acceptance: AcceptanceEvidence[];
+  reviewCheckpoints: ReviewCheckpoint[];
 }
 
 interface UseRunEvidenceOptions {
@@ -25,6 +27,7 @@ interface UseRunEvidenceResult {
   events: RunEvent[];
   checks: CheckEvidence[];
   acceptance: AcceptanceEvidence[];
+  reviewCheckpoints: ReviewCheckpoint[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -48,6 +51,7 @@ export function useRunEvidence({
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [checks, setChecks] = useState<CheckEvidence[]>([]);
   const [acceptance, setAcceptance] = useState<AcceptanceEvidence[]>([]);
+  const [reviewCheckpoints, setReviewCheckpoints] = useState<ReviewCheckpoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +61,7 @@ export function useRunEvidence({
       setEvents([]);
       setChecks([]);
       setAcceptance([]);
+      setReviewCheckpoints([]);
       return;
     }
 
@@ -77,6 +82,7 @@ export function useRunEvidence({
       setEvents(data.events ?? []);
       setChecks(data.checks ?? []);
       setAcceptance(data.acceptance ?? []);
+      setReviewCheckpoints(data.reviewCheckpoints ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load evidence");
     } finally {
@@ -95,5 +101,5 @@ export function useRunEvidence({
     return () => clearInterval(interval);
   }, [refresh, pollIntervalMs]);
 
-  return { evidence, events, checks, acceptance, loading, error, refresh };
+  return { evidence, events, checks, acceptance, reviewCheckpoints, loading, error, refresh };
 }

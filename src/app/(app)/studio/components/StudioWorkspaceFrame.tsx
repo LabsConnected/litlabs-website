@@ -31,6 +31,7 @@ import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { StudioChangesPanel } from "./StudioChangesPanel";
 import { StudioChecksPanel } from "./StudioChecksPanel";
 import { StudioAcceptancePanel } from "./StudioAcceptancePanel";
+import { StudioReviewPanel } from "./StudioReviewPanel";
 import { useRunEvidence } from "../hooks/useRunEvidence";
 
 /**
@@ -103,7 +104,7 @@ function InspectorSection({ title, children }: { title: string; children: React.
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
   const { capabilities, messages } = data;
   const lastMessage = messages[messages.length - 1];
-  const { evidence, checks, acceptance, loading: evidenceLoading } = useRunEvidence({
+  const { evidence, checks, acceptance, reviewCheckpoints, loading: evidenceLoading } = useRunEvidence({
     projectId: capabilities.projectId ?? null,
   });
 
@@ -153,8 +154,16 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "approvals") {
+    const latestCheckpoint = reviewCheckpoints.length > 0 ? reviewCheckpoints[reviewCheckpoints.length - 1] : null;
     return (
       <div className="space-y-3">
+        <StudioReviewPanel
+          checkpoint={latestCheckpoint}
+          mutations={evidence}
+          readyForReview={evidence.length > 0 && checks.length > 0}
+          blockers={[]}
+          loading={evidenceLoading}
+        />
         <StudioAcceptancePanel acceptance={acceptance} loading={evidenceLoading} />
         <StudioHealthPanel mode="approvals" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} />
       </div>

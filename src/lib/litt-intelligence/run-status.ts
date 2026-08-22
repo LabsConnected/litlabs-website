@@ -11,6 +11,7 @@
 import type { MutationEvidence } from "./mutation-evidence";
 import type { CheckEvidence } from "./check-evidence";
 import type { AcceptanceEvidence } from "./acceptance-evidence";
+import type { ReviewCheckpoint } from "./review-checkpoint";
 
 export type RunStatus =
   | "planning"
@@ -19,6 +20,8 @@ export type RunStatus =
   | "checks_running"
   | "checks_failed"
   | "ready_for_review"
+  | "review_approved"
+  | "changes_requested"
   | "deployed"
   | "failed";
 
@@ -41,11 +44,19 @@ export interface DeriveRunStatusInput {
   unresolvedBlockingEvents: Array<{ id: string; type: string }>;
   /** Whether checks are currently running */
   checksRunning?: boolean;
+  /** Latest review checkpoint (Phase 10). If approved and fresh, status becomes review_approved. */
+  reviewCheckpoint?: ReviewCheckpoint | null;
 }
 
 export interface DeriveRunStatusResult {
   status: RunStatus;
   readyForReview: boolean;
+  /** Whether the run has an active (non-stale) approved review checkpoint */
+  reviewApproved: boolean;
+  /** Whether the run has an active (non-stale) changes_requested review checkpoint */
+  changesRequested: boolean;
+  /** Whether the review checkpoint is stale */
+  reviewStale: boolean;
   /** Why the run is not ready (if applicable) */
   blockers: string[];
   /** Required checks that haven't passed */
@@ -75,13 +86,16 @@ export interface DeriveRunStatusResult {
  * 7. No stale checks
  */
 export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusResult {
-  const { mutationEvidence, checkEvidence, acceptanceEvidence, acceptanceCriteria, unresolvedBlockingEvents, checksRunning } = input;
+  const { mutationEvidence, checkEvidence, acceptanceEvidence, acceptanceCriteria, unresolvedBlockingEvents, checksRunning, reviewCheckpoint } = input;
 
   const blockers: string[] = [];
   const emptyResult = {
     failedAcceptanceCriteria: [] as AcceptanceEvidence[],
     skippedAcceptanceCriteria: [] as AcceptanceEvidence[],
     staleAcceptanceEvidence: [] as AcceptanceEvidence[],
+    reviewApproved: false,
+    changesRequested: false,
+    reviewStale: false,
   };
 
   // 1. Must have mutations
@@ -233,6 +247,9 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
     return {
       status: "checks_failed",
       readyForReview: false,
+      reviewApproved: false,
+      changesRequested: false,
+      reviewStale: false,
       blockers,
       failedRequiredChecks,
       skippedRequiredChecks,
@@ -243,9 +260,75 @@ export function deriveRunStatus(input: DeriveRunStatusInput): DeriveRunStatusRes
     };
   }
 
+  // 11. Review checkpoint (Phase 10)
+  //
+  // If there's a review checkpoint:
+  // - approved + fresh → review_approved
+  // - changes_requested + fresh → changes_requested
+  // - stale → ready_for_review (need re-review)
+  // - pending → ready_for_review (awaiting human)
+  if (reviewCheckpoint) {
+    if (reviewCheckpoint.stale) {
+      // Stale checkpoint — code changed after approval
+      // The run goes back to ready_for_review (needs re-review)
+      return {
+        status: "ready_for_review",
+        readyForReview: true,
+        reviewApproved: false,
+        changesRequested: false,
+        reviewStale: true,
+        blockers: ["Review checkpoint is stale — code changed after review"],
+        failedRequiredChecks: [],
+        skippedRequiredChecks: [],
+        staleChecks: [],
+        failedAcceptanceCriteria: [],
+        skippedAcceptanceCriteria: [],
+        staleAcceptanceEvidence: [],
+      };
+    }
+
+    if (reviewCheckpoint.decision === "approved") {
+      return {
+        status: "review_approved",
+        readyForReview: true,
+        reviewApproved: true,
+        changesRequested: false,
+        reviewStale: false,
+        blockers: [],
+        failedRequiredChecks: [],
+        skippedRequiredChecks: [],
+        staleChecks: [],
+        failedAcceptanceCriteria: [],
+        skippedAcceptanceCriteria: [],
+        staleAcceptanceEvidence: [],
+      };
+    }
+
+    if (reviewCheckpoint.decision === "changes_requested") {
+      return {
+        status: "changes_requested",
+        readyForReview: false, // not ready until changes are made
+        reviewApproved: false,
+        changesRequested: true,
+        reviewStale: false,
+        blockers: ["Reviewer requested changes"],
+        failedRequiredChecks: [],
+        skippedRequiredChecks: [],
+        staleChecks: [],
+        failedAcceptanceCriteria: [],
+        skippedAcceptanceCriteria: [],
+        staleAcceptanceEvidence: [],
+      };
+    }
+    // pending → ready_for_review (awaiting human review)
+  }
+
   return {
     status: "ready_for_review",
     readyForReview: true,
+    reviewApproved: false,
+    changesRequested: false,
+    reviewStale: false,
     blockers: [],
     failedRequiredChecks: [],
     skippedRequiredChecks: [],

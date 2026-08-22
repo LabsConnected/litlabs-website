@@ -29,6 +29,9 @@ export type RunEventType =
   | "check_skipped"
   | "recovery_attempt"
   | "checkpoint_created"
+  | "checkpoint_captured"
+  | "review_approved"
+  | "changes_requested"
   | "branch_created"
   | "branch_switched";
 

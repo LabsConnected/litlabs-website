@@ -13,6 +13,7 @@ import { getEvidenceStore } from "@/lib/litt-intelligence/evidence-store";
 import { getRunEventStore } from "@/lib/litt-intelligence/run-event-store";
 import { getCheckEvidenceStore } from "@/lib/litt-intelligence/check-evidence-store";
 import { getAcceptanceEvidenceStore } from "@/lib/litt-intelligence/acceptance-evidence-store";
+import { getReviewCheckpointStore } from "@/lib/litt-intelligence/review-checkpoint-store";
 
 export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
   const runEventStore = getRunEventStore();
   const checkStore = getCheckEvidenceStore();
   const acceptanceStore = getAcceptanceEvidenceStore();
+  const reviewCheckpointStore = getReviewCheckpointStore();
 
   // Fetch evidence (mutations)
   const evidence = runId
@@ -53,10 +55,16 @@ export async function GET(request: NextRequest) {
     ? await acceptanceStore.listByRun(runId)
     : await acceptanceStore.listByProject(projectId);
 
+  // Fetch review checkpoints
+  const reviewCheckpoints = runId
+    ? await reviewCheckpointStore.listByRun(runId)
+    : await reviewCheckpointStore.listByProject(projectId);
+
   return NextResponse.json({
     evidence,
     events,
     checks,
     acceptance,
+    reviewCheckpoints,
   });
 }
