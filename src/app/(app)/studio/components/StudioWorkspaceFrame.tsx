@@ -29,6 +29,7 @@ import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
 import { StudioChangesPanel } from "./StudioChangesPanel";
+import { StudioChecksPanel } from "./StudioChecksPanel";
 import { useRunEvidence } from "../hooks/useRunEvidence";
 
 /**
@@ -101,7 +102,7 @@ function InspectorSection({ title, children }: { title: string; children: React.
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
   const { capabilities, messages } = data;
   const lastMessage = messages[messages.length - 1];
-  const { evidence, loading: evidenceLoading } = useRunEvidence({
+  const { evidence, checks, loading: evidenceLoading } = useRunEvidence({
     projectId: capabilities.projectId ?? null,
   });
 
@@ -134,7 +135,7 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
   }
 
   if (tab === "checks") {
-    return <StudioHealthPanel mode="checks" projectId={capabilities.projectId} refreshKey={data.workspaceRevision} runTrigger={data.healthRunTrigger} />;
+    return <StudioChecksPanel checks={checks} loading={evidenceLoading} />;
   }
 
   if (tab === "changes") {

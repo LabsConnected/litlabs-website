@@ -1,16 +1,17 @@
 /**
  * GET /api/studio/evidence?runId=xxx&projectId=yyy
  *
- * Returns mutation evidence + run events for the Changes and Activity panels.
- * One API, two data sets — the panels filter client-side.
+ * Returns mutation evidence + run events + check evidence for the
+ * Changes, Activity, and Checks panels. One API, three data sets.
  *
- * Phase 7 — Studio Control Plane V1
+ * Phase 7-8 — Studio Control Plane V1
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getEvidenceStore } from "@/lib/litt-intelligence/evidence-store";
 import { getRunEventStore } from "@/lib/litt-intelligence/run-event-store";
+import { getCheckEvidenceStore } from "@/lib/litt-intelligence/check-evidence-store";
 
 export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
 
   const evidenceStore = getEvidenceStore();
   const runEventStore = getRunEventStore();
+  const checkStore = getCheckEvidenceStore();
 
   // Fetch evidence (mutations)
   const evidence = runId
@@ -39,8 +41,14 @@ export async function GET(request: NextRequest) {
     ? await runEventStore.listByRun(runId)
     : await runEventStore.listByProject(projectId);
 
+  // Fetch check evidence (checks)
+  const checks = runId
+    ? await checkStore.listByRun(runId)
+    : await checkStore.listByProject(projectId);
+
   return NextResponse.json({
     evidence,
     events,
+    checks,
   });
 }

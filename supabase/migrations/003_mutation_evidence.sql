@@ -71,3 +71,32 @@ CREATE TABLE IF NOT EXISTS run_events (
 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_project ON run_events(project_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_created ON run_events(created_at DESC);
+
+-- ─── Check Evidence (Phase 8 — Checks executor) ────────────────
+
+CREATE TABLE IF NOT EXISTS check_evidence (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  command TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  required BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'queued',
+  exit_code INTEGER,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  duration_ms INTEGER,
+  stdout_ref TEXT,
+  stderr_ref TEXT,
+  skip_reason TEXT,
+  failure_reason TEXT,
+  head_sha TEXT NOT NULL,
+  working_tree_diff_hash TEXT NOT NULL,
+  stale BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS idx_check_evidence_run ON check_evidence(run_id);
+CREATE INDEX IF NOT EXISTS idx_check_evidence_project ON check_evidence(project_id);
+CREATE INDEX IF NOT EXISTS idx_check_evidence_status ON check_evidence(status);
+CREATE INDEX IF NOT EXISTS idx_check_evidence_stale ON check_evidence(stale);
