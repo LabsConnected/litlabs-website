@@ -369,3 +369,152 @@ export const handlePackageInfo: ToolHandler = async (_inputs, transport) => {
   const info = await transport.discoverPackageInfo();
   return { success: true, ...info };
 };
+
+// ─── Evidence-Aware Mutation Handlers ────────────────────────────
+//
+// These wrap the basic mutation handlers with the Workspace Mutation
+// Service, which enforces branch safety, path validation, approval
+// verification, before/after capture, diff capture, and evidence
+// persistence.
+//
+// Inputs must include:
+//   - runId: string
+//   - approvalTokenId: string
+//   - projectId: string
+//
+// If these are missing, the handler falls back to the basic version
+// (for backward compatibility with non-Studio callers).
+
+import { executeMutation, MutationError } from "./mutation-service";
+
+export const handleFilesWriteWithEvidence: ToolHandler = async (inputs, transport) => {
+  const path = inputs.path as string;
+  const content = inputs.content as string;
+  const runId = inputs.runId as string | undefined;
+  const approvalTokenId = inputs.approvalTokenId as string | undefined;
+  const projectId = inputs.projectId as string | undefined;
+
+  if (!path || content === undefined) {
+    return { success: false, error: "path and content are required" };
+  }
+
+  // Fall back to basic handler if no evidence context
+  if (!runId || !approvalTokenId || !projectId) {
+    return handleFilesWrite(inputs, transport);
+  }
+
+  try {
+    const result = await executeMutation(
+      {
+        runId,
+        projectId,
+        toolId: "files.write",
+        approvalTokenId,
+        paths: [path],
+        operation: async (t) => {
+          await t.writeFile(path, content);
+          return { bytesWritten: Buffer.byteLength(content, "utf-8") };
+        },
+      },
+      transport,
+    );
+    return {
+      success: true,
+      path,
+      bytesWritten: Buffer.byteLength(content, "utf-8"),
+      evidenceId: result.evidence.id,
+      headShaBefore: result.evidence.headShaBefore,
+      headShaAfter: result.evidence.headShaAfter,
+    };
+  } catch (err) {
+    if (err instanceof MutationError) {
+      return { success: false, error: err.message, code: err.code };
+    }
+    return { success: false, error: err instanceof Error ? err.message : "Failed to write file" };
+  }
+};
+
+export const handleFilesDeleteWithEvidence: ToolHandler = async (inputs, transport) => {
+  const path = inputs.path as string;
+  const runId = inputs.runId as string | undefined;
+  const approvalTokenId = inputs.approvalTokenId as string | undefined;
+  const projectId = inputs.projectId as string | undefined;
+
+  if (!path) return { success: false, error: "path is required" };
+
+  if (!runId || !approvalTokenId || !projectId) {
+    return handleFilesDelete(inputs, transport);
+  }
+
+  try {
+    const result = await executeMutation(
+      {
+        runId,
+        projectId,
+        toolId: "files.delete",
+        approvalTokenId,
+        paths: [path],
+        operation: async (t) => {
+          await t.deleteFile(path);
+          return { deleted: true };
+        },
+      },
+      transport,
+    );
+    return {
+      success: true,
+      path,
+      deleted: true,
+      evidenceId: result.evidence.id,
+    };
+  } catch (err) {
+    if (err instanceof MutationError) {
+      return { success: false, error: err.message, code: err.code };
+    }
+    return { success: false, error: err instanceof Error ? err.message : "Failed to delete file" };
+  }
+};
+
+export const handleApplyPatchWithEvidence: ToolHandler = async (inputs, transport) => {
+  const path = inputs.path as string;
+  const patches = inputs.patches as Array<{ type: "search_replace"; search: string; replace: string }> | undefined;
+  const runId = inputs.runId as string | undefined;
+  const approvalTokenId = inputs.approvalTokenId as string | undefined;
+  const projectId = inputs.projectId as string | undefined;
+
+  if (!path || !patches) {
+    return { success: false, error: "path and patches are required" };
+  }
+
+  if (!runId || !approvalTokenId || !projectId) {
+    return handleApplyPatch(inputs, transport);
+  }
+
+  try {
+    const result = await executeMutation(
+      {
+        runId,
+        projectId,
+        toolId: "apply_patch",
+        approvalTokenId,
+        paths: [path],
+        operation: async (t) => {
+          await t.applyPatch(path, patches);
+          return { applied: true };
+        },
+      },
+      transport,
+    );
+    return {
+      success: true,
+      path,
+      applied: true,
+      evidenceId: result.evidence.id,
+    };
+  } catch (err) {
+    if (err instanceof MutationError) {
+      return { success: false, error: err.message, code: err.code };
+    }
+    return { success: false, error: err instanceof Error ? err.message : "Failed to apply patch" };
+  }
+};
