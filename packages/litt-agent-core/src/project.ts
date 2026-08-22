@@ -457,12 +457,40 @@ export async function inspectPackageJson(
 // ─── Terminal Execution ───────────────────────────────────────────
 
 /**
+ * Verification timeout constants — named, not scattered magic numbers.
+ *
+ * These are the minimum budgets for verification commands (typecheck,
+ * build, test). They are deliberately generous because:
+ *   - typecheck (tsc --noEmit) on a monorepo can take 120s+ on slow
+ *     devices (Termux/proot, low-RAM CI runners)
+ *   - build (next build / tsc) is heavier than typecheck
+ *   - test (vitest) includes cold import + transform overhead
+ *
+ * The old 120_000 ms default was killing typecheck and build on Termux
+ * at ~125-128s, surfacing as misleading "exit 1" failures when the
+ * process was actually timed out and killed.
+ */
+export const VERIFY_TIMEOUTS = {
+  /** Typecheck / project.check — 5 minutes. */
+  typecheck: 300_000,
+  /** Build / project.build — 10 minutes. */
+  build: 600_000,
+  /** Test / project.test — 10 minutes. */
+  test: 600_000,
+} as const;
+
+/** Default timeout for runCommand (non-verification commands). */
+const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+
+/**
  * Run a command in the project directory and return structured output.
  *
  * This is the canonical terminal execution function. It uses the shell
  * executor (execFile, no shell-string) for cross-platform safety.
  *
- * Returns stdout, stderr, exit code, and duration.
+ * Returns stdout, stderr, exit code, and duration. A timeout is
+ * surfaced as status="timeout" with a "TIMEOUT after Xms" message —
+ * NOT as a misleading "exit 1".
  */
 export async function runCommand(
   shell: ShellExecutor,
@@ -471,16 +499,24 @@ export async function runCommand(
   options?: { cwd?: string; timeoutMs?: number },
 ): Promise<ToolResult> {
   const cwd = options?.cwd ?? shell.cwd;
-  const timeoutMs = options?.timeoutMs ?? 120_000;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
   const result = await shell.execute({ command, args, cwd, timeoutMs });
+
+  // Surface timeout as TIMEOUT, not misleadingly as "exit 1".
+  // The shell executor sets status="timeout" and exitCode=-1 when the
+  // process is killed after timeoutMs — without this, the message would
+  // say "exit -1" which is indistinguishable from a crash.
+  const message = result.ok
+    ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
+    : result.status === "timeout"
+      ? `${command} ${args.join(" ")} — TIMEOUT after ${timeoutMs}ms (${result.durationMs}ms)`
+      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`;
 
   return {
     status: result.status,
     success: result.ok,
-    message: result.ok
-      ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
-      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`,
+    message,
     data: {
       command,
       args,
@@ -501,7 +537,9 @@ export async function runCommand(
  *
  * Callers may optionally override the default command timeout via
  * `options.timeoutMs`. When omitted, the canonical `runCommand` default
- * (120_000 ms) is used — preserving existing behavior for build/check/run.
+ * (DEFAULT_COMMAND_TIMEOUT_MS = 120_000 ms) is used. Verification
+ * functions (runTypecheck, runBuild, runTest) pass explicit timeouts
+ * from VERIFY_TIMEOUTS — see the constants above.
  */
 export async function runScript(
   shell: ShellExecutor,
@@ -547,6 +585,12 @@ export async function runScript(
 
 /**
  * Run typecheck via the project's typecheck script or tsc --noEmit.
+ *
+ * Uses VERIFY_TIMEOUTS.typecheck (300_000 ms = 5 minutes) because tsc
+ * --noEmit on a monorepo can take 120s+ on slow devices (Termux/proot).
+ * The old 120_000 ms default was killing typecheck at ~125s on Termux,
+ * surfacing as a misleading "exit 1" when the process was actually
+ * timed out.
  */
 export async function runTypecheck(
   shell: ShellExecutor,
@@ -559,38 +603,42 @@ export async function runTypecheck(
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       if (pkg.scripts?.typecheck) {
-        return runScript(shell, "typecheck", root);
+        return runScript(shell, "typecheck", root, { timeoutMs: VERIFY_TIMEOUTS.typecheck });
       }
     } catch { /* fall through to tsc */ }
   }
 
   // Fallback: run tsc --noEmit directly
-  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root });
+  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root, timeoutMs: VERIFY_TIMEOUTS.typecheck });
 }
 
 /**
  * Run tests via the project's test script.
  *
- * Tests are given an extended 300_000 ms (5 minute) budget because the
- * canonical root suite (vitest) takes ~144s and previously hit the
- * 120_000 ms default runCommand timeout. This is the ONLY script runner
- * that overrides the default — build/check/run keep 120s.
+ * Uses VERIFY_TIMEOUTS.test (600_000 ms = 10 minutes) because the
+ * canonical root suite (vitest) includes cold import + transform
+ * overhead that can exceed 300s on slow devices.
  */
 export async function runTest(
   shell: ShellExecutor,
   cwd?: string,
 ): Promise<ToolResult> {
-  return runScript(shell, "test", cwd ?? shell.cwd, { timeoutMs: 300_000 });
+  return runScript(shell, "test", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.test });
 }
 
 /**
  * Run build via the project's build script.
+ *
+ * Uses VERIFY_TIMEOUTS.build (600_000 ms = 10 minutes) because next
+ * build / tsc on a monorepo is heavier than typecheck and can exceed
+ * 120s on slow devices. The old 120_000 ms default was killing build
+ * at ~127s on Termux.
  */
 export async function runBuild(
   shell: ShellExecutor,
   cwd?: string,
 ): Promise<ToolResult> {
-  return runScript(shell, "build", cwd ?? shell.cwd);
+  return runScript(shell, "build", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.build });
 }
 
 // ─── Path Safety ──────────────────────────────────────────────────
