@@ -42,6 +42,7 @@ async function handler(req: NextRequest) {
   const toolId = body.toolId as string | undefined;
   const inputs = (body.inputs as Record<string, unknown>) ?? {};
   const hasApproval = body.hasApproval === true;
+  const executionMode = body.executionMode as "plan" | "act" | "auto" | undefined;
 
   if (!sessionId) return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
   if (!toolId) return NextResponse.json({ error: "Missing toolId" }, { status: 400 });
@@ -70,7 +71,7 @@ async function handler(req: NextRequest) {
   }
 
   // Execute via the registry
-  const result = await toolRegistry.execute(toolId, fullInputs, { hasApproval });
+  const result = await toolRegistry.execute(toolId, fullInputs, { hasApproval, executionMode });
 
   if (result.ok) {
     return NextResponse.json({ success: true, data: result.result });

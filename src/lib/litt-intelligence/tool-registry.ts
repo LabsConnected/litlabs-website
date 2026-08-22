@@ -10,6 +10,7 @@
  */
 
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
+import { PermissionEngine, type ExecutionMode } from "./permission-engine";
 
 type ToolHandler = (inputs: Record<string, unknown>, transport?: unknown) => Promise<unknown>;
 
@@ -107,6 +108,7 @@ class ToolRegistry {
   private tools = new Map<string, LiTTToolDefinition>();
   private handlers = new Map<string, (() => Promise<(inputs: Record<string, unknown>) => Promise<unknown>>) | ((inputs: Record<string, unknown>) => Promise<unknown>)>();
   private listeners = new Set<(id: string, enabled: boolean) => void>();
+  private permissionEngine = new PermissionEngine();
 
   /**
    * Register a tool definition and optional handler.
@@ -219,8 +221,11 @@ class ToolRegistry {
 
   /**
    * Execute a tool by ID with validated inputs.
-   * Checks: enabled, capabilities, approval, schema validation.
+   * Checks: enabled, execution mode, capabilities, approval, schema validation.
    * @param options.transport — optional WorkspaceTransport passed to V2 handlers
+   * @param options.executionMode — PLAN/ACT/AUTO enforcement. When "plan",
+   *        mutation tools are blocked at the registry level (defense-in-depth,
+   *        not just in the agent loop). Defaults to "act" if unspecified.
    */
   async execute(
     id: string,
@@ -229,6 +234,7 @@ class ToolRegistry {
       hasApproval?: boolean;
       availableCapabilities?: string[];
       transport?: unknown;
+      executionMode?: ExecutionMode;
     } = {},
   ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
     const tool = this.tools.get(id);
@@ -246,11 +252,28 @@ class ToolRegistry {
       return { ok: false, error: `Tool "${id}" is quarantined and cannot execute` };
     }
 
-    // Check approval
-    if (tool.approvalPolicy.requireExplicitForMutations && !tool.readOnly) {
-      if (!options.hasApproval) {
-        return { ok: false, error: `Tool "${id}" requires explicit approval` };
-      }
+    // Defense-in-depth: enforce execution mode at the registry level.
+    // The agent loop also filters tools before presenting them to the LLM,
+    // but this ensures direct callers (API routes, action-loop) cannot
+    // bypass PLAN mode restrictions.
+    const mode = options.executionMode ?? "act";
+    const permResult = this.permissionEngine.check(
+      {
+        toolId: tool.id,
+        permissionLevel: tool.permissionLevel,
+        isReadOnly: tool.readOnly,
+        isMutation: !tool.readOnly,
+        enabled: tool.enabled,
+      },
+      inputs,
+      mode,
+    );
+    if (!permResult.allowed) {
+      return { ok: false, error: `Tool "${id}" blocked: ${permResult.reason ?? "mode restriction"}` };
+    }
+    // If approval is required and not given, block
+    if (permResult.requiresApproval && !options.hasApproval) {
+      return { ok: false, error: `Tool "${id}" requires explicit approval` };
     }
 
     // Check capabilities
@@ -292,18 +315,35 @@ class ToolRegistry {
 
   /**
    * Check if a tool can execute given current state.
+   * Includes execution mode enforcement (defense-in-depth).
    */
   canExecute(
     id: string,
-    options: { hasApproval?: boolean; availableCapabilities?: string[] } = {},
+    options: { hasApproval?: boolean; availableCapabilities?: string[]; executionMode?: ExecutionMode } = {},
   ): { can: boolean; reason?: string } {
     const tool = this.tools.get(id);
     if (!tool) return { can: false, reason: "Not registered" };
     if (!tool.enabled) return { can: false, reason: "Disabled" };
     if (tool.approvalPolicy.neverAllow) return { can: false, reason: "Quarantined" };
-    if (tool.approvalPolicy.requireExplicitForMutations && !tool.readOnly && !options.hasApproval) {
+
+    // Execution mode check (defense-in-depth)
+    const mode = options.executionMode ?? "act";
+    const permResult = this.permissionEngine.check(
+      {
+        toolId: tool.id,
+        permissionLevel: tool.permissionLevel,
+        isReadOnly: tool.readOnly,
+        isMutation: !tool.readOnly,
+        enabled: tool.enabled,
+      },
+      {},
+      mode,
+    );
+    if (!permResult.allowed) return { can: false, reason: permResult.reason ?? "Mode restriction" };
+    if (permResult.requiresApproval && !options.hasApproval) {
       return { can: false, reason: "Approval required" };
     }
+
     const available = new Set(options.availableCapabilities ?? []);
     for (const cap of tool.requiredCapabilities) {
       if (!available.has(cap)) return { can: false, reason: `Missing capability: ${cap}` };

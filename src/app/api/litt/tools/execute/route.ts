@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
     stepId?: string;
     projectId?: string;
     hasApproval?: boolean;
+    executionMode?: "plan" | "act" | "auto";
   };
 
   try {
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
     body.inputs ?? {},
     {
       hasApproval: body.hasApproval,
+      executionMode: body.executionMode,
     },
   );
 

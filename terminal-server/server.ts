@@ -16,18 +16,15 @@ import express from "express";
 import http from "http";
 import cors from "cors";
 import { Server } from "socket.io";
-import * as pty from "node-pty";
-import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync, renameSync } from "fs";
-import type { NextFunction, Request, Response } from "express";
+import type { NextFunction, Response } from "express";
 import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
-import { createDockerSession } from "./docker-manager";
 import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
 import { dispatchMobileCommand } from "./mobile-commands";
-import { bearerToken, verifyTerminalToken } from "./auth";
+import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import {
   initRuntime,
   runtimeCommandStart,
@@ -53,32 +50,10 @@ import {
   type PreviewStatus,
 } from "./preview/PreviewManager";
 import { dispatchCommand } from "./command-bridge";
+import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
+import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
+import { verifyClerkToken } from "./clerk-verify";
 import type { RemoteCommandRequest } from "@litt/agent-core";
-
-// ─── Service-to-service auth ───────────────────────────────────
-// Internal endpoints (under /internal/*) use a shared secret via
-// the X-Internal-Service-Key header. This is separate from the
-// user-facing terminal JWT auth and is only for Next.js → terminal-server calls.
-function requireInternalServiceAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const expectedKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-  if (expectedKey.length < 32) {
-    res.status(503).json({ error: "Internal service auth not configured" });
-    return;
-  }
-  const providedKey = req.headers["x-internal-service-key"] as string | undefined;
-  if (!providedKey || providedKey.length !== expectedKey.length) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  // Timing-safe comparison
-  const a = Buffer.from(providedKey);
-  const b = Buffer.from(expectedKey);
-  if (a.length !== b.length || !a.equals(b)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  next();
-}
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGINS = [
@@ -193,17 +168,14 @@ const io = new Server(server, {
 // One RuntimeStore owns the truth. Socket.IO clients receive a full
 // snapshot on connect and incremental updates on every mutation.
 // server.ts does NOT create another parallel state object.
+// server.ts does NOT create another parallel state object.
 initRuntime(io);
 
-interface Session {
-  ptyProcess: pty.IPty;
-  createdAt: Date;
-  userId: string;
-  sessionId: string;
-  cwd: string;
-}
-
-const sessions = new Map<string, Session>();
+// ─── PTY session manager ───────────────────────────────────────────
+// Canonical PTY lifecycle: create/input/resize/kill/snapshot with
+// idle timeout, absolute lifetime, and max concurrent PTYs per user.
+const ptyManager = new PtySessionManager();
+ptyManager.startSweeper();
 
 app.get("/health/live", (_req, res) => {
   res.json({
@@ -219,6 +191,122 @@ app.get("/health/live", (_req, res) => {
 // can poll this or use Socket.IO for realtime updates.
 app.get("/internal/runtime", requireInternalServiceAuth, (_req: AuthenticatedRequest, res: Response) => {
   res.json(getRuntimeState());
+});
+
+// ─── Token exchange: Clerk token → short-lived terminal JWT ───────
+// POST /api/token-exchange
+//
+// Security chain:
+//   CLI/Desktop/Mobile (authenticated Clerk user)
+//     → sends Clerk-issued JWT (Authorization: Bearer <clerk-token>)
+//     → terminal-server verifies Clerk token server-side (CLERK_SECRET_KEY)
+//     → server derives userId from verified Clerk token (NOT from request body)
+//     → server mints short-lived terminal JWT (5 min TTL) using TERMINAL_AUTH_SECRET
+//     → returns terminal JWT to client
+//     → client uses terminal JWT for /api/command, /api/runtime, /api/cancel
+//
+// The client NEVER touches TERMINAL_AUTH_SECRET or CLERK_SECRET_KEY.
+// The terminal JWT is short-lived (5 min) and must be refreshed via
+// another token exchange.
+app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const clerkToken = bearerToken(req.headers.authorization);
+    if (!clerkToken) {
+      res.status(401).json({ error: "Missing Clerk token" });
+      return;
+    }
+
+    // ─── 1. Verify the Clerk token server-side ────────────────────
+    // userId comes from the verified token, NOT from the request body.
+    const verified = await verifyClerkToken(clerkToken);
+    const userId = verified.userId;
+
+    // ─── 2. Workspace/project authorization (server-side) ────────
+    // If the client requests a specific workspaceId, verify the
+    // workspace exists AND belongs to the authenticated user.
+    // This prevents cross-user workspace access.
+    //
+    // The workspaceId is NOT trusted from the request body for
+    // identity — it's only used for authorization after the user
+    // has been verified via the Clerk token.
+    const body = req.body ?? {};
+    const requestedWorkspaceId = typeof body.workspaceId === "string" ? body.workspaceId : null;
+    let authorizedWorkspaceId: string | undefined;
+    let authorizedProjectId: string | undefined;
+    let authorizedWorkspaceRoot: string | undefined;
+
+    if (requestedWorkspaceId) {
+      const ws = getWorkspace(requestedWorkspaceId);
+      if (!ws) {
+        res.status(404).json({ error: "Workspace not found" });
+        return;
+      }
+      // ─── Ownership check: workspace must belong to the verified user ──
+      if (ws.userId !== userId) {
+        res.status(403).json({
+          error: "Forbidden — workspace does not belong to the authenticated user",
+        });
+        return;
+      }
+      authorizedWorkspaceId = ws.workspaceId;
+      authorizedProjectId = ws.projectId;
+      authorizedWorkspaceRoot = ws.root;
+    }
+
+    // ─── 3. Mint a short-lived terminal JWT (5 min TTL) ──────────
+    // The terminal JWT embeds the verified userId and optionally the
+    // authorized workspaceId/projectId. The client cannot forge these
+    // claims — they come from server-side verification.
+    const terminalToken = authorizedWorkspaceId
+      ? mintTerminalToken(userId, 300, {
+          workspaceId: authorizedWorkspaceId,
+          projectId: authorizedProjectId,
+          cwd: authorizedWorkspaceRoot,
+        })
+      : mintTerminalToken(userId, 300);
+
+    res.json({
+      terminalToken,
+      expiresIn: 300,
+      userId, // returned for client convenience; the token is the authority
+      workspaceId: authorizedWorkspaceId,
+      projectId: authorizedProjectId,
+      workspaceRoot: authorizedWorkspaceRoot,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Token exchange failed";
+    res.status(401).json({ error: message });
+  }
+});
+
+// ─── User-authenticated runtime state endpoint ────────────────────
+// GET /api/runtime — returns the canonical runtime snapshot using
+// USER authentication (terminal JWT minted by /api/token-exchange).
+app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    verifyTerminalToken(bearerToken(req.headers.authorization));
+    res.json(getRuntimeState());
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+});
+
+// ─── User-authenticated cancel endpoint ───────────────────────────
+// POST /api/cancel — cancel the currently active run using USER auth.
+app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    verifyTerminalToken(bearerToken(req.headers.authorization));
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const runId = String(req.body?.runId ?? "");
+  if (!runId) {
+    res.status(400).json({ error: "Missing 'runId'" });
+    return;
+  }
+  // TODO: wire to actual cancel — for now returns ok
+  res.json({ ok: true, runId });
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
@@ -252,6 +340,87 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── User-authenticated command endpoint ──────────────────────────
+// POST /api/command — dispatch a command through the canonical command
+// registry using USER authentication (terminal JWT), NOT the internal
+// service key. This is the endpoint `litt --remote` should use.
+//
+// Security chain:
+//   CLI authenticated user
+//     → signed user token (Authorization: Bearer <token>)
+//     → terminal-server verifies identity via verifyTerminalToken
+//     → userId extracted from JWT (NOT from request body)
+//     → authorized workspace/project
+//     → ExecutionGateway
+//
+// A user CANNOT specify another userId, workspaceId, or project and
+// gain access — the userId comes from the verified JWT, and workspace
+// ownership is validated against that userId.
+app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
+  // ─── 1. Verify user JWT ──────────────────────────────────────────
+  let userId: string;
+  try {
+    const token = bearerToken(req.headers.authorization);
+    const payload = verifyTerminalToken(token);
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
+    return;
+  }
+
+  // ─── 2. Validate request body ────────────────────────────────────
+  const body = req.body as RemoteCommandRequest;
+  if (!body?.command || typeof body.command !== "string") {
+    res.status(400).json({ error: "Missing 'command' field" });
+    return;
+  }
+  if (body.args !== undefined && !Array.isArray(body.args)) {
+    res.status(400).json({ error: "'args' must be a string[] (structured argv)" });
+    return;
+  }
+
+  // ─── 3. Build authenticated request ──────────────────────────────
+  // userId comes from the VERIFIED JWT — NOT from the request body.
+  // A user cannot impersonate another user by setting userId in the body.
+  // workspaceId/cwd are validated against the user's workspace root.
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const userWorkspaceRoot = workspaceRoot
+    ? resolve(workspaceRoot, userId)
+    : process.cwd();
+
+  // If the request specifies a cwd, validate it's within the user's workspace.
+  // This prevents cross-user workspace access.
+  let cwd = body.cwd ?? userWorkspaceRoot;
+  if (workspaceRoot) {
+    const resolvedCwd = resolve(cwd);
+    const resolvedUserRoot = resolve(userWorkspaceRoot);
+    const rel = relative(resolvedUserRoot, resolvedCwd);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      res.status(403).json({
+        error: "Forbidden — cwd is outside your workspace",
+      });
+      return;
+    }
+  }
+
+  const normalizedReq: RemoteCommandRequest = {
+    ...body,
+    args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
+    // userId from the JWT — overrides any value in the body
+    userId,
+    // cwd validated to be within the user's workspace
+    cwd,
+  };
+
+  try {
+    const result = await dispatchCommand(normalizedReq);
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -308,7 +477,7 @@ app.get("/health", async (_req, res) => {
     service: "terminal-server",
     status: allReady ? "ok" : "degraded",
     uptime: process.uptime(),
-    activeSessions: sessions.size,
+    activeSessions: ptyManager.size,
     timestamp: new Date().toISOString(),
     readiness: allReady ? "ready" : "not_ready",
     checks: {
@@ -332,6 +501,17 @@ app.get("/health", async (_req, res) => {
 app.get("/internal/audit-log", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
   const limit = Math.min(Number(req.query?.limit) || 100, 1000);
   res.json({ entries: getAuditLog(limit) });
+});
+
+// ─── PTY session status endpoint ──────────────────────────────────
+// Returns active PTY session snapshots (safe shape — no ptyProcess handle).
+// Service-to-service only (requires internal service key).
+app.get("/internal/sessions", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.terminalUserId;
+  const sessions = userId
+    ? ptyManager.snapshotByUser(userId)
+    : ptyManager.snapshot();
+  res.json({ sessions });
 });
 
 // ─── Internal workspace endpoints (service-to-service) ─────────
@@ -814,12 +994,6 @@ function safePath(userId: string, filePath: string) {
   return target;
 }
 
-type AuthenticatedRequest = Request & {
-  terminalUserId?: string;
-  workspaceId?: string;
-  workspaceRoot?: string;
-};
-
 function requireTerminalAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -1106,7 +1280,6 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   const userId = String(socket.data.userId);
-  const sessionId = randomUUID();
   const workspaceId = socket.data.workspaceId as string | undefined;
   const projectId = socket.data.projectId as string | undefined;
   const desktopCwd = socket.data.cwd as string | undefined;
@@ -1116,39 +1289,58 @@ io.on("connection", (socket) => {
   const workspace = (socket.data.workspaceRoot as string | undefined) ?? resolve(WORKSPACE_ROOT, userId);
   mkdirSync(workspace, { recursive: true });
 
-  console.log("[Terminal] Connected:", { userId, sessionId, workspaceId: workspaceId ?? "default", projectId: projectId ?? "none" });
+  console.log("[Terminal] Connected:", { userId, workspaceId: workspaceId ?? "default", projectId: projectId ?? "none" });
   if (desktopCwd) {
     console.log("[Terminal] Authenticated desktop cwd:", desktopCwd);
   }
 
-  let ptyProcess: pty.IPty;
-
+  // ─── Create PTY session via the canonical manager ───────────────
+  // PtySessionManager handles: spawn, metadata, idle/lifetime timers,
+  // max concurrent enforcement, workspace boundary validation, and cleanup.
+  // The allowedRoot is the server-side resolved workspace root — the
+  // manager validates that cwd is within this root before spawning.
+  let session: PtySessionSnapshot;
   try {
-    if (USE_DOCKER) {
-      ptyProcess = createDockerSession({
-        userId,
-        sessionId,
-        workspace,
-        onData: (data: string) => socket.emit("terminal:output", data),
-      });
-    } else {
-      const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "bash";
-      ptyProcess = pty.spawn(shell, [], {
-        name: "xterm-256color",
-        cols: 120,
-        rows: 32,
-        cwd: workspace,
-        env: {
-          ...process.env,
-          TERM: "xterm-256color",
-          LITTREE_USER_ID: userId,
-          LITTREE_SESSION_ID: sessionId,
-          LITTREE_WORKSPACE_ID: workspaceId ?? "",
-          LITTREE_PROJECT_ID: projectId ?? "",
-          HOME: workspace,
-        },
-      });
-    }
+    session = ptyManager.create({
+      userId,
+      projectId: projectId ?? null,
+      workspaceId: workspaceId ?? null,
+      cwd: workspace,
+      allowedRoot: workspace,
+      useDocker: USE_DOCKER,
+      onData: (data: string) => socket.emit("terminal:output", data),
+      onExit: ({ sessionId, exitCode, signal }) => {
+        console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
+        socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
+      },
+      onOutputDropped: ({ sessionId, dropped }) => {
+        console.warn("[Terminal] Output dropped:", { sessionId, dropped });
+      },
+      // ─── Backpressure protection ───────────────────────────────
+      // Predicate: is the Socket.IO transport ready to accept output?
+      // Checks both disconnection and Engine.IO sendBuffer buildup.
+      // When this returns false, PtySessionManager buffers output up
+      // to MAX_PENDING_OUTPUT_BYTES, then drops to prevent OOM.
+      isTransportWritable: () => {
+        if (socket.disconnected) return false;
+        // Engine.IO sendBuffer: packets queued waiting for the transport.
+        // If it's backing up (slow client), stop feeding it more data.
+        const conn = (socket as any).conn;
+        if (conn?.sendBuffer && Array.isArray(conn.sendBuffer) && conn.sendBuffer.length > 64) {
+          return false;
+        }
+        return true;
+      },
+      // Throttled user-visible warning — emitted once when the transport
+      // recovers and buffered output is flushed, if any output was dropped.
+      onBackpressureWarning: ({ droppedChunks, droppedBytes }) => {
+        const kb = Math.max(1, Math.round(droppedBytes / 1024));
+        socket.emit(
+          "terminal:output",
+          `\r\n\x1b[33m\u26A0 Terminal output dropped (${droppedChunks} chunks, ~${kb} KiB) \u2014 connection too slow.\x1b[0m\r\n`,
+        );
+      },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start terminal";
     console.error("[Terminal] Start failed:", message);
@@ -1157,31 +1349,14 @@ io.on("connection", (socket) => {
     return;
   }
 
-  const session: Session = {
-    ptyProcess,
-    createdAt: new Date(),
-    userId,
-    sessionId,
-    cwd: workspace,
-  };
+  const sessionId = session.sessionId;
 
-  sessions.set(sessionId, session);
   socket.emit("session:ready", {
     sessionId,
     cwd: workspace,
     workspaceId: workspaceId ?? null,
     projectId: projectId ?? null,
-    shell: process.platform === "win32" ? "powershell" : process.env.SHELL || "bash",
-  });
-
-  ptyProcess.onData((data) => {
-    socket.emit("terminal:output", data);
-  });
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    console.log("[Terminal] Exit:", { sessionId, exitCode, signal });
-    socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
-    sessions.delete(sessionId);
+    shell: session.shell,
   });
 
   socket.on("terminal:input", (data: string) => {
@@ -1209,7 +1384,10 @@ io.on("connection", (socket) => {
     }
 
     auditCommand(userId, sessionId, data, false);
-    ptyProcess.write(data);
+    if (!ptyManager.input(sessionId, data, userId)) {
+      // input rejected — wrong owner, exited, or oversized
+      socket.emit("terminal:output", "\r\n\x1b[33m⚠ Input rejected (session ended or too large).\x1b[0m\r\n");
+    }
   });
 
     socket.on("litt-code:command", async (input: string) => {
@@ -1222,7 +1400,7 @@ io.on("connection", (socket) => {
       const userId = socket.data.userId || "unknown";
       auditCommand(userId, sessionId, mobileCmd.shellCommand, false);
       socket.emit("terminal:output", `\r\n\x1b[36m📱 ${mobileCmd.label}\x1b[0m\r\n`);
-      ptyProcess.write(mobileCmd.shellCommand + "\r");
+      ptyManager.input(sessionId, mobileCmd.shellCommand + "\r", userId);
       return;
     }
 
@@ -1279,7 +1457,7 @@ io.on("connection", (socket) => {
 
   socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
     if (typeof cols === "number" && typeof rows === "number") {
-      ptyProcess.resize(cols, rows);
+      ptyManager.resize(sessionId, cols, rows, userId);
     }
   });
 
@@ -1323,8 +1501,9 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("[Terminal] Disconnected:", sessionId);
-    ptyProcess.kill();
-    sessions.delete(sessionId);
+    // Kill the session — the socket owns it, so we pass the authenticated userId.
+    // This is safe because userId came from the JWT, not the client.
+    ptyManager.kill(sessionId, "client_disconnect", userId);
   });
 });
 
@@ -1338,12 +1517,7 @@ server.listen(PORT, "0.0.0.0", () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`[terminal-server] Received ${signal}, shutting down...`);
-  for (const [id, session] of sessions) {
-    try {
-      session.ptyProcess.kill();
-    } catch {}
-    sessions.delete(id);
-  }
+  ptyManager.shutdown();
   io.close(() => {
     server.close(() => {
       console.log("[terminal-server] All connections closed.");

@@ -398,7 +398,8 @@ export async function runAgentLoopV2(
         // Use the registry's execute method, passing transport for V2 handlers
         const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
           hasApproval: !permResult.requiresApproval,
-          transport,
+        transport,
+        executionMode: cfg.executionMode,
         });
 
         if (execResult.ok) {
@@ -598,7 +599,8 @@ export async function resumeAgentLoopV2(
     try {
       const execResult = await toolRegistry.execute(resume.toolId, resume.inputs, {
         hasApproval: true,
-        transport,
+      transport,
+      executionMode: cfg.executionMode,
       });
 
       if (execResult.ok) {
@@ -817,7 +819,8 @@ export async function resumeAgentLoopV2(
       try {
         const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
           hasApproval: !permResult.requiresApproval,
-          transport,
+        transport,
+        executionMode: cfg.executionMode,
         });
 
         if (execResult.ok) {
@@ -934,7 +937,8 @@ function createAutonomousRepairCallback(
           try {
             const execResult = await toolRegistry.execute(toolCall.toolId, toolCall.inputs, {
               hasApproval: true,
-              transport,
+      transport,
+      executionMode: "act" as const,
             });
 
             const result: ToolCallResult = execResult.ok
