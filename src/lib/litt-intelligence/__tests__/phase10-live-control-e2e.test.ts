@@ -409,6 +409,108 @@ describe("Phase 10.9 — End-to-End Browser Control Chain", () => {
 
       await closeSession(session.id, session.userId);
     });
+
+    it("HARD CANCEL — cancelled action that returns success is invalidated by generation ID", async () => {
+      const session = await startTestSession();
+
+      // Start an action that resolves successfully after a delay.
+      // The action does NOT check the abort signal — it completes normally.
+      // But because cancelSessionAction increments the generation, the
+      // result is discarded and replaced with "cancelled".
+      let actionResolve: ((value: BrowserActionResult) => void) | null = null;
+      const actionPromise = executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000" },
+        async () => {
+          // Simulate a slow Playwright operation that completes successfully
+          // regardless of the abort signal (like page.goto() without AbortSignal)
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 200);
+          });
+          return { success: true, data: { url: "http://localhost:3000" }, durationMs: 0 };
+        },
+      );
+
+      // Cancel while the action is in flight
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      cancelSessionAction(session.id);
+
+      const result = await actionPromise;
+      // Even though fn() returned success, the result must be invalidated
+      // because the action was cancelled.
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("cancelled");
+
+      await closeSession(session.id, session.userId);
+    });
+
+    it("HARD CANCEL — stale completion cannot overwrite newer session state", async () => {
+      const session = await startTestSession();
+
+      // Action 1: slow action that will be cancelled
+      const slowAction = executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000/slow" },
+        async () => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 200));
+          return { success: true, data: { url: "http://localhost:3000/slow" }, durationMs: 0 };
+        },
+      );
+
+      // Cancel action 1
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      cancelSessionAction(session.id);
+
+      // Action 2: fast action that should succeed with the new generation
+      const fastResult = await executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000/fast" },
+        async () => {
+          return { success: true, data: { url: "http://localhost:3000/fast" }, durationMs: 0 };
+        },
+      );
+      expect(fastResult.success).toBe(true);
+
+      // Now await the slow action — it must report cancelled, not success
+      const slowResult = await slowAction;
+      expect(slowResult.success).toBe(false);
+      expect(slowResult.error).toContain("cancelled");
+
+      await closeSession(session.id, session.userId);
+    });
+
+    it("HARD CANCEL — cancellation result is deterministic", async () => {
+      const session = await startTestSession();
+
+      // Run the same scenario 3 times — each must produce "cancelled"
+      for (let i = 0; i < 3; i++) {
+        const actionPromise = executeBrowserAction(
+          session.id,
+          session.userId,
+          "browser.wait",
+          {},
+          async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 150));
+            return { success: true, durationMs: 0 };
+          },
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        cancelSessionAction(session.id);
+
+        const result = await actionPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("cancelled");
+      }
+
+      await closeSession(session.id, session.userId);
+    });
   });
 
   // ─── 5. Console/network errors are captured ────────────────────
@@ -561,8 +663,8 @@ describe("Phase 10.9 — End-to-End Browser Control Chain", () => {
     });
   });
 
-  // ─── 7. Pause session blocks execution ─────────────────────────
-  describe("7. Pause session blocks execution", () => {
+  // ─── 7. HARD PAUSE — paused session blocks execution at the boundary ─
+  describe("7. HARD PAUSE — paused session blocks execution", () => {
     it("executeBrowserAction returns error when session is paused", async () => {
       const session = await startTestSession();
 
@@ -577,12 +679,58 @@ describe("Phase 10.9 — End-to-End Browser Control Chain", () => {
         { url: "http://localhost:3000" },
         async () => ({ success: true, durationMs: 0 }),
       );
-      // Paused sessions are not "human_control" or "closed", so execution
-      // might still proceed. The session manager only blocks "closed" and
-      // "human_control" statuses. This is intentional — pause is a softer
-      // state that the agent loop respects, not a hard block.
-      // We verify the session IS paused:
-      expect(pausedSession?.status).toBe("paused");
+      // HARD PAUSE — the action must be rejected, not executed
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("paused");
+
+      await closeSession(session.id, session.userId);
+    });
+
+    it("paused session — the action callback never executes", async () => {
+      const session = await startTestSession();
+      await pauseSession(session.id, session.userId);
+
+      let callbackRan = false;
+      const result = await executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000" },
+        async () => {
+          callbackRan = true;
+          return { success: true, durationMs: 0 };
+        },
+      );
+      expect(callbackRan).toBe(false);
+      expect(result.success).toBe(false);
+
+      await closeSession(session.id, session.userId);
+    });
+
+    it("resume after pause — execution works again", async () => {
+      const session = await startTestSession();
+
+      // Pause
+      await pauseSession(session.id, session.userId);
+      const pausedResult = await executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000" },
+        async () => ({ success: true, durationMs: 0 }),
+      );
+      expect(pausedResult.success).toBe(false);
+
+      // Resume — returnControl sets status to agent_control
+      await returnControl(session.id, session.userId);
+      const resumedResult = await executeBrowserAction(
+        session.id,
+        session.userId,
+        "browser.navigate",
+        { url: "http://localhost:3000" },
+        async () => ({ success: true, durationMs: 0 }),
+      );
+      expect(resumedResult.success).toBe(true);
 
       await closeSession(session.id, session.userId);
     });

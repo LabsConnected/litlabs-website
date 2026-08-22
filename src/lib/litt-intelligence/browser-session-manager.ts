@@ -87,6 +87,16 @@ interface ActiveSession {
   consoleErrors: string[];
   /** Network errors captured from the page. */
   networkErrors: string[];
+  /**
+   * Action generation counter — increments on every cancel.
+   * Each executeBrowserAction() call captures the generation at start;
+   * if it changed by the time fn() resolves, the action is treated as
+   * cancelled even if fn() returned success. This prevents stale
+   * completions from a cancelled action overwriting newer session state.
+   */
+  actionGeneration: number;
+  /** The generation that the currently-running action captured, if any. */
+  runningActionGeneration: number | null;
 }
 
 const activeSessions = new Map<string, ActiveSession>();
@@ -329,6 +339,8 @@ export async function startSession(
     abortController: null,
     consoleErrors,
     networkErrors,
+    actionGeneration: 0,
+    runningActionGeneration: null,
   });
 
   return session;
@@ -461,15 +473,31 @@ export async function closeSession(
  * Cancel the currently-running browser action for a session.
  * Returns true if an action was cancelled, false if no action was running.
  *
- * This is the "Stop" button's backend — it aborts the AbortController
- * associated with the in-flight executeBrowserAction() call, causing
- * the action to throw an AbortError which is caught and converted to
- * a "cancelled" result.
+ * This is the "Stop" button's backend. It uses TWO mechanisms:
+ *
+ * 1. AbortController — aborts the signal, which actions can check
+ *    cooperatively. Playwright/Stagehand operations that accept an
+ *    AbortSignal will throw AbortError.
+ *
+ * 2. Action generation ID — increments the session's actionGeneration
+ *    counter. When the in-flight fn() resolves, executeBrowserAction()
+ *    checks if the generation changed. If it did, the result is
+ *    discarded and replaced with a "cancelled" result, even if fn()
+ *    returned success. This prevents stale completions from a
+ *    cancelled action from overwriting newer session state.
+ *
+ * Together, these ensure that:
+ * - cancelled actions cannot later report success
+ * - cancelled actions cannot continue mutating the page silently
+ * - cancellation result is deterministic
+ * - stale completion from a cancelled action cannot overwrite newer state
  */
 export function cancelSessionAction(sessionId: string): boolean {
   const active = activeSessions.get(sessionId);
   if (!active || !active.abortController) return false;
   active.abortController.abort();
+  // Increment generation so the in-flight action's result is invalidated
+  active.actionGeneration++;
   return true;
 }
 
@@ -555,6 +583,17 @@ export async function executeBrowserAction(
     };
   }
 
+  // HARD PAUSE — paused sessions reject all actions at the execution boundary.
+  // This is not a soft hint for the agent loop; it is a hard block so that
+  // direct API calls, test harnesses, and any other caller cannot bypass pause.
+  if (session.status === "paused") {
+    return {
+      success: false,
+      error: "Browser session is paused. Resume the session before executing actions.",
+      durationMs: 0,
+    };
+  }
+
   const stagehand = getStagehand(sessionId);
   if (!stagehand) {
     return {
@@ -564,13 +603,19 @@ export async function executeBrowserAction(
     };
   }
 
-  // Set up cancellation — each action gets its own AbortController.
-  // cancelSessionAction() will abort it, causing the action to throw
-  // an AbortError which we catch and convert to a "cancelled" result.
+  // Set up cancellation — each action gets its own AbortController and
+  // captures the current action generation. cancelSessionAction() will
+  // abort the signal AND increment the generation. After fn() resolves,
+  // we check if the generation changed — if it did, the result is
+  // discarded and replaced with a "cancelled" result, even if fn()
+  // returned success. This prevents stale completions from overwriting
+  // newer session state.
   const active = activeSessions.get(sessionId);
   const abortController = new AbortController();
+  const actionGeneration = active?.actionGeneration ?? 0;
   if (active) {
     active.abortController = abortController;
+    active.runningActionGeneration = actionGeneration;
   }
 
   let result: BrowserActionResult;
@@ -595,7 +640,20 @@ export async function executeBrowserAction(
     // Clear the abort controller so cancelSessionAction knows nothing is running
     if (active) {
       active.abortController = null;
+      active.runningActionGeneration = null;
     }
+  }
+
+  // HARD CANCELLATION — check if the action was cancelled while fn() was
+  // in flight. If the generation changed, the result from fn() is stale
+  // and must be discarded. This prevents a cancelled action from reporting
+  // success or mutating session state after the user pressed Stop.
+  if (active && active.actionGeneration !== actionGeneration) {
+    result = {
+      success: false,
+      error: "Action cancelled by user",
+      durationMs: Date.now() - start,
+    };
   }
 
   // Ensure durationMs is set
