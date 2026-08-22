@@ -1,7 +1,10 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { studioColors, studioRadius, studioSpacing, studioTypography, statusColor, statusBg, type StatusTone } from "@/lib/studio/design-tokens";
+import { studioColors, studioRadius, studioSpacing, studioTypography, statusColor, statusBg } from "@/lib/studio/design-tokens";
+import type { StatusTone } from "@/lib/studio/design-tokens";
+
+export type { StatusTone };
 
 /* ─────────────────────────────────────────────────────────────────
  * StudioStatus — status badge primitive.
