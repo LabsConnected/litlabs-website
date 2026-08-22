@@ -422,6 +422,35 @@ describe("POST /api/vapi/tools — route handler", () => {
     getDeployments: vi.fn(),
   }));
 
+  // Mock the heavy transitive dependencies of @/lib/project-tools/registry
+  // that are NOT otherwise mocked. Without these mocks, importing the route
+  // handler pulls in the full dependency graph (Playwright/browser executor,
+  // GitHub Octokit, memory service, etc.) which can exceed the 10s hookTimeout
+  // under full-suite cold load. The registry's tool execution logic is not
+  // under test here — the route handler's orchestration (auth, payload
+  // parsing, response formatting) is.
+  vi.mock("@/lib/github-pat", () => ({
+    getUserGitHubOctokit: vi.fn(),
+  }));
+
+  vi.mock("@/lib/studio/memory-service", () => ({
+    persistMemory: vi.fn(),
+    recallMemories: vi.fn(() => Promise.resolve([])),
+    formatMemoryContext: vi.fn(() => ""),
+  }));
+
+  vi.mock("@/lib/browser-jobs", () => ({
+    createJob: vi.fn(),
+    getJob: vi.fn(),
+    listJobs: vi.fn(),
+    updateJob: vi.fn(),
+    deleteJob: vi.fn(),
+  }));
+
+  vi.mock("@/lib/browser-job-executor", () => ({
+    executeBrowserJob: vi.fn(),
+  }));
+
   vi.mock("@/lib/rate-limiter", () => ({
     rateLimit: vi.fn(() => Promise.resolve({ success: true, remaining: 59, resetTime: 60 })),
   }));
