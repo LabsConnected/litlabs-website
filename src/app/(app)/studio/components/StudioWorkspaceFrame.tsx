@@ -28,6 +28,8 @@ import StudioHealthPanel from "./StudioHealthPanel";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import StudioBrowserJobsPanel from "./StudioBrowserJobsPanel";
+import { StudioChangesPanel } from "./StudioChangesPanel";
+import { useRunEvidence } from "../hooks/useRunEvidence";
 
 /**
  * StudioWorkspaceFrame — collapsible right inspector + bottom drawer.
@@ -99,6 +101,9 @@ function InspectorSection({ title, children }: { title: string; children: React.
 function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspectorData }) {
   const { capabilities, messages } = data;
   const lastMessage = messages[messages.length - 1];
+  const { evidence, loading: evidenceLoading } = useRunEvidence({
+    projectId: capabilities.projectId ?? null,
+  });
 
   if (tab === "files") {
     return (
@@ -134,21 +139,13 @@ function InspectorContent({ tab, data }: { tab: InspectorTab; data: StudioInspec
 
   if (tab === "changes") {
     return (
-      <div className="space-y-4">
-        <InspectorSection title="Current surface">
-          <InspectorRow label="Destination" value={data.destination} />
-          <InspectorRow label="Surface" value={data.surface} />
-          <InspectorRow label="Messages" value={String(messages.length)} />
-          <InspectorRow label="Latest state" value={lastMessage?.status ?? "No messages yet"} tone={lastMessage?.status === "failed" ? "warn" : lastMessage ? "ok" : "muted"} />
-        </InspectorSection>
+      <div className="space-y-3">
         <InspectorSection title="Repository scope">
           <InspectorRow label="Repository" value={capabilities.repositoryName ?? "Not connected"} tone={capabilities.repositoryName ? "ok" : "muted"} />
           <InspectorRow label="Branch" value={capabilities.activeBranch ?? capabilities.defaultBranch ?? "Not available"} />
           <InspectorRow label="Index" value={capabilities.repositoryIndexed ? "Indexed" : "Not indexed"} tone={capabilities.repositoryIndexed ? "ok" : "muted"} />
         </InspectorSection>
-        <div className="rounded-xl border px-3 py-2.5 text-[10px] leading-4" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(114,242,56,0.04)", color: "var(--text-muted)" }}>
-          File-level changes will appear here when a project write or checkpoint is available. The imported prototype showed sample files; this panel only reports real workspace state.
-        </div>
+        <StudioChangesPanel evidence={evidence} loading={evidenceLoading} />
       </div>
     );
   }

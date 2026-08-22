@@ -43,6 +43,8 @@ import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import { StudioActivityEvents } from "./StudioActivityEvents";
+import { useRunEvidence } from "../hooks/useRunEvidence";
 import StudioProjectFiles from "./StudioProjectFiles";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
@@ -164,6 +166,9 @@ function CommandStudioContent() {
   const searchParams = useSearchParams();
   const { capabilities, refresh: refreshCapabilities } = useConnectionSummary();
   const projectReady = Boolean(capabilities.projectId);
+  const { events: runEvents, loading: runEventsLoading } = useRunEvidence({
+    projectId: capabilities.projectId ?? null,
+  });
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
@@ -1511,13 +1516,28 @@ function CommandStudioContent() {
               {/* Render others conditionally since they don't have background workers */}
               {drawerOpen && drawerTab === "media" && <MediaUtilityDock />}
               {drawerOpen && drawerTab === "activity" && (
-                <StudioActivityPanel
-                  messages={conversation.messages}
-                  busy={conversation.busy}
-                  modelLabel={modelLabel}
-                  projectName={capabilities.projectName}
-                  terminalStatus={capabilities.terminalStatus}
-                />
+                <div className="h-full overflow-y-auto">
+                  <div className="space-y-3 p-2">
+                    <div>
+                      <div className="px-1 text-[9px] font-black uppercase tracking-[0.18em] mb-1.5" style={{ color: "var(--text-muted)" }}>
+                        Run Events
+                      </div>
+                      <StudioActivityEvents events={runEvents} loading={runEventsLoading} />
+                    </div>
+                    <div>
+                      <div className="px-1 text-[9px] font-black uppercase tracking-[0.18em] mb-1.5" style={{ color: "var(--text-muted)" }}>
+                        Conversation
+                      </div>
+                      <StudioActivityPanel
+                        messages={conversation.messages}
+                        busy={conversation.busy}
+                        modelLabel={modelLabel}
+                        projectName={capabilities.projectName}
+                        terminalStatus={capabilities.terminalStatus}
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
             </StudioDrawer>
           </main>
