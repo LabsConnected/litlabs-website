@@ -23,6 +23,7 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { deriveTransport } from "../lib/transport-projection.js";
 
 export interface HeaderProps {
   project: string;
@@ -70,28 +71,29 @@ export function Header({
     );
   }
 
-  // ─── LOCAL indicator (always available — RuntimeSession) ──────────
-  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
-  const localColor = localRuntime === "ready" ? COLORS.success
-    : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL"
-    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  // ─── Transport projection (SHARED with the status bar) ────────────
+  // Both surfaces render from this ONE derivation, so the header and the
+  // footer cannot assert different transports at the same moment.
+  const transport = deriveTransport({ localRuntime, remoteRuntime, signedIn });
 
-  // ─── REMOTE indicator (reflects actual transport connection state) ──
-  // Only shown when remote is not "offline" (i.e. when --remote was used
-  // or a RuntimeClient was created). When offline, the indicator is
-  // omitted entirely — LOCAL is the only active runtime.
-  // Do NOT claim REMOTE until the remote runtime connection is actually
-  // established (connected). Connecting/reconnecting shows the ↻ suffix.
-  const showRemote = remoteRuntime !== "offline";
-  const remoteIcon = remoteRuntime === "connected" ? "●"
-    : remoteRuntime === "error" ? "✗" : "○";
-  const remoteColor = remoteRuntime === "connected" ? COLORS.success
-    : remoteRuntime === "error" ? COLORS.error : COLORS.warning;
-  const remoteLabel = remoteRuntime === "connected" ? "REMOTE"
-    : remoteRuntime === "connecting" ? "REMOTE…"
-    : remoteRuntime === "reconnecting" ? "REMOTE↻"
-    : remoteRuntime === "error" ? "REMOTE ERR" : "REMOTE";
+  // Secondary indicator: local TOOL availability. Labelled TOOLS, not
+  // LOCAL — it reports whether local tooling is ready, which is true
+  // regardless of whether execution is happening remotely.
+  const localIcon = transport.footerSeverity === "ok" ? "●"
+    : transport.footerSeverity === "error" ? "✗" : "○";
+  const localColor = transport.footerSeverity === "ok" ? COLORS.success
+    : transport.footerSeverity === "error" ? COLORS.error : COLORS.warning;
+  const localLabel = transport.footerLabel;
+
+  // ─── Primary indicator: the ACTUAL execution path ─────────────────
+  // REMOTE is claimed only on an established connection; connecting,
+  // reconnecting and error render distinct labels.
+  const showRemote = transport.showRemote;
+  const remoteIcon = transport.remoteActive ? "●"
+    : transport.headerSeverity === "error" ? "✗" : "○";
+  const remoteColor = transport.headerSeverity === "ok" ? COLORS.success
+    : transport.headerSeverity === "error" ? COLORS.error : COLORS.warning;
+  const remoteLabel = transport.headerLabel;
 
   // ─── Email suffix — shown when signed in (e.g. "· user@email.com") ──
   // Truncated on narrow terminals to avoid wrapping.
