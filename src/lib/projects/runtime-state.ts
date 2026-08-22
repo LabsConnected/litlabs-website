@@ -15,7 +15,11 @@ export type RuntimePhase =
   | "resolving" // resolving project + workspace
   | "ready" // workspace mounted, terminal connected, execution available
   | "workspace_not_provisioned" // project exists but no workspaceId
+  | "workspace_provisioning" // workspace is being provisioned (cloning/indexing)
+  | "workspace_cloning" // repository is being cloned into the workspace
+  | "workspace_indexing" // workspace files are being indexed for search
   | "workspace_not_ready" // workspaceId exists but workspaceStatus !== "ready"
+  | "workspace_failed" // workspace provisioning failed
   | "terminal_disconnected" // workspace ready but terminal not connected
   | "terminal_reconnecting" // attempting to reconnect terminal
   | "error" // unrecoverable error
@@ -45,6 +49,14 @@ export interface ProjectRuntimeState {
   projectName: string | null;
   repository: string | null;
   branch: string | null;
+  /** HEAD SHA of the checked-out workspace, resolved from the actual filesystem.
+   *  NOT stale DB metadata — read from `git rev-parse HEAD` in workspaceRoot.
+   *  Null when workspace is not ready or not a git repo. */
+  headSha: string | null;
+  /** Base SHA the workspace was branched from / cloned at.
+   *  Used to compute diff range for the Changes tab.
+   *  Null when not applicable (blank projects, no git history). */
+  baseSha: string | null;
   /** How the project source was created */
   sourceType: "github" | "upload" | "template" | "blank" | null;
 
@@ -99,6 +111,8 @@ export const INITIAL_RUNTIME_STATE: ProjectRuntimeState = {
   projectName: null,
   repository: null,
   branch: null,
+  headSha: null,
+  baseSha: null,
   sourceType: null,
   workspaceId: null,
   workspacePath: null,
@@ -130,8 +144,16 @@ export function runtimePhaseLabel(phase: RuntimePhase): string {
       return "Workspace ready";
     case "workspace_not_provisioned":
       return "Workspace not provisioned";
+    case "workspace_provisioning":
+      return "Provisioning workspace…";
+    case "workspace_cloning":
+      return "Cloning repository…";
+    case "workspace_indexing":
+      return "Indexing workspace…";
     case "workspace_not_ready":
       return "Workspace not ready";
+    case "workspace_failed":
+      return "Workspace provisioning failed";
     case "terminal_disconnected":
       return "Terminal disconnected";
     case "terminal_reconnecting":
@@ -155,6 +177,16 @@ export function runtimeRecoveryActions(
     case "workspace_not_provisioned":
       return [
         { label: "Provision workspace", action: "provision_workspace" },
+        { label: "Open connection settings", action: "open_settings", href: "/settings" },
+      ];
+    case "workspace_provisioning":
+    case "workspace_cloning":
+    case "workspace_indexing":
+      return []; // in progress — no recovery needed
+    case "workspace_failed":
+      return [
+        { label: "Retry provisioning", action: "retry_workspace" },
+        { label: "Re-clone repository", action: "reclone_repo" },
         { label: "Open connection settings", action: "open_settings", href: "/settings" },
       ];
     case "workspace_not_ready":

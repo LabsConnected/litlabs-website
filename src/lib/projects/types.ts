@@ -12,6 +12,8 @@ export type ProjectAccessMode = "private" | "shared";
 export type WorkspaceStatus =
   | "not_prepared"
   | "provisioning"
+  | "cloning"
+  | "indexing"
   | "preparing"
   | "ready"
   | "failed"

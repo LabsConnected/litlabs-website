@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { resolveCurrentProject } from "@/lib/projects/resolve-current-project";
 import { getProject } from "@/lib/projects/project-repository";
+import { resolveWorkspaceGit } from "@/lib/projects/workspace-git-resolver";
 import type { ProjectRuntimeState, RuntimePhase, ProjectRuntimeError } from "@/lib/projects/runtime-state";
 
 export const runtime = "nodejs";
@@ -20,7 +21,8 @@ export const dynamic = "force-dynamic";
  * 3. Confirm project membership.
  * 4. Resolve repository and branch.
  * 5. Resolve or provision the workspace.
- * 6. Compute the runtime phase.
+ * 6. Resolve HEAD SHA from the actual workspace filesystem (not stale DB).
+ * 7. Compute the runtime phase.
  *
  * Terminal connection state is client-side (WebSocket) and is merged in
  * by the useProjectRuntime hook, not by this endpoint. This endpoint
@@ -75,7 +77,7 @@ export async function GET(request: NextRequest) {
   const workspaceStatus = project.workspaceStatus;
   const workspacePath = project.workspaceRoot;
 
-  // Determine workspace phase
+  // Determine workspace phase with explicit provisioning sub-states
   let phase: RuntimePhase;
   let error: ProjectRuntimeError | undefined;
 
@@ -85,6 +87,37 @@ export async function GET(request: NextRequest) {
       code: "WORKSPACE_NOT_PROVISIONED",
       message: `No workspace has been provisioned for "${project.name}". Connect a repository or start a blank project to provision one.`,
       recoveryAction: "provision_workspace",
+      recoveryHref: "/settings",
+    };
+  } else if (workspaceStatus === "provisioning") {
+    phase = "workspace_provisioning";
+    error = {
+      code: "WORKSPACE_PROVISIONING",
+      message: `Workspace is being provisioned for "${project.name}". This may take a few minutes.`,
+      recoveryAction: "wait",
+    };
+  } else if (workspaceStatus === "cloning") {
+    phase = "workspace_cloning";
+    error = {
+      code: "WORKSPACE_CLONING",
+      message: `Repository is being cloned into the workspace for "${project.name}".`,
+      recoveryAction: "wait",
+    };
+  } else if (workspaceStatus === "indexing") {
+    phase = "workspace_indexing";
+    error = {
+      code: "WORKSPACE_INDEXING",
+      message: `Workspace files are being indexed for "${project.name}". Search will be available shortly.`,
+      recoveryAction: "wait",
+    };
+  } else if (workspaceStatus === "failed" || workspaceStatus === "error") {
+    phase = "workspace_failed";
+    error = {
+      code: "WORKSPACE_FAILED",
+      message:
+        project.workspaceError ??
+        `Workspace provisioning failed for "${project.name}". Retry or re-clone the repository.`,
+      recoveryAction: "retry_workspace",
       recoveryHref: "/settings",
     };
   } else if (workspaceStatus !== "ready") {
@@ -102,6 +135,16 @@ export async function GET(request: NextRequest) {
     phase = "ready";
   }
 
+  // Resolve HEAD SHA from the actual workspace filesystem.
+  // Only attempt when workspace is ready — otherwise the path may not exist.
+  let headSha: string | null = null;
+  let baseSha: string | null = null;
+  if (phase === "ready" && workspacePath) {
+    const gitState = resolveWorkspaceGit(workspacePath, project.githubDefaultBranch);
+    headSha = gitState.headSha;
+    baseSha = gitState.baseSha;
+  }
+
   const state: ProjectRuntimeState = {
     phase,
     executionAvailable: phase === "ready", // hook will refine with terminal state
@@ -112,6 +155,8 @@ export async function GET(request: NextRequest) {
     projectName: project.name,
     repository,
     branch,
+    headSha,
+    baseSha,
     sourceType: project.sourceType ?? (repository ? "github" : "blank"),
     workspaceId,
     workspacePath,
@@ -151,6 +196,8 @@ function makeState(phase: RuntimePhase, error?: ProjectRuntimeError): Omit<Proje
     projectName: null,
     repository: null,
     branch: null,
+    headSha: null,
+    baseSha: null,
     sourceType: null,
     workspaceId: null,
     workspacePath: null,
