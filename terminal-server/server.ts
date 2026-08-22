@@ -53,6 +53,7 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { verifyClerkToken } from "./clerk-verify";
+import { checkEntitlement, recordUsage, estimateCoinCost, entitlementReady } from "./entitlement";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -332,6 +333,177 @@ app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
   res.json({ ok: true, runId });
 });
 
+// ─── Remote inference endpoint (SSE) ───────────────────────────────
+// POST /api/inference — stream model inference from the server's
+// provider key. This is the customer-facing path: a paid LiTT user
+// with NO local OPENROUTER_API_KEY gets inference served here.
+//
+// Flow:
+//   1. Verify terminal JWT → extract userId (Clerk ID)
+//   2. checkEntitlement(userId) → subscription + credits
+//      - 402 if not entitled (clean message, never an API-key error)
+//   3. runLiTTOperator() with the server's OPENROUTER_API_KEY
+//   4. Stream deltas back as SSE events:
+//        event: meta\ndata: {"provider":"openrouter","model":"..."}
+//        event: delta\ndata: {"text":"..."}
+//        event: done\ndata: {"model":"...","usage":{...}}
+//        event: error\ndata: {"message":"..."}
+//   5. recordUsage() — ledger + coin debit (best-effort)
+//
+// The server's OPENROUTER_API_KEY NEVER appears in any response,
+// header, log line, or event. The CLI only sees model deltas.
+app.post("/api/inference", async (req: AuthenticatedRequest, res: Response) => {
+  // ─── 1. Verify user JWT ──────────────────────────────────────────
+  let clerkId: string;
+  try {
+    const token = bearerToken(req.headers.authorization);
+    const payload = verifyTerminalToken(token);
+    clerkId = payload.sub;
+  } catch {
+    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
+    return;
+  }
+
+  // ─── 2. Validate request body ────────────────────────────────────
+  const body = req.body as {
+    prompt?: string;
+    messages?: Array<{ role: string; content: string }>;
+    cwd?: string;
+    mode?: "plan" | "act" | "auto";
+  };
+  const prompt = body?.prompt;
+  const messages = body?.messages;
+  if (!prompt && !messages) {
+    res.status(400).json({ error: "Missing 'prompt' or 'messages'" });
+    return;
+  }
+
+  // Build the prompt — prefer explicit prompt, else reconstruct from messages
+  const finalPrompt = prompt ?? (messages ?? [])
+    .filter((m) => m.role !== "system")
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n\n");
+
+  const cwd = body.cwd ?? process.cwd();
+  const mode = body.mode ?? "act";
+
+  // ─── 3. Entitlement check (subscription + credits) ───────────────
+  const entitlement = await checkEntitlement(clerkId);
+  if (!entitlement.entitled) {
+    res.status(402).json({
+      error: entitlement.reason,
+      code: entitlement.code,
+      plan: entitlement.plan,
+      coinBalance: entitlement.coinBalance,
+    });
+    return;
+  }
+
+  // ─── 4. Set up SSE ───────────────────────────────────────────────
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable proxy buffering
+  res.flushHeaders?.();
+
+  // Helper: send an SSE event
+  const sendEvent = (event: string, data: unknown): void => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Track whether we've sent a terminal event (done/error) to avoid
+  // duplicate terminal events if both the stream handler and the
+  // outer try/catch fire.
+  let terminated = false;
+  const finish = (): void => {
+    if (terminated) return;
+    terminated = true;
+    res.end();
+  };
+
+  // Client disconnect handling
+  const onClose = (): void => {
+    terminated = true;
+  };
+  req.on("close", onClose);
+
+  // ─── 5. Run the operator with streaming ──────────────────────────
+  try {
+    const result = await runLiTTOperator({
+      prompt: finalPrompt,
+      cwd,
+      userId: clerkId,
+      mode,
+      onModelStream: (event) => {
+        if (terminated) return;
+        switch (event.type) {
+          case "meta":
+            sendEvent("meta", {
+              provider: event.provider,
+              model: event.model,
+              profile: event.profile,
+            });
+            break;
+          case "delta":
+            sendEvent("delta", { text: event.text });
+            break;
+          case "done":
+            sendEvent("done", {
+              model: event.model,
+              usage: event.usage,
+              timing: event.timing,
+            });
+            break;
+          case "error":
+            sendEvent("error", { message: event.message });
+            break;
+        }
+      },
+    });
+
+    // ─── 6. Record usage (best-effort) ─────────────────────────────
+    const totalTokens = result.usage?.total_tokens ?? 0;
+    const coinsDebited = estimateCoinCost(totalTokens, entitlement.plan);
+    // Cost estimate: rough $0.002 per 1K tokens (varies by model, but
+    // this is a conservative average for ledger analytics)
+    const costUsd = (totalTokens / 1000) * 0.002;
+
+    await recordUsage({
+      clerkId,
+      provider: "openrouter",
+      model: "remote-inference",
+      promptTokens: 0, // not separately tracked in operator result
+      completionTokens: totalTokens,
+      totalTokens,
+      costUsd,
+      coinsDebited,
+      runId: result.runId,
+      mode,
+      durationMs: result.durationMs,
+    }).catch(() => { /* best-effort */ });
+
+    // Send a final completion event with the full content + runId
+    if (!terminated) {
+      sendEvent("complete", {
+        runId: result.runId,
+        content: result.content,
+        termination: result.termination,
+        rounds: result.rounds,
+        toolCalls: result.toolCalls.length,
+        coinsDebited,
+      });
+    }
+    finish();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!terminated) {
+      sendEvent("error", { message });
+    }
+    finish();
+  }
+});
+
 // ─── Command bridge endpoint ──────────────────────────────────────
 // POST /internal/command — dispatch a slash command through the
 // canonical command registry. Both Studio Web, `litt --remote`, and
@@ -457,6 +629,7 @@ app.get("/health/ready", async (_req, res) => {
   const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
   const workspaceReady = workspaceRoot.length > 0;
   const dockerProbe = await probeDockerAvailability();
+  const entitlementConfigured = await entitlementReady().catch(() => false);
 
   const checks = {
     authConfigured,
@@ -464,6 +637,7 @@ app.get("/health/ready", async (_req, res) => {
     workspaceRoot: workspaceReady,
     docker: dockerProbe.value,
     dockerReason: dockerProbe.reason,
+    entitlement: entitlementConfigured,
   };
 
   // Docker readiness is reported but does NOT block the overall readiness

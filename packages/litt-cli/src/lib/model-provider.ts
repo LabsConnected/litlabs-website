@@ -45,6 +45,7 @@ import {
   toOpenAiToolSchemas,
   resolveCanonicalToolId,
 } from "./openai-tool-names.js";
+import { RemoteModelProvider, isRemoteInferenceAvailable } from "./remote-model-provider.js";
 
 // ─── Model Truth Types ─────────────────────────────────────────────
 
@@ -1010,8 +1011,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
 // ACTUALLY handled the request — the controller reads it after streaming
 // to display the real served provider, not merely the intended one.
 
-/** A union of both adapter types the resolver can return. */
-export type ResolvedModelProvider = OpenRouterModelProvider | OpenAICompatibleModelProvider;
+/** A union of all adapter types the resolver can return. */
+export type ResolvedModelProvider =
+  | OpenRouterModelProvider
+  | OpenAICompatibleModelProvider
+  | RemoteModelProvider;
 
 export interface ResolveProviderAdapterOptions {
   /** Native tool definitions to declare on the transport. */
@@ -1071,7 +1075,23 @@ export function resolveProviderAdapter(
     });
   }
 
-  // 3. Nothing can service this model — surface a clear error instead of
+  // 3. Remote inference — the CUSTOMER path. When no local provider key
+  //    is set BUT the user is signed in and the terminal-server is
+  //    reachable, serve inference from the server's provider key.
+  //    This is the production boundary: paid users never need
+  //    OPENROUTER_API_KEY on their device.
+  //
+  //    This branch is ASYNC-checked at call time (the caller must await
+  //    resolveProviderAdapterAsync for the remote path). The synchronous
+  //    resolveProviderAdapter falls through to the error below if the
+  //    remote path is the only option — callers that support it should
+  //    use resolveProviderAdapterAsync instead.
+  //
+  //    Local developer mode (OPENROUTER_API_KEY set) takes priority —
+  //    branch 2 above already returned. BYOK stays optional, never
+  //    required for paid users.
+
+  // 4. Nothing can service this model — surface a clear error instead of
   //    silently constructing an adapter that will fail with a confusing
   //    credit/auth error at stream time.
   const needed = servedBy === "openrouter"
@@ -1083,6 +1103,115 @@ export function resolveProviderAdapter(
     `No provider adapter can service ${routed.label}: ${needed} is not configured. ` +
     `Routing resolved servedBy="${servedBy}" but no matching credential is available.`,
   );
+}
+
+/**
+ * Async provider resolver — the canonical resolver for the interactive
+ * cockpit. Uses REMOTE as THE DEFAULT for signed-in users, with local
+ * BYOK as an explicit opt-out.
+ *
+ * Resolution order (security-first — paying users must not silently
+ * bypass BITS/subscription via an accidental env var):
+ *
+ *   1. REMOTE (DEFAULT): signed in + server reachable + NOT explicitly
+ *      opted into local mode → RemoteModelProvider
+ *      This is the production customer path. The server's provider key
+ *      is used, entitlement is enforced, usage is recorded.
+ *
+ *   2. LOCAL BYOK (explicit opt-out): LITT_LOCAL_MODE=1 env var set
+ *      → use local provider keys (native direct or OpenRouter)
+ *      This is for developers/power users who intentionally want to
+ *      use their own keys instead of the server's inference path.
+ *
+ *   3. LOCAL (not signed in): has a local key but not signed in
+ *      → use local provider keys
+ *      This is the developer who hasn't logged in but has their own
+ *      API key set for local development.
+ *
+ *   4. Throw (clear error — no provider available)
+ *
+ * The key insight: an accidental OPENROUTER_API_KEY in the environment
+ * (e.g. from a different project's .env) must NOT silently bypass the
+ * BITS/subscription system for a signed-in paying customer. Remote is
+ * the default; local requires explicit opt-in via LITT_LOCAL_MODE=1.
+ */
+export async function resolveProviderAdapterAsync(
+  routed: RoutedModel,
+  options: ResolveProviderAdapterOptions & {
+    cwd?: string;
+    mode?: "plan" | "act" | "auto";
+  } = {},
+): Promise<ResolvedModelProvider> {
+  const explicitLocalMode = process.env.LITT_LOCAL_MODE === "1";
+  const hasLocalKey = hasOpenRouterKey()
+    || [...OPENAI_COMPATIBLE_NATIVE_PROVIDERS].some((pid) => {
+      const def = getProvider(pid);
+      return def?.envKey ? !!process.env[def.envKey] : false;
+    });
+
+  // Branch 1: REMOTE is the DEFAULT for signed-in users.
+  // An accidental env var must NOT bypass BITS/subscription.
+  if (!explicitLocalMode) {
+    const remoteAvailable = await isRemoteInferenceAvailable();
+    if (remoteAvailable) {
+      return new RemoteModelProvider({
+        cwd: options.cwd,
+        mode: options.mode,
+        configuredModel: routed.label,
+      });
+    }
+  }
+
+  // Branch 2: Explicit local BYOK mode (LITT_LOCAL_MODE=1)
+  // Branch 3: Not signed in but has a local key (developer path)
+  if (explicitLocalMode || hasLocalKey) {
+    try {
+      return resolveProviderAdapter(routed, options);
+    } catch {
+      // Local key exists but can't service this specific model —
+      // fall through to the error below.
+    }
+  }
+
+  // Branch 4: nothing available — throw a clear error
+  const servedBy = routed.servedBy;
+  const needed = servedBy === "openrouter"
+    ? "OPENROUTER_API_KEY"
+    : OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)
+      ? `${getProvider(servedBy)?.envKey ?? servedBy.toUpperCase() + "_API_KEY"} (or OPENROUTER_API_KEY as fallback)`
+      : `a direct ${servedBy} key or OPENROUTER_API_KEY`;
+  if (explicitLocalMode) {
+    throw new Error(
+      `No provider adapter can service ${routed.label}. ` +
+      `LITT_LOCAL_MODE=1 is set but ${needed} is not configured.`,
+    );
+  }
+  throw new Error(
+    `No provider adapter can service ${routed.label}. ` +
+    `Run 'litt login' for remote inference, or set ${needed} for local mode ` +
+    `(or set LITT_LOCAL_MODE=1 to force local BYOK).`,
+  );
+}
+
+/**
+ * Check if ANY provider path is available (local OR remote).
+ * Used by the controller to decide whether to attempt a chat/mission
+ * or show the "no provider" hint.
+ *
+ * This is the async gate that replaces the old hasOpenRouterKey()-only
+ * check — a signed-in user with no local key still passes this gate.
+ */
+export async function canUseAnyProvider(): Promise<boolean> {
+  // Remote path (DEFAULT for signed-in users)
+  const remoteAvailable = await isRemoteInferenceAvailable();
+  if (remoteAvailable) return true;
+  // Local BYOK path (explicit opt-out or not-signed-in developer)
+  if (hasOpenRouterKey()) return true;
+  for (const pid of OPENAI_COMPATIBLE_NATIVE_PROVIDERS) {
+    const def = getProvider(pid);
+    if (def?.envKey && process.env[def.envKey]) return true;
+  }
+  return false;
 }
 
 // ─── Provider display label ─────────────────────────────────────────

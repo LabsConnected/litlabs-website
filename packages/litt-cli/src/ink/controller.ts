@@ -42,7 +42,7 @@ import type { CockpitStore, ActivitySemantic, RoutingMode } from "./cockpit-stor
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { hasOpenRouterKey, resolveProviderAdapter, resolveProviderAdapterAsync, canUseAnyProvider } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
@@ -688,7 +688,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     if (input === "/doctor") {
       act(store, `LiTT runtime: local=${store.state.localRuntime} remote=${store.state.remoteRuntime}`, "info", undefined, "DOCTOR");
       act(store, `Git: ${store.state.branch} · +${store.state.gitModified + store.state.gitUntracked} changes`, "info", undefined, "DOCTOR");
-      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no key (set OPENROUTER_API_KEY)"}`, "info", undefined, "DOCTOR");
+      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no local key (use 'litt login' for remote)"}`, "info", undefined, "DOCTOR");
       for (const status of modelRuntime.getProviderStatuses()) {
         act(store, `  ${status.label}: ${status.tier}${status.hasCredential ? " ✓" : " ✗ no key"}${status.latencyMs !== null ? ` ${status.latencyMs}ms` : ""}`, "info", undefined, "DOCTOR");
       }
@@ -1179,7 +1179,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
 
           // ─── Optional synthesis ───
-          if (readMatch.needsSynthesis && hasOpenRouterKey()) {
+          if (readMatch.needsSynthesis && await canUseAnyProvider()) {
             perf.mark("synthesis_start");
             const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
             const routed = modelRuntime.route(
@@ -1188,7 +1188,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               synthesisPrompt,
             );
             store.actions.setActiveModel(routed.label);
-            const adapter = resolveProviderAdapter(routed);
+            const adapter = await resolveProviderAdapterAsync(routed, {
+              cwd: projectRoot,
+              mode: session.getMode(),
+            });
             store.actions.setActiveProvider(adapter.providerId);
             // Start the assistant message for streaming synthesis.
             store.actions.addChatMessage({
@@ -1272,7 +1275,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // if intent classification is correct, but defensive).
     }
 
-    if (hasOpenRouterKey()) {
+    if (await canUseAnyProvider()) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
       // holoState stays IDLE throughout — CHAT never enters mission
@@ -1355,8 +1358,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
             );
           }
-          const model = resolveProviderAdapter(routed, {
+          const model = await resolveProviderAdapterAsync(routed, {
             tools: tools.list(),
+            cwd: projectRoot,
+            mode: session.getMode(),
           });
           // Truthful label: this marks the provider adapter being READY,
           // not an outbound request. The actual request fires inside
@@ -1612,8 +1617,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
           );
         }
-        const model = resolveProviderAdapter(routed, {
+        const model = await resolveProviderAdapterAsync(routed, {
           tools: tools.list(),
+          cwd: projectRoot,
+          mode: session.getMode(),
         });
         // Truthful label: provider adapter READY, not an outbound request.
         // The actual request fires inside runAgentLoop below.
@@ -2252,12 +2259,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // No API key — show heuristic hint
+    // No provider available (no local key, not signed in, or server unreachable)
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "info",
-      text: "Set OPENROUTER_API_KEY to talk to LiTT. Use /commands for direct execution.",
+      text: "Sign in with 'litt login' for remote inference, or set OPENROUTER_API_KEY for local mode. Use /commands for direct execution.",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);

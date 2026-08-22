@@ -14,9 +14,10 @@
  */
 
 import { ClerkCliAuth } from "./clerk-auth.js";
-import { resolveAuthConfig, hasAuthConfig } from "./auth-config.js";
+import { resolveAuthConfig, hasAuthConfig, getTerminalUrl } from "./auth-config.js";
 import type { AuthState, CredentialStore, LoginResult, UserInfo } from "./types.js";
 import { AuthError } from "./types.js";
+import { exchangeClerkToken } from "../remote.js";
 
 /** The signed-out state (used when no credentials exist). */
 const SIGNED_OUT: AuthState = {
@@ -88,6 +89,26 @@ export class AuthSession {
       }
       throw error;
     }
+  }
+
+  /**
+   * Get a terminal JWT for authenticating against terminal-server
+   * endpoints (/api/inference, /api/command, etc.).
+   *
+   * This exchanges the Clerk access token for a short-lived terminal
+   * JWT via /api/token-exchange. The terminal JWT is cached per-process
+   * (see remote.ts) and refreshed when it expires.
+   *
+   * Used by RemoteModelProvider to authenticate remote inference
+   * requests — the CLI never holds the server's OPENROUTER_API_KEY,
+   * only this user-specific JWT.
+   *
+   * Returns null if not authenticated. Throws on exchange failure.
+   */
+  async getTerminalToken(): Promise<string | null> {
+    const accessToken = await this.getAccessToken();
+    if (!accessToken) return null;
+    return exchangeClerkToken(accessToken, getTerminalUrl());
   }
 
   /**
