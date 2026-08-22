@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import CommandStudio from "./components/CommandStudio";
+import { StudioRuntimeProvider } from "./context/StudioRuntimeContext";
 import { Terminal, Loader2 } from "lucide-react";
 
 /**
@@ -151,7 +152,11 @@ function StudioHub() {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
-  return <CommandStudio />;
+  return (
+    <StudioRuntimeProvider>
+      <CommandStudio />
+    </StudioRuntimeProvider>
+  );
 }
 
 export default function StudioPage() {

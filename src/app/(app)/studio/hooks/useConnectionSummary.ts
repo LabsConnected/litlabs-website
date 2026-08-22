@@ -1,13 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+/**
+ * useConnectionSummary — COMPATIBILITY SHIM.
+ *
+ * This hook is now a thin derivation from the canonical Studio runtime state.
+ * It NO LONGER independently fetches from /api/capabilities, /api/voice/health,
+ * /api/llm/health, or /api/capabilities/project-terminal. Those fetches are
+ * handled by useServiceHealth, and project/workspace state by useProjectRuntime.
+ *
+ * This eliminates the competing aggregation layer that caused contradictory
+ * readiness reports (e.g. "1 AI" vs "setup required").
+ *
+ * Existing consumers that read `capabilities` from this hook continue to work
+ * without changes. New code should use useStudioRuntime() directly.
+ *
+ * Phase 1 — Studio Control Plane V1
+ */
+
+import { useMemo } from "react";
 import { useTerminalStore } from "@/stores/useTerminalStore";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useVoiceSession } from "../context/VoiceSessionContext";
-import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useProjectRuntime } from "./useProjectRuntime";
+import { useServiceHealth } from "./useServiceHealth";
+import { useStudioRuntimeOptional } from "../context/StudioRuntimeContext";
 import type { TerminalStatus } from "@/lib/capabilities/types";
+
+// ─── Types (preserved for backward compatibility) ───────────────
 
 export interface VoiceHealthState {
   /** Inworld env vars are set (server-side check) */
@@ -88,205 +105,152 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   },
 };
 
+// ─── Hook (pure derivation, zero fetches) ────────────────────────
+
 export function useConnectionSummary() {
-  const [loading, setLoading] = useState(true);
-  const [capabilities, setCapabilities] = useState<ConnectionCapabilities>(
-    DEFAULT_CAPABILITIES,
-  );
+  // Prefer the shared StudioRuntimeProvider context when available
+  // (inside Studio) to avoid duplicate polling. The hooks below are
+  // always called unconditionally (React rules of hooks), but their
+  // results are only used when no provider is mounted.
+  const ctx = useStudioRuntimeOptional();
 
-  // Canonical project runtime — the ONE source of truth for project identity
-  const { state: runtimeState } = useProjectRuntime();
+  // Canonical project runtime — server-authoritative
+  const directProject = useProjectRuntime();
+  const { state: runtimeState, loading: projectLoading, refresh: refreshProject } =
+    ctx?.project ?? directProject;
 
-  // Client-side terminal store is the source of truth for PTY status
+  // Canonical service health — LLM/voice/GitHub/terminal-server
+  const directHealth = useServiceHealth();
+  const { state: healthState, loading: healthLoading, refresh: refreshHealth } =
+    ctx?.serviceHealth ?? directHealth;
+
+  // Client-side terminal store — source of truth for PTY session state
   const terminalStatus = useTerminalStore((s) => s.status);
   const terminalSessionId = useTerminalStore((s) => s.sessionId);
   const terminalError = useTerminalStore((s) => s.error);
   const terminalFailureStage = useTerminalStore((s) => s.failureStage);
   const terminalCwd = useTerminalStore((s) => s.cwd);
-  const { voiceTransportConnected, voiceInputState } = useVoiceSession();
-  const { getToken } = useClerkAuth();
-  const searchParams = useSearchParams();
-  const explicitProjectId = searchParams.get("project");
 
-  const refresh = useCallback(async () => {
-    try {
-      const token = await getToken?.();
-      const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const [capsRes, termRes, voiceRes, llmRes] = await Promise.allSettled([
-        fetch(`/api/capabilities${explicitProjectId ? `?projectId=${encodeURIComponent(explicitProjectId)}` : ""}`, { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
-        fetch("/api/capabilities/project-terminal", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
-        fetch("/api/voice/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
-        fetch("/api/llm/health", { cache: "no-store", credentials: "include", headers: authHeaders, signal: AbortSignal.timeout(8000) }),
-      ]);
+  const capabilities = useMemo<ConnectionCapabilities>(() => {
+    const next: ConnectionCapabilities = { ...DEFAULT_CAPABILITIES };
 
-      const next = { ...DEFAULT_CAPABILITIES };
-
-      if (capsRes.status === "fulfilled" && capsRes.value.ok) {
-        const data = await capsRes.value.json();
-        const caps = data.capabilities ?? [];
-        const repoCap = caps.find((c: { id: string }) => c.id === "repository");
-        const projectCap = caps.find((c: { id: string }) => c.id === "project");
-        const workspaceCap = caps.find((c: { id: string }) => c.id === "runtime.sandbox");
-        next.repository = repoCap?.status === "ready" ? "connected" : "none";
-        next.repositoryName = repoCap?.accountName ?? null;
-        next.repositoryIndexed = repoCap?.status === "ready";
-        // Prefer the project capability for projectId — a blank project
-        // is valid even without a repository.
-        next.projectId = projectCap?.projectId ?? repoCap?.projectId ?? null;
-        next.projectName = projectCap?.projectName ?? repoCap?.projectName ?? null;
-        next.defaultBranch = repoCap?.defaultBranch ?? null;
-        next.activeBranch = repoCap?.activeBranch ?? repoCap?.defaultBranch ?? null;
-        next.workspaceStatus = workspaceCap?.status ?? null;
-        next.writeAccess = workspaceCap?.status === "ready";
-        next.githubInstalled = repoCap?.status === "unavailable";
-        next.connectedProviders = caps
-          .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
-          .map((c: { id: string }) => c.id);
-        next.availableTools = caps
-          .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
-          .map((c: { id: string }) => c.id);
-        next.connectionSummary =
-          next.connectedProviders.length > 0
-            ? `Connected: ${next.connectedProviders.join(", ")}`
-            : "No services connected.";
-      }
-
-      // Voice health — server-side check of Inworld configuration + token service
-      if (voiceRes.status === "fulfilled" && voiceRes.value.ok) {
-        const voiceData = await voiceRes.value.json();
-        next.voiceHealth = {
-          configured: !!voiceData.configured,
-          tokenService: voiceData.tokenService === "healthy" ? "healthy" : "error",
-          available: !!voiceData.available,
-          errorCode: voiceData.errorCode,
-          message: voiceData.message,
-          checkedAt: voiceData.checkedAt,
-        };
-      } else {
-        // Health endpoint failed — mark as unknown, don't silently reuse old state
-        next.voiceHealth = {
-          configured: false,
-          tokenService: "unknown",
-          available: false,
-          errorCode: "VOICE_HEALTH_UNREACHABLE",
-          message: "Voice health check failed.",
-        };
-      }
-
-      // Voice transport and microphone are client-side runtime state.
-      next.voiceTransportConnected = voiceTransportConnected;
-      next.voiceMicrophoneOn = voiceInputState === "listening";
-
-      // LLM provider health — sync to model store so the empty-state
-      // briefing and model picker show accurate "AI ready" status.
-      const setProviderHealth = useStudioModelStore.getState().setProviderHealth;
-      if (llmRes.status === "fulfilled" && llmRes.value.ok) {
-        const llmData = await llmRes.value.json();
-        const geminiOk = !!llmData.gemini?.available;
-        const groqOk = !!llmData.groq?.available;
-        const openrouterOk = !!llmData.openrouter?.available;
-        setProviderHealth("gemini", geminiOk ? "available" : "unavailable");
-        setProviderHealth("groq", groqOk ? "available" : "unavailable");
-        setProviderHealth("openrouter", openrouterOk ? "available" : "unavailable");
-        // "Auto" models route to whichever provider is available (prefer Gemini).
-        setProviderHealth("Auto", geminiOk || groqOk || openrouterOk ? "available" : "unavailable");
-      } else {
-        // Health endpoint failed — mark all as unavailable so the UI
-        // shows a truthful "setup required" rather than a stale unknown.
-        setProviderHealth("gemini", "unavailable");
-        setProviderHealth("groq", "unavailable");
-        setProviderHealth("openrouter", "unavailable");
-        setProviderHealth("Auto", "unavailable");
-      }
-
-      // Use client-side terminal store as primary source of truth for PTY status
-      // Only fall back to server-side if client hasn't connected yet
-      // Terminal is only "available" when the store says connected AND
-      // a verified cwd exists (set by session:ready, not by socket connect).
-      if (terminalStatus === "connected" && terminalCwd) {
-        next.terminalStatus = "connected";
-        next.terminalSessionId = terminalSessionId;
-        next.terminalExecution = "available";
-        next.terminalCwd = terminalCwd;
-        next.terminalFailureStage = null;
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "connected" && !terminalCwd) {
-        // Store says connected but no cwd — PTY not truly ready yet
-        next.terminalStatus = "connecting";
-        next.terminalExecution = "connecting";
-        next.terminalFailureStage = "pty_creation_failed";
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "connecting") {
-        next.terminalStatus = "connecting";
-        next.terminalExecution = "connecting";
-        next.terminalFailureStage = terminalFailureStage;
-        next.terminalServerReachable = true;
-      } else if (terminalStatus === "error" || terminalStatus === "auth_failed" || terminalStatus === "pty_failed" || terminalStatus === "unavailable") {
-        next.terminalStatus = terminalStatus;
-        next.terminalError = terminalError;
-        next.terminalExecution = "error";
-        next.terminalFailureStage = terminalFailureStage;
-        // For error states, server reachability is unknown — leave as default (false)
-        // unless the server probe (termRes) updates it below.
-      } else {
-        // Client says disconnected — check if server is at least alive
-        if (termRes.status === "fulfilled" && termRes.value.ok) {
-          const termData = await termRes.value.json();
-          next.terminalServerReachable = !!termData.serverReachable;
-          // "idle" = server is reachable, no PTY session — normal idle state.
-          // "unavailable" = server unreachable — real error.
-          next.terminalStatus = "disconnected";
-          next.terminalSessionId = null;
-          next.terminalExecution = termData.serverReachable ? "idle" : "unavailable";
-          next.terminalError = termData.error ?? null;
-        } else {
-          next.terminalStatus = "disconnected";
-          next.terminalExecution = "unavailable";
-          next.terminalServerReachable = false;
-        }
-      }
-
-      // Allow writes when the terminal is connected (local dev) even if
-      // the server-side workspace hasn't been provisioned. The terminal
-      // PTY can execute file writes, so it's a valid write surface.
-      // NOTE: writeAccess here means "a write surface exists", NOT "writes
-      // don't need approval". Approval is a separate policy, always required.
-      if (next.terminalExecution === "available" && !next.writeAccess) {
-        next.writeAccess = true;
-      }
-
-      // ── Merge canonical runtime state ──────────────────────────────
-      // The project-runtime API is the single source of truth for project
-      // identity, workspace, and branch. Override whatever the capabilities
-      // endpoint returned with the canonical values so every Studio surface
-      // shows the same project.
-      if (runtimeState.projectId) {
-        next.projectId = runtimeState.projectId;
-        next.projectName = runtimeState.projectName;
-        next.repository = runtimeState.repository ? "connected" : next.repository;
-        next.repositoryName = runtimeState.repository ?? next.repositoryName;
-        next.activeBranch = runtimeState.branch ?? next.activeBranch;
-        next.defaultBranch = runtimeState.branch ?? next.defaultBranch;
-        next.sourceType = runtimeState.sourceType ?? next.sourceType;
-        next.workspaceStatus = runtimeState.workspaceStatus ?? next.workspaceStatus;
-        // writeAccess = a write surface exists (workspace OR terminal).
-        // This does NOT mean approval is waived — approval is separate.
-        next.writeAccess = runtimeState.writeAccess || next.writeAccess;
-      }
-
-      setCapabilities(next);
-    } catch {
-      // leave previous state
-    } finally {
-      setLoading(false);
+    // ── Project identity + workspace (from canonical runtime state) ──
+    if (runtimeState.projectId) {
+      next.projectId = runtimeState.projectId;
+      next.projectName = runtimeState.projectName;
+      next.repository = runtimeState.repository ? "connected" : "none";
+      next.repositoryName = runtimeState.repository;
+      next.repositoryIndexed = Boolean(runtimeState.repository);
+      next.activeBranch = runtimeState.branch;
+      next.defaultBranch = runtimeState.branch;
+      next.sourceType = runtimeState.sourceType;
+      next.workspaceStatus = runtimeState.workspaceStatus;
+      next.writeAccess = runtimeState.writeAccess;
     }
-  }, [terminalStatus, terminalSessionId, terminalError, terminalFailureStage, terminalCwd, voiceTransportConnected, voiceInputState, getToken, explicitProjectId, runtimeState.projectId, runtimeState.projectName, runtimeState.repository, runtimeState.branch, runtimeState.workspaceStatus, runtimeState.writeAccess, runtimeState.sourceType]);
 
-  useEffect(() => {
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(interval);
-  }, [refresh]);
+    // ── Service health (from canonical service health state) ──
+    next.githubInstalled = healthState.github.installed;
+    next.connectedProviders = healthState.connectedCapabilities;
+    next.availableTools = healthState.connectedCapabilities;
+    next.connectionSummary = healthState.summary;
+    next.voiceTransportConnected = healthState.voiceTransportConnected;
+    next.voiceMicrophoneOn = healthState.voiceMicrophoneOn;
+    next.voiceHealth = {
+      configured: healthState.voice.configured,
+      tokenService: healthState.voice.tokenService,
+      available: healthState.voice.available,
+      errorCode: healthState.voice.errorCode,
+      message: healthState.voice.message,
+      checkedAt: healthState.voice.checkedAt,
+    };
+
+    // ── Terminal PTY state (from client-side terminal store) ──
+    // Terminal is only "available" when the store says connected AND
+    // a verified cwd exists (set by session:ready, not by socket connect).
+    next.terminalServerReachable = healthState.terminal.serverReachable;
+
+    if (terminalStatus === "connected" && terminalCwd) {
+      next.terminalStatus = "connected";
+      next.terminalSessionId = terminalSessionId;
+      next.terminalExecution = "available";
+      next.terminalCwd = terminalCwd;
+      next.terminalFailureStage = null;
+      next.terminalServerReachable = true;
+    } else if (terminalStatus === "connected" && !terminalCwd) {
+      // Store says connected but no cwd — PTY not truly ready yet
+      next.terminalStatus = "connecting";
+      next.terminalExecution = "connecting";
+      next.terminalFailureStage = "pty_creation_failed";
+      next.terminalServerReachable = true;
+    } else if (terminalStatus === "connecting") {
+      next.terminalStatus = "connecting";
+      next.terminalExecution = "connecting";
+      next.terminalFailureStage = terminalFailureStage;
+      next.terminalServerReachable = true;
+    } else if (
+      terminalStatus === "error" ||
+      terminalStatus === "auth_failed" ||
+      terminalStatus === "pty_failed" ||
+      terminalStatus === "unavailable"
+    ) {
+      next.terminalStatus = terminalStatus;
+      next.terminalError = terminalError;
+      next.terminalExecution = "error";
+      next.terminalFailureStage = terminalFailureStage;
+    } else {
+      // Client says disconnected — use server reachability from health probe
+      next.terminalStatus = "disconnected";
+      next.terminalSessionId = null;
+      next.terminalExecution = healthState.terminal.serverReachable ? "idle" : "unavailable";
+      next.terminalError = healthState.terminal.serverError;
+    }
+
+    // Allow writes when the terminal is connected (local dev) even if
+    // the server-side workspace hasn't been provisioned. The terminal
+    // PTY can execute file writes, so it's a valid write surface.
+    // NOTE: writeAccess here means "a write surface exists", NOT "writes
+    // don't need approval". Approval is a separate policy, always required.
+    if (next.terminalExecution === "available" && !next.writeAccess) {
+      next.writeAccess = true;
+    }
+
+    return next;
+  }, [
+    runtimeState.projectId,
+    runtimeState.projectName,
+    runtimeState.repository,
+    runtimeState.branch,
+    runtimeState.sourceType,
+    runtimeState.workspaceStatus,
+    runtimeState.writeAccess,
+    healthState.github.installed,
+    healthState.connectedCapabilities,
+    healthState.summary,
+    healthState.voiceTransportConnected,
+    healthState.voiceMicrophoneOn,
+    healthState.voice.configured,
+    healthState.voice.tokenService,
+    healthState.voice.available,
+    healthState.voice.errorCode,
+    healthState.voice.message,
+    healthState.voice.checkedAt,
+    healthState.terminal.serverReachable,
+    healthState.terminal.serverError,
+    terminalStatus,
+    terminalSessionId,
+    terminalError,
+    terminalFailureStage,
+    terminalCwd,
+  ]);
+
+  const loading = projectLoading || healthLoading;
+
+  const refresh = useMemo(
+    () => async () => {
+      await Promise.all([refreshProject(), refreshHealth()]);
+    },
+    [refreshProject, refreshHealth],
+  );
 
   return { capabilities, refresh, loading };
 }
