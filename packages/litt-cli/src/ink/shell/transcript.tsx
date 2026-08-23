@@ -225,16 +225,18 @@ export function TranscriptArea({
       {/* Scroll indicator — scrolled mode only */}
       {scrolled && (
         <Box flexDirection="column" marginTop={1}>
-          {viewport.hasAbove && (
-            <Text dimColor>{"  ↑ Earlier messages"}</Text>
+          {viewport.hasAbove && viewport.atBottom && (
+            <Text dimColor>{"  ↑ older messages · Ctrl+End latest"}</Text>
           )}
-          {!viewport.atBottom && (
+          {viewport.hasAbove && !viewport.atBottom && (
             <Text dimColor>
-              {"  ↓ "}{viewport.belowCount} new · End to return live
+              {`  ↑ older messages · ↓ ${viewport.belowCount} new · Ctrl+End latest`}
             </Text>
           )}
-          {viewport.atBottom && (
-            <Text dimColor>{"  End to return live"}</Text>
+          {!viewport.hasAbove && !viewport.atBottom && (
+            <Text dimColor>
+              {`  ↓ ${viewport.belowCount} new · Ctrl+End latest`}
+            </Text>
           )}
         </Box>
       )}

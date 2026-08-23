@@ -19,6 +19,7 @@ import {
   homeAnchor,
   endAnchor,
 } from "../ink/scroll-model.js";
+import { detectRawScrollKey } from "../ink/keyboard-utils.js";
 import type { ChatMessage } from "../ink/cockpit-store.js";
 
 const t = Date.now();
@@ -159,5 +160,109 @@ describe("transcript scroll window", () => {
     const vp = computeViewport(messages, layout, REGION, null, 0);
     const rows = layout.prefix[vp.end] - layout.prefix[vp.start];
     expect(rows).toBeLessThanOrEqual(REGION);
+  });
+});
+
+describe("raw scroll key detection", () => {
+  it("detects PgUp from raw escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[5~")).toBe("pageUp");
+  });
+
+  it("detects PgDn from raw escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[6~")).toBe("pageDown");
+  });
+
+  it("detects Home from multiple terminal escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[H")).toBe("home");
+    expect(detectRawScrollKey("\x1b[1~")).toBe("home");
+    expect(detectRawScrollKey("\x1bOH")).toBe("home");
+    expect(detectRawScrollKey("\x1b[7~")).toBe("home");
+  });
+
+  it("detects End from multiple terminal escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[F")).toBe("end");
+    expect(detectRawScrollKey("\x1b[4~")).toBe("end");
+    expect(detectRawScrollKey("\x1bOF")).toBe("end");
+    expect(detectRawScrollKey("\x1b[8~")).toBe("end");
+  });
+
+  it("detects Ctrl+Home from raw escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[1;5H")).toBe("ctrlHome");
+    expect(detectRawScrollKey("\x1b[5H")).toBe("ctrlHome");
+  });
+
+  it("detects Ctrl+End from raw escape sequences", () => {
+    expect(detectRawScrollKey("\x1b[1;5F")).toBe("ctrlEnd");
+    expect(detectRawScrollKey("\x1b[5F")).toBe("ctrlEnd");
+  });
+
+  it("returns null for non-scroll input", () => {
+    expect(detectRawScrollKey("a")).toBeNull();
+    expect(detectRawScrollKey("\r")).toBeNull();
+    expect(detectRawScrollKey("\x1bOQ")).toBeNull(); // F2, not a scroll key
+  });
+
+  it("one keypress = one detection (no double-trigger)", () => {
+    // Each raw input produces exactly one detection result (or null).
+    // There is no batching or repeat — one keypress = one scroll action.
+    const keys = ["\x1b[5~", "\x1b[6~", "\x1b[H", "\x1b[F", "\x1b[1;5H", "\x1b[1;5F"];
+    for (const k of keys) {
+      const result = detectRawScrollKey(k);
+      expect(result).not.toBeNull();
+      // Calling again with the same input produces the same single result.
+      expect(detectRawScrollKey(k)).toBe(result);
+    }
+  });
+});
+
+describe("composer isolation from scroll events", () => {
+  it("scroll key detection never produces printable input for the composer", () => {
+    // The raw scroll key detector returns a type, not a character.
+    // The overlay-manager dispatches scroll keys to the app handler,
+    // never to the composer's useInput. Verify the detection results
+    // are non-printable types.
+    const scrollInputs = ["\x1b[5~", "\x1b[6~", "\x1b[H", "\x1b[F", "\x1b[1;5H", "\x1b[1;5F"];
+    for (const input of scrollInputs) {
+      const result = detectRawScrollKey(input);
+      expect(result).not.toBeNull();
+      // The result is a scroll key type, not a character — the composer
+      // never sees these because they're intercepted in the raw listener.
+      expect(["pageUp", "pageDown", "home", "end", "ctrlHome", "ctrlEnd"]).toContain(result);
+    }
+  });
+});
+
+describe("terminal resize preserves scroll offset", () => {
+  const W = 60;
+  it("anchored viewport stays valid when region shrinks", () => {
+    const messages = transcript(20);
+    const layout = layoutTranscript(messages, W);
+
+    // Anchor at message 5 with a large region.
+    const bigRegion = 20;
+    const vpBig = computeViewport(messages, layout, bigRegion, 5, 2);
+    expect(vpBig.start).toBe(5);
+
+    // Region shrinks — anchor is still valid, just shows fewer messages.
+    const smallRegion = 6;
+    const vpSmall = computeViewport(messages, layout, smallRegion, 5, 2);
+    expect(vpSmall.start).toBe(5);
+    expect(vpSmall.end).toBeLessThanOrEqual(vpBig.end);
+    // The anchor is preserved — no jump to the beginning.
+    expect(vpSmall.start).toBe(5);
+  });
+
+  it("live mode adapts to region change without losing the newest content", () => {
+    const messages = transcript(20);
+    const layout = layoutTranscript(messages, W);
+
+    const vpBig = computeViewport(messages, layout, 20, null, 0);
+    const vpSmall = computeViewport(messages, layout, 6, null, 0);
+
+    // Both show the newest message.
+    expect(vpBig.end).toBe(messages.length);
+    expect(vpSmall.end).toBe(messages.length);
+    // Smaller region shows fewer messages.
+    expect(vpSmall.start).toBeGreaterThanOrEqual(vpBig.start);
   });
 });

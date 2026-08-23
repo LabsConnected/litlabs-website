@@ -123,6 +123,40 @@ export function isRawF2(data: string | Buffer): boolean {
   return F2_SEQUENCES.includes(s);
 }
 
+// ─── Scroll key detection (raw escape sequences) ───
+// Ink's useInput may not reliably detect PgUp/PgDn/Home/End on all
+// terminals (same issue as F2). We detect them from raw stdin data.
+//
+// Escape sequences across terminals:
+//   PgUp:   \x1b[5~   (xterm/rxvt/vt220)
+//   PgDn:   \x1b[6~   (xterm/rxvt/vt220)
+//   Home:   \x1b[H    \x1b[1~   \x1bOH   (xterm normal/app mode, vt220)
+//   End:    \x1b[F    \x1b[4~   \x1bOF   (xterm normal/app mode, vt220)
+//   Ctrl+Home: \x1b[1;5H  \x1b[5H  (xterm modifier encoding)
+//   Ctrl+End:  \x1b[1;5F  \x1b[5F  (xterm modifier encoding)
+
+const PGUP_SEQUENCES = ["\x1b[5~"];
+const PGDN_SEQUENCES = ["\x1b[6~"];
+const HOME_SEQUENCES = ["\x1b[H", "\x1b[1~", "\x1bOH", "\x1b[7~"];
+const END_SEQUENCES = ["\x1b[F", "\x1b[4~", "\x1bOF", "\x1b[8~"];
+const CTRL_HOME_SEQUENCES = ["\x1b[1;5H", "\x1b[5H"];
+const CTRL_END_SEQUENCES = ["\x1b[1;5F", "\x1b[5F"];
+
+/** Raw scroll key type */
+export type RawScrollKey = "pageUp" | "pageDown" | "home" | "end" | "ctrlHome" | "ctrlEnd";
+
+/** Detect scroll keys from raw stdin data. Returns the key type or null. */
+export function detectRawScrollKey(data: string | Buffer): RawScrollKey | null {
+  const s = typeof data === "string" ? data : data.toString("utf8");
+  if (PGUP_SEQUENCES.includes(s)) return "pageUp";
+  if (PGDN_SEQUENCES.includes(s)) return "pageDown";
+  if (CTRL_HOME_SEQUENCES.includes(s)) return "ctrlHome";
+  if (CTRL_END_SEQUENCES.includes(s)) return "ctrlEnd";
+  if (HOME_SEQUENCES.includes(s)) return "home";
+  if (END_SEQUENCES.includes(s)) return "end";
+  return null;
+}
+
 /**
  * Is this a printable character (not a control key, not a special key)?
  * Used to determine if input should go to a text field.

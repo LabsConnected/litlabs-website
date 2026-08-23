@@ -28,7 +28,7 @@
 import React, { createContext, useContext, useCallback, useRef, useEffect } from "react";
 import { useInput, useStdin } from "ink";
 import type { EventEmitter } from "node:events";
-import { isEnter, isEscape, isRawF2, type KeyInfo } from "./keyboard-utils.js";
+import { isEnter, isEscape, isRawF2, detectRawScrollKey, type KeyInfo } from "./keyboard-utils.js";
 
 // Debug instrumentation — set LITT_KEY_DEBUG=1 to trace key events to stderr.
 // Writes to stderr (NOT stdout) so it doesn't corrupt the Ink render.
@@ -92,11 +92,15 @@ export function OverlayKeyboardProvider({
     };
   }, []);
 
-  // ─── F2 raw listener ───
+  // ─── F2 + scroll key raw listener ───
   // Ink's useInput strips F-key input to '' (nonAlphanumericKeys), and the
   // key object has no f2 field. So we listen to the raw 'input' event from
   // Ink's internal_eventEmitter to catch F2 escape sequences before stripping.
   // F2 opens Model Center — but ONLY when no overlay owns the keyboard.
+  //
+  // We also catch PgUp/PgDn/Home/End/Ctrl+Home/Ctrl+End here because Ink's
+  // useInput may not reliably detect these on all terminals (same issue).
+  // Scroll keys work even while busy (browsing history during a run).
   useEffect(() => {
     const onRawInput = (data: string | Buffer) => {
       const s = typeof data === "string" ? data : data.toString("utf8");
@@ -106,13 +110,34 @@ export function OverlayKeyboardProvider({
         // Log ALL raw input so we can see what F2/Tab/arrows/Enter/Esc arrive as
         debugKey(`raw input=${JSON.stringify(s)} activeOverlay=${topOwner ?? "none"}`);
       }
-      if (!isRawF2(data)) return;
-      // Only dispatch F2 when no overlay is active (top of stack is empty)
-      if (stack.length > 0) return;
-      debugKey(`F2 detected → dispatching to app handler (activeOverlay=none)`);
-      // Dispatch to app shortcut handler with a synthetic key
-      // The handler checks for F2 via isRawF2 on the input field
-      appHandlerRef.current("\x1bOQ", { upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, return: false, escape: false, tab: false, backspace: false, delete: false, ctrl: false, meta: false, shift: false, pageUp: false, pageDown: false } as KeyInfo);
+
+      // F2 — opens Model Center (only when no overlay is active)
+      if (isRawF2(data)) {
+        if (stack.length > 0) return;
+        debugKey(`F2 detected → dispatching to app handler (activeOverlay=none)`);
+        appHandlerRef.current("\x1bOQ", { upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, return: false, escape: false, tab: false, backspace: false, delete: false, ctrl: false, meta: false, shift: false, pageUp: false, pageDown: false } as KeyInfo);
+        return;
+      }
+
+      // Scroll keys — PgUp/PgDn/Home/End/Ctrl+Home/Ctrl+End
+      // Work even while busy and when no overlay is active.
+      const scrollKey = detectRawScrollKey(data);
+      if (scrollKey) {
+        if (stack.length > 0) return; // Don't scroll while overlay is open
+        debugKey(`scroll key ${scrollKey} detected → dispatching to app handler`);
+        const syntheticKey: KeyInfo = {
+          upArrow: false, downArrow: false, leftArrow: false, rightArrow: false,
+          return: false, escape: false, tab: false, backspace: false, delete: false,
+          ctrl: scrollKey === "ctrlHome" || scrollKey === "ctrlEnd",
+          meta: false, shift: false,
+          pageUp: scrollKey === "pageUp",
+          pageDown: scrollKey === "pageDown",
+          home: scrollKey === "home" || scrollKey === "ctrlHome",
+          end: scrollKey === "end" || scrollKey === "ctrlEnd",
+        };
+        appHandlerRef.current(s, syntheticKey);
+        return;
+      }
     };
     internal_eventEmitter.on("input", onRawInput);
     return () => {
