@@ -479,13 +479,7 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
 
   const result = await runCommand(shell, command, cmdArgs, {
     cwd: ctx.cwd,
-    mode: ctx.mode ?? "act",
-    runId: ctx.runId,
-    store: getRuntimeStore(),
     timeoutMs: 30_000,
-    // The /do endpoint is authenticated at the HTTP boundary. Approve
-    // elevated commands automatically — the caller is already trusted.
-    approvalProvider: async () => true,
   });
 
   return {
