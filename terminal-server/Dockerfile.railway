@@ -42,6 +42,7 @@ COPY terminal-server/tsconfig.worker.json terminal-server/tsconfig.worker.json
 # We override ignore-scripts=true (from root .npmrc) for native builds (node-pty, sharp)
 RUN pnpm install --frozen-lockfile \
     --filter terminal-server... \
+    --filter @litt/agent-core... \
     --config.ignore-scripts=false
 
 # ─── Stage 2: Builder ──────────────────────────────────────────────
