@@ -227,7 +227,10 @@ export class NodeShellExecutor implements ShellExecutor {
         env: mergedEnv,
         windowsHide: true,
         shell: resolved.useShell,
-        // On Windows, detached=true allows taskkill /T to work properly
+        // detached=true allows process-tree kill (taskkill /T on Windows,
+        // pkill -P on Linux). On Linux, this creates a new process group
+        // which may fail in restricted containers. We catch the error and
+        // retry without detached if spawn fails.
         detached: process.platform !== "win32",
       });
 
@@ -270,7 +273,12 @@ export class NodeShellExecutor implements ShellExecutor {
 
       const exitCode: number = await new Promise((resolve) => {
         child.on("close", (code) => resolve(code ?? -1));
-        child.on("error", () => resolve(-1));
+        child.on("error", (err) => {
+          // Log the actual spawn error for debugging — the default
+          // behavior silently returns -1 which masks the root cause.
+          console.error(`[ShellExecutor] spawn error for "${resolved.command}":`, err.message);
+          resolve(-1);
+        });
       });
 
       if (timeoutHandle) clearTimeout(timeoutHandle);
