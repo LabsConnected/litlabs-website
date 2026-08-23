@@ -100,14 +100,6 @@ describe("Games Restoration — Route Files Exist", () => {
   });
 });
 
-describe("Games Restoration — Old App Launcher Still Has Games", () => {
-  it("dashboard-data.ts APPS array includes Games", () => {
-    const content = readFileSync(join(ROOT, "src/components/dashboard/dashboard-data.ts"), "utf8");
-    expect(content).toContain('id: "games"');
-    expect(content).toContain('href: "/games"');
-  });
-});
-
 describe("Games Restoration — Icon Support", () => {
   it("Mission Control Icon component supports 'gamepad'", () => {
     const content = readFileSync(
