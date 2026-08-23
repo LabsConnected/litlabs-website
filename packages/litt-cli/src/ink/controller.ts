@@ -1272,6 +1272,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // if intent classification is correct, but defensive).
     }
 
+    // Submission correlation ID — shared across CHAT, MISSION, and the
+    // no-key fallback so a single submission is traceable end-to-end
+    // (user message → model stream → assistant finalize). Emitted to
+    // stderr when LITT_DIAG=1.
+    const submissionId = `sub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    if (process.env.LITT_DIAG === "1") {
+      process.stderr.write(
+        `[litt-diag][SUBMIT] submissionId=${submissionId} intent=${intent} input="${truncateActivity(input, 60)}"\n`,
+      );
+    }
+
     if (hasOpenRouterKey()) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
@@ -1301,6 +1312,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           content: input,
           ts: Date.now(),
           status: "complete",
+          submissionId,
         });
         // CHAT sets isProcessing, NOT holoState=UNDERSTANDING.
         // holoState stays IDLE — CHAT is not a mission.
@@ -1387,6 +1399,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             resolvedModel: routed.label,
             servedModel: null,
             fallbackReason: routed.fallbackReason,
+            submissionId,
           });
 
           // Track tool calls for structured activity events.
@@ -1538,6 +1551,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         content: input,
         ts: Date.now(),
         status: "complete",
+        submissionId,
       });
       // Cockpit-side mission state initialized (holoState, baseline, user
       // message) — distinct from the canonical RuntimeStore mission below.
@@ -1644,6 +1658,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           resolvedModel: routed.label,
           servedModel: null,
           fallbackReason: routed.fallbackReason,
+          submissionId,
         });
 
         // ─── SEMANTIC PLANNING — plan BEFORE execution ───
@@ -2252,12 +2267,61 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // No API key — show heuristic hint
+    // No API key — the user message MUST still appear in the transcript
+    // with a visible assistant error explaining what's needed. Without this,
+    // the composer is already cleared (app.tsx) but no transcript message is
+    // added, so hasConversation stays false and the Welcome screen re-shows —
+    // the user sees their text vanish with no response (the Termux/ADB bug).
+    if (process.env.LITT_DIAG === "1") {
+      process.stderr.write(
+        `[litt-diag][NO-KEY] submissionId=${submissionId} input="${truncateActivity(input, 60)}"\n`,
+      );
+    }
+    store.actions.addChatMessage({
+      role: "user",
+      content: input,
+      ts: Date.now(),
+      status: "complete",
+      submissionId,
+    });
+    const noKeyText =
+      "Set OPENROUTER_API_KEY to talk to LiTT, or use /commands for direct execution. " +
+      "Run /doctor to check provider status.";
+    store.actions.addChatMessage({
+      role: "assistant",
+      content: noKeyText,
+      ts: Date.now(),
+      status: "error",
+      servedModel: null,
+      submissionId,
+    });
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "info",
-      text: "Set OPENROUTER_API_KEY to talk to LiTT. Use /commands for direct execution.",
+      text: noKeyText,
+    });
+    // Defer persist to allow React to flush the chatTranscript state
+    // update triggered by addChatMessage above. persistSession reads
+    // store.state.chatTranscript (React state), which is stale until
+    // the next render cycle completes. We use requestAnimationFrame
+    // + setTimeout to ensure at least one render has occurred.
+    // The no-key path also persists directly (not via persistSession)
+    // because persistSession's useCallback closure captures a stale
+    // store.state.chatTranscript from before addChatMessage flushed.
+    const noKeyMessages = [
+      { role: "user" as const, content: input, status: "complete" as const, ts: Date.now() },
+      { role: "assistant" as const, content: noKeyText, status: "error" as const, ts: Date.now() },
+    ];
+    saveSession({
+      project: store.state.project || projectName || "unnamed",
+      cwd: session.getCwd(),
+      branch: store.state.branch,
+      mode: store.state.mode,
+      routingMode: store.state.routingMode,
+      selectedModel: store.state.selectedModel,
+      summary: summarize(input),
+      messages: noKeyMessages,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);

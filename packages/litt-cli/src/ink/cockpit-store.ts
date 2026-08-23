@@ -86,6 +86,11 @@ export interface ChatMessage {
   /** Turn duration (ms) — stamped once at finalize; drives the
    *  collapsed "Model · 9.0s" routing footer. */
   durationMs?: number | null;
+  /** Submission correlation ID — stamps both the user message and the
+   *  assistant response so a single submission can be traced end-to-end
+   *  (input → transport → response). Present on messages originating
+   *  from a submit() call; absent on restored/historical messages. */
+  submissionId?: string;
 }
 
 /**
