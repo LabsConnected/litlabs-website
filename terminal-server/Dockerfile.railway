@@ -57,6 +57,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
 COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
+# Bust builder cache to ensure source changes are picked up
+ARG BUILDER_CACHE_BUST=1
 
 # Copy workspace config
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
