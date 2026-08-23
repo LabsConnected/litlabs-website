@@ -447,6 +447,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // The request body's workspaceId/cwd CANNOT override the signed claim.
   // This prevents cross-user workspace access and empty-directory fallbacks.
   let cwd: string;
+  let authorizedWorkspaceId: string;
 
   if (payload.wid) {
     // Signed workspace claim — resolve and verify
@@ -472,6 +473,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     // Use the signed workspace root as cwd. Body cwd is ignored —
     // the signed claim is authoritative.
     cwd = ws.root;
+    authorizedWorkspaceId = ws.workspaceId;
   } else {
     // No signed workspace claim — auto-select from ready workspaces
     const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
@@ -497,6 +499,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     }
     // Exactly one ready workspace — auto-select it
     cwd = readyWorkspaces[0].root;
+    authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
   }
 
   // If the request body specifies a cwd, validate it's within the
@@ -521,6 +524,10 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     userId,
     // email from the JWT — best-effort auth context for the operator
     authEmail: authEmail ?? null,
+    // The verified/selected workspace overrides any untrusted body.workspaceId.
+    // dispatchCommand resolves cwd from workspaceId, so allowing the body value
+    // through here would undo the signed-workspace authority check above.
+    workspaceId: authorizedWorkspaceId,
     // cwd resolved from the signed workspace claim — NOT from the body
     cwd,
   };
