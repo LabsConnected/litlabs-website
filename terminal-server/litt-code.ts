@@ -165,7 +165,7 @@ async function chatWithOpenRouter(
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
     },
-    body: JSON.stringify({ model, messages, stream: false }),
+    body: JSON.stringify({ model, messages, stream: false, max_tokens: 4096 }),
   });
   if (!res.ok) throw new Error(`OpenRouter failed: ${res.status}`);
   const data = await res.json();
@@ -257,6 +257,7 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
+    max_tokens: 4096,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -614,6 +615,7 @@ export async function streamLiTTMessagesWithTools(
     tools,
     tool_choice: nativeTools.length > 0 ? "auto" : "none",
     parallel_tool_calls: false,
+    max_tokens: 4096,
   };
 
   const startedAt = Date.now();
