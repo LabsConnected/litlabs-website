@@ -81,6 +81,8 @@ import {
 } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 import { remoteChat, isRemoteAvailable, type RemoteChatEvent } from "../lib/remote.js";
+import { isRemoteUnavailable, RemoteUnavailableError } from "../lib/remote-unavailable.js";
+import { getSelectedRemoteWorkspace } from "../lib/remote-workspace-store.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 
 const CLI_IDENTITY = {
@@ -2314,6 +2316,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       let servedModel: string | null = null;
 
       try {
+        const selectedWs = getSelectedRemoteWorkspace();
         await remoteChat(input, (event: RemoteChatEvent) => {
           switch (event.type) {
             case "meta":
@@ -2331,7 +2334,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               act(store, `Remote chat error: ${event.message}`, "error", "failed", "CHAT");
               break;
           }
-        });
+        }, selectedWs ? { workspaceId: selectedWs.workspaceId } : {});
 
         store.actions.finalizeAssistantMessage({
           content: assistantText,
@@ -2346,18 +2349,35 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           text: `LiTT responded (remote) · ${servedModel ?? "unknown"}`,
         });
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        store.actions.finalizeAssistantMessage({
-          content: assistantText || `Remote chat failed: ${errMsg}`,
-          status: "error",
-          servedModel: null,
-        });
-        store.actions.addActivity({
-          id: `act_${Date.now()}`,
-          ts: Date.now(),
-          type: "info",
-          text: `Remote chat failed: ${errMsg}`,
-        });
+        // Handle workspace_selection_required with an actionable message
+        // instead of a generic error — the user needs to select a workspace.
+        if (err instanceof RemoteUnavailableError && err.reason === "workspace_selection_required") {
+          const wsMsg = "Multiple LiTT workspaces are available. Run: litt workspace select";
+          store.actions.finalizeAssistantMessage({
+            content: wsMsg,
+            status: "error",
+            servedModel: null,
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}`,
+            ts: Date.now(),
+            type: "info",
+            text: wsMsg,
+          });
+        } else {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          store.actions.finalizeAssistantMessage({
+            content: assistantText || `Remote chat failed: ${errMsg}`,
+            status: "error",
+            servedModel: null,
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}`,
+            ts: Date.now(),
+            type: "info",
+            text: `Remote chat failed: ${errMsg}`,
+          });
+        }
       } finally {
         store.actions.setIsProcessing(false);
         store.actions.stopBusy();
