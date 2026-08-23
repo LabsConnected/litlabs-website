@@ -17,6 +17,7 @@ import { ClerkCliAuth } from "./clerk-auth.js";
 import { resolveAuthConfig, hasAuthConfig } from "./auth-config.js";
 import type { AuthState, CredentialStore, LoginResult, UserInfo } from "./types.js";
 import { AuthError } from "./types.js";
+import { RemoteUnavailableError } from "../remote-unavailable.js";
 
 /** The signed-out state (used when no credentials exist). */
 const SIGNED_OUT: AuthState = {
@@ -88,6 +89,63 @@ export class AuthSession {
       }
       throw error;
     }
+  }
+
+  /**
+   * Fail-closed access token accessor for the REMOTE path.
+   *
+   * Unlike getAccessToken(), this NEVER collapses "expired and could not
+   * refresh" into the same null that "never signed in" produces. That
+   * collapse is what let an expired session look like a fresh one to
+   * callers, and it hid the fact that a dead credential was still sitting
+   * in the store.
+   *
+   * Behaviour:
+   *   - no credentials            → returns null (caller raises not_authenticated)
+   *   - refresh failed / revoked  → CLEARS the unusable credential, then throws
+   *   - otherwise                 → returns the token
+   *
+   * Clearing before throwing matters: leaving a known-dead credential in
+   * the store makes the next run fail the same way while `isSignedIn()`
+   * keeps reporting true.
+   */
+  async getAccessTokenStrict(): Promise<string | null> {
+    const envToken = process.env.LITT_CLERK_TOKEN;
+    if (envToken) return envToken;
+
+    if (!hasAuthConfig()) return null;
+
+    try {
+      return await this.auth.getAccessToken();
+    } catch (error) {
+      if (
+        error instanceof AuthError &&
+        (error.code === "token_refresh" || error.code === "token_exchange")
+      ) {
+        // The stored credential is unusable. Clear it so the session does
+        // not keep presenting itself as signed in, then fail closed.
+        await this.clearUnusableSession();
+        throw new RemoteUnavailableError(
+          error.code === "token_refresh" ? "auth_expired" : "auth_revoked",
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Drop a credential we have proven cannot be used. Best-effort: if the
+   * store itself errors we still fail closed, because the caller is
+   * already on its way to throwing. Swallowing here must never turn into
+   * swallowing the auth failure itself.
+   */
+  private async clearUnusableSession(): Promise<void> {
+    try {
+      await this.auth.logout();
+    } catch {
+      // Credential store unavailable — the hard error still propagates.
+    }
+    this._cachedState = null;
   }
 
   /**

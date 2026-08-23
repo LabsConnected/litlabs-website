@@ -82,6 +82,8 @@ export interface LiTTShellProps {
   project: string;
   branch: string;
   localRuntime: string;
+  /** Remote transport state — forwarded so the footer matches the header. */
+  remoteRuntime?: string;
   brain: string;
   activeModel: string | null;
   activeProvider: string | null;
@@ -96,7 +98,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     onOpenPalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
-    project, branch, localRuntime, brain, activeModel, activeProvider, mode,
+    project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
   } = props;
 
   const { stdout } = useStdout();
@@ -197,6 +199,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         project={project}
         branch={branch}
         localRuntime={localRuntime}
+        remoteRuntime={remoteRuntime}
         holoState={holoState}
         brain={brain}
         activeModel={activeModel}

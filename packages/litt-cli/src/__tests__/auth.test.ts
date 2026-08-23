@@ -1003,6 +1003,55 @@ describe("No Token Leakage", () => {
 
 // ─── Browser Launcher ─────────────────────────────────────────────
 
+// ─── Browser launcher test doubles ────────────────────────────────
+// Every OS-facing call is faked. No test in this file may create a real
+// process: doing so opened the developer's actual browser on Windows,
+// because `start "" "<url>"` through cmd.exe does exactly what it says.
+
+interface FakeDepsOptions {
+  /** Whether hasCommand() should report the probed binary as present. */
+  commandExists?: boolean;
+  /** Make the exec() launcher fail, exercising the manual-URL fallback. */
+  execFails?: boolean;
+  /** Make spawn() throw, exercising the manual-URL fallback. */
+  spawnFails?: boolean;
+}
+
+function makeFakeDeps(options: FakeDepsOptions = {}) {
+  const execCalls: string[] = [];
+  const spawnCalls: Array<[string, string[]]> = [];
+  const execSyncCalls: string[] = [];
+  const logs: string[] = [];
+
+  const deps = {
+    exec: ((command: string, _opts: unknown, cb?: (err: Error | null) => void) => {
+      execCalls.push(command);
+      const callback = typeof _opts === "function" ? _opts as (e: Error | null) => void : cb;
+      callback?.(options.execFails ? new Error("fake exec failure") : null);
+      return { unref() {} } as never;
+    }) as never,
+
+    spawn: ((command: string, args: string[]) => {
+      if (options.spawnFails) throw new Error("fake spawn failure");
+      spawnCalls.push([command, args]);
+      return {
+        unref() {},
+        once(_event: string, _handler: (e: Error) => void) { return this; },
+      } as never;
+    }) as never,
+
+    execSync: ((command: string) => {
+      execSyncCalls.push(command);
+      if (!options.commandExists) throw new Error("not found");
+      return Buffer.from("");
+    }) as never,
+
+    log: (message: string) => { logs.push(message); },
+  };
+
+  return { deps, execCalls, spawnCalls, execSyncCalls, logs };
+}
+
 describe("Browser Launcher", () => {
   it("isTermux returns false on non-Termux platforms", async () => {
     // On Windows/macOS/Linux desktop, TERMUX_VERSION is not set
@@ -1015,10 +1064,11 @@ describe("Browser Launcher", () => {
 
   it("openBrowser does not throw on any platform", async () => {
     const { openBrowser } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
 
-    // The function should not throw regardless of platform.
-    // On desktop it tries to spawn a browser; on failure it prints the URL.
-    await expect(openBrowser("https://example.com/auth")).resolves.toBeUndefined();
+    // Injected deps — asserts the contract without creating a process.
+    // Calling the REAL launcher here used to open the developer's browser.
+    await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
   });
 });
 
@@ -1137,29 +1187,91 @@ describe("Browser Launcher — platform selection", () => {
 
   it("macOS path uses spawn with 'open' command", async () => {
     setPlatform("darwin");
-    const { openBrowser } = await import("../lib/auth/browser-launcher.js");
-    // Should not throw — spawn('open', [url]) on macOS
-    await expect(openBrowser("https://example.com/auth")).resolves.toBeUndefined();
+    const { openBrowser, describeLaunch } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
+
+    await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+    // Asserts WHICH command would run — without running it.
+    expect(fake.spawnCalls).toEqual([["open", ["https://example.com/auth"]]]);
+    expect(fake.execCalls).toEqual([]);
+    expect(describeLaunch("https://example.com/auth", "darwin")).toMatchObject({
+      kind: "macos", command: "open", usesShell: false,
+    });
   });
 
   it("Linux path uses spawn with 'xdg-open' command", async () => {
     setPlatform("linux");
-    const { openBrowser } = await import("../lib/auth/browser-launcher.js");
-    // Should not throw — spawn('xdg-open', [url]) on Linux
-    await expect(openBrowser("https://example.com/auth")).resolves.toBeUndefined();
+    const { openBrowser, describeLaunch } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
+
+    await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+    expect(fake.spawnCalls).toEqual([["xdg-open", ["https://example.com/auth"]]]);
+    expect(fake.execCalls).toEqual([]);
+    expect(describeLaunch("https://example.com/auth", "linux")).toMatchObject({
+      kind: "linux", command: "xdg-open", usesShell: false,
+    });
   });
 
   it("Termux path uses termux-open-url (not open/xdg-open/cmd)", async () => {
     setPlatform("android");
     process.env.TERMUX_VERSION = "1.0.0";
     try {
-      const { openBrowser } = await import("../lib/auth/browser-launcher.js");
-      // termux-open-url likely not installed in test env → falls back to printing URL
-      // The key: it must NOT throw and must NOT use Windows/macOS/Linux commands
-      await expect(openBrowser("https://example.com/auth")).resolves.toBeUndefined();
+      const { openBrowser, describeLaunch } = await import("../lib/auth/browser-launcher.js");
+      // termux-open-url IS present in this fake environment.
+      const fake = makeFakeDeps({ commandExists: true });
+
+      await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+      expect(fake.spawnCalls).toEqual([["termux-open-url", ["https://example.com/auth"]]]);
+      // Never the desktop launchers.
+      expect(fake.spawnCalls.map((c) => c[0])).not.toContain("open");
+      expect(fake.spawnCalls.map((c) => c[0])).not.toContain("xdg-open");
+      expect(fake.execCalls).toEqual([]);
+      expect(describeLaunch("https://example.com/auth", "android").kind).toBe("termux");
     } finally {
       delete process.env.TERMUX_VERSION;
     }
+  });
+
+  it("Termux falls back to printing the URL when termux-open-url is absent", async () => {
+    setPlatform("android");
+    process.env.TERMUX_VERSION = "1.0.0";
+    try {
+      const { openBrowser } = await import("../lib/auth/browser-launcher.js");
+      const fake = makeFakeDeps({ commandExists: false });
+
+      await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+      expect(fake.spawnCalls).toEqual([]);
+      expect(fake.logs.join(String.fromCharCode(10))).toContain("Could not open browser automatically");
+      expect(fake.logs.join(String.fromCharCode(10))).toContain("https://example.com/auth");
+    } finally {
+      delete process.env.TERMUX_VERSION;
+    }
+  });
+
+  it("Windows path issues the cmd.exe start string through exec, not spawn", async () => {
+    setPlatform("win32");
+    const { openBrowser } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
+
+    await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+    expect(fake.execCalls).toEqual([`start "" "https://example.com/auth"`]);
+    expect(fake.spawnCalls).toEqual([]);
+  });
+
+  it("prints the manual URL when the launcher fails", async () => {
+    setPlatform("win32");
+    const { openBrowser } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps({ execFails: true });
+
+    await expect(openBrowser("https://example.com/auth", fake.deps)).resolves.toBeUndefined();
+
+    expect(fake.logs.join(String.fromCharCode(10))).toContain("Could not open browser automatically");
+    expect(fake.logs.join(String.fromCharCode(10))).toContain("https://example.com/auth");
   });
 });
 
@@ -1311,5 +1423,68 @@ describe("No Secrets in CLI Default Config", () => {
     const config = resolveAuthConfig();
     const serialized = JSON.stringify(config);
     expect(serialized).not.toMatch(/sk_live|CLERK_SECRET|TERMINAL_AUTH_SECRET|TERMINAL_INTERNAL_SERVICE_KEY/i);
+  });
+});
+
+
+// ─── Regression: unit tests must never launch a real browser ──────
+
+describe("Browser Launcher — no real process launches", () => {
+  const origPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+  afterEach(() => {
+    if (origPlatform) Object.defineProperty(process, "platform", origPlatform);
+  });
+
+  it("detects that this process is an automated test run", async () => {
+    const { isAutomatedTestRun } = await import("../lib/auth/browser-launcher.js");
+    // Vitest sets VITEST=true. This is the backstop's trigger.
+    expect(isAutomatedTestRun()).toBe(true);
+  });
+
+  it("refuses to launch via the REAL deps while under a test runner", async () => {
+    // This is the exact call that used to open Brave. With the backstop
+    // it prints the manual URL and creates no process.
+    const mod = await import("../lib/auth/browser-launcher.js");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const execSpy = vi.spyOn(mod.REAL_BROWSER_DEPS, "exec");
+    const spawnSpy = vi.spyOn(mod.REAL_BROWSER_DEPS, "spawn");
+
+    try {
+      for (const platform of ["win32", "darwin", "linux"]) {
+        Object.defineProperty(process, "platform", { value: platform, configurable: true });
+        await expect(mod.openBrowser("https://example.com/auth")).resolves.toBeUndefined();
+      }
+      // Zero real process launches across every platform branch.
+      expect(execSpy).not.toHaveBeenCalled();
+      expect(spawnSpy).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalled(); // manual URL was printed instead
+    } finally {
+      execSpy.mockRestore();
+      spawnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it("routes every platform through injected deps when they are provided", async () => {
+    const { openBrowser } = await import("../lib/auth/browser-launcher.js");
+
+    for (const platform of ["win32", "darwin", "linux"]) {
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+      const fake = makeFakeDeps();
+      await openBrowser("https://example.com/auth", fake.deps);
+      // Exactly one launch attempt, and it went to the fake.
+      expect(fake.execCalls.length + fake.spawnCalls.length).toBe(1);
+    }
+  });
+
+  it("hasCommand probes through injected execSync, never the real shell", async () => {
+    const { hasCommand } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps({ commandExists: false });
+
+    expect(hasCommand("termux-open-url", fake.deps)).toBe(false);
+    // Probed via the fake only.
+    expect(fake.execSyncCalls.length).toBeGreaterThan(0);
+    expect(fake.execSyncCalls.every((c) => c.includes("termux-open-url"))).toBe(true);
   });
 });
