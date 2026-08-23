@@ -44,7 +44,12 @@ RUN pnpm install --frozen-lockfile \
     --filter terminal-server... \
     --filter @litt/agent-core... \
     --prod=false \
-    --config.ignore-scripts=false
+    --config.ignore-scripts=false \
+    --config.node-linker=isolated
+
+# Fail the build if the lockfile resolves terminal-server to the web app's
+# incompatible Clerk shared package.
+RUN node -e "const p = require('./terminal-server/node_modules/@clerk/shared/package.json'); const proxy = require('./terminal-server/node_modules/@clerk/shared/dist/proxy.js'); if (p.version !== '4.29.3' || typeof proxy.getAutoProxyUrlFromEnvironment !== 'function') process.exit(1);"
 
 # ─── Stage 2: Builder ──────────────────────────────────────────────
 FROM node:22-bookworm-slim AS builder
@@ -55,6 +60,7 @@ WORKDIR /app
 
 # Copy installed node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
 COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
 
 # Copy workspace config
@@ -95,6 +101,10 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/terminal-server/package.json terminal-server/package.json
 COPY --from=builder /app/packages/litt-agent-core/package.json packages/litt-agent-core/package.json
+
+# Verify that pnpm links still resolve to the terminal server's Clerk version
+# after crossing Docker stages.
+RUN node -e "const p = require('./terminal-server/node_modules/@clerk/shared/package.json'); const proxy = require('./terminal-server/node_modules/@clerk/shared/dist/proxy.js'); if (p.version !== '4.29.3' || typeof proxy.getAutoProxyUrlFromEnvironment !== 'function') process.exit(1);"
 
 # Railway assigns $PORT dynamically — terminal server reads process.env.PORT
 EXPOSE ${PORT:-4001}
