@@ -487,6 +487,18 @@ export function useCockpitStore() {
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
 
+  /**
+   * Read the current chat transcript straight from the pure store.
+   * Returns the live snapshot at call time — NOT a React-state closure
+   * capture (which would lag behind synchronous addChatMessage() calls
+   * made earlier in the same tick). The controller uses this to build
+   * the persisted conversation right before saveSession().
+   */
+  const getChatTranscript = useCallback(
+    (): ChatMessage[] => transcriptStore.snapshot(),
+    [transcriptStore],
+  );
+
   // ─── Tool progress actions ───────────────────────────────────────
   // All mutations go through the pure ToolProgressStore and the result
   // is mirrored into React state. These use the IMMEDIATE sync (not the
@@ -849,6 +861,7 @@ export function useCockpitStore() {
       appendAssistantDelta,
       finalizeAssistantMessage,
       clearChatTranscript,
+      getChatTranscript,
       startToolProgressMission,
       completeToolProgressMission,
       failToolProgressMission,

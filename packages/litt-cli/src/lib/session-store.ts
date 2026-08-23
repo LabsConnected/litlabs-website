@@ -22,6 +22,11 @@ export interface SessionMessage {
   content: string;
   status: string;
   ts: number;
+  /** Submission correlation ID — stamps both the user message and the
+   *  assistant response so a single submission can be traced end-to-end.
+   *  Optional: older persisted records and non-submit messages lack it.
+   *  Used by mergeAppend() to dedupe replayed/reconnected pairs. */
+  submissionId?: string;
 }
 
 export interface SessionSnapshot {
@@ -91,15 +96,84 @@ export function boundMessage(msg: SessionMessage): SessionMessage {
   };
 }
 
-export interface SaveSessionInput {
+/** Workspace + routing context for a conversation. Same shape as
+ *  SaveSessionInput minus the derived summary/messages — what the
+ *  controller already has in hand when it needs to persist. */
+export interface ConversationContext {
   project: string;
   cwd: string;
   branch: string;
   mode: "plan" | "act";
   routingMode: string;
   selectedModel: string | null;
+}
+
+export interface SaveSessionInput extends ConversationContext {
   summary: string;
   messages: SessionMessage[];
+}
+
+/**
+ * Merge an appended pair into the prior transcript, deduping by
+ * (submissionId, role). A message in `appended` is dropped when a
+ * message with the same submissionId AND role already exists in
+ * `prior` — this is what makes the persist idempotent whether the
+ * transcript snapshot was taken before or after the pair was added
+ * (the "stale" vs "fresh" capture timings in the controller).
+ *
+ * Messages without a submissionId are always kept (no dedup key).
+ * Order is preserved: prior first, then any appended messages that
+ * survived dedup.
+ */
+export function mergeAppend(
+  prior: SessionMessage[],
+  appended: SessionMessage[],
+): SessionMessage[] {
+  const result: SessionMessage[] = [...prior];
+  for (const msg of appended) {
+    if (msg.submissionId !== undefined) {
+      const dup = result.some(
+        (m) => m.submissionId === msg.submissionId && m.role === msg.role,
+      );
+      if (dup) continue;
+    }
+    result.push(msg);
+  }
+  return result;
+}
+
+/**
+ * Build a SaveSessionInput from the live transcript + an appended pair.
+ *
+ * - Merges the pair into the transcript via mergeAppend() (dedupes
+ *   replayed pairs by submissionId+role), so the persist is idempotent
+ *   regardless of when the transcript snapshot was captured.
+ * - Derives the summary from the FIRST user message of the merged
+ *   conversation — NOT the current input. This anchors the session
+ *   label to the conversation's opening turn so a mid-conversation
+ *   no-key/remote submit does not relabel (and thus fork) the session.
+ *
+ * The returned object is a complete SaveSessionInput; pass it straight
+ * to saveSession().
+ */
+export function buildConversationSave(
+  ctx: ConversationContext,
+  transcript: SessionMessage[],
+  appended: SessionMessage[],
+): SaveSessionInput {
+  const merged = mergeAppend(transcript, appended);
+  const firstUser = merged.find((m) => m.role === "user");
+  const summary = summarize(firstUser?.content ?? "untitled");
+  return {
+    project: ctx.project,
+    cwd: ctx.cwd,
+    branch: ctx.branch,
+    mode: ctx.mode,
+    routingMode: ctx.routingMode,
+    selectedModel: ctx.selectedModel,
+    summary,
+    messages: merged,
+  };
 }
 
 /**
