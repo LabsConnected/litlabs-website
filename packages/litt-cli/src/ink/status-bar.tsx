@@ -67,6 +67,15 @@ export function StatusBar({
   const busy = working || holoState === "COMPLETE" || holoState === "FAILED"
     || holoState === "CANCELLED" || holoState === "TIMEOUT";
 
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [working]);
+
   // ── Line 2 right: clean / +N / ◉ Working / ! failed ──
   let right: React.ReactElement;
   if (working) {

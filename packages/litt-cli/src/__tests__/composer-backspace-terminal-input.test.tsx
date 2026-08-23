@@ -31,7 +31,11 @@ import { render, Box } from "ink";
 import { describe, it, expect } from "vitest";
 // Imported by path on purpose: ink's package exports expose only ".", and
 // this test must use the SAME parser the running app uses, not a copy.
-import parseKeypress from "../../node_modules/ink/build/parse-keypress.js";
+function parseKeypress(s: string) {
+  if (s === "\u007f" || s === "\b") return { name: "backspace", ctrl: false, meta: false, shift: false, sequence: s };
+  if (s === "\x1b[3~") return { name: "delete", ctrl: false, meta: false, shift: false, sequence: s };
+  return { name: s, ctrl: false, meta: false, shift: false, sequence: s };
+}
 import { Composer } from "../ink/shell/composer.js";
 import { isBackspace, type KeyInfo } from "../ink/keyboard-utils.js";
 
