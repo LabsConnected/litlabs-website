@@ -43,6 +43,7 @@ COPY terminal-server/tsconfig.worker.json terminal-server/tsconfig.worker.json
 RUN pnpm install --frozen-lockfile \
     --filter terminal-server... \
     --filter @litt/agent-core... \
+    --prod=false \
     --config.ignore-scripts=false
 
 # ─── Stage 2: Builder ──────────────────────────────────────────────

@@ -40,7 +40,7 @@ COPY cli/package.json ./cli/
 # Install all workspace dependencies.
 # ignore-scripts=true is set in .npmrc — sharp uses prebuilt binaries
 # via optional deps (@img/sharp-*), so native scripts aren't needed.
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --prod=false
 
 # ─── Stage 2: Builder ──────────────────────────────────────────────
 FROM node:22-slim AS builder
