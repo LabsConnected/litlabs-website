@@ -390,8 +390,8 @@ describe("Regression: /ask uses canonical operator path", () => {
 
 // ─── Dockerfile runtime git assertion ─────────────────────────────
 
-describe("Regression: Dockerfile.railway runtime includes git", () => {
-  it("runner stage installs git (project.search depends on git grep)", () => {
+describe("Regression: Dockerfile.railway runtime does NOT include git", () => {
+  it("runner stage does NOT install git (searchFiles handles absence gracefully)", () => {
     const dockerfile = fs.readFileSync(
       path.join(repoRoot, "terminal-server", "Dockerfile.railway"),
       "utf-8",
@@ -400,11 +400,15 @@ describe("Regression: Dockerfile.railway runtime includes git", () => {
     const runnerStart = dockerfile.indexOf("FROM node:22-bookworm-slim AS runner");
     expect(runnerStart).toBeGreaterThan(-1);
     const runnerSection = dockerfile.slice(runnerStart);
-    // The runner stage must install git
-    expect(runnerSection).toContain("git");
-    // Must have a build assertion that git is present
-    expect(runnerSection).toContain("command -v git");
-    expect(runnerSection).toContain("git --version");
+    // The runner stage must NOT install git — searchFiles() returns
+    // status="failed" when git is unavailable, rather than hallucinating
+    // "no matches found". Git is only in the deps/builder stages.
+    const aptGetMatch = runnerSection.match(/apt-get install -y \\([^)]+)\)/);
+    if (aptGetMatch) {
+      const packages = aptGetMatch[1];
+      expect(packages).not.toContain("git");
+    }
+    expect(runnerSection).not.toContain("command -v git");
   });
 });
 
