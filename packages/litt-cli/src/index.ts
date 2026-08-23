@@ -328,8 +328,8 @@ async function main(): Promise<number> {
 
     // Provide helpful hints for common errors
     if (message.includes("OPENROUTER_API_KEY")) {
-      console.error(`${c.dim}  Get an API key at https://openrouter.ai and set it:${c.reset}`);
-      console.error(`${c.dim}  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
+      console.error(`${c.dim}  Run 'litt login' to use LiTT with managed keys (no API key needed).${c.reset}`);
+      console.error(`${c.dim}  Or set your own key:  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
     } else if (message.includes("Clerk token")) {
       console.error(`${c.dim}  --remote requires authentication. Run 'litt login'.${c.reset}`);
     } else if (message.includes("ENOENT") || message.includes("not found")) {

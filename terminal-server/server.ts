@@ -546,6 +546,92 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+// ─── POST /api/chat — managed-key natural-language chat (NDJSON stream) ──
+//
+// This endpoint lets authenticated CLI users chat with LiTT using the
+// server's managed OPENROUTER_API_KEY — no local API key required.
+//
+// Authentication: terminal JWT (same as /api/command).
+// Request body: { message: string }
+// Response: NDJSON stream of LiTTEvent objects:
+//   {"type":"meta","provider":"openrouter","model":"...","profile":"smart"}
+//   {"type":"delta","text":"chunk"}
+//   {"type":"done","model":"...","usage":{"total_tokens":N},"timing":{...}}
+//   {"type":"error","message":"..."}
+//
+// The server resolves the workspace cwd from the signed JWT claims
+// (same as /api/command). The client cannot override it.
+app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
+  // 1. Verify user JWT
+  let userId: string;
+  let payload: { sub: string; wid?: string; pid?: string; cwd?: string };
+  try {
+    const token = bearerToken(req.headers.authorization);
+    payload = verifyTerminalToken(token);
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
+    return;
+  }
+
+  // 2. Validate request body
+  const { message } = req.body as { message?: string };
+  if (!message || typeof message !== "string" || !message.trim()) {
+    res.status(400).json({ error: "Missing 'message' field" });
+    return;
+  }
+
+  // 3. Resolve workspace cwd (same logic as /api/command)
+  let cwd: string;
+  if (payload.wid) {
+    const ws = getWorkspace(payload.wid);
+    if (!ws || ws.userId !== userId) {
+      res.status(403).json({ error: { code: "workspace_unauthorized", message: "Workspace access denied" } });
+      return;
+    }
+    cwd = ws.root;
+  } else if (payload.cwd) {
+    cwd = payload.cwd;
+  } else {
+    // Auto-select if exactly one ready workspace
+    const allWorkspaces = listWorkspaces();
+    const userWorkspaces = allWorkspaces.filter((w) => w.userId === userId && w.status === "ready");
+    if (userWorkspaces.length === 0) {
+      res.status(400).json({ error: { code: "workspace_required", message: "No ready workspace — create one first" } });
+      return;
+    }
+    if (userWorkspaces.length > 1) {
+      res.status(400).json({ error: { code: "workspace_selection_required", message: "Multiple workspaces — specify which one" } });
+      return;
+    }
+    cwd = userWorkspaces[0].root;
+  }
+
+  // 4. Stream NDJSON response
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const writeEvent = (event: LiTTEvent) => {
+    res.write(JSON.stringify(event) + "\n");
+  };
+
+  try {
+    await streamLiTTOperator(message, cwd, writeEvent);
+    res.end();
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
+    // If headers haven't been sent yet, send a proper error response
+    if (!res.headersSent) {
+      res.status(500).json({ error: errorMsg });
+    } else {
+      // Already streaming — send the error as an NDJSON event
+      writeEvent({ type: "error", message: errorMsg });
+      res.end();
+    }
+  }
+});
+
 app.get("/health/ready", async (_req, res) => {
   const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
   const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;

@@ -31,7 +31,12 @@ import { render, Box } from "ink";
 import { describe, it, expect } from "vitest";
 // Imported by path on purpose: ink's package exports expose only ".", and
 // this test must use the SAME parser the running app uses, not a copy.
-import parseKeypress from "../../node_modules/ink/build/parse-keypress.js";
+// Resolve via the package root + path.join to bypass the exports map.
+import { createRequire } from "node:module";
+import { join, dirname } from "node:path";
+const _require = createRequire(import.meta.url);
+const _inkRoot = dirname(_require.resolve("ink"));
+const parseKeypress = _require(join(_inkRoot, "parse-keypress.js")).default as typeof import("../../node_modules/ink/build/parse-keypress.js").default;
 import { Composer } from "../ink/shell/composer.js";
 import { isBackspace, type KeyInfo } from "../ink/keyboard-utils.js";
 

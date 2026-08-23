@@ -321,3 +321,108 @@ export async function isRemoteAvailable(
 export function clearTerminalTokenCache(): void {
   cachedTerminalToken = null;
 }
+
+// ─── Remote chat (managed server-side keys) ──────────────────────
+
+/**
+ * Remote chat event — mirrors the LiTTEvent from terminal-server.
+ */
+export type RemoteChatEvent =
+  | { type: "meta"; provider: string; model: string; profile: string }
+  | { type: "delta"; text: string }
+  | { type: "done"; model: string; usage: { total_tokens: number }; timing: { ttftMs: number; generationMs: number; totalMs: number } }
+  | { type: "error"; message: string };
+
+/**
+ * Send a natural-language chat message to terminal-server's /api/chat
+ * endpoint. The server uses its managed OPENROUTER_API_KEY — the CLI
+ * never needs a local API key.
+ *
+ * Streams NDJSON events back via the onEvent callback. Resolves when
+ * the stream ends (done or error). Rejects on transport failure.
+ *
+ * Authentication: uses the same token-exchange flow as dispatchRemote.
+ */
+export async function remoteChat(
+  message: string,
+  onEvent: (event: RemoteChatEvent) => void,
+  options: RemoteDispatchOptions = {},
+): Promise<void> {
+  const baseUrl = options.terminalUrl ?? getTerminalUrl();
+  const token = await getTerminalToken(options);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (error) {
+    throw new RemoteUnavailableError(
+      "service_unavailable",
+      error instanceof Error ? `${error.message}.` : "Network error.",
+    );
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string | { code?: string; message?: string } } | null;
+    const typedError = body?.error && typeof body.error === "object"
+      ? body.error as { code?: string; message?: string }
+      : undefined;
+    const detail = typedError?.message ?? (typeof body?.error === "string" ? body.error : `Remote chat failed (${response.status}).`);
+
+    if (response.status === 401 || response.status === 403) {
+      throw new RemoteUnavailableError("auth_revoked", detail);
+    }
+    throw new RemoteUnavailableError("execution_failed", detail);
+  }
+
+  // Read NDJSON stream
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new RemoteUnavailableError("service_unavailable", "No response body from terminal server.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete lines (NDJSON)
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+        if (!line) continue;
+
+        try {
+          const event = JSON.parse(line) as RemoteChatEvent;
+          onEvent(event);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    }
+    // Process any remaining buffered data
+    const remaining = buffer.trim();
+    if (remaining) {
+      try {
+        const event = JSON.parse(remaining) as RemoteChatEvent;
+        onEvent(event);
+      } catch {
+        // Ignore malformed final chunk
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

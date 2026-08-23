@@ -72,8 +72,16 @@ import {
   generateBranchName,
   isBlockedGitCommand,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
+import {
+  buildConversationSave,
+  saveSession,
+  summarize,
+  type SessionMessage,
+  type SessionSnapshot,
+} from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
+import { remoteChat, isRemoteAvailable, type RemoteChatEvent } from "../lib/remote.js";
+import { getAuthSession } from "../lib/auth/auth-session.js";
 
 const CLI_IDENTITY = {
   tenantId: "cli-tenant",
@@ -275,6 +283,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         content: m.content,
         status: m.status,
         ts: m.ts,
+        // Preserve the submission correlation ID so mergeAppend() can
+        // dedupe by (submissionId, role) on the next persist.
+        ...(m.submissionId ? { submissionId: m.submissionId } : {}),
       })),
     });
   }, [store, session, projectName]);
@@ -688,7 +699,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     if (input === "/doctor") {
       act(store, `LiTT runtime: local=${store.state.localRuntime} remote=${store.state.remoteRuntime}`, "info", undefined, "DOCTOR");
       act(store, `Git: ${store.state.branch} · +${store.state.gitModified + store.state.gitUntracked} changes`, "info", undefined, "DOCTOR");
-      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no key (set OPENROUTER_API_KEY)"}`, "info", undefined, "DOCTOR");
+      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no local key (use `litt login` for managed keys)"}`, "info", undefined, "DOCTOR");
       for (const status of modelRuntime.getProviderStatuses()) {
         act(store, `  ${status.label}: ${status.tier}${status.hasCredential ? " ✓" : " ✗ no key"}${status.latencyMs !== null ? ` ${status.latencyMs}ms` : ""}`, "info", undefined, "DOCTOR");
       }
@@ -2267,11 +2278,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // No API key — the user message MUST still appear in the transcript
-    // with a visible assistant error explaining what's needed. Without this,
-    // the composer is already cleared (app.tsx) but no transcript message is
-    // added, so hasConversation stays false and the Welcome screen re-shows —
-    // the user sees their text vanish with no response (the Termux/ADB bug).
+    // No local API key — try the managed-key remote chat path first.
+    // If the user is signed in (via `litt login`) and the terminal-server
+    // is reachable, the server uses its managed OPENROUTER_API_KEY to run
+    // inference. The CLI never needs a local key.
+    //
+    // Only if the user is NOT signed in do we show the "run litt login"
+    // message. This fixes the Termux/ADB onboarding bug where users had
+    // to paste an OpenRouter key on their phone.
     if (process.env.LITT_DIAG === "1") {
       process.stderr.write(
         `[litt-diag][NO-KEY] submissionId=${submissionId} input="${truncateActivity(input, 60)}"\n`,
@@ -2284,9 +2298,111 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       status: "complete",
       submissionId,
     });
-    const noKeyText =
-      "Set OPENROUTER_API_KEY to talk to LiTT, or use /commands for direct execution. " +
-      "Run /doctor to check provider status.";
+
+    // Check if the user is signed in and the server is reachable
+    const authSession = getAuthSession();
+    const signedIn = await authSession.isSignedIn().catch(() => false);
+    const serverReachable = signedIn ? await isRemoteAvailable().catch(() => false) : false;
+
+    if (signedIn && serverReachable) {
+      // ─── Managed-key remote chat path ───────────────────────────
+      // The server has OPENROUTER_API_KEY configured — stream the
+      // response back through the same transcript rendering as local.
+      store.actions.setIsProcessing(true);
+      store.actions.startBusy();
+      let assistantText = "";
+      let servedModel: string | null = null;
+
+      try {
+        await remoteChat(input, (event: RemoteChatEvent) => {
+          switch (event.type) {
+            case "meta":
+              servedModel = event.model;
+              act(store, `Route: ${event.provider}/${event.model} (${event.profile})`, "info", "decision", "ROUTE");
+              break;
+            case "delta":
+              assistantText += event.text;
+              store.actions.appendAssistantDelta(event.text);
+              break;
+            case "done":
+              servedModel = event.model;
+              break;
+            case "error":
+              act(store, `Remote chat error: ${event.message}`, "error", "failed", "CHAT");
+              break;
+          }
+        });
+
+        store.actions.finalizeAssistantMessage({
+          content: assistantText,
+          status: "complete",
+          servedModel,
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "agent.chat",
+          tag: "CHAT",
+          text: `LiTT responded (remote) · ${servedModel ?? "unknown"}`,
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        store.actions.finalizeAssistantMessage({
+          content: assistantText || `Remote chat failed: ${errMsg}`,
+          status: "error",
+          servedModel: null,
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "info",
+          text: `Remote chat failed: ${errMsg}`,
+        });
+      } finally {
+        store.actions.setIsProcessing(false);
+        store.actions.stopBusy();
+      }
+
+      // Persist the conversation
+      const remotePair: SessionMessage[] = [
+        { role: "user", content: input, status: "complete", ts: Date.now(), submissionId },
+        { role: "assistant", content: assistantText, status: "complete", ts: Date.now(), submissionId },
+      ];
+      const transcript: SessionMessage[] = store.actions
+        .getChatTranscript()
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          status: m.status,
+          ts: m.ts,
+          ...(m.submissionId ? { submissionId: m.submissionId } : {}),
+        }));
+      saveSession(
+        buildConversationSave(
+          {
+            project: store.state.project || projectName || "unnamed",
+            cwd: session.getCwd(),
+            branch: store.state.branch,
+            mode: store.state.mode,
+            routingMode: store.state.routingMode,
+            selectedModel: store.state.selectedModel,
+          },
+          transcript,
+          remotePair,
+        ),
+      );
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      return;
+    }
+
+    // ─── Not signed in or server unreachable ──────────────────────
+    // Show a clear onboarding message. Do NOT tell the user to paste
+    // an API key — that's the old broken UX. The correct path is
+    // `litt login` which uses the server's managed keys.
+    const noKeyText = signedIn
+      ? "Can't reach the LiTT server. Check your connection and try again, or run /doctor for diagnostics."
+      : "Run `litt login` to start using LiTT — no API key needed. " +
+        "If you have your own OpenRouter key, set OPENROUTER_API_KEY in your environment.";
     store.actions.addChatMessage({
       role: "assistant",
       content: noKeyText,
@@ -2301,28 +2417,33 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       type: "info",
       text: noKeyText,
     });
-    // Defer persist to allow React to flush the chatTranscript state
-    // update triggered by addChatMessage above. persistSession reads
-    // store.state.chatTranscript (React state), which is stale until
-    // the next render cycle completes. We use requestAnimationFrame
-    // + setTimeout to ensure at least one render has occurred.
-    // The no-key path also persists directly (not via persistSession)
-    // because persistSession's useCallback closure captures a stale
-    // store.state.chatTranscript from before addChatMessage flushed.
-    const noKeyMessages = [
-      { role: "user" as const, content: input, status: "complete" as const, ts: Date.now() },
-      { role: "assistant" as const, content: noKeyText, status: "error" as const, ts: Date.now() },
+    const noKeyPair: SessionMessage[] = [
+      { role: "user", content: input, status: "complete", ts: Date.now(), submissionId },
+      { role: "assistant", content: noKeyText, status: "error", ts: Date.now(), submissionId },
     ];
-    saveSession({
-      project: store.state.project || projectName || "unnamed",
-      cwd: session.getCwd(),
-      branch: store.state.branch,
-      mode: store.state.mode,
-      routingMode: store.state.routingMode,
-      selectedModel: store.state.selectedModel,
-      summary: summarize(input),
-      messages: noKeyMessages,
-    });
+    const transcript: SessionMessage[] = store.actions
+      .getChatTranscript()
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+        status: m.status,
+        ts: m.ts,
+        ...(m.submissionId ? { submissionId: m.submissionId } : {}),
+      }));
+    saveSession(
+      buildConversationSave(
+        {
+          project: store.state.project || projectName || "unnamed",
+          cwd: session.getCwd(),
+          branch: store.state.branch,
+          mode: store.state.mode,
+          routingMode: store.state.routingMode,
+          selectedModel: store.state.selectedModel,
+        },
+        transcript,
+        noKeyPair,
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);
 

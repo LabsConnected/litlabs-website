@@ -52,7 +52,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // If no API key, fall back to heuristic analysis
   if (!hasOpenRouterKey()) {
     warn("No OPENROUTER_API_KEY set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Set OPENROUTER_API_KEY to enable the full agent with tool calling.${c.reset}\n`);
+    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
     return heuristicAnalysis(question, project);
   }
 
