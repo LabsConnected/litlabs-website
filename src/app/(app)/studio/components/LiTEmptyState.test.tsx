@@ -2,24 +2,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import LiTEmptyState from "@/app/(app)/studio/components/LiTEmptyState";
 
-// Mock StudioBrandHero to avoid next/image loading in unit tests.
-// The brand hero is the new visual centerpiece that replaced LiTTPresence.
-// We verify it renders with the expected props (display name, project state,
-// action callback) rather than testing its internal image carousel here.
-vi.mock("@/app/(app)/studio/components/StudioBrandHero", () => ({
-  default: ({ displayName, hasProject, onPickAction }: {
-    displayName: string;
-    hasProject: boolean;
-    projectName: string | null;
-    onPickAction: (prompt: string) => void;
+// Mock LiTTPresence to avoid next/image loading in unit tests.
+// LiTTPresence is the current production visual centerpiece rendered by
+// LiTEmptyState. We verify it renders with the expected props (state,
+// variant, size) rather than testing its internal image loading here.
+vi.mock("@/app/(app)/studio/components/LiTTPresence", () => ({
+  default: ({ state, variant, size }: {
+    state: string;
+    variant: string;
+    size: string;
   }) => (
-    <div data-testid="studio-brand-hero" aria-label="LiTT Studio command center">
-      <span data-testid="brand-hero-display-name">{displayName}</span>
-      <span data-testid="brand-hero-has-project">{String(hasProject)}</span>
-      <button type="button" onClick={() => onPickAction("test-prompt")}>
-        Start building
-      </button>
-    </div>
+    <div
+      data-testid="litt-presence"
+      aria-label="LiTT Studio operator presence"
+      data-state={state}
+      data-variant={variant}
+      data-size={size}
+    />
   ),
   __esModule: true,
 }));
@@ -110,7 +109,7 @@ describe("LiTEmptyState", () => {
     expect(screen.getByText("Upload project")).toBeDefined();
   });
 
-  it("renders StudioBrandHero with display name and project state", () => {
+  it("renders LiTTPresence with idle state and empty-state variant", () => {
     const onPickAction = vi.fn();
     render(
       <LiTEmptyState
@@ -123,22 +122,13 @@ describe("LiTEmptyState", () => {
       />,
     );
 
-    // The brand hero is the new visual centerpiece — verify it renders
+    // LiTTPresence is the production visual centerpiece — verify it renders
     // with the correct props passed from LiTEmptyState.
-    const hero = screen.getByTestId("studio-brand-hero");
-    expect(hero).toBeDefined();
-    expect(hero.getAttribute("aria-label")).toBe("LiTT Studio command center");
-
-    // Display name is passed through (greetingName derived from user)
-    expect(screen.getByTestId("brand-hero-display-name").textContent).toBeDefined();
-
-    // No project → hasProject=false
-    expect(screen.getByTestId("brand-hero-has-project").textContent).toBe("false");
-
-    // The primary CTA ("Start building") is present and wired
-    const cta = screen.getByText("Start building");
-    expect(cta.tagName).toBe("BUTTON");
-    cta.click();
-    expect(onPickAction).toHaveBeenCalledWith("test-prompt");
+    const presence = screen.getByTestId("litt-presence");
+    expect(presence).toBeDefined();
+    expect(presence.getAttribute("aria-label")).toBe("LiTT Studio operator presence");
+    expect(presence.getAttribute("data-state")).toBe("idle");
+    expect(presence.getAttribute("data-variant")).toBe("empty-state");
+    expect(presence.getAttribute("data-size")).toBe("xl");
   });
 });
