@@ -54,18 +54,88 @@ export const REAL_BROWSER_DEPS: BrowserLaunchDeps = {
 };
 
 /**
- * True when running under an automated test runner.
+ * Check if the provided deps object uses real Node.js child_process implementations.
+ */
+export function isRealLauncher(deps: BrowserLaunchDeps): boolean {
+  return (
+    deps === REAL_BROWSER_DEPS ||
+    deps.exec === exec ||
+    deps.spawn === spawn ||
+    deps.execSync === execSync
+  );
+}
+
+/**
+ * Checks if a URL targets an RFC 2606 / RFC 6761 reserved domain or test domain
+ * (e.g. example.com, example.org, example.net, *.test, *.example, *.invalid, test.com).
+ * Real browsers must never be launched for documentation or test URLs.
+ */
+export function isExampleOrTestUrl(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === "example.com" ||
+      host.endsWith(".example.com") ||
+      host === "example.org" ||
+      host.endsWith(".example.org") ||
+      host === "example.net" ||
+      host.endsWith(".example.net") ||
+      host === "test.com" ||
+      host.endsWith(".test.com") ||
+      host.endsWith(".test") ||
+      host.endsWith(".example") ||
+      host.endsWith(".invalid")
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * True when running under an automated test runner or headless test environment.
  *
  * Used as a backstop so a real browser can never be launched from a test
  * process. `LITT_NO_BROWSER=1` lets CI and headless environments opt into
  * the same behaviour explicitly.
  */
 export function isAutomatedTestRun(): boolean {
-  return Boolean(
-    process.env.VITEST ??
-    process.env.LITT_NO_BROWSER ??
-    (process.env.NODE_ENV === "test" ? "1" : undefined),
-  );
+  if (
+    process.env.VITEST !== undefined ||
+    process.env.NODE_ENV === "test" ||
+    process.env.LITT_NO_BROWSER !== undefined ||
+    process.env.JEST_WORKER_ID !== undefined ||
+    process.env.PLAYWRIGHT !== undefined ||
+    process.env.PW_TEST !== undefined ||
+    process.env.NODE_TEST_CONTEXT !== undefined ||
+    process.env.CI !== undefined ||
+    process.env.CONTINUOUS_INTEGRATION !== undefined
+  ) {
+    return true;
+  }
+
+  if (
+    Array.isArray(process.argv) &&
+    process.argv.some((arg) => {
+      const lower = String(arg).toLowerCase();
+      return (
+        lower.includes("vitest") ||
+        lower.includes("jest") ||
+        lower.includes("playwright") ||
+        lower.endsWith(".test.ts") ||
+        lower.endsWith(".test.js") ||
+        lower.endsWith(".spec.ts") ||
+        lower.endsWith(".spec.js")
+      );
+    })
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /** Check if we're running inside Termux on Android. */
@@ -75,6 +145,9 @@ export function isTermux(): boolean {
 
 /** Check if a command exists in PATH (synchronous, best-effort). */
 export function hasCommand(cmd: string, deps: BrowserLaunchDeps = REAL_BROWSER_DEPS): boolean {
+  if (isRealLauncher(deps) && isAutomatedTestRun()) {
+    return false;
+  }
   try {
     deps.execSync(`${cmd} --version`, { stdio: "ignore", timeout: 3000 });
     return true;
@@ -167,10 +240,11 @@ export async function openBrowser(
   url: string,
   deps: BrowserLaunchDeps = REAL_BROWSER_DEPS,
 ): Promise<void> {
-  // ─── Backstop: never launch a real browser from a test process ───
+  // ─── Backstop: never launch a real browser from a test process or for test/example URLs ───
   // Only applies when the REAL deps are in play; an injected fake is
   // always allowed through so tests can still exercise the full path.
-  if (deps === REAL_BROWSER_DEPS && isAutomatedTestRun()) {
+  const isReal = isRealLauncher(deps);
+  if (isReal && (isAutomatedTestRun() || isExampleOrTestUrl(url))) {
     printManualUrl(url, deps);
     return;
   }
