@@ -428,6 +428,17 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     ? resolve(workspaceRoot, userId)
     : process.cwd();
 
+  // Ensure the user's workspace directory exists — spawn() fails with
+  // ENOENT if the cwd doesn't exist, which would cause every /do command
+  // to fail immediately with exit -1.
+  if (workspaceRoot) {
+    try {
+      mkdirSync(userWorkspaceRoot, { recursive: true });
+    } catch {
+      // Non-fatal — the directory may already exist or be on a read-only fs.
+    }
+  }
+
   // If the request specifies a cwd, validate it's within the user's workspace.
   // This prevents cross-user workspace access.
   let cwd = body.cwd ?? userWorkspaceRoot;
