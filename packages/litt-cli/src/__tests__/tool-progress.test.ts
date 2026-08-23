@@ -366,6 +366,37 @@ describe("toolLabel", () => {
     expect(toolLabel("totally_unknown_tool", "unknown")).toBe("Working");
     expect(toolLabel("totally_unknown_tool", "myTool")).toBe("MyTool");
   });
+
+  // ─── Web tool labels — must NOT collide with project.search ───
+  it("labels web.search as 'Searching web' (not 'Searching codebase')", () => {
+    expect(toolLabel("web.search")).toBe("Searching web");
+  });
+
+  it("labels web.fetch as 'Reading web page'", () => {
+    expect(toolLabel("web.fetch")).toBe("Reading web page");
+  });
+
+  it("labels weather.forecast as 'Checking weather'", () => {
+    expect(toolLabel("weather.forecast")).toBe("Checking weather");
+  });
+
+  it("labels project.search as 'Searching codebase' (unchanged)", () => {
+    expect(toolLabel("project.search")).toBe("Searching codebase");
+  });
+
+  it("canonical toolId takes precedence over generic name 'search'", () => {
+    // web.search has tool name "search" which would match TOOL_NAME_LABELS
+    // as "Searching codebase" — but the exact toolId match must win.
+    expect(toolLabel("web.search", "search")).toBe("Searching web");
+  });
+
+  it("weather keyword does not override web.search toolId", () => {
+    // A tool id containing "weather" should get "Checking weather" via
+    // keyword, but "web.search" should still get "Searching web" via
+    // exact toolId match (checked before keywords).
+    expect(toolLabel("web.search")).toBe("Searching web");
+    expect(toolLabel("custom.weather.tool")).toBe("Checking weather");
+  });
 });
 
 describe("toolSummary", () => {

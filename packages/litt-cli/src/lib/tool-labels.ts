@@ -93,6 +93,12 @@ const TOOL_LABELS: Record<string, string> = {
   "project.diff": "Reviewing changes",
   "project.lint": "Linting",
   "project.format": "Formatting",
+  // ─── Realtime / web tools ───
+  // These MUST be distinct from project.* labels so the UI never lies
+  // about which capability is running. web.search ≠ "Searching codebase".
+  "web.search": "Searching web",
+  "web.fetch": "Reading web page",
+  "weather.forecast": "Checking weather",
 };
 
 const TOOL_NAME_LABELS: Record<string, string> = {
@@ -111,6 +117,11 @@ const TOOL_NAME_LABELS: Record<string, string> = {
   diff: "Reviewing changes",
   lint: "Linting",
   format: "Formatting",
+  // Web tool names — must not collide with project.search
+  "web.search": "Searching web",
+  "web.fetch": "Reading web page",
+  "weather.forecast": "Checking weather",
+  forecast: "Checking weather",
 };
 
 const KEYWORD_LABELS: Array<[string, string]> = [
@@ -127,4 +138,8 @@ const KEYWORD_LABELS: Array<[string, string]> = [
   ["lint", "Linting"],
   ["format", "Formatting"],
   ["diff", "Reviewing changes"],
+  // Web/weather keywords — checked AFTER exact toolId/name matches,
+  // so "web.search" hits the exact match before "search" keyword fires.
+  ["weather", "Checking weather"],
+  ["forecast", "Checking weather"],
 ];

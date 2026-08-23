@@ -204,6 +204,25 @@ function buildCanonicalStack(cwd: string): void {
     executor: canonicalExecutor,
     store,
     projectId: "terminal-server",
+    // Identity-aware approval callback. The gateway still mints a real
+    // VerifiedApproval through the approvalProvider (SEC-4) — this callback
+    // only decides whether the human approved. It does NOT bypass
+    // cryptographic verification.
+    //
+    // Only a direct, trusted, interactive human action counts as approval.
+    //   - /do (command-registry.ts): trusted + interactive → approved
+    //   - agent/operator path (runAgentLoop): untrusted → denied
+    //   - headless/automated callers: denied (fail closed)
+    //
+    // PLAN mode and destructive commands are still denied by policy
+    // BEFORE this callback is consulted — the callback only fires when
+    // policy returns "require_approval".
+    onApprovalRequired: async (request) => {
+      return (
+        request.identity.trusted === true &&
+        request.identity.interaction === "interactive"
+      );
+    },
   });
   gatewayCwd = cwd;
 }

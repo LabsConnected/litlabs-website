@@ -135,8 +135,12 @@ describe("Regression: Desktop uses canonical runtime", () => {
 describe("Regression: Desktop action visible through canonical store", () => {
   it("runLiTTOperator mutates the store's command history", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_p: string, emit: (e: any) => void) => {
+    // Production (litt-operator.ts) calls streamLiTTMessagesWithTools,
+    // NOT the legacy streamLiTTCode adapter. Mock the actual provider
+    // boundary the operator imports, or the spy never intercepts and the
+    // test times out hitting the real OpenRouter API.
+    vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages: any, _nativeTools: any, emit: (e: any) => void) => {
         emit({ type: "meta", provider: "openrouter", model: "t", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "t", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -172,8 +176,9 @@ describe("Regression: runId consistency", () => {
 
   it("operator turns return runIds with the operator prefix", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_p: string, emit: (e: any) => void) => {
+    // Mock the actual provider boundary — see note above.
+    vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages: any, _nativeTools: any, emit: (e: any) => void) => {
         emit({ type: "meta", provider: "openrouter", model: "t", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "t", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });

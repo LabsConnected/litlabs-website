@@ -384,6 +384,50 @@ describe("realtime — webSearch", () => {
     await assert.rejects(() => webSearch(""), SafeFetchError);
     await assert.rejects(() => webSearch("   "), SafeFetchError);
   });
+
+  it("accepts DuckDuckGo application/x-javascript content-type (valid JSON body)", async () => {
+    // DuckDuckGo Instant Answers sometimes responds with
+    // content-type: application/x-javascript even though the body is JSON.
+    // The fix accepts this content type but still JSON.parse the body.
+    mockFetch(() => Promise.resolve(makeJsonResponse({
+      AbstractText: "Test answer",
+      AbstractSource: "TestSource",
+      AbstractURL: "https://example.com/test",
+      Answer: "",
+      RelatedTopics: [],
+    }, 200, { "content-type": "application/x-javascript" })));
+    const res = await webSearch("test query", { dnsResolver: publicResolver() });
+    assert.equal(res.empty, false);
+    assert.equal(res.abstract, "Test answer");
+  });
+
+  it("accepts DuckDuckGo application/javascript content-type (valid JSON body)", async () => {
+    mockFetch(() => Promise.resolve(makeJsonResponse({
+      AbstractText: "JS content type test",
+      AbstractSource: "TestSource",
+      AbstractURL: "https://example.com/js",
+      Answer: "",
+      RelatedTopics: [],
+    }, 200, { "content-type": "application/javascript" })));
+    const res = await webSearch("js content type", { dnsResolver: publicResolver() });
+    assert.equal(res.empty, false);
+    assert.equal(res.abstract, "JS content type test");
+  });
+
+  it("rejects malformed/non-JSON body even with accepted content-type", async () => {
+    mockFetch(() => Promise.resolve(new Response("not valid json {{{", {
+      status: 200,
+      headers: { "content-type": "application/x-javascript" },
+    })));
+    await assert.rejects(
+      () => webSearch("malformed test", { dnsResolver: publicResolver() }),
+      (err: unknown) => {
+        assert.ok(err instanceof SafeFetchError);
+        assert.match((err as Error).message, /Malformed/);
+        return true;
+      },
+    );
+  });
 });
 
 // ─── Default ToolRegistry parity ───────────────────────────────────

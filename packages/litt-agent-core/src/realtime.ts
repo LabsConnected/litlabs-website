@@ -631,7 +631,14 @@ export async function webSearch(
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
   const res = await safeFetch(url, {
     timeoutMs: 12_000,
-    acceptContentTypes: ["application/json"],
+    // DuckDuckGo Instant Answers may respond with any of these content types
+    // even though the body is always JSON. Accept them all but still JSON.parse.
+    acceptContentTypes: [
+      "application/json",
+      "application/x-javascript",
+      "application/javascript",
+      "text/javascript",
+    ],
     dnsResolver: opts.dnsResolver,
   });
   if (!res.ok || !res.content) {

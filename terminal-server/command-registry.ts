@@ -15,9 +15,9 @@
 import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { createShellExecutor, createCommandExecutor, createExecutionGateway } from "@litt/agent-core";
+import { createShellExecutor } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell, getCanonicalToolRegistry } from "./runtime.js";
+import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell } from "./runtime.js";
 import { getRunRegistry } from "./run-registry.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
@@ -469,23 +469,18 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   // secret redaction. This is the security invariant: /do in PLAN mode
   // MUST NOT execute mutating commands.
   //
-  // /do is a direct authenticated user action (Clerk JWT verified at the
-  // HTTP boundary). The user typing `/do node -e "..."` IS the approval.
-  // We create a /do-specific gateway with an auto-approve callback so
-  // elevated commands (node, npm, etc) proceed. The gateway still denies
-  // dangerous commands (rm -rf /) and still enforces PLAN mode.
+  // /do routes through the canonical ExecutionGateway singleton from
+  // runtime.ts — the SAME gateway the LiTT operator (runAgentLoop) uses.
+  // This is the singleton invariant: one gateway, one policy, one approval
+  // authority. /do does NOT construct its own gateway.
+  //
+  // In headless mode (no approval provider on the canonical gateway),
+  // elevated commands are denied (fail closed). Safe commands (echo, git
+  // status) execute. PLAN mode denies all mutations. This is the security
+  // invariant: /do is NOT a bypass around the gateway.
   const mode = ctx.mode ?? "act";
+  const doGateway = getExecutionGateway(ctx.cwd, mode);
   const shell = getCanonicalShell(ctx.cwd);
-  const tools = getCanonicalToolRegistry(ctx.cwd);
-  const executor = createCommandExecutor(shell, getRuntimeStore(), null);
-  const doGateway = createExecutionGateway({
-    tools,
-    shell,
-    executor,
-    store: getRuntimeStore(),
-    projectId: "terminal-server",
-    onApprovalRequired: async () => true, // auto-approve: user typed it
-  });
   if (ctx.runId) {
     getRunRegistry().register(ctx.runId, shell);
   }
@@ -505,8 +500,10 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
       // dangerous commands (rm -rf /, etc).
       trusted: true,
       // /do is interactive: the user is present (they typed the command).
-      // Combined with onApprovalRequired auto-approve, elevated commands
-      // proceed. Dangerous commands still require explicit approval.
+      // The canonical gateway's onApprovalRequired callback approves
+      // elevated commands ONLY for trusted + interactive identities.
+      // The agent/operator path (untrusted) is denied. The gateway still
+      // mints a real VerifiedApproval — this is not a boolean bypass.
       interaction: "interactive" as const,
     },
     mode,
