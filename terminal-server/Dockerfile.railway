@@ -53,7 +53,6 @@ WORKDIR /app
 
 # Copy installed node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
 COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
 
 # Copy workspace config
@@ -90,7 +89,6 @@ RUN mkdir -p /data/littree-workspaces
 COPY --from=builder /app/terminal-server/dist terminal-server/dist
 COPY --from=builder /app/terminal-server/node_modules terminal-server/node_modules
 COPY --from=builder /app/packages/litt-agent-core/dist packages/litt-agent-core/dist
-COPY --from=builder /app/packages/litt-agent-core/node_modules packages/litt-agent-core/node_modules
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/terminal-server/package.json terminal-server/package.json
