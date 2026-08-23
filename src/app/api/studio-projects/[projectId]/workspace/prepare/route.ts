@@ -9,7 +9,7 @@ import {
   recoverStaleProvisioning,
 } from "@/lib/projects/project-repository";
 import { prepareWorkspaceInternal, getWorkspaceInternal } from "@/lib/terminal-internal-client";
-import { getInstallationToken } from "@/lib/github-app";
+import { getInstallationTokenForClone } from "@/lib/github-app";
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -144,7 +144,11 @@ export async function POST(
       // Generate a short-lived installation token so the terminal server can
       // clone private repositories. The token is never returned to the client
       // or logged — it is only passed to the internal workspace prepare call.
-      const githubToken = await getInstallationToken(project.githubInstallationId);
+      const githubToken = await getInstallationTokenForClone({
+        installationId: project.githubInstallationId,
+        owner: project.githubOwner,
+        repo: project.githubRepo,
+      });
       result = await prepareWorkspaceInternal({
         sourceType: "github",
         userId,

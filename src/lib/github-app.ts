@@ -32,6 +32,44 @@ export async function getInstallationToken(installationId: number) {
   return token;
 }
 
+/**
+ * Return an installation token for cloning, or null when GitHub directly
+ * confirms that the repository is public.
+ *
+ * This keeps private repositories fail-closed when GitHub App credentials are
+ * missing or invalid, while allowing public projects to use the canonical
+ * workspace preparation path without embedding credentials in the clone URL.
+ */
+export async function getInstallationTokenForClone(input: {
+  installationId: number;
+  owner: string;
+  repo: string;
+}): Promise<string | null> {
+  try {
+    return await getInstallationToken(input.installationId);
+  } catch (authError) {
+    try {
+      const response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "LiTTree-Workspace-Preparer",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        },
+      );
+      if (response.ok) {
+        const repository = (await response.json()) as { private?: unknown };
+        if (repository.private === false) return null;
+      }
+    } catch {
+      // Public verification is best-effort. Preserve the original auth error.
+    }
+    throw authError;
+  }
+}
+
 export async function getInstallationOctokit(installationId: number) {
   const token = await getInstallationToken(installationId);
   return new Octokit({ auth: token });

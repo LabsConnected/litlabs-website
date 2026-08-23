@@ -220,6 +220,7 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // userId comes from the verified token, NOT from the request body.
     const verified = await verifyClerkToken(clerkToken);
     const userId = verified.userId;
+    const userEmail = verified.email;
 
     // ─── 2. Workspace/project authorization (server-side) ────────
     // If the client requests a specific workspaceId, verify the
@@ -262,8 +263,11 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
           workspaceId: authorizedWorkspaceId,
           projectId: authorizedProjectId,
           cwd: authorizedWorkspaceRoot,
+          email: userEmail ?? undefined,
         })
-      : mintTerminalToken(userId, 300);
+      : mintTerminalToken(userId, 300, {
+          email: userEmail ?? undefined,
+        });
 
     res.json({
       terminalToken,
@@ -430,11 +434,13 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
 app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 1. Verify user JWT ──────────────────────────────────────────
   let userId: string;
-  let payload: { sub: string; wid?: string; pid?: string; cwd?: string };
+  let authEmail: string | undefined;
+  let payload: { sub: string; wid?: string; pid?: string; cwd?: string; email?: string };
   try {
     const token = bearerToken(req.headers.authorization);
     payload = verifyTerminalToken(token);
     userId = payload.sub;
+    authEmail = payload.email;
   } catch {
     res.status(401).json({ error: "Unauthorized — valid terminal token required" });
     return;
@@ -466,6 +472,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // The request body's workspaceId/cwd CANNOT override the signed claim.
   // This prevents cross-user workspace access and empty-directory fallbacks.
   let cwd: string;
+  let authorizedWorkspaceId: string;
 
   if (payload.wid) {
     // Signed workspace claim — resolve and verify
@@ -491,6 +498,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     // Use the signed workspace root as cwd. Body cwd is ignored —
     // the signed claim is authoritative.
     cwd = ws.root;
+    authorizedWorkspaceId = ws.workspaceId;
   } else {
     // No signed workspace claim — auto-select from ready workspaces
     const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
@@ -516,6 +524,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     }
     // Exactly one ready workspace — auto-select it
     cwd = readyWorkspaces[0].root;
+    authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
   }
 
   // If the request body specifies a cwd, validate it's within the
@@ -538,6 +547,12 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     // userId from the JWT — overrides any value in the body
     userId,
+    // email from the JWT — best-effort auth context for the operator
+    authEmail: authEmail ?? null,
+    // The verified/selected workspace overrides any untrusted body.workspaceId.
+    // dispatchCommand resolves cwd from workspaceId, so allowing the body value
+    // through here would undo the signed-workspace authority check above.
+    workspaceId: authorizedWorkspaceId,
     // cwd resolved from the signed workspace claim — NOT from the body
     cwd,
   };
@@ -589,7 +604,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
 app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
   // 1. Verify user JWT
   let userId: string;
-  let payload: { sub: string; wid?: string; pid?: string; cwd?: string };
+  let payload: { sub: string; wid?: string; pid?: string; cwd?: string; email?: string };
   try {
     const token = bearerToken(req.headers.authorization);
     payload = verifyTerminalToken(token);
@@ -608,27 +623,41 @@ app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
 
   // 3. Resolve workspace cwd (same logic as /api/command)
   let cwd: string;
+  let authorizedWorkspaceId: string | undefined;
+
   if (payload.wid) {
     const ws = getWorkspace(payload.wid);
-    if (!ws || ws.userId !== userId) {
-      res.status(403).json({ error: { code: "workspace_unauthorized", message: "Workspace access denied" } });
+    if (!ws) {
+      res.status(404).json({
+        error: { code: "workspace_unauthorized", message: "Signed workspace no longer exists" },
+      });
+      return;
+    }
+    if (ws.userId !== userId) {
+      res.status(403).json({
+        error: { code: "workspace_unauthorized", message: "Workspace access denied" },
+      });
       return;
     }
     cwd = ws.root;
-  } else if (payload.cwd) {
-    cwd = payload.cwd;
+    authorizedWorkspaceId = ws.workspaceId;
   } else {
-    // Auto-select if exactly one ready workspace
-    const userWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
-    if (userWorkspaces.length === 0) {
-      res.status(400).json({ error: { code: "workspace_required", message: "No ready workspace — create one first" } });
+    // No signed workspace claim — auto-select from ready workspaces
+    const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
+    if (readyWorkspaces.length === 0) {
+      res.status(400).json({
+        error: { code: "workspace_required", message: "No remote project workspace is prepared for this account." },
+      });
       return;
     }
-    if (userWorkspaces.length > 1) {
-      res.status(400).json({ error: { code: "workspace_selection_required", message: "Multiple workspaces — specify which one" } });
+    if (readyWorkspaces.length > 1) {
+      res.status(400).json({
+        error: { code: "workspace_selection_required", message: "Multiple workspaces — specify which one" },
+      });
       return;
     }
-    cwd = userWorkspaces[0].root;
+    cwd = readyWorkspaces[0].root;
+    authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
   }
 
   // 4. Stream NDJSON response
@@ -645,11 +674,9 @@ app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
     res.end();
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
-    // If headers haven't been sent yet, send a proper error response
     if (!res.headersSent) {
       res.status(500).json({ error: errorMsg });
     } else {
-      // Already streaming — send the error as an NDJSON event
       writeEvent({ type: "error", message: errorMsg });
       res.end();
     }

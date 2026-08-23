@@ -450,6 +450,19 @@ export function useCockpitStore() {
   }, [transcriptStore, syncTranscript]);
 
   /**
+   * The transcript as of RIGHT NOW, read straight from the pure store.
+   *
+   * state.chatTranscript is React state: within a single callback tick it
+   * still holds the pre-mutation array, because setChatTranscript has not
+   * flushed yet. Callers that mutate and then need to read back in the
+   * same tick (session persistence) must use this instead.
+   */
+  const getChatTranscript = useCallback(
+    (): ChatMessage[] => transcriptStore.snapshot(),
+    [transcriptStore],
+  );
+
+  /**
    * Append a delta to the LAST assistant message (streaming live preview).
    * If the last message is not a streaming assistant message, this is a
    * no-op (the caller must have added one first). Idempotent per delta.
@@ -494,10 +507,7 @@ export function useCockpitStore() {
    * made earlier in the same tick). The controller uses this to build
    * the persisted conversation right before saveSession().
    */
-  const getChatTranscript = useCallback(
-    (): ChatMessage[] => transcriptStore.snapshot(),
-    [transcriptStore],
-  );
+  // getChatTranscript is defined above (line ~460) — same implementation.
 
   // ─── Tool progress actions ───────────────────────────────────────
   // All mutations go through the pure ToolProgressStore and the result
@@ -858,10 +868,10 @@ export function useCockpitStore() {
       setIsProcessing,
       setBranch,
       addChatMessage,
+      getChatTranscript,
       appendAssistantDelta,
       finalizeAssistantMessage,
       clearChatTranscript,
-      getChatTranscript,
       startToolProgressMission,
       completeToolProgressMission,
       failToolProgressMission,

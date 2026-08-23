@@ -30,6 +30,7 @@ import type { RemoteCommandRequest } from "@litt/agent-core";
 // ─── Constants ────────────────────────────────────────────────────
 
 const VALID_SECRET = "s".repeat(32);
+const repoRoot = path.resolve(__dirname, "..", "..");
 
 // ─── Terminal JWT minting with workspace claims ───────────────────
 
@@ -110,6 +111,7 @@ function createTestApp(): express.Application {
 
     // ─── 3. Resolve authorized workspace ─────────────────────────
     let cwd: string;
+    let authorizedWorkspaceId: string;
 
     if (payload.wid) {
       const ws = getMockWorkspace(payload.wid);
@@ -141,6 +143,7 @@ function createTestApp(): express.Application {
         return;
       }
       cwd = ws.root;
+      authorizedWorkspaceId = ws.workspaceId;
       if (body.cwd) {
         const resolvedBodyCwd = resolve(body.cwd);
         const resolvedWsRoot = resolve(ws.root);
@@ -187,6 +190,7 @@ function createTestApp(): express.Application {
       }
 
       cwd = readyWorkspaces[0].root;
+      authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
       if (body.cwd) {
         const resolvedBodyCwd = resolve(body.cwd);
         const resolvedWsRoot = resolve(readyWorkspaces[0].root);
@@ -209,7 +213,7 @@ function createTestApp(): express.Application {
       args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
       userId,
       cwd,
-      workspaceId: payload.wid,
+      workspaceId: authorizedWorkspaceId,
     };
 
     res.json({
@@ -358,6 +362,7 @@ describe("Workspace claim resolution", () => {
 
     expect(res.status).toBe(200);
     expect(res.body._testCwd).toBe(wsRoot);
+    expect(res.body._testWorkspaceId).toBe("ws-alice-1");
   });
 
   // ─── E. No workspace claim + zero ready workspaces ─────────────
@@ -455,6 +460,11 @@ describe("Workspace claim resolution", () => {
     // The signed claim wins — body.workspaceId is ignored
     expect(res.body._testWorkspaceId).toBe("ws-alice-1");
     expect(res.body._testCwd).toBe(wsRoot);
+  });
+
+  it("production handler overwrites body.workspaceId with the authorized workspace", () => {
+    const source = fs.readFileSync(path.join(repoRoot, "terminal-server", "server.ts"), "utf-8");
+    expect(source).toContain("workspaceId: authorizedWorkspaceId");
   });
 });
 

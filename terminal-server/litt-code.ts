@@ -735,7 +735,7 @@ export async function streamLiTTMessagesWithTools(
     const toolSpec =
       nativeTools.find(
         (tool) =>
-          tool.functionName === functionName,
+          tool.functionName === functionName || tool.toolId === functionName,
       );
 
     if (!toolSpec) {

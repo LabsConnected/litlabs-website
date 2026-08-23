@@ -22,10 +22,9 @@ export interface SessionMessage {
   content: string;
   status: string;
   ts: number;
-  /** Submission correlation ID — stamps both the user message and the
-   *  assistant response so a single submission can be traced end-to-end.
-   *  Optional: older persisted records and non-submit messages lack it.
-   *  Used by mergeAppend() to dedupe replayed/reconnected pairs. */
+  /** Submission correlation ID, when the message originated from a
+   *  submit() call. Persisted so append-idempotency survives a reload —
+   *  see mergeAppend(). Absent on restored/historical messages. */
   submissionId?: string;
 }
 
@@ -96,6 +95,51 @@ export function boundMessage(msg: SessionMessage): SessionMessage {
   };
 }
 
+/**
+ * Append-identity for a message. Two messages are the SAME message iff
+ * they came from the same submission and play the same role.
+ *
+ * Content is deliberately not part of the key: an assistant message can
+ * be persisted mid-stream and again at finalize with different content,
+ * and both are the same message. Conversely, identical content from two
+ * different turns ("yes" twice) has different submission IDs and must
+ * stay two messages.
+ *
+ * Messages with no submissionId (restored from disk, or historical) are
+ * unidentifiable and are therefore never treated as duplicates.
+ */
+function appendKey(msg: SessionMessage): string | null {
+  return msg.submissionId ? `${msg.submissionId}::${msg.role}` : null;
+}
+
+/**
+ * Append `appended` to `prior`, skipping any message `prior` already
+ * contains. Idempotent: appending the same pair twice yields it once.
+ *
+ * This makes the caller's capture timing irrelevant — passing a live
+ * transcript that ALREADY contains the new pair and passing a stale one
+ * that does not both produce the same, correct result.
+ */
+export function mergeAppend(
+  prior: SessionMessage[],
+  appended: SessionMessage[],
+): SessionMessage[] {
+  const seen = new Set<string>();
+  for (const msg of prior) {
+    const key = appendKey(msg);
+    if (key) seen.add(key);
+  }
+
+  const merged = [...prior];
+  for (const msg of appended) {
+    const key = appendKey(msg);
+    if (key !== null && seen.has(key)) continue; // already present — never twice
+    if (key !== null) seen.add(key);
+    merged.push(msg);
+  }
+  return merged;
+}
+
 /** Workspace + routing context for a conversation. Same shape as
  *  SaveSessionInput minus the derived summary/messages — what the
  *  controller already has in hand when it needs to persist. */
@@ -111,35 +155,6 @@ export interface ConversationContext {
 export interface SaveSessionInput extends ConversationContext {
   summary: string;
   messages: SessionMessage[];
-}
-
-/**
- * Merge an appended pair into the prior transcript, deduping by
- * (submissionId, role). A message in `appended` is dropped when a
- * message with the same submissionId AND role already exists in
- * `prior` — this is what makes the persist idempotent whether the
- * transcript snapshot was taken before or after the pair was added
- * (the "stale" vs "fresh" capture timings in the controller).
- *
- * Messages without a submissionId are always kept (no dedup key).
- * Order is preserved: prior first, then any appended messages that
- * survived dedup.
- */
-export function mergeAppend(
-  prior: SessionMessage[],
-  appended: SessionMessage[],
-): SessionMessage[] {
-  const result: SessionMessage[] = [...prior];
-  for (const msg of appended) {
-    if (msg.submissionId !== undefined) {
-      const dup = result.some(
-        (m) => m.submissionId === msg.submissionId && m.role === msg.role,
-      );
-      if (dup) continue;
-    }
-    result.push(msg);
-  }
-  return result;
 }
 
 /**
