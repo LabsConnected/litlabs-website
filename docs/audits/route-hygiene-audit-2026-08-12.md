@@ -33,13 +33,13 @@
 | `/wallet` | CANONICAL | Active | Wallet/credits |
 | `/profile` | CANONICAL | Active | User profile |
 | `/voice` | CANONICAL | Active | Voice interface |
-| `/litt` | CANONICAL | Active | LiTT assistant |
-| `/litt-terminal` | CANONICAL | Active | Terminal interface |
+| `/litt` | REDIRECT | → `/studio` | Compatibility redirect (not canonical) |
+| `/litt-terminal` | REDIRECT | → `/studio` | Compatibility redirect (not canonical) |
 
 ## Summary
 
-- **Canonical routes**: Studio, Dashboard, Showcase, Games, Discover, Marketplace, Wallet, Profile, Voice, LiTT
-- **Redirects**: 8 legacy routes redirect to canonical surfaces
+- **Canonical routes**: Studio, Dashboard, Showcase, Games, Discover, Marketplace, Wallet, Profile, Voice
+- **Redirects**: 10 legacy routes redirect to canonical surfaces (including `/litt` and `/litt-terminal` → `/studio`)
 - **Public**: 7 legal/auth/marketing pages with bare chrome
 - **Hybrid**: /hire (public for signed-out, AppShell for signed-in)
 - **Own shell**: /settings (has its own sidebar)
