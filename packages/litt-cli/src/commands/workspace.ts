@@ -29,6 +29,53 @@ import { ok, fail, warn, header, label, value, c } from "../lib/utils.js";
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
+/**
+ * Resolve a workspace from a string argument (index, ID, or partial name).
+ * Returns the matched workspace, or null if no match / ambiguous match.
+ * Exported for testability — pure function, no side effects.
+ */
+export function resolveWorkspaceByArg(
+  arg: string,
+  workspaces: RemoteWorkspace[],
+): RemoteWorkspace | null {
+  // Numeric index (1-based)
+  const idx = parseInt(arg, 10);
+  if (!isNaN(idx) && idx >= 1 && idx <= workspaces.length) {
+    return workspaces[idx - 1] ?? null;
+  }
+
+  // Exact workspace ID match — takes precedence over partial name
+  const idMatch = workspaces.find((ws) => ws.workspaceId === arg);
+  if (idMatch) {
+    return idMatch;
+  }
+
+  // Partial name match (root basename) — only if exactly one match
+  const nameMatches = workspaces.filter((ws) => {
+    const name = ws.root.split("/").pop() ?? ws.root;
+    return name.toLowerCase().includes(arg.toLowerCase());
+  });
+  if (nameMatches.length === 1) {
+    return nameMatches[0];
+  }
+  // Ambiguous or no match
+  return null;
+}
+
+/** Returns true if the arg matches multiple workspace names (ambiguous). */
+export function isAmbiguousNameMatch(arg: string, workspaces: RemoteWorkspace[]): boolean {
+  // Exact ID match is never ambiguous
+  if (workspaces.some((ws) => ws.workspaceId === arg)) return false;
+  // Numeric index is never ambiguous
+  const idx = parseInt(arg, 10);
+  if (!isNaN(idx) && idx >= 1 && idx <= workspaces.length) return false;
+  const nameMatches = workspaces.filter((ws) => {
+    const name = ws.root.split("/").pop() ?? ws.root;
+    return name.toLowerCase().includes(arg.toLowerCase());
+  });
+  return nameMatches.length > 1;
+}
+
 export async function workspaceCommand(args: string[]): Promise<number> {
   const subcommand = args[0] ?? "list";
 
@@ -161,25 +208,15 @@ async function selectWorkspace(args: string[]): Promise<number> {
   if (args.length > 0) {
     const arg = args[0];
 
-    // Numeric index (1-based)
-    const idx = parseInt(arg, 10);
-    if (!isNaN(idx) && idx >= 1 && idx <= workspaces.length) {
-      return doSelect(workspaces[idx - 1]);
+    if (isAmbiguousNameMatch(arg, workspaces)) {
+      fail(`Multiple workspaces match '${arg}'.`);
+      console.error(`${c.dim}  Use a number or full workspace ID from 'litt workspace list'.${c.reset}`);
+      return 1;
     }
 
-    // Workspace ID match
-    const match = workspaces.find((ws) => ws.workspaceId === arg);
+    const match = resolveWorkspaceByArg(arg, workspaces);
     if (match) {
       return doSelect(match);
-    }
-
-    // Partial name match (root basename)
-    const nameMatch = workspaces.find((ws) => {
-      const name = ws.root.split("/").pop() ?? ws.root;
-      return name.toLowerCase().includes(arg.toLowerCase());
-    });
-    if (nameMatch) {
-      return doSelect(nameMatch);
     }
 
     fail(`No workspace matching '${arg}'.`);
