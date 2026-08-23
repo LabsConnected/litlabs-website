@@ -27,7 +27,7 @@
  * plans never perform mutations automatically — even in Act mode.
  */
 
-import type { ChatMessage, ModelProvider, ModelStreamEvent } from "./types.js";
+import type { ChatMessage, ModelProvider, ModelStreamEvent, ProjectContext } from "./types.js";
 import type { RuntimeStore } from "./state.js";
 import type { Mission, MissionStep } from "./missions/mission-entities.js";
 import type { EvidenceType, MissionEvidence } from "./missions/mission-types.js";
@@ -79,7 +79,7 @@ export interface PlanMissionOptions {
   /** The user goal text (already used to create the mission). */
   goal: string;
   /** Project context for the planning prompt. */
-  projectContext?: { name: string; root: string; branch?: string | null } | null;
+  projectContext?: ProjectContext | null;
   /** Optional stream callback for live planning output. */
   onModelStream?: (event: ModelStreamEvent) => void;
   /** Max tokens to spend on planning (default 800). */
@@ -96,7 +96,7 @@ export interface PlanMissionResult {
 
 function buildPlanningPrompt(
   goal: string,
-  project: { name: string; root: string; branch?: string | null } | null,
+  project: ProjectContext | null,
 ): string {
   const projectSection = project
     ? `\nProject context (canonical — do not guess):\n  - Name: ${project.name}\n  - Root: ${project.root}\n  - Branch: ${project.branch ?? "unknown"}\n`

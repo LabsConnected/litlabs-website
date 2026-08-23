@@ -246,6 +246,24 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   pwd: { defaultCapability: "read_only" },
   env: { defaultCapability: "read_only" },
   printenv: { defaultCapability: "read_only" },
+
+  // LiTT CLI self-introspection — read-only diagnostic subcommands.
+  // Allows the agent to run `litt doctor`, `litt status`, `litt whoami`,
+  // `litt --remote doctor` etc. to truthfully answer questions about
+  // its own runtime/auth/REMOTE state. Mutating subcommands (login,
+  // logout, build, test, run) are NOT here — they stay arbitrary_code.
+  litt: {
+    defaultCapability: "arbitrary_code", // safe default for unknown subcommands
+    subcommands: {
+      doctor: "read_only",
+      status: "read_only",
+      whoami: "read_only",
+      version: "read_only",
+      inspect: "read_only",
+      diff: "read_only",
+      check: "read_only",
+    },
+  },
 };
 
 /**
@@ -283,6 +301,19 @@ function capabilityToRisk(cap: CapabilityTier): { level: RiskLevel; mutating: bo
   }
 }
 
+// ─── Version flag detection ────────────────────────────────────────
+
+/**
+ * Flags that only request version/introspection info — no side effects.
+ * Used to downgrade interpreters/package managers from arbitrary_code to
+ * read_only when the user (or agent) just wants the version string.
+ */
+const VERSION_FLAGS = new Set(["--version", "-version", "-v", "-V", "--help", "-h", "--help"]);
+
+function isVersionFlag(arg: string): boolean {
+  return VERSION_FLAGS.has(arg);
+}
+
 // ─── Operation parser ─────────────────────────────────────────────
 
 /**
@@ -299,6 +330,20 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
       capability: "destructive",
       reason: `Command "${cmd}" is classified as destructive`,
       mutating: true,
+    };
+  }
+
+  // Version/introspection flags — pure read-only, no side effects.
+  // `node --version`, `pnpm -v`, `python -V`, etc. only print version info.
+  // Must be checked BEFORE COMMAND_SPECS lookup because interpreters and
+  // package managers default to arbitrary_code/workspace_edit, which would
+  // deny these harmless introspection commands in act mode.
+  if (args.length > 0 && args.every(isVersionFlag)) {
+    return {
+      level: "safe",
+      capability: "read_only",
+      reason: `${cmd} ${args.join(" ")} → version introspection (read-only)`,
+      mutating: false,
     };
   }
 
@@ -325,6 +370,20 @@ export function classifyCommand(command: string, args: string[], cwd?: string): 
   // Special case: git branch -D (destructive)
   if (cmd === "git" && args[0] === "branch" && (args.includes("-D") || args.includes("-d"))) {
     capability = "destructive";
+  }
+
+  // Special case: litt --remote <subcommand> or litt <subcommand>
+  // The --remote flag can appear before the subcommand, so we scan args
+  // for the first non-flag token and check if it's a known read-only
+  // subcommand. This lets the agent run `litt --remote doctor` etc.
+  if (cmd === "litt" && spec.subcommands) {
+    const firstNonFlag = args.find((a) => !a.startsWith("-"));
+    if (firstNonFlag) {
+      const subcmd = firstNonFlag.toLowerCase();
+      if (spec.subcommands[subcmd]) {
+        capability = spec.subcommands[subcmd];
+      }
+    }
   }
 
   // Special case: npm/pnpm/yarn run <script> — inspect package.json

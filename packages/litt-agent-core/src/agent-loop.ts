@@ -42,6 +42,7 @@ import type {
   RuntimeEventEmitter,
   ShellExecutor,
   ToolEntry,
+  ProjectContext,
 } from "./types.js";
 import type { ToolRegistry } from "./tools.js";
 import type { RuntimeStore } from "./state.js";
@@ -83,7 +84,7 @@ export interface AgentLoopOptions {
   /** System prompt (prepended to the conversation) */
   systemPrompt?: string;
   /** Project context to embed in the default system prompt (prevents model hallucination) */
-  projectContext?: { name: string; root: string; branch?: string | null } | null;
+  projectContext?: ProjectContext | null;
   /** Working directory for tool execution */
   cwd: string;
   /** User ID for tool context */
@@ -1106,7 +1107,7 @@ export async function runAgentLoop(
  * Build the default system prompt that includes tool definitions
  * and optional project identity (so the model doesn't guess).
  */
-export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: { name: string; root: string; branch?: string | null } | null): string {
+export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: ProjectContext | null): string {
   const toolList = tools.map((t) => {
     const params = Object.entries(t.inputSchema.properties ?? {})
       .map(([key, schema]) => {
@@ -1122,6 +1123,8 @@ export function buildDefaultSystemPrompt(tools: ToolDefinition[], project?: { na
   - Name: ${project.name}
   - Root: ${project.root}
   - Branch: ${project.branch ?? "unknown"}
+  - Authenticated: ${project.authenticated ?? "unknown"}${project.authenticated && project.authEmail ? ` (user: ${project.authEmail})` : ""}${project.authProvider ? ` via ${project.authProvider}` : ""}
+  - REMOTE server: ${project.remoteUrl ?? "not configured"}${project.remoteReachable != null ? ` (${project.remoteReachable ? "reachable" : "unreachable"})` : ""}
 All tool calls execute in this project. Do not assume a different project.`
     : "";
 
