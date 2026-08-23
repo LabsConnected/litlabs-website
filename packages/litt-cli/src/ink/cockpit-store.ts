@@ -86,6 +86,11 @@ export interface ChatMessage {
   /** Turn duration (ms) — stamped once at finalize; drives the
    *  collapsed "Model · 9.0s" routing footer. */
   durationMs?: number | null;
+  /** Submission correlation ID — stamps both the user message and the
+   *  assistant response so a single submission can be traced end-to-end
+   *  (input → transport → response). Present on messages originating
+   *  from a submit() call; absent on restored/historical messages. */
+  submissionId?: string;
 }
 
 /**
@@ -443,6 +448,19 @@ export function useCockpitStore() {
     syncTranscript();
     return id;
   }, [transcriptStore, syncTranscript]);
+
+  /**
+   * The transcript as of RIGHT NOW, read straight from the pure store.
+   *
+   * state.chatTranscript is React state: within a single callback tick it
+   * still holds the pre-mutation array, because setChatTranscript has not
+   * flushed yet. Callers that mutate and then need to read back in the
+   * same tick (session persistence) must use this instead.
+   */
+  const getChatTranscript = useCallback(
+    (): ChatMessage[] => transcriptStore.snapshot(),
+    [transcriptStore],
+  );
 
   /**
    * Append a delta to the LAST assistant message (streaming live preview).
@@ -841,6 +859,7 @@ export function useCockpitStore() {
       setIsProcessing,
       setBranch,
       addChatMessage,
+      getChatTranscript,
       appendAssistantDelta,
       finalizeAssistantMessage,
       clearChatTranscript,

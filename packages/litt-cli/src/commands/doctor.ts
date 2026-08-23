@@ -140,6 +140,9 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     if (process.env[envVar]) ok(`${envVar}: set`);
     else warn(`${envVar}: not set`);
   }
+  if (!process.env.OPENROUTER_API_KEY) {
+    console.log(`${c.dim}  No local key — run 'litt login' to use managed server keys.${c.reset}`);
+  }
 
   // First-run config — auto-create if missing
   header("First-Run Config");

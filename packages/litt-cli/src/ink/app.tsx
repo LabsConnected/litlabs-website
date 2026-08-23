@@ -397,8 +397,25 @@ export function CockpitApp({
             composerValue={store.state.composerValue}
             onComposerChange={(v) => store.actions.setComposerValue(v)}
             onSubmit={(v) => {
+              // Preserve the draft until submit is accepted. If submit
+              // throws synchronously (before adding any chat message),
+              // the draft is restored so the user doesn't lose their text.
+              const draft = store.state.composerValue;
               store.actions.setComposerValue("");
-              submit(v);
+              try {
+                submit(v);
+              } catch (err) {
+                // Synchronous throw before any transcript mutation —
+                // restore the draft and surface the error.
+                store.actions.setComposerValue(draft);
+                store.actions.addActivity({
+                  id: `act_${Date.now()}_submit_err`,
+                  ts: Date.now(),
+                  type: "error",
+                  tag: "SUBMIT",
+                  text: `Submit failed: ${err instanceof Error ? err.message : String(err)}`,
+                });
+              }
             }}
             onNavigateHistory={store.actions.navigateHistory}
             onOpenPalette={controller.openPalette}

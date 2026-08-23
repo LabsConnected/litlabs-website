@@ -22,6 +22,10 @@ export interface SessionMessage {
   content: string;
   status: string;
   ts: number;
+  /** Submission correlation ID, when the message originated from a
+   *  submit() call. Persisted so append-idempotency survives a reload —
+   *  see mergeAppend(). Absent on restored/historical messages. */
+  submissionId?: string;
 }
 
 export interface SessionSnapshot {
@@ -91,6 +95,51 @@ export function boundMessage(msg: SessionMessage): SessionMessage {
   };
 }
 
+/**
+ * Append-identity for a message. Two messages are the SAME message iff
+ * they came from the same submission and play the same role.
+ *
+ * Content is deliberately not part of the key: an assistant message can
+ * be persisted mid-stream and again at finalize with different content,
+ * and both are the same message. Conversely, identical content from two
+ * different turns ("yes" twice) has different submission IDs and must
+ * stay two messages.
+ *
+ * Messages with no submissionId (restored from disk, or historical) are
+ * unidentifiable and are therefore never treated as duplicates.
+ */
+function appendKey(msg: SessionMessage): string | null {
+  return msg.submissionId ? `${msg.submissionId}::${msg.role}` : null;
+}
+
+/**
+ * Append `appended` to `prior`, skipping any message `prior` already
+ * contains. Idempotent: appending the same pair twice yields it once.
+ *
+ * This makes the caller's capture timing irrelevant — passing a live
+ * transcript that ALREADY contains the new pair and passing a stale one
+ * that does not both produce the same, correct result.
+ */
+export function mergeAppend(
+  prior: SessionMessage[],
+  appended: SessionMessage[],
+): SessionMessage[] {
+  const seen = new Set<string>();
+  for (const msg of prior) {
+    const key = appendKey(msg);
+    if (key) seen.add(key);
+  }
+
+  const merged = [...prior];
+  for (const msg of appended) {
+    const key = appendKey(msg);
+    if (key !== null && seen.has(key)) continue; // already present — never twice
+    if (key !== null) seen.add(key);
+    merged.push(msg);
+  }
+  return merged;
+}
+
 export interface SaveSessionInput {
   project: string;
   cwd: string;
@@ -129,6 +178,28 @@ export function saveSession(input: SaveSessionInput): SessionSnapshot {
   const rest = sameConversation ? all.slice(1) : all;
   writeAllSessions([snapshot, ...rest].slice(0, MAX_SESSIONS));
   return snapshot;
+}
+
+/**
+ * Build a SaveSessionInput for an ongoing conversation.
+ *
+ * The summary is always derived from the first user message of the
+ * COMPLETE resulting conversation, so a mid-conversation turn never
+ * relabels the session — which would otherwise defeat saveSession's
+ * sameConversation check and fork a duplicate row.
+ */
+export function buildConversationSave(
+  ctx: Omit<SaveSessionInput, "summary" | "messages">,
+  prior: SessionMessage[],
+  appended: SessionMessage[],
+): SaveSessionInput {
+  const messages = mergeAppend(prior, appended);
+  const firstUser = messages.find((m) => m.role === "user");
+  return {
+    ...ctx,
+    summary: summarize(firstUser?.content ?? "untitled"),
+    messages,
+  };
 }
 
 /** All sessions, most recent first. */

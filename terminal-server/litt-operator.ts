@@ -159,8 +159,6 @@ export interface OperatorContext {
   cwd: string;
   /** User ID (from Socket.IO auth or HTTP auth) */
   userId?: string | null;
-  /** Authenticated user's email (best-effort, from Clerk via JWT) */
-  authEmail?: string | null;
   /** Mission mode */
   mode?: "plan" | "act" | "auto";
   /** Transport correlation ID (distinct from runId) */
@@ -230,7 +228,7 @@ function readGitBranch(cwd: string): string {
  *   - Available tools: the canonical tool set
  *   - Intent guidance: how to interpret natural-language requests
  */
-function buildOperatorSystemPrompt(cwd: string, mode: string, authEmail?: string | null): string {
+function buildOperatorSystemPrompt(cwd: string, mode: string): string {
   const projectName = cwd.split(/[\\/]/).pop() ?? "unknown";
   const store = getRuntimeStore();
   const state = store.getState();
@@ -244,12 +242,10 @@ function buildOperatorSystemPrompt(cwd: string, mode: string, authEmail?: string
   const model = state.model ?? "unconfigured";
   const profile = state.profile ?? "auto";
 
-  // Auth context — the operator must know WHO it's acting for so it can
-  // truthfully answer "am I authenticated?" and "what is my email?"
-  // without guessing. The email comes from the verified Clerk JWT.
-  const authLine = authEmail
-    ? `- Authenticated: yes (user: ${authEmail} via Clerk OAuth)`
-    : `- Authenticated: yes (user ID verified via Clerk, email not available)`;
+  // Auth context — the operator knows it's acting for a verified Clerk
+  // user (userId is always set by the server), but email is no longer
+  // passed through the JWT to avoid PII in tokens.
+  const authLine = `- Authenticated: yes (user ID verified via Clerk)`;
 
   // Current date/time grounding — the model must NOT invent the current
   // date. Words like "today", "tomorrow", "tonight", "yesterday", "open
@@ -384,7 +380,7 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
 
   runtimeSetPhase("thinking");
 
-  const systemPrompt = buildOperatorSystemPrompt(ctx.cwd, mode, ctx.authEmail);
+  const systemPrompt = buildOperatorSystemPrompt(ctx.cwd, mode);
 
   const options: AgentLoopOptions = {
     model,

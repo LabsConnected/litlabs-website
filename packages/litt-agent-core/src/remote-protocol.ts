@@ -67,8 +67,6 @@ export interface RemoteCommandRequest {
   workspaceId?: string;
   /** Optional authenticated user ID (set by the server from auth). */
   userId?: string | null;
-  /** Optional authenticated user's email (set by the server from JWT). */
-  authEmail?: string | null;
 }
 
 // ─── Response ─────────────────────────────────────────────────────
