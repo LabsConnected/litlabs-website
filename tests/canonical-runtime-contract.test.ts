@@ -99,10 +99,10 @@ describe("PHASE 3: One operator brain path", () => {
 
   it("runLiTTOperator generates a canonical runId (run_op_ prefix)", async () => {
     // Mock the model provider so we don't need a real LLM.
-    // We do this by mocking the streamLiTTCode module.
+    // We do this by mocking the native tool-aware model transport.
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_prompt: string, emit: (e: any) => void) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages, _tools, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test-model", profile: "fast" });
         emit({ type: "delta", text: "I am LiTT, operating on the project." });
         emit({ type: "done", model: "test-model", usage: { total_tokens: 10 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -140,8 +140,8 @@ describe("PHASE 3: One operator brain path", () => {
 
   it("runLiTTOperator mutates the canonical RuntimeStore", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_prompt: string, emit: (e: any) => void) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages, _tools, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test-model", profile: "fast" });
         emit({ type: "delta", text: "Done." });
         emit({ type: "done", model: "test-model", usage: { total_tokens: 5 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -200,8 +200,8 @@ describe("PHASE 3: One operator brain path", () => {
 describe("PHASE 4: Cross-surface runId identity", () => {
   it("operator runId is distinct from requestId", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_prompt: string, emit: (e: any) => void) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages, _tools, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "test", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -229,8 +229,8 @@ describe("PHASE 4: Cross-surface runId identity", () => {
 
   it("two operator turns produce different runIds", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (_prompt: string, emit: (e: any) => void) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (_messages, _tools, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "test", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -318,9 +318,10 @@ describe("PHASE 8: Operator context — identity & intent", () => {
     store.setPhase("verifying");
 
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
-      async (prompt: string, _emit: (e: any) => void) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
+      async (messages, _tools, _emit) => {
         // The prompt should contain the runtime context
+        const prompt = messages.map((message) => String(message.content ?? "")).join("\n");
         expect(prompt).toContain("verifying");
         return {
           content: "ok",
