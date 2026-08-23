@@ -110,7 +110,6 @@ export async function dispatchCommand(
     rawInput: req.command,
     runId,
     mode: req.mode ?? "act",
-    authEmail: req.authEmail ?? null,
   };
 
   // ─── Dispatch through the registry ───────────────────────────
