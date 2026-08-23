@@ -53,6 +53,7 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { verifyClerkToken } from "./clerk-verify";
+import { getRunRegistry } from "./run-registry";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -316,7 +317,9 @@ app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
 
 // ─── User-authenticated cancel endpoint ───────────────────────────
 // POST /api/cancel — cancel the currently active run using USER auth.
-app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
+// Kills the actual child process tree associated with the runId and
+// reports whether a running process was found and cancelled.
+app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
   try {
     verifyTerminalToken(bearerToken(req.headers.authorization));
   } catch {
@@ -328,8 +331,8 @@ app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: "Missing 'runId'" });
     return;
   }
-  // TODO: wire to actual cancel — for now returns ok
-  res.json({ ok: true, runId });
+  const cancelled = await getRunRegistry().cancel(runId);
+  res.json({ ok: true, runId, cancelled });
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
@@ -358,8 +361,15 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     userId: body.userId ?? req.terminalUserId ?? null,
   };
+  // Generate runId for client disconnect cancellation (same as /api/command).
+  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  req.on("close", () => {
+    if (!res.headersSent) {
+      getRunRegistry().cancel(runId).catch(() => {});
+    }
+  });
   try {
-    const result = await dispatchCommand(normalizedReq);
+    const result = await dispatchCommand(normalizedReq, { runId });
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
@@ -442,8 +452,22 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     cwd,
   };
 
+  // Generate the runId here so we can cancel the run if the client
+  // disconnects before the response is sent. The runId is passed to
+  // dispatchCommand which registers it in the RunRegistry.
+  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
+  // before the response is sent, cancel the running process. This
+  // prevents orphaned processes from continuing after the client is gone.
+  req.on("close", () => {
+    if (!res.headersSent) {
+      getRunRegistry().cancel(runId).catch(() => {});
+    }
+  });
+
   try {
-    const result = await dispatchCommand(normalizedReq);
+    const result = await dispatchCommand(normalizedReq, { runId });
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

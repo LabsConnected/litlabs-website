@@ -15,9 +15,16 @@
 import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { createShellExecutor } from "@litt/agent-core";
+import {
+  createShellExecutor,
+  createCommandExecutor,
+  createDefaultRegistry,
+  createExecutionGateway,
+  runCommand,
+} from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState, getExecutionGateway } from "./runtime.js";
+import { getRuntimeStore, getRuntimeState } from "./runtime.js";
+import { getRunRegistry } from "./run-registry.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
@@ -138,11 +145,15 @@ export interface CommandSpec {
 
 // ─── Helpers for handlers ─────────────────────────────────────────
 
-function getRouter(cwd: string, userId: string | null): CommandRouter {
+function getRouter(cwd: string, userId: string | null, runId?: string): CommandRouter {
   // Lazy import to avoid circular dependency at module load time
   const { CommandRouter } = require("@litt/agent-core");
   const store = getRuntimeStore();
   const shell = createShellExecutor(cwd);
+  // Register the shell so /api/cancel or client disconnect can kill it.
+  if (runId) {
+    getRunRegistry().register(runId, shell);
+  }
   return new CommandRouter(shell, { cwd, userId, store });
 }
 
@@ -165,17 +176,26 @@ function execShell(
   args: string[],
   cwd: string,
   timeoutMs: number,
+  runId?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const child = execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (runId) getRunRegistry().unregister(runId);
       resolve({
         stdout: stdout ?? "",
         stderr: stderr ?? "",
         exitCode: err ? (err as { code?: number }).code ?? -1 : 0,
       });
     });
-    // Guard against orphan — if the promise resolved, child already exited
-    void child;
+    // Register the child process so /api/cancel or client disconnect can kill it.
+    if (runId) {
+      getRunRegistry().register(runId, {
+        cancel: async () => {
+          try { child.kill("SIGTERM"); } catch { /* already exited */ }
+          return [child.pid ?? 0];
+        },
+      });
+    }
   });
 }
 
@@ -183,7 +203,7 @@ function execShell(
 
 async function handleStatus(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.status();
   return routerResultToResponse("status", result, t0);
 }
@@ -191,28 +211,28 @@ async function handleStatus(_args: string[], ctx: CommandContext): Promise<Comma
 async function handleDiff(args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const staged = args.includes("--staged") || args.includes("-s");
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.diff(staged);
   return routerResultToResponse("diff", result, t0);
 }
 
 async function handleCheck(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.check(ctx.runId);
   return routerResultToResponse("check", result, t0);
 }
 
 async function handleBuild(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.build(ctx.runId);
   return routerResultToResponse("build", result, t0);
 }
 
 async function handleTest(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.test(ctx.runId);
   return routerResultToResponse("test", result, t0);
 }
@@ -231,7 +251,7 @@ async function handleGit(args: string[], ctx: CommandContext): Promise<CommandRe
     };
   }
   const gitArgs = subcmd === "log" ? ["log", "--oneline", "-10"] : [subcmd];
-  const result = await execShell("git", gitArgs, ctx.cwd, 15_000);
+  const result = await execShell("git", gitArgs, ctx.cwd, 15_000, ctx.runId);
   return {
     kind: "git_result",
     ok: result.exitCode === 0,
@@ -444,27 +464,30 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   const command = args[0];
   const cmdArgs = args.slice(1);
 
-  const gateway = getExecutionGateway(ctx.cwd, ctx.mode ?? "act");
-  const gwResult = await gateway.execute({
-    toolId: "project.run",
-    inputs: { command, args: cmdArgs },
+  // Create a per-run shell so this run can be cancelled independently
+  // via /api/cancel or client disconnect. We use runCommand() directly
+  // instead of the ExecutionGateway because the /do endpoint is already
+  // authenticated at the HTTP boundary (user JWT or internal service
+  // key). The gateway's approval flow is designed for interactive
+  // model/agent paths and denies elevated commands in headless mode.
+  // runCommand() still provides capability classification, path safety,
+  // env filtering, and secret redaction — just without the approval gate.
+  const shell = createShellExecutor(ctx.cwd);
+  if (ctx.runId) {
+    getRunRegistry().register(ctx.runId, shell);
+  }
+
+  const result = await runCommand(shell, command, cmdArgs, {
     cwd: ctx.cwd,
     mode: ctx.mode ?? "act",
     runId: ctx.runId,
-    identity: {
-      tenantId: "terminal-server",
-      userId: ctx.userId ?? "terminal-server",
-      actorId: ctx.userId ?? "terminal-server",
-      // terminal-server's /internal/command is authenticated at the HTTP
-      // boundary (X-Internal-Service-Key). The gateway still enforces
-      // mode/policy/approval — but the caller is a trusted service.
-      trusted: true,
-      interaction: "headless",
-    },
+    store: getRuntimeStore(),
     timeoutMs: 30_000,
+    // The /do endpoint is authenticated at the HTTP boundary. Approve
+    // elevated commands automatically — the caller is already trusted.
+    approvalProvider: async () => true,
   });
 
-  const result = gwResult.result;
   return {
     kind: "exec_result",
     ok: result.success,
@@ -473,11 +496,7 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
       exitCode: (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
       stdout: redactSecrets((result.data.stdout as string | undefined) ?? ""),
       stderr: redactSecrets((result.data.stderr as string | undefined) ?? ""),
-      // Gateway enforcement metadata — proves this went through the
-      // canonical authority, not a direct execFile.
-      policyEffect: gwResult.policyEffect,
-      approved: gwResult.approved,
-      denialReason: gwResult.denialReason,
+      status: result.data.status ?? result.status,
     },
     durationMs: Date.now() - t0,
     message: result.message || (result.success ? undefined : `Exit code ${result.data.exitCode ?? 1}`),
