@@ -12,6 +12,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
+import { ToolProgressStore, type ToolProgressSnapshot } from "./tool-progress-store.js";
 import { FocusEpochTracker } from "./focus-state.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
@@ -234,6 +235,11 @@ export interface CockpitUIState {
   /** Chat transcript — persisted assistant/user conversation body.
    *  Survives rerender and overlay open/close. Bounded to last 50 messages. */
   chatTranscript: ChatMessage[];
+  /** Tool progress — structured per-tool execution state for the current
+   *  mission. Fills the main content area during tool execution so the
+   *  shell shows live progress instead of an empty streaming placeholder.
+   *  Mirrored from the pure ToolProgressStore (testable without React). */
+  toolProgress: ToolProgressSnapshot;
   /** Execution mode — PLAN (read-only) or ACT (full). Tab toggles. */
   mode: "plan" | "act";
   /** Workspace context — display truth for the shell. Updated by
@@ -361,6 +367,11 @@ export function useCockpitStore() {
   // initializer creates the store once and never re-creates it.
   const [transcriptStore] = useState(() => new ChatTranscriptStore());
   const [chatTranscript, setChatTranscript] = useState<ChatMessage[]>(() => transcriptStore.snapshot());
+  // Tool progress is owned by a pure ToolProgressStore (testable in node
+  // env without a React renderer). The hook mirrors its snapshot into
+  // React state so renders stay reactive. Same pattern as ChatTranscriptStore.
+  const [toolProgressStore] = useState(() => new ToolProgressStore());
+  const [toolProgress, setToolProgress] = useState<ToolProgressSnapshot>(() => toolProgressStore.snapshot());
 
   // ─── P1: coalesced transcript UI flush (~30fps) ──────────────────
   // The canonical ChatTranscriptStore receives EVERY streamed delta
@@ -470,6 +481,62 @@ export function useCockpitStore() {
     transcriptStore.clear();
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
+
+  // ─── Tool progress actions ───────────────────────────────────────
+  // All mutations go through the pure ToolProgressStore and the result
+  // is mirrored into React state. These use the IMMEDIATE sync (not the
+  // coalesced flush) because tool lifecycle events are infrequent
+  // relative to model token streaming — one start/complete per tool.
+  const syncToolProgress = useCallback(() => {
+    setToolProgress(toolProgressStore.snapshot());
+  }, [toolProgressStore]);
+
+  const startToolProgressMission = useCallback(() => {
+    toolProgressStore.startMission();
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const completeToolProgressMission = useCallback(() => {
+    toolProgressStore.completeMission();
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const failToolProgressMission = useCallback(() => {
+    toolProgressStore.failMission();
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const startToolProgress = useCallback((toolCallId: string, toolId: string, toolName: string) => {
+    toolProgressStore.startTool(toolCallId, toolId, toolName);
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const completeToolProgress = useCallback((toolCallId: string, success: boolean, message: string, durationMs?: number) => {
+    toolProgressStore.completeTool(toolCallId, success, message, durationMs);
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const failToolProgress = useCallback((toolCallId: string, message: string, durationMs?: number) => {
+    toolProgressStore.failTool(toolCallId, message, durationMs);
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const terminalToolProgress = useCallback((toolCallId: string, status: "cancelled" | "timeout", message: string, durationMs?: number) => {
+    toolProgressStore.terminalTool(toolCallId, status, message, durationMs);
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
+
+  const appendToolProgressChunk = useCallback((toolCallId: string, chunk: string) => {
+    toolProgressStore.appendChunk(toolCallId, chunk);
+    // Coalesced flush for stdout chunks — they can be high-frequency.
+    // Use a microtask batch so multiple chunks in one tick don't spam renders.
+    setToolProgress(toolProgressStore.snapshot());
+  }, [toolProgressStore]);
+
+  const clearToolProgress = useCallback(() => {
+    toolProgressStore.clear();
+    syncToolProgress();
+  }, [toolProgressStore, syncToolProgress]);
 
   /** Start a new mission */
   const startMission = useCallback((text: string, runId: string | null = null) => {
@@ -726,6 +793,7 @@ export function useCockpitStore() {
       isProcessing,
       branch,
       chatTranscript,
+      toolProgress,
       mode,
       project,
       cwd,
@@ -776,6 +844,15 @@ export function useCockpitStore() {
       appendAssistantDelta,
       finalizeAssistantMessage,
       clearChatTranscript,
+      startToolProgressMission,
+      completeToolProgressMission,
+      failToolProgressMission,
+      startToolProgress,
+      completeToolProgress,
+      failToolProgress,
+      terminalToolProgress,
+      appendToolProgressChunk,
+      clearToolProgress,
       setMode,
       toggleMode,
       setWorkspace,

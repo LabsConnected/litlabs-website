@@ -1,12 +1,17 @@
 /**
  * Intent classification — how LiTT treats user input.
  *
- * Three intents:
+ * Four intents:
  *   chat     — casual conversation, questions, greetings, speech acts
  *              (say/reply/repeat/echo), and informational requests
  *              (explain/what does/...). Does NOT start a mission or
  *              progress bar.
  *   command  — slash commands (start with /).
+ *   read     — bounded read-only project inspection queries answerable
+ *              with canonical read-only tools (project.status, .branch,
+ *              .inspect_package, .log, .diff). Does NOT start a full
+ *              mission. May use one synthesis model call to format
+ *              results.
  *   mission  — tasks that require tools/execution.
  *              Starts the full agent lifecycle with progress + steps.
  *
@@ -18,10 +23,21 @@
  *   "test". The classifier distinguishes USER INTENT (the leading
  *   speech act / info verb) from words appearing in the payload.
  *
+ * READ vs CHAT:
+ *   "what framework is this" → READ (answerable by project.inspect_package)
+ *   "what is TypeScript" → CHAT (general knowledge, not project state)
+ *   "what files changed" → READ (answerable by project.status)
+ *   "what does npm run build do" → CHAT (info prefix, explanation)
+ *
+ * READ vs MISSION:
+ *   "what files changed" → READ (bounded, one tool call)
+ *   "scan this repo and tell me what needs attention" → MISSION (complex
+ *   analysis, multi-step, needs agent loop)
+ *
  * This is extracted from the controller so it can be unit-tested.
  */
 
-export type Intent = "chat" | "command" | "mission";
+export type Intent = "chat" | "command" | "read" | "mission";
 
 /** Words that imply action — used only AFTER speech/info acts are ruled out. */
 const MISSION_TRIGGERS = [
@@ -141,6 +157,23 @@ export function classifyIntent(input: string): Intent {
     return "chat";
   }
 
+  // ─── READ intent — bounded read-only project inspection ───
+  // Queries about the current project's state that can be answered with
+  // canonical read-only tools (project.inspect_package, .status, .branch,
+  // .log, .diff). These do NOT need a full mission lifecycle — just
+  // bounded tool calls + optional synthesis.
+  //
+  // Key distinction from CHAT: "what framework is this" asks about THIS
+  // project's framework (tool-answerable), while "what is TypeScript"
+  // asks for general knowledge (model-only).
+  //
+  // Key distinction from MISSION: "what files changed" is a bounded
+  // one-tool query, while "scan this repo and tell me what needs
+  // attention" requires complex analysis and the full agent loop.
+  if (isReadIntent(lower, core)) {
+    return "read";
+  }
+
   // Questions (not asking for action) are chat. Info-prefix questions are
   // already handled above; this catches remaining non-action questions
   // like "is the sky blue?".
@@ -163,4 +196,75 @@ export function classifyIntent(input: string): Intent {
   // Default: conversation. Length alone does NOT imply execution — a long
   // message without an action verb is still chat.
   return "chat";
+}
+
+// ─── READ intent detection ─────────────────────────────────────────
+
+/**
+ * Project-state nouns that signal a read-only inspection query.
+ * When the query asks about these, it can be answered with canonical
+ * read-only tools rather than going through the full model path.
+ */
+const READ_NOUNS = [
+  "framework", "stack", "technology", "technologies",
+  "package manager", "package-manager",
+  "scripts", "npm scripts", "available scripts",
+  "dependencies", "deps", "dev dependencies", "devdependencies",
+  "packages",
+  "files changed", "what changed", "changes", "diff",
+  "recent commits", "commits", "git log", "log",
+  "current branch", "branch",
+  "project name", "project type", "project info",
+  "node version", "node version",
+  "typescript version",
+  "build tool", "bundler",
+];
+
+/**
+ * Leading patterns that indicate a read-only inspection query.
+ * These are checked AFTER speech acts and info prefixes are ruled out,
+ * so "explain what framework means" stays CHAT (info prefix) and
+ * "say the word framework" stays CHAT (speech act).
+ */
+const READ_PATTERNS: Array<{ test: (lower: string, core: string) => boolean }> = [
+  // "what framework is this" / "what package manager does this use"
+  { test: (_l, c) => /^what\s+(framework|stack|package manager|package-manager|scripts|dependencies|deps|packages|project name|project type|build tool|bundler|node version|typescript version)\b/.test(c) },
+  // "what files changed" / "what changed"
+  { test: (_l, c) => /^what\s+(files changed|changed|changes|diff)\b/.test(c) },
+  // "show recent commits" / "show commits" / "show the diff" / "show changes"
+  { test: (_l, c) => /^show\s+(recent commits|commits|the diff|diff|changes|log|git log)\b/.test(c) },
+  // "tell me the framework" / "tell me the branch" (NOT "tell me about X" — that's INFO)
+  { test: (_l, c) => /^tell me\s+(the\s+)?(framework|stack|branch|current branch|package manager|scripts|dependencies|deps|project name|project type|diff|changes|commits|recent commits)\b/.test(c) },
+  // "which package manager" / "which branch"
+  { test: (_l, c) => /^which\s+(package manager|package-manager|branch|current branch|framework|stack)\b/.test(c) },
+  // Compound: "tell me the framework and branch" / "what framework and branch"
+  { test: (_l, c) => /\b(framework|stack)\b.*\b(branch|current branch)\b/.test(c) && /^(what|tell me|which|show)\b/.test(c) },
+];
+
+/**
+ * Determine if a query is a bounded read-only project inspection.
+ * Returns true only when the query asks about project state answerable
+ * with canonical read-only tools. Does NOT catch complex analysis
+ * queries like "scan this repo" or "inspect this repo" — those are
+ * MISSION (they need the full agent loop for multi-step analysis).
+ */
+function isReadIntent(lower: string, core: string): boolean {
+  // Mission-complex words override READ — "inspect this repo" is MISSION
+  // even though it might mention project-state nouns.
+  if (/\b(inspect|scan|audit|analyze|diagnose|repair|fix|implement|refactor)\b/.test(lower)) {
+    return false;
+  }
+  // Check explicit read patterns
+  for (const { test } of READ_PATTERNS) {
+    if (test(lower, core)) return true;
+  }
+  // "what <read-noun>" pattern — generic catch for project-state questions
+  // that start with "what" and contain a read noun.
+  if (core.startsWith("what ") && READ_NOUNS.some((n) => core.includes(n))) {
+    // But NOT "what is/are/does/do" — those are INFO (chat).
+    if (!/^what\s+(is|are|does|do|happened)\b/.test(core)) {
+      return true;
+    }
+  }
+  return false;
 }

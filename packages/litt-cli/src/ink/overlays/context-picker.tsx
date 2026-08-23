@@ -84,7 +84,7 @@ export function ContextPicker({ cwd, mode = "context", initialQuery = "", onSele
       if (items[selectedIdx]) onSelect(items[selectedIdx].token);
     } else if (isEscape(key, input)) {
       onCancel();
-    } else if (isBackspace(key)) {
+    } else if (isBackspace(key, input)) {
       setQuery((prev) => prev.slice(0, -1));
       setSelectedIdx(0);
     } else if (isPrintable(input, key)) {

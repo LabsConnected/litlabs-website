@@ -13,7 +13,6 @@
  */
 
 import { io, type Socket } from "socket.io-client";
-import { createHmac } from "node:crypto";
 import type { RuntimeState, RuntimeEvent } from "@litt/agent-core";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -27,9 +26,10 @@ export type ConnectionState =
 
 export interface RuntimeClientOptions {
   terminalUrl?: string;
-  authSecret?: string;
-  internalKey?: string;
-  userId?: string;
+  /** Clerk token for token exchange (obtained via `litt login` or LITT_CLERK_TOKEN env) */
+  clerkToken?: string;
+  /** Pre-exchanged terminal JWT (skip token exchange if provided) */
+  terminalToken?: string;
   /** Max reconnection attempts before falling back to REST-only */
   maxReconnectAttempts?: number;
 }
@@ -66,23 +66,14 @@ export type StateListener = (state: RuntimeState) => void;
 export type ConnectionListener = (state: ConnectionState) => void;
 export type ErrorListener = (error: { code: string; message: string }) => void;
 
-// ─── Token minting (matches terminal-server/auth.ts) ──────────────
+// ─── Token exchange (Clerk token → short-lived terminal JWT) ──────
+// The CLI NEVER holds TERMINAL_AUTH_SECRET. It exchanges a Clerk token
+// for a terminal JWT via /api/token-exchange, then uses that JWT.
 
-function mintTerminalToken(userId: string, secret: string): string {
-  const payload = {
-    sub: userId,
-    aud: "littree-terminal",
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-  };
-  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = createHmac("sha256", secret).update(encodedPayload).digest("base64url");
-  return `${encodedPayload}.${signature}`;
-}
+import { exchangeClerkToken, clearTerminalTokenCache } from "./remote.js";
+import { getTerminalUrl } from "./auth/auth-config.js";
 
 // ─── RuntimeClient ────────────────────────────────────────────────
-
-const DEFAULT_TERMINAL_URL = "http://127.0.0.1:4001";
 
 export class RuntimeClient {
   private socket: Socket | null = null;
@@ -125,15 +116,15 @@ export class RuntimeClient {
   };
 
   private readonly terminalUrl: string;
-  private readonly authSecret: string;
-  private readonly internalKey: string;
-  private readonly userId: string;
+  private readonly clerkToken: string;
+  private readonly terminalToken: string | null;
+  /** The exchanged terminal JWT (cached after token exchange) */
+  private _exchangedToken: string | null = null;
 
   constructor(options: RuntimeClientOptions = {}) {
-    this.terminalUrl = options.terminalUrl ?? process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
-    this.authSecret = options.authSecret ?? process.env.TERMINAL_AUTH_SECRET ?? "";
-    this.internalKey = options.internalKey ?? process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
-    this.userId = options.userId ?? "cli-user";
+    this.terminalUrl = options.terminalUrl ?? getTerminalUrl();
+    this.clerkToken = options.clerkToken ?? process.env.LITT_CLERK_TOKEN ?? "";
+    this.terminalToken = options.terminalToken ?? null;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
 
     // Install a permanent error listener so Socket.IO 'error' events
@@ -145,18 +136,45 @@ export class RuntimeClient {
 
   // ─── Connection ────────────────────────────────────────────────
 
+  /**
+   * Get a terminal JWT for authentication. Uses the pre-exchanged
+   * token if provided, otherwise exchanges the Clerk token via
+   * /api/token-exchange. The client NEVER holds TERMINAL_AUTH_SECRET.
+   *
+   * The Clerk token is obtained from:
+   *   1. this.clerkToken (constructor option — explicit override)
+   *   2. AuthSession.getAccessToken() — the real OAuth credential store
+   *      (auto-refreshes if the access token is expired)
+   *   3. LITT_CLERK_TOKEN env var (temporary — automated acceptance tests)
+   */
+  private async getAuthToken(): Promise<string> {
+    if (this.terminalToken) return this.terminalToken;
+    if (this._exchangedToken) return this._exchangedToken;
+
+    let clerkToken = this.clerkToken;
+    if (!clerkToken) {
+      // Use the AuthSession (OAuth credential store with auto-refresh)
+      const { getAuthSession } = await import("./auth/auth-session.js");
+      const authSession = getAuthSession();
+      clerkToken = await authSession.getAccessToken() ?? "";
+    }
+
+    if (!clerkToken) {
+      throw new Error(
+        "Not authenticated. Run `litt login` to sign in. " +
+        "Run without --remote for local execution.",
+      );
+    }
+
+    this._exchangedToken = await exchangeClerkToken(clerkToken, this.terminalUrl);
+    return this._exchangedToken;
+  }
+
   async connect(): Promise<void> {
     if (this.socket?.connected) return;
     this.setConnectionState("connecting");
 
-    if (this.authSecret.length < 32) {
-      throw new Error(
-        "TERMINAL_AUTH_SECRET not configured (min 32 chars). " +
-        "Set it in your environment.",
-      );
-    }
-
-    const token = mintTerminalToken(this.userId, this.authSecret);
+    const token = await this.getAuthToken();
 
     this.socket = io(this.terminalUrl, {
       auth: { token },
@@ -413,31 +431,27 @@ export class RuntimeClient {
   // ─── REST fallback ─────────────────────────────────────────────
 
   /**
-   * Dispatch a command via REST (POST /internal/command).
-   * Used as fallback when Socket.IO is not connected, or as the primary
-   * dispatch method (Socket.IO is for events, REST is for commands).
+   * Dispatch a command via REST (POST /api/command).
+   * Uses USER authentication (signed JWT token), NOT the internal
+   * service key. Socket.IO is for events, REST is for commands.
    */
   async dispatchCommand(
     command: string,
     args?: Record<string, unknown>,
     cwd?: string,
   ): Promise<{ ok: boolean; runId: string; result: unknown }> {
-    if (this.internalKey.length < 32) {
-      throw new Error(
-        "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars).",
-      );
-    }
+    const token = await this.getAuthToken();
 
-    const response = await fetch(`${this.terminalUrl}/internal/command`, {
+    const response = await fetch(`${this.terminalUrl}/api/command`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Service-Key": this.internalKey,
+        "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
         command,
         args,
-        cwd: cwd ?? process.cwd(),
+        cwd,
       }),
       signal: AbortSignal.timeout(240_000),
     });
@@ -461,18 +475,18 @@ export class RuntimeClient {
 
   /**
    * Cancel the currently active run.
-   * Uses POST /internal/cancel if available, otherwise tries to abort
-   * via the REST dispatch with a cancel command.
+   * Uses POST /api/cancel with the terminal JWT.
    */
   async cancelActiveRun(): Promise<boolean> {
     if (!this.currentRunId) return false;
 
     try {
-      const response = await fetch(`${this.terminalUrl}/internal/cancel`, {
+      const token = await this.getAuthToken();
+      const response = await fetch(`${this.terminalUrl}/api/cancel`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Internal-Service-Key": this.internalKey,
+          "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({ runId: this.currentRunId }),
         signal: AbortSignal.timeout(10_000),
@@ -489,8 +503,9 @@ export class RuntimeClient {
    */
   async fetchState(): Promise<RuntimeState | null> {
     try {
-      const response = await fetch(`${this.terminalUrl}/internal/runtime`, {
-        headers: { "X-Internal-Service-Key": this.internalKey },
+      const token = await this.getAuthToken();
+      const response = await fetch(`${this.terminalUrl}/api/runtime`, {
+        headers: { "Authorization": `Bearer ${token}` },
         signal: AbortSignal.timeout(5000),
       });
       if (!response.ok) {
@@ -675,5 +690,8 @@ export class RuntimeClient {
       this.socket = null;
     }
     this.setConnectionState("disconnected");
+    // Clear the exchanged token on disconnect — force re-exchange on reconnect
+    this._exchangedToken = null;
+    clearTerminalTokenCache();
   }
 }

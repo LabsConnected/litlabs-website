@@ -29,6 +29,7 @@ import { COLORS } from "./colors.js";
 import { truncateTail, shortModelName } from "./text-wrap.js";
 import { providerLabel } from "../lib/model-provider.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
+import { deriveTransport } from "../lib/transport-projection.js";
 
 function isWorking(h: HoloState): boolean {
   return h === "UNDERSTANDING" || h === "PLANNING" || h === "READING"
@@ -40,6 +41,8 @@ export interface StatusBarProps {
   project: string;
   branch: string;
   localRuntime: string;
+  /** Remote transport state — required so the footer cannot contradict the header. */
+  remoteRuntime?: string;
   holoState: HoloState;
   brain: string;
   activeModel: string | null;
@@ -54,7 +57,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
-  project, branch, localRuntime, holoState, brain, activeModel, activeProvider,
+  project, branch, localRuntime, remoteRuntime = "offline", holoState, brain, activeModel, activeProvider,
   mode, isProcessing, busySince, missionState, gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -102,11 +105,15 @@ export function StatusBar({
   const right1Text = `${planDot} Plan   ${actDot} Act`;
 
   // ── Line 2: project · branch · LOCAL   |   right status ──
-  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
-  const localColor = localRuntime === "ready" ? COLORS.success
-    : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL"
-    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  // Footer label comes from the SHARED projection — never derived here.
+  // This is what makes "header says REMOTE, footer says LOCAL" structurally
+  // impossible rather than merely unlikely.
+  const transport = deriveTransport({ localRuntime, remoteRuntime });
+  const localIcon = transport.footerSeverity === "ok" ? "●"
+    : transport.footerSeverity === "error" ? "✗" : "○";
+  const localColor = transport.footerSeverity === "ok" ? COLORS.success
+    : transport.footerSeverity === "error" ? COLORS.error : COLORS.warning;
+  const localLabel = transport.footerLabel;
 
   // Right-segment widths for overlap-free truncation.
   const rightWidth = Math.max(5, measure(right));

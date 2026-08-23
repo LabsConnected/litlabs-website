@@ -241,12 +241,11 @@ async function ensureRuntime(repoRoot: string): Promise<boolean> {
   const env = parseEnvFile(envFile);
 
   if (
-    (env.TERMINAL_AUTH_SECRET ?? "").length < 32 ||
     (env.TERMINAL_INTERNAL_SERVICE_KEY ?? "").length < 32
   ) {
     fail("LiTT runtime configuration is missing.");
     console.error(
-      `${c.dim}Expected required runtime secrets in ${envFile}${c.reset}`,
+      `${c.dim}Expected TERMINAL_INTERNAL_SERVICE_KEY in ${envFile}${c.reset}`,
     );
     return false;
   }

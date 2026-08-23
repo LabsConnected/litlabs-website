@@ -1,57 +1,20 @@
 import { test, expect, type Browser, type BrowserContext, type APIResponse } from "@playwright/test";
 
 const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
-const VERCEL_BYPASS_SECRET = process.env.VERCEL_PROTECTION_BYPASS_SECRET;
 
-// ─── Vercel Deployment Protection bypass ──────────────────────────
-// Vercel Preview deployments have Deployment Protection (SSO). We bypass
-// it by sending x-vercel-protection-bypass + x-vercel-set-bypass-cookie
-// on the initial request, which sets a cookie for subsequent navigation.
-// See: https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection
+// LiTLabs no longer uses Vercel deployment protection. Keep these helpers as
+// no-op compatibility shims for the shared preview/production smoke tests.
+const VERCEL_BYPASS_SECRET: string | undefined = undefined;
+const isVercelPreview = false;
 
-const isVercelPreview = !!VERCEL_BYPASS_SECRET;
-
-/** Common bypass headers for API requests. */
 function bypassHeaders(): Record<string, string> {
-  return isVercelPreview && VERCEL_BYPASS_SECRET
-    ? { "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET }
-    : {};
+  return {};
 }
 
-/**
- * Create a browser context with Vercel Deployment Protection bypassed.
- * The bypass cookie is established by an initial request with
- * x-vercel-set-bypass-cookie: true.
- */
 async function createBypassedContext(browser: Browser): Promise<BrowserContext> {
-  const context = await browser.newContext();
-  if (isVercelPreview && VERCEL_BYPASS_SECRET) {
-    // Establish the bypass cookie via a GET with x-vercel-set-bypass-cookie
-    const resp = await context.request.get(`${DEPLOYMENT_URL}/`, {
-      headers: {
-        "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET,
-        "x-vercel-set-bypass-cookie": "true",
-      },
-    });
-    expect(resp.status(), "Bypass request should return 200").toBe(200);
-    // Log warning if SSO content detected, but don't fail — the bypass cookie
-    // may still be set and work for subsequent requests
-    const body = await resp.text();
-    if (body.includes("vercel.com/login") || body.includes("Vercel Authentication")) {
-      console.log("WARNING: Bypass response contains Vercel SSO content — bypass may not be fully active");
-    }
-  }
-  return context;
+  return browser.newContext();
 }
 
-// ─── LiTTree-origin assertion helpers ─────────────────────────────
-
-/** Assert that a response body is from LiTTree, not Vercel SSO. */
-function assertNotVercelSSO(body: string, context: string) {
-  expect(body, `${context}: must not contain Vercel SSO redirect`).not.toContain("vercel.com/login");
-  expect(body, `${context}: must not contain Vercel Authentication page`).not.toContain("Vercel Authentication");
-  expect(body, `${context}: must not contain Vercel deployment-protection HTML`).not.toContain("x-vercel-protection-bypass");
-}
 
 /** Assert that an API response has JSON content type. */
 function assertJsonContentType(resp: APIResponse, context: string) {
@@ -61,39 +24,39 @@ function assertJsonContentType(resp: APIResponse, context: string) {
 
 // ─── Unauthenticated behavior — must reach LiTTree, not Vercel SSO ───
 
-test.describe("Vercel Preview — unauthenticated behavior (bypassed)", () => {
-  test.skip(isVercelPreview && !VERCEL_BYPASS_SECRET, "Requires VERCEL_PROTECTION_BYPASS_SECRET for Vercel Preview");
+test.describe("unauthenticated behavior (bypassed)", () => {
+
 
   test("homepage returns 200 from LiTTree", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/`, { headers: bypassHeaders() });
+    const resp = await request.get(`${DEPLOYMENT_URL}/`, {  });
     expect(resp.status()).toBe(200);
     const body = await resp.text();
-    assertNotVercelSSO(body, "homepage");
+
     // LiTTree homepage should have a <body> with real content
     expect(body).toContain("<body");
     console.log(`Homepage: ${resp.status()}, length=${body.length}`);
   });
 
   test("pricing returns 200 from LiTTree", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/pricing`, { headers: bypassHeaders() });
+    const resp = await request.get(`${DEPLOYMENT_URL}/pricing`, {  });
     expect(resp.status()).toBe(200);
     const body = await resp.text();
-    assertNotVercelSSO(body, "pricing");
+
     expect(body).toContain("<body");
     console.log(`Pricing: ${resp.status()}`);
   });
 
   test("docs returns 200 or 404 from LiTTree (pre-existing 404 bug tracked separately)", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/docs`, { headers: bypassHeaders() });
+    const resp = await request.get(`${DEPLOYMENT_URL}/docs`, {  });
     // /docs returns 404 on both Preview and Production — pre-existing issue.
-    // The key assertion is that we reach LiTTree (not Vercel SSO) and get < 500.
+    // The key assertion is that we reach LiTTree  and get < 500.
     expect(resp.status(), "docs should not 500").toBeLessThan(500);
     const body = await resp.text();
-    assertNotVercelSSO(body, "docs");
+
     console.log(`Docs: ${resp.status()} (pre-existing 404 if not 200)`);
   });
 
-  test("studio page renders from LiTTree (not Vercel SSO)", async ({ browser }) => {
+  test("studio page renders from LiTTree ", async ({ browser }) => {
     const context = await createBypassedContext(browser);
     const page = await context.newPage();
     const response = await page.goto(`${DEPLOYMENT_URL}/studio`, { waitUntil: "domcontentloaded" });
@@ -122,7 +85,7 @@ test.describe("Vercel Preview — unauthenticated behavior (bypassed)", () => {
     await context.close();
   });
 
-  test("dashboard renders from LiTTree (not Vercel SSO)", async ({ browser }) => {
+  test("dashboard renders from LiTTree ", async ({ browser }) => {
     const context = await createBypassedContext(browser);
     const page = await context.newPage();
     const response = await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
@@ -138,7 +101,7 @@ test.describe("Vercel Preview — unauthenticated behavior (bypassed)", () => {
     await context.close();
   });
 
-  test("sign-in page renders from LiTTree (not Vercel SSO)", async ({ browser }) => {
+  test("sign-in page renders from LiTTree ", async ({ browser }) => {
     const context = await createBypassedContext(browser);
     const page = await context.newPage();
     const response = await page.goto(`${DEPLOYMENT_URL}/sign-in`, { waitUntil: "domcontentloaded" });
@@ -159,25 +122,25 @@ test.describe("Vercel Preview — unauthenticated behavior (bypassed)", () => {
 
 // ─── API endpoints — must reach LiTTree app layer, not Vercel SSO ───
 
-test.describe("Vercel Preview — API endpoints (bypassed)", () => {
-  test.skip(isVercelPreview && !VERCEL_BYPASS_SECRET, "Requires VERCEL_PROTECTION_BYPASS_SECRET for Vercel Preview");
+test.describe("API endpoints (bypassed)", () => {
 
-  test("conversations API returns 401 (not Vercel SSO HTML)", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/api/studio/conversations`, { headers: bypassHeaders() });
+
+  test("conversations API returns 401 ", async ({ request }) => {
+    const resp = await request.get(`${DEPLOYMENT_URL}/api/studio/conversations`, {  });
     expect(resp.status()).toBe(401);
     assertJsonContentType(resp, "conversations API");
     const body = await resp.text();
-    assertNotVercelSSO(body, "conversations API");
+
     expect(body).toContain("Unauthorized");
     console.log(`Conversations API: ${resp.status()}`);
   });
 
-  test("storage API returns 401 (not Vercel SSO HTML)", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/api/storage`, { headers: bypassHeaders() });
+  test("storage API returns 401 ", async ({ request }) => {
+    const resp = await request.get(`${DEPLOYMENT_URL}/api/storage`, {  });
     expect(resp.status()).toBe(401);
     assertJsonContentType(resp, "storage API");
     const body = await resp.text();
-    assertNotVercelSSO(body, "storage API");
+
     console.log(`Storage API: ${resp.status()}`);
   });
 
@@ -210,8 +173,8 @@ test.describe("Vercel Preview — API endpoints (bypassed)", () => {
     console.log(`Orchestrate API: ${resp.status()}`);
   });
 
-  test("nonexistent API returns 404 (not Vercel SSO HTML)", async ({ request }) => {
-    const resp = await request.get(`${DEPLOYMENT_URL}/api/this-does-not-exist`, { headers: bypassHeaders() });
+  test("nonexistent API returns 404 ", async ({ request }) => {
+    const resp = await request.get(`${DEPLOYMENT_URL}/api/this-does-not-exist`, {  });
     expect(resp.status()).toBe(404);
     console.log(`Nonexistent API: ${resp.status()}`);
   });
@@ -219,20 +182,20 @@ test.describe("Vercel Preview — API endpoints (bypassed)", () => {
 
 // ─── No 500 errors on any route (bypassed) ────────────────────────
 
-test.describe("Vercel Preview — no server errors (bypassed)", () => {
-  test.skip(isVercelPreview && !VERCEL_BYPASS_SECRET, "Requires VERCEL_PROTECTION_BYPASS_SECRET for Vercel Preview");
+test.describe("no server errors (bypassed)", () => {
+
 
   test("no HTTP 500 on any tested route", async ({ request }) => {
     const routes = ["/", "/pricing", "/docs", "/login", "/sign-in", "/studio", "/dashboard"];
     for (const route of routes) {
-      const resp = await request.get(`${DEPLOYMENT_URL}${route}`, { headers: bypassHeaders() });
+      const resp = await request.get(`${DEPLOYMENT_URL}${route}`, {  });
       console.log(`${route}: ${resp.status()}`);
       expect(resp.status(), `${route} returned ${resp.status()}`).toBeLessThan(500);
     }
 
     const apiRoutes = ["/api/studio/conversations", "/api/storage", "/api/this-does-not-exist"];
     for (const route of apiRoutes) {
-      const resp = await request.get(`${DEPLOYMENT_URL}${route}`, { headers: bypassHeaders() });
+      const resp = await request.get(`${DEPLOYMENT_URL}${route}`, {  });
       console.log(`${route}: ${resp.status()}`);
       expect(resp.status(), `${route} returned ${resp.status()}`).toBeLessThan(500);
     }
@@ -285,7 +248,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     if (projectAId && contextA) {
       try {
         await contextA.request.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-          headers: bypassHeaders(),
+
         });
         console.log(`Cleanup: deleted project ${projectAId}`);
       } catch (err) {
@@ -298,7 +261,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
   test("User A — server recognizes Clerk session (protected endpoint proof)", async ({ browser }) => {
     contextA = await browser.newContext({ storageState: userAAuthFile });
-    await establishBypass(contextA);
+
     const page = await contextA.newPage();
     await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2000);
@@ -307,7 +270,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     // The real proof: protected API endpoint must return non-401
     const api = contextA.request;
     const resp = await api.get(`${DEPLOYMENT_URL}/api/studio-projects`, {
-      headers: bypassHeaders(),
+
     });
     const status = resp.status();
     const ct = resp.headers()["content-type"] || "";
@@ -341,7 +304,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     // Verify User A can read their own project
     const getResp = await api.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
     expect(getResp.status(), "User A should read own project (200)").toBe(200);
     console.log(`[User A] Verified can read own project: ${getResp.status()}`);
@@ -349,7 +312,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
   test("User B — server recognizes Clerk session (protected endpoint proof)", async ({ browser }) => {
     contextB = await browser.newContext({ storageState: userBAuthFile });
-    await establishBypass(contextB);
+
     const page = await contextB.newPage();
     await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2000);
@@ -357,7 +320,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const api = contextB.request;
     const resp = await api.get(`${DEPLOYMENT_URL}/api/studio-projects`, {
-      headers: bypassHeaders(),
+
     });
     const status = resp.status();
     const ct = resp.headers()["content-type"] || "";
@@ -374,7 +337,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const api = contextB!.request;
     const getResp = await api.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
 
     expect(
@@ -391,7 +354,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const apiB = contextB!.request;
     const deleteResp = await apiB.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
 
     expect(
@@ -402,7 +365,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const apiA = contextA!.request;
     const verifyResp = await apiA.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
     expect(verifyResp.status(), "User A's project should still exist after User B delete attempt").toBe(200);
     console.log(`[User A] Verified project still exists after User B delete attempt`);
@@ -414,7 +377,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     const apiB = contextB!.request;
     const storageResp = await apiB.get(
       `${DEPLOYMENT_URL}/api/storage?key=audio/test-clip.mp3&type=audio/mpeg`,
-      { headers: bypassHeaders() },
+      {  },
     );
 
     expect(storageResp.status(), "Storage API should respond to authenticated User B").toBeLessThan(500);
@@ -436,7 +399,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const apiA = contextA!.request;
     const getResp = await apiA.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
     expect(getResp.status(), "User A should still access their project (200)").toBe(200);
     console.log(`[User A] Confirmed retained access to project ${projectAId}`);
@@ -448,7 +411,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
 
     const apiA = contextA!.request;
     const deleteResp = await apiA.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
     expect(
       [200, 204].includes(deleteResp.status()),
@@ -457,7 +420,7 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     console.log(`[User A] Cleanup: deleted project ${projectAId}, status: ${deleteResp.status()}`);
 
     const verifyResp = await apiA.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
-      headers: bypassHeaders(),
+
     });
     expect(verifyResp.status(), "Deleted project should return 404").toBe(404);
     console.log(`[User A] Cleanup verified: project ${projectAId} is deleted`);

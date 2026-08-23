@@ -12,7 +12,8 @@ pub use commands::*;
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            generate_desktop_token,
+            exchange_clerk_token,
+            generate_dev_token,
             read_workspace_context
         ])
         .run(tauri::generate_context!())

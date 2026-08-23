@@ -359,9 +359,9 @@ describe("SEC-5.8 — Wrong capability (resource scope) denied", () => {
 describe("SEC-5.9 — Wrong credential scope denied", () => {
   it("credential from different provider than request is denied", async () => {
     const store = new InMemoryCredentialStore();
-    store.addCredential(makeStoredCredential({ provider: "vercel", scope: { provider: "vercel", account: "litlabs", projectId: null } }));
+    store.addCredential(makeStoredCredential({ provider: "github", scope: { provider: "github", account: "litlabs", projectId: null } }));
     const broker = new ProductionCredentialBroker(store);
-    broker.registerCredential(makeCredentialRef("vercel"));
+    broker.registerCredential(makeCredentialRef("github"));
 
     const result = await broker.resolve(
       makeRuntimeIdentity(),

@@ -95,7 +95,7 @@ export function ShipFlow({
     if (editing) {
       if (isEscape(key, input) || isEnter(key, input)) {
         setEditing(false);
-      } else if (isBackspace(key)) {
+      } else if (isBackspace(key, input)) {
         setMessage((prev) => prev.slice(0, -1));
       } else if (isPrintable(input, key)) {
         setMessage((prev) => prev + input);

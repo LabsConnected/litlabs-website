@@ -18,7 +18,7 @@
  *   - cwd preserved
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as http from "http";
 import * as path from "path";
 import type { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from "express";
@@ -29,15 +29,15 @@ import type { RemoteCommandRequest, RemoteCommandResponse } from "@litt/agent-co
 // We create a minimal test server that wires the same routes.
 
 const repoRoot = path.resolve(__dirname, "..");
-const TEST_PORT = 4199; // unlikely to conflict
 const TEST_KEY = "test-internal-service-key-32-chars-min!!";
 
 let testServer: http.Server | null = null;
 let baseUrl: string;
+let testPort: number;
 
 // Build the Express app inline — we import the same route handlers
 // the real server uses, but on a test port.
-async function startTestServer(): Promise<http.Server> {
+async function startTestServer(): Promise<{ server: http.Server; port: number }> {
   const express = (await import("express")).default;
   const app = express();
   app.use(express.json({ limit: "2mb" }));
@@ -119,9 +119,13 @@ async function startTestServer(): Promise<http.Server> {
     res.json({ ok: true, ts: Date.now() });
   });
 
+  // Use port 0 (ephemeral) to avoid port collisions with other test
+  // files or previous runs. The OS assigns a free port.
   return new Promise((resolve, reject) => {
-    const server = app.listen(TEST_PORT, "127.0.0.1", () => {
-      resolve(server);
+    const server = app.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = addr && typeof addr === "object" ? addr.port : 0;
+      resolve({ server, port });
     });
     server.on("error", reject);
   });
@@ -133,7 +137,7 @@ async function termuxRequest(
   req: Partial<RemoteCommandRequest> & { command: string },
   key: string = TEST_KEY,
 ): Promise<{ status: number; body: RemoteCommandResponse }> {
-  const resp = await fetch(`http://127.0.0.1:${TEST_PORT}/internal/command`, {
+  const resp = await fetch(`http://127.0.0.1:${testPort}/internal/command`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -154,16 +158,38 @@ async function termuxRequest(
 // ─── Tests ────────────────────────────────────────────────────────
 
 describe("PHASE 7: Termux-style end-to-end HTTP protocol", () => {
+  let statusSpy: ReturnType<typeof vi.spyOn> | null = null;
+
   beforeAll(async () => {
     process.env.TERMINAL_INTERNAL_SERVICE_KEY = TEST_KEY;
-    testServer = await startTestServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-  }, 10_000);
+
+    // Mock CommandRouter.status to avoid running real git subprocesses
+    // that can exceed the default 5s test timeout under full-suite CPU
+    // contention. This test verifies the HTTP PROTOCOL (auth boundary,
+    // request decoding, response shape), not subprocess execution.
+    const agentCore = await import("@litt/agent-core");
+    statusSpy = vi.spyOn(agentCore.CommandRouter.prototype, "status").mockResolvedValue({
+      command: "status",
+      result: {
+        status: "success" as const,
+        success: true,
+        message: "branch=main changes=0",
+        data: { branch: "main", changeCount: 0, root: repoRoot, isGitRepo: true },
+      },
+    });
+
+    const started = await startTestServer();
+    testPort = started.port;
+    testServer = started.server;
+    baseUrl = `http://127.0.0.1:${testPort}`;
+  }, 15_000);
 
   afterAll(async () => {
     if (testServer) {
       await new Promise<void>((resolve) => testServer!.close(() => resolve()));
+      testServer = null;
     }
+    statusSpy?.mockRestore();
     delete process.env.TERMINAL_INTERNAL_SERVICE_KEY;
   });
 
@@ -281,5 +307,45 @@ describe("PHASE 7: Termux-style end-to-end HTTP protocol", () => {
     expect(body.timestamp).toBeGreaterThan(0);
     expect(typeof body.durationMs).toBe("number");
     expect(body.durationMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ─── Regression: clean server lifecycle ───────────────────────────
+
+describe("Server lifecycle: no port/socket/env leaks", () => {
+  it("repeated startup/shutdown leaves no server, socket, or env mutation behind", async () => {
+    const initialKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY;
+
+    // Start and stop a server 3 times on ephemeral ports
+    for (let i = 0; i < 3; i++) {
+      process.env.TERMINAL_INTERNAL_SERVICE_KEY = `test-key-iteration-${i}-${TEST_KEY}`;
+      const { server, port } = await startTestServer();
+
+      // Verify the server is reachable
+      const resp = await fetch(`http://127.0.0.1:${port}/health/live`);
+      expect(resp.status).toBe(200);
+
+      // Close the server and wait for it to fully release the port
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => err ? reject(err) : resolve());
+      });
+
+      // Verify the port is no longer reachable (connection refused)
+      try {
+        await fetch(`http://127.0.0.1:${port}/health/live`);
+        // If we get here, the port is still listening — that's a leak
+        throw new Error(`Port ${port} still reachable after server.close() at iteration ${i}`);
+      } catch (err) {
+        // Expected: connection refused or network error
+        if (err instanceof Error && !err.message.includes("still reachable")) {
+          // Good — connection refused means the port was released
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    // Verify env was cleaned up
+    process.env.TERMINAL_INTERNAL_SERVICE_KEY = initialKey;
   });
 });

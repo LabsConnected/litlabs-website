@@ -40,8 +40,14 @@ export interface MissionVerificationGateOptions {
   isReadOnly: () => boolean;
   /** True when at least one read-only tool produced a successful result. */
   hasSuccessfulEvidence: () => boolean;
+  /** True when at least one read-only tool FAILED. When true, the
+   *  evidence gate must NOT prove the mission complete — a failed
+   *  objective means the user's request was only partially fulfilled. */
+  hasFailedEvidence: () => boolean;
   /** Human summary of the collected evidence (tool results). */
   evidenceSummary: () => string;
+  /** Human summary of FAILED results only (for truthful failure messages). */
+  failedSummary: () => string;
 }
 
 export class MissionVerificationGate implements VerificationGateLike {
@@ -50,7 +56,9 @@ export class MissionVerificationGate implements VerificationGateLike {
   private readonly _emitter: RuntimeEventEmitter | null;
   private readonly _isReadOnly: () => boolean;
   private readonly _hasSuccessfulEvidence: () => boolean;
+  private readonly _hasFailedEvidence: () => boolean;
   private readonly _evidenceSummary: () => string;
+  private readonly _failedSummary: () => string;
 
   constructor(options: MissionVerificationGateOptions) {
     this._fullGate = options.fullGate;
@@ -58,7 +66,9 @@ export class MissionVerificationGate implements VerificationGateLike {
     this._emitter = options.emitter ?? null;
     this._isReadOnly = options.isReadOnly;
     this._hasSuccessfulEvidence = options.hasSuccessfulEvidence;
+    this._hasFailedEvidence = options.hasFailedEvidence;
     this._evidenceSummary = options.evidenceSummary;
+    this._failedSummary = options.failedSummary;
   }
 
   async verify(): Promise<VerificationResult> {
@@ -68,23 +78,44 @@ export class MissionVerificationGate implements VerificationGateLike {
     }
 
     // ─── Read-only inspection: evidence gate ─────────────────────
-    // Proof = a successful tool result exists on the canonical mission.
+    // Proof requires BOTH:
+    //   1. At least one successful tool result (positive evidence)
+    //   2. NO failed tool results (all requested objectives succeeded)
+    //
+    // A compound request where repo inspection succeeds but weather
+    // lookup fails must NOT be COMPLETE — the user's entire request
+    // was not fulfilled. The gate returns proven=false with a truthful
+    // message listing which objectives failed.
     const runId = `verify_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const t0 = Date.now();
-    const proven = this._hasSuccessfulEvidence();
+    const hasSuccess = this._hasSuccessfulEvidence();
+    const hasFailures = this._hasFailedEvidence();
     const summary = this._evidenceSummary();
+    const failedSummary = this._failedSummary();
+
+    // Proven only when there is positive evidence AND no failures.
+    const proven = hasSuccess && !hasFailures;
 
     this._emit("verification_start", { runId, checks: ["evidence"] }, runId);
     if (this._store) this._store.setPhase("verifying");
+
+    let message: string;
+    if (proven) {
+      message = `Evidence collected: ${summary}`;
+    } else if (hasSuccess && hasFailures) {
+      message = `Partial success — some objectives failed: ${failedSummary}. Succeeded: ${summary}`;
+    } else if (hasFailures) {
+      message = `All tool evidence failed: ${failedSummary}`;
+    } else {
+      message = `No successful tool evidence — ${summary}`;
+    }
 
     const check: CheckResult = {
       id: "evidence",
       status: proven ? "success" : "failed",
       success: proven,
       exitCode: proven ? 0 : 1,
-      message: proven
-        ? `Evidence collected: ${summary}`
-        : `No successful tool evidence — ${summary}`,
+      message,
       durationMs: 0,
       runId,
       toolCallId: "",
@@ -109,9 +140,7 @@ export class MissionVerificationGate implements VerificationGateLike {
       status: proven ? "proven" : "failed",
       checks: [check],
       totalDurationMs,
-      message: proven
-        ? `Repository inspection verified: ${summary}`
-        : "Repository inspection could not be verified: no successful tool evidence was collected.",
+      message,
       runId,
       ranChecks: ["evidence"],
       skippedChecks: [],
@@ -175,8 +204,12 @@ export interface MissionEvidenceTracker {
   isReadOnly(): boolean;
   /** True when at least one tool result succeeded. */
   hasSuccessfulEvidence(): boolean;
+  /** True when at least one tool result FAILED. */
+  hasFailedEvidence(): boolean;
   /** Human summary of results. */
   summary(): string;
+  /** Human summary of FAILED results only. */
+  failedSummary(): string;
 }
 
 /**
@@ -243,6 +276,16 @@ export function createMissionEvidenceTracker(
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success);
+    },
+    hasFailedEvidence(): boolean {
+      return results.some((r) => !r.success);
+    },
+    failedSummary(): string {
+      const failed = results.filter((r) => !r.success);
+      if (failed.length === 0) return "";
+      return failed
+        .map((r) => `${r.toolId}: ${r.message.slice(0, 100)}`)
+        .join("; ");
     },
     summary(): string {
       if (results.length === 0) return "no tool evidence collected";

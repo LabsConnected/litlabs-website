@@ -47,12 +47,18 @@ import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
 import { desktopCommand } from "./commands/desktop.js";
+import { loginCommand } from "./commands/login.js";
+import { logoutCommand } from "./commands/logout.js";
+import { whoamiCommand } from "./commands/whoami.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
+import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
+import { executeCommand } from "./lib/command-execution.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
+import { getAuthSession } from "./lib/auth/auth-session.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
@@ -112,12 +118,31 @@ const COMMANDS: Record<string, CommandHandler> = {
   ask: askCommand,
   explain: explainCommand,
   desktop: desktopCommand,
+  login: loginCommand,
+  logout: logoutCommand,
+  whoami: whoamiCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
 /** Commands that require lazy loading (heavy deps like Ink/React).
  *  `shell` is an explicit alias for the same Ink cockpit as bare `litt`. */
 const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
+
+/**
+ * Commands allowed while signed out (no valid user session).
+ *
+ * These commands don't require authentication:
+ *   login    — the auth flow itself
+ *   logout   — clearing credentials (no-op if already signed out)
+ *   whoami   — shows "not signed in" when signed out
+ *   doctor   — system health check (doesn't require auth)
+ *   version  — version info
+ *   help     — help text
+ *
+ * Everything else — including the interactive cockpit — requires a
+ * valid user session. The auth gate enforces this before dispatching.
+ */
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "doctor", "version", "help"]);
 
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
@@ -131,28 +156,30 @@ async function main(): Promise<number> {
 
   // ─── TEMPORARY STARTUP DIAGNOSTIC (provider-routing trace) ───────
   // Proves which code is actually executing: package path, version, and
-  // git commit SHA. Remove once the routing investigation is resolved.
-  try {
-    const { execSync } = await import("node:child_process");
-    const { fileURLToPath } = await import("node:url");
-    const { dirname, resolve } = await import("node:path");
-    const here = dirname(fileURLToPath(import.meta.url));
-    const pkgRoot = resolve(here, "..");
-    let sha = "unknown";
+  // git commit SHA. Gated by LITT_DIAG=1 — quiet by default in production.
+  if (process.env.LITT_DIAG === "1") {
     try {
-      sha = execSync("git rev-parse HEAD", { cwd: pkgRoot, encoding: "utf8" }).trim();
-    } catch { /* not a git repo or git missing */ }
-    let pkgVersion = "unknown";
-    try {
-      const pkgJson = await import(resolve(pkgRoot, "package.json"), { with: { type: "json" } });
-      pkgVersion = pkgJson.default?.version ?? pkgJson.version ?? "unknown";
-    } catch { /* package.json unreadable */ }
-    process.stderr.write(
-      `[litt-diag] executing package: ${pkgRoot}\n` +
-      `[litt-diag] version: ${pkgVersion}  commit: ${sha}\n` +
-      `[litt-diag] OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}  OPENROUTER_API_KEY set: ${!!process.env.OPENROUTER_API_KEY}\n`,
-    );
-  } catch { /* diagnostic must never break startup */ }
+      const { execSync } = await import("node:child_process");
+      const { fileURLToPath } = await import("node:url");
+      const { dirname, resolve } = await import("node:path");
+      const here = dirname(fileURLToPath(import.meta.url));
+      const pkgRoot = resolve(here, "..");
+      let sha = "unknown";
+      try {
+        sha = execSync("git rev-parse HEAD", { cwd: pkgRoot, encoding: "utf8" }).trim();
+      } catch { /* not a git repo or git missing */ }
+      let pkgVersion = "unknown";
+      try {
+        const pkgJson = await import(resolve(pkgRoot, "package.json"), { with: { type: "json" } });
+        pkgVersion = pkgJson.default?.version ?? pkgJson.version ?? "unknown";
+      } catch { /* package.json unreadable */ }
+      process.stderr.write(
+        `[litt-diag] executing package: ${pkgRoot}\n` +
+        `[litt-diag] version: ${pkgVersion}  commit: ${sha}\n` +
+        `[litt-diag] OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}  OPENROUTER_API_KEY set: ${!!process.env.OPENROUTER_API_KEY}\n`,
+      );
+    } catch { /* diagnostic must never break startup */ }
+  }
 
   const args = process.argv.slice(2);
 
@@ -178,13 +205,95 @@ async function main(): Promise<number> {
   const rest = dispatch.rest;
   const mode = dispatch.mode;
 
-  // --remote: dispatch through terminal-server's canonical CommandRouter
-  if (dispatch.useRemote) {
-    if (!REMOTEABLE_COMMANDS.has(command)) {
-      console.error(`--remote is only supported for: ${[...REMOTEABLE_COMMANDS].join(", ")}`);
-      return 1;
+  // ─── Auth gate ──────────────────────────────────────────────────
+  // Commands that require a valid user session are blocked when signed
+  // out. Only login, logout, whoami, doctor, version, and help work
+  // without authentication. The interactive cockpit (bare `litt`,
+  // `litt shell`, `litt cockpit`, `litt tui`) and all runtime/project
+  // commands require authentication.
+  //
+  // LITT_CLERK_TOKEN (temporary acceptance-test mechanism) bypasses the
+  // gate — it's kept only so existing automated tests don't break.
+  //
+  // The CLI ships safe production defaults for the Clerk issuer, OAuth
+  // client_id, and terminal-server URL. Auth is ALWAYS configured for a
+  // normal installed CLI — env overrides are for dev/staging/testing
+  // only. The gate therefore ALWAYS engages (except for LITT_CLERK_TOKEN
+  // test bypass). Absence of env overrides must NOT disable mandatory
+  // authentication.
+  if (
+    !LOGGED_OUT_ALLOWED.has(command) &&
+    !process.env.LITT_CLERK_TOKEN
+  ) {
+    const authSession = getAuthSession();
+    const signedIn = await authSession.isSignedIn();
+
+    if (!signedIn) {
+      // Non-interactive commands: print a clear message and exit
+      if (command !== "cockpit" && command !== "shell" && command !== "tui") {
+        console.error(`${c.red}✗${c.reset} Authentication required.`);
+        console.error(`${c.dim}  Run 'litt login' to sign in, then try again.${c.reset}`);
+        return 1;
+      }
+
+      // Interactive cockpit: render the sign-in-required screen
+      const authState = await authSession.getAuthState();
+      const { render } = await import("ink");
+      const React = await import("react");
+      const { SignInRequired } = await import("./ink/sign-in-required.js");
+      const { CockpitErrorBoundary } = await import("./ink/cockpit-error-boundary.js");
+
+      // Check TTY — Ink requires raw mode on stdin
+      if (!process.stdin.isTTY) {
+        console.error(`${c.red}✗${c.reset} Not signed in.`);
+        console.error(`${c.dim}  Run 'litt login' to sign in.${c.reset}`);
+        if (authState.error) {
+          console.error(`${c.dim}  ${authState.error}${c.reset}`);
+        }
+        return 1;
+      }
+
+      const { waitUntilExit } = render(
+        React.createElement(CockpitErrorBoundary, null,
+          React.createElement(SignInRequired, {
+            error: authState.error,
+            // The gate only runs when auth is configured, so login is always
+            // an available action on this screen.
+            configAvailable: true,
+          }),
+        ),
+      );
+      await waitUntilExit();
+      return 0;
     }
-    return await runRemote(command, rest, mode);
+  }
+
+  // --remote: dispatch through terminal-server's canonical CommandRouter.
+  // Routed via executeCommand() so the fail-closed guarantee lives in ONE
+  // tested function rather than being re-asserted here by hand. On any
+  // remote failure this returns without ever reaching the local handler
+  // resolution below.
+  if (dispatch.useRemote) {
+    const outcome = await executeCommand(command, {
+      useRemote: true,
+      isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
+      remoteExecutor: () => runRemote(command, rest, mode),
+      // Unreachable by contract when useRemote is true. If this ever runs,
+      // the fail-closed guarantee has been broken and we want a loud crash
+      // rather than a silent relocation of the user's command.
+      localExecutor: () => {
+        throw new Error(
+          "fail-closed violation: local executor reached on the --remote path",
+        );
+      },
+      onError: (msg) => {
+        console.error(`${c.red}✗${c.reset} ${msg}`);
+        if (msg.includes("--remote is not supported")) {
+          console.error(`${c.dim}  Supported: ${[...REMOTEABLE_COMMANDS].join(", ")}${c.reset}`);
+        }
+      },
+    });
+    return outcome.exitCode;
   }
 
   // Resolve handler — lazy-load heavy commands (Ink/React) on demand
@@ -221,9 +330,8 @@ async function main(): Promise<number> {
     if (message.includes("OPENROUTER_API_KEY")) {
       console.error(`${c.dim}  Get an API key at https://openrouter.ai and set it:${c.reset}`);
       console.error(`${c.dim}  set OPENROUTER_API_KEY=sk-or-v1-...${c.reset}`);
-    } else if (message.includes("TERMINAL_INTERNAL_SERVICE_KEY")) {
-      console.error(`${c.dim}  --remote requires a terminal-server running with TERMINAL_INTERNAL_SERVICE_KEY set.${c.reset}`);
-      console.error(`${c.dim}  Run without --remote for local execution.${c.reset}`);
+    } else if (message.includes("Clerk token")) {
+      console.error(`${c.dim}  --remote requires authentication. Run 'litt login'.${c.reset}`);
     } else if (message.includes("ENOENT") || message.includes("not found")) {
       console.error(`${c.dim}  The command was not found. Check that it's installed and in your PATH.${c.reset}`);
     }
@@ -254,8 +362,11 @@ async function runRemote(
 ): Promise<number> {
   header(`${command} (remote)`);
   try {
+    // Remote commands execute on terminal-server's filesystem. We do NOT
+    // pass the local project root because the server authorizes cwd against
+    // its own user workspace root. The server will use its configured
+    // user workspace root when no cwd is supplied.
     const response = await dispatchRemote(command, args, {
-      cwd: detectProject().rootDir,
       mode,
     });
 
@@ -288,6 +399,9 @@ async function runRemote(
     console.log(`${c.gray}runId: ${response.runId}${c.reset}`);
     return 0;
   } catch (error) {
+    // Re-throw typed remote failures so executeCommand() classifies them
+    // and reports the reason. Nothing here re-routes to local execution.
+    if (isRemoteUnavailable(error)) throw error;
     fail(error instanceof Error ? error.message : String(error));
     return 1;
   }
@@ -310,6 +424,9 @@ Commands:
   cockpit    Alias for the LiTT shell
   tui        Alias for the LiTT shell
   desktop    Launch the LiTT Desktop (Tauri) GUI application
+  login      Sign in via Clerk OAuth (browser-based PKCE flow)
+  logout     Sign out and clear local credentials
+  whoami     Show the current authenticated identity
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version
   status     Show project + git status (via @litt/agent-core)

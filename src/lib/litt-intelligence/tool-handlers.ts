@@ -200,7 +200,7 @@ export async function handleFilesList(inputs: Record<string, unknown>): Promise<
     return { success: false, error: `Not a directory: ${relPath}` };
   }
 
-  const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".cache", ".turbo", "coverage", ".vercel", "__pycache__", ".pnpm-store"]);
+  const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".cache", ".turbo", "coverage",  "__pycache__", ".pnpm-store"]);
 
   try {
     const entries = readdirSync(fullPath, { withFileTypes: true });

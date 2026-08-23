@@ -15,7 +15,6 @@ export function monitorApplicationErrors(page: Page): string[] {
     "googletagmanager.com",
     "clerk.google.dev", // Clerk dev domain handshake (not an app error)
     "fonts.gstatic.com", // Font loading race conditions
-    "vitals.vercel-insights.com", // Vercel analytics
   ];
 
   const isAllowed = (url: string): boolean =>

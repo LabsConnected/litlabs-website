@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   resolveGitHub,
-  resolveVercel,
-  resolveSupabaseProject,
+    resolveSupabaseProject,
   resolveWorkspaceConnections,
   resolvePlatformServices,
   buildHealthSummary,
@@ -115,61 +114,6 @@ describe("resolveGitHub", () => {
 /*  Vercel resolution                                                  */
 /* ------------------------------------------------------------------ */
 
-describe("resolveVercel", () => {
-  it("shows Live when a project is linked and deployment is ready", () => {
-    const v = resolveVercel({
-      ...emptyData,
-      projects: [
-        {
-          repository_full_name: null,
-          repository_html_url: null,
-          vercel_project_id: "prj_123",
-          vercel_deployment_url: "https://deploy.vercel.app",
-          vercel_production_url: "https://litlabs-website.vercel.app",
-          vercel_status: "ready",
-          sync_status: "synced",
-          sync_error: null,
-        },
-      ],
-    });
-    expect(v.state).toBe("live");
-    expect(v.detail).toBe("https://litlabs-website.vercel.app");
-  });
-
-  it("shows Linked when a project is linked but no live deployment", () => {
-    const v = resolveVercel({
-      ...emptyData,
-      projects: [
-        {
-          repository_full_name: null,
-          repository_html_url: null,
-          vercel_project_id: "prj_123",
-          vercel_deployment_url: null,
-          vercel_production_url: null,
-          vercel_status: null,
-          sync_status: "synced",
-          sync_error: null,
-        },
-      ],
-    });
-    expect(v.state).toBe("linked");
-  });
-
-  it("shows Authorized when an account exists but no project is linked", () => {
-    const v = resolveVercel({
-      ...emptyData,
-      accounts: [
-        { provider: "vercel", provider_account_id: "1", provider_account_name: "my-team", status: "connected", last_connected_at: null, last_error: null },
-      ],
-    });
-    expect(v.state).toBe("authorized");
-  });
-
-  it("shows Not connected when nothing exists", () => {
-    const v = resolveVercel(emptyData);
-    expect(v.state).toBe("not_connected");
-  });
-});
 
 /* ------------------------------------------------------------------ */
 /*  Supabase labeling                                                  */
@@ -208,12 +152,11 @@ describe("resolveSupabaseProject", () => {
 /* ------------------------------------------------------------------ */
 
 describe("resolveWorkspaceConnections", () => {
-  it("returns exactly 3 connections in order: GitHub, Vercel, Supabase", () => {
+  it("returns GitHub and Supabase connections after Vercel removal", () => {
     const ws = resolveWorkspaceConnections(emptyData);
-    expect(ws).toHaveLength(3);
+    expect(ws).toHaveLength(2);
     expect(ws[0].id).toBe("github");
-    expect(ws[1].id).toBe("vercel");
-    expect(ws[2].id).toBe("supabase_project");
+    expect(ws[1].id).toBe("supabase_project");
   });
 });
 
@@ -269,14 +212,13 @@ describe("buildHealthSummary", () => {
     const summary = buildHealthSummary(
       [
         { id: "github", label: "GitHub", category: "Workspace", state: "connected", detail: "ok", lastChecked: now() },
-        { id: "vercel", label: "Vercel", category: "Workspace", state: "not_connected", detail: "no", lastChecked: now() },
-        { id: "supabase_project", label: "Supabase", category: "Workspace", state: "not_connected", detail: "no", lastChecked: now() },
+                { id: "supabase_project", label: "Supabase", category: "Workspace", state: "not_connected", detail: "no", lastChecked: now() },
       ],
       [],
       [{ id: "auth", label: "Authentication", category: "Platform", state: "operational", detail: "ok", lastChecked: now() }],
     );
-    expect(summary.optionalPending).toBe(2);
-    expect(summary.headline).toContain("2 optional integrations need setup");
+    expect(summary.optionalPending).toBe(1);
+    expect(summary.headline).toContain("1 optional integration needs setup");
   });
 
   it("says Platform degraded when a critical service is down", () => {
@@ -311,8 +253,7 @@ describe("buildHealthSummary", () => {
     const summary = buildHealthSummary(
       [
         { id: "github", label: "GitHub", category: "Workspace", state: "connected", detail: "ok", lastChecked: now() },
-        { id: "vercel", label: "Vercel", category: "Workspace", state: "not_connected", detail: "no", lastChecked: now() },
-      ],
+              ],
       [{ id: "gemini", label: "Gemini", category: "AI", state: "healthy", detail: "ok", model: "g", latencyMs: 1, lastChecked: now() }],
       [{ id: "auth", label: "Authentication", category: "Platform", state: "operational", detail: "ok", lastChecked: now() }],
     );

@@ -1043,7 +1043,7 @@ describe("SEC-6.1 — Credential lease enforcement", () => {
         mutating: true,
         readOnly: false,
         requiresCredentials: [
-          { provider: "vercel", scopes: ["deploy"], audience: "vercel.com" },
+          { provider: "github", scopes: ["deploy"], audience: "vercel.com" },
         ],
       },
       handler: async () => ({
@@ -1092,7 +1092,7 @@ describe("SEC-6.1 — Credential lease enforcement", () => {
         mutating: true,
         readOnly: false,
         requiresCredentials: [
-          { provider: "vercel", scopes: ["deploy"], audience: "vercel.com" },
+          { provider: "github", scopes: ["deploy"], audience: "vercel.com" },
         ],
       },
       handler: async () => {

@@ -10,10 +10,12 @@
     "build:all": "npm run build:server && npm run build:worker",
     "start:server": "node dist/server.js",
     "start:worker": "node dist/worker/livekit-agent.js start",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@clerk/backend": "^3.11.4",
+    "@clerk/backend": "^3.16.10",
+    "@clerk/shared": "^4.29.3",
     "@litt/agent-core": "workspace:*",
     "@livekit/agents": "^1.6.2",
     "@livekit/agents-plugin-openai": "^1.6.2",
@@ -30,7 +32,10 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "vitest": "^2.1.8"
   }
 }

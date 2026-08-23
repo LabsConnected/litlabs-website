@@ -24,6 +24,18 @@ vi.mock("socket.io-client", () => ({
   io: vi.fn(() => mockSocket),
 }));
 
+// ─── Auth session mock ───────────────────────────────────────────
+// RuntimeClient calls getAuthSession().getAccessToken() when no
+// explicit clerkToken is provided. Mock it to return null by default
+// so tests don't read the real keychain. Individual tests that need
+// a token use the `terminalToken` constructor option instead.
+vi.mock("../lib/auth/auth-session.js", () => ({
+  getAuthSession: vi.fn(() => ({
+    getAccessToken: vi.fn(async () => null),
+  })),
+  resetAuthSession: vi.fn(),
+}));
+
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
 
@@ -67,9 +79,7 @@ function makeEvent(
 function createClient(): RuntimeClient {
   return new RuntimeClient({
     terminalUrl: "http://127.0.0.1:4001",
-    authSecret: "test-auth-secret-" + "a".repeat(32),
-    internalKey: "test-internal-key-" + "b".repeat(32),
-    userId: "test-user",
+    terminalToken: "test-terminal-jwt-token",
   });
 }
 
@@ -120,13 +130,11 @@ describe("RuntimeClient", () => {
     );
   });
 
-  it("throws if TERMINAL_AUTH_SECRET is not configured", async () => {
+  it("throws if no Clerk token and no terminalToken is configured", async () => {
     const client = new RuntimeClient({
       terminalUrl: "http://127.0.0.1:4001",
-      authSecret: "short",
-      internalKey: "test-internal-key-" + "b".repeat(32),
     });
-    await expect(client.connect()).rejects.toThrow("TERMINAL_AUTH_SECRET");
+    await expect(client.connect()).rejects.toThrow("Not authenticated");
   });
 
   it("notifies connection listeners on connect", async () => {
@@ -394,14 +402,12 @@ describe("RuntimeClient", () => {
     expect(client.getCurrentRunId()).toBe("run_rest_123");
   });
 
-  it("throws if TERMINAL_INTERNAL_SERVICE_KEY is not configured", async () => {
+  it("throws if no Clerk token and no terminalToken for dispatch", async () => {
     const client = new RuntimeClient({
       terminalUrl: "http://127.0.0.1:4001",
-      authSecret: "test-auth-secret-" + "a".repeat(32),
-      internalKey: "short",
     });
 
-    await expect(client.dispatchCommand("check")).rejects.toThrow("TERMINAL_INTERNAL_SERVICE_KEY");
+    await expect(client.dispatchCommand("check")).rejects.toThrow("Not authenticated");
   });
 
   it("fetches state via REST fallback", async () => {
@@ -428,7 +434,7 @@ describe("RuntimeClient", () => {
 
     expect(cancelled).toBe(true);
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:4001/internal/cancel",
+      "http://127.0.0.1:4001/api/cancel",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ runId: "run_cancel_123" }),

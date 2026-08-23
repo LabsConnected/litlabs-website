@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import {
   runAgentLoop,
   planMission,
@@ -46,6 +46,9 @@ import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
+import { matchLocalFastPath } from "../lib/local-fast-lane.js";
+import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
+import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
@@ -58,6 +61,17 @@ import {
 } from "../lib/mission-verification.js";
 import { buildPromptWithContext } from "../lib/context-resolver.js";
 import { getGitState } from "../lib/git-state.js";
+import {
+  shipWorkflow as safeShipWorkflow,
+  createOrSwitchBranch as safeCreateOrSwitchBranch,
+  stageFiles as safeStageFiles,
+  commitStaged as safeCommitStaged,
+  pushBranch as safePushBranch,
+  createDraftPR as safeCreateDraftPR,
+  isProtectedBranch,
+  generateBranchName,
+  isBlockedGitCommand,
+} from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
@@ -435,6 +449,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   const newSession = useCallback(() => {
     store.actions.clearChatTranscript();
     store.actions.clearMission();
+    store.actions.clearToolProgress();
     store.actions.setHoloState("IDLE");
     store.actions.setIsProcessing(false);
     store.actions.setOverlay("none");
@@ -460,32 +475,56 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       act(store, "Ship blocked: verification gate has not proven the work.", "error", "failed", "SHIP");
       return { ok: false, message: "Verification gate not proven — fix failures, then re-open /ship to re-verify before committing." };
     }
-    const gateway = session.getGateway();
     const cwd = session.getCwd();
-    const run = async (args: string[]) => {
-      const r = await gateway.execute({
-        toolId: "project.run",
-        inputs: { command: "git", args },
-        cwd,
-        mode: session.getMode(),
-        identity: CLI_IDENTITY,
-      });
-      if (!r.result.success) throw new Error(r.result.message || `git ${args[0]} failed`);
-      return r;
-    };
+    const gs = getGitState(cwd);
+    if (!gs.isGitRepo) {
+      act(store, "Ship blocked: not a git repository.", "error", "failed", "SHIP");
+      return { ok: false, message: "Not a git repository" };
+    }
+
+    // SAFE STAGE: Collect only the changed files from the porcelain output.
+    // NEVER uses `git add -A`, `git add .`, or `git add --all`.
+    // Unrelated dirty/untracked files are preserved.
+    const changedFiles: string[] = [];
+    for (const line of gs.files) {
+      // Porcelain v1 format: "XY path" where X/Y are status codes
+      // Skip pure untracked files (??) — only stage tracked changes
+      // unless the user explicitly includes them via the ship overlay.
+      if (line.startsWith("??")) continue;
+      const filePath = line.slice(3).trim();
+      if (filePath) changedFiles.push(filePath);
+    }
+
+    if (changedFiles.length === 0) {
+      act(store, "Ship blocked: no tracked changes to commit.", "error", "failed", "SHIP");
+      return { ok: false, message: "No tracked changes to commit" };
+    }
+
     try {
-      await run(["add", "-A"]);
-      await run(["commit", "-m", message]);
-      if (push) await run(["push"]);
-      const gs = getGitState(cwd);
-      store.actions.setWorkspace({
-        gitModified: gs.changed,
-        gitUntracked: gs.untracked,
-        branch: gs.branch ?? store.state.branch,
+      // Use the safe ship workflow — never commits to main, never uses git add -A
+      const result = await safeShipWorkflow({
+        cwd,
+        files: changedFiles,
+        message,
+        push,
+        createPR: false, // V1: PR creation is a separate explicit step
       });
-      act(store, push ? `Shipped: committed + pushed` : `Shipped: committed`, "info", "success", "SHIP");
-      persistSession();
-      return { ok: true, message: push ? `Committed + pushed — ${message}` : `Committed — ${message}` };
+
+      const updatedGs = getGitState(cwd);
+      store.actions.setWorkspace({
+        gitModified: updatedGs.changed,
+        gitUntracked: updatedGs.untracked,
+        branch: updatedGs.branch ?? store.state.branch,
+      });
+
+      if (result.ok) {
+        act(store, push ? `Shipped: committed + pushed (${result.branch})` : `Shipped: committed (${result.branch})`, "info", "success", "SHIP");
+        persistSession();
+        return { ok: true, message: push ? `Committed + pushed — ${message} (${result.branch})` : `Committed — ${message} (${result.branch})` };
+      } else {
+        act(store, `Ship failed: ${result.message}`, "error", "failed", "SHIP");
+        return { ok: false, message: result.message };
+      }
     } catch (err) {
       act(store, `Ship failed: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "SHIP");
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -507,6 +546,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
       store.actions.clearChatTranscript();
+      store.actions.clearToolProgress();
       return;
     }
     if (input === "/help") {
@@ -590,22 +630,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     if (input.startsWith("/branch ")) {
       const name = input.slice(8).trim();
-      const gateway = session.getGateway();
-      try {
-        const result = await gateway.execute({
-          toolId: "project.run",
-          inputs: { command: "git", args: ["switch", "-c", name] },
-          cwd: session.getCwd(),
-          mode: session.getMode(),
-          identity: CLI_IDENTITY,
-        });
-        act(store, result.result.success ? `Branch created + switched: ${name}` : `Branch failed: ${result.result.message}`, result.result.success ? "info" : "error", result.result.success ? "decision" : "failed", "BRANCH");
-        if (result.result.success) {
-          const gs = getGitState(session.getCwd());
-          store.actions.setWorkspace({ branch: gs.branch ?? name });
-        }
-      } catch (err) {
-        act(store, `Branch error: ${err instanceof Error ? err.message : String(err)}`, "error", "failed", "BRANCH");
+      // Use the safe branch creation — blocks protected branch names
+      const branchResult = safeCreateOrSwitchBranch(session.getCwd(), name);
+      act(store, branchResult.ok ? `Branch ${branchResult.created ? "created" : "switched"}: ${branchResult.branch}` : `Branch failed: ${branchResult.message}`, branchResult.ok ? "info" : "error", branchResult.ok ? "decision" : "failed", "BRANCH");
+      if (branchResult.ok) {
+        const gs = getGitState(session.getCwd());
+        store.actions.setWorkspace({ branch: gs.branch ?? name });
       }
       return;
     }
@@ -617,6 +647,33 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // ─── Ship flow ────────────────────────────────────────────────
     if (input === "/ship") {
       store.actions.setOverlay("ship");
+      return;
+    }
+    // ─── Draft PR creation ────────────────────────────────────────
+    if (input === "/pr" || input.startsWith("/pr ")) {
+      const title = input.startsWith("/pr ") ? input.slice(4).trim() : "";
+      const cwd = session.getCwd();
+      const gs = getGitState(cwd);
+      if (!gs.isGitRepo) {
+        act(store, "PR failed: not a git repository", "error", "failed", "PR");
+        return;
+      }
+      if (!gs.branch || isProtectedBranch(gs.branch)) {
+        act(store, `PR failed: on protected branch '${gs.branch}'. Switch to a feature branch first.`, "error", "failed", "PR");
+        return;
+      }
+      const prTitle = title || `Changes from ${gs.branch}`;
+      act(store, `Creating draft PR for ${gs.branch}...`, "info", undefined, "PR");
+      const prResult = safeCreateDraftPR(cwd, {
+        branch: gs.branch,
+        title: prTitle,
+        body: `## Summary\n\n${prTitle}\n\nGenerated with [LiTT](https://litlabs.net)`,
+      });
+      if (prResult.ok) {
+        act(store, `PR ${prResult.created ? "created" : "reused"}: ${prResult.prUrl}`, "info", "success", "PR");
+      } else {
+        act(store, `PR failed: ${prResult.message}`, "error", "failed", "PR");
+      }
       return;
     }
     // ─── Runtime details ──────────────────────────────────────────
@@ -911,6 +968,124 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     //   mission  — tasks that require tools/execution.
     //              Starts the full agent lifecycle with progress + steps.
     //   command  — slash commands (handled above)
+    const projectRoot = session.getCwd();
+
+    // ─── Local Fast Lane — deterministic local queries (no model) ───────
+    // A NARROW, explicit fast-path that answers a fixed set of canonical
+    // phrasings from local runtime state BEFORE model routing. No model
+    // request, no provider adapter, no mission, no VerificationGate.
+    // Ambiguous wording falls through to the normal chat/mission path.
+    // See lib/local-fast-lane.ts for the phrase set + truthfulness rules.
+    const local = matchLocalFastPath(input, {
+      cwd: projectRoot,
+      projectName,
+      repoName: basename(projectRoot),
+      mode: store.state.mode,
+      // Sync the header with the freshly resolved HEAD state so the
+      // cockpit stays truthful after external branch switches AND
+      // detached-HEAD checkouts. The SAME resolved state feeds both
+      // the response and the header — they can never disagree.
+      onHeadResolved: (state) => {
+        if (state.kind === "branch") {
+          if (state.branch !== store.state.branch) {
+            store.actions.setBranch(state.branch);
+          }
+        } else if (state.kind === "detached") {
+          // Use the same "DETACHED · shortSha" display form as
+          // refreshProjectBranch so the header is consistent.
+          const display = `DETACHED · ${state.commit}`;
+          if (display !== store.state.branch) {
+            store.actions.setBranch(display);
+          }
+        } else if (state.kind === "not-git") {
+          // The old branch must NOT remain displayed — it is no longer
+          // truthful. Clear it so the status bar doesn't show a stale
+          // branch from a previous repository context.
+          if (store.state.branch !== "unknown" && store.state.branch !== "(not a git repo)") {
+            store.actions.setBranch("(not a git repo)");
+          }
+        }
+      },
+    });
+    if (local) {
+      // Local perf trace — truthful labels only. The Local Fast Lane runs
+      // BEFORE classifyIntent(), so the trace MUST NOT claim
+      // "intent_classified" — that classifier is intentionally bypassed.
+      // The truthful local boundaries are:
+      //   submit → local_match → finalize
+      // No provider/model marks are emitted because no provider or model
+      // is involved.
+      const localPerf = PerfTrace.start("local");
+      localPerf.mark("local_match");
+
+      // Bare exit/quit — exit locally without calling the model.
+      if (local.kind === "exit") {
+        localPerf.mark("finalize");
+        localPerf.end("local");
+        // Render the farewell into the transcript before exiting so the
+        // turn is not a missing-content gap.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: local.text,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "local",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_local`,
+          ts: Date.now(),
+          type: "info",
+          tag: "LOCAL",
+          text: truncateActivity(local.text, 60),
+        });
+        onExit?.();
+        return;
+      }
+
+      // Persist the user message to the chat transcript (rendered once).
+      store.actions.addChatMessage({
+        role: "user",
+        content: input,
+        ts: Date.now(),
+        status: "complete",
+      });
+      // Surface the local query in the operator feed.
+      store.actions.addActivity({
+        id: `act_${Date.now()}_chat`,
+        ts: Date.now(),
+        type: "agent.chat",
+        tag: "LOCAL",
+        text: truncateActivity(input, 40),
+        fullText: input,
+      });
+      // Assistant answer — finalized immediately as complete. servedModel
+      // is "local" so the routing footer truthfully shows no provider.
+      store.actions.addChatMessage({
+        role: "assistant",
+        content: local.text,
+        ts: Date.now(),
+        status: "complete",
+        servedModel: "local",
+      });
+      store.actions.addActivity({
+        id: `act_${Date.now()}_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "LOCAL",
+        text: truncateActivity(local.text, 60),
+      });
+      localPerf.mark("finalize");
+      localPerf.end("local");
+      persistSession();
+      return;
+    }
+
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
     // P0 perf instrumentation — no-op unless LITT_PERF=1.
@@ -921,7 +1096,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // The transcript shows the original input (@tokens intact); the
     // MODEL receives the resolved context prompt. Unresolvable tokens
     // (emails, stray @s) stay in the prompt untouched.
-    const projectRoot = session.getCwd();
     const contextResult = buildPromptWithContext(input, projectRoot, {
       terminalLog: terminalLog.current,
       errorLog: errorLog.current,
@@ -932,6 +1106,171 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // so neither path's `intent_classified → route` span silently bundles
     // context resolution into routing latency.
     perf.mark("context_resolved");
+
+    // ─── READ lane — bounded read-only project inspection ───────────
+    // Sits between LOCAL (deterministic fast lane) and MISSION (full
+    // agent lifecycle). Executes canonical read-only tools through the
+    // gateway, then optionally makes one synthesis model call to format
+    // results. Does NOT create a Mission, invoke the planner, or run
+    // VerificationGate.
+    if (intent === "read") {
+      const readMatch = matchReadTools(input);
+      if (readMatch) {
+        perf.mark("read_match");
+
+        // Refresh branch (same as CHAT path — keeps header truthful).
+        // Skip if the read match already includes project.branch — the tool
+        // will read the branch itself, so a separate refreshBranch call is
+        // redundant (eliminates one duplicate git read).
+        const hasBranchTool = readMatch.calls.some((c) => c.toolId === "project.branch");
+        if (!hasBranchTool) {
+          refreshBranch(projectRoot, store.state.branch, store.actions.setBranch);
+        }
+
+        // Surface the read query in the operator feed.
+        store.actions.addActivity({
+          id: `act_${Date.now()}_read`,
+          ts: Date.now(),
+          type: "agent.chat",
+          tag: "READ",
+          text: truncateActivity(input, 40),
+          fullText: input,
+        });
+        // Persist user message to the chat transcript.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.setIsProcessing(true);
+        store.actions.startBusy();
+        try {
+          const gateway = session.getGateway();
+          const cwd = session.getCwd();
+
+          // Execute read tools in parallel through the canonical gateway.
+          for (const call of readMatch.calls) {
+            perf.mark(`tool_start:${call.toolId}`);
+          }
+          const readResults = await executeReadTools(
+            readMatch.calls,
+            async (toolId, args) => {
+              const r = await gateway.execute({
+                toolId,
+                inputs: args,
+                cwd,
+                mode: session.getMode(),
+                identity: CLI_IDENTITY,
+              });
+              return r.result;
+            },
+          );
+          for (const r of readResults) {
+            perf.mark(`tool_end:${r.toolId}`);
+            // Surface truthful tool activity.
+            act(
+              store,
+              `${r.label}: ${r.result.success ? r.result.message : r.result.message}`,
+              r.result.success ? "info" : "error",
+              r.result.success ? "success" : "failed",
+              "READ",
+            );
+          }
+
+          // ─── Optional synthesis ───
+          if (readMatch.needsSynthesis && hasOpenRouterKey()) {
+            perf.mark("synthesis_start");
+            const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
+            const routed = modelRuntime.route(
+              store.state.routingMode,
+              store.state.selectedModel,
+              synthesisPrompt,
+            );
+            store.actions.setActiveModel(routed.label);
+            const adapter = resolveProviderAdapter(routed);
+            store.actions.setActiveProvider(adapter.providerId);
+            // Start the assistant message for streaming synthesis.
+            store.actions.addChatMessage({
+              role: "assistant",
+              content: "",
+              ts: Date.now(),
+              status: "streaming",
+              servedModel: routed.label,
+            });
+            let synthesized = "";
+            const modelResult = await adapter.stream(
+              [{ role: "user", content: synthesisPrompt }],
+              (event) => {
+                if (event.type === "delta") {
+                  synthesized += event.text;
+                  perf.mark("first_token");
+                  store.actions.appendAssistantDelta(event.text);
+                }
+              },
+            );
+            perf.mark("finalize");
+            store.actions.finalizeAssistantMessage({
+              content: synthesized || modelResult.content || "No synthesis produced.",
+              status: "complete",
+              servedModel: routed.label,
+            });
+          } else {
+            // No synthesis — format raw tool results as the answer.
+            const rawAnswer = readResults.map((r) => {
+              const d = r.result.data;
+              const lines = [`${r.label}:`];
+              if (d && typeof d === "object") {
+                for (const [k, v] of Object.entries(d)) {
+                  lines.push(`  ${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);
+                }
+              } else {
+                lines.push(`  ${r.result.message}`);
+              }
+              return lines.join("\n");
+            }).join("\n\n");
+            perf.mark("finalize");
+            store.actions.addChatMessage({
+              role: "assistant",
+              content: rawAnswer,
+              ts: Date.now(),
+              status: "complete",
+              servedModel: "read-tools",
+            });
+          }
+
+          store.actions.addActivity({
+            id: `act_${Date.now()}_done`,
+            ts: Date.now(),
+            type: "info",
+            tag: "READ",
+            text: `Read complete — ${readMatch.summary}`,
+          });
+        } catch (err) {
+          const errText = err instanceof Error ? err.message : String(err);
+          perf.mark("finalize");
+          store.actions.finalizeAssistantMessage({
+            content: `Read failed: ${errText}`,
+            status: "error",
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}_err`,
+            ts: Date.now(),
+            type: "error",
+            tag: "READ",
+            text: `Read error: ${errText}`,
+          });
+        } finally {
+          store.actions.setIsProcessing(false);
+          store.actions.stopBusy();
+          perf.end("read");
+          persistSession();
+        }
+        return;
+      }
+      // If readMatch is null, fall through to CHAT (shouldn't happen
+      // if intent classification is correct, but defensive).
+    }
 
     if (hasOpenRouterKey()) {
       // CHAT intent — casual response, no mission lifecycle.
@@ -1181,6 +1520,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
       store.actions.startMission(input);
       store.actions.startBusy();
+      store.actions.startToolProgressMission();
       store.actions.setHoloState("UNDERSTANDING");
       // ─── Git BASELINE at mission start (dogfood P0) ──────────────
       // The repo's pre-existing dirty files are recorded BEFORE any
@@ -1213,6 +1553,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const gateway = session.getGateway();
         const tools = gateway.getTools();
         const agentStore = session.getStore();
+
+        // ─── Track mission total duration ───
+        // The mission lifecycle spans: creation → planning → execution →
+        // verification. The agent loop's result.durationMs only covers
+        // execution (model + tool calls). The displayed duration must
+        // reflect the FULL mission lifecycle, not just the agent loop.
+        const missionStartTime = Date.now();
 
         // ─── Create a REAL Mission in the canonical RuntimeStore ───
         const mission = await agentStore.createMission({
@@ -1305,58 +1652,100 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // BEFORE any tool runs. Tools then execute UNDER an existing
         // semantic step — they do NOT define the step. One step may
         // cover many tool calls; one tool may serve many steps.
-        store.actions.setHoloState("UNDERSTANDING");
-        store.actions.addActivity({
-          id: `act_${Date.now()}_plan`,
-          ts: Date.now(),
-          type: "info",
-          tag: "PLAN",
-          text: "Planning mission steps",
-        });
-        // Semantic planning boundary — planMission may call the model to
-        // produce steps. Without this mark the planning round is hidden
-        // inside the provider_ready → tool_start span. (plan_first_token
-        // is not emitted: planMission does not stream deltas to the
-        // controller, so a per-token mark would require architecture
-        // changes — out of scope for this instrumentation pass.)
-        perf.mark("plan_start");
+        //
+        // ─── Smart planning — skip for simple missions ───
+        // Simple missions (single-action, bounded scope) skip the
+        // ~2.1s planning round and go directly to execution with a
+        // default single step. Complex missions use the full planner.
+        const complexity = classifyMissionComplexity(input);
+        let plan: { source: string; fallbackDomain?: string };
+        let plannedSteps: Array<{ id: string; title: string; allowedActionScope: string[] }>;
 
-        const { plan, steps: plannedSteps } = await planMission({
-          model,
-          store: agentStore,
-          goal: input,
-          projectContext: {
-            name: projectName ?? "unnamed",
-            root: projectRoot,
-            branch: freshBranch ?? branch ?? "unknown",
-          },
-        });
-        perf.mark("plan_end");
-
-        store.actions.addActivity({
-          id: `act_${Date.now()}_plansteps`,
-          ts: Date.now(),
-          type: "info",
-          tag: "PLAN",
-          text: `Plan (${plan.source}${plan.fallbackDomain ? ` · ${plan.fallbackDomain}` : ""}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
-        });
-
-        // Fallback plans are unproven (the model failed to plan) — make
-        // the safety posture explicit in the activity feed.
-        if (plan.source === "fallback") {
-          const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
-          const hasMutationStep = plannedSteps.some((s) =>
-            s.allowedActionScope.some((scope) => MUTATION_SCOPES.has(scope)),
-          );
+        if (shouldSkipPlanning(input)) {
+          // Simple mission — skip planning, create a default step.
+          perf.mark("plan_skipped");
+          store.actions.setHoloState("UNDERSTANDING");
           store.actions.addActivity({
-            id: `act_${Date.now()}_planfallback`,
+            id: `act_${Date.now()}_plan`,
             ts: Date.now(),
             type: "info",
             tag: "PLAN",
-            text: hasMutationStep
-              ? "Fallback plan — mutation steps are approval-gated"
-              : "Fallback plan is read-only — no automatic mutations",
+            text: `Direct execution (simple mission) — skipping planning round`,
           });
+
+          // Create a single default step on the mission.
+          const missionNow = agentStore.getMission();
+          if (missionNow) {
+            await agentStore.addMissionStep({
+              title: input.slice(0, 80),
+              description: input,
+              allowedActionScope: ["act"],
+            });
+          }
+          plan = { source: "skip", fallbackDomain: undefined };
+          const m = agentStore.getMission();
+          plannedSteps = (m?.steps ?? []).map((s) => ({
+            id: s.id,
+            title: s.title,
+            allowedActionScope: s.allowedActionScope,
+          }));
+        } else {
+          // Complex mission — use full semantic planning.
+          store.actions.setHoloState("UNDERSTANDING");
+          store.actions.addActivity({
+            id: `act_${Date.now()}_plan`,
+            ts: Date.now(),
+            type: "info",
+            tag: "PLAN",
+            text: "Planning mission steps",
+          });
+          // Semantic planning boundary — planMission may call the model to
+          // produce steps. Without this mark the planning round is hidden
+          // inside the provider_ready → tool_start span. (plan_first_token
+          // is not emitted: planMission does not stream deltas to the
+          // controller, so a per-token mark would require architecture
+          // changes — out of scope for this instrumentation pass.)
+          perf.mark("plan_start");
+
+          const planResult = await planMission({
+            model,
+            store: agentStore,
+            goal: input,
+            projectContext: {
+              name: projectName ?? "unnamed",
+              root: projectRoot,
+              branch: freshBranch ?? branch ?? "unknown",
+            },
+          });
+          plan = planResult.plan;
+          plannedSteps = planResult.steps as Array<{ id: string; title: string; allowedActionScope: string[] }>;
+          perf.mark("plan_end");
+
+          store.actions.addActivity({
+            id: `act_${Date.now()}_plansteps`,
+            ts: Date.now(),
+            type: "info",
+            tag: "PLAN",
+            text: `Plan (${plan.source}${plan.fallbackDomain ? ` · ${plan.fallbackDomain}` : ""}): ${plannedSteps.length} steps — ${plannedSteps.map((s) => s.title).join(" → ")}`,
+          });
+
+          // Fallback plans are unproven (the model failed to plan) — make
+          // the safety posture explicit in the activity feed.
+          if (plan.source === "fallback") {
+            const MUTATION_SCOPES = new Set(["repair", "implement", "act"]);
+            const hasMutationStep = plannedSteps.some((s) =>
+              s.allowedActionScope.some((scope) => MUTATION_SCOPES.has(scope)),
+            );
+            store.actions.addActivity({
+              id: `act_${Date.now()}_planfallback`,
+              ts: Date.now(),
+              type: "info",
+              tag: "PLAN",
+              text: hasMutationStep
+                ? "Fallback plan — mutation steps are approval-gated"
+                : "Fallback plan is read-only — no automatic mutations",
+            });
+          }
         }
 
         // The semantic steps now exist on the canonical mission BEFORE
@@ -1420,7 +1809,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             emitter: (event) => session.emitAgentEvent(event),
             isReadOnly: evidenceTracker.isReadOnly,
             hasSuccessfulEvidence: evidenceTracker.hasSuccessfulEvidence,
+            hasFailedEvidence: evidenceTracker.hasFailedEvidence,
             evidenceSummary: evidenceTracker.summary,
+            failedSummary: evidenceTracker.failedSummary,
           }),
           // ─── Wire the EscalationHook into the agent loop ───
           // The mission id + model id + resolver let the loop track
@@ -1748,13 +2139,27 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
 
         // ─── Mission completion — driven by VerificationGate, not model ───
-        const seconds = (result.durationMs / 1000).toFixed(1);
+        // Display the FULL mission duration (creation → verification),
+        // not just the agent loop duration. The agent loop's
+        // result.durationMs only covers model+tool execution; the
+        // mission total includes planning, mission creation, and
+        // verification gate time.
+        const missionTotalMs = Date.now() - missionStartTime;
+        const agentLoopMs = result.durationMs;
+        const seconds = (missionTotalMs / 1000).toFixed(1);
+        const agentSeconds = (agentLoopMs / 1000).toFixed(1);
         if (missionComplete) {
           // Read-only inspection missions: the plan steps (inspect →
           // verify → report) are satisfied by the collected evidence +
           // the delivered answer. Mark them passed so the canonical
           // mission can honestly reach "complete" instead of stalling
           // at "verifying" (which would resurrect on restart).
+          //
+          // IMPORTANT: only mark steps complete when there are NO failed
+          // objectives. If any tool failed (e.g., weather lookup failed
+          // while repo inspection succeeded), the gate returns
+          // proven=false and this branch is not reached — the mission
+          // fails honestly with a truthful partial-success message.
           if (evidenceTracker.isReadOnly()) {
             await markInspectionStepsComplete(
               agentStore,
@@ -1768,6 +2173,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("COMPLETE");
           store.actions.updateMissionState("COMPLETE");
           store.actions.setMissionRuntimeProven(true);
+          store.actions.completeToolProgressMission();
           settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
@@ -1775,7 +2181,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             ts: Date.now(),
             type: "agent.complete",
             tag: "DONE",
-            text: `Mission verified · ${seconds}s`,
+            text: `Mission verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} completed with runtime verification.\n${verificationSummary}`,
           });
         } else {
@@ -1786,6 +2192,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED");
           store.actions.setMissionRuntimeProven(false);
+          store.actions.failToolProgressMission();
           settled = true;
           store.actions.stopBusy();
           store.actions.addActivity({
@@ -1793,7 +2200,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             ts: Date.now(),
             type: "agent.stopped",
             tag: "FAIL",
-            text: `Mission not verified · ${seconds}s`,
+            text: `Mission not verified · ${seconds}s${agentSeconds !== seconds ? ` (agent ${agentSeconds}s)` : ""}`,
             fullText: `Mission ${mission.id} could not be verified.\nAgent termination: ${result.termination}\n${verificationSummary}`,
           });
         }
@@ -1820,6 +2227,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
+        store.actions.failToolProgressMission();
         settled = true;
         store.actions.stopBusy();
         // Fail the canonical mission if one was created
@@ -1837,6 +2245,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           store.actions.stopBusy();
           store.actions.setHoloState("FAILED");
           store.actions.updateMissionState("FAILED");
+          store.actions.failToolProgressMission();
         }
       }
       perf.end("mission");

@@ -2,18 +2,28 @@
  * Header — the one-line LiTT brand band.
  *
  * ```
- *   ⚡ LiTT                                      LOCAL
+ *   ⚡ LiTT                              ● LOCAL  ● REMOTE
+ *   ⚡ LiTT                    ● SIGNED OUT
+ *   ⚡ LiTT            ● LOCAL · user@email.com
+ *   ⚡ LiTT            ● REMOTE · user@email.com
+ *   ⚡ LiTT            ● REMOTE↻ · user@email.com
  * ```
  *
  * The header ONLY brands the surface. Project, branch, model, and
  * runtime state live in the status bar — never duplicated. The LOCAL
- * indicator is the single state dot (muted; the status bar owns the
- * details). On narrow terminals the indicator drops off.
+ * and REMOTE indicators are independent truth sources — LOCAL is always
+ * available (RuntimeSession), REMOTE reflects the actual transport
+ * connection state to terminal-server. On narrow terminals the
+ * indicators drop off.
+ *
+ * Auth state (email) is shown when the user is signed in. When signed
+ * out, a SIGNED OUT indicator replaces the runtime indicators.
  */
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
+import { deriveTransport } from "../lib/transport-projection.js";
 
 export interface HeaderProps {
   project: string;
@@ -29,27 +39,86 @@ export interface HeaderProps {
   localRuntime: string;
   remoteRuntime: string;
   mode: string;
+  /** Auth email — shown when signed in (null when signed out or unknown). */
+  authEmail?: string | null;
+  /** Whether the user is signed in. When false, shows SIGNED OUT. */
+  signedIn?: boolean;
   /** Compact mode for small terminals (ignored — the header is always one line). */
   compact?: boolean;
 }
 
 export function Header({
   localRuntime,
+  remoteRuntime,
+  authEmail,
+  signedIn,
 }: HeaderProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
 
-  const localIcon = localRuntime === "ready" ? "●" : localRuntime === "error" ? "✗" : "○";
-  const localColor = localRuntime === "ready" ? COLORS.success
-    : localRuntime === "error" ? COLORS.error : COLORS.warning;
-  const localLabel = localRuntime === "ready" ? "LOCAL"
-    : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+  // ─── SIGNED OUT state — takes priority over runtime indicators ───
+  // When signed out, the header shows ● SIGNED OUT instead of LOCAL/REMOTE.
+  // This is the truthful state: the cockpit is only mounted after auth,
+  // but this covers the edge case where auth state changes during a session.
+  if (signedIn === false) {
+    return (
+      <Box justifyContent="space-between">
+        <Text bold color={COLORS.brand}>⚡ LiTT</Text>
+        {width >= 50 && (
+          <Text color={COLORS.error}>● SIGNED OUT</Text>
+        )}
+      </Box>
+    );
+  }
+
+  // ─── Transport projection (SHARED with the status bar) ────────────
+  // Both surfaces render from this ONE derivation, so the header and the
+  // footer cannot assert different transports at the same moment.
+  const transport = deriveTransport({ localRuntime, remoteRuntime, signedIn });
+
+  // Secondary indicator: local TOOL availability. Labelled TOOLS, not
+  // LOCAL — it reports whether local tooling is ready, which is true
+  // regardless of whether execution is happening remotely.
+  const localIcon = transport.footerSeverity === "ok" ? "●"
+    : transport.footerSeverity === "error" ? "✗" : "○";
+  const localColor = transport.footerSeverity === "ok" ? COLORS.success
+    : transport.footerSeverity === "error" ? COLORS.error : COLORS.warning;
+  const localLabel = transport.footerLabel;
+
+  // ─── Primary indicator: the ACTUAL execution path ─────────────────
+  // REMOTE is claimed only on an established connection; connecting,
+  // reconnecting and error render distinct labels.
+  const showRemote = transport.showRemote;
+  const remoteIcon = transport.remoteActive ? "●"
+    : transport.headerSeverity === "error" ? "✗" : "○";
+  const remoteColor = transport.headerSeverity === "ok" ? COLORS.success
+    : transport.headerSeverity === "error" ? COLORS.error : COLORS.warning;
+  const remoteLabel = transport.headerLabel;
+
+  // ─── Email suffix — shown when signed in (e.g. "· user@email.com") ──
+  // Truncated on narrow terminals to avoid wrapping.
+  const emailSuffix = authEmail
+    ? ` · ${authEmail.length > 25 ? authEmail.slice(0, 22) + "…" : authEmail}`
+    : "";
+  const showEmail = width >= 70 && !!authEmail;
+
+  // Build the right-side indicator block
+  // Priority: REMOTE (if connected/connecting) > LOCAL
+  // Email is appended to whichever indicator is shown
+  const primaryIndicator = showRemote
+    ? <Text color={remoteColor} dimColor={remoteRuntime === "connected"}>{remoteIcon} {remoteLabel}{showEmail && emailSuffix}</Text>
+    : <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}{showEmail && emailSuffix}</Text>;
 
   return (
     <Box justifyContent="space-between">
       <Text bold color={COLORS.brand}>⚡ LiTT</Text>
-      {width >= 60 && (
-        <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
+      {width >= 50 && (
+        <Box gap={2}>
+          {primaryIndicator}
+          {showRemote && width >= 80 && (
+            <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
+          )}
+        </Box>
       )}
     </Box>
   );

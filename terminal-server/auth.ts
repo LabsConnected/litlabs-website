@@ -16,12 +16,62 @@ function sign(encodedPayload: string, secret: string): string {
   return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
 }
 
+/**
+ * Mint a short-lived terminal JWT (server-side only).
+ *
+ * This is called by the /api/token-exchange endpoint after verifying
+ * a Clerk token and authorizing the workspace/project. The client
+ * NEVER calls this — TERMINAL_AUTH_SECRET stays server-side.
+ *
+ * @param userId  Verified Clerk user ID (from the verified Clerk token)
+ * @param ttlSec  Token lifetime in seconds (default 300 = 5 minutes)
+ * @param claims  Optional authorized workspace/project claims
+ * @returns Signed terminal JWT string
+ */
+export function mintTerminalToken(
+  userId: string,
+  ttlSec = 300,
+  claims?: {
+    workspaceId?: string;
+    projectId?: string;
+    cwd?: string;
+  },
+): string {
+  const secret = process.env.TERMINAL_AUTH_SECRET ?? "";
+  if (secret.length < 32) throw new Error("Terminal authentication is not configured");
+  if (!userId || typeof userId !== "string") throw new Error("userId is required");
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload: TerminalTokenPayload = {
+    sub: userId,
+    aud: TOKEN_AUDIENCE,
+    iat: now,
+    exp: now + ttlSec,
+  };
+  if (claims?.workspaceId) payload.wid = claims.workspaceId;
+  if (claims?.projectId) payload.pid = claims.projectId;
+  if (claims?.cwd) payload.cwd = claims.cwd;
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = sign(encodedPayload, secret);
+  return `${encodedPayload}.${signature}`;
+}
+
 export function verifyTerminalToken(token: unknown): TerminalTokenPayload {
   const secret = process.env.TERMINAL_AUTH_SECRET ?? "";
 
-  // Development mode: accept "dev-" prefixed unsigned tokens when secret is not configured
-  // This allows local Desktop/TUI development without requiring full auth setup
-  if (typeof token === "string" && token.startsWith("dev-")) {
+  // Development mode: accept "dev-" prefixed unsigned tokens ONLY when:
+  //   1. TERMINAL_AUTH_SECRET is not configured (local dev), AND
+  //   2. NODE_ENV is not "production" (hard-disable in production)
+  // This allows local Desktop/TUI development without requiring full
+  // auth setup, but is hard-blocked in production — no unsigned dev
+  // tokens can ever authenticate against a production server.
+  const isProduction = process.env.NODE_ENV === "production";
+  if (
+    !isProduction &&
+    secret.length < 32 &&
+    typeof token === "string" &&
+    token.startsWith("dev-")
+  ) {
     const payload = parseTokenPayload(token, "dev-");
     if (payload) return payload;
     // Fall through to error if dev token is malformed

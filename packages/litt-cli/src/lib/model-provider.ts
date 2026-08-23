@@ -445,10 +445,14 @@ export class OpenRouterModelProvider implements ModelProvider {
       const state = { emittedDelta: false };
       if (i > 0) {
         // Surfaced (not silent) — consistent with the [litt-diag] pattern.
-        process.stderr.write(
-          `[litt-diag][OR-CREDIT-RETRY] insufficient credits for max_tokens=${ladder[i - 1]} ` +
-          `→ retrying at max_tokens=${attemptMax} (step ${i + 1}/${ladder.length})\n`,
-        );
+        // Gated by LITT_DIAG=1 for production quietness; the retry itself
+        // is always attempted regardless of diagnostic visibility.
+        if (process.env.LITT_DIAG === "1") {
+          process.stderr.write(
+            `[litt-diag][OR-CREDIT-RETRY] insufficient credits for max_tokens=${ladder[i - 1]} ` +
+            `→ retrying at max_tokens=${attemptMax} (step ${i + 1}/${ladder.length})\n`,
+          );
+        }
       }
       try {
         return await this.streamOnce(messages, emit, attemptMax, state);
@@ -503,11 +507,13 @@ export class OpenRouterModelProvider implements ModelProvider {
     }
 
     try {
-      // ─── TEMPORARY DIAGNOSTIC (OpenRouter fetch) ─────────────────
-      process.stderr.write(
-        `[litt-diag][FETCH-OR] providerId=openrouter host=openrouter.ai ` +
-        `model=${this._model} max_tokens=${maxTokens}\n`,
-      );
+      // ─── DIAGNOSTIC (OpenRouter fetch) — gated by LITT_DIAG=1 ───
+      if (process.env.LITT_DIAG === "1") {
+        process.stderr.write(
+          `[litt-diag][FETCH-OR] providerId=openrouter host=openrouter.ai ` +
+          `model=${this._model} max_tokens=${maxTokens}\n`,
+        );
+      }
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -815,13 +821,15 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (this._idleStallMs > 0) armStallTimer();
 
     try {
-      // ─── TEMPORARY DIAGNOSTIC (native OpenAI-compatible fetch) ───
+      // ─── DIAGNOSTIC (native OpenAI-compatible fetch) — gated by LITT_DIAG=1 ───
       let diagHost = this._endpoint;
       try { diagHost = new URL(this._endpoint).host; } catch { /* keep endpoint */ }
-      process.stderr.write(
-        `[litt-diag][FETCH-NATIVE] providerId=${this.providerId} host=${diagHost} ` +
-        `model=${this._model} max_tokens=${this._maxTokens}\n`,
-      );
+      if (process.env.LITT_DIAG === "1") {
+        process.stderr.write(
+          `[litt-diag][FETCH-NATIVE] providerId=${this.providerId} host=${diagHost} ` +
+          `model=${this._model} max_tokens=${this._maxTokens}\n`,
+        );
+      }
       const response = await fetch(this._endpoint, {
         method: "POST",
         headers: {

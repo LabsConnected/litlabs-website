@@ -61,10 +61,34 @@ export function isDownArrow(key: KeyInfo): boolean {
   return key.downArrow === true;
 }
 
-/** Is this Backspace or Delete? */
-export function isBackspace(key: KeyInfo): boolean {
-  return key.backspace === true || key.delete === true
-    || (key as { delete?: boolean }).delete === true;
+/**
+ * Raw bytes that mean "erase the character before the caret".
+ *   0x7F (DEL) — what a physical Backspace sends on Windows Terminal,
+ *                macOS Terminal, iTerm2 and every xterm-family terminal.
+ *   0x08 (BS)  — what conhost/Ctrl+H and some remote/serial sessions send.
+ */
+const BACKSPACE_BYTES = new Set(["\u007f", "\b"]);
+
+/**
+ * Is this Backspace or Delete?
+ *
+ * Ink classifies both 0x7F and 0x08 as `key.backspace`, and `ESC [ 3 ~`
+ * as `key.delete` — so the key flags are the primary signal.
+ *
+ * The optional `input` is a deliberate second line of defense. `key`
+ * alone means we are fully at the mercy of Ink's parser: if a chunk ever
+ * reaches us unclassified (an unrecognized terminal, a partially-parsed
+ * escape chunk, a future Ink change), every backspace becomes a silent
+ * no-op and the composer simply stops erasing — the exact failure this
+ * function exists to prevent. Matching the raw byte too costs nothing
+ * and makes that failure mode unreachable.
+ *
+ * The length-1 guard keeps pasted text that happens to contain a DEL
+ * byte from being mistaken for a keypress.
+ */
+export function isBackspace(key: KeyInfo, input?: string): boolean {
+  if (key.backspace === true || key.delete === true) return true;
+  return input !== undefined && input.length === 1 && BACKSPACE_BYTES.has(input);
 }
 
 /** Is this a Ctrl+key combination? */

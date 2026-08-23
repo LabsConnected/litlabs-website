@@ -17,6 +17,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync, existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 export interface GitState {
   /** Whether the cwd is inside a git work tree. */
@@ -35,6 +37,141 @@ export interface GitState {
   files: string[];
   /** Raw `git status --porcelain=v1` output (trimmed). */
   porcelain: string;
+}
+
+// ─── Fresh branch via .git/HEAD filesystem read ───────────────────
+//
+// Reads the current branch directly from Git's metadata without
+// spawning a git subprocess. This is a filesystem read (~1ms) vs
+// a subprocess (~100-200ms), and it is ALWAYS fresh — the file is
+// updated by `git switch`, `git checkout`, `git pull`, etc.
+//
+// Handles:
+//   - normal branch:  "ref: refs/heads/feature/a" → "feature/a"
+//   - detached HEAD:  "a1b2c3d..." (40 hex chars) → null
+//   - worktree:       .git is a file with "gitdir: /path/to/.git/worktrees/xxx"
+//                     → follow indirection, read HEAD from the real gitdir
+//   - non-git dir:    no .git file or directory → null
+//   - missing/locked: any read error → null (caller falls back to subprocess)
+
+/**
+ * Resolve the `.git` directory for a working directory.
+ * Handles worktrees where `.git` is a file containing `gitdir: /path`.
+ * Returns the path to the actual gitdir, or null if not a git repo.
+ */
+function resolveGitDir(cwd: string): string | null {
+  const dotGit = join(cwd, ".git");
+
+  // .git doesn't exist → not a git repo (or we're in a subdirectory)
+  if (!existsSync(dotGit)) {
+    // Walk up to find .git (we might be in a subdirectory of the repo)
+    let dir = resolve(cwd);
+    for (let i = 0; i < 20; i++) {
+      const parent = join(dir, ".git");
+      if (existsSync(parent)) {
+        return resolveGitDirEntry(parent);
+      }
+      const parentDir = resolve(dir, "..");
+      if (parentDir === dir) break; // reached filesystem root
+      dir = parentDir;
+    }
+    return null;
+  }
+
+  return resolveGitDirEntry(dotGit);
+}
+
+/**
+ * Given a `.git` path (file or directory), resolve to the actual gitdir.
+ */
+function resolveGitDirEntry(dotGit: string): string | null {
+  try {
+    const stat = statSync(dotGit);
+    if (stat.isDirectory()) {
+      return dotGit;
+    }
+
+    // .git is a file → worktree or submodule. Read the gitdir pointer.
+    const content = readFileSync(dotGit, "utf8").trim();
+    const match = content.match(/^gitdir:\s*(.+)$/);
+    if (!match) return null;
+
+    const gitdirPath = match[1].trim();
+    // gitdirPath may be relative to the .git file's location
+    const resolved = resolve(join(dotGit, ".."), gitdirPath);
+    if (existsSync(resolved)) {
+      return resolved;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Structured Git HEAD state — the ONE truth for what `.git/HEAD` says.
+ * Used by the local fast lane to feed both the response AND the cockpit
+ * header from the same resolution, so they can never disagree.
+ */
+export type GitHeadState =
+  | { kind: "branch"; branch: string }
+  | { kind: "detached"; commit: string }
+  | { kind: "not-git" };
+
+/**
+ * Read the structured HEAD state directly from `.git/HEAD` — no git subprocess.
+ *
+ * Returns:
+ *   - { kind: "branch", branch: "feature/a" } when on a branch
+ *   - { kind: "detached", commit: "a1b2c3d" } when detached (short SHA)
+ *   - { kind: "not-git" } when not a git repo or metadata unreadable
+ *
+ * This is ALWAYS fresh — the file is updated atomically by git on every
+ * branch switch. The short SHA for detached HEAD is extracted from the
+ * 40-char SHA in `.git/HEAD` without spawning `git rev-parse --short HEAD`.
+ */
+export function readHeadStateFromGitDir(cwd: string): GitHeadState {
+  const gitDir = resolveGitDir(cwd);
+  if (!gitDir) return { kind: "not-git" };
+
+  try {
+    const headPath = join(gitDir, "HEAD");
+    const head = readFileSync(headPath, "utf8").trim();
+
+    // Normal branch: "ref: refs/heads/feature/a"
+    const refMatch = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+    if (refMatch) {
+      return { kind: "branch", branch: refMatch[1] };
+    }
+
+    // Detached HEAD: 40-char hex SHA
+    if (/^[0-9a-f]{40}$/i.test(head)) {
+      return { kind: "detached", commit: head.slice(0, 7) };
+    }
+
+    return { kind: "not-git" };
+  } catch {
+    return { kind: "not-git" };
+  }
+}
+
+/**
+ * Read the current branch directly from `.git/HEAD` — no git subprocess.
+ *
+ * Returns:
+ *   - branch name string (e.g. "feature/a") when on a branch
+ *   - null when detached HEAD, not a git repo, or metadata is unreadable
+ *
+ * Delegates to `readHeadStateFromGitDir` — there is ONE source of truth
+ * for `.git/HEAD` parsing, not two.
+ *
+ * For detached HEAD, the file contains a 40-char SHA. The caller should
+ * use `readHeadStateFromGitDir()` if they need the structured state
+ * (including the short SHA for display).
+ */
+export function readBranchFromGitDir(cwd: string): string | null {
+  const state = readHeadStateFromGitDir(cwd);
+  return state.kind === "branch" ? state.branch : null;
 }
 
 function runGit(args: string[], cwd: string): string | null {
@@ -62,13 +199,37 @@ export function countGitChanges(porcelain: string): { changed: number; untracked
 }
 
 /**
+ * Parse the branch line from `git status --porcelain=v1 --branch` output.
+ * The first line starts with `## ` and contains the branch info:
+ *   `## release/litt-v1-acceptance...origin/release/litt-v1-acceptance`
+ *   `## HEAD (no branch)` (detached HEAD)
+ * Returns the branch name, or null for detached HEAD.
+ */
+function parseBranchFromPorcelainBranch(branchLine: string): string | null {
+  // Strip the `## ` prefix
+  const rest = branchLine.replace(/^##\s+/, "");
+  // Detached HEAD: `## HEAD (no branch)`
+  if (rest.startsWith("HEAD (no branch)") || rest === "HEAD") {
+    return null;
+  }
+  // Normal branch: `## branchname...upstream` or `## branchname`
+  const branchMatch = rest.match(/^([^.\s]+)/);
+  return branchMatch ? branchMatch[1] : null;
+}
+
+/**
  * Read the canonical git state for a directory.
  * Never throws — returns isGitRepo: false when git is unavailable or
  * the directory is not a repository.
+ *
+ * Uses a SINGLE `git status --porcelain=v1 --branch` call to get both
+ * the branch name and dirty state in one subprocess invocation (~180ms
+ * on Windows vs ~500ms for three separate calls).
  */
 export function getGitState(cwd: string): GitState {
-  const isRepo = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
-  if (isRepo !== "true") {
+  // Single combined call — fails if not a git repo
+  const combined = runGit(["status", "--porcelain=v1", "--branch"], cwd);
+  if (combined === null) {
     return {
       isGitRepo: false,
       branch: null,
@@ -81,19 +242,26 @@ export function getGitState(cwd: string): GitState {
     };
   }
 
-  const branchOut = runGit(["branch", "--show-current"], cwd);
-  const porcelain = runGit(["status", "--porcelain=v1"], cwd) ?? "";
-  const files = porcelain.split("\n").filter((l) => l.trim().length > 0);
+  const lines = combined.split("\n");
+  // First line is the branch header (`## ...`)
+  const branchLine = lines[0] ?? "";
+  const branch = branchLine.startsWith("## ")
+    ? parseBranchFromPorcelainBranch(branchLine)
+    : null;
+
+  // Remaining lines are file status entries
+  const fileLines = lines.slice(1).filter((l) => l.trim().length > 0);
+  const porcelain = fileLines.join("\n");
   const { changed, untracked } = countGitChanges(porcelain);
 
   return {
     isGitRepo: true,
-    branch: branchOut && branchOut.length > 0 ? branchOut : null,
+    branch,
     root: cwd,
     changed,
     untracked,
     clean: changed === 0 && untracked === 0,
-    files,
+    files: fileLines,
     porcelain,
   };
 }
