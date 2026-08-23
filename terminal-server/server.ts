@@ -471,8 +471,14 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
   // before the response is sent, cancel the running process. This
   // prevents orphaned processes from continuing after the client is gone.
+  // Use req.aborted to distinguish a real client disconnect from the
+  // normal "request body fully consumed" close event — without this,
+  // every /do command would be cancelled immediately after the request
+  // body is read, before the spawned process has a chance to run.
+  let responseSent = false;
+  res.on("finish", () => { responseSent = true; });
   req.on("close", () => {
-    if (!res.headersSent) {
+    if (!responseSent && req.aborted) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
   });
