@@ -63,6 +63,8 @@ export interface RemoteDispatchOptions {
   terminalToken?: string;
   cwd?: string;
   mode?: MissionMode;
+  /** Workspace ID for workspace-scoped token caching. Different workspace = different token. */
+  workspaceId?: string;
 }
 
 // ─── Terminal JWT cache (per-process) ─────────────────────────────
@@ -70,6 +72,8 @@ export interface RemoteDispatchOptions {
 interface CachedToken {
   token: string;
   expiresAt: number; // epoch ms
+  terminalUrl: string;
+  workspaceId?: string;
 }
 
 let cachedTerminalToken: CachedToken | null = null;
@@ -85,6 +89,7 @@ let cachedTerminalToken: CachedToken | null = null;
 export async function exchangeClerkToken(
   clerkToken: string,
   terminalUrl: string = getTerminalUrl(),
+  workspaceId?: string,
 ): Promise<string> {
   let response: Response;
   try {
@@ -92,7 +97,9 @@ export async function exchangeClerkToken(
       method: "POST",
       headers: {
         "Authorization": `Bearer ${clerkToken}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify(workspaceId ? { workspaceId } : {}),
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
@@ -123,10 +130,12 @@ export async function exchangeClerkToken(
     userId: string;
   };
 
-  // Cache with 30s safety margin
+  // Cache with 30s safety margin, scoped to terminalUrl + workspaceId
   cachedTerminalToken = {
     token: payload.terminalToken,
     expiresAt: Date.now() + (payload.expiresIn - 30) * 1000,
+    terminalUrl,
+    workspaceId,
   };
 
   return payload.terminalToken;
@@ -146,8 +155,20 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
   // Pre-exchanged token takes priority
   if (options.terminalToken) return options.terminalToken;
 
-  // Check cache
-  if (cachedTerminalToken && Date.now() < cachedTerminalToken.expiresAt) {
+  const terminalUrl = options.terminalUrl ?? getTerminalUrl();
+
+  // Check cache — only reuse if:
+  //   1. Token is not expired
+  //   2. terminalUrl matches (different server = different token)
+  //   3. workspaceId matches (different workspace = different signed claim)
+  // This prevents a token minted for workspace A from being reused for
+  // workspace B, which would silently bind the command to the wrong project.
+  if (
+    cachedTerminalToken &&
+    Date.now() < cachedTerminalToken.expiresAt &&
+    cachedTerminalToken.terminalUrl === terminalUrl &&
+    cachedTerminalToken.workspaceId === options.workspaceId
+  ) {
     return cachedTerminalToken.token;
   }
 
@@ -173,8 +194,10 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     throw new RemoteUnavailableError("not_authenticated");
   }
 
-  const terminalUrl = options.terminalUrl ?? getTerminalUrl();
-  return exchangeClerkToken(clerkToken, terminalUrl);
+  // Pass workspaceId so the server can embed it as a signed claim.
+  // When no workspaceId is provided, the server auto-selects if exactly
+  // one ready workspace exists, or returns a typed error.
+  return exchangeClerkToken(clerkToken, terminalUrl, options.workspaceId);
 }
 
 /**
@@ -230,18 +253,36 @@ export async function dispatchRemote(
   }
 
   const payload = await response.json().catch(() => null) as
-    | (RemoteCommandResponse & { error?: string })
+    | (RemoteCommandResponse & { error?: string | { code?: string; message?: string } })
     | null;
 
   if (!response.ok) {
-    // HTTP-level failure (auth, 500, etc.). The server may still return
-    // a partial RemoteCommandResponse shape with a top-level `error`
-    // string (legacy) — prefer the typed `error.code` if present.
-    const typedMessage = payload?.error && typeof payload.error === "object"
-      ? (payload.error as { message?: string }).message
+    // HTTP-level failure (auth, 500, workspace errors, etc.).
+    // The server may return a typed error object with a `code` field
+    // (workspace_required, workspace_selection_required, workspace_unauthorized)
+    // or a legacy string error.
+    const typedError = payload?.error && typeof payload.error === "object"
+      ? payload.error as { code?: string; message?: string }
       : undefined;
+    const typedMessage = typedError?.message;
     const legacyMessage = typeof payload?.error === "string" ? payload.error : undefined;
     const detail = typedMessage ?? legacyMessage ?? `Remote command failed (${response.status}).`;
+
+    // Check workspace error codes FIRST — before the generic 401/403 check.
+    // workspace_unauthorized returns HTTP 403 but is NOT an auth revocation —
+    // it means the workspace doesn't belong to the user. It must remain a
+    // distinct reason so the CLI does NOT clear valid Clerk credentials
+    // or tell the user to log in again.
+    if (typedError?.code === "workspace_required") {
+      throw new RemoteUnavailableError("workspace_required", detail);
+    }
+    if (typedError?.code === "workspace_selection_required") {
+      throw new RemoteUnavailableError("workspace_selection_required", detail);
+    }
+    if (typedError?.code === "workspace_unauthorized") {
+      throw new RemoteUnavailableError("workspace_unauthorized", detail);
+    }
+
     if (response.status === 401 || response.status === 403) {
       throw new RemoteUnavailableError("auth_revoked", detail);
     }

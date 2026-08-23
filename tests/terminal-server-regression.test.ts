@@ -370,6 +370,42 @@ describe("Regression: /ask uses canonical operator path", () => {
     expect(hasRemoteResult(resp)).toBe(true);
     expect(resp.result!.message).toMatch(/Usage/);
   });
+
+  it("/ask response exposes safe toolIds (not just count) — source audit", () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, "terminal-server", "command-registry.ts"),
+      "utf-8",
+    );
+    const askStart = source.indexOf("async function handleAsk(");
+    const askEnd = source.indexOf("async function handleDo(args");
+    const askSection = source.slice(askStart, askEnd);
+    expect(askSection.length).toBeGreaterThan(0);
+    // The response must expose toolIds (canonical tool IDs only, no inputs)
+    expect(askSection).toContain("toolIds");
+    expect(askSection).toContain("result.toolCalls.map");
+    // Must NOT expose raw tool call inputs (which may contain secrets)
+    expect(askSection).not.toContain("result.toolCalls.map((tc) => tc.inputs)");
+  });
+});
+
+// ─── Dockerfile runtime git assertion ─────────────────────────────
+
+describe("Regression: Dockerfile.railway runtime includes git", () => {
+  it("runner stage installs git (project.search depends on git grep)", () => {
+    const dockerfile = fs.readFileSync(
+      path.join(repoRoot, "terminal-server", "Dockerfile.railway"),
+      "utf-8",
+    );
+    // Find the runner stage
+    const runnerStart = dockerfile.indexOf("FROM node:22-bookworm-slim AS runner");
+    expect(runnerStart).toBeGreaterThan(-1);
+    const runnerSection = dockerfile.slice(runnerStart);
+    // The runner stage must install git
+    expect(runnerSection).toContain("git");
+    // Must have a build assertion that git is present
+    expect(runnerSection).toContain("command -v git");
+    expect(runnerSection).toContain("git --version");
+  });
 });
 
 // ─── AUTO mode on remote path ─────────────────────────────────────

@@ -277,7 +277,7 @@ async function main(): Promise<number> {
     const outcome = await executeCommand(command, {
       useRemote: true,
       isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
-      remoteExecutor: () => runRemote(command, rest, mode),
+      remoteExecutor: () => runRemote(command, rest, mode, dispatch.workspaceId),
       // Unreachable by contract when useRemote is true. If this ever runs,
       // the fail-closed guarantee has been broken and we want a loud crash
       // rather than a silent relocation of the user's command.
@@ -359,6 +359,7 @@ async function runRemote(
   command: string,
   args: string[],
   mode: "plan" | "act" | "auto" = "act",
+  workspaceId?: string,
 ): Promise<number> {
   header(`${command} (remote)`);
   try {
@@ -368,6 +369,7 @@ async function runRemote(
     // user workspace root when no cwd is supplied.
     const response = await dispatchRemote(command, args, {
       mode,
+      workspaceId,
     });
 
     // Protocol-level error (unknown command, gateway denial, etc.)
@@ -444,6 +446,7 @@ Options:
   -v, --version  Show version
   --remote       Dispatch through terminal-server (shared RuntimeStore with Studio)
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
+  --workspace <id>  Workspace ID for --remote (selects which project workspace to use)
   --tui          Redundant — bare 'litt' already launches the cockpit (kept for compat)
 
 Examples:

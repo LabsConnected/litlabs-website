@@ -372,8 +372,17 @@ export async function readFile(
 }
 
 /**
- * Search file contents using a simple substring match.
- * (grep/ripgrep integration comes later — this is the baseline.)
+ * Search file contents using git grep.
+ *
+ * Exit-code semantics:
+ *   exit 0 — matches found (stdout has results)
+ *   exit 1 — no matches (legitimate empty result, NOT an error)
+ *   other  — operational failure (timeout, crash, not a git repo, etc.)
+ *
+ * The previous implementation collapsed all non-zero exits into a
+ * "success with empty matches" result, which masked real failures
+ * (timeouts, missing git, broken repos) as "no matches found" —
+ * the exact hallucination class this function exists to prevent.
  */
 export async function searchFiles(
   shell: ShellExecutor,
@@ -381,7 +390,6 @@ export async function searchFiles(
   filePattern = "*.ts",
   maxResults = 50,
 ): Promise<ToolResult> {
-  // Use git grep if inside a repo, fallback to nothing
   const res = await shell.execute({
     command: "git",
     args: ["grep", "-n", "--", query],
@@ -389,22 +397,38 @@ export async function searchFiles(
     timeoutMs: 10000,
   });
 
+  // exit 0 — matches found
   if (res.ok) {
     const lines = res.stdout.trim().split("\n").filter((l) => l.trim()).slice(0, maxResults);
     return {
       status: "success",
-    success: true,
+      success: true,
       message: `${lines.length} match(es)`,
       data: { matches: lines, query },
     };
   }
 
-  // Not a git repo or no matches — return empty
+  // exit 1 — git grep found no matches (legitimate empty result)
+  if (res.exitCode === 1 && res.status !== "timeout") {
+    return {
+      status: "success",
+      success: true,
+      message: "No matches",
+      data: { matches: [], query },
+    };
+  }
+
+  // Any other non-zero exit — operational failure. Report it as an
+  // error so the caller knows the search itself failed, rather than
+  // silently presenting an empty result that looks like "nothing here."
+  const reason = res.status === "timeout"
+    ? "Search timed out"
+    : res.stderr?.trim() || `git grep exited with code ${res.exitCode}`;
   return {
-    status: "success",
-    success: true,
-    message: "No matches (not a git repo or empty result)",
-    data: { matches: [], query },
+    status: "failed",
+    success: false,
+    message: `Search failed: ${reason}`,
+    data: { matches: [], query, error: reason },
   };
 }
 

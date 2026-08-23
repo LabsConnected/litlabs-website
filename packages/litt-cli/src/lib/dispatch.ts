@@ -37,6 +37,8 @@ export interface DispatchResult {
   mode: "plan" | "act" | "auto";
   /** True if --remote was present. */
   useRemote: boolean;
+  /** Workspace ID extracted from --workspace <id>. */
+  workspaceId?: string;
 }
 
 /** Commands that launch the Ink operator cockpit (current terminal). */
@@ -51,6 +53,7 @@ const DESKTOP_COMMANDS = new Set(["desktop"]);
  * Flags handled here:
  *   --remote       (stripped — caller checks useRemote)
  *   --mode <m>     (stripped — caller reads mode)
+ *   --workspace <id> (stripped — caller reads workspaceId)
  *   --tui          (stripped — redundant, bare `litt` already launches cockpit)
  *   --help / -h    (returns isHelp=true, command=undefined)
  *   --version / -v (returns isVersion=true, command=undefined)
@@ -81,9 +84,21 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
   // --tui is redundant: bare `litt` already launches the cockpit.
   // Strip it so existing scripts/aliases keep working without changing routing.
   const tuiIdx = argsWithoutMode.indexOf("--tui");
-  const cleanArgs = tuiIdx !== -1
+  const argsWithoutTui = tuiIdx !== -1
     ? [...argsWithoutMode.slice(0, tuiIdx), ...argsWithoutMode.slice(tuiIdx + 1)]
     : argsWithoutMode;
+
+  // Extract --workspace flag (for --remote workspace selection)
+  const workspaceIdx = argsWithoutTui.indexOf("--workspace");
+  let workspaceId: string | undefined;
+  let cleanArgs = argsWithoutTui;
+  if (workspaceIdx !== -1 && workspaceIdx + 1 < argsWithoutTui.length) {
+    workspaceId = argsWithoutTui[workspaceIdx + 1];
+    cleanArgs = [
+      ...argsWithoutTui.slice(0, workspaceIdx),
+      ...argsWithoutTui.slice(workspaceIdx + 2),
+    ];
+  }
 
   const requestedCommand = cleanArgs[0];
 
@@ -99,6 +114,7 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
       isVersion,
       mode,
       useRemote,
+      workspaceId,
     };
   }
 
@@ -122,5 +138,6 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
     isVersion: false,
     mode,
     useRemote,
+    workspaceId,
   };
 }

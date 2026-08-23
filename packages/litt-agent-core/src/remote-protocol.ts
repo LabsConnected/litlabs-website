@@ -127,7 +127,12 @@ export type RemoteCommandErrorCode =
   | "gateway_denied"
   | "plan_mode_rejected"
   | "approval_required"
-  | "internal_error";
+  | "internal_error"
+  // Workspace-specific errors (returned as typed HTTP errors, not as
+  // RemoteCommandResponse.errorCode — these are HTTP-level failures)
+  | "workspace_required"
+  | "workspace_selection_required"
+  | "workspace_unauthorized";
 
 // ─── Helpers ──────────────────────────────────────────────────────
 

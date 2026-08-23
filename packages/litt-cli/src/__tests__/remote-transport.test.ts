@@ -499,3 +499,241 @@ describe("resolveDispatch --remote flag", () => {
     expect(d.surface).toBe("ink");
   });
 });
+
+// ─── Workspace-scoped token cache ─────────────────────────────────
+
+describe("Workspace-scoped token cache", () => {
+  const CLERK_TOKEN = "clerk-session-jwt-token-here";
+  const EXCHANGE_URL = "http://127.0.0.1:4001";
+  const TOKEN_A = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsIndpZCI6IndzLWEifQ.sigA";
+  const TOKEN_B = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsIndpZCI6IndzLWIifQ.sigB";
+  const TOKEN_NO_WS = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.sigN";
+
+  function mockTokenExchange(token: string): void {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      terminalToken: token,
+      expiresIn: 300,
+      userId: "alice",
+    }));
+  }
+
+  function mockCommandSuccess(): void {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      ok: true, runId: "r", kind: "test", result: {}, timestamp: 0, durationMs: 0,
+    }));
+  }
+
+  it("A. same workspace reused → cached token reused (no new exchange)", async () => {
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    // Second call with same workspace — should reuse cached token
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    // Only 1 token exchange call + 2 command calls = 3 total fetch calls
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("B. workspace switch → NEW token exchange", async () => {
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    // Switch to workspace B — must re-exchange
+    mockTokenExchange(TOKEN_B);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-b" });
+
+    // 2 token exchanges + 2 command calls = 4 total
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    // Verify the second exchange was for ws-b
+    const secondExchangeBody = JSON.parse(fetchSpy.mock.calls[2][1]?.body as string);
+    expect(secondExchangeBody.workspaceId).toBe("ws-b");
+  });
+
+  it("C. no workspace → then workspace A → NEW exchange", async () => {
+    mockTokenExchange(TOKEN_NO_WS);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL });
+
+    // Now request with workspace A — must re-exchange
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("D. terminal URL changes → NEW exchange", async () => {
+    const OTHER_URL = "http://10.0.0.1:9999";
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    // Same workspace but different URL — must re-exchange
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: OTHER_URL, workspaceId: "ws-a" });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    // Verify the second exchange hit the other URL
+    expect(fetchSpy.mock.calls[2][0]).toBe(`${OTHER_URL}/api/token-exchange`);
+  });
+
+  it("E. clearTerminalTokenCache() → next request exchanges again", async () => {
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    clearTerminalTokenCache();
+
+    // After clearing, must re-exchange even with same workspace
+    mockTokenExchange(TOKEN_A);
+    mockCommandSuccess();
+    await dispatchRemote("test", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL, workspaceId: "ws-a" });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+});
+
+// ─── CLI workspace error propagation ──────────────────────────────
+
+describe("CLI workspace error propagation", () => {
+  const CLERK_TOKEN = "clerk-session-jwt-token-here";
+  const EXCHANGE_URL = "http://127.0.0.1:4001";
+  const TERMINAL_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.signature";
+
+  beforeEach(() => {
+    // Mock token exchange to return a valid token
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      terminalToken: TERMINAL_JWT,
+      expiresIn: 300,
+      userId: "alice",
+    }));
+  });
+
+  it("workspace_required → RemoteUnavailableError with workspace_required reason", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      error: {
+        code: "workspace_required",
+        message: "No remote project workspace is prepared for this account.",
+      },
+    }, 400));
+
+    const { isRemoteUnavailable, RemoteUnavailableError } = await import("../lib/remote-unavailable.js");
+    try {
+      await dispatchRemote("status", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(isRemoteUnavailable(error)).toBe(true);
+      const rue = error as InstanceType<typeof RemoteUnavailableError>;
+      expect(rue.reason).toBe("workspace_required");
+      expect(rue.message).toMatch(/No remote project workspace/);
+    }
+  });
+
+  it("workspace_selection_required → RemoteUnavailableError with selection reason", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      error: {
+        code: "workspace_selection_required",
+        message: "Multiple workspaces are available. Specify a workspaceId.",
+        workspaces: [
+          { workspaceId: "ws-1", projectId: "proj-1", branch: "main" },
+          { workspaceId: "ws-2", projectId: "proj-2", branch: "dev" },
+        ],
+      },
+    }, 400));
+
+    const { isRemoteUnavailable, RemoteUnavailableError } = await import("../lib/remote-unavailable.js");
+    try {
+      await dispatchRemote("status", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(isRemoteUnavailable(error)).toBe(true);
+      const rue = error as InstanceType<typeof RemoteUnavailableError>;
+      expect(rue.reason).toBe("workspace_selection_required");
+      expect(rue.message).toMatch(/Multiple workspaces/);
+    }
+  });
+
+  it("workspace_unauthorized → distinct reason (NOT auth_revoked)", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      error: {
+        code: "workspace_unauthorized",
+        message: "Forbidden — workspace does not belong to the authenticated user",
+      },
+    }, 403));
+
+    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    try {
+      await dispatchRemote("status", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(isRemoteUnavailable(error)).toBe(true);
+      const rue = error as InstanceType<typeof RemoteUnavailableError>;
+      // MUST be workspace_unauthorized, NOT auth_revoked
+      expect(rue.reason).toBe("workspace_unauthorized");
+      expect(rue.reason).not.toBe("auth_revoked");
+      // Message should mention workspace/authorized, not "log in again"
+      expect(rue.message).toMatch(/authorized|workspace/i);
+    }
+  });
+
+  it("workspace_unauthorized is NOT in CREDENTIAL_CLEARING_REASONS", async () => {
+    const { CREDENTIAL_CLEARING_REASONS } = await import("../lib/remote-unavailable.js");
+    expect(CREDENTIAL_CLEARING_REASONS.has("workspace_unauthorized")).toBe(false);
+    expect(CREDENTIAL_CLEARING_REASONS.has("auth_revoked")).toBe(true);
+    expect(CREDENTIAL_CLEARING_REASONS.has("auth_expired")).toBe(true);
+  });
+
+  it("ordinary 401 (no workspace code) still maps to auth_revoked", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      error: "Invalid token",
+    }, 401));
+
+    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    try {
+      await dispatchRemote("status", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(isRemoteUnavailable(error)).toBe(true);
+      const rue = error as InstanceType<typeof RemoteUnavailableError>;
+      expect(rue.reason).toBe("auth_revoked");
+    }
+  });
+
+  it("workspace errors do NOT suggest local fallback", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({
+      error: {
+        code: "workspace_required",
+        message: "No remote project workspace is prepared for this account.",
+      },
+    }, 400));
+
+    try {
+      await dispatchRemote("status", [], {
+        clerkToken: CLERK_TOKEN,
+        terminalUrl: EXCHANGE_URL,
+      });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // Must NOT suggest running locally
+      expect(msg).not.toMatch(/without --remote|local execution|run locally/i);
+    }
+  });
+});

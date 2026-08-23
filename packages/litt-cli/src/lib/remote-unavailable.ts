@@ -32,7 +32,13 @@ export type RemoteUnavailableReason =
   /** Reached the service, but establishing the remote session failed. */
   | "session_failed"
   /** Remote session established, but the command could not be executed. */
-  | "execution_failed";
+  | "execution_failed"
+  /** No remote project workspace is prepared for this account. */
+  | "workspace_required"
+  /** Multiple ready workspaces exist; the caller must select one. */
+  | "workspace_selection_required"
+  /** Authenticated, but not authorized for the requested workspace. */
+  | "workspace_unauthorized";
 
 /**
  * Short subject line per reason — used when the caller supplies no
@@ -46,6 +52,9 @@ const SUBJECT: Record<RemoteUnavailableReason, string> = {
   service_unavailable: "Remote service unavailable.",
   session_failed: "Remote session could not be established.",
   execution_failed: "Remote execution failed.",
+  workspace_required: "No remote project workspace is prepared.",
+  workspace_selection_required: "Multiple remote workspaces are available.",
+  workspace_unauthorized: "Not authorized for that workspace.",
 };
 
 /** Operator-facing guidance per reason. Never suggests local execution. */
@@ -56,6 +65,9 @@ const REMEDY: Record<RemoteUnavailableReason, string> = {
   service_unavailable: "The LiTT terminal service is unreachable. Check your connection or LITT_TERMINAL_URL.",
   session_failed: "Could not establish a remote session. Retry, or check the terminal service status.",
   execution_failed: "The remote runtime could not execute this command.",
+  workspace_required: "Prepare a remote project workspace, then retry with --remote.",
+  workspace_selection_required: "Specify which workspace to use with --workspace <id>.",
+  workspace_unauthorized: "You are authenticated but not authorized for that workspace. Select a workspace that belongs to your account.",
 };
 
 /**

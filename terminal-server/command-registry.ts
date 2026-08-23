@@ -392,6 +392,9 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
           text: redactSecrets(result.content),
           runId: result.runId,
           toolCalls: result.toolCalls.length,
+          // Expose safe tool IDs (canonical toolId only — no inputs, no args,
+          // no secrets) so the CLI can render tool labels and verify routing.
+          toolIds: result.toolCalls.map((tc: { toolId?: string }) => tc.toolId).filter(Boolean),
           rounds: result.rounds,
         },
         durationMs: Date.now() - t0,
