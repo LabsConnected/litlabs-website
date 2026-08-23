@@ -16,6 +16,7 @@
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { hasAuthConfig } from "../lib/auth/auth-config.js";
 import { clearTerminalTokenCache } from "../lib/remote.js";
+import { clearSelectedRemoteWorkspace } from "../lib/remote-workspace-store.js";
 import { ok, fail, header, c } from "../lib/utils.js";
 
 export async function logoutCommand(_args: string[]): Promise<number> {
@@ -23,6 +24,8 @@ export async function logoutCommand(_args: string[]): Promise<number> {
 
   // Clear the cached terminal JWT (in-memory)
   clearTerminalTokenCache();
+  // Clear the persisted remote workspace selection
+  clearSelectedRemoteWorkspace();
 
   // If using LITT_CLERK_TOKEN (temporary test path), just report
   if (process.env.LITT_CLERK_TOKEN) {

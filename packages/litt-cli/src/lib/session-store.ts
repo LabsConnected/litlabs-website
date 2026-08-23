@@ -140,15 +140,55 @@ export function mergeAppend(
   return merged;
 }
 
-export interface SaveSessionInput {
+/** Workspace + routing context for a conversation. Same shape as
+ *  SaveSessionInput minus the derived summary/messages — what the
+ *  controller already has in hand when it needs to persist. */
+export interface ConversationContext {
   project: string;
   cwd: string;
   branch: string;
   mode: "plan" | "act";
   routingMode: string;
   selectedModel: string | null;
+}
+
+export interface SaveSessionInput extends ConversationContext {
   summary: string;
   messages: SessionMessage[];
+}
+
+/**
+ * Build a SaveSessionInput from the live transcript + an appended pair.
+ *
+ * - Merges the pair into the transcript via mergeAppend() (dedupes
+ *   replayed pairs by submissionId+role), so the persist is idempotent
+ *   regardless of when the transcript snapshot was captured.
+ * - Derives the summary from the FIRST user message of the merged
+ *   conversation — NOT the current input. This anchors the session
+ *   label to the conversation's opening turn so a mid-conversation
+ *   no-key/remote submit does not relabel (and thus fork) the session.
+ *
+ * The returned object is a complete SaveSessionInput; pass it straight
+ * to saveSession().
+ */
+export function buildConversationSave(
+  ctx: ConversationContext,
+  transcript: SessionMessage[],
+  appended: SessionMessage[],
+): SaveSessionInput {
+  const merged = mergeAppend(transcript, appended);
+  const firstUser = merged.find((m) => m.role === "user");
+  const summary = summarize(firstUser?.content ?? "untitled");
+  return {
+    project: ctx.project,
+    cwd: ctx.cwd,
+    branch: ctx.branch,
+    mode: ctx.mode,
+    routingMode: ctx.routingMode,
+    selectedModel: ctx.selectedModel,
+    summary,
+    messages: merged,
+  };
 }
 
 /**
@@ -178,28 +218,6 @@ export function saveSession(input: SaveSessionInput): SessionSnapshot {
   const rest = sameConversation ? all.slice(1) : all;
   writeAllSessions([snapshot, ...rest].slice(0, MAX_SESSIONS));
   return snapshot;
-}
-
-/**
- * Build a SaveSessionInput for an ongoing conversation.
- *
- * The summary is always derived from the first user message of the
- * COMPLETE resulting conversation, so a mid-conversation turn never
- * relabels the session — which would otherwise defeat saveSession's
- * sameConversation check and fork a duplicate row.
- */
-export function buildConversationSave(
-  ctx: Omit<SaveSessionInput, "summary" | "messages">,
-  prior: SessionMessage[],
-  appended: SessionMessage[],
-): SaveSessionInput {
-  const messages = mergeAppend(prior, appended);
-  const firstUser = messages.find((m) => m.role === "user");
-  return {
-    ...ctx,
-    summary: summarize(firstUser?.content ?? "untitled"),
-    messages,
-  };
 }
 
 /** All sessions, most recent first. */

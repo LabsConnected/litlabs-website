@@ -376,6 +376,18 @@ export async function remoteChat(
       : undefined;
     const detail = typedError?.message ?? (typeof body?.error === "string" ? body.error : `Remote chat failed (${response.status}).`);
 
+    // Check workspace error codes FIRST — before the generic 401/403 check.
+    // workspace_selection_required returns HTTP 400 but is NOT an execution
+    // failure — it means the user must select a workspace first.
+    if (typedError?.code === "workspace_required") {
+      throw new RemoteUnavailableError("workspace_required", detail);
+    }
+    if (typedError?.code === "workspace_selection_required") {
+      throw new RemoteUnavailableError("workspace_selection_required", detail);
+    }
+    if (typedError?.code === "workspace_unauthorized") {
+      throw new RemoteUnavailableError("workspace_unauthorized", detail);
+    }
     if (response.status === 401 || response.status === 403) {
       throw new RemoteUnavailableError("auth_revoked", detail);
     }
@@ -425,4 +437,54 @@ export async function remoteChat(
   } finally {
     reader.releaseLock();
   }
+}
+
+// ─── Remote workspace listing ─────────────────────────────────────
+
+export interface RemoteWorkspace {
+  workspaceId: string;
+  projectId: string;
+  root: string;
+  branch: string;
+}
+
+/**
+ * List the authenticated user's ready workspaces from terminal-server.
+ * Uses the same token-exchange flow as remoteChat/dispatchRemote.
+ *
+ * Returns an empty array if the user has no ready workspaces. Throws
+ * RemoteUnavailableError on transport/auth failures.
+ */
+export async function listRemoteWorkspaces(
+  options: RemoteDispatchOptions = {},
+): Promise<RemoteWorkspace[]> {
+  const baseUrl = options.terminalUrl ?? getTerminalUrl();
+  const token = await getTerminalToken(options);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/workspaces`, {
+      headers: { "Authorization": `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    throw new RemoteUnavailableError(
+      "service_unavailable",
+      error instanceof Error ? `${error.message}.` : "Network error.",
+    );
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    const reason = response.status === 401 || response.status === 403
+      ? "auth_revoked"
+      : "session_failed";
+    throw new RemoteUnavailableError(
+      reason,
+      body?.error ?? `Workspace list failed (${response.status}).`,
+    );
+  }
+
+  const data = await response.json() as { workspaces?: RemoteWorkspace[] };
+  return Array.isArray(data.workspaces) ? data.workspaces : [];
 }

@@ -319,6 +319,31 @@ app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+// ─── User-authenticated workspace listing ─────────────────────────
+// GET /api/workspaces — lists the authenticated user's ready workspaces.
+//
+// Uses USER authentication (terminal JWT minted by /api/token-exchange).
+// Returns only workspaces that belong to the verified user and are ready.
+// The CLI uses this to present a workspace selector when multiple
+// workspaces are available.
+app.get("/api/workspaces", (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const payload = verifyTerminalToken(bearerToken(req.headers.authorization));
+    const userId = payload.sub;
+    const ready = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
+    res.json({
+      workspaces: ready.map((w: WorkspaceDescriptor) => ({
+        workspaceId: w.workspaceId,
+        projectId: w.projectId,
+        root: w.root,
+        branch: w.branch,
+      })),
+    });
+  } catch {
+    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
+  }
+});
+
 // ─── User-authenticated cancel endpoint ───────────────────────────
 // POST /api/cancel — cancel the currently active run using USER auth.
 // Kills the actual child process tree associated with the runId and

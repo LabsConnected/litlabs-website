@@ -50,6 +50,7 @@ import { desktopCommand } from "./commands/desktop.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
+import { workspaceCommand } from "./commands/workspace.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -121,6 +122,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   login: loginCommand,
   logout: logoutCommand,
   whoami: whoamiCommand,
+  workspace: workspaceCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -142,7 +144,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * Everything else — including the interactive cockpit — requires a
  * valid user session. The auth gate enforces this before dispatching.
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "doctor", "version", "help"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help"]);
 
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
@@ -429,6 +431,7 @@ Commands:
   login      Sign in via Clerk OAuth (browser-based PKCE flow)
   logout     Sign out and clear local credentials
   whoami     Show the current authenticated identity
+  workspace  List, select, or show your remote workspace
   doctor     Check system health (Node, Git, pnpm, network, auth)
   version    Show CLI version
   status     Show project + git status (via @litt/agent-core)
