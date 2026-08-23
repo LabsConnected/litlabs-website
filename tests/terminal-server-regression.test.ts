@@ -468,3 +468,118 @@ describe("Regression: /git intentional read-only bypass", () => {
     expect(resp.kind).toBe("git_result");
   });
 });
+
+// ─── Identity-aware approval security regression ──────────────────
+//
+// The canonical gateway's onApprovalRequired callback approves ONLY
+// for trusted + interactive identities (direct /do from an
+// authenticated user). The agent/operator path (untrusted) is denied.
+// PLAN mode denies mutations before the callback is consulted.
+// Dangerous commands in AUTO mode are denied by policy (callback
+// never fires).
+
+describe("Regression: identity-aware approval security", () => {
+  // A. trusted + interactive + ACT + node → approved → executes
+  it("A: trusted interactive ACT /do node is approved and executes", async () => {
+    const resp = await dispatchCommand(
+      makeRequest({
+        command: "do",
+        args: ["node", "-e", "console.log('security-A')"],
+        mode: "act",
+      }),
+    );
+    expect(resp.ok).toBe(true);
+    expect(resp.result!.data.policyEffect).toBe("require_approval");
+    expect(resp.result!.data.approved).toBe(true);
+    const stdout = String(resp.result!.data.stdout ?? "");
+    expect(stdout).toContain("security-A");
+  });
+
+  // B. trusted + interactive + PLAN + node → denied (PLAN blocks mutations)
+  it("B: trusted interactive PLAN /do node is denied by policy", async () => {
+    const resp = await dispatchCommand(
+      makeRequest({
+        command: "do",
+        args: ["node", "-e", "console.log('security-B')"],
+        mode: "plan",
+      }),
+    );
+    expect(resp.ok).toBe(false);
+    expect(resp.result!.data.policyEffect).toBe("deny");
+    // PLAN denies before the approval callback is consulted
+    expect(resp.result!.data.approved).toBe(false);
+  });
+
+  // C. untrusted + headless + ACT + node → denied (callback rejects untrusted)
+  it("C: untrusted headless gateway.execute node is denied", async () => {
+    // Call the gateway directly with untrusted/headless identity,
+    // simulating the agent/model path (runAgentLoop passes trusted:false).
+    const gateway = getExecutionGateway(repoRoot, "act");
+    const result = await gateway.execute({
+      toolId: "project.run",
+      inputs: { command: "node", args: ["-e", "console.log('security-C')"] },
+      cwd: repoRoot,
+      mode: "act",
+      identity: {
+        tenantId: "default",
+        userId: "untrusted-agent",
+        actorId: "untrusted-agent",
+        trusted: false,
+        interaction: "headless",
+      },
+    });
+    expect(result.result.success).toBe(false);
+    expect(result.approved).toBe(false);
+  });
+
+  // D. dangerous command in AUTO mode → denied by policy (callback never fires)
+  it("D: dangerous command in AUTO mode is denied regardless of identity", async () => {
+    // rm -rf is destructive. AUTO mode policy says "deny" for dangerous
+    // commands — the approval callback is NEVER consulted.
+    const gateway = getExecutionGateway(repoRoot, "auto");
+    const result = await gateway.execute({
+      toolId: "project.run",
+      inputs: { command: "rm", args: ["-rf", "/tmp/litt-security-D-nonexistent"] },
+      cwd: repoRoot,
+      mode: "auto",
+      identity: {
+        tenantId: "default",
+        userId: "direct-user",
+        actorId: "direct-user",
+        trusted: true,
+        interaction: "interactive",
+      },
+    });
+    expect(result.result.success).toBe(false);
+    expect(result.policyEffect).toBe("deny");
+  });
+
+  // Source audit: command-registry uses getExecutionGateway, not createExecutionGateway
+  it("command-registry.ts uses getExecutionGateway (not createExecutionGateway)", () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, "terminal-server", "command-registry.ts"),
+      "utf-8",
+    );
+    expect(source).toContain("getExecutionGateway");
+    expect(source).not.toContain("createExecutionGateway");
+  });
+
+  // Source audit: runtime.ts is the only gateway constructor
+  it("runtime.ts is the only terminal-server file that constructs the gateway", () => {
+    const files = fs.readdirSync(path.join(repoRoot, "terminal-server"))
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
+    for (const file of files) {
+      const source = fs.readFileSync(
+        path.join(repoRoot, "terminal-server", file),
+        "utf-8",
+      );
+      if (file === "runtime.ts") {
+        // runtime.ts is the ONLY file allowed to create an ExecutionGateway
+        expect(source).toContain("createExecutionGateway");
+      } else {
+        expect(source).not.toContain("createExecutionGateway");
+        expect(source).not.toContain("new ExecutionGateway");
+      }
+    }
+  });
+});
