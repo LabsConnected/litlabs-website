@@ -37,7 +37,7 @@ import {
   type ModelResult,
   type ModelStreamEvent,
   type ModelProfile,
-  type ToolResult,
+  type ToolDefinition,
 } from "@litt/agent-core";
 import {
   getRuntimeStore,
@@ -46,63 +46,94 @@ import {
   getCanonicalShell,
   runtimeSetPhase,
 } from "./runtime.js";
-import { streamLiTTCode, health, type LiTTEvent } from "./litt-code.js";
+import {
+  streamLiTTMessagesWithTools,
+  health,
+  type LiTTEvent,
+  type LiTTNativeTool,
+} from "./litt-code.js";
 
 // ─── ModelProvider adapter ────────────────────────────────────────
 
 /**
- * Wraps the existing `streamLiTTCode` (Ollama → OpenRouter fallback) as
- * a `ModelProvider` that the canonical agent loop can call.
+ * Tool-aware model provider for the canonical operator.
  *
- * This is a transport adapter only — it does NOT make decisions, does
- * NOT call tools, and does NOT touch the RuntimeStore. The agent loop
- * owns the brain; this owns the wire to the LLM API.
+ * Uses `streamLiTTMessagesWithTools()` — the native OpenRouter function
+ * calling transport — so the model can select tools via native tool_calls
+ * instead of text-form ```tool_call blocks. The transport converts native
+ * calls into LiTT's canonical fenced tool_call envelope, which runAgentLoop
+ * dispatches through the canonical ExecutionGateway.
+ *
+ * This replaces the old `streamLiTTCode()` adapter, which only consumed
+ * `choices[0].delta.content` and threw "completed without assistant content"
+ * when the model returned a native tool call with zero text.
+ *
+ * Architecture: this is a transport adapter only — it does NOT make
+ * decisions, does NOT call tools, and does NOT touch the RuntimeStore.
+ * The agent loop owns the brain; this owns the wire to the LLM API.
  */
 class LiTTModelProvider implements ModelProvider {
+  private readonly nativeTools: LiTTNativeTool[];
+
+  constructor(toolDefinitions: ToolDefinition[]) {
+    const usedNames = new Set<string>();
+
+    this.nativeTools = toolDefinitions.map((tool) => {
+      // OpenRouter function names must match ^[a-zA-Z0-9_-]{1,64}$
+      const baseName =
+        tool.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60) || "litt_tool";
+
+      let functionName = baseName;
+      let suffix = 2;
+      while (usedNames.has(functionName)) {
+        functionName = `${baseName}_${suffix++}`;
+      }
+      usedNames.add(functionName);
+
+      return {
+        toolId: tool.id,
+        functionName,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      };
+    });
+  }
+
   async stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
   ): Promise<ModelResult> {
-    // The agent loop sends [system, user, assistant, user, ...] — but
-    // streamLiTTCode expects a single prompt. We reconstruct the prompt
-    // from the conversation, keeping the system message separate.
-    const systemMsg = messages.find((m) => m.role === "system");
-    const conversation = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-
-    const prompt = systemMsg
-      ? `${systemMsg.content}\n\n${conversation}`
-      : conversation;
-
-    // Bridge LiTTEvent → ModelStreamEvent
-    const result = await streamLiTTCode(prompt, (e: LiTTEvent) => {
-      switch (e.type) {
-        case "meta":
-          emit({
-            type: "meta",
-            provider: e.provider,
-            model: e.model,
-            profile: e.profile as ModelProfile,
-          });
-          break;
-        case "delta":
-          emit({ type: "delta", text: e.text });
-          break;
-        case "done":
-          emit({
-            type: "done",
-            model: e.model,
-            usage: e.usage,
-            timing: e.timing,
-          });
-          break;
-        case "error":
-          emit({ type: "error", message: e.message });
-          break;
-      }
-    });
+    const result = await streamLiTTMessagesWithTools(
+      messages,
+      this.nativeTools,
+      (e: LiTTEvent) => {
+        // Bridge LiTTEvent → ModelStreamEvent
+        switch (e.type) {
+          case "meta":
+            emit({
+              type: "meta",
+              provider: e.provider,
+              model: e.model,
+              profile: e.profile as ModelProfile,
+            });
+            break;
+          case "delta":
+            emit({ type: "delta", text: e.text });
+            break;
+          case "done":
+            emit({
+              type: "done",
+              model: e.model,
+              usage: e.usage,
+              timing: e.timing,
+            });
+            break;
+          case "error":
+            emit({ type: "error", message: e.message });
+            break;
+        }
+      },
+    );
 
     return {
       content: result.content,
@@ -261,15 +292,6 @@ function buildOperatorSystemPrompt(cwd: string, mode: string): string {
 
 // ─── Canonical operator ───────────────────────────────────────────
 
-let modelProvider: LiTTModelProvider | null = null;
-
-function getModelProvider(): LiTTModelProvider {
-  if (!modelProvider) {
-    modelProvider = new LiTTModelProvider();
-  }
-  return modelProvider;
-}
-
 /**
  * Run the canonical LiTT operator.
  *
@@ -280,9 +302,10 @@ function getModelProvider(): LiTTModelProvider {
  * The operator:
  *   1. Generates a canonical runId
  *   2. Obtains canonical runtime resources (store, gateway, tools, shell)
- *   3. Calls runAgentLoop with those resources
- *   4. Emits lifecycle events through the canonical RuntimeStore
- *   5. Returns the result with the runId for cross-surface correlation
+ *   3. Creates a tool-aware model provider with the canonical tool definitions
+ *   4. Calls runAgentLoop with those resources
+ *   5. Emits lifecycle events through the canonical RuntimeStore
+ *   6. Returns the result with the runId for cross-surface correlation
  */
 export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorResult> {
   const t0 = Date.now();
@@ -294,7 +317,13 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
   const gateway = getExecutionGateway(ctx.cwd, mode);
   const tools = getCanonicalToolRegistry(ctx.cwd);
   const shell = getCanonicalShell(ctx.cwd);
-  const model = getModelProvider();
+
+  // Create a tool-aware model provider with the canonical tool definitions.
+  // The provider maps ToolDefinition[] → LiTTNativeTool[] and calls
+  // streamLiTTMessagesWithTools(), which sends native OpenRouter function
+  // definitions and converts model-selected tool_calls into LiTT's
+  // canonical fenced tool_call envelope for runAgentLoop to dispatch.
+  const model = new LiTTModelProvider(tools.list());
 
   // Emit lifecycle: operator turn started
   store.commandStart("litt-operator", [ctx.prompt], ctx.cwd);
