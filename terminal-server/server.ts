@@ -220,7 +220,6 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // userId comes from the verified token, NOT from the request body.
     const verified = await verifyClerkToken(clerkToken);
     const userId = verified.userId;
-    const userEmail = verified.email;
 
     // ─── 2. Workspace/project authorization (server-side) ────────
     // If the client requests a specific workspaceId, verify the
@@ -263,11 +262,8 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
           workspaceId: authorizedWorkspaceId,
           projectId: authorizedProjectId,
           cwd: authorizedWorkspaceRoot,
-          email: userEmail ?? undefined,
         })
-      : mintTerminalToken(userId, 300, {
-          email: userEmail ?? undefined,
-        });
+      : mintTerminalToken(userId, 300);
 
     res.json({
       terminalToken,
@@ -409,12 +405,11 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
 app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 1. Verify user JWT ──────────────────────────────────────────
   let userId: string;
-  let authEmail: string | undefined;
+  let payload: { sub: string; wid?: string; pid?: string; cwd?: string };
   try {
     const token = bearerToken(req.headers.authorization);
-    const payload = verifyTerminalToken(token);
+    payload = verifyTerminalToken(token);
     userId = payload.sub;
-    authEmail = payload.email;
   } catch {
     res.status(401).json({ error: "Unauthorized — valid terminal token required" });
     return;
@@ -431,39 +426,86 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  // ─── 3. Build authenticated request ──────────────────────────────
-  // userId comes from the VERIFIED JWT — NOT from the request body.
-  // A user cannot impersonate another user by setting userId in the body.
-  // workspaceId/cwd are validated against the user's workspace root.
-  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
-  const userWorkspaceRoot = workspaceRoot
-    ? resolve(workspaceRoot, userId)
-    : process.cwd();
+  // ─── 3. Resolve authorized workspace ─────────────────────────────
+  // The signed terminal token may carry workspace claims (wid/pid/cwd)
+  // from the token-exchange step. These are SIGNED — the client cannot
+  // forge them. We resolve the cwd from these claims, NOT from the
+  // request body.
+  //
+  // Priority:
+  //   1. Signed wid claim → getWorkspace(wid) → ownership + ready check
+  //   2. No signed claim → auto-select if exactly one ready workspace
+  //   3. Zero ready workspaces → typed workspace_required error
+  //   4. Multiple ready workspaces → typed workspace_selection_required error
+  //
+  // The request body's workspaceId/cwd CANNOT override the signed claim.
+  // This prevents cross-user workspace access and empty-directory fallbacks.
+  let cwd: string;
 
-  // Ensure the user's workspace directory exists — spawn() fails with
-  // ENOENT if the cwd doesn't exist, which would cause every /do command
-  // to fail immediately with exit -1.
-  if (workspaceRoot) {
-    try {
-      mkdirSync(userWorkspaceRoot, { recursive: true });
-    } catch {
-      // Non-fatal — the directory may already exist or be on a read-only fs.
-    }
-  }
-
-  // If the request specifies a cwd, validate it's within the user's workspace.
-  // This prevents cross-user workspace access.
-  let cwd = body.cwd ?? userWorkspaceRoot;
-  if (workspaceRoot) {
-    const resolvedCwd = resolve(cwd);
-    const resolvedUserRoot = resolve(userWorkspaceRoot);
-    const rel = relative(resolvedUserRoot, resolvedCwd);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      res.status(403).json({
-        error: "Forbidden — cwd is outside your workspace",
+  if (payload.wid) {
+    // Signed workspace claim — resolve and verify
+    const ws = getWorkspace(payload.wid);
+    if (!ws) {
+      res.status(404).json({
+        error: { code: "workspace_unauthorized", message: "Signed workspace no longer exists" },
       });
       return;
     }
+    if (ws.userId !== userId) {
+      res.status(403).json({
+        error: { code: "workspace_unauthorized", message: "Forbidden — workspace does not belong to the authenticated user" },
+      });
+      return;
+    }
+    if (!ws.ready) {
+      res.status(400).json({
+        error: { code: "workspace_required", message: "Workspace is not ready (still preparing)" },
+      });
+      return;
+    }
+    // Use the signed workspace root as cwd. Body cwd is ignored —
+    // the signed claim is authoritative.
+    cwd = ws.root;
+  } else {
+    // No signed workspace claim — auto-select from ready workspaces
+    const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
+    if (readyWorkspaces.length === 0) {
+      res.status(400).json({
+        error: { code: "workspace_required", message: "No remote project workspace is prepared for this account." },
+      });
+      return;
+    }
+    if (readyWorkspaces.length > 1) {
+      res.status(400).json({
+        error: {
+          code: "workspace_selection_required",
+          message: "Multiple remote workspaces are available. Specify one with --workspace <id>.",
+          workspaces: readyWorkspaces.map((w: WorkspaceDescriptor) => ({
+            workspaceId: w.workspaceId,
+            projectId: w.projectId,
+            branch: w.branch,
+          })),
+        },
+      });
+      return;
+    }
+    // Exactly one ready workspace — auto-select it
+    cwd = readyWorkspaces[0].root;
+  }
+
+  // If the request body specifies a cwd, validate it's within the
+  // authorized workspace. This allows subdirectory navigation but
+  // prevents escaping the workspace root.
+  if (body.cwd) {
+    const resolvedCwd = resolve(cwd, body.cwd);
+    const rel = relative(cwd, resolvedCwd);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      res.status(403).json({
+        error: { code: "workspace_unauthorized", message: "Forbidden — cwd is outside your workspace" },
+      });
+      return;
+    }
+    cwd = resolvedCwd;
   }
 
   const normalizedReq: RemoteCommandRequest = {
@@ -471,9 +513,7 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     // userId from the JWT — overrides any value in the body
     userId,
-    // email from the JWT — best-effort auth context for the operator
-    authEmail: authEmail ?? null,
-    // cwd validated to be within the user's workspace
+    // cwd resolved from the signed workspace claim — NOT from the body
     cwd,
   };
 

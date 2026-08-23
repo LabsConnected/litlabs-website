@@ -30,7 +30,11 @@ describe("getGitState (real worktree)", () => {
   it("returns the actual branch from the current worktree", () => {
     const git = getGitState(REPO_ROOT);
     expect(git.isGitRepo).toBe(true);
-    expect(git.branch).toBe(directGit(["branch", "--show-current"]));
+    // git branch --show-current returns "" for detached HEAD, but
+    // getGitState returns null for detached HEAD. Normalize both to
+    // null so the comparison is correct in detached worktrees.
+    const directBranch = directGit(["branch", "--show-current"]);
+    expect(git.branch).toBe(directBranch === "" ? null : directBranch);
   });
 
   it("detects a clean worktree exactly like direct git", () => {

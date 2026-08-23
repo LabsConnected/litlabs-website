@@ -106,8 +106,6 @@ export interface CommandContext {
   runId?: string;
   /** Mission mode (PLAN/ACT/AUTO). Defaults to "act". */
   mode?: MissionMode;
-  /** Authenticated user's email (best-effort, from Clerk via JWT). */
-  authEmail?: string | null;
 }
 
 export interface CommandResponse {
@@ -382,7 +380,6 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
         cwd: ctx.cwd,
         userId: ctx.userId,
         mode: ctx.mode ?? "act",
-        authEmail: ctx.authEmail ?? null,
       });
       return {
         kind: "brain_response",
@@ -392,6 +389,9 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
           text: redactSecrets(result.content),
           runId: result.runId,
           toolCalls: result.toolCalls.length,
+          // Expose safe tool IDs (canonical toolId only — no inputs, no args,
+          // no secrets) so the CLI can render tool labels and verify routing.
+          toolIds: result.toolCalls.map((tc: { toolId?: string }) => tc.toolId).filter(Boolean),
           rounds: result.rounds,
         },
         durationMs: Date.now() - t0,

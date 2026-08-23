@@ -67,8 +67,6 @@ export interface RemoteCommandRequest {
   workspaceId?: string;
   /** Optional authenticated user ID (set by the server from auth). */
   userId?: string | null;
-  /** Optional authenticated user's email (set by the server from JWT). */
-  authEmail?: string | null;
 }
 
 // ─── Response ─────────────────────────────────────────────────────
@@ -127,7 +125,12 @@ export type RemoteCommandErrorCode =
   | "gateway_denied"
   | "plan_mode_rejected"
   | "approval_required"
-  | "internal_error";
+  | "internal_error"
+  // Workspace-specific errors (returned as typed HTTP errors, not as
+  // RemoteCommandResponse.errorCode — these are HTTP-level failures)
+  | "workspace_required"
+  | "workspace_selection_required"
+  | "workspace_unauthorized";
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
