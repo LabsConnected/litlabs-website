@@ -363,13 +363,12 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
   };
   // Generate runId for client disconnect cancellation (same as /api/command).
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  // Only cancel on premature client abort, NOT on normal request body
-  // completion. The req 'close' event fires when the readable stream
-  // ends (after body is consumed), which happens BEFORE the response is
-  // sent for POST requests. The 'aborted' event fires ONLY when the
-  // client disconnects before the response is sent.
+  // Only cancel if the client disconnects BEFORE the response is sent.
+  // We track completion via responseSent and use res.on("close") which
+  // fires when the response stream ends. If responseSent is false at
+  // that point, the client disconnected prematurely.
   let responseSent = false;
-  req.on("aborted", () => {
+  res.on("close", () => {
     if (!responseSent) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
@@ -467,10 +466,11 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
   // before the response is sent, cancel the running process. This
   // prevents orphaned processes from continuing after the client is gone.
-  // Use 'aborted' (fires only on premature disconnect) not 'close' (fires
-  // when the request body stream ends, which is before the response).
+  // Use res.on("close") with a responseSent guard — res close fires when
+  // the response stream ends, so if responseSent is false, the client
+  // disconnected before we could respond.
   let responseSent = false;
-  req.on("aborted", () => {
+  res.on("close", () => {
     if (!responseSent) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
