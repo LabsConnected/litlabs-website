@@ -15,15 +15,9 @@
 import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import {
-  createShellExecutor,
-  createCommandExecutor,
-  createDefaultRegistry,
-  createExecutionGateway,
-  runCommand,
-} from "@litt/agent-core";
+import { createShellExecutor, createCommandExecutor, createExecutionGateway } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState } from "./runtime.js";
+import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell, getCanonicalToolRegistry } from "./runtime.js";
 import { getRunRegistry } from "./run-registry.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
@@ -469,36 +463,90 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   const command = args[0];
   const cmdArgs = args.slice(1);
 
-  // Create a per-run shell so this run can be cancelled independently
-  // via /api/cancel or client disconnect. We use runCommand() directly
-  // instead of the ExecutionGateway because the /do endpoint is already
-  // authenticated at the HTTP boundary (user JWT or internal service
-  // key). The gateway's approval flow is designed for interactive
-  // model/agent paths and denies elevated commands in headless mode.
-  // runCommand() still provides capability classification, path safety,
-  // env filtering, and secret redaction — just without the approval gate.
-  const shell = createShellExecutor(ctx.cwd);
+  // Route through the canonical ExecutionGateway — NOT runCommand()
+  // directly. The gateway enforces mode (PLAN blocks mutating commands),
+  // policy, capability classification, path safety, env filtering, and
+  // secret redaction. This is the security invariant: /do in PLAN mode
+  // MUST NOT execute mutating commands.
+  //
+  // /do is a direct authenticated user action (Clerk JWT verified at the
+  // HTTP boundary). The user typing `/do node -e "..."` IS the approval.
+  // We create a /do-specific gateway with an auto-approve callback so
+  // elevated commands (node, npm, etc) proceed. The gateway still denies
+  // dangerous commands (rm -rf /) and still enforces PLAN mode.
+  const mode = ctx.mode ?? "act";
+  const shell = getCanonicalShell(ctx.cwd);
+  const tools = getCanonicalToolRegistry(ctx.cwd);
+  const executor = createCommandExecutor(shell, getRuntimeStore(), null);
+  const doGateway = createExecutionGateway({
+    tools,
+    shell,
+    executor,
+    store: getRuntimeStore(),
+    projectId: "terminal-server",
+    onApprovalRequired: async () => true, // auto-approve: user typed it
+  });
   if (ctx.runId) {
     getRunRegistry().register(ctx.runId, shell);
   }
 
-  const result = await runCommand(shell, command, cmdArgs, {
+  const result = await doGateway.execute({
+    toolId: "project.run",
+    inputs: { command, args: cmdArgs },
     cwd: ctx.cwd,
-    timeoutMs: 30_000,
+    identity: {
+      tenantId: "default",
+      userId: ctx.userId ?? "terminal-server",
+      actorId: ctx.userId ?? "terminal-server",
+      // /do is a direct authenticated user action (Clerk JWT verified at
+      // the HTTP boundary), NOT an untrusted model/agent action. The user
+      // is trusted to run arbitrary commands — the gateway still enforces
+      // PLAN mode (blocks mutating commands) and risk-based denial for
+      // dangerous commands (rm -rf /, etc).
+      trusted: true,
+      // /do is interactive: the user is present (they typed the command).
+      // Combined with onApprovalRequired auto-approve, elevated commands
+      // proceed. Dangerous commands still require explicit approval.
+      interaction: "interactive" as const,
+    },
+    mode,
+    runId: ctx.runId,
   });
 
+  // Gateway denials (PLAN mode, policy, approval) are legitimate outcomes
+  if (!result.result.success) {
+    return {
+      kind: "exec_result",
+      ok: false,
+      data: {
+        command,
+        exitCode: null,
+        stdout: "",
+        stderr: redactSecrets(result.denialReason ?? result.result.message ?? ""),
+        policyEffect: result.policyEffect ?? "deny",
+        approved: result.approved ?? false,
+        denialReason: result.denialReason ?? result.result.message ?? "Command denied by gateway",
+      },
+      durationMs: Date.now() - t0,
+      message: redactSecrets(result.denialReason ?? result.result.message ?? "Command denied by gateway"),
+    };
+  }
+
+  const execData = result.result.data as Record<string, unknown>;
   return {
     kind: "exec_result",
-    ok: result.success,
+    ok: true,
     data: {
       command,
-      exitCode: (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
-      stdout: redactSecrets((result.data.stdout as string | undefined) ?? ""),
-      stderr: redactSecrets((result.data.stderr as string | undefined) ?? ""),
-      status: result.data.status ?? result.status,
+      exitCode: (execData.exitCode as number | null) ?? 0,
+      stdout: redactSecrets((execData.stdout as string | undefined) ?? ""),
+      stderr: redactSecrets((execData.stderr as string | undefined) ?? ""),
+      status: execData.status ?? result.result.status,
+      policyEffect: result.policyEffect ?? "allow",
+      approved: result.approved ?? true,
     },
     durationMs: Date.now() - t0,
-    message: result.message || (result.success ? undefined : `Exit code ${result.data.exitCode ?? 1}`),
+    message: result.result.message || undefined,
   };
 }
 
