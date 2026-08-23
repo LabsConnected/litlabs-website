@@ -363,19 +363,17 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
   };
   // Generate runId for client disconnect cancellation (same as /api/command).
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  // Only cancel on premature disconnect (aborted/closed before response),
-  // NOT on normal request body completion. req "close" fires when the
-  // readable stream ends (after body is consumed), which happens BEFORE
-  // the response is sent for POST requests. Using req.aborted + a
-  // response-sent guard prevents racing the command to completion.
+  // Only cancel on premature client abort, NOT on normal request body
+  // completion. The req 'close' event fires when the readable stream
+  // ends (after body is consumed), which happens BEFORE the response is
+  // sent for POST requests. The 'aborted' event fires ONLY when the
+  // client disconnects before the response is sent.
   let responseSent = false;
-  const cancelOnDisconnect = () => {
-    if (!responseSent && req.destroyed) {
+  req.on("aborted", () => {
+    if (!responseSent) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
-  };
-  req.on("aborted", cancelOnDisconnect);
-  req.on("close", cancelOnDisconnect);
+  });
   try {
     const result = await dispatchCommand(normalizedReq, { runId });
     responseSent = true;
@@ -469,14 +467,14 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
   // before the response is sent, cancel the running process. This
   // prevents orphaned processes from continuing after the client is gone.
+  // Use 'aborted' (fires only on premature disconnect) not 'close' (fires
+  // when the request body stream ends, which is before the response).
   let responseSent = false;
-  const cancelOnDisconnect = () => {
-    if (!responseSent && req.destroyed) {
+  req.on("aborted", () => {
+    if (!responseSent) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
-  };
-  req.on("aborted", cancelOnDisconnect);
-  req.on("close", cancelOnDisconnect);
+  });
 
   try {
     const result = await dispatchCommand(normalizedReq, { runId });
