@@ -58,7 +58,7 @@ function resolveCommand(command: string): { command: string; args: string[]; use
   }
 
   // Check if the command is a known package manager / CLI shim
-  const shims = ["pnpm", "npm", "npx", "yarn", "pnpx"];
+  const shims = ["pnpm", "npm", "npx", "yarn", "pnpx", "litt"];
   if (!shims.includes(lowerCommand)) {
     // Not a shim — try directly (git, node, tsc, etc. are real .exe files)
     return { command, args: [], useShell: false };

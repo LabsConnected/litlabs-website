@@ -29,6 +29,8 @@ import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } fro
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
+import { getAuthSession } from "../lib/auth/auth-session.js";
+import { getTerminalUrl } from "../lib/auth/auth-config.js";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -82,6 +84,14 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     tools: tools.list(),
   });
 
+  // Resolve auth + REMOTE state so the model knows who it's acting for
+  // and whether the REMOTE transport is available. Without this, the
+  // agent cannot truthfully answer "am I authenticated?" or "is REMOTE
+  // reachable?" — it would guess or say "unable to determine."
+  const authSession = getAuthSession();
+  const authState = await authSession.getAuthState();
+  const remoteUrl = getTerminalUrl();
+
   console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 
   try {
@@ -98,6 +108,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         name: String(project.packageJson?.name ?? "unnamed"),
         root: project.rootDir,
         branch: project.gitBranch ?? "unknown",
+        authenticated: authState.signedIn,
+        authEmail: authState.email,
+        authProvider: authState.signedIn ? "Clerk OAuth" : null,
+        remoteUrl,
       },
       store,
       onModelStream: (event) => {

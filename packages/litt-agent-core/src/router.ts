@@ -109,8 +109,8 @@ export class CommandRouter {
         root: project.root,
         name: project.name,
         branch: project.branch,
-        remote: project.remote,
-        isGitRepo: project.isGitRepo,
+        remote: project.remote ?? null,
+        isGitRepo: project.isGitRepo ?? false,
       },
     };
   }

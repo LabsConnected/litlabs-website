@@ -5,24 +5,13 @@
  * The session owns the canonical RuntimeStore — single source of truth.
  */
 
-import { RuntimeSession } from "../lib/runtime-session.js";
 import { detectProject, ok, fail, warn, header, label, value, c } from "../lib/utils.js";
 import { getGitState } from "../lib/git-state.js";
+import type { RuntimeSession } from "../lib/runtime-session.js";
 
-export async function statusCommand(_args: string[], session?: RuntimeSession): Promise<number> {
-  const sess = session ?? new RuntimeSession({ cwd: process.cwd() });
-  const router = sess.getRouter();
-
-  const result = await router.status();
-
-  if (!result.result.success) {
-    fail(result.result.message);
-    return 1;
-  }
-
-  // Use the CLI's canonical project detection for identity (package.json name),
-  // not the router's path.basename fallback. This ensures status, cockpit,
-  // and all CLI surfaces show the same project name.
+export async function statusCommand(_args: string[], _session?: RuntimeSession): Promise<number> {
+  // Use the CLI's canonical project detection for identity (package.json name).
+  // This is a filesystem read — no subprocess needed.
   const detected = detectProject();
   const projectRoot = detected.rootDir;
   const projectName = String(detected.packageJson?.name ?? detected.dirName);
@@ -31,9 +20,14 @@ export async function statusCommand(_args: string[], session?: RuntimeSession): 
   console.log(`${label("Root:")} ${value(projectRoot, c.bold)}`);
   console.log(`${label("Name:")} ${value(projectName, c.bold)}`);
 
-  // Canonical git state — the SAME source as litt doctor, the cockpit
-  // FILES counter, and the agent mission's project.status tool. All
-  // surfaces always agree.
+  // Canonical git state — SINGLE `git status --porcelain=v1 --branch` call
+  // gets both branch and dirty state. This is the SAME source as litt doctor,
+  // the cockpit FILES counter, and the agent mission's project.status tool.
+  //
+  // Performance: the previous code called router.status() which ran 4
+  // sequential git subprocesses (resolveProjectContext: rev-parse + branch +
+  // remote, then gitStatus), THEN called getGitState for 1 more. That's
+  // 5 spawns × ~1.5s on Windows = ~7.5s. Now it's 1 spawn = ~1.5s.
   const gitState = getGitState(projectRoot);
   if (gitState.isGitRepo) {
     header("Git");

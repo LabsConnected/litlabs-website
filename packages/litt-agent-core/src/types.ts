@@ -175,9 +175,19 @@ export interface ShellExecutor {
 export interface ProjectContext {
   root: string;
   name: string;
-  isGitRepo: boolean;
+  isGitRepo?: boolean;
   branch: string | null;
-  remote: string | null;
+  remote?: string | null;
+  /** Authenticated user's email (null when signed out). */
+  authEmail?: string | null;
+  /** Whether the user is currently authenticated. */
+  authenticated?: boolean;
+  /** Auth provider name (e.g. "Clerk OAuth"). */
+  authProvider?: string | null;
+  /** REMOTE terminal server URL, if configured. */
+  remoteUrl?: string | null;
+  /** Whether the REMOTE terminal server is reachable. */
+  remoteReachable?: boolean;
 }
 
 // ─── Runtime State ────────────────────────────────────────────────
