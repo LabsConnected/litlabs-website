@@ -1,11 +1,18 @@
 /**
  * AppShell navigation regression tests.
  *
+ * Verifies the LiTT-centered information architecture:
+ *   - Primary: Home · Dashboard · Studio · Projects
+ *   - Secondary: Library · Deployments · Marketplace
+ *   - Labs: Games · Discover · Showcase (experimental)
+ *   - Account: Wallet · Settings (bottom utility)
+ *   - Mobile: Home · Studio · Projects · Me
+ *
  * Verifies:
  *   - Correct active navigation detection
  *   - Collapsed sidebar persistence key
  *   - Mobile drawer items match desktop sections
- *   - No duplicate navigation (Navbar.tsx is dead code)
+ *   - No duplicate navigation
  *   - Route accessibility for authenticated routes
  */
 
@@ -18,45 +25,50 @@ import {
   COLLAPSED_KEY,
 } from "@/lib/navigation";
 
-describe("AppShell Navigation", () => {
+describe("AppShell Navigation — LiTT-centered IA", () => {
   describe("Canonical nav sections", () => {
-    it("has exactly 3 sections: Command, Create, Explore", () => {
+    it("has exactly 3 sections: Primary, Secondary, Labs", () => {
       const ids = APP_NAV_SECTIONS.map((s) => s.id);
-      expect(ids).toEqual(["command", "create", "explore"]);
+      expect(ids).toEqual(["primary", "secondary", "labs"]);
     });
 
-    it("Command section has Dashboard and Studio", () => {
-      const command = APP_NAV_SECTIONS.find((s) => s.id === "command");
-      expect(command).toBeDefined();
-      const labels = command!.items.map((i) => i.label);
+    it("Primary section has Dashboard, Studio, and Projects", () => {
+      const primary = APP_NAV_SECTIONS.find((s) => s.id === "primary");
+      expect(primary).toBeDefined();
+      const labels = primary!.items.map((i) => i.label);
       expect(labels).toContain("Dashboard");
       expect(labels).toContain("Studio");
+      expect(labels).toContain("Projects");
     });
 
-    it("Create section has Create, Music, and Showcase", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const labels = create!.items.map((i) => i.label);
-      expect(labels).toContain("Create");
-      expect(labels).toContain("Music");
+    it("Secondary section has Library, Deployments, and Marketplace", () => {
+      const secondary = APP_NAV_SECTIONS.find((s) => s.id === "secondary");
+      expect(secondary).toBeDefined();
+      const labels = secondary!.items.map((i) => i.label);
+      expect(labels).toContain("Library");
+      expect(labels).toContain("Deployments");
+      expect(labels).toContain("Marketplace");
+    });
+
+    it("Labs section has Games, Discover, and Showcase", () => {
+      const labs = APP_NAV_SECTIONS.find((s) => s.id === "labs");
+      expect(labs).toBeDefined();
+      const labels = labs!.items.map((i) => i.label);
+      expect(labels).toContain("Games");
+      expect(labels).toContain("Discover");
       expect(labels).toContain("Showcase");
     });
 
-    it("Create nav item links to /studio?tool=image (not chat)", () => {
-      const create = APP_NAV_SECTIONS.find((s) => s.id === "create");
-      expect(create).toBeDefined();
-      const createItem = create!.items.find((i) => i.label === "Create");
-      expect(createItem).toBeDefined();
-      expect(createItem!.href).toBe("/studio?tool=image");
+    it("Studio links to /studio (not a tool-specific query)", () => {
+      const primary = APP_NAV_SECTIONS.find((s) => s.id === "primary");
+      const studio = primary!.items.find((i) => i.label === "Studio");
+      expect(studio!.href).toBe("/studio");
     });
 
-    it("Explore section has Games, Discover, Marketplace", () => {
-      const explore = APP_NAV_SECTIONS.find((s) => s.id === "explore");
-      expect(explore).toBeDefined();
-      const labels = explore!.items.map((i) => i.label);
-      expect(labels).toContain("Games");
-      expect(labels).toContain("Discover");
-      expect(labels).toContain("Marketplace");
+    it("Projects links to /projects", () => {
+      const primary = APP_NAV_SECTIONS.find((s) => s.id === "primary");
+      const projects = primary!.items.find((i) => i.label === "Projects");
+      expect(projects!.href).toBe("/projects");
     });
   });
 
@@ -94,13 +106,11 @@ describe("AppShell Navigation", () => {
     it("Studio is active on /studio and /studio/*", () => {
       expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
       expect(isAppNavActive("/studio/image", search, "/studio")).toBe(true);
-      // pathname from usePathname() doesn't include query string
       expect(isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio")).toBe(true);
     });
 
-    it("Gallery is active on /gallery and /gallery/[id]", () => {
-      expect(isAppNavActive("/gallery", search, "/gallery")).toBe(true);
-      expect(isAppNavActive("/gallery/123", search, "/gallery")).toBe(true);
+    it("Projects is active on /projects", () => {
+      expect(isAppNavActive("/projects", search, "/projects")).toBe(true);
     });
 
     it("Settings is active on /settings and /settings/*", () => {
@@ -108,10 +118,7 @@ describe("AppShell Navigation", () => {
       expect(isAppNavActive("/settings/connections", search, "/settings")).toBe(true);
     });
 
-    it("Dashboard is NOT active on /dashboard-something (prefix edge case)", () => {
-      // /dashboard should match exactly, not as prefix for /dashboard-foo
-      // But our impl uses startsWith, so this is a known trade-off
-      // The important thing is /studio, /gallery etc. work correctly
+    it("Wallet is active on /wallet", () => {
       expect(isAppNavActive("/wallet", search, "/wallet")).toBe(true);
     });
 
@@ -138,9 +145,9 @@ describe("AppShell Navigation", () => {
       expect(labels).toContain("Studio");
     });
 
-    it("includes Discover and Me", () => {
+    it("includes Projects and Me", () => {
       const labels = APP_MOBILE_BOTTOM_ITEMS.map((i) => i.label);
-      expect(labels).toContain("Discover");
+      expect(labels).toContain("Projects");
       expect(labels).toContain("Me");
     });
 

@@ -214,7 +214,7 @@ export const PLAN_CONTRACTS: Record<PlanId, PlanContract> = {
       "Terminal runtime",
       "Advanced coding models",
       "Diff and approval",
-      "Vercel deployment",
+      "Railway deployment",
       "Supabase integration",
       "Larger uploads",
       "Priority generation",

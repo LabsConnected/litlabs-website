@@ -1398,7 +1398,7 @@ function sanitizeErrorMessage(raw: string): string {
     return "The AI provider is rate-limited. Please wait a moment and try again.";
   }
   if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(raw)) {
-    return "The AI provider rejected the API key. Check that the key is valid in Vercel env vars.";
+    return "The AI provider rejected the API key. Check that the key is valid in environment variables.";
   }
   return raw;
 }

@@ -171,7 +171,7 @@ export default function GitHubSetupPage() {
               </div>
               The server is missing <code>GITHUB_APP_ID</code> and{" "}
               <code>GITHUB_PRIVATE_KEY</code>. Create a GitHub App and add the
-              environment variables to Vercel, then redeploy.
+              environment variables to Railway, then redeploy.
             </div>
             <button
               onClick={() => window.open("https://github.com/settings/developers", "_blank")}

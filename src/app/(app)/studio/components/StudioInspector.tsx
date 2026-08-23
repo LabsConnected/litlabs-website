@@ -343,7 +343,7 @@ function BuilderInspector({
         <Row label="Status" value="Running" accent="#34d399" />
       </Section>
       <Section title="Deploy">
-        <Row label="Target" value="Vercel" />
+        <Row label="Target" value="Railway" />
         <Row label="Last deploy" value="2h ago" />
         <Row label="Preview" value="Live" accent="#34d399" />
       </Section>

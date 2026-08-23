@@ -276,7 +276,7 @@ export default function PrivacyPage() {
                 assets.
               </li>
               <li>
-                <strong>Vercel:</strong> Hosting and deployment infrastructure.
+                <strong>Railway:</strong> Hosting and deployment infrastructure.
               </li>
               <li>
                 <strong>Railway:</strong> Terminal workspace provisioning and
@@ -318,11 +318,7 @@ export default function PrivacyPage() {
                 and cached session metadata. AI credit balances are fetched from
                 the server, not stored locally.
               </li>
-              <li>
-                <strong>Analytics:</strong> Vercel Analytics may collect basic
-                usage metrics (page views, performance). No cross-site
-                tracking or advertising cookies are used.
-              </li>
+
             </ul>
             <p className="mt-2">
               You can instruct your browser to refuse all cookies. Note that

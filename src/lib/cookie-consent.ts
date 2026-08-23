@@ -6,7 +6,7 @@
  * so that analytics, marketing, and preference scripts can check consent
  * before loading.
  *
- * IMPORTANT: Any future analytics integration (Vercel Analytics, PostHog,
+ * IMPORTANT: Any future analytics integration (PostHog,
  * Google Analytics, etc.) MUST call hasConsent("analytics") before loading.
  * Loading analytics scripts before the user consents is a GDPR violation.
  */

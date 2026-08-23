@@ -16,7 +16,7 @@ import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env"
 //   - Legitimate crawlers (Googlebot, Bingbot) — they're allowed for SEO
 //   - Webhook calls from Stripe, Clerk, GitHub (verified by signature in handlers)
 //   - API calls from authenticated users
-//   - Health check probes (Vercel, UptimeRobot) and the /metrics scrape
+//   - Health check probes (Railway, UptimeRobot) and the /metrics scrape
 
 /** User-Agent patterns that are always blocked. */
 const BLOCKED_BOT_PATTERNS: readonly RegExp[] = [
@@ -133,7 +133,7 @@ function withBotProtection(inner: (...args: never[]) => unknown) {
 
     // Skip webhooks + health checks + metrics — they verify themselves.
     // This check MUST come before validateAuthConfig() so that health probes
-    // (Railway/Vercel healthcheck at /api/health) succeed even when Clerk env
+    // (Railway healthcheck at /api/health) succeed even when Clerk env
     // vars are not yet configured. Without this ordering, the middleware throws
     // on every request including /api/health, causing a blanket 500 that makes
     // the deployment fail healthcheck and blocks all debugging.

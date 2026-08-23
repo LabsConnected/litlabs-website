@@ -326,7 +326,7 @@ type SheetEntry = {
 const PRIMARY_ENTRIES: SheetEntry[] = [
   { label: "Settings", description: "Manage Studio, models, voice, camera, appearance, and connections", icon: SettingsIcon, href: "/settings" },
   { label: "Account", description: "Profile, plan, usage, and security", icon: User, href: "/profile" },
-  { label: "Connections", description: "GitHub, Vercel, Supabase, and model providers", icon: Plug, href: "/settings/connections" },
+  { label: "Connections", description: "GitHub, Railway, Supabase, and model providers", icon: Plug, href: "/settings/connections" },
 ];
 
 const SYSTEM_ENTRIES: SheetEntry[] = [

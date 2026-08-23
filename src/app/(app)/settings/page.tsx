@@ -1370,6 +1370,9 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
 function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { selectedModel, selectModel, providerHealth } = useStudioModelStore();
+  const { userId } = useClerkAuthContext();
+  const adminUserId = process.env.NEXT_PUBLIC_ADMIN_USER_ID || "";
+  const isOwner = !!(userId && adminUserId && userId === adminUserId);
   const [spend, updateSpend] = useLocalSettings("spend-limits", {
     dailyLimit: "5",
     monthlyLimit: "50",
@@ -1451,7 +1454,8 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
         </div>
       </SettingsCard>
 
-      {/* Provider diagnostics */}
+      {/* Provider diagnostics — owner only */}
+      {isOwner && (
       <SettingsCard title="Provider diagnostics" description="Health and availability">
         <div className="space-y-2">
           {[
@@ -1473,6 +1477,7 @@ function AIModelsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors
           })}
         </div>
       </SettingsCard>
+      )}
     </div>
   );
 }
@@ -2005,7 +2010,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   <div className="mt-1.5 text-emerald-400">Inworld realtime voice is configured and ready.</div>
                 ) : (
                   <div className="mt-1.5 text-amber-400">
-                    Inworld is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE in Vercel env.
+                    Inworld is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE in Railway env.
                   </div>
                 )}
               </div>

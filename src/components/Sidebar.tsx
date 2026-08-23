@@ -211,11 +211,31 @@ function CreditsCard({ balance, plan, T }: { balance: number; plan: string; T: R
 }
 
 function SystemStatus({ collapsed, T }: { collapsed: boolean; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const [status, setStatus] = useState<"loading" | "ok" | "degraded" | "down">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: { status?: string }) => {
+        if (cancelled) return;
+        if (data.status === "ok") setStatus("ok");
+        else if (data.status === "degraded") setStatus("degraded");
+        else setStatus("down");
+      })
+      .catch(() => { if (!cancelled) setStatus("down"); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const dotColor = status === "ok" ? "bg-emerald-400" : status === "degraded" ? "bg-amber-400" : status === "down" ? "bg-red-400" : "bg-neutral-600";
+  const textColor = status === "ok" ? "text-emerald-400" : status === "degraded" ? "text-amber-400" : status === "down" ? "text-red-400" : "text-neutral-500";
+  const label = status === "ok" ? "All systems operational" : status === "degraded" ? "Some systems degraded" : status === "down" ? "Systems offline" : "Checking status…";
+
   return (
     <div className="shrink-0 border-t p-2.5" style={{ borderColor: `${T.borderColor}20` }}>
       <Link href="/settings" className={`flex items-center rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] ${collapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"}`}>
-        <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10"><ShieldCheck size={14} className="text-emerald-400" /><span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-[#080910] bg-emerald-400" /></span>
-        {!collapsed && <span className="min-w-0"><b className="block text-[8px] uppercase tracking-wider" style={{ color: T.textMuted }}>System status</b><span className="block truncate text-[8px] font-bold text-emerald-400">All systems operational</span></span>}
+        <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10"><ShieldCheck size={14} className="text-emerald-400" /><span className={`absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-[#080910] ${dotColor}`} /></span>
+        {!collapsed && <span className="min-w-0"><b className="block text-[8px] uppercase tracking-wider" style={{ color: T.textMuted }}>System status</b><span className={`block truncate text-[8px] font-bold ${textColor}`}>{label}</span></span>}
       </Link>
     </div>
   );

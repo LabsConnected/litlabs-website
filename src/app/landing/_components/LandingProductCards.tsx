@@ -47,7 +47,7 @@ const CARDS: Array<{
   {
     icon: Rocket,
     title: "Deploy",
-    desc: "Review the diff, approve, and ship. Vercel + GitHub PRs. Human approval before any production deploy.",
+    desc: "Review the diff, approve, and ship. Railway + GitHub PRs. Human approval before any production deploy.",
     status: "BETA",
     color: "#818cf8",
   },

@@ -1,5 +1,5 @@
 // Connect all workspace integrations via Supabase
-// This inserts records for GitHub repo, Vercel project, and Supabase project
+// This inserts records for GitHub repo, Railway project, and Supabase project
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rokbfvuoqildggnhappy.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
