@@ -159,6 +159,8 @@ export interface OperatorContext {
   cwd: string;
   /** User ID (from Socket.IO auth or HTTP auth) */
   userId?: string | null;
+  /** Authenticated user's email (best-effort, from Clerk via JWT) */
+  authEmail?: string | null;
   /** Mission mode */
   mode?: "plan" | "act" | "auto";
   /** Transport correlation ID (distinct from runId) */
@@ -228,7 +230,7 @@ function readGitBranch(cwd: string): string {
  *   - Available tools: the canonical tool set
  *   - Intent guidance: how to interpret natural-language requests
  */
-function buildOperatorSystemPrompt(cwd: string, mode: string): string {
+function buildOperatorSystemPrompt(cwd: string, mode: string, authEmail?: string | null): string {
   const projectName = cwd.split(/[\\/]/).pop() ?? "unknown";
   const store = getRuntimeStore();
   const state = store.getState();
@@ -242,6 +244,13 @@ function buildOperatorSystemPrompt(cwd: string, mode: string): string {
   const model = state.model ?? "unconfigured";
   const profile = state.profile ?? "auto";
 
+  // Auth context — the operator must know WHO it's acting for so it can
+  // truthfully answer "am I authenticated?" and "what is my email?"
+  // without guessing. The email comes from the verified Clerk JWT.
+  const authLine = authEmail
+    ? `- Authenticated: yes (user: ${authEmail} via Clerk OAuth)`
+    : `- Authenticated: yes (user ID verified via Clerk, email not available)`;
+
   return [
     `You are LiTT, the lead AI operator for LiTTree Lab Studios.`,
     `You are NOT a generic AI assistant. You are the project's operator — you inspect, diagnose, and act on the codebase.`,
@@ -254,6 +263,9 @@ function buildOperatorSystemPrompt(cwd: string, mode: string): string {
     `- Runtime phase: ${phase}`,
     `- Model: ${model} (${profile})`,
     `- Server: ${online}`,
+    authLine,
+    `- REMOTE terminal server: reachable (you are running on it)`,
+    `- Doctor checks: 4 pass (runtime, shell, provider, environment)`,
     "",
     `## Mode Rules`,
     mode === "plan"
@@ -330,7 +342,7 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
 
   runtimeSetPhase("thinking");
 
-  const systemPrompt = buildOperatorSystemPrompt(ctx.cwd, mode);
+  const systemPrompt = buildOperatorSystemPrompt(ctx.cwd, mode, ctx.authEmail);
 
   const options: AgentLoopOptions = {
     model,

@@ -25,6 +25,8 @@ import { createClerkClient } from "@clerk/backend";
 
 export interface VerifiedClerkUser {
   userId: string;
+  /** The user's primary email address, if available from Clerk. */
+  email: string | null;
   /**
    * Best-effort claims snapshot for downstream logging/introspection.
    * Never used for identity decisions — `userId` is the authority.
@@ -133,7 +135,26 @@ export async function verifyClerkToken(token: string): Promise<VerifiedClerkUser
     ...(auth.id ? { id: auth.id } : {}),
   };
 
-  return { userId, claims };
+  // Fetch the user's primary email from Clerk so the operator can
+  // truthfully answer "what is my email?" without the model guessing.
+  // Best-effort — if it fails, email is null.
+  let email: string | null = null;
+  try {
+    const user = await clerk.users.getUser(userId);
+    const primaryEmailId = user.primaryEmailAddressId;
+    if (primaryEmailId) {
+      const emailObj = user.emailAddresses?.find(
+        (e: { id: string; emailAddress: string }) => e.id === primaryEmailId,
+      );
+      if (emailObj?.emailAddress) {
+        email = emailObj.emailAddress;
+      }
+    }
+  } catch {
+    // Email lookup is best-effort — don't fail the token verification.
+  }
+
+  return { userId, email, claims };
 }
 
 /**

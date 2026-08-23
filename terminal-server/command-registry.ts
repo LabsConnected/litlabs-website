@@ -112,6 +112,8 @@ export interface CommandContext {
   runId?: string;
   /** Mission mode (PLAN/ACT/AUTO). Defaults to "act". */
   mode?: MissionMode;
+  /** Authenticated user's email (best-effort, from Clerk via JWT). */
+  authEmail?: string | null;
 }
 
 export interface CommandResponse {
@@ -386,6 +388,7 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
         cwd: ctx.cwd,
         userId: ctx.userId,
         mode: ctx.mode ?? "act",
+        authEmail: ctx.authEmail ?? null,
       });
       return {
         kind: "brain_response",

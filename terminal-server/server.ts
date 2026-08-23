@@ -220,6 +220,7 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // userId comes from the verified token, NOT from the request body.
     const verified = await verifyClerkToken(clerkToken);
     const userId = verified.userId;
+    const userEmail = verified.email;
 
     // ─── 2. Workspace/project authorization (server-side) ────────
     // If the client requests a specific workspaceId, verify the
@@ -262,8 +263,11 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
           workspaceId: authorizedWorkspaceId,
           projectId: authorizedProjectId,
           cwd: authorizedWorkspaceRoot,
+          email: userEmail ?? undefined,
         })
-      : mintTerminalToken(userId, 300);
+      : mintTerminalToken(userId, 300, {
+          email: userEmail ?? undefined,
+        });
 
     res.json({
       terminalToken,
@@ -405,10 +409,12 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
 app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 1. Verify user JWT ──────────────────────────────────────────
   let userId: string;
+  let authEmail: string | undefined;
   try {
     const token = bearerToken(req.headers.authorization);
     const payload = verifyTerminalToken(token);
     userId = payload.sub;
+    authEmail = payload.email;
   } catch {
     res.status(401).json({ error: "Unauthorized — valid terminal token required" });
     return;
@@ -465,6 +471,8 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     // userId from the JWT — overrides any value in the body
     userId,
+    // email from the JWT — best-effort auth context for the operator
+    authEmail: authEmail ?? null,
     // cwd validated to be within the user's workspace
     cwd,
   };

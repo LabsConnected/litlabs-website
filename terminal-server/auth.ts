@@ -10,6 +10,8 @@ type TerminalTokenPayload = {
   wid?: string;
   pid?: string;
   cwd?: string;
+  /** Authenticated user's primary email (best-effort, from Clerk). */
+  email?: string;
 };
 
 function sign(encodedPayload: string, secret: string): string {
@@ -35,6 +37,7 @@ export function mintTerminalToken(
     workspaceId?: string;
     projectId?: string;
     cwd?: string;
+    email?: string;
   },
 ): string {
   const secret = process.env.TERMINAL_AUTH_SECRET ?? "";
@@ -51,6 +54,7 @@ export function mintTerminalToken(
   if (claims?.workspaceId) payload.wid = claims.workspaceId;
   if (claims?.projectId) payload.pid = claims.projectId;
   if (claims?.cwd) payload.cwd = claims.cwd;
+  if (claims?.email) payload.email = claims.email;
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = sign(encodedPayload, secret);
   return `${encodedPayload}.${signature}`;
