@@ -390,6 +390,7 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
       return {
         kind: "brain_response",
         ok: result.termination !== "error",
+        message: redactSecrets(result.content),
         data: {
           text: redactSecrets(result.content),
           runId: result.runId,
@@ -415,6 +416,7 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
     return {
       kind: "brain_response",
       ok: true,
+      message: redactSecrets(text),
       data: { text: redactSecrets(text) },
       durationMs: Date.now() - t0,
     };
