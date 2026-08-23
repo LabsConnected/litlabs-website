@@ -11,7 +11,7 @@ import {
   getWorkspaceInternal,
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
-import { getInstallationToken } from "@/lib/github-app";
+import { getInstallationTokenForClone } from "@/lib/github-app";
 import type { CanonicalProject } from "@/lib/projects/types";
 
 /**
@@ -156,7 +156,11 @@ async function autoReprepare(
       project.githubOwner &&
       project.githubRepo
     ) {
-      const githubToken = await getInstallationToken(project.githubInstallationId);
+      const githubToken = await getInstallationTokenForClone({
+        installationId: project.githubInstallationId,
+        owner: project.githubOwner,
+        repo: project.githubRepo,
+      });
       result = await prepareWorkspaceInternal({
         sourceType: "github",
         userId,
