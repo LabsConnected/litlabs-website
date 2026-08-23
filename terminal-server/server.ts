@@ -363,13 +363,22 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
   };
   // Generate runId for client disconnect cancellation (same as /api/command).
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  req.on("close", () => {
-    if (!res.headersSent) {
+  // Only cancel on premature disconnect (aborted/closed before response),
+  // NOT on normal request body completion. req "close" fires when the
+  // readable stream ends (after body is consumed), which happens BEFORE
+  // the response is sent for POST requests. Using req.aborted + a
+  // response-sent guard prevents racing the command to completion.
+  let responseSent = false;
+  const cancelOnDisconnect = () => {
+    if (!responseSent && req.destroyed) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
-  });
+  };
+  req.on("aborted", cancelOnDisconnect);
+  req.on("close", cancelOnDisconnect);
   try {
     const result = await dispatchCommand(normalizedReq, { runId });
+    responseSent = true;
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
@@ -460,14 +469,18 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
   // before the response is sent, cancel the running process. This
   // prevents orphaned processes from continuing after the client is gone.
-  req.on("close", () => {
-    if (!res.headersSent) {
+  let responseSent = false;
+  const cancelOnDisconnect = () => {
+    if (!responseSent && req.destroyed) {
       getRunRegistry().cancel(runId).catch(() => {});
     }
-  });
+  };
+  req.on("aborted", cancelOnDisconnect);
+  req.on("close", cancelOnDisconnect);
 
   try {
     const result = await dispatchCommand(normalizedReq, { runId });
+    responseSent = true;
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
