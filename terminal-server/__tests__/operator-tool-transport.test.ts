@@ -387,6 +387,6 @@ describe("LiTTModelProvider construction", () => {
     expect(capturedBody.tools[0].function.name).toBe("project_search");
     expect(capturedBody.tool_choice).toBe("auto");
     expect(capturedBody.parallel_tool_calls).toBe(false);
-    expect(capturedBody.max_tokens).toBe(4096);
+    expect(capturedBody.max_tokens).toBe(1024);
   });
 });
