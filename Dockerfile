@@ -51,6 +51,7 @@ RUN corepack enable pnpm
 
 # Copy installed node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
 
 # Copy source code
 COPY . .
