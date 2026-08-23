@@ -16,6 +16,8 @@
 
 # ─── Stage 1: Dependencies ─────────────────────────────────────────
 FROM node:22-bookworm-slim AS deps
+# Cache bust — forces fresh build when Dockerfile changes
+ARG CACHE_BUST=1
 
 # Install build tools for native modules (node-pty, sharp) and runtime deps (ffmpeg)
 RUN apt-get update && apt-get install -y \
