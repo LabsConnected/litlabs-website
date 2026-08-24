@@ -41,7 +41,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
   if (elapsed) {
     return (
       <div
-        className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
+        className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
         data-testid="studio-timeout"
       >
@@ -69,7 +69,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 
   return (
     <div
-      className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
+      className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
       style={{ backgroundColor: tokens.background }}
       data-testid="studio-loading"
     >
@@ -166,7 +166,7 @@ export default function StudioPage() {
     <Suspense
       fallback={
         <div
-          className="flex min-h-screen items-center justify-center p-6"
+          className="flex min-h-dvh items-center justify-center p-6"
           style={{
             backgroundColor: tokens.background,
             color: tokens.textMuted,

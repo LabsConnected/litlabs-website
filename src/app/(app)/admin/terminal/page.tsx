@@ -497,7 +497,7 @@ export default function AdminTerminal() {
           <div
             ref={outputRef}
             className="flex-1 overflow-auto p-4 text-sm leading-relaxed"
-            style={{ minHeight: 0, maxHeight: "calc(100vh - 148px)" }}
+            style={{ minHeight: 0, maxHeight: "calc(100dvh - 148px)" }}
             onClick={() => inputRef.current?.focus()}
           >
             {output.map((line) => (

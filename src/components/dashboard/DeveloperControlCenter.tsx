@@ -990,7 +990,7 @@ export function DeveloperControlCenter() {
               style={{
                 background: T.boxBg,
                 border: `1px solid ${T.borderColor}30`,
-                maxHeight: "calc(100vh - 280px)",
+                maxHeight: "calc(100dvh - 280px)",
               }}
             >
               {loading ? (
