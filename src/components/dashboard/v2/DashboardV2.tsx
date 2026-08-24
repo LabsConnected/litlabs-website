@@ -199,7 +199,7 @@ export function DashboardV2() {
 
   return (
     <div
-      className="min-h-screen"
+      className="min-h-dvh"
       style={{ background: D.bgGradient, color: D.textPrimary }}
     >
       <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8 lg:py-8">

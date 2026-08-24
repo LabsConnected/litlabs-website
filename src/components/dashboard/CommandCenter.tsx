@@ -1073,7 +1073,7 @@ export function CommandCenter() {
   const isFullWidth = (id: WidgetId) => id === "hero" || id === "quickActions";
 
   return (
-    <div className="min-h-screen backdrop-blur-sm" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
+    <div className="min-h-dvh backdrop-blur-sm" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
       <div className="mx-auto max-w-7xl p-4 lg:p-8">
         {/* Personal Greeting + Actions */}
         <div className="mb-6 flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between" style={{ background: `linear-gradient(135deg, ${T.accentColor}08 0%, transparent 70%)`, borderBottom: `1px solid ${T.borderColor}20` }}>

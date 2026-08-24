@@ -76,7 +76,7 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-screen">
+        <main id="main-content" className="relative z-10 min-h-dvh">
           {children}
         </main>
         <GlobalCompanion />
@@ -91,7 +91,7 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main id="main-content" className="relative z-10 min-h-screen">
+        <main id="main-content" className="relative z-10 min-h-dvh">
           {children}
         </main>
         <GlobalCompanion />
@@ -109,7 +109,7 @@ export default function LayoutShell({
         <AnimatedBackgroundWrapper />
         <div className="relative z-10">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <main id="main-content" className="min-h-screen">{children}</main>
+          <main id="main-content" className="min-h-dvh">{children}</main>
           <GlobalCompanion />
           <CookieConsent />
           <ServiceWorkerRegistration />

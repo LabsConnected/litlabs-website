@@ -245,7 +245,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`} style={shellStyle}>
+    <aside className={`sticky top-0 hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`} style={shellStyle}>
       <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
     </aside>
   );
