@@ -76,6 +76,118 @@ export function isAmbiguousNameMatch(arg: string, workspaces: RemoteWorkspace[])
   return nameMatches.length > 1;
 }
 
+// ─── Post-login workspace onboarding ──────────────────────────────
+
+/**
+ * Result of the post-login workspace onboarding step.
+ * Exported for testability.
+ */
+export type WorkspaceOnboardingResult =
+  | { status: "selected"; workspace: RemoteWorkspace }
+  | { status: "none_ready" }
+  | { status: "skipped" }
+  | { status: "cancelled" };
+
+/**
+ * Post-login workspace onboarding.
+ *
+ * Called after a successful `litt login`. Fetches the user's ready
+ * workspaces through the existing terminal-JWT flow and:
+ *
+ *   - Zero ready workspaces → informs the user, does NOT guess. Returns
+ *     `none_ready` so the caller can show the right message.
+ *   - Exactly one ready workspace → auto-selects and persists via
+ *     `remote-workspace-store.ts`. Returns `selected`.
+ *   - Multiple ready workspaces → prompts the user to choose. Persists
+ *     the choice via `remote-workspace-store.ts`. Returns `selected`
+ *     on valid choice, `cancelled` on invalid/empty input.
+ *
+ * The `workspaceId` from the persisted selection is later sent to
+ * `/api/token-exchange` as a signed claim — it is NEVER sent in the
+ * `/api/chat` or `/api/command` request body. The server verifies
+ * ownership and signs `wid` into the terminal JWT.
+ *
+ * `fetchWorkspaces` is injected so tests can mock the network call.
+ * `promptFn` is injected so tests can mock stdin.
+ * `outputFn` is injected so tests can capture the numbered workspace
+ * list that is printed before the prompt. Defaults to `console.log`.
+ */
+export async function onboardWorkspaceSelection(
+  fetchWorkspaces: () => Promise<RemoteWorkspace[]>,
+  promptFn?: (question: string) => Promise<string>,
+  outputFn?: (line: string) => void,
+): Promise<WorkspaceOnboardingResult> {
+  let workspaces: RemoteWorkspace[];
+  try {
+    workspaces = await fetchWorkspaces();
+  } catch {
+    // Non-fatal — workspace selection can happen later via `litt workspace select`.
+    // We don't print here; the caller decides the messaging.
+    return { status: "skipped" };
+  }
+
+  if (workspaces.length === 0) {
+    return { status: "none_ready" };
+  }
+
+  // Auto-select single workspace
+  if (workspaces.length === 1) {
+    const ws = workspaces[0];
+    setSelectedRemoteWorkspace({
+      workspaceId: ws.workspaceId,
+      projectId: ws.projectId,
+      root: ws.root,
+      branch: ws.branch,
+    });
+    return { status: "selected", workspace: ws };
+  }
+
+  // Multiple workspaces — print the numbered list, then prompt
+  const out = outputFn ?? ((line: string) => console.log(line));
+  out("");
+  out("Available workspaces:");
+  for (let i = 0; i < workspaces.length; i += 1) {
+    const ws = workspaces[i];
+    const name = ws.root.split("/").pop() ?? ws.root;
+    out(`  ${i + 1}. ${name} (${ws.branch}) — ${ws.root}`);
+  }
+
+  const ask = promptFn ?? defaultPrompt;
+  const answer = await ask(
+    `Select [1-${workspaces.length}]: `,
+  );
+
+  const choice = parseInt(answer.trim(), 10);
+  if (isNaN(choice) || choice < 1 || choice > workspaces.length) {
+    return { status: "cancelled" };
+  }
+
+  const ws = workspaces[choice - 1];
+  setSelectedRemoteWorkspace({
+    workspaceId: ws.workspaceId,
+    projectId: ws.projectId,
+    root: ws.root,
+    branch: ws.branch,
+  });
+  return { status: "selected", workspace: ws };
+}
+
+/** Default readline prompt — used when no promptFn is injected. */
+async function defaultPrompt(question: string): Promise<string> {
+  // Non-interactive environments (CI, piped stdin, SSH without TTY,
+  // Termux without interactive shell) — return empty so the caller
+  // treats it as "cancelled" rather than hanging indefinitely.
+  if (!process.stdin.isTTY) {
+    return "";
+  }
+  const rl = readline.createInterface({ input, output });
+  try {
+    return await rl.question(question);
+  } finally {
+    rl.close();
+  }
+}
+
 export async function workspaceCommand(args: string[]): Promise<number> {
   const subcommand = args[0] ?? "list";
 

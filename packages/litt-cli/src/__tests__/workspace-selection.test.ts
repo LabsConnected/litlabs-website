@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -140,13 +140,11 @@ describe("remote-workspace-store", () => {
 
   it("returns null for a corrupted file", () => {
     // Write invalid JSON
-    const { writeFileSync } = require("node:fs");
     writeFileSync(storeFile, "{ invalid json }", "utf8");
     expect(getSelectedRemoteWorkspace()).toBeNull();
   });
 
   it("returns null for incomplete selection (missing required fields)", () => {
-    const { writeFileSync } = require("node:fs");
     // Missing projectId, root, branch, selectedAt
     writeFileSync(storeFile, JSON.stringify({ workspaceId: "ws-1" }), "utf8");
     expect(getSelectedRemoteWorkspace()).toBeNull();
