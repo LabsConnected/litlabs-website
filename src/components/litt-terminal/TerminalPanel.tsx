@@ -694,7 +694,7 @@ export const TerminalPanel = forwardRef<
   };
 
   return (
-    <div className={`flex h-full flex-col ${fullScreen ? "fixed inset-0 z-[10000] h-screen w-screen bg-[#0d0916] p-4" : ""}`}>
+    <div className={`flex h-full flex-col ${fullScreen ? "fixed inset-0 z-[10000] h-dvh w-screen bg-[#0d0916] p-4" : ""}`}>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="min-w-0 flex-1 text-sm">
           {/* Connection state — only "connected" when PTY is verified */}

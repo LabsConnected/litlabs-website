@@ -352,7 +352,7 @@ function DesktopSidebar({
 
   return (
     <aside
-      className={`sticky top-0 z-20 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
+      className={`sticky top-0 z-20 hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-200 ease-out md:flex ${
         collapsed ? "w-[72px]" : "w-[256px]"
       }`}
       style={{
@@ -845,7 +845,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-dvh">
       {/* Desktop sidebar — wrapped in Suspense for useSearchParams SSG safety */}
       <Suspense fallback={<div className="hidden md:block" style={{ width: collapsed ? 72 : 256 }} />}>
         <DesktopSidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />

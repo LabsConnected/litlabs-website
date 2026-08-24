@@ -311,7 +311,7 @@ export default function SocialFeed({
   if (!isLoaded) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-dvh flex items-center justify-center"
         style={{
           backgroundColor: T?.bgColor || "#0a0a0f",
           color: T?.textColor || "#e2e8f0",

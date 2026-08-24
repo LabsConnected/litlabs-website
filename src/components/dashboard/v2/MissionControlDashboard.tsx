@@ -498,7 +498,7 @@ export function MissionControlDashboard() {
   /* ─── Loading state ──────────────────────────────────────────────── */
   if (loading) {
     return (
-      <main className="min-h-screen" style={{ background: D.bgGradient, color: D.textPrimary }}>
+      <main className="min-h-dvh" style={{ background: D.bgGradient, color: D.textPrimary }}>
         <DashboardAmbientBackground />
         <div className="relative z-10 mx-auto w-full max-w-[1680px] px-4 py-5 lg:px-6 xl:px-8">
           <div className="mb-5 rounded-3xl border p-5" style={{ borderColor: D.border, background: D.surface, backdropFilter: "blur(20px)" }}>
@@ -541,7 +541,7 @@ export function MissionControlDashboard() {
   const plan = data?.billing.plan ?? "Free";
 
   return (
-    <main className="min-h-screen" style={{ background: D.bgGradient, color: D.textPrimary }}>
+    <main className="min-h-dvh" style={{ background: D.bgGradient, color: D.textPrimary }}>
       <DashboardAmbientBackground />
       <div className="relative z-10 mx-auto w-full max-w-[1680px] px-4 py-5 lg:px-6 xl:px-8">
         {/* === Header === */}

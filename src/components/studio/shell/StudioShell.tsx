@@ -41,7 +41,7 @@ export function StudioShell() {
 
   if (focusMode) {
     return (
-      <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#07050a]">
+      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#07050a]">
         <TopBar />
         <div className="relative flex-1 overflow-hidden">
           <WorkspaceCanvas />
@@ -52,7 +52,7 @@ export function StudioShell() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#07050a]">
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#07050a]">
       <TopBar />
 
       <div className="flex-1 overflow-hidden">
