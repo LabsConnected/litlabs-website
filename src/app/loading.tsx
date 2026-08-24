@@ -1,7 +1,7 @@
 export default function Loading() {
   return (
     <div
-      className="min-h-screen flex items-center justify-center"
+      className="min-h-dvh flex items-center justify-center px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]"
       style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
     >
       <div className="text-center">

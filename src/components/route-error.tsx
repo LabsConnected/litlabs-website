@@ -20,7 +20,7 @@ export function RouteError({
 
   return (
     <div
-      className="flex min-h-[60vh] items-center justify-center px-4"
+      className="flex min-h-[60dvh] items-center justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16"
       style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
     >
       <div

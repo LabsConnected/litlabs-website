@@ -158,7 +158,7 @@ export default function RuntimeTestPage() {
   const runIdMatch = lastTriggeredRunId && eventRunId && lastTriggeredRunId === eventRunId;
 
   return (
-    <div style={{ fontFamily: "monospace", padding: "20px", maxWidth: "900px", margin: "0 auto", background: "#0a0a0a", color: "#e0e0e0", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "monospace", padding: "20px", maxWidth: "900px", margin: "0 auto", background: "#0a0a0a", color: "#e0e0e0", minHeight: "100dvh" }}>
       <h1 style={{ color: "#8b5cf6", borderBottom: "1px solid #333", paddingBottom: "10px" }}>
         OS-2D.2 — Browser Runtime Acceptance
       </h1>
