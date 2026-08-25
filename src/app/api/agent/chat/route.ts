@@ -1,28 +1,31 @@
 /**
  * Public Agent Chat API — for external AI tools (ChatGPT, Claude, etc.)
  *
- * Allows ChatGPT's browser to interact with your site's AI without
- * requiring Clerk authentication. Uses a simple API key passed via
- * query parameter or header.
+ * Allows external AI tools to interact with your site's AI without
+ * requiring Clerk authentication. Uses a Bearer token in the
+ * Authorization header — never in the URL query string (query params
+ * leak into logs, browser history, analytics, and referrers).
  *
- * Usage (GET — for ChatGPT browsing):
- *   GET /api/agent/chat?key=YOUR_KEY&message=Hello
- *
- * Usage (POST — for programmatic access):
+ * Usage (POST — recommended):
  *   POST /api/agent/chat
- *   Headers: x-agent-api-key: YOUR_KEY
- *   Body: { "message": "Hello", "history": [...], "agentSlug": "litt" }
+ *   Authorization: Bearer YOUR_KEY
+ *   Content-Type: application/json
+ *   { "message": "Hello", "history": [...], "agentSlug": "litt" }
  *
- * Auth: AGENT_API_KEY env var must be set. The key in the request
- * must match it. This is a separate key from INTERNAL_API_KEY to
- * limit blast radius.
+ * Usage (GET — simple one-shot):
+ *   GET /api/agent/chat?message=Hello
+ *   Authorization: Bearer YOUR_KEY
  *
- * Responses are JSON with CORS enabled so ChatGPT can read them.
+ * Auth: AGENT_API_KEY env var must be set (min 16 chars). The Bearer
+ * token must match it. This is a separate key from INTERNAL_API_KEY
+ * to limit blast radius.
+ *
+ * Responses are JSON with CORS enabled so external clients can read them.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { generateText, type LLMProvider, type ModelCategory } from "@/lib/llm";
+import { generateText } from "@/lib/llm";
 import { AGENTS } from "@/lib/agents";
 
 export const runtime = "nodejs";
@@ -39,20 +42,20 @@ function safeSecretEqual(candidate: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function extractBearerToken(req: NextRequest): string | null {
+  const header = req.headers.get("authorization") || req.headers.get("Authorization");
+  if (!header || !header.startsWith("Bearer ")) return null;
+  const token = header.slice(7).trim();
+  if (!token || token.length < 10) return null;
+  return token;
+}
+
 function isAuthorized(req: NextRequest): boolean {
   const expected = process.env.AGENT_API_KEY;
   if (!expected || expected.length < 16) return false;
-
-  // Check query parameter first (for ChatGPT browser access)
-  const url = new URL(req.url);
-  const queryKey = url.searchParams.get("key");
-  if (queryKey && safeSecretEqual(queryKey, expected)) return true;
-
-  // Check header (for programmatic access)
-  const headerKey = req.headers.get("x-agent-api-key");
-  if (headerKey && safeSecretEqual(headerKey, expected)) return true;
-
-  return false;
+  const token = extractBearerToken(req);
+  if (!token) return false;
+  return safeSecretEqual(token, expected);
 }
 
 function buildPrompt(
@@ -84,7 +87,7 @@ function buildPrompt(
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-agent-api-key",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
 export async function OPTIONS() {
@@ -116,7 +119,7 @@ async function handleChat(message: string, history: HistoryEntry[], agentSlug: s
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) {
     return NextResponse.json(
-      { error: "Unauthorized. Pass ?key=YOUR_AGENT_API_KEY" },
+      { error: "Unauthorized. Use Authorization: Bearer YOUR_KEY header." },
       { status: 401, headers: corsHeaders },
     );
   }
@@ -127,7 +130,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         error: "Missing 'message' query parameter",
-        usage: "GET /api/agent/chat?key=YOUR_KEY&message=Hello",
+        usage: "GET /api/agent/chat?message=Hello  (with Authorization: Bearer header)",
         agents: Object.keys(AGENTS),
       },
       { status: 400, headers: corsHeaders },
@@ -153,7 +156,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
     return NextResponse.json(
-      { error: "Unauthorized. Pass key in x-agent-api-key header or ?key= query param" },
+      { error: "Unauthorized. Use Authorization: Bearer YOUR_KEY header." },
       { status: 401, headers: corsHeaders },
     );
   }
