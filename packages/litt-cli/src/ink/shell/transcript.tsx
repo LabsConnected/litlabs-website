@@ -246,3 +246,80 @@ export function TranscriptArea({
 
 // Re-export for the shell and tests.
 export { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS };
+
+/**
+ * Estimate the rendered height of the MissionResultBlock.
+ * Pure — used by the shell to reserve rows for the result block so the
+ * fixed-height content region doesn't overflow (causing line collisions).
+ *
+ * The result block renders:
+ *   - 1 header line (DONE/FAILED/CANCELLED/TIMEOUT)
+ *   - 1 line per proof line (verification, tools used, delta, tests, typecheck, build)
+ *   - 3 rows for failed-state action hints (marginTop + /diff + /verify)
+ */
+export function estimateResultBlockHeight(mission: MissionState | null): number {
+  if (!mission) return 0;
+  const isTerminal = mission.state === "COMPLETE" || mission.state === "FAILED"
+    || mission.state === "CANCELLED" || mission.state === "TIMEOUT";
+  if (!isTerminal) return 0;
+
+  let rows = 1; // header
+
+  // Verification line (rendered for both read-only and mutating missions)
+  if (mission.runtimeProven !== null) rows++;
+
+  // Read-only line ("N tools used")
+  if (mission.readOnly && mission.toolsUsed.length > 0) rows++;
+
+  // Mission delta line (mutating missions with actual file changes)
+  if (!mission.readOnly && mission.missionDeltaFiles && mission.missionDeltaFiles.length > 0) rows++;
+
+  // Test results line
+  if (mission.testResults) rows++;
+
+  // Typecheck line
+  if (mission.typecheckPassed !== null) rows++;
+
+  // Build line
+  if (mission.buildPassed !== null) rows++;
+
+  // Failed-state next actions: marginTop(1) + /diff + /verify = 3 rows
+  const isSuccess = mission.state === "COMPLETE";
+  if (!isSuccess && mission.state !== "CANCELLED" && mission.state !== "TIMEOUT") {
+    rows += 3;
+  }
+
+  return rows;
+}
+
+/**
+ * Estimate the rendered height of the compact activity feed.
+ * Pure — used by the shell to reserve rows for the feed.
+ *
+ * The feed renders with marginTop(1) + one line per visible event.
+ */
+export function estimateActivityFeedHeight(events: ActivityEntry[], max = 4): number {
+  const visible = visibleEvents(events, max);
+  if (visible.length === 0) return 0;
+  return 1 + visible.length; // marginTop(1) + event lines
+}
+
+/**
+ * Total extra content height in live mode: tool progress + result block +
+ * activity feed. Each section has marginTop(1) when present.
+ * Pure — used by the shell to compute the viewport budget accurately.
+ */
+export function estimateExtraContentHeight(
+  toolProgress: ToolProgressSnapshot | null,
+  mission: MissionState | null,
+  events: ActivityEntry[],
+): number {
+  let h = 0;
+  if (toolProgress && toolProgress.entries.length > 0) {
+    h += estimateToolProgressHeight(toolProgress) + 1; // marginTop(1)
+  }
+  const resultH = estimateResultBlockHeight(mission);
+  if (resultH > 0) h += resultH + 1; // marginTop(1)
+  h += estimateActivityFeedHeight(events);
+  return h;
+}
