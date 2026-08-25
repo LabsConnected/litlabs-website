@@ -120,6 +120,7 @@ const optionalIntegrationSchema = z.object({
   VERCEL_TOKEN: z.string().optional(),
   VERCEL_PROJECT_ID: z.string().optional(),
   VERCEL_PROJECT_NAME: z.string().optional(),
+  AGENT_API_KEY: z.string().optional(),
 });
 
 // Terminal server configuration.
