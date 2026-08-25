@@ -106,7 +106,7 @@ async function handleChat(message: string, history: HistoryEntry[], agentSlug: s
 
   return {
     agent: { id: agent.id, name: agent.name, slug: agentSlug },
-    message: result.content,
+    message: result.text,
     provider: result.provider,
     model: result.model,
     usage: result.usage,
