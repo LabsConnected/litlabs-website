@@ -17,12 +17,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Determine target URL
+        id: target
+        run: |
+          # For PRs: test the Railway PR preview deployment (if available).
+          # For manual runs: test production.
+          # Railway PR deployment URLs follow the pattern:
+          #   https://web-pr-<number>.up.railway.app
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_URL="https://web-pr-${{ github.event.pull_request.number }}.up.railway.app"
+            echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "Testing Railway PR deployment: $PR_URL"
+          else
+            echo "url=https://www.litlabs.net" >> "$GITHUB_OUTPUT"
+            echo "Testing production: https://www.litlabs.net"
+          fi
+
+      - name: Wait for deployment to be ready
+        id: wait
+        run: |
+          TARGET_URL="${{ steps.target.outputs.url }}"
+          echo "Waiting for $TARGET_URL to be ready..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_URL" 2>/dev/null || echo "000")
+            if [ "$STATUS" != "000" ] && [ "$STATUS" != "502" ] && [ "$STATUS" != "503" ]; then
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              echo "Deployment ready (HTTP $STATUS) after ${i}0 seconds"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS, waiting 10s..."
+            sleep 10
+          done
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "Deployment not ready after 5 minutes"
+
       - name: Run Lighthouse
+        if: steps.wait.outputs.ready == 'true'
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            https://www.litlabs.net
-            https://www.litlabs.net/studio
+            ${{ steps.target.outputs.url }}
+            ${{ steps.target.outputs.url }}/studio
           budgetPath: .github/budget.config.json
 
       - name: Upload Lighthouse reports
