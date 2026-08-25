@@ -273,16 +273,33 @@ async function streamChatWithOpenRouter(
   if (useWebSearch) {
     body.tools = [buildWebSearchTool()];
   }
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-      "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok || !res.body) throw new Error(`OpenRouter stream failed: ${res.status}`);
+  // Retry transient upstream errors (502, 503, 429) with exponential backoff.
+  // OpenRouter proxies to upstream providers (Nvidia, OpenAI, Google, etc.)
+  // and a single provider being overloaded should not hard-fail the request.
+  const RETRYABLE_STATUS = new Set([429, 502, 503]);
+  const MAX_RETRIES = 2;
+  let res: Response | undefined;
+  let lastError: string | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok && res.body) break;
+    lastError = `OpenRouter stream failed: ${res.status}`;
+    if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_RETRIES) {
+      throw new Error(lastError);
+    }
+    // Exponential backoff: 1s, 2s
+    const delayMs = 1000 * Math.pow(2, attempt);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  if (!res!.ok || !res!.body) throw new Error(lastError ?? "OpenRouter stream failed");
 
   emit({ type: "meta", provider: "openrouter", model, profile });
   let content = "";
@@ -290,7 +307,7 @@ async function streamChatWithOpenRouter(
   let finalModel = model;
   let tFirst = -1;
 
-  const reader = res.body.getReader();
+  const reader = res!.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
   for (;;) {
@@ -627,37 +644,49 @@ export async function streamLiTTMessagesWithTools(
     profile,
   });
 
-  let response: Response;
+  // Retry transient upstream errors (502, 503, 429) with exponential backoff.
+  const RETRYABLE_STATUS = new Set([429, 502, 503]);
+  const MAX_RETRIES = 2;
+  let response: Response | undefined;
+  let lastErrorMessage: string | undefined;
 
-  try {
-    response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          "HTTP-Referer":
-            process.env.NEXT_PUBLIC_SITE_URL ||
-            "https://litlabs.net",
-          "X-Title": "LiTT Desktop Operator",
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      response = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "HTTP-Referer":
+              process.env.NEXT_PUBLIC_SITE_URL ||
+              "https://litlabs.net",
+            "X-Title": "LiTT Desktop Operator",
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      },
-    );
-  } catch (error) {
-    const message =
-      `OpenRouter request failed: ${
-        error instanceof Error
-          ? error.message
-          : String(error)
-      }`;
+      );
+    } catch (error) {
+      const message =
+        `OpenRouter request failed: ${
+          error instanceof Error
+            ? error.message
+            : String(error)
+        }`;
+      lastErrorMessage = message;
+      if (attempt === MAX_RETRIES) {
+        emit({ type: "error", message });
+        throw new Error(message);
+      }
+      // Network errors are retryable
+      const delayMs = 1000 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
 
-    emit({ type: "error", message });
-    throw new Error(message);
-  }
+    if (response.ok) break;
 
-  if (!response.ok) {
     const errorBody =
       await response.text().catch(() => "");
 
@@ -666,6 +695,19 @@ export async function streamLiTTMessagesWithTools(
         errorBody || response.statusText
       }`;
 
+    if (!RETRYABLE_STATUS.has(response.status) || attempt === MAX_RETRIES) {
+      emit({ type: "error", message });
+      throw new Error(message);
+    }
+
+    lastErrorMessage = message;
+    // Exponential backoff: 1s, 2s
+    const delayMs = 1000 * Math.pow(2, attempt);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+
+  if (!response || !response.ok) {
+    const message = lastErrorMessage ?? "OpenRouter request failed";
     emit({ type: "error", message });
     throw new Error(message);
   }
