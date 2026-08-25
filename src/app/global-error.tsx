@@ -32,11 +32,11 @@ export default function GlobalError({
       >
         <main
           style={{
-            minHeight: "100vh",
+            minHeight: "100dvh",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "1rem",
+            padding: "1rem 1rem calc(1rem + env(safe-area-inset-bottom))",
           }}
         >
           <div

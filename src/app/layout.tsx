@@ -116,7 +116,7 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
       </head>
       <body
-        className="antialiased min-h-screen"
+        className="antialiased min-h-dvh"
         style={{ backgroundColor: "#03050b" }}
         suppressHydrationWarning
       >

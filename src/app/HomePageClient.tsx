@@ -56,7 +56,7 @@ function Header() {
 
 function LandingPage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#03050a] text-white selection:bg-[#a970ff] selection:text-white">
+    <main className="min-h-dvh overflow-hidden bg-[#03050a] text-white selection:bg-[#a970ff] selection:text-white">
       <Header />
 
       {/* ═══ 1. PREMIUM HERO — LandingHeroV3 (LiTT agent + Studio) ═══ */}
@@ -206,7 +206,7 @@ function LandingPage() {
       <TrustSection />
 
       {/* ═══ FOOTER ═══ */}
-      <footer className="bg-[#050706] px-5 py-8 lg:px-10">
+      <footer className="bg-[#050706] px-5 py-8 pb-[calc(2rem+env(safe-area-inset-bottom))] lg:px-10">
         <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
           <div className="flex items-center gap-2 font-black text-white">
             <Sparkles size={14} className="text-[#a8ff2f]" /> LiTTree LabStudios

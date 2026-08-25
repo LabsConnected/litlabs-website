@@ -181,7 +181,7 @@ export default function VisualHarnessContent() {
         </p>
       </div>
 
-      <div className="flex h-[calc(100vh-72px)]">
+      <div className="flex h-[calc(100dvh-72px)]">
         {/* Sidebar — conversation list */}
         <div className="w-64 border-r overflow-y-auto" style={{ borderColor: tokens.border, backgroundColor: tokens.surface }}>
           <div className="p-3">
