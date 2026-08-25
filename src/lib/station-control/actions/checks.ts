@@ -50,7 +50,7 @@ export const runsChecksAction: StationAction<
       project_id: args.projectId,
       checks: args.checks as CheckId[] | undefined,
     });
-    if (result.ok) {
+    if (result.success) {
       return result.data as {
         checks: Array<{
           id: CheckId;
@@ -63,7 +63,7 @@ export const runsChecksAction: StationAction<
         timestamp: string;
       };
     }
-    throw new Error(result.error || "Checks failed");
+    throw new Error(result.message || "Checks failed");
   },
 };
 

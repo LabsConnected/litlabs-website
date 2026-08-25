@@ -7,12 +7,6 @@
 import { z } from "zod";
 import { registerStationAction } from "../registry";
 import type { StationAction } from "../types";
-import {
-  createBrowserJob,
-  getJob,
-  approveJob,
-  cancelJob,
-} from "@/lib/browser-jobs";
 
 // ─── Browser Navigate Action ──────────────────────────────────────
 
@@ -37,20 +31,10 @@ export const browserNavigateAction: StationAction<
   mutating: true,
   argsSchema: browserNavigateArgsSchema,
   resultType: browserNavigateResultSchema,
-  execute: async (args, ctx) => {
-    const result = await createBrowserJob({
-      userId: ctx.userId,
-      projectId: args.projectId,
-      jobType: "browser.navigate",
-      params: {
-        url: args.url,
-        waitUntil: args.waitUntil ?? "networkidle",
-      },
-    });
-    return {
-      jobId: result.id,
-      liveViewUrl: result.liveViewUrl,
-    };
+  execute: async () => {
+    // The browser-jobs system currently only supports GHL workflow job types.
+    // Browser navigation/screenshot job types are not yet implemented.
+    throw new Error("browser.navigate: Not implemented — browser job types not yet supported");
   },
 };
 
@@ -76,19 +60,10 @@ export const browserScreenshotAction: StationAction<
   mutating: false,
   argsSchema: browserScreenshotArgsSchema,
   resultType: browserScreenshotResultSchema,
-  execute: async (args, ctx) => {
-    // Submit screenshot job
-    const result = await createBrowserJob({
-      userId: ctx.userId,
-      jobType: "browser.screenshot",
-      params: {
-        jobId: args.jobId,
-        selector: args.selector,
-        fullPage: args.fullPage ?? true,
-      },
-    });
-    // For screenshot, we return the job ID for polling
-    return { screenshotUrl: result.liveViewUrl ?? "" };
+  execute: async () => {
+    // The browser-jobs system currently only supports GHL workflow job types.
+    // Browser navigation/screenshot job types are not yet implemented.
+    throw new Error("browser.screenshot: Not implemented — browser job types not yet supported");
   },
 };
 

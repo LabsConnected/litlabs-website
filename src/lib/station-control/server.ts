@@ -21,10 +21,9 @@ export type {
   ExecutionEvent,
   StationExecutionContext,
   LiveStateSnapshot,
-  PendingApproval,
 } from "./types";
 
-export type { ProjectSession, ProjectSessionStore } from "./project-session";
+export type { ProjectSession, ProjectSessionStore, PendingApproval } from "./project-session";
 
 export { DEFAULT_PERMISSIONS, stationToPermissionKey, canMutate, requiresApproval } from "./permissions";
 

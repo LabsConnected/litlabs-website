@@ -34,10 +34,10 @@ export const gitStatusAction: StationAction<
     const result = await toolGitStatus(ctx.userId, {
       project_id: args.projectId,
     });
-    if (result.ok) {
+    if (result.success) {
       return result.data as { clean: boolean; files: string[] };
     }
-    throw new Error(result.error || "Git status failed");
+    throw new Error(result.message || "Git status failed");
   },
 };
 
@@ -99,10 +99,10 @@ export const gitCommitAction: StationAction<
       project_id: args.projectId,
       message: args.message,
     });
-    if (result.ok) {
+    if (result.success) {
       return result.data as { sha: string | null; message: string };
     }
-    throw new Error(result.error || "Git commit failed");
+    throw new Error(result.message || "Git commit failed");
   },
 };
 
