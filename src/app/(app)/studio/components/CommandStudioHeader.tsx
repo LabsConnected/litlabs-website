@@ -28,6 +28,7 @@ import {
   Download,
   Eraser,
   Settings,
+  Check,
 } from "lucide-react";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
 
@@ -66,6 +67,8 @@ export default function CommandStudioHeader({
   projectReady,
   capabilities,
   busy = false,
+  executionMode = "auto",
+  onExecutionModeChange,
 }: {
   branch?: string;
   onPreviewAction?: () => void;
@@ -89,6 +92,9 @@ export default function CommandStudioHeader({
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   /** True while an agent/conversation turn is in flight. */
   busy?: boolean;
+  /** Execution mode — shown as AUTO ▾ dropdown in the top bar. */
+  executionMode?: "plan" | "act" | "auto";
+  onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -97,11 +103,14 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const [notifCount, setNotifCount] = useState<number | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const modeTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
   const [overflowRect, setOverflowRect] = useState<DOMRect | null>(null);
+  const [modeRect, setModeRect] = useState<DOMRect | null>(null);
 
   const updateRect = useCallback(() => {
     if (statusTriggerRef.current) {
@@ -109,6 +118,9 @@ export default function CommandStudioHeader({
     }
     if (overflowTriggerRef.current) {
       setOverflowRect(overflowTriggerRef.current.getBoundingClientRect());
+    }
+    if (modeTriggerRef.current) {
+      setModeRect(modeTriggerRef.current.getBoundingClientRect());
     }
   }, []);
 
@@ -131,7 +143,7 @@ export default function CommandStudioHeader({
   }, []);
 
   useEffect(() => {
-    if (!statusOpen && !overflowOpen) return;
+    if (!statusOpen && !overflowOpen && !modeOpen) return;
     updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
@@ -139,7 +151,7 @@ export default function CommandStudioHeader({
       window.removeEventListener("scroll", updateRect, true);
       window.removeEventListener("resize", updateRect);
     };
-  }, [statusOpen, overflowOpen, updateRect]);
+  }, [statusOpen, overflowOpen, modeOpen, updateRect]);
 
   const repoConnected = capabilities.repository === "connected";
   const ptyAvailable = capabilities.terminalExecution === "available";
@@ -196,70 +208,70 @@ export default function CommandStudioHeader({
         onSelect={(projectId) => onProjectSelectAction?.(projectId)}
       />
 
-      {/* Branch — only when a repo is connected; repo name is already
-          shown inside the project picker to avoid duplicate indicators */}
-      {branch && repoConnected && (
-        <span
-          className="glass-chip hidden lg:inline shrink-0 whitespace-nowrap px-2 py-0.5 text-[11px] font-bold"
-          style={{
-            color: "var(--text-soft)",
-          }}
-          title={`Branch: ${branch}`}
-        >
-          {branch}
-        </span>
-      )}
-
-      {/* Workspace Status popover trigger — absorbs all permanent chips */}
-      <button
-        ref={statusTriggerRef}
-        type="button"
-        onClick={() => setStatusOpen((v) => !v)}
-        className="glass-chip flex shrink-0 items-center gap-1.5 px-2 py-1 text-[12px] font-bold transition-all hover:bg-white/5 active:scale-95"
-        style={{
-          color: "var(--text-soft)",
-        }}
-        aria-label="Workspace status"
-        aria-expanded={Boolean(statusOpen)}
-        title={capabilities.connectionSummary}
+      {/* Workspace status dot — compact indicator only, no popover.
+          The full status detail lives in the overflow menu (⋯). */}
+      <span
+        className="hidden sm:flex shrink-0 items-center gap-1"
+        title={statusLabel}
+        aria-label={statusLabel}
       >
         <span
           className="h-1.5 w-1.5 rounded-full"
           aria-hidden
           style={{ backgroundColor: statusColor, boxShadow: `0 0 4px ${statusColor}` }}
         />
-        <span className="hidden sm:inline">{statusLabel}</span>
-        <ChevronDown size={10} style={{ color: "var(--text-muted)" }} />
-      </button>
-      {statusOpen && statusRect &&
+      </span>
+
+      {/* Execution mode dropdown — AUTO ▾ / PLAN ▾ / ACT ▾
+          Moved from the composer to the top bar so it's always visible. */}
+      {onExecutionModeChange && (
+        <button
+          ref={modeTriggerRef}
+          type="button"
+          onClick={() => setModeOpen((v) => !v)}
+          className="glass-chip flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11px] font-black transition-all hover:bg-white/5 active:scale-95"
+          style={{
+            color: executionMode === "auto"
+              ? "var(--litt-primary)"
+              : executionMode === "plan"
+                ? "#3b82f6"
+                : "var(--spark-primary)",
+            backgroundColor: executionMode === "auto"
+              ? "rgba(114,242,56,0.08)"
+              : executionMode === "plan"
+                ? "rgba(59,130,246,0.10)"
+                : "rgba(155,77,255,0.10)",
+            borderColor: executionMode === "auto"
+              ? "rgba(114,242,56,0.28)"
+              : executionMode === "plan"
+                ? "rgba(59,130,246,0.28)"
+                : "rgba(155,77,255,0.28)",
+          }}
+          aria-label={`Execution mode: ${executionMode.toUpperCase()}`}
+          aria-expanded={Boolean(modeOpen)}
+          title={
+            executionMode === "auto"
+              ? "Auto — work autonomously until complete"
+              : executionMode === "plan"
+                ? "Plan — inspect and plan without making changes"
+                : "Act — make changes and run commands"
+          }
+          data-testid="execution-mode-trigger"
+        >
+          <span className="pointer-events-none">{executionMode.toUpperCase()}</span>
+          <ChevronDown size={10} className="pointer-events-none" style={{ color: "var(--text-muted)" }} />
+        </button>
+      )}
+      {modeOpen && modeRect && onExecutionModeChange &&
         createPortal(
-          <WorkspaceStatusPopover
-            rect={statusRect}
-            onClose={() => setStatusOpen(false)}
-            onOpenTerminalAction={onOpenTerminalAction}
-            providerCount={providerCount}
-            repoConnected={repoConnected}
-            repoName={capabilities.repositoryName}
-            ptyState={capabilities.terminalExecution}
-            writesAllowed={writesAllowed}
-            modelLabel={selectedModel.label}
-            modelHealth={modelHealth}
-            fallbackNotice={fallbackNotice}
-            walletBalance={walletLoading ? null : balance}
-            connectionSummary={
-              hasAi
-                ? `${selectedModel.label} is ready. Add a project for files, preview, terminal, and deployment.`
-                : "Configure an AI provider to start chatting."
-            }
+          <ExecutionModePopover
+            rect={modeRect}
+            currentMode={executionMode}
+            onSelect={(mode) => { onExecutionModeChange(mode); setModeOpen(false); }}
+            onClose={() => setModeOpen(false)}
           />,
           document.body,
         )}
-
-
-
-      {/* Write-permission pill — colored so the approval state is obvious.
-          🟢 Writes allowed · 🟡 Approval needed · (locked shown in popover) */}
-      <WritePermissionPill writesAllowed={writesAllowed} hasProject={hasProject} />
 
       {/* Agent-active indicator — truthful: only while a turn is in flight */}
       {busy && (
@@ -617,32 +629,80 @@ function WorkspaceStatusPopover({
   );
 }
 
-/* ── Write-permission pill ──────────────────────────────────────── */
-function WritePermissionPill({ writesAllowed, hasProject }: { writesAllowed: boolean; hasProject: boolean }) {
-  // No project yet → no writes possible → muted "Read-only" pill.
-  // Project + writes allowed → green.
-  // Project + approval required → amber.
-  const tone = !hasProject ? "muted" : writesAllowed ? "ok" : "warn";
-  const label = !hasProject ? "Read-only" : writesAllowed ? "Writes allowed" : "Approval needed";
-  const cfg = {
-    ok: { color: "var(--litt-primary)", bg: "rgba(114,242,56,0.08)", border: "rgba(114,242,56,0.3)" },
-    warn: { color: "#e3b341", bg: "rgba(227,179,65,0.08)", border: "rgba(227,179,65,0.3)" },
-    muted: { color: "var(--text-muted)", bg: "var(--studio-surface)", border: "var(--studio-border)" },
-  }[tone];
+/* ── Execution mode popover ────────────────────────────────────── */
+function ExecutionModePopover({
+  rect,
+  currentMode,
+  onSelect,
+  onClose,
+}: {
+  rect: DOMRect;
+  currentMode: "plan" | "act" | "auto";
+  onSelect: (mode: "plan" | "act" | "auto") => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const modes: { id: "plan" | "act" | "auto"; label: string; desc: string; color: string }[] = [
+    { id: "auto", label: "AUTO", desc: "Work autonomously until complete", color: "var(--litt-primary)" },
+    { id: "plan", label: "PLAN", desc: "Inspect and plan without making changes", color: "#3b82f6" },
+    { id: "act", label: "ACT", desc: "Make changes and run commands", color: "var(--spark-primary)" },
+  ];
+
+  const left = Math.min(rect.left, window.innerWidth - 220);
+  const top = rect.bottom + 6;
+
   return (
-    <span
-      className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
-      style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}
-      title={label}
-      data-testid="write-permission-pill"
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Execution mode"
+      className="fixed z-[200] w-52 overflow-hidden rounded-xl border shadow-2xl"
+      style={{
+        left,
+        top,
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border-strong)",
+      }}
     >
-      <span
-        className="h-1.5 w-1.5 rounded-full"
-        aria-hidden
-        style={{ backgroundColor: cfg.color }}
-      />
-      {label}
-    </span>
+      <div className="py-1">
+        {modes.map((m) => {
+          const isActive = currentMode === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onSelect(m.id)}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+              style={{ backgroundColor: isActive ? "rgba(255,255,255,0.03)" : "transparent" }}
+            >
+              {isActive && <Check size={12} className="shrink-0" style={{ color: m.color }} />}
+              {!isActive && <span className="w-3 shrink-0" />}
+              <div className="min-w-0">
+                <div className="text-[11px] font-black" style={{ color: isActive ? m.color : "var(--text-primary)" }}>
+                  {m.label}
+                </div>
+                <div className="text-[10px] leading-tight" style={{ color: "var(--text-muted)" }}>
+                  {m.desc}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

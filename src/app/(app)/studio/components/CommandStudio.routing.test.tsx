@@ -314,18 +314,18 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     vi.clearAllMocks();
   });
 
-  it("initializes with conversation surface when ?tool=chat", () => {
+  it("initializes with preview surface when ?tool=chat", () => {
     render(<CommandStudio />);
-    // Plan tab is active in conversation mode
-    const planBtn = screen.getByTestId("workspace-tab-plan");
-    expect(planBtn.className).toContain("glass-active");
+    // Preview tab is active by default (preview is the primary surface)
+    const previewBtn = screen.getByTestId("workspace-tab-preview");
+    expect(previewBtn.className).toContain("glass-active");
   });
 
   it("routes to builder surface when ?tool=build via studio:switch-tool event", async () => {
     render(<CommandStudio />);
-    // Plan tab starts active (conversation mode)
-    const planBtn = screen.getByTestId("workspace-tab-plan");
-    expect(planBtn.className).toContain("glass-active");
+    // Preview tab starts active (default surface)
+    const previewBtn = screen.getByTestId("workspace-tab-preview");
+    expect(previewBtn.className).toContain("glass-active");
     // Dispatch the legacy switch-tool event for "build"
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
@@ -335,43 +335,43 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // next/dynamic with ssr:false and cannot render in jsdom, but the
     // routing state change is verifiable via the Plan tab's active class.
     await waitFor(() => {
-      expect(planBtn.className).not.toContain("glass-active");
+      expect(previewBtn.className).not.toContain("glass-active");
     });
   });
 
   it("returns to conversation when chat is routed after Build", async () => {
     render(<CommandStudio />);
-    const planBtn = screen.getByTestId("workspace-tab-plan");
+    const previewBtn = screen.getByTestId("workspace-tab-preview");
     // Route to build
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
     });
-    await waitFor(() => expect(planBtn.className).not.toContain("glass-active"));
+    await waitFor(() => expect(previewBtn.className).not.toContain("glass-active"));
     // Route back to chat via the switch-tool event
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
     });
     await waitFor(() => {
-      expect(planBtn.className).toContain("glass-active");
+      expect(previewBtn.className).toContain("glass-active");
     });
   });
 
   it("chat → build routes to builder, then build → chat returns to conversation", async () => {
     render(<CommandStudio />);
-    const planBtn = screen.getByTestId("workspace-tab-plan");
-    // Start at conversation (Plan active)
-    expect(planBtn.className).toContain("glass-active");
+    const previewBtn = screen.getByTestId("workspace-tab-preview");
+    // Start at preview (default surface)
+    expect(previewBtn.className).toContain("glass-active");
     // Route to build
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "build" }));
     });
-    await waitFor(() => expect(planBtn.className).not.toContain("glass-active"));
+    await waitFor(() => expect(previewBtn.className).not.toContain("glass-active"));
     // Route back to chat
     act(() => {
       window.dispatchEvent(new CustomEvent("studio:switch-tool", { detail: "chat" }));
     });
     await waitFor(() => {
-      expect(planBtn.className).toContain("glass-active");
+      expect(previewBtn.className).toContain("glass-active");
     });
   });
 
@@ -384,10 +384,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
 
-    it("Plan tab is active when ?tool=chat (legacy work mode)", () => {
+    it("Preview tab is active by default (preview is primary surface)", () => {
       render(<CommandStudio />);
-      const planBtn = screen.getByTestId("workspace-tab-plan");
-      expect(planBtn.className).toContain("glass-active");
+      const previewBtn = screen.getByTestId("workspace-tab-preview");
+      expect(previewBtn.className).toContain("glass-active");
     });
 
     it("clicking Canvas switches to canvas stage", async () => {
