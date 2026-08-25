@@ -98,7 +98,7 @@ export default function LiTTLiveActivity({
 
   const [elapsed, setElapsed] = useState(0);
   const [hideLowLevel, setHideLowLevel] = useState(false);
-  const [collapsedAll, setCollapsedAll] = useState(false);
+  const [collapsedAll, setCollapsedAll] = useState(true);
 
   // Track elapsed time while running
   useEffect(() => {

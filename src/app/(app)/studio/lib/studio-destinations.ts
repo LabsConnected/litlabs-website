@@ -226,10 +226,11 @@ export function mapLegacyToolToDestination(
   }
 
   switch (tool) {
-    // Studio / Work surface — the conversation (canonical)
+    // Studio / Work surface — the conversation (canonical).
+    // Preview is the default workspace surface; chat lives in the LiTT panel.
     case "home":
     case "chat":
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "preview", littMode: "auto" };
     // Studio / Files — the Canvas surface
     case "canvas":
       return { destination: "studio", legacyTool: "canvas", mode: "files", littMode: "website" };
@@ -289,9 +290,10 @@ export function mapLegacyToolToDestination(
     case "clibridge":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
 
-    // Unknown / default → Studio (LiTT chat)
+    // Unknown / default → Studio with Preview as the primary surface.
+    // Chat lives in the LiTT panel (left); Preview gets the main workspace.
     default:
-      return { destination: "studio", legacyTool: "chat", mode: "work", littMode: "auto" };
+      return { destination: "studio", legacyTool: "chat", mode: "preview", littMode: "auto" };
   }
 }
 

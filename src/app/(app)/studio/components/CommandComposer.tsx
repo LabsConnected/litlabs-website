@@ -341,51 +341,8 @@ export default function CommandComposer({
           </div>
         )}
 
-        {/* PLAN / ACT / AUTO execution mode selector */}
-        {onExecutionModeChange && (
-          <div
-            className="glass-chip flex shrink-0 items-center gap-0.5 p-0.5"
-            role="radiogroup"
-            aria-label="Execution mode"
-          >
-            {(["plan", "act", "auto"] as const).map((mode) => {
-              const isActive = executionMode === mode;
-              const colors: Record<typeof mode, { bg: string; fg: string }> = {
-                plan: { bg: "rgba(59,130,246,0.15)", fg: "#3b82f6" },
-                act: { bg: "var(--purple-soft)", fg: "var(--purple)" },
-                auto: { bg: "var(--green-soft)", fg: "var(--green)" },
-              };
-              const labels: Record<typeof mode, string> = {
-                plan: "PLAN",
-                act: "ACT",
-                auto: "AUTO",
-              };
-              const tooltips: Record<typeof mode, string> = {
-                plan: "Inspect and plan without making changes",
-                act: "Make changes and run commands",
-                auto: "Work autonomously until the task is complete",
-              };
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={isActive}
-                  aria-label={labels[mode]}
-                  title={tooltips[mode]}
-                  onClick={() => onExecutionModeChange(mode)}
-                  className="rounded px-2 py-0.5 text-[10px] font-bold transition"
-                  style={{
-                    backgroundColor: isActive ? colors[mode].bg : "transparent",
-                    color: isActive ? colors[mode].fg : "var(--text-muted)",
-                  }}
-                >
-                  {labels[mode]}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* Execution mode is now in the top bar (AUTO ▾).
+            The composer focuses on intent pills and tool modes only. */}
       </div>
 
       {/* LiTT mode quick-select — Image / Music / Video / Code / Website

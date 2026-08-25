@@ -191,7 +191,7 @@ function CommandStudioContent() {
   }, [searchParams]);
 
   const [destination, setDestination] = useState<StudioDestination>(initial.destination);
-  const [studioMode, setStudioMode] = useState<StudioMode>((initial.mode as StudioMode) ?? "work");
+  const [studioMode, setStudioMode] = useState<StudioMode>((initial.mode as StudioMode) ?? "preview");
   const [createMode, setCreateMode] = useState<CreateMode>((initial.mode as CreateMode) ?? "image");
   const [moreMode, setMoreMode] = useState<MoreMode>((initial.mode as MoreMode) ?? "plugins");
   const [missionMode, setMissionMode] = useState<MissionMode>((initial.mode as MissionMode) ?? "overview");
@@ -223,7 +223,7 @@ function CommandStudioContent() {
   // we preserve the last workspace stage so the context can represent
   // e.g. { workspaceMode: "code", creator: "image" }.
   const [lastWorkspaceStage, setLastWorkspaceStage] = useState<WorkspaceStage>(
-    deriveWorkspaceStage(initial.destination, (initial.mode as StudioMode) ?? "work") ?? "plan",
+    deriveWorkspaceStage(initial.destination, (initial.mode as StudioMode) ?? "preview") ?? "preview",
   );
 
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
@@ -248,7 +248,7 @@ function CommandStudioContent() {
 
     setDestination((cur) => (cur === mapped.destination ? cur : mapped.destination));
     if (mapped.destination === "studio") {
-      const newMode = (mapped.mode as StudioMode) ?? "work";
+      const newMode = (mapped.mode as StudioMode) ?? "preview";
       setStudioMode((cur) => (cur === newMode ? cur : newMode));
     }
     if (mapped.destination === "create") {
@@ -1219,6 +1219,8 @@ function CommandStudioContent() {
           projectReady={projectReady}
           capabilities={capabilities}
           busy={conversation.busy}
+          executionMode={executionMode}
+          onExecutionModeChange={setExecutionMode}
         />
 
         {/* Body: LiTT (left) | Workspace (center) | Context Drawer (right).
