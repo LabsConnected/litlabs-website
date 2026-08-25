@@ -27,7 +27,7 @@
 import React, { useEffect, useMemo } from "react";
 import { Box, useStdout } from "ink";
 import { Welcome } from "./welcome.js";
-import { TranscriptArea, layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS } from "./transcript.js";
+import { TranscriptArea, layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS, estimateExtraContentHeight } from "./transcript.js";
 import { Composer } from "./composer.js";
 import { StatusBar } from "../status-bar.js";
 import { CONTENT_MEASURE } from "../chat-transcript.js";
@@ -37,9 +37,6 @@ import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
 const CHROME_ROWS = 6;
-
-/** Result block reserve — rows set aside for the DONE/FAILED block. */
-const RESULT_RESERVE = 4;
 
 export interface LiTTShellProps {
   messages: ChatMessage[];
@@ -117,19 +114,30 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const contentWidth = Math.max(32, Math.min(CONTENT_MEASURE, columns - 4));
   const contentRows = Math.max(8, rows - 1 - CHROME_ROWS);
 
-  const terminalMission = missionState
-    && (missionState.state === "COMPLETE" || missionState.state === "FAILED"
-      || missionState.state === "CANCELLED" || missionState.state === "TIMEOUT");
-
   const layout = useMemo(() => layoutTranscript(messages, contentWidth), [messages, contentWidth]);
+
+  // Extra content height in live mode: tool progress + result block +
+  // activity feed. These render BELOW the messages inside the same
+  // fixed-height Box, so the viewport budget must reserve rows for them.
+  // Without this, the Box overflows and Ink collides lines (the 100×30 bug).
+  const extraHeight = useMemo(() => {
+    if (anchor !== null) return 0; // scrolled mode — extra content not rendered
+    return estimateExtraContentHeight(toolProgress, missionState, activityLog);
+  }, [anchor, toolProgress, missionState, activityLog]);
 
   const viewport = useMemo(() => {
     if (messages.length === 0) {
-      return { start: 0, end: 0, atBottom: true, hasAbove: false, belowCount: 0, fits: true };
+      return { start: 0, end: 0, atBottom: true, hasAbove: false, belowCount: 0, fits: extraHeight < contentRows };
     }
-    // In scrolled mode the DONE/events are skipped; live mode reserves
-    // rows for the result block.
-    const reserve = anchor === null && terminalMission ? RESULT_RESERVE : 0;
+    // Reserve rows for extra content (tool progress + result block + feed).
+    // In scrolled mode, extra content is not rendered, so reserve = 0.
+    const reserve = anchor === null ? extraHeight : 0;
+    // If the extra content alone exceeds the region, fall back to natural
+    // flow (terminal scrollback) instead of overflowing the fixed Box.
+    if (reserve >= contentRows) {
+      const last = messages.length - 1;
+      return { start: last, end: messages.length, atBottom: true, hasAbove: last > 0, belowCount: 0, fits: false };
+    }
     return computeViewport(
       messages,
       layout,
@@ -137,7 +145,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
       anchor,
       anchor === null ? 0 : SCROLL_INDICATOR_ROWS,
     );
-  }, [messages, layout, contentRows, anchor, terminalMission]);
+  }, [messages, layout, contentRows, anchor, extraHeight]);
 
   // Page size for PgUp/PgDn = the number of messages the LIVE viewport
   // shows. Synced on every render.

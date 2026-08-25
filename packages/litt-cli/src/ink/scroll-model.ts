@@ -38,7 +38,12 @@ export interface TranscriptLayout {
 export function layoutTranscript(messages: ChatMessage[], width: number): TranscriptLayout {
   const heights = messages.map((m) => estimateMessageHeight(m, width));
   const prefix: number[] = [0];
-  for (const h of heights) prefix.push(prefix[prefix.length - 1] + h);
+  for (let i = 0; i < heights.length; i++) {
+    // Each message after the first has marginTop={1} in TranscriptArea.
+    // Include it so the budget accurately reflects the rendered height.
+    const margin = i > 0 ? 1 : 0;
+    prefix.push(prefix[prefix.length - 1] + heights[i] + margin);
+  }
   return { heights, prefix, total: prefix[prefix.length - 1] ?? 0 };
 }
 
