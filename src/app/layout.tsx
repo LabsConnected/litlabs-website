@@ -96,6 +96,12 @@ export const metadata: Metadata = {
 // making the real pk_live key available to Next.js during SSG.
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
+// Force dynamic rendering so ClerkProvider doesn't throw during static
+// prerendering when the Clerk key is missing (local builds, CI without
+// secrets). The app is inherently dynamic (Clerk auth, user state) so
+// static prerendering provides no benefit here.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{
