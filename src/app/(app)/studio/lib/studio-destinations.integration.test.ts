@@ -13,19 +13,19 @@ describe("Phase 1.1 — Legacy routing integration", () => {
   });
 
   describe("Required legacy URL behaviors", () => {
-    it("?tool=home → Studio Work conversation", () => {
+    it("?tool=home → Studio Preview (preview is the primary surface)", () => {
       const r = mapLegacyToolToDestination("home");
       expect(r.destination).toBe("studio");
-      expect(r.mode).toBe("work");
+      expect(r.mode).toBe("preview");
       expect(r.legacyTool).toBe("chat");
       expect(r.openDrawer).toBeUndefined();
       expect(r.openInspector).toBeUndefined();
     });
 
-    it("?tool=chat → Studio Work conversation", () => {
+    it("?tool=chat → Studio Preview (preview is the primary surface)", () => {
       const r = mapLegacyToolToDestination("chat");
       expect(r.destination).toBe("studio");
-      expect(r.mode).toBe("work");
+      expect(r.mode).toBe("preview");
       expect(r.legacyTool).toBe("chat");
     });
 
