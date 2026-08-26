@@ -421,6 +421,7 @@ export default function CommandStudioHeader({
             onDeleteChatAction={onDeleteChatAction}
             onRenameChatAction={onRenameChatAction}
             onExportChatAction={onExportChatAction}
+            onOpenTerminalAction={onOpenTerminalAction}
             hasConversation={Boolean(hasConversation)}
             previewDisabled={!projectReady}
             busy={busy}
@@ -716,6 +717,7 @@ function OverflowMenu({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
+  onOpenTerminalAction,
   hasConversation,
   previewDisabled,
   busy,
@@ -729,6 +731,7 @@ function OverflowMenu({
   onDeleteChatAction?: () => void;
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
+  onOpenTerminalAction?: () => void;
   hasConversation: boolean;
   previewDisabled: boolean;
   busy: boolean;
@@ -843,6 +846,18 @@ function OverflowMenu({
         <Eye size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Preview
       </button>
+      {onOpenTerminalAction && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onOpenTerminalAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[11px] font-bold transition-colors hover:bg-white/5"
+          style={{ color: "var(--text-primary)" }}
+          aria-label="Terminal"
+        >
+          <Terminal size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+          Terminal
+        </button>
+      )}
       <div className="h-px" style={{ backgroundColor: "var(--studio-border)" }} />
       <Link
         href={settingsHref}
