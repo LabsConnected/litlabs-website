@@ -20,7 +20,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
+import { tryCommandOutputAsync } from "../lib/which.js";
 
 export async function doctorCommand(_args: string[]): Promise<number> {
   header("LiTT Doctor — System Health Check");
@@ -36,24 +36,18 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     console.log(`${c.dim}  Cockpit and other Ink-based commands will crash on Node <22.${c.reset}`);
   }
 
-  // Git + package managers — run version checks in parallel using
-  // execFileSync (no PowerShell shell overhead). Each call spawns the
-  // binary directly, saving ~1s per command vs the old exec() which
-  // spawned powershell.exe for every call.
-  //
-  // Performance: old code ran hasCommand() + exec(--version) sequentially
-  // for each tool = 2 PowerShell spawns × 4 tools = 8 spawns × ~1.5s =
-  // ~12s. Now: 4 direct spawns in parallel = ~1.5s total.
-  const toolResults = await Promise.allSettled([
-    tryExecFileSync("git", ["--version"]),
-    tryExecFileSync("pnpm", ["--version"]),
-    tryExecFileSync("npm", ["--version"]),
-    tryExecFileSync("yarn", ["--version"]),
+  // Git + package managers — four ACTUAL async probes run concurrently
+  // via Promise.all. Each calls tryCommandOutputAsync, which resolves
+  // the executable through lib/which (so Windows .CMD shims like
+  // pnpm/npm/yarn are found correctly) and spawns it asynchronously.
+  // Resolution is synchronous filesystem work; only the spawn is async,
+  // so the four probes overlap on their spawn time, not their stat time.
+  const [gitVer, pnpmVer, npmVer, yarnVer] = await Promise.all([
+    tryCommandOutputAsync("git", ["--version"]),
+    tryCommandOutputAsync("pnpm", ["--version"]),
+    tryCommandOutputAsync("npm", ["--version"]),
+    tryCommandOutputAsync("yarn", ["--version"]),
   ]);
-
-  const [gitVer, pnpmVer, npmVer, yarnVer] = toolResults.map((r) =>
-    r.status === "fulfilled" ? r.value : null,
-  );
 
   if (gitVer) {
     ok(`Git: ${gitVer}`);
@@ -214,21 +208,3 @@ export async function doctorCommand(_args: string[]): Promise<number> {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
-
-/**
- * Run a command via execFileSync (no shell) and return trimmed stdout.
- * Returns null if the command is not found or fails.
- * Used for version checks — avoids PowerShell shell overhead.
- */
-function tryExecFileSync(command: string, args: string[]): string | null {
-  try {
-    return execFileSync(command, args, {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
