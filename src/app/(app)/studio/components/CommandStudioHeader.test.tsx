@@ -82,9 +82,12 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
-    // Chat is available without a project; project-only controls stay disabled.
+    // The status label is now a compact dot with title tooltip — no text.
+    // "Workspace ready" should never appear without a project.
     expect(screen.queryByText("Workspace ready")).toBeNull();
-    expect(screen.getByText("Chat ready")).toBeTruthy();
+    // The status dot is rendered with an aria-label for accessibility.
+    const statusDot = screen.getByLabelText("Chat ready");
+    expect(statusDot).toBeTruthy();
   });
 
   it("Deploy button is disabled when no project is ready", () => {
@@ -136,7 +139,7 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
     expect(onOpenActivity).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the terminal drawer from workspace status when PTY is disconnected", () => {
+  it("opens the terminal drawer from overflow menu when PTY is disconnected", () => {
     const onOpenTerminal = vi.fn();
     render(
       <CommandStudioHeader
@@ -147,8 +150,11 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         capabilities={mockCapabilities}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /workspace status/i }));
-    fireEvent.click(screen.getByRole("button", { name: /open terminal & connect/i }));
+    // Terminal access is now in the overflow menu (⋯) — the workspace
+    // status popover was removed to simplify the top bar.
+    fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
+    const terminalBtn = screen.getByRole("button", { name: /terminal/i });
+    fireEvent.click(terminalBtn);
     expect(onOpenTerminal).toHaveBeenCalledTimes(1);
   });
 
