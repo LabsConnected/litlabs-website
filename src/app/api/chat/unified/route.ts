@@ -154,6 +154,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null, cl
     "gemini",
     "groq",
     "groq-whisper",
+    "openai",
     "openrouter-free",
     "openrouter-qwen",
     "openrouter-deepseek",

@@ -51,6 +51,7 @@ const optionalAISchema = z.object({
   OPENROUTER_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().optional().default("gpt-4o"),
   TOGETHER_API_KEY: z.string().optional(),
   HUGGING_FACE_API_KEY: z.string().optional(),
   FAL_KEY: z.string().optional(),

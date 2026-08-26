@@ -48,6 +48,10 @@ export async function GET(req: NextRequest) {
       keySet: !!process.env.GROQ_API_KEY,
       model: health.groq.model,
     },
+    openai: {
+      keySet: !!process.env.OPENAI_API_KEY,
+      model: health.openai.model,
+    },
     openrouter: {
       keySet: !!process.env.OPENROUTER_API_KEY,
       model: health.openrouter.model,
@@ -113,7 +117,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     timestamp: new Date().toISOString(),
     providerKeys,
-    failoverChain: ["gemini", "groq", "openrouter-free"],
+    failoverChain: ["openai", "gemini", "groq", "openrouter-free"],
     results,
   });
 }
