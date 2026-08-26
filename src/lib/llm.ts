@@ -1,19 +1,19 @@
 /**
  * Unified LLM client for litlabs.net.
  *
- * Architecture: Vercel AI Gateway controls routing. Google handles the default
- * free experience. OpenRouter supplies model variety and free fallbacks.
- * Groq handles speed and transcription. Users bring OpenAI or Anthropic keys
- * for premium work.
+ * Architecture: OpenAI handles the default production experience when it is
+ * configured. Google and OpenRouter provide free fallbacks, while Groq handles
+ * speed-sensitive inference and transcription.
  *
  * Strategy: try providers in order, fail over on 429 / 5xx / network error.
  *
- *   1. Gemini 2.5 Flash  — primary. Generous free tier, fast, 1M context.
- *   2. Groq              — ultra-fast inference, Whisper transcription.
- *   3. OpenRouter        — free models, experimental, fallback variety.
+ *   1. OpenAI            — primary production provider.
+ *   2. Gemini 2.5 Flash  — free fallback with a large context window.
+ *   3. Groq              — ultra-fast inference and Whisper transcription.
+ *   4. OpenRouter        — free models and fallback variety.
  *
  * Categories (user-facing model selector):
- *   - "auto"     → Best available (Gemini → Groq → OpenRouter free)
+ *   - "auto"     → Best available (OpenAI → Gemini → Groq → OpenRouter)
  *   - "free"     → Gemini free → OpenRouter free → Groq free
  *   - "fast"     → Groq → Gemini Flash → OpenRouter fallback
  *   - "code"     → Qwen3 Coder (free) → Gemini → OpenRouter free
@@ -26,6 +26,8 @@
  *   GOOGLE_API_KEY     — alias for GEMINI_API_KEY
  *   OPENROUTER_API_KEY — enables the OpenRouter fallback chain
  *   GROQ_API_KEY       — enables Groq fast inference + Whisper
+ *   OPENAI_API_KEY     — enables OpenAI as the primary production provider
+ *   OPENAI_MODEL       — optional OpenAI model override (default: gpt-4o)
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -42,6 +44,7 @@ export type LLMProvider =
   | "gemini"
   | "groq"
   | "groq-whisper"
+  | "openai"
   | "openrouter-free"
   | "openrouter-qwen"
   | "openrouter-deepseek"
@@ -101,6 +104,9 @@ const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const GROQ_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_BASE = "https://api.groq.com/openai/v1";
+const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_BASE = "https://api.openai.com/v1";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
 const GEMINI_PRIMARY_MODEL =
   process.env.GEMINI_PRIMARY_MODEL || "gemini-2.5-flash";
@@ -111,6 +117,7 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
   groq: "llama-3.3-70b-versatile",
   "groq-whisper": "whisper-large-v3",
+  openai: OPENAI_MODEL,
   "openrouter-free": "openrouter/free",
   "openrouter-qwen": "qwen/qwen-2.5-coder-32b-instruct:free",
   "openrouter-deepseek": "deepseek/deepseek-chat:free",
@@ -161,7 +168,9 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   // then falling back to the others.
   if (opts.category === "litt-alias" && opts.provider) {
     const preferred = opts.provider;
-    const all: LLMProvider[] = ["gemini", "groq", "openrouter-free"];
+    const all: LLMProvider[] = OPENAI_KEY
+      ? ["openai", "gemini", "groq", "openrouter-free"]
+      : ["gemini", "groq", "openrouter-free"];
     const fallbacks = all.filter((p): p is LLMProvider => p !== preferred);
     return [preferred, ...fallbacks];
   }
@@ -171,15 +180,21 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
     switch (opts.category) {
       case "auto":
       case "litt-alias":
-        return ["gemini", "groq", "openrouter-free"];
+        return OPENAI_KEY
+          ? ["openai", "gemini", "groq", "openrouter-free"]
+          : ["gemini", "groq", "openrouter-free"];
       case "free":
         return ["gemini", "openrouter-free", "groq"];
       case "fast":
         return ["groq", "gemini", "openrouter-free"];
       case "code":
-        return ["openrouter-qwen", "gemini", "openrouter-free"];
+        return OPENAI_KEY
+          ? ["openai", "openrouter-qwen", "gemini", "openrouter-free"]
+          : ["openrouter-qwen", "gemini", "openrouter-free"];
       case "creative":
-        return ["gemini", "openrouter-free", "groq"];
+        return OPENAI_KEY
+          ? ["openai", "gemini", "openrouter-free", "groq"]
+          : ["gemini", "openrouter-free", "groq"];
       case "vision":
         return ["gemini", "openrouter-vision"];
       case "byok":
@@ -193,10 +208,14 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   }
   switch (task) {
     case "code":
-      return ["openrouter-qwen", "gemini", "openrouter-free"];
+      return OPENAI_KEY
+        ? ["openai", "openrouter-qwen", "gemini", "openrouter-free"]
+        : ["openrouter-qwen", "gemini", "openrouter-free"];
     case "precise":
     case "json":
-      return ["gemini", "openrouter-deepseek", "openrouter-free"];
+      return OPENAI_KEY
+        ? ["openai", "gemini", "openrouter-deepseek", "openrouter-free"]
+        : ["gemini", "openrouter-deepseek", "openrouter-free"];
     case "vision":
       return ["gemini", "openrouter-vision"];
     case "transcription":
@@ -204,7 +223,9 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
     case "creative":
     case "chat":
     default:
-      return ["gemini", "groq", "openrouter-free"];
+      return OPENAI_KEY
+        ? ["openai", "gemini", "groq", "openrouter-free"]
+        : ["gemini", "groq", "openrouter-free"];
   }
 }
 
@@ -413,6 +434,64 @@ async function generateViaGroq(
   return { text, usage, model: data.model ?? modelName };
 }
 
+async function generateViaOpenAI(
+  p: GenerateParams,
+  modelName: string,
+  timeoutMs: number,
+): Promise<{ text: string; usage?: LLMUsage; model: string }> {
+  if (!OPENAI_KEY) {
+    throw new ProviderError("openai", null, "OPENAI_API_KEY not set");
+  }
+  const body: Record<string, unknown> = {
+    model: modelName,
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+  else if (p.task === "creative") body.temperature = 0.9;
+  else if (p.task === "precise" || p.task === "json") body.temperature = 0.2;
+  else if (p.task === "code") body.temperature = 0.1;
+  else if (p.task === "chat") body.temperature = 0.7;
+  if (p.opts.stop) body.stop = p.opts.stop;
+  if (p.task === "json") body.response_format = { type: "json_object" };
+
+  const res = await fetchWithTimeout(
+    `${OPENAI_BASE}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_KEY}`,
+      },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "openai",
+      res.status,
+      `OpenAI ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+  const data = await res.json();
+  const choice = data.choices?.[0];
+  const text: string = choice?.message?.content ?? "";
+  const usage: LLMUsage | undefined = data.usage
+    ? {
+        prompt: data.usage.prompt_tokens ?? 0,
+        completion: data.usage.completion_tokens ?? 0,
+        total: data.usage.total_tokens ?? 0,
+      }
+    : undefined;
+  return { text, usage, model: data.model ?? modelName };
+}
+
 async function dispatchProvider(
   provider: LLMProvider,
   p: GenerateParams,
@@ -438,6 +517,9 @@ async function dispatchProvider(
   }
   if (provider === "groq" || provider === "groq-whisper") {
     return generateViaGroq(p, provider, modelName, timeoutMs);
+  }
+  if (provider === "openai") {
+    return generateViaOpenAI(p, modelName, timeoutMs);
   }
   // All others are OpenRouter
   return generateViaOpenRouter(p, provider, modelName, timeoutMs);
@@ -615,6 +697,14 @@ export async function streamText(
           t0,
           failover,
           onReasoning,
+        );
+      } else if (provider === "openai") {
+        result = await streamViaOpenAI(
+          { prompt, systemPrompt, task, opts: options },
+          wrappedOnChunk,
+          t0,
+          failover,
+          timeoutMs,
         );
       } else if (provider === "groq" || provider === "groq-whisper") {
         result = await streamViaGroq(
@@ -815,6 +905,88 @@ async function streamViaOpenRouter(
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
 }
 
+async function streamViaOpenAI(
+  p: GenerateParams,
+  onChunk: (text: string) => void,
+  t0: number,
+  failover: LLMProvider[],
+  timeoutMs: number,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+}> {
+  if (!OPENAI_KEY) {
+    throw new ProviderError("openai", null, "OPENAI_API_KEY not set");
+  }
+  const modelName =
+    p.opts.modelOverride?.openai ?? DEFAULT_MODELS.openai;
+  const body: Record<string, unknown> = {
+    model: modelName,
+    stream: true,
+    messages: [
+      ...(p.systemPrompt ? [{ role: "system", content: p.systemPrompt }] : []),
+      { role: "user", content: p.prompt },
+    ],
+  };
+  if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+
+  const res = await fetchWithTimeout(
+    `${OPENAI_BASE}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_KEY}`,
+      },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  );
+
+  if (!res.ok || !res.body) {
+    const txt = await res.text().catch(() => "");
+    throw new ProviderError(
+      "openai",
+      res.status,
+      `OpenAI stream ${res.status}: ${txt.slice(0, 200)}`,
+    );
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        const content = json.choices?.[0]?.delta?.content;
+        if (content) onChunk(content);
+      } catch {
+        // Ignore malformed chunks and continue consuming the stream.
+      }
+    }
+  }
+
+  return {
+    provider: "openai",
+    model: modelName,
+    latencyMs: Date.now() - t0,
+    failover,
+  };
+}
+
 async function streamViaGroq(
   provider: LLMProvider,
   p: GenerateParams,
@@ -899,6 +1071,7 @@ async function streamViaGroq(
 export interface LLMHealth {
   gemini: { available: boolean; model: string };
   groq: { available: boolean; model: string };
+  openai: { available: boolean; model: string };
   openrouter: { available: boolean; model: string };
   preferFree: boolean;
   primary: LLMProvider;
@@ -908,11 +1081,12 @@ export function llmHealth(): LLMHealth {
   return {
     gemini: { available: !!GEMINI_KEY, model: DEFAULT_MODELS.gemini },
     groq: { available: !!GROQ_KEY, model: DEFAULT_MODELS.groq },
+    openai: { available: !!OPENAI_KEY, model: DEFAULT_MODELS.openai },
     openrouter: {
       available: !!OPENROUTER_KEY,
       model: DEFAULT_MODELS["openrouter-free"],
     },
-    preferFree: !GEMINI_KEY, // if no Gemini key, force the free route
+    preferFree: !OPENAI_KEY && !GEMINI_KEY,
     primary: defaultChain("chat", {})[0],
   };
 }
