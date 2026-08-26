@@ -4,7 +4,7 @@
  * Minimal surface (everything powerful stays available; almost nothing
  * is visible until you need it):
  *
- *   ⚡ LiTT                                  LOCAL        ← header (1 line)
+ *   LiTT                                  LOCAL        ← header (1 line)
  *   (Welcome | transcript + semantic feed + DONE)
  *   › Ask LiTT anything...                                ← composer
  *   ─────────────────────────────────────────────────────

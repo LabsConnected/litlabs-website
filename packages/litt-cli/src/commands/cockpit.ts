@@ -67,7 +67,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
       : result.path === "wt-unsized"
         ? "dedicated Windows Terminal window (no sizing)"
         : "PowerShell window";
-    console.log(`⚡ LiTT window launched (${detail}).`);
+    console.log(`LiTT window launched (${detail}).`);
     return 0;
   }
 

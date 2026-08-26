@@ -1,7 +1,7 @@
 /**
  * LiTTShell — the minimal shell composition root.
  *
- *   ⚡ LiTT                                  LOCAL          ← header
+ *   LiTT                                  LOCAL          ← header
  *   ┌──────────────────────────────────────────────────────────┐
  *   │ (Welcome | transcript viewport + DONE)                   │ ← fixed region
  *   │ (scroll indicator while browsing history)                │

@@ -38,7 +38,7 @@ const DEFAULT_SUCCESS_HTML = `<!doctype html>
 <head><meta charset="utf-8"><title>LiTT — Authentication complete</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0a0a0a;color:#e0e0e0}h1{color:#a855f7}</style>
 </head>
-<body><div style="text-align:center"><h1>⚡ LiTT</h1><p>Authentication complete.</p><p>You can close this tab and return to your terminal.</p></div></body>
+<body><div style="text-align:center"><h1>LiTT</h1><p>Authentication complete.</p><p>You can close this tab and return to your terminal.</p></div></body>
 </html>`;
 
 const DEFAULT_ERROR_HTML = `<!doctype html>
@@ -46,7 +46,7 @@ const DEFAULT_ERROR_HTML = `<!doctype html>
 <head><meta charset="utf-8"><title>LiTT — Authentication failed</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0a0a0a;color:#e0e0e0}h1{color:#ef4444}</style>
 </head>
-<body><div style="text-align:center"><h1>⚡ LiTT</h1><p>Authentication failed.</p><p>Return to your terminal for details.</p></div></body>
+<body><div style="text-align:center"><h1>LiTT</h1><p>Authentication failed.</p><p>Return to your terminal for details.</p></div></body>
 </html>`;
 
 export function startAuthServer(options: AuthServerOptions): Promise<AuthServerHandle> {

@@ -40,7 +40,7 @@ export function SignInRequired({ error, configAvailable }: SignInRequiredProps):
   return (
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
-        <Text bold color={COLORS.brand}>⚡ LiTT</Text>
+        <Text bold color={COLORS.brand}>LiTT</Text>
       </Box>
 
       <Box marginBottom={1}>
