@@ -99,14 +99,16 @@ export function StatusBar({
       </Text>
     );
   } else if (gitModified + gitUntracked > 0) {
-    right = <Text color={COLORS.warning}>+{gitModified + gitUntracked}</Text>;
+    // Dirty state: subtle dim warning, not visually dominant.
+    right = <Text dimColor color={COLORS.warning}>+{gitModified + gitUntracked}</Text>;
   } else {
     right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
   }
 
-  // ── Line 1: brain → active · PROVIDER   |   Plan/Act ──
-  // The provider is the REAL served provider (source truth), not just
-  // the friendly model name. e.g. "LiTT Auto → GPT-5.6 Luna · OpenAI".
+  // ── Line 1: model · PROVIDER   |   Plan/Act ──
+  // Per spec: don't show "LiTT Auto →" — the user knows it's LiTT.
+  // Show the model and real provider: "GPT-5.6 Luna · OpenAI"
+  // If no model is active yet, show the brain label (routing mode).
   const modelShort = activeModel ? shortModelName(activeModel) : null;
   const providerShort = activeProvider ? providerLabel(activeProvider) : null;
   const planDot = mode === "plan" ? "●" : "○";
@@ -130,22 +132,20 @@ export function StatusBar({
   const left1Max = Math.max(20, width - 4 - right1Width);
   const left2Max = Math.max(24, width - 4 - rightWidth);
 
-  const left1 = (
+  // Line 1 left: model · provider (or brain label if no model active yet)
+  const left1 = modelShort ? (
     <Text>
-      <Text color={COLORS.brand} bold>{truncateTail(brain, Math.max(12, Math.floor(left1Max * 0.4)))}</Text>
-      {modelShort && (
+      <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - (providerShort ? providerShort.length + 3 : 0)))}</Text>
+      {providerShort && (
         <>
-          <Text dimColor> → </Text>
-          <Text color={COLORS.text}>{truncateTail(modelShort, Math.max(8, left1Max - 18 - (providerShort ? providerShort.length + 3 : 0)))}</Text>
-
-          {providerShort && (
-            <>
-              <Text dimColor> · </Text>
-              <Text color={COLORS.secondaryBright}>{providerShort}</Text>
-            </>
-          )}
+          <Text dimColor> · </Text>
+          <Text color={COLORS.secondaryBright}>{providerShort}</Text>
         </>
       )}
+    </Text>
+  ) : (
+    <Text>
+      <Text color={COLORS.brand} bold>{truncateTail(brain, Math.max(12, Math.floor(left1Max * 0.6)))}</Text>
     </Text>
   );
 

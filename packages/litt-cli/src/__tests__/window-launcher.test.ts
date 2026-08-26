@@ -114,7 +114,7 @@ describe("buildWtArgs — exact vector", () => {
     expect(idx).toBeGreaterThan(args.indexOf("nt"));
   });
 
-  it("P1: --suppressApplicationTitle follows --title (title stays '⚡ LiTT')", () => {
+  it("P1: --suppressApplicationTitle follows --title (title stays 'LiTT')", () => {
     const args = buildWtArgs(LAUNCH, CWD, { useSizing: false });
     const titleIdx = args.indexOf("--title");
     expect(args[titleIdx + 1]).toBe(LITT_WINDOW_TITLE);
