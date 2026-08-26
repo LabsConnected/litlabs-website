@@ -543,30 +543,23 @@ export function MissionControlDashboard() {
   return (
     <main className="min-h-dvh" style={{ background: D.bgGradient, color: D.textPrimary }}>
       <DashboardAmbientBackground />
-      <div className="relative z-10 mx-auto w-full max-w-[1680px] px-4 py-5 lg:px-6 xl:px-8">
-        {/* === Header === */}
+      <div className="relative z-10 mx-auto w-full max-w-[960px] px-4 py-5 lg:px-6 xl:px-8">
+        {/* === Header — greeting only, BITS small === */}
         <EntranceSection delay={0}>
-          <header className="mb-5 flex flex-col gap-4 rounded-3xl border p-5 md:flex-row md:items-center md:justify-between"
-            style={{ background: "rgba(10,9,18,0.70)", borderColor: "rgba(139,92,246,0.20)", backdropFilter: "blur(18px)", boxShadow: "0 8px 32px rgba(0,0,0,0.24)" }}>
+          <header className="mb-5 flex items-center justify-between">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <StatusPulse color={D.accentGreen} label="LiTT Online" pulse />
-              </div>
-              <h1 className="mt-3 text-2xl font-black tracking-[-.04em] sm:text-3xl" style={{ color: D.textPrimary }}>
+              <h1 className="text-2xl font-black tracking-[-.04em] sm:text-3xl" style={{ color: D.textPrimary }}>
                 {getGreeting()}, {displayName}.
               </h1>
-              <p className="mt-1 text-sm" style={{ color: D.textMuted }}>Your creative command center</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href="/wallet" className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition hover:scale-[1.02]"
-                style={{ borderColor: D.border, background: D.surface, color: D.textMuted }}>
-                <Icon name="wallet" size={14} />
-                {balance.toLocaleString()} BITS · {plan}
-              </Link>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold" style={{ color: D.textDim }}>
+                {balance.toLocaleString()} BITS
+              </span>
               <button type="button" onClick={() => void load()} disabled={refreshing}
-                className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition hover:opacity-80 disabled:opacity-50"
+                className="grid h-8 w-8 place-items-center rounded-lg border transition hover:opacity-80 disabled:opacity-50"
                 style={{ borderColor: D.border, background: D.surface, color: D.textMuted }}>
-                <Icon name="refresh" size={14} className={refreshing ? "animate-spin" : ""} />
+                <Icon name="refresh" size={13} className={refreshing ? "animate-spin" : ""} />
               </button>
               <ThemeToggle />
             </div>
@@ -583,16 +576,16 @@ export function MissionControlDashboard() {
           </div>
         )}
 
-        {/* === LiTT Command Center === */}
+        {/* === LiTT Command Center — the center of the page === */}
         <EntranceSection delay={0.08}>
-          <CursorSpotlight className="mb-5">
+          <CursorSpotlight className="mb-4">
             <BorderBeam className="rounded-3xl">
-              <div className="rounded-3xl border border-white/8 p-5 sm:p-7" style={{ background: "rgba(10,9,18,0.75)", backdropFilter: "blur(18px)" }}>
+              <div className="rounded-3xl border border-white/8 p-5 sm:p-6" style={{ background: "rgba(10,9,18,0.75)", backdropFilter: "blur(18px)" }}>
                 <div className="flex items-center gap-2">
                   <Icon name="sparkles" size={16} style={{ color: D.accent }} />
                   <span className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accent }}>What are we building?</span>
                 </div>
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2">
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -612,408 +605,239 @@ export function MissionControlDashboard() {
           </CursorSpotlight>
         </EntranceSection>
 
-        {/* === Owner Diagnostics — AI Provider Status === */}
-        {ownerMode && <OwnerDiagnosticsCard />}
+        {/* === Compact project strip === */}
+        {data?.project && (
+          <div className="mb-4 flex items-center gap-2 text-xs" style={{ color: D.textMuted }}>
+            <Icon name="branch" size={12} />
+            <span className="truncate font-bold" style={{ color: D.textPrimary }}>{data.project.repository}</span>
+            <span style={{ color: D.textDim }}>·</span>
+            <span>{data.project.branch}</span>
+            {data.project.workspaceState === "ready" && (
+              <>
+                <span style={{ color: D.textDim }}>·</span>
+                <span style={{ color: D.accentGreen }}>Ready</span>
+              </>
+            )}
+            {data.project.deploymentState === "production" && (
+              <>
+                <span style={{ color: D.textDim }}>·</span>
+                <span style={{ color: D.accentCyan }}>Live</span>
+              </>
+            )}
+          </div>
+        )}
 
-        {/* === Metric strip === */}
-        <section className="mb-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
-          <MetricCard
-            label="Active Missions"
-            value={activeMissions.length}
-            detail="Currently running or waiting"
-            icon="zap"
-            highlight={activeMissions.length > 0}
-            statusColor={activeMissions.length > 0 ? D.accentGreen : D.textDim}
-          />
-          <MetricCard
-            label="Needs Attention"
-            value={urgentCount}
-            detail="Approvals, failures, or degraded services"
-            icon="alert"
-            highlight={urgentCount > 0}
-            statusColor={urgentCount > 0 ? D.accentRed : D.accentGreen}
-          />
-          <MetricCard
-            label="LiTTBits"
-            value={(data?.billing.balance ?? 0).toLocaleString()}
-            detail={data?.billing.plan ?? "Free"}
-            icon="wallet"
-            highlight={(data?.billing.balance ?? 0) > 0}
-            statusColor={(data?.billing.balance ?? 0) > 0 ? D.accent : D.textDim}
-          />
-          <MetricCard
-            label="Workspace"
-            value={data?.project?.workspaceState ?? "No project"}
-            detail={data?.project?.repository ?? "Connect a project"}
-            icon="layers"
-            statusColor={data?.project?.workspaceState === "ready" ? D.accentGreen : data?.project ? D.accentAmber : D.textDim}
-          />
-          <MetricCard
-            label="Terminal"
-            value={data?.project?.terminalState ?? "Unavailable"}
-            detail="Project execution runtime"
-            icon="terminal"
-            statusColor={data?.project?.terminalState === "connected" ? D.accentGreen : data?.project?.terminalState === "disconnected" ? D.accentAmber : D.textDim}
-          />
-          <MetricCard
-            label="Deployment"
-            value={data?.project?.deploymentState ?? "None"}
-            detail="Latest project environment"
-            icon="rocket"
-            statusColor={data?.project?.deploymentState === "production" ? D.accentGreen : data?.project?.deploymentState ? D.accentAmber : D.textDim}
-          />
-        </section>
-
-        {/* === Quick Actions bar === */}
+        {/* === 4 primary actions === */}
         <section className="mb-5">
-          <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-            <Link
-              href="/studio?tool=chat"
-              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              style={{
-                borderColor: `${D.accent}33`,
-                background: `${D.accent}10`,
-              }}
-            >
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+            <Link href="/studio?tool=chat" className="group rounded-2xl border p-4 transition-all hover:-translate-y-0.5"
+              style={{ borderColor: `${D.accent}33`, background: `${D.accent}10` }}>
               <Icon name="message" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
-              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
-                Ask LiTT
-              </div>
-              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                Continue the active project conversation.
-              </div>
+              <div className="mt-2 text-sm font-black" style={{ color: D.textPrimary }}>Ask LiTT</div>
             </Link>
-            <Link
-              href="/studio?tool=code"
-              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              style={{
-                borderColor: `${D.accentCyan}22`,
-                background: `${D.accentCyan}0f`,
-              }}
-            >
+            <Link href="/studio?tool=code" className="group rounded-2xl border p-4 transition-all hover:-translate-y-0.5"
+              style={{ borderColor: `${D.accentCyan}22`, background: `${D.accentCyan}0f` }}>
               <Icon name="code" size={18} style={{ color: D.accentCyan }} className="transition-transform group-hover:scale-110" />
-              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
-                LiTT Code
-              </div>
-              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                Files, editor, terminal, checks, and preview.
-              </div>
+              <div className="mt-2 text-sm font-black" style={{ color: D.textPrimary }}>Build</div>
             </Link>
-            <Link
-              href="/studio?tool=chat&prompt=Run%20a%20complete%20project%20health%20check"
-              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              style={{
-                borderColor: `${D.accentGreen}22`,
-                background: `${D.accentGreen}0e`,
-              }}
-            >
-              <Icon name="heart" size={18} style={{ color: D.accentGreen }} className="transition-transform group-hover:scale-110" />
-              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
-                Health Scan
-              </div>
-              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                Run actual checks against the active workspace.
-              </div>
+            <Link href="/studio?tool=image" className="group rounded-2xl border p-4 transition-all hover:-translate-y-0.5"
+              style={{ borderColor: `${D.accentGreen}22`, background: `${D.accentGreen}0e` }}>
+              <Icon name="image" size={18} style={{ color: D.accentGreen }} className="transition-transform group-hover:scale-110" />
+              <div className="mt-2 text-sm font-black" style={{ color: D.textPrimary }}>Create</div>
             </Link>
-            <Link
-              href="/deployments"
-              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              style={{
-                borderColor: `${D.accentAmber}22`,
-                background: `${D.accentAmber}0e`,
-              }}
-            >
+            <Link href="/deployments" className="group rounded-2xl border p-4 transition-all hover:-translate-y-0.5"
+              style={{ borderColor: `${D.accentAmber}22`, background: `${D.accentAmber}0e` }}>
               <Icon name="rocket" size={18} style={{ color: D.accentAmber }} className="transition-transform group-hover:scale-110" />
-              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
-                Deploy
-              </div>
-              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                Preview, production, logs, and rollback.
-              </div>
-            </Link>
-            <Link
-              href="/games"
-              className="group rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
-              style={{
-                borderColor: `${D.accent}33`,
-                background: `${D.accent}10`,
-              }}
-            >
-              <Icon name="gamepad" size={18} style={{ color: D.accent }} className="transition-transform group-hover:scale-110" />
-              <div className="mt-3 text-sm font-black" style={{ color: D.textPrimary }}>
-                Games
-              </div>
-              <div className="mt-1 text-xs" style={{ color: D.textMuted }}>
-                Game Cloud, Retro Arcade and browser games.
-              </div>
+              <div className="mt-2 text-sm font-black" style={{ color: D.textPrimary }}>Deploy</div>
             </Link>
           </div>
         </section>
 
-        {/* === Continue Working + System Status === */}
-        <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
-          {/* Continue Working */}
-          <EntranceSection delay={0.14}>
-            <CursorSpotlight>
-              <GlassPanel hover className="p-5 sm:p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accentCyan }}>Continue Working</p>
-                    <h2 className="mt-1 text-xl font-black" style={{ color: D.textPrimary }}>Pick up where you left off</h2>
-                  </div>
+        {/* === Owner Diagnostics — only for owner mode === */}
+        {ownerMode && <OwnerDiagnosticsCard />}
+
+        {/* === Needs Attention — only when there's something to act on === */}
+        {urgentCount > 0 && (
+          <EntranceSection delay={0.12}>
+            <Link href="/studio?tool=agents" className="group mb-4 flex items-center justify-between rounded-2xl border p-4 transition hover:opacity-90"
+              style={{ borderColor: `${D.accentAmber}33`, background: `${D.accentAmber}08` }}>
+              <div className="flex items-center gap-3">
+                <Icon name="alert" size={18} style={{ color: D.accentAmber }} />
+                <span className="text-sm font-black" style={{ color: D.accentAmber }}>{urgentCount} {urgentCount === 1 ? "item" : "items"} need attention</span>
+              </div>
+              <span className="text-xs font-bold transition group-hover:translate-x-0.5" style={{ color: D.accentAmber }}>Review →</span>
+            </Link>
+          </EntranceSection>
+        )}
+
+        {/* === Continue Working === */}
+        <EntranceSection delay={0.14}>
+          <CursorSpotlight>
+            <GlassPanel hover className="mb-4 p-5 sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accentCyan }}>Continue Working</p>
+                {data?.project && (
                   <Link href="/projects" className="text-[10px] font-bold transition hover:opacity-80" style={{ color: D.accent }}>
                     View all <Icon name="arrow" size={11} className="inline" />
                   </Link>
-                </div>
-
-                {/* Active project card with visual preview */}
-                {data?.project ? (
-                  <Link href={`/studio?mission=${encodeURIComponent(`Continue work on ${data.project.repository}`)}`}
-                    className="group mt-5 block overflow-hidden rounded-2xl border transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.005]"
-                    style={{ borderColor: "rgba(34,211,238,0.15)", background: "rgba(34,211,238,0.04)" }}>
-                    {/* Preview area */}
-                    <div className="relative h-32 overflow-hidden" style={{ background: "linear-gradient(135deg, #0d0b16, #151027)" }}>
-                      <div className="absolute inset-0 opacity-20" style={{
-                        backgroundImage: "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
-                        backgroundSize: "32px 32px",
-                      }} />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Icon name="code" size={36} style={{ color: "rgba(139,92,246,0.3)" }} />
-                      </div>
-                      <div className="absolute right-3 top-3 flex gap-1.5">
-                        {data.project.workspaceState === "ready" && (
-                          <span className="rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider"
-                            style={{ borderColor: `${D.accentGreen}40`, background: `${D.accentGreen}15`, color: D.accentGreen }}>
-                            Ready
-                          </span>
-                        )}
-                        {data.project.deploymentState === "production" && (
-                          <span className="rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider"
-                            style={{ borderColor: `${D.accentCyan}40`, background: `${D.accentCyan}15`, color: D.accentCyan }}>
-                            Live
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {/* Project info */}
-                    <div className="p-4">
-                      <div className="truncate text-sm font-black" style={{ color: D.textPrimary }}>{data.project.repository}</div>
-                      <div className="mt-1 flex items-center gap-3 text-[10px]" style={{ color: D.textMuted }}>
-                        <span className="flex items-center gap-1"><Icon name="branch" size={10} />{data.project.branch}</span>
-                        {data.project.latestCommit && <span>Commit {data.project.latestCommit.slice(0, 8)}</span>}
-                        {data.project.updatedAt && <span>{timeAgo(data.project.updatedAt)}</span>}
-                      </div>
-                      <div className="mt-3 flex items-center gap-1 text-[10px] font-bold transition group-hover:opacity-100" style={{ color: D.accentCyan, opacity: 0.7 }}>
-                        Continue <Icon name="arrow" size={10} />
-                      </div>
-                    </div>
-                  </Link>
-                ) : (
-                  <div className="mt-5 rounded-2xl border border-dashed p-6 text-center" style={{ borderColor: `${D.accent}25`, background: `${D.accent}04` }}>
-                    <Icon name="sparkles" size={24} className="mx-auto" style={{ color: D.accent }} />
-                    <h3 className="mt-3 text-base font-black" style={{ color: D.textPrimary }}>Your first build starts here</h3>
-                    <p className="mx-auto mt-2 max-w-md text-xs leading-5" style={{ color: D.textMuted }}>
-                      Describe an idea above, connect a GitHub repository, or let LiTT guide your workspace setup.
-                    </p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      <button onClick={() => { setMode("builder"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                        className="rounded-xl px-4 py-2 text-xs font-black transition hover:scale-[1.02]" style={{ background: D.accent, color: D.textOnAccent }}>
-                        Build something
-                      </button>
-                      <Link href="/projects" className="rounded-xl border px-4 py-2 text-xs font-black transition hover:opacity-80" style={{ borderColor: D.border, color: D.textMuted }}>
-                        Connect GitHub
-                      </Link>
-                    </div>
-                  </div>
                 )}
-
-                {/* Active missions */}
-                {activeMissions.length > 0 && (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {activeMissions.slice(0, 4).map((mission) => (
-                      <MissionCard key={mission.id} mission={mission} />
-                    ))}
-                  </div>
-                )}
-              </GlassPanel>
-            </CursorSpotlight>
-          </EntranceSection>
-
-          {/* System Status */}
-          <EntranceSection delay={0.19}>
-            <GlassPanel className="p-5 sm:p-6">
-              <div className="flex items-center gap-2">
-                <Icon name="cpu" size={17} style={{ color: D.accentGreen }} />
-                <h2 className="text-sm font-black" style={{ color: D.textPrimary }}>System</h2>
               </div>
-              <div className="mt-4 divide-y divide-white/5">
-                {systemStatuses.map((status) => {
-                  const color = STATE_COLOR[status.state] || D.textDim;
-                  const isHealthy = ["connected", "ready", "live", "operational", "healthy"].includes(status.state);
+
+              {/* Active project card */}
+              {data?.project ? (
+                <Link href={`/studio?mission=${encodeURIComponent(`Continue work on ${data.project.repository}`)}`}
+                  className="group mt-4 block overflow-hidden rounded-2xl border transition-all hover:-translate-y-0.5 hover:scale-[1.005]"
+                  style={{ borderColor: "rgba(34,211,238,0.15)", background: "rgba(34,211,238,0.04)" }}>
+                  <div className="relative h-28 overflow-hidden" style={{ background: "linear-gradient(135deg, #0d0b16, #151027)" }}>
+                    <div className="absolute inset-0 opacity-20" style={{
+                      backgroundImage: "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
+                      backgroundSize: "32px 32px",
+                    }} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Icon name="code" size={32} style={{ color: "rgba(139,92,246,0.3)" }} />
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <div className="truncate text-sm font-black" style={{ color: D.textPrimary }}>{data.project.repository}</div>
+                    <div className="mt-1 flex items-center gap-3 text-[10px]" style={{ color: D.textMuted }}>
+                      <span className="flex items-center gap-1"><Icon name="branch" size={10} />{data.project.branch}</span>
+                      {data.project.updatedAt && <span>{timeAgo(data.project.updatedAt)}</span>}
+                    </div>
+                    <div className="mt-2 flex items-center gap-1 text-[10px] font-bold transition group-hover:opacity-100" style={{ color: D.accentCyan, opacity: 0.7 }}>
+                      Continue <Icon name="arrow" size={10} />
+                    </div>
+                  </div>
+                </Link>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed p-6 text-center" style={{ borderColor: `${D.accent}25`, background: `${D.accent}04` }}>
+                  <Icon name="sparkles" size={24} className="mx-auto" style={{ color: D.accent }} />
+                  <h3 className="mt-3 text-base font-black" style={{ color: D.textPrimary }}>Your first build starts here</h3>
+                  <p className="mx-auto mt-2 max-w-md text-xs leading-5" style={{ color: D.textMuted }}>
+                    Describe an idea above, connect a GitHub repository, or let LiTT guide your workspace setup.
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    <button onClick={() => { setMode("builder"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                      className="rounded-xl px-4 py-2 text-xs font-black transition hover:scale-[1.02]" style={{ background: D.accent, color: D.textOnAccent }}>
+                      Build something
+                    </button>
+                    <Link href="/projects" className="rounded-xl border px-4 py-2 text-xs font-black transition hover:opacity-80" style={{ borderColor: D.border, color: D.textMuted }}>
+                      Connect GitHub
+                    </Link>
+                  </div>
+                </div>
+              )}
+
+              {/* Active missions */}
+              {activeMissions.length > 0 && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {activeMissions.slice(0, 4).map((mission) => (
+                    <MissionCard key={mission.id} mission={mission} />
+                  ))}
+                </div>
+              )}
+            </GlassPanel>
+          </CursorSpotlight>
+        </EntranceSection>
+
+        {/* === Recent Activity — only when there is real activity === */}
+        {data?.activity && data.activity.length > 0 && (
+          <EntranceSection delay={0.18}>
+            <GlassPanel className="mb-4 p-5 sm:p-6">
+              <p className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accentCyan }}>Recent Activity</p>
+              <div className="mt-3 divide-y divide-white/5">
+                {data.activity.slice(0, 6).map((event) => {
+                  const color = event.severity === "error" ? D.accentRed : event.severity === "warning" ? D.accentAmber : event.severity === "success" ? D.accentGreen : D.accentCyan;
                   return (
-                    <div key={status.label} className="flex items-center justify-between py-2.5">
-                      <StatusPulse color={color} label={status.label} detail={status.detail} pulse={isHealthy} />
+                    <div key={event.id} className="group flex items-start gap-3 py-2.5 transition-all first:pt-0 last:pb-0 hover:bg-white/[0.02] hover:px-2 hover:rounded-lg">
+                      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}60` }} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-bold" style={{ color: D.textPrimary }}>{event.title}</div>
+                        {event.detail && <div className="mt-0.5 truncate text-xs" style={{ color: D.textMuted }}>{event.detail}</div>}
+                      </div>
+                      <time className="shrink-0 text-[10px]" style={{ color: D.textDim }}>{formatTime(event.createdAt)}</time>
                     </div>
                   );
                 })}
               </div>
-
-              {/* LiTT status */}
-              <div className="mt-4 rounded-xl border p-3" style={{ borderColor: `${D.accentGreen}25`, background: `${D.accentGreen}08` }}>
-                <div className="flex items-center justify-between">
-                  <StatusPulse color={D.accentGreen} label="LiTT" detail="Ready" pulse />
-                  <Link href="/studio?tool=chat" className="text-[10px] font-black transition hover:opacity-80" style={{ color: D.accent }}>
-                    Launch
-                  </Link>
-                </div>
-              </div>
-
-              {/* Media player */}
-              <div className="mt-4">
-                <MediaNowPlayingCard />
-              </div>
             </GlassPanel>
           </EntranceSection>
-        </div>
-
-        {/* === Quick Launch === */}
-        <EntranceSection delay={0.24}>
-          <div className="mb-5 grid gap-3 grid-cols-2 lg:grid-cols-4">
-            <QuickLaunchTile icon="code" label="BUILD" description="Build it" href="/studio?tool=code" accentColor={D.accent} />
-            <QuickLaunchTile icon="image" label="CREATE" description="Make it" href="/studio?tool=image" accentColor={D.accentCyan} />
-            <QuickLaunchTile icon="bot" label="AGENTS" description="Run crew" href="/studio?tool=agents" accentColor={D.accentGreen} />
-            <QuickLaunchTile icon="rocket" label="DEPLOY" description="Ship it" href="/deployments" accentColor={D.accentAmber} />
-          </div>
-        </EntranceSection>
-
-        {/* === LiTT Operations === */}
-        <EntranceSection delay={0.28}>
-          <GlassPanel className="mb-5 p-5 sm:p-6">
-            <div className="flex items-center gap-2">
-              <Icon name="cpu" size={17} style={{ color: D.accentCyan }} />
-              <h2 className="text-sm font-black" style={{ color: D.textPrimary }}>LiTT Operations</h2>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Browser Agent */}
-              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentCyan}15`, background: `${D.accentCyan}04` }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Browser Agent</span>
-                  <StatusPulse color={D.textDim} label="" detail="Idle" />
-                </div>
-              </div>
-              {/* Voice / Vapi */}
-              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentGreen}15`, background: `${D.accentGreen}04` }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Voice / Vapi</span>
-                  <StatusPulse color={D.accentGreen} label="" detail="Online" pulse />
-                </div>
-              </div>
-              {/* GHL / CRM */}
-              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accentAmber}15`, background: `${D.accentAmber}04` }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>GHL / CRM</span>
-                  <StatusPulse color={D.accentAmber} label="" detail="Connected" />
-                </div>
-              </div>
-              {/* Runtime */}
-              <div className="rounded-xl border p-3" style={{ borderColor: `${D.accent}15`, background: `${D.accent}04` }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold" style={{ color: D.textMuted }}>Runtime</span>
-                  <StatusPulse color={data?.project?.terminalState === "connected" ? D.accentGreen : D.textDim} label="" detail={data?.project?.terminalState === "connected" ? "Ready" : "Offline"} pulse={data?.project?.terminalState === "connected"} />
-                </div>
-              </div>
-            </div>
-            {/* Approvals */}
-            {urgentCount > 0 && (
-              <Link href="/studio?tool=agents" className="mt-3 flex items-center justify-between rounded-xl border p-3 transition hover:opacity-80"
-                style={{ borderColor: `${D.accentAmber}25`, background: `${D.accentAmber}08` }}>
-                <span className="text-[11px] font-bold" style={{ color: D.accentAmber }}>Approvals</span>
-                <span className="text-[11px] font-black" style={{ color: D.accentAmber }}>{urgentCount} waiting →</span>
-              </Link>
-            )}
-          </GlassPanel>
-        </EntranceSection>
-
-        {/* === Recent Activity + Usage === */}
-        <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.75fr)]">
-          {/* Recent Activity */}
-          <EntranceSection delay={0.30}>
-            <CursorSpotlight>
-              <GlassPanel className="p-5 sm:p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.accentCyan }}>Recent Activity</p>
-                    <h2 className="mt-1 text-lg font-black" style={{ color: D.textPrimary }}>Platform and project events</h2>
-                  </div>
-                </div>
-                <div className="mt-4 divide-y divide-white/5">
-                  {(data?.activity ?? []).slice(0, 8).map((event) => {
-                    const color = event.severity === "error" ? D.accentRed : event.severity === "warning" ? D.accentAmber : event.severity === "success" ? D.accentGreen : D.accentCyan;
-                    return (
-                      <div key={event.id} className="group flex items-start gap-3 py-3 transition-all first:pt-0 last:pb-0 hover:bg-white/[0.02] hover:px-2 hover:rounded-lg">
-                        <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full transition group-hover:scale-125" style={{ background: color, boxShadow: `0 0 8px ${color}60` }} />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-bold" style={{ color: D.textPrimary }}>{event.title}</div>
-                          {event.detail && <div className="mt-1 truncate text-xs" style={{ color: D.textMuted }}>{event.detail}</div>}
-                        </div>
-                        <time className="shrink-0 text-[10px]" style={{ color: D.textDim }}>{formatTime(event.createdAt)}</time>
-                      </div>
-                    );
-                  })}
-                  {!data?.activity?.length && (
-                    <div className="py-8 text-center">
-                      <div className="text-xs font-bold" style={{ color: D.textMuted }}>No recent activity</div>
-                      <p className="mt-1 text-[11px]" style={{ color: D.textDim }}>Activity from missions, builds, and deploys will appear here.</p>
-                    </div>
-                  )}
-                </div>
-              </GlassPanel>
-            </CursorSpotlight>
-          </EntranceSection>
-
-          {/* Usage / Bits */}
-          <EntranceSection delay={0.35}>
-            <GlassPanel className="p-5 sm:p-6">
-              <div className="flex items-center gap-2">
-                <Icon name="zap" size={17} style={{ color: D.accent }} />
-                <h2 className="text-sm font-black" style={{ color: D.textPrimary }}>Usage / BITS</h2>
-              </div>
-              <div className="mt-4">
-                <div className="text-3xl font-black" style={{ color: D.textPrimary }}>{balance.toLocaleString()}</div>
-                <div className="mt-1 text-xs" style={{ color: D.textMuted }}>{plan} plan</div>
-                {/* Usage bar */}
-                <div className="mt-4 h-2 overflow-hidden rounded-full" style={{ background: D.skeleton }}>
-                  <div className="h-full rounded-full" style={{
-                    width: `${Math.min(100, Math.max(8, (balance / 1000) * 100))}%`,
-                    background: `linear-gradient(to right, ${D.accent}, ${D.accentCyan})`,
-                  }} />
-                </div>
-                {/* Key counts */}
-                <div className="mt-5 space-y-2 text-xs" style={{ color: D.textMuted }}>
-                  <div className="flex items-center justify-between">
-                    <span>LiTT runs</span>
-                    <span className="font-bold" style={{ color: D.textPrimary }}>{(data?.missions ?? []).length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Deployments</span>
-                    <span className="font-bold" style={{ color: D.textPrimary }}>{(data?.activity ?? []).filter((a) => a.category === "deployment").length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Needs attention</span>
-                    <span className="font-bold" style={{ color: urgentCount > 0 ? D.accentRed : D.textPrimary }}>{urgentCount}</span>
-                  </div>
-                </div>
-              </div>
-            </GlassPanel>
-          </EntranceSection>
-        </div>
+        )}
 
         {/* === Draggable Widget Grid === */}
-        <EntranceSection delay={0.40}>
+        <EntranceSection delay={0.22}>
           <DraggableWidgetGrid data={data} widgetData={widgetData} ownerMode={ownerMode} />
         </EntranceSection>
+
+        {/* === System / Details — collapsed by default === */}
+        <EntranceSection delay={0.26}>
+          <SystemDetailsDrawer systemStatuses={systemStatuses} terminalState={data?.project?.terminalState} />
+        </EntranceSection>
+
+        {/* === Footer — BITS small, media player === */}
+        <footer className="mt-6 flex items-center justify-between gap-4 pb-4">
+          <span className="text-[10px] font-bold" style={{ color: D.textDim }}>
+            {balance.toLocaleString()} BITS · {plan}
+          </span>
+          <MediaNowPlayingCard />
+        </footer>
       </div>
     </main>
+  );
+}
+
+/* ─── System Details Drawer — collapsed by default ──────────────────── */
+
+function SystemDetailsDrawer({
+  systemStatuses,
+  terminalState,
+}: {
+  systemStatuses: Array<{ label: string; state: string; detail: string }>;
+  terminalState?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const D = { ...DashTokens, bg: "transparent", bgGradient: DashTokens.heroGradient };
+
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between rounded-2xl border px-4 py-3 transition hover:opacity-80"
+        style={{ borderColor: D.border, background: D.surface }}
+      >
+        <span className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: D.textMuted }}>
+          System Details
+        </span>
+        <Icon name="chevron" size={14} style={{ color: D.textDim, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+      </button>
+      {expanded && (
+        <div className="mt-2 rounded-2xl border p-4" style={{ borderColor: D.border, background: D.surface }}>
+          <div className="divide-y divide-white/5">
+            {systemStatuses.map((status) => {
+              const color = STATE_COLOR[status.state] || D.textDim;
+              const isHealthy = ["connected", "ready", "live", "operational", "healthy"].includes(status.state);
+              const isInactive = ["disconnected", "not_connected", "missing", "none", "not_configured"].includes(status.state);
+              // Hide inactive states
+              if (isInactive) return null;
+              return (
+                <div key={status.label} className="flex items-center justify-between py-2">
+                  <StatusPulse color={color} label={status.label} detail={status.detail} pulse={isHealthy} />
+                </div>
+              );
+            })}
+          </div>
+          {/* LiTT status */}
+          <div className="mt-3 rounded-xl border p-3" style={{ borderColor: `${D.accentGreen}25`, background: `${D.accentGreen}08` }}>
+            <div className="flex items-center justify-between">
+              <StatusPulse color={D.accentGreen} label="LiTT" detail="Ready" pulse />
+              <Link href="/studio?tool=chat" className="text-[10px] font-black transition hover:opacity-80" style={{ color: D.accent }}>
+                Launch
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
