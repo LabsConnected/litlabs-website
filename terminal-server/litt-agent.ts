@@ -87,6 +87,11 @@ class SharedLiTTModelProvider implements ModelProvider {
         messages,
         this.nativeTools,
         (event: LiTTEvent) => {
+          // streamLiTTMessagesWithTools is non-streaming (single JSON
+          // response) — it never actually emits tool_call_chunk. Filter
+          // it out explicitly rather than widening ModelStreamEvent,
+          // since this bridge's contract is meta/delta/done/error only.
+          if (event.type === "tool_call_chunk") return;
           emit(event);
         },
       );

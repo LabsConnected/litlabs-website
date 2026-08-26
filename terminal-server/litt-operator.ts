@@ -37,7 +37,7 @@ import {
   type ModelResult,
   type ModelStreamEvent,
   type ModelProfile,
-  type ToolDefinition,
+  type ToolResult,
 } from "@litt/agent-core";
 import {
   getRuntimeStore,
@@ -46,94 +46,102 @@ import {
   getCanonicalShell,
   runtimeSetPhase,
 } from "./runtime.js";
-import {
-  streamLiTTMessagesWithTools,
-  health,
-  type LiTTEvent,
-  type LiTTNativeTool,
-} from "./litt-code.js";
+import { streamLiTTCode, health, type LiTTEvent } from "./litt-code.js";
+import { getBillingClient, type AuthorizationDenialCode } from "./billing.js";
 
 // ─── ModelProvider adapter ────────────────────────────────────────
 
 /**
- * Tool-aware model provider for the canonical operator.
+ * Cumulative usage observed across every `stream()` call made during ONE
+ * operator turn (an agent run may call the model multiple times across
+ * tool-calling rounds). Used for billing — see `runLiTTOperator()`.
+ */
+export interface OperatorUsageSummary {
+  provider: string | null;
+  model: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/**
+ * Wraps the existing `streamLiTTCode` (Ollama → OpenRouter fallback) as
+ * a `ModelProvider` that the canonical agent loop can call.
  *
- * Uses `streamLiTTMessagesWithTools()` — the native OpenRouter function
- * calling transport — so the model can select tools via native tool_calls
- * instead of text-form ```tool_call blocks. The transport converts native
- * calls into LiTT's canonical fenced tool_call envelope, which runAgentLoop
- * dispatches through the canonical ExecutionGateway.
- *
- * This replaces the old `streamLiTTCode()` adapter, which only consumed
- * `choices[0].delta.content` and threw "completed without assistant content"
- * when the model returned a native tool call with zero text.
- *
- * Architecture: this is a transport adapter only — it does NOT make
- * decisions, does NOT call tools, and does NOT touch the RuntimeStore.
- * The agent loop owns the brain; this owns the wire to the LLM API.
+ * This is a transport adapter only — it does NOT make decisions, does
+ * NOT call tools, and does NOT touch the RuntimeStore. The agent loop
+ * owns the brain; this owns the wire to the LLM API.
  */
 class LiTTModelProvider implements ModelProvider {
-  private readonly nativeTools: LiTTNativeTool[];
+  // Per-instance accumulators. IMPORTANT: this class is instantiated FRESH
+  // per operator turn (see `runLiTTOperator()`) — never shared across
+  // concurrent requests — so these fields cannot leak usage between users.
+  private _lastProvider: string | null = null;
+  private _lastModel: string | null = null;
+  private _promptTokens = 0;
+  private _completionTokens = 0;
+  private _totalTokens = 0;
 
-  constructor(toolDefinitions: ToolDefinition[]) {
-    const usedNames = new Set<string>();
-
-    this.nativeTools = toolDefinitions.map((tool) => {
-      // OpenRouter function names must match ^[a-zA-Z0-9_-]{1,64}$
-      const baseName =
-        tool.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60) || "litt_tool";
-
-      let functionName = baseName;
-      let suffix = 2;
-      while (usedNames.has(functionName)) {
-        functionName = `${baseName}_${suffix++}`;
-      }
-      usedNames.add(functionName);
-
-      return {
-        toolId: tool.id,
-        functionName,
-        description: tool.description,
-        parameters: tool.inputSchema,
-      };
-    });
+  getUsageSummary(): OperatorUsageSummary {
+    return {
+      provider: this._lastProvider,
+      model: this._lastModel,
+      promptTokens: this._promptTokens,
+      completionTokens: this._completionTokens,
+      totalTokens: this._totalTokens,
+    };
   }
 
   async stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
   ): Promise<ModelResult> {
-    const result = await streamLiTTMessagesWithTools(
-      messages,
-      this.nativeTools,
-      (e: LiTTEvent) => {
-        // Bridge LiTTEvent → ModelStreamEvent
-        switch (e.type) {
-          case "meta":
-            emit({
-              type: "meta",
-              provider: e.provider,
-              model: e.model,
-              profile: e.profile as ModelProfile,
-            });
-            break;
-          case "delta":
-            emit({ type: "delta", text: e.text });
-            break;
-          case "done":
-            emit({
-              type: "done",
-              model: e.model,
-              usage: e.usage,
-              timing: e.timing,
-            });
-            break;
-          case "error":
-            emit({ type: "error", message: e.message });
-            break;
-        }
-      },
-    );
+    // The agent loop sends [system, user, assistant, user, ...] — but
+    // streamLiTTCode expects a single prompt. We reconstruct the prompt
+    // from the conversation, keeping the system message separate.
+    const systemMsg = messages.find((m) => m.role === "system");
+    const conversation = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+
+    const prompt = systemMsg
+      ? `${systemMsg.content}\n\n${conversation}`
+      : conversation;
+
+    // Bridge LiTTEvent → ModelStreamEvent
+    const result = await streamLiTTCode(prompt, (e: LiTTEvent) => {
+      switch (e.type) {
+        case "meta":
+          this._lastProvider = e.provider;
+          this._lastModel = e.model;
+          emit({
+            type: "meta",
+            provider: e.provider,
+            model: e.model,
+            profile: e.profile as ModelProfile,
+          });
+          break;
+        case "delta":
+          emit({ type: "delta", text: e.text });
+          break;
+        case "done":
+          this._lastModel = e.model;
+          this._promptTokens += e.usage.prompt_tokens ?? 0;
+          this._completionTokens += e.usage.completion_tokens ?? 0;
+          this._totalTokens += e.usage.total_tokens ?? 0;
+          emit({
+            type: "done",
+            model: e.model,
+            usage: e.usage,
+            timing: e.timing,
+          });
+          break;
+        case "error":
+          emit({ type: "error", message: e.message });
+          break;
+      }
+    });
 
     return {
       content: result.content,
@@ -184,6 +192,15 @@ export interface OperatorResult {
   termination: AgentLoopResult["termination"];
   /** Model usage */
   usage: { total_tokens: number };
+  /**
+   * True when the operator refused to execute — no model provider was
+   * ever invoked. `termination` is "error" in this case for backward
+   * compatibility with existing `result.termination !== "error"` checks;
+   * `denied`/`denialCode` let callers distinguish "auth/entitlement
+   * denial" from "the model call itself failed".
+   */
+  denied?: boolean;
+  denialCode?: AuthorizationDenialCode;
 }
 
 // ─── System prompt builder ────────────────────────────────────────
@@ -301,29 +318,57 @@ function buildOperatorSystemPrompt(cwd: string, mode: string): string {
  *
  * The operator:
  *   1. Generates a canonical runId
- *   2. Obtains canonical runtime resources (store, gateway, tools, shell)
- *   3. Creates a tool-aware model provider with the canonical tool definitions
+ *   2. Authorizes the request (authenticated identity + plan entitlement
+ *      + credit balance) — FAILS CLOSED, and the model provider is never
+ *      constructed or invoked when authorization is denied
+ *   3. Obtains canonical runtime resources (store, gateway, tools, shell)
  *   4. Calls runAgentLoop with those resources
  *   5. Emits lifecycle events through the canonical RuntimeStore
- *   6. Returns the result with the runId for cross-surface correlation
+ *   6. On success, debits the caller's LiTTBits balance and records a
+ *      usage row (idempotent per runId — a retried completion for the
+ *      same runId cannot double-charge)
+ *   7. Returns the result with the runId for cross-surface correlation
+ *
+ * Every surface that calls this function (CLI `--remote`, Studio Web's
+ * Socket.IO NL path, Desktop, Termux) is subject to the SAME gate — there
+ * is no separate, looser entry point into model execution.
  */
 export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorResult> {
   const t0 = Date.now();
   const runId = `run_op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const mode = ctx.mode ?? "act";
-  const userId = ctx.userId ?? "terminal-server";
+  // No placeholder identity: a missing/unresolvable userId is treated as
+  // unauthenticated and denied below — it is NEVER substituted with a
+  // synthetic "terminal-server" identity that could bypass billing.
+  const userId = ctx.userId ?? null;
+
+  // ─── Authorization gate — runs BEFORE any runtime/model resource is
+  // constructed. Denial here means the OpenRouter/Ollama provider is
+  // never instantiated and never called. ─────────────────────────────
+  const authz = await getBillingClient().authorize(userId);
+  if (!authz.ok) {
+    runtimeSetPhase("failed");
+    return {
+      content: authz.message ?? "Not authorized.",
+      runId,
+      toolCalls: [],
+      rounds: 0,
+      durationMs: Date.now() - t0,
+      termination: "error",
+      usage: { total_tokens: 0 },
+      denied: true,
+      denialCode: authz.code,
+    };
+  }
+  const identity = authz.identity!;
 
   const store = getRuntimeStore();
   const gateway = getExecutionGateway(ctx.cwd, mode);
   const tools = getCanonicalToolRegistry(ctx.cwd);
   const shell = getCanonicalShell(ctx.cwd);
-
-  // Create a tool-aware model provider with the canonical tool definitions.
-  // The provider maps ToolDefinition[] → LiTTNativeTool[] and calls
-  // streamLiTTMessagesWithTools(), which sends native OpenRouter function
-  // definitions and converts model-selected tool_calls into LiTT's
-  // canonical fenced tool_call envelope for runAgentLoop to dispatch.
-  const model = new LiTTModelProvider(tools.list());
+  // Fresh per-run instance — accumulates usage for THIS turn only, never
+  // shared across concurrent requests (see LiTTModelProvider above).
+  const model = new LiTTModelProvider();
 
   // Emit lifecycle: operator turn started
   store.commandStart("litt-operator", [ctx.prompt], ctx.cwd);
@@ -359,6 +404,28 @@ export async function runLiTTOperator(ctx: OperatorContext): Promise<OperatorRes
       Date.now() - t0,
       result.content.slice(0, 200),
     );
+
+    // ─── Usage recording + debit — success only. A provider failure
+    // (thrown below, in the catch block) never reaches this line, so
+    // failed calls are never billed. ──────────────────────────────────
+    if (success) {
+      const usageSummary = model.getUsageSummary();
+      // Ollama is terminal-server's own self-hosted fallback — zero
+      // marginal provider cost, so it is never charged. Only OpenRouter
+      // calls (the only provider that carries a real provider cost) are
+      // billed.
+      if (usageSummary.provider === "openrouter") {
+        await getBillingClient().recordUsage({
+          identity,
+          runId,
+          provider: usageSummary.provider,
+          model: usageSummary.model ?? "unknown",
+          promptTokens: usageSummary.promptTokens,
+          completionTokens: usageSummary.completionTokens,
+          totalTokens: usageSummary.totalTokens || result.usage.total_tokens,
+        });
+      }
+    }
 
     return {
       content: result.content,

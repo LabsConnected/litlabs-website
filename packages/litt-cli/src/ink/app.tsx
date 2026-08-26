@@ -88,6 +88,7 @@ export function CockpitApp({
   const controller = useCockpitController({
     session, store, approvalBridge, sessionBridge,
     onExit: () => exit(), projectName: project, branch: store.state.branch, modelRuntime,
+    client,
   });
   const { submit, handleApproval } = controller;
 
@@ -125,14 +126,22 @@ export function CockpitApp({
   // Responsive layout — the shell adapts but never reflows content.
   useTerminalSize(stdout);
 
-  const modelReady = hasOpenRouterKey();
+  // executionTarget, NOT hasOpenRouterKey(), is the source of truth for
+  // whether the model path is usable — "remote" never needs a local key
+  // (see lib/execution-target.ts). hasOpenRouterKey() only matters in
+  // "local" (developer/BYOK) mode.
+  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey();
   const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   // Source truth: show the REAL served provider (from the last run's
-  // adapter), not a hardcoded "OpenRouter" label. Before the first run,
-  // fall back to whichever provider is configured.
+  // adapter) AND where it executed — never let "REMOTE" in the header
+  // and "OpenRouter • BYOK" in the footer imply two different stories
+  // about where the model call actually ran.
+  const executionSuffix = store.state.executionTarget === "remote" ? "REMOTE" : "BYOK ✓";
   const source = store.state.activeProvider
-    ? `${providerLabel(store.state.activeProvider)} • BYOK ✓`
-    : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+    ? `${providerLabel(store.state.activeProvider)} • ${executionSuffix}`
+    : store.state.executionTarget === "remote"
+      ? "REMOTE (server-executed)"
+      : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
   const overlay = store.state.overlay;
@@ -184,6 +193,10 @@ export function CockpitApp({
       || store.state.holoState === "READING" || store.state.holoState === "EDITING"
       || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING")) {
       session.cancel().catch(() => {});
+      // Also cancel an in-flight REMOTE model stream — session.cancel()
+      // only stops local tool execution; the server-side model call
+      // would otherwise keep running (and being billed) unheard.
+      controller.cancelRemoteModel();
       store.actions.setIsProcessing(false);
       store.actions.setHoloState("IDLE");
       store.actions.clearMission();
@@ -202,6 +215,7 @@ export function CockpitApp({
         || store.state.holoState === "READING" || store.state.holoState === "EDITING"
         || store.state.holoState === "TESTING" || store.state.holoState === "VERIFYING") {
         session.cancel().catch(() => {});
+        controller.cancelRemoteModel();
         store.actions.setIsProcessing(false);
         store.actions.setHoloState("IDLE");
         store.actions.clearMission();
@@ -277,6 +291,7 @@ export function CockpitApp({
         activeModel={store.state.activeModel}
         source={source}
         connected={store.state.connected}
+        executionTarget={store.state.executionTarget}
         localRuntime={store.state.localRuntime}
         remoteRuntime={store.state.remoteRuntime}
         mode={store.state.mode}
@@ -418,7 +433,6 @@ export function CockpitApp({
             project={store.state.project}
             branch={store.state.branch}
             localRuntime={store.state.localRuntime}
-            remoteRuntime={store.state.remoteRuntime}
             brain={brain}
             activeModel={store.state.activeModel}
             activeProvider={store.state.activeProvider}

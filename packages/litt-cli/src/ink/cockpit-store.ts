@@ -14,6 +14,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
 import { ToolProgressStore, type ToolProgressSnapshot } from "./tool-progress-store.js";
 import { FocusEpochTracker } from "./focus-state.js";
+import { resolveExecutionTarget } from "../lib/execution-target.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -204,6 +205,10 @@ export type Intent = "chat" | "command" | "mission";
  */
 export type LocalRuntimeState = "starting" | "ready" | "error";
 export type RemoteRuntimeState = "offline" | "connecting" | "connected" | "reconnecting" | "error";
+/** Where the MODEL provider executes — see lib/execution-target.ts.
+ *  Independent of localRuntime (local TOOL execution, always ready) and
+ *  remoteRuntime (Socket.IO transport connectivity). */
+export type ExecutionTarget = "local" | "remote";
 
 export interface CockpitUIState {
   selectedPanel: CockpitPanel;
@@ -214,10 +219,14 @@ export interface CockpitUIState {
   activityLog: ActivityEntry[];
   /** @deprecated Use localRuntime + remoteRuntime for granular truth */
   connected: boolean;
-  /** Local RuntimeSession readiness — always available */
+  /** Local RuntimeSession readiness — always available (TOOL execution) */
   localRuntime: LocalRuntimeState;
   /** Remote terminal-server connection state — independent of local */
   remoteRuntime: RemoteRuntimeState;
+  /** Where the MODEL provider executes for this session — set once at
+   *  startup (see resolveExecutionTarget). NOT the same thing as
+   *  remoteRuntime (transport) or localRuntime (tool execution). */
+  executionTarget: ExecutionTarget;
   currentRunId: string | null;
   /** Mission tracking — null when no mission is active */
   missionState: MissionState | null;
@@ -326,6 +335,10 @@ export function useCockpitStore() {
   const [connected, setConnected] = useState(false);
   const [localRuntime, setLocalRuntime] = useState<LocalRuntimeState>("starting");
   const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntimeState>("offline");
+  // Set ONCE for the life of the session — not toggled at runtime (a
+  // developer flips LITT_LOCAL_MODE and restarts the CLI, they don't
+  // switch mid-session). No setter is exposed in actions.
+  const [executionTarget] = useState<ExecutionTarget>(() => resolveExecutionTarget());
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
@@ -445,34 +458,40 @@ export function useCockpitStore() {
   }, [transcriptStore, syncTranscript]);
 
   /**
-   * Append a delta to the LAST assistant message (streaming live preview).
-   * If the last message is not a streaming assistant message, this is a
-   * no-op (the caller must have added one first). Idempotent per delta.
+   * Append a delta to the assistant message identified by `id` (streaming
+   * live preview). `id` MUST be the value addChatMessage() returned when
+   * this caller opened ITS OWN streaming assistant message — passing a
+   * stale id (from a superseded/cancelled turn) is a no-op, which is
+   * what stops a late-arriving background stream from corrupting a
+   * newer message (see ChatTranscriptStore invariant 7).
    *
    * P1: Uses the coalesced flush — the canonical store gets every delta,
    * but the React snapshot is refreshed at most every FLUSH_INTERVAL_MS
    * (~30fps). This is the streaming hot path; the immediate syncTranscript
    * would rerender the entire CockpitApp on every token.
    */
-  const appendAssistantDelta = useCallback((text: string) => {
-    transcriptStore.appendDelta(text);
+  const appendAssistantDelta = useCallback((id: string, text: string) => {
+    transcriptStore.appendDelta(id, text);
     flushTranscriptSoon();
   }, [transcriptStore, flushTranscriptSoon]);
 
   /**
-   * Finalize the LAST assistant message with canonical content + status.
-   * Called ONCE when the agent loop completes (success) or errors.
-   * Replaces the streaming body with the authoritative result.content so
-   * the persisted message is exactly what the runtime produced — never a
+   * Finalize the assistant message identified by `id` with canonical
+   * content + status. `id` MUST be the value addChatMessage() returned
+   * when this caller opened ITS OWN streaming assistant message — a
+   * stale id is a no-op (see ChatTranscriptStore invariant 7). Called
+   * ONCE when the agent loop completes (success) or errors. Replaces the
+   * streaming body with the authoritative result.content so the
+   * persisted message is exactly what the runtime produced — never a
    * partial stream, never duplicated. Also stamps the served model.
    */
-  const finalizeAssistantMessage = useCallback((options: {
+  const finalizeAssistantMessage = useCallback((id: string, options: {
     content: string;
     status: "complete" | "error";
     servedModel?: string | null;
     durationMs?: number | null;
   }) => {
-    transcriptStore.finalize(options);
+    transcriptStore.finalize(id, options);
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
 
@@ -778,6 +797,7 @@ export function useCockpitStore() {
       approvalPrompt,
       activityLog,
       connected,
+      executionTarget,
       localRuntime,
       remoteRuntime,
       currentRunId,

@@ -15,6 +15,35 @@
 import { io, type Socket } from "socket.io-client";
 import type { RuntimeState, RuntimeEvent } from "@litt/agent-core";
 
+// ─── Remote model transport types ──────────────────────────────────
+//
+// Mirror terminal-server's litt-code.ts LiTTEvent / RemoteToolSchema
+// wire shapes. Defined locally (not imported from terminal-server —
+// a separate deployment) so the CLI has zero build-time dependency on
+// the server package.
+
+export interface RemoteChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface RemoteToolSchema {
+  type: "function";
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+}
+
+export type RemoteModelStreamEvent =
+  | { type: "meta"; provider: string; model: string; profile: string }
+  | { type: "delta"; text: string }
+  | { type: "tool_call_chunk"; index: number; id?: string; name?: string; argsChunk?: string }
+  | {
+      type: "done";
+      model: string;
+      usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number };
+      timing: { ttftMs: number; generationMs: number; totalMs: number };
+    }
+  | { type: "error"; message: string };
+
 // ─── Types ────────────────────────────────────────────────────────
 
 export type ConnectionState =
@@ -120,6 +149,9 @@ export class RuntimeClient {
   private readonly terminalToken: string | null;
   /** The exchanged terminal JWT (cached after token exchange) */
   private _exchangedToken: string | null = null;
+
+  /** Per-requestId callbacks for the remote model transport (streamModel). */
+  private modelStreamCallbacks = new Map<string, (event: RemoteModelStreamEvent, denied?: boolean, denialCode?: string) => void>();
 
   constructor(options: RuntimeClientOptions = {}) {
     this.terminalUrl = options.terminalUrl ?? getTerminalUrl();
@@ -258,6 +290,19 @@ export class RuntimeClient {
     // Runtime events — map to lifecycle events (with hardening)
     this.socket.on("runtime:event", (event: RuntimeEvent) => {
       this.handleRuntimeEvent(event);
+    });
+
+    // Remote model transport — dispatch to the per-requestId callback
+    // registered by streamModel(). Events for an unknown/already-settled
+    // requestId (e.g. after cancel) are silently dropped.
+    this.socket.on("litt:model:event", (payload: {
+      requestId: string;
+      event: RemoteModelStreamEvent;
+      denied?: boolean;
+      denialCode?: string;
+    }) => {
+      const cb = this.modelStreamCallbacks.get(payload.requestId);
+      if (cb) cb(payload.event, payload.denied, payload.denialCode);
     });
   }
 
@@ -471,6 +516,83 @@ export class RuntimeClient {
     this.currentRunId = payload.runId;
 
     return payload;
+  }
+
+  // ─── Remote model transport ────────────────────────────────────
+  //
+  // Streams a model completion through terminal-server's authenticated
+  // litt:model:request/litt:model:event Socket.IO channel — the server
+  // NEVER executes any tool or touches any filesystem for this; it is a
+  // pure, billed, entitlement-gated model-completion proxy. Tool calls
+  // returned via tool_call_chunk events are executed LOCALLY by the
+  // caller's own agent loop, exactly as in local-provider mode.
+  //
+  // Requires an already-connected socket (does NOT lazily connect —
+  // the caller is expected to have called connect() and to treat a
+  // disconnected transport as "remote unavailable", never silently
+  // falling back to a local provider).
+
+  /**
+   * Stream a model completion. Resolves with the terminal usage summary
+   * on a "done" event; rejects on an "error" event (including
+   * entitlement/auth denials — the message is server-redacted and
+   * user-facing) or if the socket is not connected.
+   */
+  async streamModel(
+    requestId: string,
+    /** The OpenRouter model id already resolved by the CALLER's own
+     *  routing (@litt/models). The server does not re-derive a model —
+     *  it uses exactly this id, preserving the CLI's routing decision
+     *  (AUTO/FIXED/BUDGET/MAX) for remote execution too. */
+    model: string,
+    messages: RemoteChatMessage[],
+    tools: RemoteToolSchema[],
+    onEvent: (event: RemoteModelStreamEvent) => void,
+    options: { maxTokens?: number } = {},
+  ): Promise<{ provider: string; model: string; usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number } }> {
+    if (!this.socket?.connected) {
+      throw new Error("Remote runtime is not connected. Cannot stream a remote model completion.");
+    }
+
+    return new Promise((resolve, reject) => {
+      let resolvedProvider: string | null = null;
+
+      this.modelStreamCallbacks.set(requestId, (event) => {
+        onEvent(event);
+        if (event.type === "meta") {
+          resolvedProvider = event.provider;
+        }
+        if (event.type === "done") {
+          this.modelStreamCallbacks.delete(requestId);
+          resolve({ provider: resolvedProvider ?? event.model, model: event.model, usage: event.usage });
+        }
+        if (event.type === "error") {
+          this.modelStreamCallbacks.delete(requestId);
+          reject(new Error(event.message));
+        }
+      });
+
+      this.socket!.emit("litt:model:request", {
+        requestId,
+        model,
+        messages,
+        tools,
+        maxTokens: options.maxTokens,
+      });
+    });
+  }
+
+  /**
+   * Cancel an in-flight streamModel() call by its requestId. Does NOT
+   * remove the pending callback — the server responds to a cancelled
+   * stream with a genuine "error" event (its AbortController rejection),
+   * and that event must still reach the callback to settle the
+   * streamModel() promise. Deleting the callback here would leave that
+   * promise dangling forever (neither resolved nor rejected) whenever
+   * the server's response arrives after this call.
+   */
+  cancelModelStream(requestId: string): void {
+    this.socket?.emit("litt:model:cancel", { requestId });
   }
 
   /**

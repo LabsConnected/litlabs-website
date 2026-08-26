@@ -8,17 +8,30 @@ export type ChatMessage = {
 // {"type":"delta","text":"chunk"}
 // {"type":"done","model":"...","usage":{"total_tokens":N},"timing":{"ttftMs":N,"generationMs":N,"totalMs":N}}
 // {"type":"error","message":"..."}
+/**
+ * `prompt_tokens`/`completion_tokens` are optional because Ollama's
+ * local responses don't always report a split — `total_tokens` is the
+ * only field every provider guarantees. OpenRouter (the only provider
+ * ever billed) always populates all three.
+ */
+export type LiTTUsage = {
+  total_tokens: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+};
+
 export type LiTTEvent =
   | { type: "meta"; provider: "ollama" | "openrouter"; model: string; profile: ModelProfile }
   | { type: "delta"; text: string }
-  | { type: "done"; model: string; usage: { total_tokens: number }; timing: LiTTTiming }
+  | { type: "tool_call_chunk"; index: number; id?: string; name?: string; argsChunk?: string }
+  | { type: "done"; model: string; usage: LiTTUsage; timing: LiTTTiming }
   | { type: "error"; message: string };
 
 export type LiTTResult = {
   content: string;
   model: string;
   provider: "ollama" | "openrouter";
-  usage: { total_tokens: number };
+  usage: LiTTUsage;
   timing: LiTTTiming;
   profile: ModelProfile;
 };
@@ -165,7 +178,7 @@ async function chatWithOpenRouter(
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
     },
-    body: JSON.stringify({ model, messages, stream: false, max_tokens: 4096 }),
+    body: JSON.stringify({ model, messages, stream: false }),
   });
   if (!res.ok) throw new Error(`OpenRouter failed: ${res.status}`);
   const data = await res.json();
@@ -257,7 +270,6 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    max_tokens: 4096,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -287,6 +299,8 @@ async function streamChatWithOpenRouter(
   emit({ type: "meta", provider: "openrouter", model, profile });
   let content = "";
   let total_tokens = 0;
+  let prompt_tokens = 0;
+  let completion_tokens = 0;
   let finalModel = model;
   let tFirst = -1;
 
@@ -343,6 +357,8 @@ async function streamChatWithOpenRouter(
         emit({ type: "delta", text: delta });
       }
       if (obj.usage?.total_tokens) total_tokens = obj.usage.total_tokens;
+      if (obj.usage?.prompt_tokens) prompt_tokens = obj.usage.prompt_tokens;
+      if (obj.usage?.completion_tokens) completion_tokens = obj.usage.completion_tokens;
     }
   }
   // A successful provider stream must produce assistant content.
@@ -359,8 +375,167 @@ async function streamChatWithOpenRouter(
     generationMs: tFirst >= 0 ? tEnd - tFirst : -1,
     totalMs: tEnd - t0,
   };
-  emit({ type: "done", model: finalModel, usage: { total_tokens }, timing });
-  return { content, model: finalModel, provider: "openrouter", usage: { total_tokens }, timing, profile };
+  const usage: LiTTUsage = { total_tokens, prompt_tokens, completion_tokens };
+  emit({ type: "done", model: finalModel, usage, timing });
+  return { content, model: finalModel, provider: "openrouter", usage, timing, profile };
+}
+
+// ── Remote model proxy for the CLI's interactive cockpit ────────────────────
+//
+// The CLI's local project tools MUST execute on the user's own machine (the
+// server has no access to it) — so this function is deliberately a PURE
+// model-completion proxy: it streams text + relays OpenRouter's raw native
+// tool_calls deltas back to the caller, and does NOT execute any tools or
+// touch any gateway/filesystem itself. The CLI's own agent loop (unchanged)
+// executes tool calls locally exactly as it does for local-provider mode;
+// only the model call moves server-side.
+//
+// This mirrors the exact wire shape OpenRouter itself uses for streaming
+// native tool_calls (index/id/function.name/function.arguments fragments),
+// so the CLI's existing accumulation/fence-block logic
+// (model-provider.ts's OpenRouterModelProvider) can be reused almost
+// unchanged for the remote transport.
+
+export type RemoteToolSchema = {
+  type: "function";
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+};
+
+export interface StreamModelForRemoteClientOptions {
+  /**
+   * The OpenRouter model id to use (e.g. "anthropic/claude-sonnet-5"),
+   * already resolved by the CLIENT's own routing. Required — this
+   * function never re-derives a model from the conversation content.
+   */
+  model: string;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Stream a model completion for the CLI's remote model transport.
+ * OpenRouter only (the only provider ever billed) — never Ollama.
+ * Throws on any upstream failure; the caller (server.ts) is responsible
+ * for redacting the error message before it reaches the client.
+ */
+export async function streamModelForRemoteClient(
+  messages: ChatMessage[],
+  tools: RemoteToolSchema[],
+  emit: (e: LiTTEvent) => void,
+  options: StreamModelForRemoteClientOptions,
+): Promise<LiTTResult> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("OPENROUTER_API_KEY not configured");
+
+  // The CLIENT resolves which model to use — via its own @litt/models
+  // routing (AUTO/FIXED/BUDGET/MAX, catalog-aware) — and sends the
+  // already-resolved OpenRouter model id. This server does NOT
+  // re-derive a model from a cruder heuristic (that's what
+  // streamLiTTCode/resolveProfile is for elsewhere): doing so would
+  // silently override the CLI's routing decision and break "model
+  // truth" for remote execution. profile is "auto" here because the
+  // actual profile classification already happened client-side.
+  const model = options.model;
+  if (!model) throw new Error("model is required for streamModelForRemoteClient");
+  const profile: ModelProfile = "auto";
+
+  const t0 = Date.now();
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+    stream_options: { include_usage: true },
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : undefined,
+    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+  };
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
+      "X-Title": "LiTT CLI (remote)",
+    },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  if (!res.ok || !res.body) {
+    const errorText = await res.text().catch(() => "");
+    throw new Error(`OpenRouter API error ${res.status}: ${errorText || res.statusText}`);
+  }
+
+  emit({ type: "meta", provider: "openrouter", model, profile });
+  let content = "";
+  let total_tokens = 0;
+  let prompt_tokens = 0;
+  let completion_tokens = 0;
+  let finalModel = model;
+  let tFirst = -1;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line || !line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      let obj: any;
+      try {
+        obj = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      if (obj.error) {
+        const code = obj.error?.code ?? obj.choices?.[0]?.finish_reason ?? "unknown";
+        const message = obj.error?.message ?? "Unknown OpenRouter streaming error";
+        throw new Error(`OpenRouter stream error ${code}: ${message}`);
+      }
+      if (obj.choices?.[0]?.finish_reason === "error") {
+        throw new Error("OpenRouter stream terminated with finish_reason=error");
+      }
+
+      if (obj.model) finalModel = obj.model;
+      const delta = obj.choices?.[0]?.delta;
+      if (delta?.content) {
+        if (tFirst < 0) tFirst = Date.now();
+        content += delta.content;
+        emit({ type: "delta", text: delta.content });
+      }
+      if (Array.isArray(delta?.tool_calls)) {
+        for (const tc of delta.tool_calls as Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>) {
+          emit({
+            type: "tool_call_chunk",
+            index: tc.index ?? 0,
+            id: tc.id,
+            name: tc.function?.name,
+            argsChunk: tc.function?.arguments,
+          });
+        }
+      }
+      if (obj.usage?.total_tokens) total_tokens = obj.usage.total_tokens;
+      if (obj.usage?.prompt_tokens) prompt_tokens = obj.usage.prompt_tokens;
+      if (obj.usage?.completion_tokens) completion_tokens = obj.usage.completion_tokens;
+    }
+  }
+
+  const tEnd = Date.now();
+  const timing: LiTTTiming = {
+    ttftMs: tFirst >= 0 ? tFirst - t0 : -1,
+    generationMs: tFirst >= 0 ? tEnd - tFirst : -1,
+    totalMs: tEnd - t0,
+  };
+  const usage: LiTTUsage = { total_tokens, prompt_tokens, completion_tokens };
+  emit({ type: "done", model: finalModel, usage, timing });
+  return { content, model: finalModel, provider: "openrouter", usage, timing, profile };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -615,7 +790,6 @@ export async function streamLiTTMessagesWithTools(
     tools,
     tool_choice: nativeTools.length > 0 ? "auto" : "none",
     parallel_tool_calls: false,
-    max_tokens: 4096,
   };
 
   const startedAt = Date.now();

@@ -36,18 +36,23 @@ import {
   type RuntimeEvent,
   type StreamChunk,
   type VerificationResult,
+  type ChatMessage as AgentCoreChatMessage,
+  type ToolDefinition,
 } from "@litt/agent-core";
 import type { RuntimeSession } from "../lib/runtime-session.js";
-import type { CockpitStore, ActivitySemantic, RoutingMode } from "./cockpit-store.js";
+import type { RuntimeClient } from "../lib/runtime-client.js";
+import { RemoteModelProvider, RemoteExecutionError } from "../lib/remote-model-provider.js";
+import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, ExecutionTarget } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { hasOpenRouterKey, resolveProviderAdapter, type ResolvedModelProvider } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
+import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -74,6 +79,85 @@ import {
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
+
+/**
+ * Resolve the ModelProvider for a routed model, honoring executionTarget.
+ *
+ * This is the ONE place CHAT/MISSION/READ pick a model adapter. It
+ * enforces the production contract:
+ *   - "local"  → resolveProviderAdapter() (unchanged local dev/BYOK path)
+ *   - "remote" → RemoteModelProvider, and ONLY RemoteModelProvider. If
+ *     the remote transport isn't connected, or the routed model has no
+ *     OpenRouter id to serve it remotely, this THROWS — it never falls
+ *     back to constructing a local adapter. The throw propagates into
+ *     the caller's existing try/catch (CHAT/MISSION/READ all already
+ *     finalize the streaming assistant message as an error on any
+ *     thrown error), so the user sees an explicit remote-execution
+ *     error, never a silent switch to a local provider key.
+ */
+function resolveModelProvider(
+  target: ExecutionTarget,
+  client: RuntimeClient | null,
+  routed: RoutedModel,
+  opts: { tools?: ToolDefinition[]; maxTokens?: number } = {},
+): ResolvedModelProvider | RemoteModelProvider {
+  if (target === "local") {
+    return resolveProviderAdapter(routed, opts);
+  }
+  if (!client || !client.is_connected()) {
+    throw new RemoteExecutionError(
+      "Remote execution is unavailable — not connected to the LiTT server. " +
+      "Check your network connection, or run `litt login` if your session expired.",
+    );
+  }
+  if (!routed.openRouterModelId) {
+    throw new RemoteExecutionError(
+      `Remote execution cannot serve ${routed.label} — no OpenRouter-compatible model id is available for it.`,
+    );
+  }
+  return new RemoteModelProvider({
+    client,
+    model: routed.openRouterModelId,
+    tools: opts.tools,
+    maxTokens: opts.maxTokens,
+  });
+}
+
+/**
+ * Is a model provider possibly usable for this session? This is a
+ * cheap up-front gate (skip the model path entirely, show a heuristic
+ * fallback) — NOT the authority on whether a remote call will actually
+ * succeed. In "remote" mode this is always true: the cockpit already
+ * requires a signed-in session to launch, and REMOTE never needs a
+ * local key — unavailability (disconnected transport) is surfaced as
+ * an explicit error at call time via resolveModelProvider, not by
+ * gating here. In "local" mode this mirrors the pre-existing contract:
+ * a local provider key must actually be present.
+ */
+function modelExecutionAvailable(target: ExecutionTarget): boolean {
+  return target === "remote" || hasOpenRouterKey();
+}
+
+/**
+ * Build the prior-turn history to hand runAgentLoop for THIS submission.
+ *
+ * Each call to runAgentLoop is otherwise a fresh, context-free
+ * conversation (see agent-loop.ts's `priorMessages` doc) — without this,
+ * a follow-up like "49456" answering "what city/ZIP?" loses the original
+ * question entirely and gets sent to the model in isolation, which can
+ * misroute a bare ZIP to a weather tool instead of continuing the actual
+ * pending request.
+ *
+ * Only `status === "complete"` messages are included — a still-streaming
+ * or errored message is not a settled turn and must not be replayed into
+ * a new request. Only user/assistant content is passed; runAgentLoop
+ * itself rejects any other role.
+ */
+export function buildPriorMessages(chatTranscript: ChatMessage[]): AgentCoreChatMessage[] {
+  return chatTranscript
+    .filter((m) => m.status === "complete")
+    .map((m) => ({ role: m.role, content: m.content }));
+}
 
 const CLI_IDENTITY = {
   tenantId: "cli-tenant",
@@ -217,13 +301,30 @@ export interface CockpitControllerOptions {
    * header. The controller must NOT create its own.
    */
   modelRuntime: ModelRuntime;
+  /**
+   * The RuntimeClient (Socket.IO connection to terminal-server), or null
+   * if it failed to connect. REQUIRED for executionTarget "remote" — the
+   * controller never falls back to a local provider when this is null;
+   * it surfaces an explicit remote-unavailable error instead (see
+   * resolveModelProvider below).
+   */
+  client: RuntimeClient | null;
 }
 
-export function useCockpitController({ session, store, approvalBridge, sessionBridge, onExit, projectName, branch, modelRuntime }: CockpitControllerOptions) {
+export function useCockpitController({ session, store, approvalBridge, sessionBridge, onExit, projectName, branch, modelRuntime, client }: CockpitControllerOptions) {
   // Telemetry store is controller-local (not model truth).
   // useState lazy initializer keeps a single stable instance for the
   // hook's lifetime without touching refs during render.
   const [telemetryStore] = useState(() => new TelemetryStore());
+
+  // The currently in-flight RemoteModelProvider (if any) — set right
+  // after resolveModelProvider() returns one, cleared when the turn
+  // ends. Lets Escape (app.tsx) cancel the remote model stream, not
+  // just the local tool executor (session.cancel()).
+  const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
+  const cancelRemoteModel = useCallback(() => {
+    currentRemoteModelRef.current?.cancel();
+  }, []);
 
   // ─── @mention context logs ──────────────────────────────────────
   // Captured from the runtime event stream so @terminal:last and
@@ -535,6 +636,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // Kept in a ref so recursion always calls the LATEST submit.
   const submitRef = useRef<(input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => void>(() => {});
   const submit = useCallback(async (input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => {
+    // ─── Re-entrancy guard (defense in depth) ──────────────────────
+    // The composer UI disables input while isProcessing is true, but
+    // that's a UI-layer debounce, not a hard guarantee — a fast double
+    // submit (or any other caller of submit()) could otherwise start a
+    // SECOND turn while the first is still streaming. ChatTranscriptStore
+    // now rejects a superseded turn's stray deltas (see invariant 7 in
+    // chat-transcript-store.ts), but the two turns' TOOL executions and
+    // mission state would still collide. Block a genuinely overlapping
+    // submission here; internal recursive calls (submitRef.current from
+    // /inspect, /fix) are unaffected — they fire before isProcessing is
+    // ever set for their own call chain.
+    if (store.state.isProcessing) return;
     store.actions.addCommand(input);
     // A new turn returns the transcript to LIVE mode (auto-follow).
     store.actions.resetTranscriptScroll();
@@ -682,13 +795,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       act(store, `Branch: ${store.state.branch}`, "info", undefined, "STATUS");
       act(store, `Mode: ${store.state.mode.toUpperCase()}`, "info", undefined, "STATUS");
       act(store, `Brain: ${modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel)}`, "info", "decision", "STATUS");
-      act(store, `Local: ${store.state.localRuntime} · Remote: ${store.state.remoteRuntime}`, "info", undefined, "STATUS");
+      act(store, `Execution: ${store.state.executionTarget.toUpperCase()} (model) · Tools: local · Transport: ${store.state.remoteRuntime}`, "info", undefined, "STATUS");
       return;
     }
     if (input === "/doctor") {
-      act(store, `LiTT runtime: local=${store.state.localRuntime} remote=${store.state.remoteRuntime}`, "info", undefined, "DOCTOR");
+      act(store, `LiTT runtime: executionTarget=${store.state.executionTarget} local(tools)=${store.state.localRuntime} remote(transport)=${store.state.remoteRuntime}`, "info", undefined, "DOCTOR");
       act(store, `Git: ${store.state.branch} · +${store.state.gitModified + store.state.gitUntracked} changes`, "info", undefined, "DOCTOR");
-      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no key (set OPENROUTER_API_KEY)"}`, "info", undefined, "DOCTOR");
+      act(
+        store,
+        store.state.executionTarget === "remote"
+          ? "Provider: REMOTE — server-executed via your LiTT account (no local key required)"
+          : `Provider: LOCAL — ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no key (set OPENROUTER_API_KEY)"}`,
+        "info",
+        undefined,
+        "DOCTOR",
+      );
       for (const status of modelRuntime.getProviderStatuses()) {
         act(store, `  ${status.label}: ${status.tier}${status.hasCredential ? " ✓" : " ✗ no key"}${status.latencyMs !== null ? ` ${status.latencyMs}ms` : ""}`, "info", undefined, "DOCTOR");
       }
@@ -1092,6 +1213,54 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");
 
+    // ─── UTILITY lane — trivial factual/utility lookups bypass the
+    // full model+tool agent loop entirely (weather/time/calculator/
+    // business-hours/local-place). Checked ONLY for "chat"-classified,
+    // non-mission input — read and mission intents (coding, tool-heavy,
+    // build, deploy) are completely untouched. Deliberately placed
+    // BEFORE @mention context resolution so a hit skips that work too.
+    // See lib/utility-lane.ts for why this exists and how it's scoped.
+    if (intent === "chat" && !isMission) {
+      const utilityMatch = classifyUtilityIntent(input);
+      if (utilityMatch) {
+        perf.mark("utility_route");
+        const gateway = session.getGateway();
+        const cwd = session.getCwd();
+        perf.mark("utility_lookup_start");
+        const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
+          const r = await gateway.execute({
+            toolId,
+            inputs: args,
+            cwd,
+            mode: session.getMode(),
+            identity: CLI_IDENTITY,
+          });
+          return r.result;
+        });
+        perf.mark("utility_lookup_end");
+        if (lookup.satisfied) {
+          store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
+          store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
+          store.actions.addActivity({
+            id: `act_${Date.now()}_utility`,
+            ts: Date.now(),
+            type: "info",
+            tag: "UTILITY",
+            text: `Direct lookup (${utilityMatch.kind}) — no model call`,
+          });
+          perf.mark("finalize");
+          perf.end("utility");
+          persistSession();
+          return;
+        }
+        // Direct path could not satisfy the request (e.g. empty search,
+        // unparseable expression) — nothing was rendered; fall through
+        // to the normal chat path below exactly as if no utility match
+        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
+        // call, never an LLM round trip.
+      }
+    }
+
     // ─── @mention context resolution ──────────────────────────────
     // The transcript shows the original input (@tokens intact); the
     // MODEL receives the resolved context prompt. Unresolvable tokens
@@ -1145,6 +1314,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setIsProcessing(true);
         store.actions.startBusy();
+        // Captured once the READ synthesis assistant message is opened
+        // below — every appendAssistantDelta/finalizeAssistantMessage
+        // call in this turn (including the catch block) must target
+        // THIS id specifically (see ChatTranscriptStore invariant 7).
+        let readAssistantMsgId: string | null = null;
         try {
           const gateway = session.getGateway();
           const cwd = session.getCwd();
@@ -1179,7 +1353,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
 
           // ─── Optional synthesis ───
-          if (readMatch.needsSynthesis && hasOpenRouterKey()) {
+          if (readMatch.needsSynthesis && modelExecutionAvailable(store.state.executionTarget)) {
             perf.mark("synthesis_start");
             const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
             const routed = modelRuntime.route(
@@ -1188,10 +1362,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               synthesisPrompt,
             );
             store.actions.setActiveModel(routed.label);
-            const adapter = resolveProviderAdapter(routed);
+            const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
+            if (adapter instanceof RemoteModelProvider) currentRemoteModelRef.current = adapter;
             store.actions.setActiveProvider(adapter.providerId);
             // Start the assistant message for streaming synthesis.
-            store.actions.addChatMessage({
+            readAssistantMsgId = store.actions.addChatMessage({
               role: "assistant",
               content: "",
               ts: Date.now(),
@@ -1205,12 +1380,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 if (event.type === "delta") {
                   synthesized += event.text;
                   perf.mark("first_token");
-                  store.actions.appendAssistantDelta(event.text);
+                  store.actions.appendAssistantDelta(readAssistantMsgId!, event.text);
                 }
               },
             );
             perf.mark("finalize");
-            store.actions.finalizeAssistantMessage({
+            store.actions.finalizeAssistantMessage(readAssistantMsgId!, {
               content: synthesized || modelResult.content || "No synthesis produced.",
               status: "complete",
               servedModel: routed.label,
@@ -1249,10 +1424,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         } catch (err) {
           const errText = err instanceof Error ? err.message : String(err);
           perf.mark("finalize");
-          store.actions.finalizeAssistantMessage({
-            content: `Read failed: ${errText}`,
-            status: "error",
-          });
+          if (readAssistantMsgId) {
+            store.actions.finalizeAssistantMessage(readAssistantMsgId, {
+              content: `Read failed: ${errText}`,
+              status: "error",
+            });
+          }
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
             ts: Date.now(),
@@ -1261,6 +1438,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             text: `Read error: ${errText}`,
           });
         } finally {
+          currentRemoteModelRef.current = null;
           store.actions.setIsProcessing(false);
           store.actions.stopBusy();
           perf.end("read");
@@ -1272,7 +1450,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // if intent classification is correct, but defensive).
     }
 
-    if (hasOpenRouterKey()) {
+    if (modelExecutionAvailable(store.state.executionTarget)) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
       // holoState stays IDLE throughout — CHAT never enters mission
@@ -1306,6 +1484,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // holoState stays IDLE — CHAT is not a mission.
         store.actions.setIsProcessing(true);
         store.actions.startBusy();
+        // Captured once the CHAT assistant message is opened below —
+        // every appendAssistantDelta/finalizeAssistantMessage call for
+        // this turn (including the catch block) must target THIS id
+        // specifically (see ChatTranscriptStore invariant 7).
+        let chatAssistantMsgId: string | null = null;
         try {
           // ─── CANONICAL PATH — one brain, one RuntimeStore ───
           // Reuse the session's canonical ExecutionGateway + RuntimeStore.
@@ -1355,9 +1538,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
             );
           }
-          const model = resolveProviderAdapter(routed, {
+          const model = resolveModelProvider(store.state.executionTarget, client, routed, {
             tools: tools.list(),
           });
+          if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
           // Truthful label: this marks the provider adapter being READY,
           // not an outbound request. The actual request fires inside
           // runAgentLoop below; we do not claim provider latency here.
@@ -1378,7 +1562,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
           // Persist a streaming assistant message — the live preview.
           // Finalized ONCE with result.content when the loop completes.
-          store.actions.addChatMessage({
+          chatAssistantMsgId = store.actions.addChatMessage({
             role: "assistant",
             content: "",
             ts: Date.now(),
@@ -1406,6 +1590,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             mode: session.getMode(), maxRounds: 4,
             projectContext: { name: projectName ?? "chat", root: projectRoot, branch: freshBranch ?? branch ?? "unknown" },
             store: agentStore,
+            // Prior completed turns from THIS cockpit session — without
+            // this, every chat message is a fresh, context-free request
+            // (see buildPriorMessages doc).
+            priorMessages: buildPriorMessages(store.state.chatTranscript),
             onModelStream: (event) => {
               if (event.type === "delta") {
                 // Suppress tool_call/json protocol markup — never dump
@@ -1418,7 +1606,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
-                store.actions.appendAssistantDelta(visible);
+                store.actions.appendAssistantDelta(chatAssistantMsgId!, visible);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -1459,12 +1647,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const finalStatus: "complete" | "error" =
             result.termination === "complete" ? "complete" : "error";
           perf.mark("finalize");
-          store.actions.finalizeAssistantMessage({
-            content: finalContent,
-            status: finalStatus,
-            servedModel: model.activeModel,
-            durationMs: result.durationMs,
-          });
+          if (chatAssistantMsgId) {
+            store.actions.finalizeAssistantMessage(chatAssistantMsgId, {
+              content: finalContent,
+              status: finalStatus,
+              servedModel: model.activeModel,
+              durationMs: result.durationMs,
+            });
+          }
           const seconds = (result.durationMs / 1000).toFixed(1);
           // Single concise DONE event — not raw response body
           store.actions.addActivity({
@@ -1490,13 +1680,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // Finalize the streaming assistant message as an ERROR —
           // never leave it blank or partially streamed.
           perf.mark("finalize");
-          store.actions.finalizeAssistantMessage({
-            content: errText,
-            status: "error",
-          });
+          if (chatAssistantMsgId) {
+            store.actions.finalizeAssistantMessage(chatAssistantMsgId, {
+              content: errText,
+              status: "error",
+            });
+          }
           store.actions.setHoloState("FAILED");
           store.actions.scheduleIdle(2000);
         } finally {
+          currentRemoteModelRef.current = null;
           // ONE canonical transition out of a run: every terminal
           // outcome (success, failed, provider error, tool error, stall)
           // re-enables the composer and stops the busy timer. The shell
@@ -1548,6 +1741,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // terminal state; the finally is the guarantee for anything that
       // escapes (e.g. a cleanup call itself throwing).
       let settled = false;
+      // Captured once the MISSION assistant message is opened below —
+      // every appendAssistantDelta/finalizeAssistantMessage call for
+      // this turn (including the catch block) must target THIS id
+      // specifically (see ChatTranscriptStore invariant 7).
+      let missionAssistantMsgId: string | null = null;
       try {
         // ─── CANONICAL PATH — one brain, one RuntimeStore ───
         const gateway = session.getGateway();
@@ -1612,9 +1810,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
           );
         }
-        const model = resolveProviderAdapter(routed, {
+        const model = resolveModelProvider(store.state.executionTarget, client, routed, {
           tools: tools.list(),
         });
+        if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
         // Truthful label: provider adapter READY, not an outbound request.
         // The actual request fires inside runAgentLoop below.
         perf.mark("provider_ready");
@@ -1635,7 +1834,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // the mission. Finalized ONCE with result.content when the loop
         // completes. The mission body is the same canonical response
         // the user sees in CHAT — one brain, one rendering.
-        store.actions.addChatMessage({
+        missionAssistantMsgId = store.actions.addChatMessage({
           role: "assistant",
           content: "",
           ts: Date.now(),
@@ -1793,6 +1992,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             branch: freshBranch ?? branch ?? "unknown",
           },
           store: agentStore,
+          // Prior completed chat turns from THIS cockpit session — a
+          // mission trigger ("build it") often depends on context from
+          // the conversation that preceded it (see buildPriorMessages doc).
+          priorMessages: buildPriorMessages(store.state.chatTranscript),
           // ─── Wire the VerificationGate into the agent loop ───
           // This is the REAL repair/revalidation path: when the model
           // says "done", the loop runs the gate. If the gate fails,
@@ -1832,7 +2035,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
               perf.mark("first_token");
-              store.actions.appendAssistantDelta(visible);
+              store.actions.appendAssistantDelta(missionAssistantMsgId!, visible);
             }
           },
           onToolStream: (chunk: StreamChunk) => {
@@ -2028,12 +2231,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const finalStatus: "complete" | "error" =
             result.termination === "complete" ? "complete" : "error";
           perf.mark("finalize");
-          store.actions.finalizeAssistantMessage({
-            content: finalContent,
-            status: finalStatus,
-            servedModel: model.activeModel,
-            durationMs: result.durationMs,
-          });
+          if (missionAssistantMsgId) {
+            store.actions.finalizeAssistantMessage(missionAssistantMsgId, {
+              content: finalContent,
+              status: finalStatus,
+              servedModel: model.activeModel,
+              durationMs: result.durationMs,
+            });
+          }
         }
 
         // ─── VerificationGate owns completion ───
@@ -2221,10 +2426,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // Finalize the streaming assistant message as an ERROR —
         // never leave it blank or partially streamed.
         perf.mark("finalize");
-        store.actions.finalizeAssistantMessage({
-          content: errText,
-          status: "error",
-        });
+        if (missionAssistantMsgId) {
+          store.actions.finalizeAssistantMessage(missionAssistantMsgId, {
+            content: errText,
+            status: "error",
+          });
+        }
         store.actions.setHoloState("FAILED");
         store.actions.updateMissionState("FAILED");
         store.actions.failToolProgressMission();
@@ -2237,6 +2444,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           await agentStore.failMission(errText).catch(() => {});
         }
       } finally {
+        currentRemoteModelRef.current = null;
         // The canonical transition out of a run — no terminal outcome
         // (success, failed, cancelled, timeout, provider/tool/planning
         // error, transport stall) may leave the shell visually Working.
@@ -2252,12 +2460,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // No API key — show heuristic hint
+    // Reached only in LOCAL (developer) mode without a provider key —
+    // "remote" is always modelExecutionAvailable (see above), so this
+    // branch never fires for a normal signed-in customer session.
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "info",
-      text: "Set OPENROUTER_API_KEY to talk to LiTT. Use /commands for direct execution.",
+      text: "LOCAL mode: set OPENROUTER_API_KEY to talk to LiTT, or unset LITT_LOCAL_MODE to use REMOTE. Use /commands for direct execution.",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);
@@ -2320,5 +2530,6 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     newSession,
     runShipVerify,
     runShipCommit,
+    cancelRemoteModel,
   };
 }

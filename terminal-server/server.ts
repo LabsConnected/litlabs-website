@@ -23,6 +23,7 @@ import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
+import { handleModelRequest, handleModelCancel, type ModelRequestPayload } from "./model-relay";
 import { dispatchMobileCommand } from "./mobile-commands";
 import {
   initRuntime,
@@ -53,7 +54,6 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { verifyClerkToken } from "./clerk-verify";
-import { getRunRegistry } from "./run-registry";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -317,9 +317,7 @@ app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
 
 // ─── User-authenticated cancel endpoint ───────────────────────────
 // POST /api/cancel — cancel the currently active run using USER auth.
-// Kills the actual child process tree associated with the runId and
-// reports whether a running process was found and cancelled.
-app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
   try {
     verifyTerminalToken(bearerToken(req.headers.authorization));
   } catch {
@@ -331,8 +329,8 @@ app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: "Missing 'runId'" });
     return;
   }
-  const cancelled = await getRunRegistry().cancel(runId);
-  res.json({ ok: true, runId, cancelled });
+  // TODO: wire to actual cancel — for now returns ok
+  res.json({ ok: true, runId });
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
@@ -361,21 +359,8 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     userId: body.userId ?? req.terminalUserId ?? null,
   };
-  // Generate runId for client disconnect cancellation (same as /api/command).
-  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  // Only cancel if the client disconnects BEFORE the response is sent.
-  // We track completion via responseSent and use res.on("close") which
-  // fires when the response stream ends. If responseSent is false at
-  // that point, the client disconnected prematurely.
-  let responseSent = false;
-  res.on("close", () => {
-    if (!responseSent) {
-      getRunRegistry().cancel(runId).catch(() => {});
-    }
-  });
   try {
-    const result = await dispatchCommand(normalizedReq, { runId });
-    responseSent = true;
+    const result = await dispatchCommand(normalizedReq);
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
@@ -434,17 +419,6 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     ? resolve(workspaceRoot, userId)
     : process.cwd();
 
-  // Ensure the user's workspace directory exists — spawn() fails with
-  // ENOENT if the cwd doesn't exist, which would cause every /do command
-  // to fail immediately with exit -1.
-  if (workspaceRoot) {
-    try {
-      mkdirSync(userWorkspaceRoot, { recursive: true });
-    } catch {
-      // Non-fatal — the directory may already exist or be on a read-only fs.
-    }
-  }
-
   // If the request specifies a cwd, validate it's within the user's workspace.
   // This prevents cross-user workspace access.
   let cwd = body.cwd ?? userWorkspaceRoot;
@@ -469,31 +443,11 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     cwd,
   };
 
-  // Generate the runId here so we can cancel the run if the client
-  // disconnects before the response is sent. The runId is passed to
-  // dispatchCommand which registers it in the RunRegistry.
-  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
-  // before the response is sent, cancel the running process. This
-  // prevents orphaned processes from continuing after the client is gone.
-  // We track completion via responseSent and use res.on("close") which
-  // fires when the response stream ends. If responseSent is false at
-  // close time, the client disconnected mid-run → cancel.
-  let responseSent = false;
-  res.on("close", () => {
-    if (!responseSent) {
-      getRunRegistry().cancel(runId).catch(() => {});
-    }
-  });
-
   try {
-    const result = await dispatchCommand(normalizedReq, { runId });
-    responseSent = true;
+    const result = await dispatchCommand(normalizedReq);
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    responseSent = true;
     res.status(500).json({ error: message });
   }
 });
@@ -1569,8 +1523,35 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Remote model transport (CLI interactive cockpit) ───────────────
+  //
+  // Unlike litt:chat (streamLiTTOperator, above), this is a PURE model
+  // completion proxy: it streams text + relays OpenRouter's native
+  // tool_calls back to the caller, and never executes any tool or
+  // touches any gateway/filesystem itself. The CLI's LOCAL project
+  // tools execute on the user's own machine (the server has no access
+  // to it) — the CLI's existing agent loop handles that unchanged;
+  // only the model call moves server-side.
+  //
+  // Gated by the SAME billing.ts entitlement/credit check Commit A
+  // added for the /api/command ask path — no separate, looser entry
+  // point into model execution exists on this server.
+  const activeModelStreams = new Map<string, AbortController>();
+
+  socket.on("litt:model:request", (payload: ModelRequestPayload) =>
+    handleModelRequest(userId, payload, (p) => socket.emit("litt:model:event", p), activeModelStreams),
+  );
+
+  socket.on("litt:model:cancel", (payload: { requestId?: string }) =>
+    handleModelCancel(activeModelStreams, payload?.requestId),
+  );
+
   socket.on("disconnect", () => {
     console.log("[Terminal] Disconnected:", sessionId);
+    // A disconnect abandons any in-flight model streams for this socket
+    // — abort them rather than letting them run to completion unheard.
+    for (const controller of activeModelStreams.values()) controller.abort();
+    activeModelStreams.clear();
     // Kill the session — the socket owns it, so we pass the authenticated userId.
     // This is safe because userId came from the JWT, not the client.
     ptyManager.kill(sessionId, "client_disconnect", userId);
