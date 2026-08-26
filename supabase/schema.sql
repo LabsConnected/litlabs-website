@@ -1,7 +1,12 @@
 -- ============================================
--- LiTreeLabStudios Database Schema (Self-Contained)
+-- LiTreeLabStudios Database Schema (Bootstrap)
 -- Compatible with Clerk + Next.js API routes (service role key)
 -- Run this in Supabase Dashboard → SQL Editor → "New Query" → Run
+--
+-- NOTE: This file creates the CORE tables for initial setup.
+-- The canonical source of truth is supabase/migrations/ — run all
+-- migrations in order for the full schema. This bootstrap is for
+-- quick manual setup of the essential tables only.
 -- ============================================
 
 -- Drop old auth-dependent constraints if they exist
@@ -145,11 +150,18 @@ create table if not exists public.rate_limits (
 create index if not exists idx_rate_limits_ip_created on public.rate_limits(ip, created_at desc);
 
 -- Auto-cleanup old rate limit entries (older than 5 minutes)
-select cron.schedule(
-  'cleanup-rate-limits',
-  '*/5 * * * *',
-  $$delete from public.rate_limits where created_at < now() - interval '5 minutes'$$
-);
+-- Guard: only schedule if pg_cron extension is available
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.schedule(
+      'cleanup-rate-limits',
+      '*/5 * * * *',
+      $$delete from public.rate_limits where created_at < now() - interval '5 minutes'$$
+    );
+  END IF;
+END;
+$$;
 
 -- ============================================
 -- RLS: ENABLED with service_role bypass
@@ -289,6 +301,9 @@ CREATE TABLE IF NOT EXISTS public.agents (
   model TEXT DEFAULT 'gpt-4o-mini',
   is_core BOOLEAN DEFAULT false,
   is_public BOOLEAN DEFAULT true,
+  is_featured BOOLEAN DEFAULT false,
+  price_cents INTEGER DEFAULT 0,
+  features TEXT DEFAULT '',
   owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateUser } from "@/lib/user-db";
+import { anonymizeUser } from "@/lib/user-deletion";
+import { getAdminSupabase } from "@/lib/supabase-admin";
 import { Webhook } from "svix";
 
 /**
@@ -79,8 +81,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (eventType === "user.deleted") {
-      // User deleted — handle cleanup if needed
-      // Optional: delete from Supabase here
+      // User deleted in Clerk — anonymize PII and purge personal data.
+      // Retains billing/legal records (transactions, credit_ledger, audit_events).
+      // Idempotent: safe for duplicate webhook delivery.
+      const data = evt.data;
+      const clerkUserId = data.id as string;
+      if (clerkUserId) {
+        try {
+          const db = getAdminSupabase();
+          await anonymizeUser(db, clerkUserId);
+        } catch {
+          // If Supabase isn't configured or fails, we still return success
+          // so Clerk doesn't retry indefinitely. The user is already gone
+          // from Clerk; we'll catch up on next sign-in attempt or manual cleanup.
+        }
+      }
     }
 
     return NextResponse.json({ success: true });
