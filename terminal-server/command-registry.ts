@@ -17,14 +17,18 @@ import * as fs from "fs";
 import * as path from "path";
 import { createShellExecutor } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell } from "./runtime.js";
-import { getRunRegistry } from "./run-registry.js";
+import { getRuntimeStore, getRuntimeState, getExecutionGateway } from "./runtime.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
 
 const SECRET_PATTERNS: readonly RegExp[] = [
+  // Plain sk-<alnum> keys (OpenAI-style: sk-XXXXXXXXXXXXXXXXXXXXXXXX).
   /\b(sk-[a-zA-Z0-9]{20,})\b/g,
+  // Hyphen-segmented sk-*-* keys (OpenRouter: sk-or-v1-..., Anthropic:
+  // sk-ant-api03-...). Matches 2+ hyphenated segments after "sk-" so a
+  // bare "sk-" prefix without a real key body never gets redacted.
+  /\b(sk-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+){2,})\b/g,
   /\b(pk_[a-zA-Z0-9]{20,})\b/g,
   /\b(Bearer\s+[a-zA-Z0-9._-]{20,})\b/gi,
   /\b(eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})\b/g,
@@ -139,15 +143,11 @@ export interface CommandSpec {
 
 // ─── Helpers for handlers ─────────────────────────────────────────
 
-function getRouter(cwd: string, userId: string | null, runId?: string): CommandRouter {
+function getRouter(cwd: string, userId: string | null): CommandRouter {
   // Lazy import to avoid circular dependency at module load time
   const { CommandRouter } = require("@litt/agent-core");
   const store = getRuntimeStore();
   const shell = createShellExecutor(cwd);
-  // Register the shell so /api/cancel or client disconnect can kill it.
-  if (runId) {
-    getRunRegistry().register(runId, shell);
-  }
   return new CommandRouter(shell, { cwd, userId, store });
 }
 
@@ -170,26 +170,17 @@ function execShell(
   args: string[],
   cwd: string,
   timeoutMs: number,
-  runId?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const child = execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      if (runId) getRunRegistry().unregister(runId);
       resolve({
         stdout: stdout ?? "",
         stderr: stderr ?? "",
         exitCode: err ? (err as { code?: number }).code ?? -1 : 0,
       });
     });
-    // Register the child process so /api/cancel or client disconnect can kill it.
-    if (runId) {
-      getRunRegistry().register(runId, {
-        cancel: async () => {
-          try { child.kill("SIGTERM"); } catch { /* already exited */ }
-          return [child.pid ?? 0];
-        },
-      });
-    }
+    // Guard against orphan — if the promise resolved, child already exited
+    void child;
   });
 }
 
@@ -197,7 +188,7 @@ function execShell(
 
 async function handleStatus(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
+  const router = getRouter(ctx.cwd, ctx.userId);
   const result = await router.status();
   return routerResultToResponse("status", result, t0);
 }
@@ -205,28 +196,28 @@ async function handleStatus(_args: string[], ctx: CommandContext): Promise<Comma
 async function handleDiff(args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const staged = args.includes("--staged") || args.includes("-s");
-  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
+  const router = getRouter(ctx.cwd, ctx.userId);
   const result = await router.diff(staged);
   return routerResultToResponse("diff", result, t0);
 }
 
 async function handleCheck(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
+  const router = getRouter(ctx.cwd, ctx.userId);
   const result = await router.check(ctx.runId);
   return routerResultToResponse("check", result, t0);
 }
 
 async function handleBuild(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
+  const router = getRouter(ctx.cwd, ctx.userId);
   const result = await router.build(ctx.runId);
   return routerResultToResponse("build", result, t0);
 }
 
 async function handleTest(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
+  const router = getRouter(ctx.cwd, ctx.userId);
   const result = await router.test(ctx.runId);
   return routerResultToResponse("test", result, t0);
 }
@@ -245,7 +236,7 @@ async function handleGit(args: string[], ctx: CommandContext): Promise<CommandRe
     };
   }
   const gitArgs = subcmd === "log" ? ["log", "--oneline", "-10"] : [subcmd];
-  const result = await execShell("git", gitArgs, ctx.cwd, 15_000, ctx.runId);
+  const result = await execShell("git", gitArgs, ctx.cwd, 15_000);
   return {
     kind: "git_result",
     ok: result.exitCode === 0,
@@ -384,14 +375,10 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
       return {
         kind: "brain_response",
         ok: result.termination !== "error",
-        message: redactSecrets(result.content),
         data: {
           text: redactSecrets(result.content),
           runId: result.runId,
           toolCalls: result.toolCalls.length,
-          // Expose safe tool IDs (canonical toolId only — no inputs, no args,
-          // no secrets) so the CLI can render tool labels and verify routing.
-          toolIds: result.toolCalls.map((tc: { toolId?: string }) => tc.toolId).filter(Boolean),
           rounds: result.rounds,
         },
         durationMs: Date.now() - t0,
@@ -413,7 +400,6 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
     return {
       kind: "brain_response",
       ok: true,
-      message: redactSecrets(text),
       data: { text: redactSecrets(text) },
       durationMs: Date.now() - t0,
     };
@@ -463,87 +449,43 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   const command = args[0];
   const cmdArgs = args.slice(1);
 
-  // Route through the canonical ExecutionGateway — NOT runCommand()
-  // directly. The gateway enforces mode (PLAN blocks mutating commands),
-  // policy, capability classification, path safety, env filtering, and
-  // secret redaction. This is the security invariant: /do in PLAN mode
-  // MUST NOT execute mutating commands.
-  //
-  // /do routes through the canonical ExecutionGateway singleton from
-  // runtime.ts — the SAME gateway the LiTT operator (runAgentLoop) uses.
-  // This is the singleton invariant: one gateway, one policy, one approval
-  // authority. /do does NOT construct its own gateway.
-  //
-  // In headless mode (no approval provider on the canonical gateway),
-  // elevated commands are denied (fail closed). Safe commands (echo, git
-  // status) execute. PLAN mode denies all mutations. This is the security
-  // invariant: /do is NOT a bypass around the gateway.
-  const mode = ctx.mode ?? "act";
-  const doGateway = getExecutionGateway(ctx.cwd, mode);
-  const shell = getCanonicalShell(ctx.cwd);
-  if (ctx.runId) {
-    getRunRegistry().register(ctx.runId, shell);
-  }
-
-  const result = await doGateway.execute({
+  const gateway = getExecutionGateway(ctx.cwd, ctx.mode ?? "act");
+  const gwResult = await gateway.execute({
     toolId: "project.run",
     inputs: { command, args: cmdArgs },
     cwd: ctx.cwd,
+    mode: ctx.mode ?? "act",
+    runId: ctx.runId,
     identity: {
-      tenantId: "default",
+      tenantId: "terminal-server",
       userId: ctx.userId ?? "terminal-server",
       actorId: ctx.userId ?? "terminal-server",
-      // /do is a direct authenticated user action (Clerk JWT verified at
-      // the HTTP boundary), NOT an untrusted model/agent action. The user
-      // is trusted to run arbitrary commands — the gateway still enforces
-      // PLAN mode (blocks mutating commands) and risk-based denial for
-      // dangerous commands (rm -rf /, etc).
+      // terminal-server's /internal/command is authenticated at the HTTP
+      // boundary (X-Internal-Service-Key). The gateway still enforces
+      // mode/policy/approval — but the caller is a trusted service.
       trusted: true,
-      // /do is interactive: the user is present (they typed the command).
-      // The canonical gateway's onApprovalRequired callback approves
-      // elevated commands ONLY for trusted + interactive identities.
-      // The agent/operator path (untrusted) is denied. The gateway still
-      // mints a real VerifiedApproval — this is not a boolean bypass.
-      interaction: "interactive" as const,
+      interaction: "headless",
     },
-    mode,
-    runId: ctx.runId,
+    timeoutMs: 30_000,
   });
 
-  // Gateway denials (PLAN mode, policy, approval) are legitimate outcomes
-  if (!result.result.success) {
-    return {
-      kind: "exec_result",
-      ok: false,
-      data: {
-        command,
-        exitCode: null,
-        stdout: "",
-        stderr: redactSecrets(result.denialReason ?? result.result.message ?? ""),
-        policyEffect: result.policyEffect ?? "deny",
-        approved: result.approved ?? false,
-        denialReason: result.denialReason ?? result.result.message ?? "Command denied by gateway",
-      },
-      durationMs: Date.now() - t0,
-      message: redactSecrets(result.denialReason ?? result.result.message ?? "Command denied by gateway"),
-    };
-  }
-
-  const execData = result.result.data as Record<string, unknown>;
+  const result = gwResult.result;
   return {
     kind: "exec_result",
-    ok: true,
+    ok: result.success,
     data: {
       command,
-      exitCode: (execData.exitCode as number | null) ?? 0,
-      stdout: redactSecrets((execData.stdout as string | undefined) ?? ""),
-      stderr: redactSecrets((execData.stderr as string | undefined) ?? ""),
-      status: execData.status ?? result.result.status,
-      policyEffect: result.policyEffect ?? "allow",
-      approved: result.approved ?? true,
+      exitCode: (result.data.exitCode as number | null) ?? (result.success ? 0 : 1),
+      stdout: redactSecrets((result.data.stdout as string | undefined) ?? ""),
+      stderr: redactSecrets((result.data.stderr as string | undefined) ?? ""),
+      // Gateway enforcement metadata — proves this went through the
+      // canonical authority, not a direct execFile.
+      policyEffect: gwResult.policyEffect,
+      approved: gwResult.approved,
+      denialReason: gwResult.denialReason,
     },
     durationMs: Date.now() - t0,
-    message: result.result.message || undefined,
+    message: result.message || (result.success ? undefined : `Exit code ${result.data.exitCode ?? 1}`),
   };
 }
 

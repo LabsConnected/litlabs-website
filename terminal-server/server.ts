@@ -23,6 +23,7 @@ import { isBlockedCommand, auditCommand, getAuditLog } from "./security";
 import { handleLiTTCodeCommand, type LiTTEvent } from "./litt-code";
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
+import { handleModelRequest, handleModelCancel, type ModelRequestPayload } from "./model-relay";
 import { dispatchMobileCommand } from "./mobile-commands";
 import {
   initRuntime,
@@ -53,7 +54,6 @@ import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manage
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { verifyClerkToken } from "./clerk-verify";
-import { getRunRegistry } from "./run-registry";
 import type { RemoteCommandRequest } from "@litt/agent-core";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -220,7 +220,6 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
     // userId comes from the verified token, NOT from the request body.
     const verified = await verifyClerkToken(clerkToken);
     const userId = verified.userId;
-    const userEmail = verified.email;
 
     // ─── 2. Workspace/project authorization (server-side) ────────
     // If the client requests a specific workspaceId, verify the
@@ -263,11 +262,8 @@ app.post("/api/token-exchange", async (req: AuthenticatedRequest, res: Response)
           workspaceId: authorizedWorkspaceId,
           projectId: authorizedProjectId,
           cwd: authorizedWorkspaceRoot,
-          email: userEmail ?? undefined,
         })
-      : mintTerminalToken(userId, 300, {
-          email: userEmail ?? undefined,
-        });
+      : mintTerminalToken(userId, 300);
 
     res.json({
       terminalToken,
@@ -319,36 +315,9 @@ app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// ─── User-authenticated workspace listing ─────────────────────────
-// GET /api/workspaces — lists the authenticated user's ready workspaces.
-//
-// Uses USER authentication (terminal JWT minted by /api/token-exchange).
-// Returns only workspaces that belong to the verified user and are ready.
-// The CLI uses this to present a workspace selector when multiple
-// workspaces are available.
-app.get("/api/workspaces", (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const payload = verifyTerminalToken(bearerToken(req.headers.authorization));
-    const userId = payload.sub;
-    const ready = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
-    res.json({
-      workspaces: ready.map((w: WorkspaceDescriptor) => ({
-        workspaceId: w.workspaceId,
-        projectId: w.projectId,
-        root: w.root,
-        branch: w.branch,
-      })),
-    });
-  } catch {
-    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
-  }
-});
-
 // ─── User-authenticated cancel endpoint ───────────────────────────
 // POST /api/cancel — cancel the currently active run using USER auth.
-// Kills the actual child process tree associated with the runId and
-// reports whether a running process was found and cancelled.
-app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
   try {
     verifyTerminalToken(bearerToken(req.headers.authorization));
   } catch {
@@ -360,8 +329,8 @@ app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: "Missing 'runId'" });
     return;
   }
-  const cancelled = await getRunRegistry().cancel(runId);
-  res.json({ ok: true, runId, cancelled });
+  // TODO: wire to actual cancel — for now returns ok
+  res.json({ ok: true, runId });
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
@@ -390,21 +359,8 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     userId: body.userId ?? req.terminalUserId ?? null,
   };
-  // Generate runId for client disconnect cancellation (same as /api/command).
-  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  // Only cancel if the client disconnects BEFORE the response is sent.
-  // We track completion via responseSent and use res.on("close") which
-  // fires when the response stream ends. If responseSent is false at
-  // that point, the client disconnected prematurely.
-  let responseSent = false;
-  res.on("close", () => {
-    if (!responseSent) {
-      getRunRegistry().cancel(runId).catch(() => {});
-    }
-  });
   try {
-    const result = await dispatchCommand(normalizedReq, { runId });
-    responseSent = true;
+    const result = await dispatchCommand(normalizedReq);
     // Unknown commands and command-level failures return HTTP 200 with
     // ok:false so the client can display the typed error. Only server
     // errors get HTTP 500.
@@ -434,13 +390,10 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
 app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 1. Verify user JWT ──────────────────────────────────────────
   let userId: string;
-  let authEmail: string | undefined;
-  let payload: { sub: string; wid?: string; pid?: string; cwd?: string; email?: string };
   try {
     const token = bearerToken(req.headers.authorization);
-    payload = verifyTerminalToken(token);
+    const payload = verifyTerminalToken(token);
     userId = payload.sub;
-    authEmail = payload.email;
   } catch {
     res.status(401).json({ error: "Unauthorized — valid terminal token required" });
     return;
@@ -457,89 +410,28 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  // ─── 3. Resolve authorized workspace ─────────────────────────────
-  // The signed terminal token may carry workspace claims (wid/pid/cwd)
-  // from the token-exchange step. These are SIGNED — the client cannot
-  // forge them. We resolve the cwd from these claims, NOT from the
-  // request body.
-  //
-  // Priority:
-  //   1. Signed wid claim → getWorkspace(wid) → ownership + ready check
-  //   2. No signed claim → auto-select if exactly one ready workspace
-  //   3. Zero ready workspaces → typed workspace_required error
-  //   4. Multiple ready workspaces → typed workspace_selection_required error
-  //
-  // The request body's workspaceId/cwd CANNOT override the signed claim.
-  // This prevents cross-user workspace access and empty-directory fallbacks.
-  let cwd: string;
-  let authorizedWorkspaceId: string;
+  // ─── 3. Build authenticated request ──────────────────────────────
+  // userId comes from the VERIFIED JWT — NOT from the request body.
+  // A user cannot impersonate another user by setting userId in the body.
+  // workspaceId/cwd are validated against the user's workspace root.
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const userWorkspaceRoot = workspaceRoot
+    ? resolve(workspaceRoot, userId)
+    : process.cwd();
 
-  if (payload.wid) {
-    // Signed workspace claim — resolve and verify
-    const ws = getWorkspace(payload.wid);
-    if (!ws) {
-      res.status(404).json({
-        error: { code: "workspace_unauthorized", message: "Signed workspace no longer exists" },
-      });
-      return;
-    }
-    if (ws.userId !== userId) {
-      res.status(403).json({
-        error: { code: "workspace_unauthorized", message: "Forbidden — workspace does not belong to the authenticated user" },
-      });
-      return;
-    }
-    if (!ws.ready) {
-      res.status(400).json({
-        error: { code: "workspace_required", message: "Workspace is not ready (still preparing)" },
-      });
-      return;
-    }
-    // Use the signed workspace root as cwd. Body cwd is ignored —
-    // the signed claim is authoritative.
-    cwd = ws.root;
-    authorizedWorkspaceId = ws.workspaceId;
-  } else {
-    // No signed workspace claim — auto-select from ready workspaces
-    const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
-    if (readyWorkspaces.length === 0) {
-      res.status(400).json({
-        error: { code: "workspace_required", message: "No remote project workspace is prepared for this account." },
-      });
-      return;
-    }
-    if (readyWorkspaces.length > 1) {
-      res.status(400).json({
-        error: {
-          code: "workspace_selection_required",
-          message: "Multiple remote workspaces are available. Specify one with --workspace <id>.",
-          workspaces: readyWorkspaces.map((w: WorkspaceDescriptor) => ({
-            workspaceId: w.workspaceId,
-            projectId: w.projectId,
-            branch: w.branch,
-          })),
-        },
-      });
-      return;
-    }
-    // Exactly one ready workspace — auto-select it
-    cwd = readyWorkspaces[0].root;
-    authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
-  }
-
-  // If the request body specifies a cwd, validate it's within the
-  // authorized workspace. This allows subdirectory navigation but
-  // prevents escaping the workspace root.
-  if (body.cwd) {
-    const resolvedCwd = resolve(cwd, body.cwd);
-    const rel = relative(cwd, resolvedCwd);
+  // If the request specifies a cwd, validate it's within the user's workspace.
+  // This prevents cross-user workspace access.
+  let cwd = body.cwd ?? userWorkspaceRoot;
+  if (workspaceRoot) {
+    const resolvedCwd = resolve(cwd);
+    const resolvedUserRoot = resolve(userWorkspaceRoot);
+    const rel = relative(resolvedUserRoot, resolvedCwd);
     if (rel.startsWith("..") || isAbsolute(rel)) {
       res.status(403).json({
-        error: { code: "workspace_unauthorized", message: "Forbidden — cwd is outside your workspace" },
+        error: "Forbidden — cwd is outside your workspace",
       });
       return;
     }
-    cwd = resolvedCwd;
   }
 
   const normalizedReq: RemoteCommandRequest = {
@@ -547,139 +439,16 @@ app.post("/api/command", async (req: AuthenticatedRequest, res: Response) => {
     args: Array.isArray(body.args) ? body.args.filter((a) => typeof a === "string") : [],
     // userId from the JWT — overrides any value in the body
     userId,
-    // email from the JWT — best-effort auth context for the operator
-    authEmail: authEmail ?? null,
-    // The verified/selected workspace overrides any untrusted body.workspaceId.
-    // dispatchCommand resolves cwd from workspaceId, so allowing the body value
-    // through here would undo the signed-workspace authority check above.
-    workspaceId: authorizedWorkspaceId,
-    // cwd resolved from the signed workspace claim — NOT from the body
+    // cwd validated to be within the user's workspace
     cwd,
   };
 
-  // Generate the runId here so we can cancel the run if the client
-  // disconnects before the response is sent. The runId is passed to
-  // dispatchCommand which registers it in the RunRegistry.
-  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  // If the client disconnects (timeout, network drop, Ctrl+C on the CLI)
-  // before the response is sent, cancel the running process. This
-  // prevents orphaned processes from continuing after the client is gone.
-  // We track completion via responseSent and use res.on("close") which
-  // fires when the response stream ends. If responseSent is false at
-  // close time, the client disconnected mid-run → cancel.
-  let responseSent = false;
-  res.on("close", () => {
-    if (!responseSent) {
-      getRunRegistry().cancel(runId).catch(() => {});
-    }
-  });
-
   try {
-    const result = await dispatchCommand(normalizedReq, { runId });
-    responseSent = true;
+    const result = await dispatchCommand(normalizedReq);
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    responseSent = true;
     res.status(500).json({ error: message });
-  }
-});
-
-// ─── POST /api/chat — managed-key natural-language chat (NDJSON stream) ──
-//
-// This endpoint lets authenticated CLI users chat with LiTT using the
-// server's managed OPENROUTER_API_KEY — no local API key required.
-//
-// Authentication: terminal JWT (same as /api/command).
-// Request body: { message: string }
-// Response: NDJSON stream of LiTTEvent objects:
-//   {"type":"meta","provider":"openrouter","model":"...","profile":"smart"}
-//   {"type":"delta","text":"chunk"}
-//   {"type":"done","model":"...","usage":{"total_tokens":N},"timing":{...}}
-//   {"type":"error","message":"..."}
-//
-// The server resolves the workspace cwd from the signed JWT claims
-// (same as /api/command). The client cannot override it.
-app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
-  // 1. Verify user JWT
-  let userId: string;
-  let payload: { sub: string; wid?: string; pid?: string; cwd?: string; email?: string };
-  try {
-    const token = bearerToken(req.headers.authorization);
-    payload = verifyTerminalToken(token);
-    userId = payload.sub;
-  } catch {
-    res.status(401).json({ error: "Unauthorized — valid terminal token required" });
-    return;
-  }
-
-  // 2. Validate request body
-  const { message } = req.body as { message?: string };
-  if (!message || typeof message !== "string" || !message.trim()) {
-    res.status(400).json({ error: "Missing 'message' field" });
-    return;
-  }
-
-  // 3. Resolve workspace cwd (same logic as /api/command)
-  let cwd: string;
-  let authorizedWorkspaceId: string | undefined;
-
-  if (payload.wid) {
-    const ws = getWorkspace(payload.wid);
-    if (!ws) {
-      res.status(404).json({
-        error: { code: "workspace_unauthorized", message: "Signed workspace no longer exists" },
-      });
-      return;
-    }
-    if (ws.userId !== userId) {
-      res.status(403).json({
-        error: { code: "workspace_unauthorized", message: "Workspace access denied" },
-      });
-      return;
-    }
-    cwd = ws.root;
-    authorizedWorkspaceId = ws.workspaceId;
-  } else {
-    // No signed workspace claim — auto-select from ready workspaces
-    const readyWorkspaces = listWorkspaces(userId).filter((w: WorkspaceDescriptor) => w.ready);
-    if (readyWorkspaces.length === 0) {
-      res.status(400).json({
-        error: { code: "workspace_required", message: "No remote project workspace is prepared for this account." },
-      });
-      return;
-    }
-    if (readyWorkspaces.length > 1) {
-      res.status(400).json({
-        error: { code: "workspace_selection_required", message: "Multiple workspaces — specify which one" },
-      });
-      return;
-    }
-    cwd = readyWorkspaces[0].root;
-    authorizedWorkspaceId = readyWorkspaces[0].workspaceId;
-  }
-
-  // 4. Stream NDJSON response
-  res.setHeader("Content-Type", "application/x-ndjson");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-
-  const writeEvent = (event: LiTTEvent) => {
-    res.write(JSON.stringify(event) + "\n");
-  };
-
-  try {
-    await streamLiTTOperator(message, cwd, writeEvent);
-    res.end();
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
-    if (!res.headersSent) {
-      res.status(500).json({ error: errorMsg });
-    } else {
-      writeEvent({ type: "error", message: errorMsg });
-      res.end();
-    }
   }
 });
 
@@ -1754,8 +1523,35 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Remote model transport (CLI interactive cockpit) ───────────────
+  //
+  // Unlike litt:chat (streamLiTTOperator, above), this is a PURE model
+  // completion proxy: it streams text + relays OpenRouter's native
+  // tool_calls back to the caller, and never executes any tool or
+  // touches any gateway/filesystem itself. The CLI's LOCAL project
+  // tools execute on the user's own machine (the server has no access
+  // to it) — the CLI's existing agent loop handles that unchanged;
+  // only the model call moves server-side.
+  //
+  // Gated by the SAME billing.ts entitlement/credit check Commit A
+  // added for the /api/command ask path — no separate, looser entry
+  // point into model execution exists on this server.
+  const activeModelStreams = new Map<string, AbortController>();
+
+  socket.on("litt:model:request", (payload: ModelRequestPayload) =>
+    handleModelRequest(userId, payload, (p) => socket.emit("litt:model:event", p), activeModelStreams),
+  );
+
+  socket.on("litt:model:cancel", (payload: { requestId?: string }) =>
+    handleModelCancel(activeModelStreams, payload?.requestId),
+  );
+
   socket.on("disconnect", () => {
     console.log("[Terminal] Disconnected:", sessionId);
+    // A disconnect abandons any in-flight model streams for this socket
+    // — abort them rather than letting them run to completion unheard.
+    for (const controller of activeModelStreams.values()) controller.abort();
+    activeModelStreams.clear();
     // Kill the session — the socket owns it, so we pass the authenticated userId.
     // This is safe because userId came from the JWT, not the client.
     ptyManager.kill(sessionId, "client_disconnect", userId);

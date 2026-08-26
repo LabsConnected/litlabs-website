@@ -33,7 +33,6 @@ import {
   type CommandResponse,
 } from "./command-registry";
 import { getWorkspace } from "./workspace/WorkspaceManager";
-import { getRunRegistry } from "./run-registry.js";
 import {
   successResponse,
   errorResponse,
@@ -54,9 +53,8 @@ import {
  */
 export async function dispatchCommand(
   req: RemoteCommandRequest,
-  options?: { runId?: string },
 ): Promise<RemoteCommandResponse> {
-  const runId = options?.runId ?? `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const timestamp = Date.now();
   const requestId = req.requestId;
 
@@ -117,28 +115,22 @@ export async function dispatchCommand(
   // any inline args like "/diff --staged"). The structured `args`
   // from the request are appended so both inline and structured argv
   // are preserved. Handlers receive the merged args array.
-  try {
-    const response: CommandResponse = await dispatchRegistry(
-      req.command,
-      ctx,
-      req.args,
-    );
+  const response: CommandResponse = await dispatchRegistry(
+    req.command,
+    ctx,
+    req.args,
+  );
 
-    return successResponse({
-      runId,
-      requestId,
-      ok: response.ok,
-      kind: response.kind,
-      message: response.message ?? "",
-      data: (response.data as Record<string, unknown>) ?? {},
-      durationMs: response.durationMs,
-      timestamp,
-    });
-  } finally {
-    // Clean up the run registry entry so the map doesn't grow unbounded.
-    // If the run was cancelled, the entry was already removed by cancel().
-    getRunRegistry().unregister(runId);
-  }
+  return successResponse({
+    runId,
+    requestId,
+    ok: response.ok,
+    kind: response.kind,
+    message: response.message ?? "",
+    data: (response.data as Record<string, unknown>) ?? {},
+    durationMs: response.durationMs,
+    timestamp,
+  });
 }
 
 // ─── Supported commands (registry-derived) ────────────────────────
