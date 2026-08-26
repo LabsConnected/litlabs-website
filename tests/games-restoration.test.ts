@@ -52,15 +52,15 @@ describe("Games Restoration — Navigation & Feature Flags", () => {
   });
 
   describe("Mission Control dashboard quick launch", () => {
-    it("MissionControlDashboard has the four premium quick launch tiles", () => {
+    it("MissionControlDashboard has the four primary actions", () => {
       const content = readFileSync(
         join(ROOT, "src/components/dashboard/v2/MissionControlDashboard.tsx"),
         "utf8",
       );
-      expect(content).toContain('label="BUILD"');
-      expect(content).toContain('label="CREATE"');
-      expect(content).toContain('label="AGENTS"');
-      expect(content).toContain('label="DEPLOY"');
+      expect(content).toContain("Ask LiTT");
+      expect(content).toContain(">Build<");
+      expect(content).toContain(">Create<");
+      expect(content).toContain(">Deploy<");
     });
   });
 });
