@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   robots: {
@@ -15,7 +14,6 @@ export default function AgentLayout({
 }) {
   return (
     <>
-      <AutonomicLoopBanner />
       {children}
     </>
   );
