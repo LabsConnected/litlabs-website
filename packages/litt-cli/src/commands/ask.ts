@@ -25,12 +25,13 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
+import { createPolicyApproval } from "../lib/approval-policy.js";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -50,9 +51,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   header("LiTT Ask");
 
   // If no API key, fall back to heuristic analysis
-  if (!hasOpenRouterKey()) {
-    warn("No OPENROUTER_API_KEY set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
+  if (!hasProviderKey()) {
+    warn("No API key set — using local heuristic analysis (no agent loop).");
+    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENAI_API_KEY or OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
     return heuristicAnalysis(question, project);
   }
 
@@ -72,6 +73,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     executor,
     store,
     projectId: projectRoot,
+    // Policy-aware approval: safe→approve, elevated→approve in ACT,
+    // dangerous→deny (requires --yes flag or interactive UI).
+    onApprovalRequired: createPolicyApproval(),
   });
 
   // Route through the same ModelRuntime as the TUI — picks the best
