@@ -22,7 +22,10 @@ import { scanProject, type ScanInput } from "./project-scanner";
 // ─── Helpers ──────────────────────────────────────────────────────
 
 function getRepoRoot(): string {
-  return process.cwd();
+  // turbopackIgnore: prevent Next.js NFT from tracing the entire project
+  // root. These fs operations are runtime-only (server-side tool handlers)
+  // and should never be statically traced during build.
+  return join(/*turbopackIgnore: true*/ process.cwd());
 }
 
 function safeExec(cmd: string, cwd?: string, timeoutMs = 10000): { stdout: string; stderr: string; exitCode: number } {
@@ -189,7 +192,7 @@ export async function handleProjectScan(inputs: Record<string, unknown>): Promis
 export async function handleFilesList(inputs: Record<string, unknown>): Promise<unknown> {
   const repoRoot = getRepoRoot();
   const relPath = (inputs.path as string) || ".";
-  const fullPath = join(repoRoot, relPath);
+  const fullPath = join(/*turbopackIgnore: true*/ repoRoot, relPath);
 
   if (!existsSync(fullPath)) {
     return { success: false, error: `Path not found: ${relPath}` };
@@ -233,7 +236,7 @@ export async function handleFilesRead(inputs: Record<string, unknown>): Promise<
     return { success: false, error: "path is required" };
   }
 
-  const fullPath = join(repoRoot, relPath);
+  const fullPath = join(/*turbopackIgnore: true*/ repoRoot, relPath);
 
   if (!existsSync(fullPath)) {
     return { success: false, error: `File not found: ${relPath}` };
@@ -400,7 +403,7 @@ export async function handleFilesWrite(inputs: Record<string, unknown>): Promise
   }
 
   const repoRoot = getRepoRoot();
-  const fullPath = join(repoRoot, relPath);
+  const fullPath = join(/*turbopackIgnore: true*/ repoRoot, relPath);
 
   try {
     writeFileSync(fullPath, content, "utf-8");

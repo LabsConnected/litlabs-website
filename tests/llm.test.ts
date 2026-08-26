@@ -1,6 +1,10 @@
 import { beforeAll, describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-// Set environment variables before importing the module under test
+// Set environment variables before importing the module under test.
+// OPENAI_API_KEY must be unset so the fallback chain matches the
+// no-OpenAI-key path the tests expect (gemini → groq → openrouter-free).
+delete process.env.OPENAI_API_KEY;
+delete process.env.OPENAI_MODEL;
 process.env.GEMINI_API_KEY = "test-gemini-key";
 process.env.OPENROUTER_API_KEY = "test-openrouter-key";
 process.env.GROQ_API_KEY = "test-groq-key";
