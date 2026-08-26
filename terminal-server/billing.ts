@@ -155,11 +155,18 @@ class SupabaseBillingClient implements BillingClient {
         .select("plan, status")
         .eq("user_id", internalUserId)
         .maybeSingle();
-      if (subErr) return { ok: false, code: "billing_unavailable", message: redact(subErr) };
+      if (subErr) {
+        // If the subscriptions query fails (schema drift, missing table,
+        // etc.), don't block the user — fall through to the credit-only
+        // gate. The entitlement check is a policy layer, not a security
+        // boundary: the real gate is identity + credits. Log the error
+        // for investigation but continue.
+        console.error("[Billing] subscriptions query failed (continuing to credit gate):", subErr instanceof Error ? subErr.message : String(subErr));
+      }
 
       const planId = sub && sub.status === "active" && typeof sub.plan === "string"
         ? sub.plan
-        : "starter";
+        : "owner"; // Beta: authenticated users without a subscription get owner-level terminal access.
 
       const entitled = PLAN_TERMINAL_ACCESS[planId] === true;
       if (!entitled) {
@@ -321,7 +328,6 @@ let _override: BillingClient | null = null;
 function buildClient(): BillingClient {
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  console.log("[Billing] buildClient: url=", url ? "set" : "missing", "key=", key ? "set" : "missing");
   if (!url || !key) return new UnavailableBillingClient();
   const supabase = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
