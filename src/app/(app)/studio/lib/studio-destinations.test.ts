@@ -13,17 +13,17 @@ import {
 
 describe("studio-destinations", () => {
   describe("mapLegacyToolToDestination", () => {
-    it("maps home/chat to Studio/Work", () => {
+    it("maps home/chat to Studio/Preview (preview is the primary surface)", () => {
       expect(mapLegacyToolToDestination("home")).toEqual({
         destination: "studio",
         legacyTool: "chat",
-        mode: "work",
+        mode: "preview",
         littMode: "auto",
       });
       expect(mapLegacyToolToDestination("chat")).toEqual({
         destination: "studio",
         legacyTool: "chat",
-        mode: "work",
+        mode: "preview",
         littMode: "auto",
       });
     });
