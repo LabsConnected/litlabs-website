@@ -1,6 +1,21 @@
-import { auth as clerkAuth, verifyToken } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
+
+// Lazy-load @clerk/nextjs/server — this module is ~1.6s to import (it
+// pulls in Clerk's full server SDK). Deferring it to first use keeps
+// module-load time fast for routes that import @/lib/auth but may not
+// call auth() on every request (e.g. routes that conditionally check
+// auth, and test files that only verify a route exports POST). The
+// dynamic import is cached after the first call, so production warm
+// instances pay the cost exactly once on the first authenticated
+// request rather than on every cold start.
+let _clerkMod: Promise<typeof import("@clerk/nextjs/server")> | null = null;
+function loadClerk(): Promise<typeof import("@clerk/nextjs/server")> {
+  if (!_clerkMod) {
+    _clerkMod = import("@clerk/nextjs/server");
+  }
+  return _clerkMod;
+}
 
 export interface AuthResult {
   userId: string | null;
@@ -33,6 +48,7 @@ async function authFromBearerToken(req: NextRequest): Promise<string | null> {
   const token = header.slice(7);
   if (!token || token.length < 10) return null;
   try {
+    const { verifyToken } = await loadClerk();
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY,
     });
@@ -76,6 +92,7 @@ export async function auth(req?: NextRequest): Promise<AuthResult> {
   // is missing or the session is in an intermediate ("interstitial") state.
   let clerkId: string | null = null;
   try {
+    const { auth: clerkAuth } = await loadClerk();
     const result = await clerkAuth();
     clerkId = result.userId;
   } catch {

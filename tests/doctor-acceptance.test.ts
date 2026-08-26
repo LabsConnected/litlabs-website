@@ -9,11 +9,27 @@
  * with direct git — whatever the current state actually is.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { doctorCommand } from "../packages/litt-cli/src/commands/doctor.js";
 
 const REPO_ROOT = process.cwd();
+
+// The doctor command makes two real network calls (litlabs.net HEAD
+// with a 5s timeout + terminal-server /health with a 3s timeout) that
+// are irrelevant to what these tests check (git state truth). Under
+// full-suite concurrent load those fetches can consume the entire 5s
+// test timeout. Mock fetch to return instantly so the tests measure
+// only the git/subprocess logic they actually assert on.
+const _originalFetch = globalThis.fetch;
+beforeEach(() => {
+  globalThis.fetch = vi.fn(async () =>
+    new Response("ok", { status: 200 }),
+  ) as unknown as typeof fetch;
+});
+afterEach(() => {
+  globalThis.fetch = _originalFetch;
+});
 
 function directGit(args: string[]): string {
   return execFileSync("git", args, {
@@ -38,10 +54,6 @@ async function captureDoctor(): Promise<string> {
 }
 
 describe("litt doctor git truth", () => {
-  afterEach(() => {
-    // The network/terminal checks leave no state, but restore anyway.
-  });
-
   it("reports the actual git branch from the current worktree", async () => {
     const output = await captureDoctor();
     const actualBranch = directGit(["branch", "--show-current"]);
