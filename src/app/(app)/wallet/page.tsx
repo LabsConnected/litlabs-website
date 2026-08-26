@@ -41,7 +41,7 @@ export default function WalletPage() {
 
 function WalletContent() {
   const { resolvedColors: T } = useTheme();
-  const { balance, claimed, isLoading, isClaiming, isError, claim } = useWallet();
+  const { balance, claimed, isLoading, isClaiming, isError, billingExempt, displayBalance, claim } = useWallet();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const searchParams = useSearchParams();
   const tab = (searchParams.get("tab") as Tab) || "overview";
@@ -95,6 +95,18 @@ function WalletContent() {
                   >
                     Credit balance unavailable.
                   </span>
+                ) : billingExempt ? (
+                  <>
+                    <span
+                      className="text-4xl md:text-5xl font-black"
+                      style={{ color: T.headerColor }}
+                    >
+                      {displayBalance ?? "DEV ∞"}
+                    </span>
+                    <span className="text-sm font-bold opacity-60">
+                      Billing-exempt (metered, not debited)
+                    </span>
+                  </>
                 ) : (
                   <>
                     <span

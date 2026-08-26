@@ -4,6 +4,7 @@ import { PLANS, type PlanId, type PlanDefinition } from "@/config/plans";
 import {
   isOwnerClerkId,
   getActiveSimulation,
+  isBillingExempt,
   OWNER_ENTITLEMENTS,
   simulationToPlanId,
   type SimulatedPlan,
@@ -37,6 +38,13 @@ export interface OwnerAwareEntitlements extends Entitlements {
   simulation: SimulatedPlan | null;
   /** True if the owner is simulating zero LiTTBits balance. */
   simulatedZeroBalance: boolean;
+  /**
+   * True if this user is billing-exempt (owner with no active customer
+   * simulation). Usage is metered but the wallet is never debited and
+   * insufficient-BITS checks are skipped. Server-derived — never trust
+   * a client-supplied value.
+   */
+  billingExempt: boolean;
 }
 
 const STARTER_ENTITLEMENTS: Entitlements = {
@@ -197,6 +205,7 @@ export async function getOwnerAwareEntitlements(
     isOwner,
     simulation,
     simulatedZeroBalance: simulation === "zero_bits",
+    billingExempt: isBillingExempt(clerkId, simulation),
   };
 }
 

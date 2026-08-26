@@ -15,6 +15,7 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { calculateLlmCost, isShadowMode, type CostCalculation } from "@/lib/llm-cost-engine";
+import { isOwnerClerkId, isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 
 export interface LlmBillingInput {
   /** Clerk user ID */
@@ -33,6 +34,13 @@ export interface LlmBillingInput {
   littAliasId?: string;
   /** Unique call/execution ID for idempotency */
   callId: string;
+  /**
+   * Optional owner simulation override. When omitted, billing exemption
+   * is determined by isOwnerClerkId(clerkId) only (no cookie read —
+   * safe for background jobs). Pass the resolved simulation when
+   * available so simulating a customer tier exercises real billing.
+   */
+  simulation?: SimulatedPlan | null;
 }
 
 export interface LlmBillingResult {
@@ -81,6 +89,22 @@ export async function chargeLlmUsage(
     await recordUsage(input, cost, null, false);
     return {
       calculated: cost.retailLiTTBits > 0 || input.isByok,
+      cost,
+      debited: false,
+      balance: null,
+      replayed: false,
+    };
+  }
+
+  // Owner billing exemption: meter usage but skip wallet debit.
+  // The owner is exempt UNLESS they're simulating a customer tier
+  // (starter/creator_beta/pro_builder_beta/zero_bits) — in that case
+  // they exercise the real billing path.
+  const exempt = isBillingExempt(input.clerkId, input.simulation);
+  if (exempt) {
+    await recordUsage(input, cost, null, false);
+    return {
+      calculated: true,
       cost,
       debited: false,
       balance: null,
@@ -205,6 +229,8 @@ async function recordUsage(
     const admin = getSupabaseAdmin();
     if (!admin) return;
 
+    const exempt = isBillingExempt(input.clerkId, input.simulation);
+
     await admin.from("llm_usage_records").insert({
       clerk_id: input.clerkId,
       provider: input.provider,
@@ -221,6 +247,7 @@ async function recordUsage(
       was_debited: wasDebited,
       balance_after: balanceAfter,
       call_id: input.callId,
+      billing_exempt: exempt,
       created_at: new Date().toISOString(),
     });
   } catch {

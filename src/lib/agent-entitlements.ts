@@ -24,7 +24,7 @@ import "server-only";
 import { getSupabaseAdmin, supabaseAdmin } from "@/lib/supabase";
 import { getAgentDefinition } from "@/lib/agent-registry";
 import { hasPlanAccess, type PlanId } from "@/config/plans";
-import { isOwnerClerkId, getActiveSimulation, simulationToPlanId, type SimulatedPlan } from "@/lib/owner";
+import { isOwnerClerkId, getActiveSimulation, isBillingExempt, simulationToPlanId, type SimulatedPlan } from "@/lib/owner";
 
 /** Subscription statuses that grant plan-based agent access. */
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
@@ -249,6 +249,8 @@ export async function chargeAgentRun(params: {
   agentSlug: string;
   /** Unique per-run key — prevents double-charging on retry/replay. */
   idempotencyKey: string;
+  /** Optional owner simulation override for billing-exempt checks. */
+  simulation?: SimulatedPlan | null;
 }): Promise<ChargeResult> {
   const agent = getAgentDefinition(params.agentSlug);
   if (!agent) {
@@ -256,6 +258,12 @@ export async function chargeAgentRun(params: {
   }
   // Free agents (LiTT, Spark) cost nothing.
   if (agent.cost.perRun === 0 && agent.cost.per1kTokens === 0) {
+    return { charged: false, replayed: false, balance: 0 };
+  }
+
+  // Owner billing exemption: skip the charge entirely.
+  // Usage is still recorded by chargeLlmUsage (which also checks exemption).
+  if (isBillingExempt(params.clerkId, params.simulation)) {
     return { charged: false, replayed: false, balance: 0 };
   }
 

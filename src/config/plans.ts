@@ -130,7 +130,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyPriceCents: null,
     standardPriceCents: null,
     default_price: null,
-    monthlyCredits: 250_000,
+    monthlyCredits: 0, // billing_exempt — wallet not used; display "DEV ∞"
     activeProjectLimit: 999_999,
     features: [],
     beta: true,

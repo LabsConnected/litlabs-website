@@ -4,14 +4,18 @@
 // full access to every feature at or above Pro Builder Beta level, with
 // an effectively unlimited project limit for testing.
 //
-// LiTTBits metering is NOT bypassed — the owner wallet is topped up to
-// a large finite target (250,000) via the existing audited ledger so
-// every real operation still deducts exactly as it would for a customer.
+// Owner billing: the owner is `billing_exempt: true`. Usage is still
+// metered (tokens, provider cost, model, BITS-calculated are recorded
+// to llm_usage_records), but the wallet is NEVER debited and
+// insufficient-BITS checks are skipped. A monthly provider-spend
+// safety ceiling (default $250) protects against runaway spend.
 //
 // The owner can also simulate any customer tier (Starter, Creator, Pro,
 // or Zero-BITS) for testing without modifying Stripe or the real
 // subscription. The simulation is stored in a short-lived cookie that
 // only affects entitlement resolution, never the subscription table.
+// Simulations exercise REAL billing checks — the owner's billing_exempt
+// flag is ignored when a non-owner simulation is active.
 
 import "server-only";
 import type { Entitlements } from "@/lib/entitlements";
@@ -25,8 +29,21 @@ import type { PlanId } from "@/config/plans";
  */
 export const OWNER_CLERK_ID_ENV = "LITTLABS_VAPI_OWNER_CLERK_ID";
 
-/** The wallet balance target for the owner testing account. */
-export const OWNER_WALLET_TARGET = 250_000;
+/**
+ * The owner is billing-exempt: usage is metered but the wallet is never
+ * debited and insufficient-BITS checks are skipped. This is the canonical
+ * owner entitlement — NOT a fake 999999 balance.
+ */
+export const OWNER_BILLING_EXEMPT = true;
+
+/**
+ * Monthly provider-spend safety ceiling for the owner (USD).
+ * Prevents runaway spend if a loop goes wrong. Configurable via
+ * OWNER_MONTHLY_SPEND_CEILING_USD env var.
+ */
+export const OWNER_SPEND_CEILING_USD = Number(
+  process.env.OWNER_MONTHLY_SPEND_CEILING_USD ?? "250",
+);
 
 /** Cookie name for the active test-mode simulation. */
 export const OWNER_TEST_MODE_COOKIE = "litt_test_mode";
@@ -114,12 +131,16 @@ export function simulationToPlanId(sim: SimulatedPlan): PlanId {
 /**
  * The owner's real entitlements — at or above Pro Builder Beta, with
  * effectively unlimited project limit. All features enabled.
+ *
+ * `monthlyCredits` is 0 because the owner is `billing_exempt` — the
+ * wallet is never checked or debited. Display "DEV ∞" instead of a
+ * numeric balance.
  */
 export const OWNER_ENTITLEMENTS: Entitlements = {
   planId: "owner",
   planName: "OWNER",
   activeProjectLimit: 999_999,
-  monthlyCredits: OWNER_WALLET_TARGET,
+  monthlyCredits: 0, // billing_exempt — wallet not used
   privateProjects: true,
   github: true,
   terminal: true,
@@ -131,6 +152,34 @@ export const OWNER_ENTITLEMENTS: Entitlements = {
   beta: true,
   founder: true,
 };
+
+// ─── Billing exemption ──────────────────────────────────────────────
+
+/**
+ * Returns true if the given Clerk user ID is the platform owner AND
+ * billing-exempt for this request.
+ *
+ * The owner is billing-exempt (usage metered, wallet never debited,
+ * insufficient-BITS checks skipped) UNLESS they are actively simulating
+ * a customer tier (starter, creator_beta, pro_builder_beta, or
+ * zero_bits). When simulating, the owner exercises the REAL billing
+ * path so the simulation is meaningful.
+ *
+ * `simulation` is the active simulation (from getActiveSimulation or
+ * passed explicitly for tests). When omitted, this function returns
+ * true for any owner — callers that need simulation-aware exemption
+ * should pass the resolved simulation.
+ */
+export function isBillingExempt(
+  clerkId: string | null | undefined,
+  simulation?: SimulatedPlan | null,
+): boolean {
+  if (!isOwnerClerkId(clerkId)) return false;
+  // No simulation or "owner" simulation → billing-exempt
+  if (!simulation || simulation === "owner") return true;
+  // Simulating a customer tier or zero_bits → NOT exempt (real billing)
+  return false;
+}
 
 // ─── Simulation cookie reader ───────────────────────────────────────
 

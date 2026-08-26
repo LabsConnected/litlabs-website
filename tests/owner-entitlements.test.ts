@@ -47,7 +47,7 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 
-import { isOwnerClerkId, OWNER_ENTITLEMENTS, OWNER_WALLET_TARGET, simulationToPlanId } from "@/lib/owner";
+import { isOwnerClerkId, OWNER_ENTITLEMENTS, OWNER_BILLING_EXEMPT, isBillingExempt, simulationToPlanId } from "@/lib/owner";
 import {
   getUserEntitlements,
   getOwnerAwareEntitlements,
@@ -108,25 +108,51 @@ describe("1. Owner receives all feature entitlements", () => {
   });
 });
 
-// ─── 2. Owner still consumes LiTTBits ─────────────────────────────
+// ─── 2. Owner is billing-exempt (metered, not debited) ───────────
 
-describe("2. Owner still consumes LiTTBits", () => {
-  it("OWNER_WALLET_TARGET is a finite number (not unlimited)", () => {
-    expect(OWNER_WALLET_TARGET).toBe(250_000);
-    expect(Number.isFinite(OWNER_WALLET_TARGET)).toBe(true);
+describe("2. Owner is billing-exempt (metered, not debited)", () => {
+  it("OWNER_BILLING_EXEMPT is true", () => {
+    expect(OWNER_BILLING_EXEMPT).toBe(true);
   });
 
-  it("OWNER_ENTITLEMENTS monthlyCredits is finite (metering stays on)", () => {
-    expect(OWNER_ENTITLEMENTS.monthlyCredits).toBe(OWNER_WALLET_TARGET);
-    expect(Number.isFinite(OWNER_ENTITLEMENTS.monthlyCredits)).toBe(true);
+  it("OWNER_ENTITLEMENTS monthlyCredits is 0 (wallet not used)", () => {
+    expect(OWNER_ENTITLEMENTS.monthlyCredits).toBe(0);
   });
 
-  it("owner wallet top-up uses the audited ledger (adjustWalletBalance), not a direct DB mutation", async () => {
-    // Verify the setup route imports adjustWalletBalance — we check the module
-    // exports the expected function signature by importing the wallet-ledger module.
-    const walletLedger = await import("@/lib/wallet-ledger");
-    expect(typeof walletLedger.adjustWalletBalance).toBe("function");
-    expect(typeof walletLedger.getCreditBalances).toBe("function");
+  it("isBillingExempt returns true for owner with no simulation", () => {
+    expect(isBillingExempt(OWNER_CLERK, null)).toBe(true);
+    expect(isBillingExempt(OWNER_CLERK, undefined)).toBe(true);
+  });
+
+  it("isBillingExempt returns true for owner with 'owner' simulation", () => {
+    expect(isBillingExempt(OWNER_CLERK, "owner")).toBe(true);
+  });
+
+  it("isBillingExempt returns false for owner simulating a customer tier", () => {
+    expect(isBillingExempt(OWNER_CLERK, "starter")).toBe(false);
+    expect(isBillingExempt(OWNER_CLERK, "creator_beta")).toBe(false);
+    expect(isBillingExempt(OWNER_CLERK, "pro_builder_beta")).toBe(false);
+    expect(isBillingExempt(OWNER_CLERK, "zero_bits")).toBe(false);
+  });
+
+  it("isBillingExempt returns false for non-owner", () => {
+    expect(isBillingExempt(NORMAL_CLERK, null)).toBe(false);
+    expect(isBillingExempt(NORMAL_CLERK, undefined)).toBe(false);
+  });
+
+  it("getOwnerAwareEntitlements sets billingExempt=true for owner with no simulation", async () => {
+    const ent = await getOwnerAwareEntitlements(OWNER_CLERK, null);
+    expect(ent.billingExempt).toBe(true);
+  });
+
+  it("getOwnerAwareEntitlements sets billingExempt=false for owner simulating starter", async () => {
+    const ent = await getOwnerAwareEntitlements(OWNER_CLERK, "starter");
+    expect(ent.billingExempt).toBe(false);
+  });
+
+  it("getOwnerAwareEntitlements sets billingExempt=false for non-owner", async () => {
+    const ent = await getOwnerAwareEntitlements(NORMAL_CLERK, null);
+    expect(ent.billingExempt).toBe(false);
   });
 });
 

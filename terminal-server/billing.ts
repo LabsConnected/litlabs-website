@@ -47,6 +47,34 @@ const PLAN_TERMINAL_ACCESS: Readonly<Record<string, boolean>> = {
   owner: true,
 };
 
+// ─── Owner identification (mirrors src/lib/owner.ts) ───────────────
+//
+// The platform owner is identified by LITTLABS_VAPI_OWNER_CLERK_ID or
+// ADMIN_CLERK_IDS env vars. The owner is billing-exempt: usage is
+// metered but the wallet is never debited and insufficient-BITS checks
+// are skipped. This is the canonical owner entitlement — NOT a fake
+// 999999 balance.
+function getOwnerClerkId(): string | null {
+  const id = process.env.LITTLABS_VAPI_OWNER_CLERK_ID;
+  if (id && id.length > 0) return id;
+  const adminIds = (process.env.ADMIN_CLERK_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return adminIds[0] ?? null;
+}
+
+function isOwnerClerkId(clerkId: string | null | undefined): boolean {
+  if (!clerkId) return false;
+  const ownerId = process.env.LITTLABS_VAPI_OWNER_CLERK_ID;
+  if (ownerId && clerkId === ownerId) return true;
+  const adminIds = (process.env.ADMIN_CLERK_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return adminIds.includes(clerkId);
+}
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 export interface BillingIdentity {
@@ -71,6 +99,12 @@ export interface AuthorizationResult {
   code?: AuthorizationDenialCode;
   /** Human-readable, redaction-safe — never includes raw Supabase errors. */
   message?: string;
+  /**
+   * True if this user is billing-exempt (owner). Usage is metered but
+   * the wallet is never debited. Server-derived — never trust a
+   * client-supplied value.
+   */
+  billingExempt?: boolean;
 }
 
 export interface UsageRecordInput {
@@ -82,6 +116,13 @@ export interface UsageRecordInput {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /**
+   * True if this user is billing-exempt (owner). When true, usage is
+   * recorded to llm_usage_records but the wallet is NOT debited.
+   * Derived from AuthorizationResult.billingExempt — never trust a
+   * client-supplied value.
+   */
+  billingExempt?: boolean;
 }
 
 export interface UsageRecordResult {
@@ -137,6 +178,11 @@ class SupabaseBillingClient implements BillingClient {
       return { ok: false, code: "unauthenticated", message: "Not authenticated." };
     }
 
+    // Owner billing exemption: the owner is always authorized and
+    // never subject to credit checks. Usage is still metered by
+    // recordUsage() (which skips the debit for exempt users).
+    const ownerExempt = isOwnerClerkId(clerkId);
+
     try {
       const { data: user, error: userErr } = await this.client
         .from("users")
@@ -166,7 +212,7 @@ class SupabaseBillingClient implements BillingClient {
 
       const planId = sub && sub.status === "active" && typeof sub.plan === "string"
         ? sub.plan
-        : "owner"; // Beta: authenticated users without a subscription get owner-level terminal access.
+        : ownerExempt ? "owner" : "starter";
 
       const entitled = PLAN_TERMINAL_ACCESS[planId] === true;
       if (!entitled) {
@@ -174,6 +220,16 @@ class SupabaseBillingClient implements BillingClient {
           ok: false,
           code: "plan_not_entitled",
           message: "Your plan does not include LiTT CLI access. Upgrade your plan to use the CLI remotely.",
+        };
+      }
+
+      // Owner billing exemption: skip credit check entirely.
+      // Usage is still recorded (recordUsage skips the debit for exempt users).
+      if (ownerExempt) {
+        return {
+          ok: true,
+          identity: { internalUserId, clerkId, planId },
+          billingExempt: true,
         };
       }
 
@@ -194,6 +250,7 @@ class SupabaseBillingClient implements BillingClient {
       return {
         ok: true,
         identity: { internalUserId, clerkId, planId },
+        billingExempt: false,
       };
     } catch (err) {
       return { ok: false, code: "billing_unavailable", message: redact(err) };
@@ -203,6 +260,12 @@ class SupabaseBillingClient implements BillingClient {
   async recordUsage(input: UsageRecordInput): Promise<UsageRecordResult> {
     const costBits = estimateCostBits(input.totalTokens);
     const idempotencyKey = `cli:${input.runId}`;
+
+    // Billing-exempt owner: record usage but skip wallet debit.
+    if (input.billingExempt) {
+      await this.insertUsageRow(input, costBits, null, false);
+      return { recorded: true, debited: false, replayed: false, balanceAfter: null, costBits };
+    }
 
     if (costBits <= 0) {
       // Nothing to charge (e.g. zero-token result) — still record for audit.
@@ -286,6 +349,7 @@ class SupabaseBillingClient implements BillingClient {
         was_debited: wasDebited,
         balance_after: balanceAfter,
         call_id: `cli:${input.runId}`,
+        billing_exempt: input.billingExempt ?? false,
         created_at: new Date().toISOString(),
       });
     } catch {

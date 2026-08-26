@@ -20,6 +20,7 @@
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
+import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 
 export interface AgentRunContext {
   clerkId: string;
@@ -31,6 +32,8 @@ export interface AgentRunContext {
   idempotencyKey: string;
   model?: string;
   provider?: string;
+  /** Optional owner simulation override for billing-exempt checks. */
+  simulation?: SimulatedPlan | null;
 }
 
 export interface ReserveResult {
@@ -71,6 +74,47 @@ export async function reserveCredits(
 ): Promise<ReserveResult> {
   if (!supabaseAdmin) {
     return { ok: false, runId: null, reservationId: null, status: 503, error: "DB unavailable", reservedCredits: 0 };
+  }
+
+  // Owner billing exemption: skip reservation entirely.
+  // Usage is still recorded by chargeLlmUsage (which also checks exemption).
+  if (isBillingExempt(ctx.clerkId, ctx.simulation)) {
+    // Still create the agent_runs row for audit, but no reservation.
+    const { data: user } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("clerk_id", ctx.clerkId)
+      .maybeSingle();
+    if (!user) {
+      return { ok: false, runId: null, reservationId: null, status: 404, error: "User not found", reservedCredits: 0 };
+    }
+    const { data: runRow } = await supabaseAdmin
+      .from("agent_runs")
+      .insert({
+        user_id: user.id,
+        agent_name: ctx.agentInstanceId,
+        task: ctx.idempotencyKey,
+        status: "running",
+        agent_mode: ctx.model ?? "default",
+        input: {
+          agent_id: ctx.agentId,
+          agent_version_id: ctx.agentVersionId,
+          conversation_id: ctx.conversationId ?? null,
+          message_id: ctx.messageId ?? null,
+          model: ctx.model ?? null,
+          provider: ctx.provider ?? null,
+          idempotency_key: ctx.idempotencyKey,
+          reservation_id: null,
+          estimated_credits: 0,
+          billing_exempt: true,
+        },
+      })
+      .select("id")
+      .single();
+    if (!runRow) {
+      return { ok: false, runId: null, reservationId: null, status: 500, error: "Failed to create run row", reservedCredits: 0 };
+    }
+    return { ok: true, runId: runRow.id, reservationId: null, reservedCredits: 0 };
   }
 
   // Resolve internal user ID

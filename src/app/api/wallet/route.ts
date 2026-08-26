@@ -4,6 +4,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
 import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { isOwnerClerkId, isBillingExempt, getActiveSimulation, OWNER_SPEND_CEILING_USD } from "@/lib/owner";
 
 const EMPTY_WALLET = {
   balance: 0,
@@ -30,6 +31,8 @@ async function getHandler(req: NextRequest) {
     }
 
     const wallet = await getCreditBalances(clerkId);
+    const ownerSim = isOwnerClerkId(clerkId) ? await getActiveSimulation() : null;
+    const exempt = isBillingExempt(clerkId, ownerSim);
     return NextResponse.json({
       balance: wallet.total,
       balances: {
@@ -39,6 +42,11 @@ async function getHandler(req: NextRequest) {
       },
       last_claim_date: wallet.lastDailyClaim,
       configured: true,
+      // Owner billing exemption: display "DEV ∞" instead of numeric balance.
+      // Usage is metered but the wallet is never debited.
+      billingExempt: exempt,
+      displayBalance: exempt ? "DEV ∞" : undefined,
+      spendCeilingUsd: exempt ? OWNER_SPEND_CEILING_USD : undefined,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch wallet";

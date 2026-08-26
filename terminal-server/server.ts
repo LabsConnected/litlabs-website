@@ -422,6 +422,13 @@ app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
     res.write(JSON.stringify(obj) + "\n");
   };
 
+  let streamProvider: string | null = null;
+  let streamModel: string | null = null;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let streamSucceeded = false;
+
   try {
     const messages = [
       { role: "system" as const, content: "You are LiTT, a helpful AI coding assistant. Be concise and direct." },
@@ -429,17 +436,38 @@ app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
     ];
 
     await streamLiTTMessages(messages, (event: LiTTEvent) => {
+      if (event.type === "meta") {
+        streamProvider = event.provider;
+        streamModel = event.model;
+      }
+      if (event.type === "done") {
+        streamModel = event.model;
+        promptTokens += event.usage?.prompt_tokens ?? 0;
+        completionTokens += event.usage?.completion_tokens ?? 0;
+        totalTokens += event.usage?.total_tokens ?? 0;
+        streamSucceeded = true;
+      }
       write(event);
     });
 
-    // Record usage if we have identity (best-effort, matches model-relay)
-    // The streamLiTTMessages result isn't directly available here, but
-    // the done event already contains usage info. Usage recording for
-    // /api/chat is handled by the done event consumer if needed.
+    // Record usage — success only. Billing-exempt owner: meter but don't debit.
+    if (streamSucceeded && authz.identity) {
+      void getBillingClient().recordUsage({
+        identity: authz.identity,
+        runId: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        provider: streamProvider ?? "unknown",
+        model: streamModel ?? "unknown",
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        billingExempt: authz.billingExempt ?? false,
+      });
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const errMsg = err instanceof Error ? err.message : String(err);
     write({ type: "error", message: "Remote chat failed." });
-    console.error("[Chat] stream error:", message);
+    console.error("[Chat] stream error:", errMsg);
+    // No usage recording on failure — a failed/cancelled call is never billed.
   } finally {
     res.end();
   }

@@ -66,6 +66,7 @@ describe("Wallet page display text", () => {
       isLoading: false,
       isClaiming: false,
       isError: false,
+      billingExempt: false,
       claim: vi.fn().mockResolvedValue(true),
       refresh: vi.fn().mockResolvedValue(undefined),
     });
@@ -87,6 +88,7 @@ describe("Wallet page display text", () => {
       isLoading: false,
       isClaiming: false,
       isError: true,
+      billingExempt: false,
       claim: vi.fn().mockResolvedValue(true),
       refresh: vi.fn().mockResolvedValue(undefined),
     });
@@ -108,6 +110,7 @@ describe("Wallet page display text", () => {
       isLoading: true,
       isClaiming: false,
       isError: false,
+      billingExempt: false,
       claim: vi.fn().mockResolvedValue(true),
       refresh: vi.fn().mockResolvedValue(undefined),
     });

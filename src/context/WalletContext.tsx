@@ -16,6 +16,10 @@ interface WalletContextType {
   isClaiming: boolean;
   /** True when the balance fetch failed — UI should show "unavailable" not 0 */
   isError: boolean;
+  /** True when the user is billing-exempt (owner) — display "DEV ∞" */
+  billingExempt: boolean;
+  /** "DEV ∞" when billing-exempt, undefined otherwise */
+  displayBalance?: string;
   claim: () => Promise<boolean>;
   refresh: () => Promise<void>;
 }
@@ -38,6 +42,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isClaiming, setIsClaiming] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [billingExempt, setBillingExempt] = useState(false);
+  const [displayBalance, setDisplayBalance] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
@@ -47,6 +53,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           setBalance(0);
           setClaimed(false);
           setIsError(false);
+          setBillingExempt(false);
+          setDisplayBalance(undefined);
         } else {
           setIsError(true);
         }
@@ -56,6 +64,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setBalance(typeof data.balance === "number" ? data.balance : 0);
       setClaimed(isSameDay(data.last_claim_date, new Date()));
       setIsError(false);
+      setBillingExempt(Boolean(data.billingExempt));
+      setDisplayBalance(data.displayBalance);
     } catch {
       setIsError(true);
     } finally {
@@ -106,7 +116,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   return (
     <WalletContext.Provider
-      value={{ balance, claimed, isLoading, isClaiming, isError, claim, refresh }}
+      value={{ balance, claimed, isLoading, isClaiming, isError, billingExempt, displayBalance, claim, refresh }}
     >
       {children}
     </WalletContext.Provider>

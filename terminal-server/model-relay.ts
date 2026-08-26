@@ -102,6 +102,7 @@ export async function handleModelRequest(
 
     // Usage recording — success only, OpenRouter only (the only
     // provider this channel ever calls, and the only one billed).
+    // Billing-exempt owner: meter but don't debit (handled in recordUsage).
     if (streamProvider === "openrouter") {
       await getBillingClient().recordUsage({
         identity,
@@ -111,6 +112,7 @@ export async function handleModelRequest(
         promptTokens,
         completionTokens,
         totalTokens,
+        billingExempt: authz.billingExempt ?? false,
       });
     }
   } catch (err) {

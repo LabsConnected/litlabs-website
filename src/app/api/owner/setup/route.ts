@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { isOwnerClerkId, OWNER_WALLET_TARGET } from "@/lib/owner";
-import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
+import { isOwnerClerkId, OWNER_BILLING_EXEMPT, OWNER_SPEND_CEILING_USD } from "@/lib/owner";
+import { getCreditBalances } from "@/lib/wallet-ledger";
 import { rateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
@@ -84,9 +84,12 @@ export async function GET(req: NextRequest) {
     },
     wallet: {
       ...balances,
-      target: OWNER_WALLET_TARGET,
-      needsTopUp: balances.total < OWNER_WALLET_TARGET,
-      topUpAmount: Math.max(0, OWNER_WALLET_TARGET - balances.total),
+      // Owner is billing-exempt — display "DEV ∞" instead of a numeric target.
+      // The wallet balance is irrelevant for authorization; usage is metered
+      // but never debited. The spend ceiling is in USD, not BITS.
+      billingExempt: OWNER_BILLING_EXEMPT,
+      displayBalance: "DEV ∞",
+      spendCeilingUsd: OWNER_SPEND_CEILING_USD,
     },
     projects: {
       count: projectCount ?? 0,
@@ -111,13 +114,10 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/owner/setup
  *
- * Tops up the owner's wallet to the target balance (250,000 LiTTBits)
- * using the existing audited ledger mechanism. Only grants the difference
- * if the current balance is below target. Owner-only.
- *
- * This does NOT bypass metering — every real operation still deducts
- * normally. It just ensures the owner has enough LiTTBits to test all
- * features without hitting artificial limits.
+ * Deprecated: the owner is now billing-exempt (OWNER_BILLING_EXEMPT).
+ * No wallet top-up is needed — usage is metered but the wallet is never
+ * debited. This endpoint remains for backward compatibility but is a
+ * no-op that returns the current billing-exempt status.
  */
 export async function POST(req: NextRequest) {
   const { success, remaining, resetTime } = await rateLimit(req, 10, 60);
@@ -142,49 +142,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden — owner access required" }, { status: 403 });
   }
 
-  try {
-    const balances = await getCreditBalances(userId);
-    const currentTotal = balances.total;
-    const needed = OWNER_WALLET_TARGET - currentTotal;
+  const response = NextResponse.json({
+    ok: true,
+    message: "Owner is billing-exempt — no top-up needed. Usage is metered but never debited.",
+    billingExempt: OWNER_BILLING_EXEMPT,
+    displayBalance: "DEV ∞",
+    spendCeilingUsd: OWNER_SPEND_CEILING_USD,
+    topped: false,
+  });
 
-    if (needed <= 0) {
-      return NextResponse.json({
-        ok: true,
-        message: "Wallet already at or above target",
-        balance: currentTotal,
-        target: OWNER_WALLET_TARGET,
-        topped: false,
-      });
-    }
+  response.headers.set("X-RateLimit-Limit", "10");
+  response.headers.set("X-RateLimit-Remaining", String(remaining));
+  response.headers.set("X-RateLimit-Reset", String(resetTime));
 
-    // Use the audited ledger to grant the difference
-    const result = await adjustWalletBalance({
-      clerkId: userId,
-      amount: needed,
-      type: "correction",
-      reason: `Owner testing wallet top-up to ${OWNER_WALLET_TARGET}`,
-      idempotencyKey: `owner_setup:${userId}:${new Date().toISOString().slice(0, 10)}`,
-    });
-
-    const response = NextResponse.json({
-      ok: true,
-      message: `Wallet topped up by ${needed} LiTTBits`,
-      balance: result.balance,
-      previousBalance: result.previousBalance,
-      topped: needed,
-      target: OWNER_WALLET_TARGET,
-      replayed: result.replayed,
-    });
-
-    response.headers.set("X-RateLimit-Limit", "10");
-    response.headers.set("X-RateLimit-Remaining", String(remaining));
-    response.headers.set("X-RateLimit-Reset", String(resetTime));
-
-    return response;
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to top up owner wallet" },
-      { status: 500 },
-    );
-  }
+  return response;
 }
