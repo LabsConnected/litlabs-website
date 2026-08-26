@@ -42,7 +42,7 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
-import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { hasProviderKey, providerLabel } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -125,14 +125,19 @@ export function CockpitApp({
   // Responsive layout — the shell adapts but never reflows content.
   useTerminalSize(stdout);
 
-  const modelReady = hasOpenRouterKey();
+  const modelReady = hasProviderKey();
   const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   // Source truth: show the REAL served provider (from the last run's
   // adapter), not a hardcoded "OpenRouter" label. Before the first run,
   // fall back to whichever provider is configured.
+  const configuredProviderLabel = process.env.OPENAI_API_KEY
+    ? "OpenAI"
+    : process.env.OPENROUTER_API_KEY
+      ? "OpenRouter"
+      : null;
   const source = store.state.activeProvider
     ? `${providerLabel(store.state.activeProvider)} • BYOK ✓`
-    : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+    : configuredProviderLabel ? `${configuredProviderLabel} • BYOK ✓` : "No provider";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
   const overlay = store.state.overlay;

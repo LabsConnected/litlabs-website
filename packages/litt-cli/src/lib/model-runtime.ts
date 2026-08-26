@@ -313,6 +313,6 @@ export function routingReason(routed: RoutedModel, _input: string): string {
 
 // ─── Credential check (kept for controller compat) ─────────────────
 
-export function hasOpenRouterKey(): boolean {
+export function hasProviderKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY;
 }

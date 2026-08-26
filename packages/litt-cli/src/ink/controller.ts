@@ -42,7 +42,7 @@ import type { CockpitStore, ActivitySemantic, RoutingMode } from "./cockpit-stor
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { hasProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
@@ -701,7 +701,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     if (input === "/doctor") {
       act(store, `LiTT runtime: local=${store.state.localRuntime} remote=${store.state.remoteRuntime}`, "info", undefined, "DOCTOR");
       act(store, `Git: ${store.state.branch} · +${store.state.gitModified + store.state.gitUntracked} changes`, "info", undefined, "DOCTOR");
-      act(store, `Provider: ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no local key (use `litt login` for managed keys)"}`, "info", undefined, "DOCTOR");
+      act(store, `Provider: ${hasProviderKey() ? "OpenRouter BYOK ✓" : "no local key (use `litt login` for managed keys)"}`, "info", undefined, "DOCTOR");
       for (const status of modelRuntime.getProviderStatuses()) {
         act(store, `  ${status.label}: ${status.tier}${status.hasCredential ? " ✓" : " ✗ no key"}${status.latencyMs !== null ? ` ${status.latencyMs}ms` : ""}`, "info", undefined, "DOCTOR");
       }
@@ -1192,7 +1192,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
 
           // ─── Optional synthesis ───
-          if (readMatch.needsSynthesis && hasOpenRouterKey()) {
+          if (readMatch.needsSynthesis && hasProviderKey()) {
             perf.mark("synthesis_start");
             const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
             const routed = modelRuntime.route(
@@ -1296,7 +1296,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       );
     }
 
-    if (hasOpenRouterKey()) {
+    if (hasProviderKey()) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
       // holoState stays IDLE throughout — CHAT never enters mission
@@ -1377,7 +1377,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
               `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
               `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
-              `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+              `hasProviderKey=${!!process.env.OPENROUTER_API_KEY}\n`,
             );
           }
           const model = resolveProviderAdapter(routed, {
@@ -1636,7 +1636,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             `routed.providerModelId=${routed.providerModelId ?? "(none)"} ` +
             `routed.openRouterModelId=${routed.openRouterModelId ?? "(none)"} ` +
             `hasOpenAIKey=${!!process.env.OPENAI_API_KEY} ` +
-            `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
+            `hasProviderKey=${!!process.env.OPENROUTER_API_KEY}\n`,
           );
         }
         const model = resolveProviderAdapter(routed, {
