@@ -36,6 +36,7 @@ import { VisualPackSettings } from "@/components/settings/VisualPackSettings";
 import { WallpaperSection } from "@/components/settings/WallpaperSection";
 import { LivePreviewPanel } from "@/components/settings/LivePreviewPanel";
 import { IntegrationCard, IntegrationSummaryBar } from "@/components/settings/IntegrationCard";
+import { MicMixerPanel } from "@/features/voice/components/MicMixerPanel";
 import { useIntegrationStatus } from "@/hooks/useIntegrationStatus";
 import type { LayoutStyle } from "@/context/ThemeContext";
 import { useStudioModelStore, MODELS as STUDIO_MODELS } from "@/app/(app)/studio/stores/useStudioModelStore";
@@ -1945,6 +1946,11 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
             Test microphone
           </button>
         </div>
+      </SettingsCard>
+
+      {/* Mic & mixer */}
+      <SettingsCard title="Mic & mixer" description="Input device, gain, mute, and output volume" icon={<Volume2 size={16} />}>
+        <MicMixerPanel accentColor={T.accentColor} />
       </SettingsCard>
 
       {/* Camera */}
