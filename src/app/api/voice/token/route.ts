@@ -22,6 +22,11 @@ export async function GET(request: NextRequest) {
   }
 
   const apiKey = process.env.INWORLD_API_KEY;
+  // Read VOICE_WS_URL at runtime (server-side). NEXT_PUBLIC_ vars are inlined
+  // at build time by webpack, so process.env.NEXT_PUBLIC_VOICE_WS_URL returns
+  // the build-time value, not the current Railway variable. Use a plain
+  // server-side var with a fallback to the NEXT_PUBLIC_ one for local dev.
+  const voiceWsUrl = process.env.VOICE_WS_URL || process.env.NEXT_PUBLIC_VOICE_WS_URL;
   if (!apiKey) {
     return NextResponse.json(
       {
@@ -31,7 +36,7 @@ export async function GET(request: NextRequest) {
           apiKey: false,
           littVoice: false,
           sparkVoice: false,
-          wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+          wsUrl: !!voiceWsUrl,
         },
       },
       { status: 503, headers: { "Cache-Control": "no-store" } },
@@ -54,12 +59,11 @@ export async function GET(request: NextRequest) {
 
     const littVoice = process.env.INWORLD_LITT_VOICE || "";
     const sparkVoice = process.env.INWORLD_SPARK_VOICE || "";
-    const voiceWsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL;
 
     if (!littVoice || !voiceWsUrl) {
       const missing = [
         !littVoice && "INWORLD_LITT_VOICE",
-        !voiceWsUrl && "NEXT_PUBLIC_VOICE_WS_URL",
+        !voiceWsUrl && "VOICE_WS_URL",
       ].filter(Boolean);
       return NextResponse.json(
         {
@@ -88,7 +92,7 @@ export async function GET(request: NextRequest) {
           apiKey: true,
           littVoice: true,
           sparkVoice: !!sparkVoice,
-          wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+          wsUrl: !!voiceWsUrl,
         },
       },
       { headers: { "Cache-Control": "no-store" } },
