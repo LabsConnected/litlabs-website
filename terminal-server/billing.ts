@@ -125,7 +125,7 @@ function redact(err: unknown): string {
   // generic, stable message; the real error is for server-side logs only
   // (and even there, never includes SUPABASE_SERVICE_ROLE_KEY — that key
   // is never part of any error payload Supabase-js constructs).
-  void err;
+  console.error("[Billing] Supabase error:", err instanceof Error ? err.message : String(err));
   return "Billing service unavailable";
 }
 
@@ -321,6 +321,7 @@ let _override: BillingClient | null = null;
 function buildClient(): BillingClient {
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  console.log("[Billing] buildClient: url=", url ? "set" : "missing", "key=", key ? "set" : "missing");
   if (!url || !key) return new UnavailableBillingClient();
   const supabase = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
