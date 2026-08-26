@@ -45,9 +45,9 @@ vi.mock("../lib/remote.js", () => ({
   hasRemoteResult: () => false,
 }));
 
-// Mock hasOpenRouterKey to always return false (we're testing the no-key path)
+// Mock hasProviderKey to always return false (we're testing the no-key path)
 vi.mock("../lib/model-provider.js", () => ({
-  hasOpenRouterKey: () => false,
+  hasProviderKey: () => false,
   resolveProviderAdapter: vi.fn(),
 }));
 

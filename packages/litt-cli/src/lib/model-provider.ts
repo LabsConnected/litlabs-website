@@ -26,7 +26,7 @@
  *   OPENROUTER_MODEL    — explicit model override (second priority)
  *
  * If no API key is set, the provider throws on construction.
- * Callers should check hasOpenRouterKey() before constructing.
+ * Callers should check hasProviderKey() before constructing.
  */
 
 import type {
@@ -159,7 +159,7 @@ export function buildModelState(options?: {
   activeModel?: string | null;
 }): ModelState {
   // No provider available
-  if (!hasOpenRouterKey()) {
+  if (!hasProviderKey()) {
     return {
       provider: null,
       configuredModel: null,
@@ -348,8 +348,13 @@ export function buildMaxTokensLadder(initial: number): number[] {
   return ladder;
 }
 
-export function hasOpenRouterKey(): boolean {
-  return !!process.env.OPENROUTER_API_KEY;
+/**
+ * Returns true when any model provider credential is configured.
+ * Checks OPENAI_API_KEY (primary) and OPENROUTER_API_KEY (fallback).
+ * Renamed from hasOpenRouterKey — the name no longer matched the behavior.
+ */
+export function hasProviderKey(): boolean {
+  return !!process.env.OPENAI_API_KEY || !!process.env.OPENROUTER_API_KEY;
 }
 
 /**
@@ -357,7 +362,7 @@ export function hasOpenRouterKey(): boolean {
  * native provider key). Used by the controller to decide whether
  * local BYOK is available as a fallback to the managed remote.
  */
-export function hasProviderKey(): boolean {
+export function hasAnyProviderKey(): boolean {
   return !!(
     process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
@@ -367,6 +372,8 @@ export function hasProviderKey(): boolean {
   );
 }
 
+/** @deprecated Use hasProviderKey() instead. Kept for backward compat. */
+export const hasOpenRouterKey = hasProviderKey;
 export class OpenRouterModelProvider implements ModelProvider {
   /** This adapter always serves via OpenRouter (source truth for the controller). */
   readonly providerId = "openrouter" as const;
@@ -1077,7 +1084,7 @@ export function resolveProviderAdapter(
 
   // 2. OpenRouter — either explicitly selected, or fallback for a native
   //    provider whose direct key is not configured / has no native adapter.
-  if (routed.openRouterModelId && hasOpenRouterKey()) {
+  if (routed.openRouterModelId && hasProviderKey()) {
     return new OpenRouterModelProvider({
       model: routed.openRouterModelId,
       tools,

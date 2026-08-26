@@ -16,10 +16,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { runAgentLoop, ToolRegistry, createShellExecutor, CommandExecutor, RuntimeStore, ExecutionGateway, type RuntimeEvent, type StreamChunk } from "@litt/agent-core";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey } from "../lib/model-provider.js";
 import { ChatTranscriptStore } from "../ink/chat-transcript-store.js";
 
-const skip = !hasOpenRouterKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
+const skip = !hasProviderKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
 
 /** Same filter as controller.isToolCallMarkup — strips raw protocol chunks. */
 function isToolCallMarkup(text: string): boolean {

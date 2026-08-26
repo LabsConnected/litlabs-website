@@ -12,7 +12,7 @@
 
 import { exec, ok, fail, warn, header, label, value, detectProject, resolveProjectCwd, c } from "../lib/utils.js";
 import { getGitState } from "../lib/git-state.js";
-import { hasOpenRouterKey } from "../lib/model-provider.js";
+import { hasProviderKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
 import { ensureConfig, getConfigPath } from "../lib/config.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
@@ -132,6 +132,7 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   // Environment — CLI-relevant only (not web-app env vars)
   header("Environment");
   const envVars = [
+    "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "LITT_TERMINAL_URL",
     "LITT_MODE",
@@ -140,7 +141,7 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     if (process.env[envVar]) ok(`${envVar}: set`);
     else warn(`${envVar}: not set`);
   }
-  if (!process.env.OPENROUTER_API_KEY) {
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENROUTER_API_KEY) {
     console.log(`${c.dim}  No local key — run 'litt login' to use managed server keys.${c.reset}`);
   }
 
@@ -185,7 +186,12 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     // package.json read may fail in some setups
   }
   console.log(`${label("ExecutionGateway:")} ${value("available", c.green)}`);
-  console.log(`${label("Model Provider:")} ${hasOpenRouterKey() ? value("OpenRouter (key set)", c.green) : value("not configured", c.yellow)}`);
+  const providerStatus = process.env.OPENAI_API_KEY
+    ? value("OpenAI (key set)", c.green)
+    : process.env.OPENROUTER_API_KEY
+      ? value("OpenRouter (key set)", c.green)
+      : value("not configured", c.yellow);
+  console.log(`${label("Model Provider:")} ${providerStatus}`);
   console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
 
   // Summary

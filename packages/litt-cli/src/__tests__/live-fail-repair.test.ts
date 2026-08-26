@@ -40,7 +40,7 @@ import {
   type ToolResult,
   type ToolContext,
 } from "@litt/agent-core";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey } from "../lib/model-provider.js";
 
 /** A real edit_file tool so the model can actually repair the file. */
 const EDIT_FILE_DEF: ToolDefinition = {
@@ -84,7 +84,7 @@ const EDIT_FILE_ENTRY: ToolEntry = {
   metadata: { projectScoped: false, mutating: true, readOnly: false },
 };
 
-const skip = !hasOpenRouterKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
+const skip = !hasProviderKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
 
 describe.skipIf(skip)("live fail→repair→revalidate — COMPLETE held until gate proves", () => {
   let tempDir: string;

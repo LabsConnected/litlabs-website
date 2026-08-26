@@ -2,7 +2,7 @@
  * Submit / Transcript State Regression — covers the Termux/ADB bug where
  * pressing Enter caused the typed text to vanish with no response.
  *
- * Root cause: when hasOpenRouterKey() was false, the controller's submit()
+ * Root cause: when hasProviderKey() was false, the controller's submit()
  * skipped addChatMessage entirely — only an activityLog entry was added.
  * The composer was already cleared by app.tsx, so:
  *   - chatTranscript stayed empty
