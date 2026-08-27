@@ -120,7 +120,15 @@ function resolveModelProvider(
     // transport), otherwise the OpenRouter slug. The server decides
     // the actual transport based on which managed credentials are set.
     model: routed.providerModelId ?? routed.openRouterModelId!,
-    providerHint: routed.servedBy,
+    // For remote execution, send the model's NATIVE provider (from the
+    // catalog) as the hint — NOT the local credential resolver's
+    // servedBy. The server has managed keys and decides the transport;
+    // the CLI's local env (which may have OPENROUTER_API_KEY for BYOK
+    // but no OPENAI_API_KEY) must not override the server's managed
+    // direct-OpenAI transport. Without this, an OpenAI model served
+    // locally via OpenRouter (BYOK) would force the server to use
+    // OpenRouter too, even though the server has a direct OpenAI key.
+    providerHint: routed.provider,
     openRouterModelId: routed.openRouterModelId,
     tools: opts.tools,
     maxTokens: opts.maxTokens,
