@@ -13,7 +13,7 @@
  * cannot observe is a guarantee you cannot trust.
  */
 
-import { RemoteUnavailableError, isRemoteUnavailable } from "./remote-unavailable.js";
+import { RemoteUnavailableError, isRemoteUnavailable, CREDENTIAL_CLEARING_REASONS } from "./remote-unavailable.js";
 
 export interface ExecuteCommandDeps {
   /** True when --remote was passed. */
@@ -68,6 +68,20 @@ export async function executeCommand(
     // from this catch to deps.localExecutor() — by construction.
     if (isRemoteUnavailable(error)) {
       emit(`Remote execution unavailable: ${error.message}`);
+      // If the reason means the stored credential is unusable
+      // (auth_expired / auth_revoked), proactively clear it so the
+      // user can simply run `litt login` next instead of getting
+      // stuck with dead credentials on disk. This does NOT fall back
+      // to local execution — the fail-closed contract is preserved.
+      if (CREDENTIAL_CLEARING_REASONS.has(error.reason)) {
+        try {
+          const { getAuthSession } = await import("./auth/auth-session.js");
+          await getAuthSession().logout();
+        } catch {
+          // Best-effort — the error message already tells the user
+          // to run `litt login`, which will overwrite the dead creds.
+        }
+      }
       return { path: "none", exitCode: 1, reason: error.reason };
     }
     const message = error instanceof Error ? error.message : String(error);
