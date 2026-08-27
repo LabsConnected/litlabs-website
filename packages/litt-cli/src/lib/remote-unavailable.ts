@@ -38,7 +38,13 @@ export type RemoteUnavailableReason =
   /** Multiple ready workspaces exist; the caller must select one. */
   | "workspace_selection_required"
   /** Authenticated, but not authorized for the requested workspace. */
-  | "workspace_unauthorized";
+  | "workspace_unauthorized"
+  /** The server's billing/entitlement service could not be reached. */
+  | "billing_unavailable"
+  /** Authenticated, but the account's plan does not include CLI access. */
+  | "plan_not_entitled"
+  /** Authenticated and entitled, but the LiTTBits balance is exhausted. */
+  | "insufficient_credits";
 
 /**
  * Short subject line per reason — used when the caller supplies no
@@ -55,6 +61,9 @@ const SUBJECT: Record<RemoteUnavailableReason, string> = {
   workspace_required: "No remote project workspace is prepared.",
   workspace_selection_required: "Multiple remote workspaces are available.",
   workspace_unauthorized: "Not authorized for that workspace.",
+  billing_unavailable: "Billing service unavailable.",
+  plan_not_entitled: "Your plan does not include LiTT CLI access.",
+  insufficient_credits: "LiTTBits balance exhausted.",
 };
 
 /** Operator-facing guidance per reason. Never suggests local execution. */
@@ -68,6 +77,13 @@ const REMEDY: Record<RemoteUnavailableReason, string> = {
   workspace_required: "Prepare a remote project workspace, then retry with --remote.",
   workspace_selection_required: "Specify which workspace to use with --workspace <id>.",
   workspace_unauthorized: "You are authenticated but not authorized for that workspace. Select a workspace that belongs to your account.",
+  // NOTE: none of the three below suggest 'litt login'. They are NOT
+  // authentication failures — the session is valid. Telling the user to
+  // re-authenticate here sends them down a dead end for a problem that
+  // re-authenticating cannot fix.
+  billing_unavailable: "This is a server-side problem, not a problem with your session — your login is still valid. Retry shortly, or check the terminal service status.",
+  plan_not_entitled: "Upgrade your plan at litlabs.net to use the CLI remotely.",
+  insufficient_credits: "Add LiTTBits at litlabs.net to continue using the CLI.",
 };
 
 /**

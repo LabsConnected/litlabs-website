@@ -49,11 +49,57 @@ import type {
 } from "@litt/agent-core";
 import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
 import { getTerminalUrl } from "./auth/auth-config.js";
-import { RemoteUnavailableError } from "./remote-unavailable.js";
+import { RemoteUnavailableError, type RemoteUnavailableReason } from "./remote-unavailable.js";
 
 // Re-export for CLI consumers (index.ts imports these from remote.ts)
 export { isRemoteError, hasRemoteResult };
 export { RemoteUnavailableError, isRemoteUnavailable } from "./remote-unavailable.js";
+
+/**
+ * Server denial codes that are NOT authentication failures, mapped to
+ * their own typed reason.
+ *
+ * terminal-server's billing gate (billing.ts) denies a call for reasons
+ * that have nothing to do with the credential — the plan lacks CLI
+ * access, the LiTTBits balance is empty, or Supabase is unreachable so
+ * billing cannot answer at all. Those denials arrive on 401/403/402/503
+ * responses, and classifying them by STATUS ALONE produced
+ * `auth_revoked` — which both told the user to run 'litt login' (a dead
+ * end: re-authenticating fixes none of them) and, because `auth_revoked`
+ * is in CREDENTIAL_CLEARING_REASONS, DELETED their perfectly valid
+ * stored credential.
+ *
+ * So: always branch on the server's typed `code` first, and fall back to
+ * status only when the server sent no code.
+ */
+const SERVER_CODE_REASONS: Readonly<Record<string, RemoteUnavailableReason>> = {
+  workspace_required: "workspace_required",
+  workspace_selection_required: "workspace_selection_required",
+  workspace_unauthorized: "workspace_unauthorized",
+  billing_unavailable: "billing_unavailable",
+  plan_not_entitled: "plan_not_entitled",
+  insufficient_credits: "insufficient_credits",
+  // The billing gate's own "no identity" codes ARE genuine auth failures.
+  unauthenticated: "auth_revoked",
+  user_not_found: "auth_revoked",
+};
+
+/**
+ * Classify a non-ok terminal-server response into a typed reason.
+ * `code` (when the server sent one) always wins over `status`.
+ */
+export function classifyRemoteFailure(
+  code: string | undefined,
+  status: number,
+  statusFallback: RemoteUnavailableReason = "execution_failed",
+): RemoteUnavailableReason {
+  if (code && code in SERVER_CODE_REASONS) return SERVER_CODE_REASONS[code];
+  // 402 Payment Required is unambiguous even without a code.
+  if (status === 402) return "insufficient_credits";
+  if (status === 401 || status === 403) return "auth_revoked";
+  if (status === 503) return "service_unavailable";
+  return statusFallback;
+}
 
 export interface RemoteDispatchOptions {
   terminalUrl?: string;
@@ -115,9 +161,13 @@ export async function exchangeClerkToken(
     const body = await response.json().catch(() => null) as { error?: string } | null;
     // 401/403 mean the credential itself is bad — surface that distinctly
     // so the caller clears it rather than retrying with the same token.
-    const reason = response.status === 401 || response.status === 403
-      ? "auth_revoked"
-      : "session_failed";
+    const reason = classifyRemoteFailure(
+      typeof (body as { code?: string } | null)?.code === "string"
+        ? (body as { code?: string }).code
+        : undefined,
+      response.status,
+      "session_failed",
+    );
     throw new RemoteUnavailableError(
       reason,
       body?.error ?? `Token exchange failed (${response.status}).`,
@@ -273,20 +323,12 @@ export async function dispatchRemote(
     // it means the workspace doesn't belong to the user. It must remain a
     // distinct reason so the CLI does NOT clear valid Clerk credentials
     // or tell the user to log in again.
-    if (typedError?.code === "workspace_required") {
-      throw new RemoteUnavailableError("workspace_required", detail);
-    }
-    if (typedError?.code === "workspace_selection_required") {
-      throw new RemoteUnavailableError("workspace_selection_required", detail);
-    }
-    if (typedError?.code === "workspace_unauthorized") {
-      throw new RemoteUnavailableError("workspace_unauthorized", detail);
-    }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new RemoteUnavailableError("auth_revoked", detail);
-    }
-    throw new RemoteUnavailableError("execution_failed", detail);
+    // Typed code first, status only as fallback — see classifyRemoteFailure.
+    throw new RemoteUnavailableError(
+      classifyRemoteFailure(typedError?.code, response.status),
+      detail,
+    );
   }
 
   if (!payload) {
@@ -379,19 +421,11 @@ export async function remoteChat(
     // Check workspace error codes FIRST — before the generic 401/403 check.
     // workspace_selection_required returns HTTP 400 but is NOT an execution
     // failure — it means the user must select a workspace first.
-    if (typedError?.code === "workspace_required") {
-      throw new RemoteUnavailableError("workspace_required", detail);
-    }
-    if (typedError?.code === "workspace_selection_required") {
-      throw new RemoteUnavailableError("workspace_selection_required", detail);
-    }
-    if (typedError?.code === "workspace_unauthorized") {
-      throw new RemoteUnavailableError("workspace_unauthorized", detail);
-    }
-    if (response.status === 401 || response.status === 403) {
-      throw new RemoteUnavailableError("auth_revoked", detail);
-    }
-    throw new RemoteUnavailableError("execution_failed", detail);
+    // Typed code first, status only as fallback — see classifyRemoteFailure.
+    throw new RemoteUnavailableError(
+      classifyRemoteFailure(typedError?.code, response.status),
+      detail,
+    );
   }
 
   // Read NDJSON stream
@@ -476,9 +510,13 @@ export async function listRemoteWorkspaces(
 
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
-    const reason = response.status === 401 || response.status === 403
-      ? "auth_revoked"
-      : "session_failed";
+    const reason = classifyRemoteFailure(
+      typeof (body as { code?: string } | null)?.code === "string"
+        ? (body as { code?: string }).code
+        : undefined,
+      response.status,
+      "session_failed",
+    );
     throw new RemoteUnavailableError(
       reason,
       body?.error ?? `Workspace list failed (${response.status}).`,
