@@ -29,25 +29,16 @@ import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 import { getGitState } from "../lib/git-state.js";
 import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
-
-// Belt-and-suspenders: the shell renders a SOFTWARE cursor (Ink hides the
-// native one). Paths that bypass Ink's unmount — e.g. the session SIGINT
-// handler's process.exit(130), a hard crash, or an unexpected throw —
-// would otherwise leave the terminal cursor invisible. Show it again on
-// any process exit. Idempotent: harmless when Ink already restored it.
-const SHOW_CURSOR = "\x1b[?25h";
-function installCursorRestore(): void {
-  process.on("exit", () => {
-    try {
-      if (process.stdout.isTTY) process.stdout.write(SHOW_CURSOR);
-    } catch {
-      // ignore — best-effort restoration
-    }
-  });
-}
+import { installTerminalTeardown, restoreTerminal } from "../lib/terminal-teardown.js";
 
 export async function cockpitCommand(args: string[]): Promise<number> {
-  installCursorRestore();
+  // Terminal state is process-external: whatever LiTT leaves enabled
+  // leaks into the parent shell. installTerminalTeardown() hooks every
+  // exit path (normal exit, process.exit, SIGTERM/SIGHUP/SIGBREAK,
+  // uncaught exception, unhandled rejection) and hands back a terminal
+  // with mouse reporting off, bracketed paste off, raw mode off and the
+  // cursor visible. See lib/terminal-teardown.ts.
+  const disposeTeardown = installTerminalTeardown();
 
   // `litt shell --window` / `litt cockpit -w` — open a dedicated LiTT
   // terminal window (Windows Terminal profile) and return immediately.
@@ -223,6 +214,10 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   try {
     await waitUntilExit();
   } finally {
+    // Centralized teardown, not a happy-path unmount: this runs whether
+    // waitUntilExit() resolved, threw, or the UI was cancelled mid-run.
+    restoreTerminal();
+    disposeTeardown();
     if (client) client.disconnect();
   }
 
