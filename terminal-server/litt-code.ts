@@ -908,8 +908,21 @@ export async function streamLiTTMessages(
         profile,
       });
     } catch (openaiErr) {
-      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
-      // Fall through to OpenRouter fallback below
+      const errMsg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
+      console.log(`[transport] /api/chat direct OpenAI failed: ${errMsg} → falling back to OpenRouter`);
+      // Failover to free OpenRouter model on ANY OpenAI error so users
+      // without funded OpenAI accounts can still use LiTT.
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
+      if (openrouterKey) {
+        const freeModel = "minimax/minimax-m3:free";
+        console.log(`[transport] OpenAI error → failover to free OpenRouter model ${freeModel}`);
+        try {
+          return await streamChatWithOpenRouter(messages, emit, freeModel, profile, false);
+        } catch (freeErr) {
+          console.log(`[transport] free model failover also failed: ${freeErr instanceof Error ? freeErr.message : String(freeErr)}`);
+        }
+      }
+      // Fall through to standard OpenRouter fallback below
     }
   }
 
