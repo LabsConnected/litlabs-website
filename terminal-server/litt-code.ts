@@ -480,8 +480,8 @@ export async function streamModelForRemoteClient(
     !isOpenRouterKeyInOpenaiSlot &&
     !model.includes("/");
 
-  // Debug: log transport selection (no key values exposed)
-  console.log(`[transport] hint=${hint} model=${model} hasOpenAIKey=${!!openaiKey} openAIKeyPrefix=${openaiKey?.slice(0, 7) ?? "none"} isOpenRouterInOpenAI=${!!isOpenRouterKeyInOpenaiSlot} hasSlash=${model.includes("/")} canUseDirect=${canUseDirectOpenAI} hasOpenRouterKey=${!!openrouterKey}`);
+  // Log transport selection (no key values exposed)
+  console.log(`[transport] hint=${hint} model=${model} hasOpenAIKey=${!!openaiKey} isOpenRouterInOpenAI=${!!isOpenRouterKeyInOpenaiSlot} hasSlash=${model.includes("/")} canUseDirect=${canUseDirectOpenAI} hasOpenRouterKey=${!!openrouterKey}`);
 
   if (canUseDirectOpenAI) {
     console.log(`[transport] → direct OpenAI (api.openai.com)`);
