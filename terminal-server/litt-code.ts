@@ -272,6 +272,10 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
+    // Cap at 4096 output tokens — leaving this undefined causes OpenRouter
+    // to default to the model's max_output_tokens (e.g. 65536), which
+    // wastes credits and causes 402 errors on low-balance accounts.
+    max_tokens: 4096,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -712,6 +716,32 @@ export async function streamLiTTMessages(
 
   const { profile, model } = resolveProfile(promptForRouting);
   const webSearch = needsWebSearch(promptForRouting);
+
+  // ── Direct OpenAI preferred path ──────────────────────────────
+  // When OPENAI_API_KEY is set and the resolved model is an OpenAI
+  // model (OpenRouter slug "openai/..."), convert to the native id
+  // and call api.openai.com directly — no OpenRouter intermediary.
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const isOpenRouterKeyInOpenaiSlot = openaiKey?.startsWith("sk-or-v1-");
+  const isOpenAIModel = model.startsWith("openai/") && !webSearch;
+  const canUseDirectOpenAI = !!openaiKey && !isOpenRouterKeyInOpenaiSlot && isOpenAIModel;
+
+  if (canUseDirectOpenAI) {
+    // Convert "openai/gpt-oss-20b:nitro" → "gpt-oss-20b"
+    const nativeModel = model.replace(/^openai\//, "").replace(/:nitro$/, "");
+    console.log(`[transport] /api/chat → direct OpenAI (api.openai.com) model=${nativeModel}`);
+    try {
+      return await streamOpenAIDirect(messages, [], emit, {
+        model: nativeModel,
+        apiKey: openaiKey!,
+        maxTokens: 4096,
+        profile,
+      });
+    } catch (openaiErr) {
+      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
+      // Fall through to OpenRouter fallback below
+    }
+  }
 
   if (webSearch) {
     emit({ type: "meta", provider: "openrouter", model, profile });
