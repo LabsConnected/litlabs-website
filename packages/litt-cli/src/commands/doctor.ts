@@ -22,7 +22,12 @@ import * as os from "os";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 
-export async function doctorCommand(_args: string[]): Promise<number> {
+export async function doctorCommand(args: string[]): Promise<number> {
+  // Subcommand: litt doctor input — interactive input diagnostic
+  if (args[0] === "input") {
+    return doctorInputCommand();
+  }
+
   header("LiTT Doctor — System Health Check");
 
   // Node — Ink 7 and the CLI require Node >=22
@@ -237,4 +242,156 @@ function tryExecFileSync(command: string, args: string[]): string | null {
   } catch {
     return null;
   }
+}
+
+// ─── litt doctor input ───────────────────────────────────────────────
+
+/**
+ * Interactive input diagnostic — shows exactly what the terminal sends
+ * for each keypress, normalized through LiTT's input layer.
+ *
+ * Shows: platform, shell, TERM, stdin.isTTY, raw mode status, terminal
+ * dimensions, normalized key, raw sequence, hex bytes, modifiers.
+ *
+ * Does NOT expose environment secrets.
+ */
+async function doctorInputCommand(): Promise<number> {
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+
+  header("LiTT Doctor — Input Diagnostic");
+
+  // Environment info (no secrets)
+  console.log(`${label("Platform:")} ${value(process.platform)} ${value(process.arch, c.dim)}`);
+  console.log(`${label("Shell:")} ${value(process.env.SHELL ?? process.env.ComSpec ?? "unknown")}`);
+  console.log(`${label("TERM:")} ${value(process.env.TERM ?? "(unset)")}`);
+  console.log(`${label("stdin.isTTY:")} ${value(String(stdin.isTTY), stdin.isTTY ? c.green : c.yellow)}`);
+  console.log(`${label("stdout.columns:")} ${value(String(stdout.columns ?? "unknown"))}`);
+  console.log(`${label("stdout.rows:")} ${value(String(stdout.rows ?? "unknown"))}`);
+
+  if (!stdin.isTTY) {
+    fail("stdin is not a TTY — interactive input diagnostic requires a real terminal.");
+    console.log(`${c.dim}  Run this command in a real terminal, not a pipe or script.${c.reset}`);
+    return 1;
+  }
+
+  // Check raw mode support
+  const rawModeSupported = typeof stdin.setRawMode === "function";
+  console.log(`${label("Raw mode support:")} ${value(rawModeSupported ? "yes" : "no", rawModeSupported ? c.green : c.red)}`);
+
+  if (!rawModeSupported) {
+    fail("stdin.setRawMode is not available — cannot enter raw mode for key capture.");
+    return 1;
+  }
+
+  // Enter raw mode
+  const wasRaw = stdin.isRaw;
+  stdin.setRawMode(true);
+  stdin.resume();
+  console.log(`${label("Raw mode:")} ${value("ENTERED", c.green)}`);
+  console.log("");
+
+  // Import the normalization layer dynamically (avoids pulling Ink
+  // into the non-interactive doctor path).
+  const { normalizeKey, describeKeyEvent } = await import("../ink/input-keys.js");
+
+  console.log(c.bold + "Press keys to see their normalized events." + c.reset);
+  console.log(`${c.dim}  Press Ctrl+C to exit.${c.reset}`);
+  console.log("");
+
+  // Column headers
+  const colKey = "KEY";
+  const colSeq = "SEQUENCE";
+  const colHex = "HEX";
+  console.log(`${c.dim}${colKey.padEnd(22)}${colSeq.padEnd(20)}${colHex}${c.reset}`);
+  console.log(`${c.dim}${"-".repeat(22)}${"-".repeat(20)}${"-".repeat(20)}${c.reset}`);
+
+  return new Promise<number>((resolve) => {
+    let exited = false;
+
+    const cleanup = () => {
+      if (exited) return;
+      exited = true;
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+      stdin.removeListener("data", onData);
+      process.removeListener("SIGINT", onSigInt);
+      console.log("");
+      ok("Terminal state restored. Input diagnostic complete.");
+      resolve(0);
+    };
+
+    const onData = (data: Buffer) => {
+      const input = data.toString("utf8");
+
+      // Build a minimal key object by checking common patterns
+      // (We can't import Ink's key parser here without pulling in
+      // React, so we do a lightweight classification.)
+      const key = classifyKey(input);
+
+      const desc = describeKeyEvent(input, key);
+      const parts = desc.split(" ");
+      const kindStr = parts[0]?.replace("key=", "") ?? "UNKNOWN";
+      const seqStr = parts[1]?.replace("sequence=", "") ?? "";
+      const hexStr = parts[2]?.replace("hex=", "") ?? "";
+
+      // Color-code the output
+      const kindColor = kindStr === "BACKSPACE" ? c.green
+        : kindStr === "DELETE_WORD_LEFT" ? c.yellow
+        : kindStr === "CANCEL" ? c.red
+        : kindStr === "INSERT_TEXT" ? c.dim
+        : c.reset;
+
+      console.log(`${kindColor}${kindStr.padEnd(22)}${c.reset}${seqStr.padEnd(20)}${c.dim}${hexStr}${c.reset}`);
+
+      // Exit on Ctrl+C
+      if (kindStr === "CANCEL") {
+        cleanup();
+      }
+    };
+
+    const onSigInt = () => {
+      cleanup();
+    };
+
+    stdin.on("data", onData);
+    process.on("SIGINT", onSigInt);
+  });
+}
+
+/**
+ * Lightweight key classification for doctor input — doesn't depend on
+ * Ink's parser. Maps raw bytes to the KeyInfo fields that matter.
+ */
+function classifyKey(input: string): { backspace: boolean; delete: boolean; ctrl: boolean; meta: boolean; return: boolean; escape: boolean; tab: boolean; upArrow: boolean; downArrow: boolean; leftArrow: boolean; rightArrow: boolean; home?: boolean; end?: boolean; shift?: boolean; pageUp?: boolean; pageDown?: boolean; enter?: boolean } {
+  const key = {
+    backspace: false, delete: false, ctrl: false, meta: false,
+    return: false, escape: false, tab: false,
+    upArrow: false, downArrow: false, leftArrow: false, rightArrow: false,
+  };
+
+  // Ctrl+C
+  if (input === "\x03") { key.ctrl = true; return key; }
+  // Ctrl+W, Ctrl+U, Ctrl+K, Ctrl+A, Ctrl+E
+  if (input.length === 1 && input.charCodeAt(0) < 0x20 && input !== "\r" && input !== "\n" && input !== "\t") {
+    key.ctrl = true;
+    return key;
+  }
+  // Backspace
+  if (input === "\u007f" || input === "\b") { key.backspace = true; return key; }
+  // Delete
+  if (input === "\x1b[3~") { key.delete = true; return key; }
+  // Enter
+  if (input === "\r" || input === "\n") { key.return = true; return key; }
+  // Escape
+  if (input === "\u001b") { key.escape = true; return key; }
+  // Tab
+  if (input === "\t") { key.tab = true; return key; }
+  // Arrows
+  if (input === "\x1b[A" || input === "\x1bOA") { key.upArrow = true; return key; }
+  if (input === "\x1b[B" || input === "\x1bOB") { key.downArrow = true; return key; }
+  if (input === "\x1b[D" || input === "\x1bOD") { key.leftArrow = true; return key; }
+  if (input === "\x1b[C" || input === "\x1bOC") { key.rightArrow = true; return key; }
+
+  return key;
 }

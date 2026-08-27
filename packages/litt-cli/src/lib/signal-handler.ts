@@ -12,6 +12,7 @@
 
 import { RuntimeClient } from "./runtime-client.js";
 import { c } from "./utils.js";
+import { restoreTerminal } from "./terminal-teardown.js";
 
 export class SignalHandler {
   private client: RuntimeClient;
@@ -38,7 +39,9 @@ export class SignalHandler {
 
   private async handleSignal(sig: string): Promise<void> {
     if (sig === "SIGTERM") {
-      // SIGTERM = always exit
+      // SIGTERM = always exit. Restore terminal state first so the
+      // parent shell isn't left in raw mode / no-echo.
+      restoreTerminal();
       process.exit(143);
       return;
     }
@@ -68,7 +71,9 @@ export class SignalHandler {
 
     // No active run, or cancel already in flight
     if (this.cancelInFlight) {
-      // Second Ctrl+C while waiting for cancellation → force exit
+      // Second Ctrl+C while waiting for cancellation → force exit.
+      // Restore terminal state before exiting.
+      restoreTerminal();
       console.log(`\n${c.red}!${c.reset} Force exit`);
       process.exit(130);
       return;
@@ -76,7 +81,8 @@ export class SignalHandler {
 
     // No active run — check for double press
     if (now - this.lastSigintTime < this.doublePressMs) {
-      // Double press while idle → exit
+      // Double press while idle → exit. Restore terminal state first.
+      restoreTerminal();
       process.exit(130);
       return;
     }
