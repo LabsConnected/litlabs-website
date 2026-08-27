@@ -71,7 +71,7 @@ export default function StudioOperatorBar({
 
   return (
     <div
-      className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px]"
+      className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[11px] overflow-x-auto"
       style={{
         backgroundColor: "rgba(8,6,14,0.92)",
         borderColor: "var(--studio-border)",
