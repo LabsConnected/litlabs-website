@@ -949,6 +949,18 @@ export async function streamLiTTMessages(
         webSearch,
       );
     } catch (orErr) {
+      // Last-resort failover: try a free OpenRouter model so users
+      // without funded OpenAI/OpenRouter accounts can still use LiTT.
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
+      if (openrouterKey) {
+        const freeModel = "minimax/minimax-m3:free";
+        console.log(`[transport] Ollama+OpenRouter both failed → last-resort free model ${freeModel}`);
+        try {
+          return await streamChatWithOpenRouter(messages, emit, freeModel, profile, false);
+        } catch (freeErr) {
+          console.log(`[transport] last-resort free model also failed: ${freeErr instanceof Error ? freeErr.message : String(freeErr)}`);
+        }
+      }
       const msg =
         `Ollama: ${
           ollamaErr instanceof Error
