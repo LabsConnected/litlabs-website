@@ -255,6 +255,13 @@ async function main(): Promise<number> {
         return 1;
       }
 
+      // Same guarantee as the cockpit: this screen puts the terminal in
+      // raw mode, so every exit path must hand it back clean.
+      const { installTerminalTeardown, restoreTerminal } = await import(
+        "./lib/terminal-teardown.js"
+      );
+      const disposeTeardown = installTerminalTeardown();
+
       const { waitUntilExit } = render(
         React.createElement(CockpitErrorBoundary, null,
           React.createElement(SignInRequired, {
@@ -265,7 +272,12 @@ async function main(): Promise<number> {
           }),
         ),
       );
-      await waitUntilExit();
+      try {
+        await waitUntilExit();
+      } finally {
+        restoreTerminal();
+        disposeTeardown();
+      }
       return 0;
     }
   }
