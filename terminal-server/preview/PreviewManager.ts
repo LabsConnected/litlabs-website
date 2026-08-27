@@ -677,8 +677,31 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   // for Next.js/Turbopack to release the port — it causes EADDRINUSE.
   await stopPreviewAndWait(workspaceId);
 
-  // Additional delay to ensure the OS releases the socket
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Wait for the port to actually be free. The OS may hold the socket
+  // in TIME_WAIT even after the process exits. Poll until the port is
+  // available or timeout.
+  const port = rt.port;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const net = require("net");
+      const testServer = net.createServer();
+      await new Promise<void>((resolve, reject) => {
+        testServer.once("error", reject);
+        testServer.once("listening", () => {
+          testServer.close(() => resolve());
+        });
+        testServer.listen(port, "0.0.0.0");
+      });
+      pushLog(rt, `[preview] Port ${port} is free after ${(i + 1) * 500}ms`);
+      break;
+    } catch {
+      pushLog(rt, `[preview] Port ${port} still in use, waiting... (${i + 1}/10)`);
+      if (i === 9) {
+        pushLog(rt, `[preview] Port ${port} never freed up, proceeding anyway`);
+      }
+    }
+  }
 
   // Start again with same config
   return startPreview({

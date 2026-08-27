@@ -45,6 +45,7 @@ import {
 import {
   startPreview,
   stopPreview,
+  stopPreviewAndWait,
   restartPreview,
   getPreviewStatus,
   getPreviewLogs,
@@ -1014,7 +1015,7 @@ app.get("/internal/workspace/:workspaceId/preview/status", requireInternalServic
  * POST /internal/workspace/:workspaceId/preview/stop
  * Stop the preview dev server.
  */
-app.post("/internal/workspace/:workspaceId/preview/stop", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
+app.post("/internal/workspace/:workspaceId/preview/stop", requireInternalServiceAuth, async (req: AuthenticatedRequest, res: Response) => {
   const workspaceId = req.params.workspaceId;
   const userId = String(req.body?.userId || "");
 
@@ -1033,7 +1034,7 @@ app.post("/internal/workspace/:workspaceId/preview/stop", requireInternalService
     return;
   }
 
-  stopPreview(workspaceId);
+  await stopPreviewAndWait(workspaceId);
   res.json({ workspaceId, status: "stopped" });
 });
 
