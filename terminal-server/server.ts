@@ -662,6 +662,29 @@ app.get("/health", async (_req, res) => {
   });
 });
 
+// Runtime diagnostic endpoint — verifies pnpm/node are available in the
+// production image. Used to confirm the Dockerfile runner stage fix.
+app.get("/health/runtime", async (_req, res) => {
+  const { execSync } = require("child_process");
+  const checks: Record<string, { ok: boolean; version?: string; error?: string }> = {};
+  for (const bin of ["node", "pnpm", "npm", "git"]) {
+    try {
+      const version = execSync(`${bin} --version`, { timeout: 5000, encoding: "utf-8" }).trim();
+      checks[bin] = { ok: true, version };
+    } catch (e: any) {
+      checks[bin] = { ok: false, error: e?.message ?? "not found" };
+    }
+  }
+  const allOk = Object.values(checks).every((c) => c.ok);
+  res.status(allOk ? 200 : 503).json({
+    service: "terminal-server",
+    runtime: allOk ? "ok" : "degraded",
+    execPath: process.execPath,
+    path: process.env.PATH?.slice(0, 200),
+    checks,
+  });
+});
+
 // Audit log endpoint (service-to-service only)
 app.get("/internal/audit-log", requireInternalServiceAuth, (req: AuthenticatedRequest, res: Response) => {
   const limit = Math.min(Number(req.query?.limit) || 100, 1000);
