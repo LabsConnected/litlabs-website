@@ -8,7 +8,7 @@
  * - No client systemPrompt accepted
  * - Cross-user project cache isolation (scoped localStorage key)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -88,14 +88,28 @@ vi.mock("@/lib/litt-kernel", () => ({
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("/api/gemini/chat auth gate", () => {
+  // Loaded ONCE in beforeAll rather than inside the first `it`.
+  //
+  // Importing the route pulls in its whole Next dependency graph, which
+  // costs ~2.4s on a warm machine. Done inside a test body, that cost is
+  // charged entirely to whichever test runs first, against vitest's 5s
+  // default timeout — so under full-suite parallel load the first test
+  // in this file would intermittently time out while passing in
+  // isolation. A beforeAll hook has its own budget and shares the cost.
+  let POST: typeof import("@/app/api/gemini/chat/route").POST;
+  let NextRequest: typeof import("next/server").NextRequest;
+
+  beforeAll(async () => {
+    ({ POST } = await import("@/app/api/gemini/chat/route"));
+    ({ NextRequest } = await import("next/server"));
+  }, 30_000);
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ userId: null, clerkId: null });
   });
 
   it("returns 401 for unauthenticated non-companion requests", async () => {
-    const { POST } = await import("@/app/api/gemini/chat/route");
-    const { NextRequest } = await import("next/server");
 
     const req = new NextRequest("http://localhost/api/gemini/chat", {
       method: "POST",
@@ -114,8 +128,6 @@ describe("/api/gemini/chat auth gate", () => {
   });
 
   it("allows unauthenticated companion requests with strict limits", async () => {
-    const { POST } = await import("@/app/api/gemini/chat/route");
-    const { NextRequest } = await import("next/server");
 
     const req = new NextRequest("http://localhost/api/gemini/chat", {
       method: "POST",
@@ -140,9 +152,6 @@ describe("/api/gemini/chat auth gate", () => {
   it("allows authenticated requests with full capabilities", async () => {
     mockAuth.mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" });
 
-    const { POST } = await import("@/app/api/gemini/chat/route");
-    const { NextRequest } = await import("next/server");
-
     const req = new NextRequest("http://localhost/api/gemini/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -159,9 +168,6 @@ describe("/api/gemini/chat auth gate", () => {
 
   it("ignores client-supplied systemPrompt", async () => {
     mockAuth.mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" });
-
-    const { POST } = await import("@/app/api/gemini/chat/route");
-    const { NextRequest } = await import("next/server");
 
     const req = new NextRequest("http://localhost/api/gemini/chat", {
       method: "POST",
