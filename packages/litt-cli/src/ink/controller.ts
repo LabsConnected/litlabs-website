@@ -52,7 +52,6 @@ import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
-import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -1213,53 +1212,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");
 
-    // ─── UTILITY lane — trivial factual/utility lookups bypass the
-    // full model+tool agent loop entirely (weather/time/calculator/
-    // business-hours/local-place). Checked ONLY for "chat"-classified,
-    // non-mission input — read and mission intents (coding, tool-heavy,
-    // build, deploy) are completely untouched. Deliberately placed
-    // BEFORE @mention context resolution so a hit skips that work too.
-    // See lib/utility-lane.ts for why this exists and how it's scoped.
-    if (intent === "chat" && !isMission) {
-      const utilityMatch = classifyUtilityIntent(input);
-      if (utilityMatch) {
-        perf.mark("utility_route");
-        const gateway = session.getGateway();
-        const cwd = session.getCwd();
-        perf.mark("utility_lookup_start");
-        const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
-          const r = await gateway.execute({
-            toolId,
-            inputs: args,
-            cwd,
-            mode: session.getMode(),
-            identity: CLI_IDENTITY,
-          });
-          return r.result;
-        });
-        perf.mark("utility_lookup_end");
-        if (lookup.satisfied) {
-          store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
-          store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
-          store.actions.addActivity({
-            id: `act_${Date.now()}_utility`,
-            ts: Date.now(),
-            type: "info",
-            tag: "UTILITY",
-            text: `Direct lookup (${utilityMatch.kind}) — no model call`,
-          });
-          perf.mark("finalize");
-          perf.end("utility");
-          persistSession();
-          return;
-        }
-        // Direct path could not satisfy the request (e.g. empty search,
-        // unparseable expression) — nothing was rendered; fall through
-        // to the normal chat path below exactly as if no utility match
-        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
-        // call, never an LLM round trip.
-      }
-    }
+    // NOTE: The utility-lane fast-path (weather/time/calculator lookups
+    // that bypass the model call) was introduced in commit 4f4e83d3 but
+    // the implementation file (lib/utility-lane.ts) was never created.
+    // The broken import and usage have been removed to restore the build.
+    // If utility-lane is needed, it must be implemented from scratch with
+    // proper billing/auth/provider attribution — do not re-add the import
+    // without the implementation.
 
     // ─── @mention context resolution ──────────────────────────────
     // The transcript shows the original input (@tokens intact); the
