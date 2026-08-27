@@ -191,6 +191,22 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(textareas).toHaveLength(1);
   });
 
+  it("keeps the message input on a full-width row", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        busy={false}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: /message input/i });
+    expect(input.className).toContain("w-full");
+    expect(input.className).toContain("flex-none");
+    expect(input.parentElement?.className).toContain("flex-wrap");
+  });
+
   it("shows the active model picker without an execution-mode dropdown", () => {
     const onSend = vi.fn();
     render(

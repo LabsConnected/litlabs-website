@@ -420,9 +420,9 @@ export default function CommandComposer({
         </div>
       )}
 
-      {/* Input row — capped at composer max width, centered */}
+      {/* Composer — input gets its own row so controls cannot squeeze it */}
       <div
-        className={`glass-panel relative flex items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
+        className={`glass-panel relative flex flex-wrap items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
         style={{
           borderColor: dragOver ? "rgba(168,85,247,0.5)" : "rgba(155,77,255,0.15)",
           backgroundColor: dragOver ? "rgba(168,85,247,0.08)" : "rgba(20,15,31,0.72)",
@@ -587,7 +587,7 @@ export default function CommandComposer({
                         ? "Tell LiTT what website or app to build…"
                         : agentMeta.placeholder
           }
-          className="min-w-0 flex-1 resize-none bg-transparent py-2.5 outline-none"
+          className="order-first w-full flex-none resize-none bg-transparent px-1 py-2.5 outline-none"
           style={{
             color: "var(--text-primary)",
             fontSize: "14px",
