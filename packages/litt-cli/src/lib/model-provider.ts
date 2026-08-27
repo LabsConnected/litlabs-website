@@ -327,6 +327,15 @@ export function classifyStreamError(err: unknown): Error {
 }
 
 /**
+ * Is the stepped max_tokens retry permitted after an insufficient-credits
+ * rejection? Default: NO — 402 is a hard stop. Opt in with
+ * LITT_CREDIT_RETRY=1.
+ */
+export function creditRetryEnabled(): boolean {
+  return process.env.LITT_CREDIT_RETRY === "1";
+}
+
+/**
  * Stepped max_tokens fallback ladder for insufficient-credits retry.
  *   [initial, 75% of initial, 50% of initial] with a 256-token floor.
  * Dedups so a small initial never produces a no-op ladder. Each step is
@@ -374,6 +383,33 @@ export function hasAnyProviderKey(): boolean {
 
 /** @deprecated Use hasProviderKey() instead. Kept for backward compat. */
 export const hasOpenRouterKey = hasProviderKey;
+
+/**
+ * Is OpenRouter permitted as a FALLBACK for a model whose own provider
+ * could not serve the request?
+ *
+ * Default: NO. A native-provider request with a missing or invalid key
+ * surfaces a clear configuration error instead of silently switching
+ * providers behind the user's back (policy C). Explicit OpenRouter
+ * selection is a different thing entirely and is always honored.
+ */
+export function openRouterFallbackAllowed(): boolean {
+  return process.env.LITT_ALLOW_OPENROUTER_FALLBACK === "1";
+}
+
+/**
+ * Is ANY natively-servable provider key configured here? A BYOK user with
+ * only OPENAI_API_KEY set must not be told "no model available" merely
+ * because OPENROUTER_API_KEY is absent (policy B).
+ */
+export function hasAnyNativeProviderKey(): boolean {
+  for (const providerId of OPENAI_COMPATIBLE_NATIVE_PROVIDERS) {
+    const def = getProvider(providerId);
+    if (def?.chatUrl && def.envKey && process.env[def.envKey]) return true;
+  }
+  return false;
+}
+
 export class OpenRouterModelProvider implements ModelProvider {
   /** This adapter always serves via OpenRouter (source truth for the controller). */
   readonly providerId = "openrouter" as const;
@@ -483,7 +519,15 @@ export class OpenRouterModelProvider implements ModelProvider {
         // a partial response must not be followed by a second one.
         if (state.emittedDelta) throw err;
         const classified = classifyStreamError(err);
-        if (isInsufficientCreditsError(classified) && i < ladder.length - 1) {
+        // A credit/402 rejection means the ACCOUNT cannot pay, not that
+        // the request was too large. Stepping down and retrying fails
+        // again more slowly and hides the real cause, so it stops after
+        // ONE attempt unless explicitly opted in (policy A).
+        if (
+          isInsufficientCreditsError(classified) &&
+          creditRetryEnabled() &&
+          i < ladder.length - 1
+        ) {
           lastErr = classified;
           continue;
         }
@@ -1082,9 +1126,30 @@ export function resolveProviderAdapter(
     // Direct key missing — fall through to OpenRouter fallback below.
   }
 
-  // 2. OpenRouter — either explicitly selected, or fallback for a native
-  //    provider whose direct key is not configured / has no native adapter.
+  // 2. OpenRouter — explicitly selected, or fallback for a model whose
+  //    own provider cannot serve it here. Fallback is OPT-IN ONLY
+  //    (policy C): silently rerouting a native-provider request through
+  //    OpenRouter bills a different provider and masks the real fault,
+  //    so it requires LITT_ALLOW_OPENROUTER_FALLBACK=1. Explicit
+  //    OpenRouter selection (servedBy === "openrouter") is unaffected,
+  //    as is a native provider whose key IS configured but that has no
+  //    OpenAI-compatible adapter here (OpenRouter is then the only path).
   if (routed.openRouterModelId && hasProviderKey()) {
+    const nativeDef = OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)
+      ? getProvider(servedBy)
+      : undefined;
+    const nativeKeyConfigured = !!(
+      nativeDef?.envKey && process.env[nativeDef.envKey]
+    );
+    if (nativeDef && !nativeKeyConfigured && !openRouterFallbackAllowed()) {
+      const envKeyName = nativeDef.envKey ?? servedBy.toUpperCase() + "_API_KEY";
+      throw new Error(
+        `Cannot serve ${routed.label}: ${envKeyName} is not configured. ` +
+        `Refusing to silently reroute a ${servedBy} request through OpenRouter. ` +
+        `Fix the ${servedBy} configuration, select an OpenRouter model explicitly, ` +
+        `or set LITT_ALLOW_OPENROUTER_FALLBACK=1 to permit fallback.`,
+      );
+    }
     return new OpenRouterModelProvider({
       model: routed.openRouterModelId,
       tools,

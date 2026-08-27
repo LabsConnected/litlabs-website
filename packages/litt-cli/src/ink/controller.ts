@@ -46,7 +46,12 @@ import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, Executio
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { hasOpenRouterKey, resolveProviderAdapter, type ResolvedModelProvider } from "../lib/model-provider.js";
+import {
+  hasOpenRouterKey,
+  hasAnyNativeProviderKey,
+  resolveProviderAdapter,
+  type ResolvedModelProvider,
+} from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
@@ -147,7 +152,10 @@ function resolveModelProvider(
  * a local provider key must actually be present.
  */
 function modelExecutionAvailable(target: ExecutionTarget): boolean {
-  return target === "remote" || hasOpenRouterKey();
+  // A configured native provider key is sufficient on its own (policy B).
+  // Requiring only an OpenRouter key made BYOK-only setups
+  // (OPENAI_API_KEY and nothing else) read as "no model available".
+  return target === "remote" || hasOpenRouterKey() || hasAnyNativeProviderKey();
 }
 
 /**
