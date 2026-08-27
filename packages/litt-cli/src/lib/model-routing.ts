@@ -170,6 +170,51 @@ export const MODEL_CATALOG: ModelChoice[] = [
     verifiedAt: "2026-08-14",
     source: "openrouter-catalog",
   },
+  // ─── Free OpenRouter models (zero-cost, rate-limited) ───────────
+  // These use OpenRouter's free tier — no credits required.
+  // Rate-limited but functional for users without funded accounts.
+  {
+    id: "minimax/minimax-m3:free",
+    label: "MiniMax M3 (Free)",
+    provider: "OpenRouter",
+    description: "Free tier — general purpose, 1M context",
+    strengths: ["general", "reasoning", "large-context", "free"],
+    cost: 0,
+    power: 3,
+    contextK: 1048,
+    providerModelId: "minimax/minimax-m3:free",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+  },
+  {
+    id: "z-ai/glm-5.2:free",
+    label: "GLM-5.2 (Free)",
+    provider: "OpenRouter",
+    description: "Free tier — coding + reasoning, 256K context",
+    strengths: ["coding", "reasoning", "general", "free"],
+    cost: 0,
+    power: 3,
+    contextK: 256,
+    providerModelId: "z-ai/glm-5.2:free",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+  },
+  {
+    id: "google/gemma-4-31b-it:free",
+    label: "Gemma 4 31B (Free)",
+    provider: "OpenRouter",
+    description: "Free tier — Google open model, 262K context",
+    strengths: ["general", "fast", "free"],
+    cost: 0,
+    power: 2,
+    contextK: 262,
+    providerModelId: "google/gemma-4-31b-it:free",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+  },
 ];
 
 /**

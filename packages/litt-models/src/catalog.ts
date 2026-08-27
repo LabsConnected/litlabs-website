@@ -546,6 +546,69 @@ const QWEN_MODELS: ModelDefinition[] = [
   },
 ];
 
+// ─── Free OpenRouter models (zero-cost, rate-limited) ──────────────
+// These use OpenRouter's free tier — no credits required on any account.
+// Rate-limited but functional for users without funded provider accounts.
+const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
+  {
+    canonicalId: "minimax-m3-free",
+    displayName: "MiniMax M3 (Free)",
+    provider: "openrouter",
+    providerModelId: "minimax/minimax-m3:free",
+    openRouterModelId: "minimax/minimax-m3:free",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "normal",
+    intelligence: "balanced",
+    contextWindow: 1_048_576,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — general purpose, 1M context. Rate-limited.",
+    recommendedFor: ["free", "general", "reasoning", "large-context"],
+    domain: "text",
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+  {
+    canonicalId: "glm-5.2-free",
+    displayName: "GLM-5.2 (Free)",
+    provider: "openrouter",
+    providerModelId: "z-ai/glm-5.2:free",
+    openRouterModelId: "z-ai/glm-5.2:free",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 262_144,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — coding + reasoning, 256K context. Rate-limited.",
+    recommendedFor: ["free", "coding", "reasoning"],
+    domain: "text",
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+  {
+    canonicalId: "gemma-4-31b-free",
+    displayName: "Gemma 4 31B (Free)",
+    provider: "openrouter",
+    providerModelId: "google/gemma-4-31b-it:free",
+    openRouterModelId: "google/gemma-4-31b-it:free",
+    capabilities: { ...TEXT_CHAT },
+    speed: "fast",
+    intelligence: "light",
+    contextWindow: 262_144,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — Google open model, 262K context. Rate-limited.",
+    recommendedFor: ["free", "general", "fast"],
+    domain: "text",
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+];
+
 // ─── The full V1 catalog ───────────────────────────────────────────
 export const MODEL_CATALOG: ModelDefinition[] = [
   ...OPENAI_MODELS,
@@ -556,6 +619,7 @@ export const MODEL_CATALOG: ModelDefinition[] = [
   ...KIMI_MODELS,
   ...MISTRAL_MODELS,
   ...QWEN_MODELS,
+  ...FREE_OPENROUTER_MODELS,
 ];
 
 // ─── LiTT defaults (spec section 24) ───────────────────────────────
