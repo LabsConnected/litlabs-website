@@ -4,7 +4,7 @@
  * Minimal surface (everything powerful stays available; almost nothing
  * is visible until you need it):
  *
- *   LiTT                                  LOCAL        ← header (1 line)
+ *   ⚡ LiTT                                  LOCAL        ← header (1 line)
  *   (Welcome | transcript + semantic feed + DONE)
  *   › Ask LiTT anything...                                ← composer
  *   ─────────────────────────────────────────────────────
@@ -83,8 +83,6 @@ export function CockpitApp({
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
-  // In remote mode, the server holds all provider keys, so the CLI's
-  // local credential check is bypassed (all providers are "available").
   const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
 
   const controller = useCockpitController({

@@ -547,8 +547,9 @@ const QWEN_MODELS: ModelDefinition[] = [
 ];
 
 // ─── Free OpenRouter models (zero-cost, rate-limited) ──────────────
-// These use OpenRouter's free tier — no credits required on any account.
-// Rate-limited but functional for users without funded provider accounts.
+// VERIFIED 2026-08-27 via https://openrouter.ai/api/v1/models — only
+// models that currently exist in the OpenRouter free tier are listed.
+// Invalid/dead slugs removed to avoid wasting failover attempts.
 const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
   {
     canonicalId: "minimax-m3-free",
@@ -591,6 +592,26 @@ const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
     notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
   },
   {
+    canonicalId: "nemotron-3.5-lightning-free",
+    displayName: "Nemotron 3.5 Lightning (Free)",
+    provider: "openrouter",
+    providerModelId: "nvidia/nemotron-3.5-lightning:free",
+    openRouterModelId: "nvidia/nemotron-3.5-lightning:free",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 1_000_000,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — NVIDIA Nemotron 3.5 Lightning, 1M context. Rate-limited.",
+    recommendedFor: ["free", "general", "fast", "large-context"],
+    domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+  {
     canonicalId: "gemma-4-31b-free",
     displayName: "Gemma 4 31B (Free)",
     provider: "openrouter",
@@ -606,6 +627,46 @@ const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
     source: "openrouter-catalog",
     description: "Free tier — Google open model, 262K context. Rate-limited.",
     recommendedFor: ["free", "general", "fast"],
+    domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+  {
+    canonicalId: "inkling-free",
+    displayName: "Inkling (Free)",
+    provider: "openrouter",
+    providerModelId: "thinkingmachines/inkling:free",
+    openRouterModelId: "thinkingmachines/inkling:free",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "normal",
+    intelligence: "balanced",
+    contextWindow: 1_048_576,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — Thinking Machines Inkling, 1M context. Rate-limited.",
+    recommendedFor: ["free", "general", "reasoning", "large-context"],
+    domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
+    notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
+  },
+  {
+    canonicalId: "north-mini-code-free",
+    displayName: "North Mini Code (Free)",
+    provider: "openrouter",
+    providerModelId: "cohere/north-mini-code:free",
+    openRouterModelId: "cohere/north-mini-code:free",
+    capabilities: { ...TEXT_CHAT, coding: true },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 256_000,
+    availability: "online",
+    verified: true,
+    verifiedAt: "2026-08-27",
+    source: "openrouter-catalog",
+    description: "Free tier — Cohere North Mini Code, 256K context. Rate-limited.",
+    recommendedFor: ["free", "coding"],
     domain: "text",
     pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
     notes: "OpenRouter free model. No credits required. Rate-limited upstream.",

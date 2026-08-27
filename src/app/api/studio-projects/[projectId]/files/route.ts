@@ -123,7 +123,7 @@ export async function POST(
 
   const { projectId } = await params;
 
-  let body: { action?: string; path?: string; newPath?: string; content?: string };
+  let body: { action?: string; path?: string; newPath?: string; content?: string; encoding?: string };
   try {
     body = await request.json();
   } catch {

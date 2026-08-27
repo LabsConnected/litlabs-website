@@ -399,8 +399,90 @@ const innerMiddleware = useClerkMiddleware
       return protectRoute(req);
     };
 
-// Bot detection wraps the Clerk/passthrough middleware so it runs first.
-const middleware = withBotProtection(innerMiddleware);
+// ─── Dev proxy header fix ──────────────────────────────────────────
+//
+// In local development, a tunnel/proxy (e.g. stitch-mcp, cloudflared) may
+// forward browser requests to the Next.js dev server at localhost:3001 while
+// the browser's Origin header reflects the proxy's local address
+// (e.g. http://127.0.0.1:21151).  The proxy sets `x-forwarded-host` to the
+// *destination* host (localhost:3001) instead of the *original* host, so
+// Next.js's Server Action CSRF check rejects the request with
+// "Invalid Server Actions request" because Origin ≠ X-Forwarded-Host.
+//
+// This dev-only fix corrects the `x-forwarded-host` header to match the
+// browser's Origin for local/trusted origins only.  It does NOT run in
+// production (deployed environments) and only affects Server Action POSTs
+// from localhost / private-IP origins — it does not disable the CSRF check,
+// it makes the proxy headers consistent so the existing CSRF check passes.
+//
+// The proper long-term fix is to configure the proxy to set
+// X-Forwarded-Host to the original request host, not the destination.
+
+/** Local/trusted origin hosts that may need proxy header correction in dev. */
+const LOCAL_ORIGIN_PATTERNS: readonly RegExp[] = [
+  /^localhost(:\d+)?$/i,
+  /^127\.0\.0\.1(:\d+)?$/,
+  /^::1(:\d+)?$/,
+  /^\[::1\](:\d+)?$/,
+  /^192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/,
+  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/,
+  /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(:\d+)?$/,
+];
+
+function isLocalOriginHost(host: string): boolean {
+  return LOCAL_ORIGIN_PATTERNS.some((p) => p.test(host));
+}
+
+/**
+ * Dev-only: if a Server Action POST has a local Origin that doesn't match
+ * x-forwarded-host, rewrite x-forwarded-host to match the Origin so the
+ * Next.js CSRF check passes.  Returns a modified NextResponse or undefined
+ * to continue with the normal middleware chain.
+ */
+function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
+  // Never run in production / deployed environments.
+  if (isDeployed()) return undefined;
+
+  // Only relevant for Server Action POSTs (Next-Action header present).
+  const nextActionHeader = req.headers.get("next-action");
+  if (!nextActionHeader) return undefined;
+
+  const originHeader = req.headers.get("origin");
+  if (!originHeader) return undefined;
+
+  let originHost: string;
+  try {
+    originHost = new URL(originHeader).host;
+  } catch {
+    return undefined;
+  }
+
+  if (!isLocalOriginHost(originHost)) return undefined;
+
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const hostHeader = req.headers.get("host");
+
+  // If x-forwarded-host already matches the origin, no fix needed.
+  if (forwardedHost === originHost) return undefined;
+  // If host header already matches the origin, no fix needed.
+  if (!forwardedHost && hostHeader === originHost) return undefined;
+
+  // Rewrite x-forwarded-host to match the browser's Origin so the
+  // Server Action CSRF origin/host validation passes.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-forwarded-host", originHost);
+  return NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+}
+
+// Dev proxy header fix wraps the bot detection so it runs first.
+// Bot detection wraps the Clerk/passthrough middleware so it runs next.
+const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
+  const fixed = fixDevProxyHeaders(req);
+  if (fixed) return Promise.resolve(fixed);
+  return withBotProtection(innerMiddleware)(req, ...rest as never[]);
+};
 
 export default middleware;
 

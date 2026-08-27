@@ -95,16 +95,9 @@ export class ModelRuntime {
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
 
-  /**
-   * @param remoteMode — when true, all providers are treated as having
-   *   credentials (the LiTT server holds the keys). This is correct for
-   *   the authenticated remote cockpit: the CLI doesn't need local API
-   *   keys because the server proxies all model calls.
-   */
   constructor(remoteMode = false) {
     const envAccessor = envAccessorFromProcess();
     const baseResolver = createEnvCredentialResolver(envAccessor.get);
-    // In remote mode, every provider has credentials — the server has them.
     const resolver = remoteMode
       ? (_provider: ProviderId): CredentialInfo => ({ hasCredential: true, source: "litt-managed", servedBy: _provider })
       : baseResolver;
@@ -326,6 +319,6 @@ export function routingReason(routed: RoutedModel, _input: string): string {
 
 // ─── Credential check (kept for controller compat) ─────────────────
 
-export function hasProviderKey(): boolean {
+export function hasOpenRouterKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY;
 }

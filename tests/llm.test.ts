@@ -142,15 +142,25 @@ describe("LLM Client & Studio Models Test Suite", () => {
       // and cause failover to openrouter-free if the chain is "auto" (default chain for chat: gemini -> groq -> openrouter-free)
       generateContentMock.mockRejectedValue(mockGeminiError);
 
-      // Mock fetch for OpenRouter (which is the last fallback of "auto" category)
-      // Since Groq is second, we'll mock Groq to also fail with 500
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          text: async () => "Internal Server Error",
-        }) // Groq fails
-        .mockResolvedValueOnce({
+      // URL-aware mock: OpenAI fails, Groq fails with 500, OpenRouter succeeds.
+      // OPENAI_API_KEY may be set in the env, putting OpenAI first in the chain.
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes("api.openai.com")) {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => "Internal Server Error",
+          };
+        }
+        if (url.includes("groq.com")) {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => "Internal Server Error",
+          };
+        }
+        // OpenRouter succeeds
+        return {
           ok: true,
           status: 200,
           json: async () => ({
@@ -158,7 +168,8 @@ describe("LLM Client & Studio Models Test Suite", () => {
             usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
             model: "openrouter/free",
           }),
-        }); // OpenRouter succeeds
+        };
+      });
 
       const res = await generateText("Test prompt", { category: "auto" });
 
@@ -188,25 +199,45 @@ describe("LLM Client & Studio Models Test Suite", () => {
     });
 
     it("marks provider as cooldown on 404 (model not found) and skips it", async () => {
-      // Create a specific 404 error like OpenRouter or other provider
-      // Mock Gemini to throw a 404-like error (which inside dispatchProvider might be wrapped or general error,
-      // but let's test fetch failing with 404 for openrouter-qwen in code category)
       // Category code default chain: ["openrouter-qwen", "gemini", "openrouter-free"]
-
-      mockFetch
-        .mockResolvedValueOnce({
+      // URL+body-aware mock: OpenAI fails with 404 (triggers cooldown),
+      // openrouter-qwen returns 404 (triggers cooldown),
+      // openrouter-free returns 200. OPENAI_API_KEY may be set in the env.
+      // The model name is in the POST body, not the URL, for OpenRouter.
+      mockFetch.mockImplementation(async (url: string, init?: any) => {
+        if (url.includes("api.openai.com")) {
+          return {
+            ok: false,
+            status: 404,
+            text: async () => "Model not found",
+          };
+        }
+        if (url.includes("openrouter.ai")) {
+          const body = init?.body ? JSON.parse(init.body) : {};
+          if (body.model && body.model.includes("qwen")) {
+            return {
+              ok: false,
+              status: 404,
+              text: async () => "Model not found",
+            };
+          }
+          // openrouter-free succeeds
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              choices: [{ message: { content: "Mistral/Qwen second attempt success" } }],
+              model: "openrouter/free",
+            }),
+          };
+        }
+        // Default: fail
+        return {
           ok: false,
-          status: 404,
-          text: async () => "Model not found",
-        }) // openrouter-qwen returns 404
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: async () => ({
-            choices: [{ message: { content: "Mistral/Qwen second attempt success" } }],
-            model: "openrouter/free",
-          }),
-        }); // openrouter-free gets called next or gemini gets called
+          status: 500,
+          text: async () => "Internal Server Error",
+        };
+      });
 
       // Gemini mock to also fail so it skips to openrouter-free
       generateContentMock.mockRejectedValue(new Error("Gemini fails"));
@@ -215,7 +246,8 @@ describe("LLM Client & Studio Models Test Suite", () => {
       expect(res1.provider).toBe("openrouter-free");
       expect(res1.failover).toContain("openrouter-qwen");
 
-      // The next call for "code" should skip openrouter-qwen entirely due to cooldown!
+      // The next call for "code" should skip openrouter-qwen AND openai
+      // entirely due to cooldown (both got 404 in the first call).
       vi.clearAllMocks();
       generateContentMock.mockResolvedValue({
         response: {
@@ -227,7 +259,8 @@ describe("LLM Client & Studio Models Test Suite", () => {
       expect(res2.provider).toBe("gemini");
       // Verify openrouter-qwen was put in failover (cooldown skips it and adds to failover)
       expect(res2.failover).toContain("openrouter-qwen");
-      // And fetch should NOT have been called for openrouter-qwen
+      // And fetch should NOT have been called — both OpenAI and openrouter-qwen
+      // are in cooldown, so Gemini (mocked via generateContentMock) handles it.
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });

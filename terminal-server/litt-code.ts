@@ -14,37 +14,6 @@ export type ChatMessage = {
  * only field every provider guarantees. OpenRouter and direct OpenAI
  * (the two providers ever billed) always populate all three.
  */
-// ── Output-token policy — ONE canonical default ─────────────────────
-//
-// 3000 is the canonical managed-remote default and MUST match the CLI's
-// DEFAULT_MAX_TOKENS (packages/litt-cli/src/lib/model-provider.ts).
-// Competing defaults (3000 client / 4096 server) made the effective cap
-// depend on which layer happened to fill it in.
-//
-// Leaving max_tokens undefined is what caused the original bug: the
-// provider then applies the MODEL's own output ceiling (65536 for
-// GPT-5.6), which burns credits and 402s a low-balance account on a
-// trivial prompt. Every request path resolves through
-// resolveServerMaxTokens() so undefined can never reach a provider.
-export const DEFAULT_MAX_TOKENS = 3000;
-
-// Hard safety ceiling. An explicit caller value below this is preserved
-// verbatim; anything above it is clamped. This is the backstop that keeps
-// a mis-set client from ever requesting the model ceiling again.
-export const MAX_OUTPUT_TOKENS = 16_384;
-
-/**
- * Resolve the output-token cap for a provider request.
- * Explicit sane value -> preserved. Missing/invalid -> canonical default.
- * Anything above the ceiling -> clamped.
- */
-export function resolveServerMaxTokens(requested?: number): number {
-  if (typeof requested === "number" && requested > 0) {
-    return Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS);
-  }
-  return DEFAULT_MAX_TOKENS;
-}
-
 export type LiTTUsage = {
   total_tokens: number;
   prompt_tokens?: number;
@@ -303,10 +272,11 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens — leaving this undefined causes OpenRouter
-    // to default to the model's max_output_tokens (e.g. 65536), which
-    // wastes credits and causes 402 errors on low-balance accounts.
-    max_tokens: 4096,
+    // Cap at 3000 output tokens — the canonical managed-remote default
+    // shared by CLI (DEFAULT_MAX_TOKENS) and terminal-server. Leaving this
+    // undefined causes OpenRouter to default to the model's max_output_tokens
+    // (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: DEFAULT_MAX_TOKENS,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -438,6 +408,20 @@ export type RemoteToolSchema = {
   function: { name: string; description?: string; parameters?: Record<string, unknown> };
 };
 
+// ── Output-token policy (policy D) ─────────────────────────────────
+// ONE canonical 3000 cap shared by CLI (DEFAULT_MAX_TOKENS in
+// model-provider.ts) and terminal-server. resolveServerMaxTokens()
+// ensures undefined can never reach a provider — the model's own
+// output ceiling (65536 for GPT-5.6) can never be requested again.
+export const DEFAULT_MAX_TOKENS = 3000;
+export const MAX_OUTPUT_TOKENS = 16_384;
+export function resolveServerMaxTokens(requested?: number): number {
+  if (typeof requested === "number" && requested > 0 && Number.isFinite(requested)) {
+    return Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS);
+  }
+  return DEFAULT_MAX_TOKENS;
+}
+
 export interface StreamModelForRemoteClientOptions {
   /**
    * The model id to use, already resolved by the CLIENT's own routing.
@@ -479,6 +463,18 @@ export interface StreamModelForRemoteClientOptions {
  * Throws on any upstream failure; the caller (server.ts) is responsible
  * for redacting the error message before it reaches the client.
  */
+
+// ── Free-model cooldown tracking ────────────────────────────────────
+// Records when each free OpenRouter model last failed with a rate-limit
+// or 404. Models in cooldown are skipped during failover to prevent
+// one request from blindly hammering all models. TTL: 60 seconds.
+const freeModelCooldown = new Map<string, number>();
+
+/** Test helper: clear the free-model cooldown map. */
+export function _clearFreeModelCooldown(): void {
+  freeModelCooldown.clear();
+}
+
 export async function streamModelForRemoteClient(
   messages: ChatMessage[],
   tools: RemoteToolSchema[],
@@ -526,19 +522,134 @@ export async function streamModelForRemoteClient(
       });
     } catch (openaiErr) {
       const msg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
-      // Failover to a free OpenRouter model on ANY OpenAI error so users
-      // without funded OpenAI accounts can still use LiTT.
-      if (openrouterKey) {
-        const freeModel = "minimax/minimax-m3:free";
-        console.log(`[transport] OpenAI error → failover to free OpenRouter model ${freeModel}`);
-        emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
-        return streamOpenRouterRemote(messages, tools, emit, {
-          model: freeModel,
-          apiKey: openrouterKey,
-          maxTokens: options.maxTokens,
-          signal: options.signal,
-          profile,
+      const status = (openaiErr as any)?.status;
+      const retryAfter = (openaiErr as any)?.retryAfter;
+      // ── Failover policy ───────────────────────────────────────────
+      // 401 (invalid_api_key) → STOP, configuration error (no failover)
+      // 429 + insufficient_quota/credit_balance → immediate free fallback
+      // 429 + rate_limit (transient) → short backoff, retry OpenAI once,
+      //   THEN free fallback if still blocked. Keeps OpenAI primary.
+      // 402 / 503 / service_unavailable → immediate free fallback
+      const isInvalidKey = status === 401 || msg.includes("401") || msg.includes("invalid_api_key");
+      const isInsufficientQuota =
+        msg.includes("insufficient_quota") || msg.includes("credit_balance") ||
+        msg.includes("credit_balance_exhausted") || msg.includes("credits remaining") ||
+        msg.includes("billing");
+      const isTransientRateLimit =
+        (status === 429 || msg.includes("429")) &&
+        (msg.includes("rate_limit") || msg.includes("rate limit") ||
+         msg.includes("Rate limit") || !!retryAfter);
+      const isBillingOrAvail =
+        msg.includes("402") || msg.includes("503") ||
+        msg.includes("service_unavailable");
+
+      if (isInvalidKey) {
+        // Configuration error — surface clearly, do NOT failover
+        console.log(`[transport] OpenAI 401 invalid key → surfacing as config error (no failover)`);
+        throw new Error(
+          "OpenAI API key is invalid or revoked. Set a valid OPENAI_API_KEY " +
+          "(sk-proj-...) to use direct OpenAI. This is a configuration error, " +
+          "not a billing issue — failover to OpenRouter is intentionally disabled."
+        );
+      }
+
+      // 429 transient rate-limit: retry OpenAI once with backoff before
+      // falling back to free models. Keeps OpenAI genuinely primary.
+      if (isTransientRateLimit && !isInsufficientQuota) {
+        const backoffMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 5000) : 2000;
+        console.log(`[transport] OpenAI 429 transient rate-limit → retrying after ${backoffMs}ms backoff`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        try {
+          return await streamOpenAIDirect(messages, tools, emit, {
+            model,
+            apiKey: openaiKey!,
+            maxTokens: options.maxTokens,
+            signal: options.signal,
+            profile,
+          });
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          console.log(`[transport] OpenAI retry still failing (${retryMsg.slice(0, 80)}) → free fallback`);
+          // Fall through to free fallback below
+        }
+      }
+
+      const shouldFailover = openrouterKey && (isInsufficientQuota || isBillingOrAvail || isTransientRateLimit);
+
+      if (shouldFailover) {
+        // VERIFIED 2026-08-27 via https://openrouter.ai/api/v1/models
+        // Only models that currently exist in OpenRouter's free tier.
+        const freeModels = [
+          "minimax/minimax-m3:free",
+          "z-ai/glm-5.2:free",
+          "nvidia/nemotron-3.5-lightning:free",
+          "google/gemma-4-31b-it:free",
+          "thinkingmachines/inkling:free",
+          "cohere/north-mini-code:free",
+        ];
+        // Cooldown tracking: skip models that failed recently (60s window)
+        // This prevents one request from blindly hammering all models.
+        const now = Date.now();
+        const COOLDOWN_MS = 60_000;
+        const tryable = freeModels.filter(m => {
+          const failTime = freeModelCooldown.get(m);
+          if (failTime && (now - failTime) < COOLDOWN_MS) {
+            console.log(`[transport] skipping ${m} (cooldown ${(now - failTime) / 1000 | 0}s/${COOLDOWN_MS / 1000}s)`);
+            return false;
+          }
+          return true;
         });
+
+        if (tryable.length === 0) {
+          throw new Error(
+            "All free OpenRouter models are on cooldown (recently failed). " +
+            "Please retry in a minute, add credits at https://openrouter.ai/settings/credits, " +
+            "or add an OpenAI key with credits."
+          );
+        }
+
+        console.log(`[transport] OpenAI billing error → trying ${tryable.length}/${freeModels.length} free OpenRouter models`);
+        for (const freeModel of tryable) {
+          console.log(`[transport]   trying ${freeModel}`);
+          try {
+            emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
+            const result = await streamOpenRouterRemote(messages, tools, emit, {
+              model: freeModel,
+              apiKey: openrouterKey,
+              maxTokens: options.maxTokens,
+              signal: options.signal,
+              profile,
+            });
+            // Success — clear cooldown for this model
+            freeModelCooldown.delete(freeModel);
+            return result;
+          } catch (orErr) {
+            const orMsg = orErr instanceof Error ? orErr.message : String(orErr);
+            console.log(`[transport]   ${freeModel} failed: ${orMsg.slice(0, 120)}`);
+            // Record cooldown for rate-limited / unavailable models
+            if (orMsg.includes("429") || orMsg.includes("rate_limit") || orMsg.includes("rate-limited")) {
+              freeModelCooldown.set(freeModel, now);
+              continue; // try next model
+            }
+            // 404 = model doesn't exist (shouldn't happen with verified list, but handle it)
+            if (orMsg.includes("404")) {
+              freeModelCooldown.set(freeModel, now);
+              continue;
+            }
+            // 402 = OpenRouter out of credits entirely — no point trying more
+            if (orMsg.includes("402") || orMsg.includes("credits")) {
+              throw orErr;
+            }
+            // Other error — surface it
+            throw orErr;
+          }
+        }
+        // All tryable models failed
+        throw new Error(
+          "All available free OpenRouter models are rate-limited or unavailable. " +
+          "Please retry in a minute, add credits at https://openrouter.ai/settings/credits, " +
+          "or add an OpenAI key with credits."
+        );
       }
       throw openaiErr;
     }
@@ -586,10 +697,11 @@ async function streamOpenAIDirect(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens by default — leaving this undefined
-    // causes OpenRouter to default to the model's max_output_tokens
-    // (e.g. 65536), which wastes credits and causes 402 errors.
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
+    // Cap at 3000 output tokens by default — the canonical managed-remote
+    // default shared by CLI (DEFAULT_MAX_TOKENS) and terminal-server.
+    // Leaving this undefined causes OpenRouter to default to the model's
+    // max_output_tokens (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: resolveServerMaxTokens(options.maxTokens),
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
@@ -604,7 +716,14 @@ async function streamOpenAIDirect(
   });
   if (!res.ok || !res.body) {
     const errorText = await res.text().catch(() => "");
-    throw new Error(`OpenAI API error ${res.status}: ${errorText || res.statusText}`);
+    // Enrich the error with status + Retry-After so the failover layer
+    // can distinguish a temporary rate-limit (retry with backoff) from
+    // an exhausted-quota 429 (immediate free fallback).
+    const retryAfter = res.headers.get("retry-after");
+    const err = new Error(`OpenAI API error ${res.status}: ${errorText || res.statusText}`);
+    (err as any).status = res.status;
+    (err as any).retryAfter = retryAfter;
+    throw err;
   }
 
   emit({ type: "meta", provider: "openai", model, profile });
@@ -629,10 +748,12 @@ async function streamOpenRouterRemote(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens by default — leaving this undefined
-    // causes OpenRouter to default to the model's max_output_tokens
-    // (e.g. 65536), which wastes credits and causes 402 errors.
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+    // Cap at 3000 output tokens by default — the canonical managed-remote
+    // default shared by CLI (DEFAULT_MAX_TOKENS) and terminal-server.
+    // Leaving this undefined causes OpenRouter to default to the model's
+    // max_output_tokens (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: resolveServerMaxTokens(options.maxTokens),
+    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -783,26 +904,12 @@ export async function streamLiTTMessages(
       return await streamOpenAIDirect(messages, [], emit, {
         model: nativeModel,
         apiKey: openaiKey!,
-        maxTokens: 4096,
+        maxTokens: 3000,
         profile,
       });
     } catch (openaiErr) {
-      const errMsg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
-      console.log(`[transport] /api/chat direct OpenAI failed: ${errMsg} → falling back to OpenRouter`);
-      // Failover to free OpenRouter model on ANY OpenAI error (billing,
-      // model not found, rate limit, etc.) so users without funded
-      // OpenAI accounts can still use LiTT.
-      const openrouterKey = process.env.OPENROUTER_API_KEY;
-      if (openrouterKey) {
-        const freeModel = "minimax/minimax-m3:free";
-        console.log(`[transport] OpenAI error → failover to free OpenRouter model ${freeModel}`);
-        try {
-          return await streamChatWithOpenRouter(messages, emit, freeModel, profile, false);
-        } catch (freeErr) {
-          console.log(`[transport] free model failover also failed: ${freeErr instanceof Error ? freeErr.message : String(freeErr)}`);
-        }
-      }
-      // Fall through to standard OpenRouter fallback below
+      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
+      // Fall through to OpenRouter fallback below
     }
   }
 
@@ -1030,11 +1137,11 @@ export async function streamLiTTMessagesWithTools(
       content: message.content,
     })),
     stream: false,
+    // Cap at 3000 — the canonical default shared by CLI and terminal-server.
+    max_tokens: DEFAULT_MAX_TOKENS,
     tools,
     tool_choice: nativeTools.length > 0 ? "auto" : "none",
     parallel_tool_calls: false,
-    // Canonical output cap (3000) — see resolveServerMaxTokens above.
-    max_tokens: resolveServerMaxTokens(),
   };
 
   const startedAt = Date.now();

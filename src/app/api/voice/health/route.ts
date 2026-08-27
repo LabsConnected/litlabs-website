@@ -50,12 +50,26 @@ export async function GET(req: NextRequest) {
   // Check configuration (env vars exist)
   const configured = !!(apiKey && littVoice && authSecret && authSecret.length >= 32);
 
+  // Also check LiveKit configuration (the newer realtime transport)
+  const livekitUrl = process.env.LIVEKIT_URL;
+  const livekitApiKey = process.env.LIVEKIT_API_KEY;
+  const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
+  const livekitConfigured = !!(livekitUrl && livekitApiKey && livekitApiSecret);
+
   const details = {
     apiKey: !!apiKey,
     littVoice: !!littVoice,
     sparkVoice: !!sparkVoice,
     wsUrl: !!wsUrl,
     authSecret: !!(authSecret && authSecret.length >= 32),
+    // LiveKit status — surfaced so the Studio can show which transport
+    // is available (LiveKit preferred, Inworld fallback).
+    livekit: {
+      configured: livekitConfigured,
+      url: !!livekitUrl,
+      apiKey: !!livekitApiKey,
+      apiSecret: !!livekitApiSecret,
+    },
   };
 
   // If not configured, return not_configured
@@ -66,7 +80,7 @@ export async function GET(req: NextRequest) {
     if (!authSecret || authSecret.length < 32) missing.push("VOICE_AUTH_SECRET");
 
     return NextResponse.json({
-      provider: "inworld",
+      provider: livekitConfigured ? "livekit" : "inworld",
       configured: false,
       tokenService: "error",
       transport: "disconnected",

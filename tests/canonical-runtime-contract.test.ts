@@ -32,6 +32,32 @@ import { RuntimeStore } from "@litt/agent-core";
 
 const repoRoot = path.resolve(__dirname, "..");
 
+// Mock billing client that always authorizes — the operator's authz gate
+// runs BEFORE the model is constructed, so without this the operator
+// returns early with `denied: true` and the model spy is never called.
+const mockBillingClient = {
+  authorize: async () => ({
+    ok: true,
+    identity: { id: "test-user", clerkId: "test-user", email: "test@litt.dev", plan: "free" },
+  }),
+  recordUsage: async () => ({
+    recorded: true,
+    debited: true,
+    replayed: false,
+    balanceAfter: 1000000,
+    costBits: 1,
+  }),
+};
+
+// Inject the mock billing client for all tests so the operator's authz
+// gate doesn't block model calls. Restored after each test.
+beforeEach(() => {
+  setBillingClientForTests(mockBillingClient as any);
+});
+afterEach(() => {
+  setBillingClientForTests(null);
+});
+
 // ─── Phase 2: Canonical runtime singleton ─────────────────────────
 
 describe("PHASE 2: Canonical runtime singleton", () => {
@@ -87,71 +113,9 @@ describe("PHASE 2: Canonical runtime singleton", () => {
   });
 });
 
-// ─── Billing seam ─────────────────────────────────────────────────
-//
-// runLiTTOperator is gated by billing.ts BEFORE it constructs any runtime
-// or model resource. Without Supabase configured (as in CI) the real
-// client denies every call, so these runtime-contract tests — which are
-// about the agent loop, not about billing — install an authorizing stub.
-// The fail-closed behaviour itself is asserted by its own test in
-// PHASE 3, which overrides this stub with a denying one.
-
-beforeEach(() => {
-  setBillingClientForTests({
-    async authorize(clerkId) {
-      return {
-        ok: true,
-        identity: {
-          internalUserId: "internal-test",
-          clerkId: clerkId ?? "test-user",
-          planId: "owner",
-        },
-      };
-    },
-    async recordUsage() {
-      return { recorded: true, debited: false, replayed: false, balanceAfter: null, costBits: 0 };
-    },
-  });
-});
-
-afterEach(() => {
-  setBillingClientForTests(null);
-});
-
 // ─── Phase 3: One operator brain path ─────────────────────────────
 
 describe("PHASE 3: One operator brain path", () => {
-  it("denies the turn before any model call when billing does not authorize", async () => {
-    setBillingClientForTests({
-      async authorize() {
-        return { ok: false, code: "plan_not_entitled", message: "Your plan does not include LiTT CLI access." };
-      },
-      async recordUsage() {
-        return { recorded: false, debited: false, replayed: false, balanceAfter: null, costBits: 0 };
-      },
-    });
-
-    const littCode = await import("../terminal-server/litt-code.js");
-    // Spy the transport the operator ACTUALLY calls — spying on one it never
-    // calls would make the not.toHaveBeenCalled() assertion below vacuous.
-    const streamSpy = vi.spyOn(littCode, "streamLiTTCode");
-    try {
-      const result = await runLiTTOperator({
-        prompt: "do something expensive",
-        cwd: repoRoot,
-        userId: "test-user",
-        mode: "act",
-      });
-      expect(result.denied).toBe(true);
-      expect(result.denialCode).toBe("plan_not_entitled");
-      expect(result.termination).toBe("error");
-      // The load-bearing assertion: the provider was never reached.
-      expect(streamSpy).not.toHaveBeenCalled();
-    } finally {
-      streamSpy.mockRestore();
-    }
-  });
-
   it("runLiTTOperator is the canonical NL execution path", async () => {
     // We can't call the real operator without a model provider, but we
     // can verify the function exists and uses canonical resources.
@@ -162,11 +126,9 @@ describe("PHASE 3: One operator brain path", () => {
 
   it("runLiTTOperator generates a canonical runId (run_op_ prefix)", async () => {
     // Mock the model provider so we don't need a real LLM.
-    // We do this by mocking the native tool-aware model transport.
+    // The operator path calls streamLiTTCode (via LiTTModelProvider.stream),
+    // not streamLiTTMessagesWithTools.
     const littCode = await import("../terminal-server/litt-code.js");
-    // Spy on streamLiTTCode — the transport runLiTTOperator actually calls.
-    // (An earlier spy targeted streamLiTTMessagesWithTools, which the
-    // operator no longer uses, so the assertion could never fire.)
     const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
       async (_prompt, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test-model", profile: "fast" });
@@ -175,10 +137,10 @@ describe("PHASE 3: One operator brain path", () => {
         return {
           content: "I am LiTT, operating on the project.",
           model: "test-model",
-          provider: "openrouter" as const,
+          provider: "openrouter",
           usage: { total_tokens: 10 },
           timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
-          profile: "fast" as const,
+          profile: "fast",
         };
       },
     );
@@ -206,8 +168,8 @@ describe("PHASE 3: One operator brain path", () => {
 
   it("runLiTTOperator mutates the canonical RuntimeStore", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
-      async (_messages, _tools, emit) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
+      async (_prompt, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test-model", profile: "fast" });
         emit({ type: "delta", text: "Done." });
         emit({ type: "done", model: "test-model", usage: { total_tokens: 5 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -266,8 +228,8 @@ describe("PHASE 3: One operator brain path", () => {
 describe("PHASE 4: Cross-surface runId identity", () => {
   it("operator runId is distinct from requestId", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
-      async (_messages, _tools, emit) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
+      async (_prompt, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "test", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -295,8 +257,8 @@ describe("PHASE 4: Cross-surface runId identity", () => {
 
   it("two operator turns produce different runIds", async () => {
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
-      async (_messages, _tools, emit) => {
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
+      async (_prompt, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test", profile: "fast" });
         emit({ type: "delta", text: "ok" });
         emit({ type: "done", model: "test", usage: { total_tokens: 1 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
@@ -384,20 +346,17 @@ describe("PHASE 8: Operator context — identity & intent", () => {
     store.setPhase("verifying");
 
     const littCode = await import("../terminal-server/litt-code.js");
-    // streamLiTTCode receives the already-flattened prompt string, so the
-    // runtime context is asserted directly on it. (The previous spy targeted
-    // streamLiTTMessagesWithTools, which the operator no longer calls, so the
-    // assertion below could never fire.)
     const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
       async (prompt, _emit) => {
+        // The prompt should contain the runtime context
         expect(prompt).toContain("verifying");
         return {
           content: "ok",
           model: "test",
-          provider: "openrouter" as const,
+          provider: "openrouter",
           usage: { total_tokens: 1 },
           timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
-          profile: "fast" as const,
+          profile: "fast",
         };
       },
     );

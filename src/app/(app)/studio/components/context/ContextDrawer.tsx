@@ -27,7 +27,7 @@
  */
 
 import { type ReactNode } from "react";
-import { Folder, ClipboardList, PanelRightClose, ImageIcon, Activity } from "lucide-react";
+import { Folder, ClipboardList, PanelRightClose, PanelLeftClose, ImageIcon, Activity } from "lucide-react";
 
 export type ContextDrawerTab = "work" | "files" | "assets" | "inspector";
 
@@ -50,6 +50,12 @@ export interface ContextDrawerProps {
   inspectorContent: ReactNode;
   /** Width in pixels when open (controlled by parent via useResizableWidth) */
   width?: number;
+  /**
+   * Desktop position — "left" renders the panel left-of-center (Phase 1
+   * shell geometry), "right" renders it on the right (legacy/default).
+   * Mobile is always a right-side fixed overlay regardless of this prop.
+   */
+  position?: "left" | "right";
 }
 
 const PRIMARY_TABS: { id: ContextDrawerTab; label: string; icon: typeof Folder }[] = [
@@ -74,8 +80,11 @@ export default function ContextDrawer({
   assetsContent,
   inspectorContent,
   width = 320,
+  position = "right",
 }: ContextDrawerProps) {
   const pxWidth = `${width}px`;
+  const isLeft = position === "left";
+  const CloseIcon = isLeft ? PanelLeftClose : PanelRightClose;
   return (
     <>
       {/* Mobile backdrop — only present while open */}
@@ -94,6 +103,7 @@ export default function ContextDrawer({
           fixed inset-y-0 right-0 z-40 flex flex-col overflow-hidden border-l
           transition-[width] duration-150 ease-out
           lg:relative lg:z-auto lg:inset-auto
+          ${isLeft ? "lg:left-0 lg:right-auto lg:border-r lg:border-l-0" : ""}
           ${open ? "" : "pointer-events-none w-0 border-transparent lg:w-0"}
         `}
         style={{
@@ -105,6 +115,7 @@ export default function ContextDrawer({
         }}
         data-testid="context-drawer"
         data-open={open}
+        data-position={position}
         aria-label="Context drawer"
         aria-hidden={!open}
       >
@@ -180,7 +191,7 @@ export default function ContextDrawer({
               data-testid="context-drawer-close"
               tabIndex={open ? 0 : -1}
             >
-              <PanelRightClose size={14} className="pointer-events-none" />
+              <CloseIcon size={14} className="pointer-events-none" />
             </button>
           </div>
 
