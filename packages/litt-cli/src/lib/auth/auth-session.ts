@@ -17,6 +17,7 @@ import { ClerkCliAuth } from "./clerk-auth.js";
 import { resolveAuthConfig, hasAuthConfig } from "./auth-config.js";
 import type { AuthState, CredentialStore, LoginResult, UserInfo } from "./types.js";
 import { AuthError } from "./types.js";
+import { RemoteUnavailableError } from "../remote-unavailable.js";
 
 /** The signed-out state (used when no credentials exist). */
 const SIGNED_OUT: AuthState = {
@@ -85,6 +86,45 @@ export class AuthSession {
       // so the caller can show the sign-in-required screen.
       if (error instanceof AuthError && (error.code === "token_refresh" || error.code === "token_exchange")) {
         return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Strict variant of `getAccessToken()` for the REMOTE dispatch path.
+   *
+   * `getAccessToken()` deliberately collapses "never signed in" and
+   * "signed in, but the refresh failed" into the same `null`, because the
+   * UI treats both as "show the sign-in screen".
+   *
+   * The remote path must NOT collapse them. An expired/revoked session has
+   * to be reported as `auth_expired` so the caller CLEARS the dead
+   * credential (see CREDENTIAL_CLEARING_REASONS); reporting it as "not
+   * authenticated" would leave an unusable credential on disk and loop the
+   * user through a login that appears to succeed and then fails again.
+   *
+   * Returns null only when there is genuinely no credential.
+   * Throws RemoteUnavailableError("auth_expired") when one exists but is
+   * no longer usable.
+   */
+  async getAccessTokenStrict(): Promise<string | null> {
+    const envToken = process.env.LITT_CLERK_TOKEN;
+    if (envToken) return envToken;
+
+    if (!hasAuthConfig()) return null;
+
+    try {
+      return await this.auth.getAccessToken();
+    } catch (error) {
+      if (
+        error instanceof AuthError &&
+        (error.code === "token_refresh" || error.code === "token_exchange")
+      ) {
+        throw new RemoteUnavailableError(
+          "auth_expired",
+          "Stored credentials could not be refreshed.",
+        );
       }
       throw error;
     }
