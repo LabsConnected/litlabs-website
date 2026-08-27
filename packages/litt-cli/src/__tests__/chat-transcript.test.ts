@@ -41,14 +41,14 @@ function startAssistantTurn(
     servedModel?: string | null;
     fallbackReason?: string | null;
   } = {},
-): void {
+): string {
   store.add({
     role: "user",
     content: userText,
     ts: Date.now(),
     status: "complete",
   });
-  store.add({
+  return store.add({
     role: "assistant",
     content: "",
     ts: Date.now(),
@@ -60,9 +60,17 @@ function startAssistantTurn(
   });
 }
 
-/** Stream a delta into the pending assistant message. */
-function streamDelta(store: ChatTranscriptStore, text: string): void {
-  store.appendDelta(text);
+/**
+ * Id of the newest message — the turn these helpers target by default,
+ * matching the pre-invariant-7 "operate on the last message" shape.
+ */
+function lastId(store: ChatTranscriptStore): string {
+  return store.last()?.id ?? "";
+}
+
+/** Stream a delta into a pending assistant message (defaults to the newest). */
+function streamDelta(store: ChatTranscriptStore, text: string, id?: string): void {
+  store.appendDelta(id ?? lastId(store), text);
 }
 
 /** Finalize the pending assistant message (success or error). */
@@ -71,8 +79,9 @@ function finalizeAssistant(
   content: string,
   status: "complete" | "error",
   servedModel?: string | null,
+  id?: string,
 ): void {
-  store.finalize({ content, status, servedModel });
+  store.finalize(id ?? lastId(store), { content, status, servedModel });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────
@@ -299,29 +308,29 @@ describe("Chat transcript — appendDelta safety", () => {
 
   it("is a no-op when there is no streaming assistant message", () => {
     // No messages at all — delta is dropped, not crashed.
-    store.appendDelta("orphan delta");
+    store.appendDelta("chat_nonexistent", "orphan delta");
     expect(store.snapshot()).toEqual([]);
   });
 
   it("is a no-op on a completed assistant message (does not append after finalize)", () => {
-    startAssistantTurn(store, "hello");
+    const id = startAssistantTurn(store, "hello");
     finalizeAssistant(store, "Final", "complete", "gpt-5.6-luna");
 
     // A late delta must NOT mutate the finalized message.
-    store.appendDelta("late delta");
+    store.appendDelta(id, "late delta");
     expect(store.snapshot()[1].content).toBe("Final");
     expect(store.snapshot()[1].status).toBe("complete");
   });
 
   it("ignores empty deltas", () => {
-    startAssistantTurn(store, "hello");
-    store.appendDelta("");
+    const id = startAssistantTurn(store, "hello");
+    store.appendDelta(id, "");
     expect(store.snapshot()[1].content).toBe("");
   });
 
   it("is a no-op on a user message (last message is not assistant)", () => {
-    store.add({ role: "user", content: "hi", ts: Date.now(), status: "complete" });
-    store.appendDelta("should not append");
+    const id = store.add({ role: "user", content: "hi", ts: Date.now(), status: "complete" });
+    store.appendDelta(id, "should not append");
     expect(store.snapshot()[0].role).toBe("user");
     expect(store.snapshot()[0].content).toBe("hi");
     expect(store.length()).toBe(1);
@@ -336,15 +345,15 @@ describe("Chat transcript — finalize safety", () => {
   });
 
   it("is a no-op when the last message is a user message", () => {
-    store.add({ role: "user", content: "hello", ts: Date.now(), status: "complete" });
+    const id = store.add({ role: "user", content: "hello", ts: Date.now(), status: "complete" });
     // No streaming assistant to finalize — must not corrupt the user msg.
-    store.finalize({ content: "should not apply", status: "complete" });
+    store.finalize(id, { content: "should not apply", status: "complete" });
     expect(store.snapshot()[0].role).toBe("user");
     expect(store.snapshot()[0].content).toBe("hello");
   });
 
   it("is a no-op when the transcript is empty", () => {
-    store.finalize({ content: "orphan", status: "complete" });
+    store.finalize("chat_nonexistent", { content: "orphan", status: "complete" });
     expect(store.isEmpty()).toBe(true);
   });
 
@@ -386,5 +395,139 @@ describe("Chat transcript — bounding", () => {
     // The most recent messages are preserved.
     expect(snap[snap.length - 1].content).toBe("a59");
     expect(snap[snap.length - 2].content).toBe("q59");
+  });
+});
+
+// ─── Invariant 7: stale-turn protection ───────────────────────────
+//
+// The bug this prevents: appendDelta/finalize used to target whatever
+// message was LAST. When turn A was superseded (cancelled, timed out,
+// or just slow) and turn B had already opened its own assistant
+// message, A's late deltas landed on B's message — the user watched a
+// dead stream overwrite the live answer, and A's finalize replaced B's
+// body wholesale.
+//
+// Now every mutation is scoped to the id add() returned for THAT turn.
+
+describe("Chat transcript — invariant 7 (stale stream cannot touch a newer message)", () => {
+  let store: ChatTranscriptStore;
+
+  beforeEach(() => {
+    store = new ChatTranscriptStore();
+  });
+
+  it("a late delta from a superseded turn does not touch the newer message", () => {
+    // Turn A opens and streams.
+    const idA = startAssistantTurn(store, "first question");
+    streamDelta(store, "A-partial", idA);
+
+    // Turn B starts before A settled — B is now the newest message.
+    const idB = startAssistantTurn(store, "second question");
+    streamDelta(store, "B-live", idB);
+
+    // A's abandoned stream finally emits.
+    store.appendDelta(idA, "-A-LATE");
+
+    const snap = store.snapshot();
+    const a = snap.find((m) => m.id === idA)!;
+    const b = snap.find((m) => m.id === idB)!;
+    expect(b.content).toBe("B-live");           // newer message untouched
+    expect(a.content).toBe("A-partial-A-LATE"); // A's own message still its own
+  });
+
+  it("a late finalize from a superseded turn does not overwrite the newer message", () => {
+    const idA = startAssistantTurn(store, "first");
+    streamDelta(store, "A-partial", idA);
+    const idB = startAssistantTurn(store, "second");
+    streamDelta(store, "B-live", idB);
+
+    // A's loop finally errors out and finalizes ITS message.
+    store.finalize(idA, { content: "A timed out", status: "error", servedModel: "model-a" });
+
+    const b = store.snapshot().find((m) => m.id === idB)!;
+    expect(b.content).toBe("B-live");
+    expect(b.status).toBe("streaming");
+    expect(b.servedModel).toBeNull();
+
+    const a = store.snapshot().find((m) => m.id === idA)!;
+    expect(a.status).toBe("error");
+    expect(a.content).toBe("A timed out");
+  });
+
+  it("full interleaving: A starts, B starts, A's late delta AND finalize both land on A only", () => {
+    const idA = startAssistantTurn(store, "q-a");
+    streamDelta(store, "a1", idA);
+    const idB = startAssistantTurn(store, "q-b");
+    streamDelta(store, "b1", idB);
+    store.appendDelta(idA, "a2");   // stale delta
+    streamDelta(store, "b2", idB);  // live continues
+    store.finalize(idA, { content: "A final", status: "error" });
+    streamDelta(store, "b3", idB);  // live still streaming after A settled
+    store.finalize(idB, { content: "B final", status: "complete", servedModel: "model-b" });
+
+    const snap = store.snapshot();
+    expect(snap.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    const a = snap.find((m) => m.id === idA)!;
+    const b = snap.find((m) => m.id === idB)!;
+    expect(a.content).toBe("A final");
+    expect(a.status).toBe("error");
+    expect(b.content).toBe("B final");
+    expect(b.status).toBe("complete");
+    expect(b.servedModel).toBe("model-b");
+  });
+
+  it("an unknown id never mutates anything", () => {
+    const idB = startAssistantTurn(store, "only turn");
+    streamDelta(store, "live", idB);
+    const before = store.snapshot();
+
+    store.appendDelta("chat_does_not_exist", "ghost");
+    store.finalize("chat_does_not_exist", { content: "ghost", status: "complete" });
+
+    expect(store.snapshot()).toEqual(before);
+    expect(store.snapshot().find((m) => m.id === idB)!.content).toBe("live");
+  });
+
+  it("an empty id is rejected — it must never fall back to the last message", () => {
+    const idB = startAssistantTurn(store, "only turn");
+    streamDelta(store, "live", idB);
+
+    store.appendDelta("", "ghost");
+    store.finalize("", { content: "ghost", status: "complete" });
+
+    const b = store.snapshot().find((m) => m.id === idB)!;
+    expect(b.content).toBe("live");
+    expect(b.status).toBe("streaming");
+  });
+
+  it("a stale delta cannot resurrect a turn the user already saw finalized", () => {
+    const idA = startAssistantTurn(store, "q");
+    store.finalize(idA, { content: "settled answer", status: "complete" });
+    store.appendDelta(idA, " …and more");
+    expect(store.snapshot().find((m) => m.id === idA)!.content).toBe("settled answer");
+  });
+
+  it("ids stay valid across intervening messages — position is not identity", () => {
+    const idA = startAssistantTurn(store, "q-a");
+    // Several unrelated turns land in between.
+    for (let i = 0; i < 5; i++) {
+      const id = startAssistantTurn(store, `filler-${i}`);
+      store.finalize(id, { content: `filler-answer-${i}`, status: "complete" });
+    }
+    // A's stream, still open, finally finishes — it must find ITS message.
+    store.appendDelta(idA, "A-body");
+    store.finalize(idA, { content: "A-body", status: "complete" });
+
+    const a = store.snapshot().find((m) => m.id === idA)!;
+    expect(a.content).toBe("A-body");
+    expect(a.status).toBe("complete");
+    // The newest turn is untouched.
+    expect(store.last()!.content).toBe("filler-answer-4");
+  });
+
+  it("find() resolves a message by id, and returns null for an unknown id", () => {
+    const id = startAssistantTurn(store, "q");
+    expect(store.find(id)!.role).toBe("assistant");
+    expect(store.find("chat_nope")).toBeNull();
   });
 });

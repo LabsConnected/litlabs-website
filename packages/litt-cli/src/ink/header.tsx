@@ -25,6 +25,7 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
 import { deriveTransport } from "../lib/transport-projection.js";
+import type { ExecutionTarget } from "../lib/execution-target.js";
 
 export interface HeaderProps {
   project: string;
@@ -37,8 +38,19 @@ export interface HeaderProps {
   /** Provider source (e.g. "OpenRouter • BYOK ✓") */
   source: string;
   connected: boolean;
-  /** Execution target — "local" or "remote" (managed backend). */
-  executionTarget?: string;
+  /**
+   * The CONFIGURED execution target (see lib/execution-target.ts) —
+   * where the cockpit intends model calls to run.
+   *
+   * Accepted so the header shares one descriptor with the rest of the
+   * cockpit, but deliberately NOT rendered: the indicators below report
+   * the ACTUAL transport, derived from localRuntime/remoteRuntime through
+   * the shared deriveTransport projection. Rendering the configured
+   * target here would let the header claim REMOTE while the connection
+   * is offline — the exact duplication this component avoids. The
+   * configured target is surfaced in the status bar's source line.
+   */
+  executionTarget: ExecutionTarget;
   localRuntime: string;
   remoteRuntime: string;
   mode: string;

@@ -33,6 +33,43 @@ export type LocationContext = {
 // Re-export canonical types from @litt/agent-core
 export type { RuntimeState, RuntimeEvent };
 
+/** A single streamed LiTT turn event, as forwarded by terminal-server. */
+export interface LiTTTurnEvent {
+  type: string;
+  turnId: string;
+  text?: string;
+  message?: string;
+  model?: string;
+  usage?: { total_tokens: number };
+  timing?: { ttftMs: number; generationMs: number; totalMs: number };
+}
+
+/**
+ * The payload each subscribable event carries — the ONE source of
+ * per-event listener typing. subscribe() and emit() are both keyed off
+ * it, so a listener for "state" is typed with ConnectionState and a
+ * mismatched emit is a compile error.
+ */
+export interface RuntimeClientEventMap {
+  state: ConnectionState;
+  workspace: WorkspaceState;
+  "litt:event": LiTTTurnEvent;
+}
+
+export type RuntimeClientEventName = keyof RuntimeClientEventMap;
+
+/**
+ * A listener with its payload type erased, for storage only.
+ *
+ * The listener map holds subscribers for several event types at once, so
+ * no single entry type can describe them all. subscribe() erases on the
+ * way in and emit() restores on the way out — both keyed by the SAME
+ * event name, so a listener is only ever invoked with the payload its
+ * event declares above. These two casts are the only ones, and neither
+ * widens the public API: callers keep full per-event typing.
+ */
+type ErasedListener = (value: never) => void;
+
 const TERMINAL_SERVER_URL = "http://127.0.0.1:4001";
 
 export class DesktopRuntimeClient {
@@ -40,7 +77,7 @@ export class DesktopRuntimeClient {
   private _state: ConnectionState = "OFFLINE";
   private _runtimeState: RuntimeState | null = null;
   private _workspace: WorkspaceState = { name: "Desktop", path: "", branch: null, status: "loading" };
-  private listeners: Map<string, ((value: unknown) => void)[]> = new Map();
+  private listeners: Map<RuntimeClientEventName, ErasedListener[]> = new Map();
   private _cwd: string | null = null;
 
   /**
@@ -87,23 +124,40 @@ export class DesktopRuntimeClient {
   get workspace(): WorkspaceState { return this._workspace; }
   get isConnected(): boolean { return this._state === "SHARED"; }
 
-  private emit(event: string, value: unknown): void {
+  private emit<E extends RuntimeClientEventName>(event: E, value: RuntimeClientEventMap[E]): void {
     const listeners = this.listeners.get(event);
-    if (listeners) { listeners.forEach(l => l(value)); }
+    if (!listeners) return;
+    // Restore the payload type erased by subscribe() — same event key,
+    // so this is the type the listener was registered with.
+    for (const listener of [...listeners]) {
+      (listener as (value: RuntimeClientEventMap[E]) => void)(value);
+    }
   }
 
-  subscribe(event: "state", listener: (value: ConnectionState) => void): () => void;
-  subscribe(event: "workspace", listener: (value: WorkspaceState) => void): () => void;
-  subscribe(event: "litt:event", listener: (value: { type: string; turnId: string; text?: string; message?: string; model?: string; usage?: { total_tokens: number }; timing?: { ttftMs: number; generationMs: number; totalMs: number } }) => void): () => void;
-  subscribe(event: string, listener: (value: unknown) => void): () => void {
-    if (!this.listeners.has(event)) { this.listeners.set(event, []); }
-    const listeners = this.listeners.get(event)!;
-    listeners.push(listener);
-    switch (event) {
-      case "state": listener(this._state); break;
-      case "workspace": listener(this._workspace); break;
+  /**
+   * Subscribe to a runtime event. Returns an unsubscribe function.
+   *
+   * "state" and "workspace" replay their current value immediately, so a
+   * late subscriber is never left waiting for the next change.
+   */
+  subscribe<E extends RuntimeClientEventName>(
+    event: E,
+    listener: (value: RuntimeClientEventMap[E]) => void,
+  ): () => void {
+    const erased = listener as ErasedListener;
+    let listeners = this.listeners.get(event);
+    if (!listeners) { listeners = []; this.listeners.set(event, listeners); }
+    listeners.push(erased);
+    // Immediate replay of current state, where one exists.
+    if (event === "state") {
+      (listener as (value: ConnectionState) => void)(this._state);
+    } else if (event === "workspace") {
+      (listener as (value: WorkspaceState) => void)(this._workspace);
     }
-    return () => { const idx = listeners.indexOf(listener); if (idx >= 0) listeners.splice(idx, 1); };
+    return () => {
+      const idx = listeners.indexOf(erased);
+      if (idx >= 0) listeners.splice(idx, 1);
+    };
   }
 
   private setupEventHandlers(): void {

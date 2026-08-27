@@ -164,6 +164,10 @@ function modelExecutionAvailable(target: ExecutionTarget): boolean {
  * or errored message is not a settled turn and must not be replayed into
  * a new request. Only user/assistant content is passed; runAgentLoop
  * itself rejects any other role.
+ *
+ * Call this with store.actions.getChatTranscript() (the canonical store)
+ * and BEFORE the current turn's own user message is appended — the
+ * result is then exactly the settled conversation that preceded now.
  */
 export function buildPriorMessages(chatTranscript: ChatMessage[]): AgentCoreChatMessage[] {
   return chatTranscript
@@ -1225,13 +1229,60 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");
 
-    // NOTE: The utility-lane fast-path (weather/time/calculator lookups
-    // that bypass the model call) was introduced in commit 4f4e83d3 but
-    // the implementation file (lib/utility-lane.ts) was never created.
-    // The broken import and usage have been removed to restore the build.
-    // If utility-lane is needed, it must be implemented from scratch with
-    // proper billing/auth/provider attribution — do not re-add the import
-    // without the implementation.
+    // Conversation history for THIS turn, captured BEFORE any of this
+    // turn's own messages are appended — so it is exactly what was said
+    // before now, and the current turn is never sent twice. Read from
+    // the canonical store (see getChatTranscript) rather than
+    // store.state, which is a render-time snapshot inside this closure.
+    const priorMessages = buildPriorMessages(store.actions.getChatTranscript());
+
+    // ─── UTILITY lane — trivial factual/utility lookups bypass the
+    // full model+tool agent loop entirely (weather/time/calculator/
+    // business-hours/local-place). Checked ONLY for "chat"-classified,
+    // non-mission input — read and mission intents (coding, tool-heavy,
+    // build, deploy) are completely untouched. Deliberately placed
+    // BEFORE @mention context resolution so a hit skips that work too.
+    // See lib/utility-lane.ts for why this exists and how it's scoped.
+    if (intent === "chat" && !isMission) {
+      const utilityMatch = classifyUtilityIntent(input);
+      if (utilityMatch) {
+        perf.mark("utility_route");
+        const gateway = session.getGateway();
+        const cwd = session.getCwd();
+        perf.mark("utility_lookup_start");
+        const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
+          const r = await gateway.execute({
+            toolId,
+            inputs: args,
+            cwd,
+            mode: session.getMode(),
+            identity: CLI_IDENTITY,
+          });
+          return r.result;
+        });
+        perf.mark("utility_lookup_end");
+        if (lookup.satisfied) {
+          store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
+          store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
+          store.actions.addActivity({
+            id: `act_${Date.now()}_utility`,
+            ts: Date.now(),
+            type: "info",
+            tag: "UTILITY",
+            text: `Direct lookup (${utilityMatch.kind}) — no model call`,
+          });
+          perf.mark("finalize");
+          perf.end("utility");
+          persistSession();
+          return;
+        }
+        // Direct path could not satisfy the request (e.g. empty search,
+        // unparseable expression) — nothing was rendered; fall through
+        // to the normal chat path below exactly as if no utility match
+        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
+        // call, never an LLM round trip.
+      }
+    }
 
     // ─── @mention context resolution ──────────────────────────────
     // The transcript shows the original input (@tokens intact); the
@@ -1565,7 +1616,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             // Prior completed turns from THIS cockpit session — without
             // this, every chat message is a fresh, context-free request
             // (see buildPriorMessages doc).
-            priorMessages: buildPriorMessages(store.state.chatTranscript),
+            priorMessages,
             onModelStream: (event) => {
               if (event.type === "delta") {
                 // Suppress tool_call/json protocol markup — never dump
@@ -1967,7 +2018,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // Prior completed chat turns from THIS cockpit session — a
           // mission trigger ("build it") often depends on context from
           // the conversation that preceded it (see buildPriorMessages doc).
-          priorMessages: buildPriorMessages(store.state.chatTranscript),
+          priorMessages,
           // ─── Wire the VerificationGate into the agent loop ───
           // This is the REAL repair/revalidation path: when the model
           // says "done", the loop runs the gate. If the gate fails,
