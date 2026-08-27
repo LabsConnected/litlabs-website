@@ -485,13 +485,32 @@ export async function streamModelForRemoteClient(
 
   if (canUseDirectOpenAI) {
     console.log(`[transport] → direct OpenAI (api.openai.com)`);
-    return streamOpenAIDirect(messages, tools, emit, {
-      model, // provider-native id (e.g. "gpt-5.6-luna")
-      apiKey: openaiKey!,
-      maxTokens: options.maxTokens,
-      signal: options.signal,
-      profile,
-    });
+    try {
+      return await streamOpenAIDirect(messages, tools, emit, {
+        model, // provider-native id (e.g. "gpt-5.6-luna")
+        apiKey: openaiKey!,
+        maxTokens: options.maxTokens,
+        signal: options.signal,
+        profile,
+      });
+    } catch (openaiErr) {
+      const msg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
+      // Failover to a free OpenRouter model on billing errors (429 insufficient_quota, 402)
+      // so users without funded OpenAI accounts can still use LiTT.
+      if (openrouterKey && (msg.includes("429") || msg.includes("402") || msg.includes("insufficient_quota") || msg.includes("credit_balance"))) {
+        const freeModel = "minimax/minimax-m3:free";
+        console.log(`[transport] OpenAI billing error → failover to free OpenRouter model ${freeModel}`);
+        emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
+        return streamOpenRouterRemote(messages, tools, emit, {
+          model: freeModel,
+          apiKey: openrouterKey,
+          maxTokens: options.maxTokens,
+          signal: options.signal,
+          profile,
+        });
+      }
+      throw openaiErr;
+    }
   }
 
   console.log(`[transport] → OpenRouter fallback (openrouter.ai)`);

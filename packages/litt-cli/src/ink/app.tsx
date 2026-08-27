@@ -83,7 +83,9 @@ export function CockpitApp({
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
-  const [modelRuntime] = useState(() => new ModelRuntime());
+  // In remote mode, the server holds all provider keys, so the CLI's
+  // local credential check is bypassed (all providers are "available").
+  const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
 
   const controller = useCockpitController({
     session, store, approvalBridge, sessionBridge,
