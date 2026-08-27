@@ -26,6 +26,10 @@ export interface ModelRequestPayload {
   messages: ChatMessage[];
   tools?: RemoteToolSchema[];
   maxTokens?: number;
+  /** Provider the CLI routed to ("openai", "openrouter", etc.). */
+  providerHint?: string;
+  /** OpenRouter fallback model slug, used if server falls back to OpenRouter. */
+  openRouterModelId?: string;
 }
 
 export interface ModelRelayEventPayload {
@@ -97,13 +101,19 @@ export async function handleModelRequest(
         }
         emit({ requestId, event });
       },
-      { model: payload.model, maxTokens: payload.maxTokens, signal: controller.signal },
+      {
+        model: payload.model,
+        providerHint: payload.providerHint,
+        openRouterModelId: payload.openRouterModelId,
+        maxTokens: payload.maxTokens,
+        signal: controller.signal,
+      },
     );
 
-    // Usage recording — success only, OpenRouter only (the only
-    // provider this channel ever calls, and the only one billed).
-    // Billing-exempt owner: meter but don't debit (handled in recordUsage).
-    if (streamProvider === "openrouter") {
+    // Usage recording — success only, for any billed provider
+    // (openrouter or openai direct). Billing-exempt owner: meter but
+    // don't debit (handled in recordUsage).
+    if (streamProvider === "openrouter" || streamProvider === "openai") {
       await getBillingClient().recordUsage({
         identity,
         runId: requestId,
