@@ -6,6 +6,13 @@ import { getVoiceConnection } from "@/lib/voice-client";
 import type { VoiceAgentId } from "@/features/voice/types";
 import { VoiceActivityDetector, type VadState } from "@/features/voice/lib/voice-vad";
 import { VOICE_GATE_CONFIG } from "@/features/voice/lib/voice-gate-config";
+import { useMixerStore } from "@/features/voice/store/useMixerStore";
+import {
+  buildMicAudioConstraints,
+  clampGain,
+  clampVolume,
+  readStoredDeviceId,
+} from "@/features/voice/lib/mixer-settings";
 
 const TARGET_SAMPLE_RATE = 24000;
 const CHUNK_SIZE = 2048;
@@ -109,6 +116,10 @@ export function useInworldSession(
   const sessionGenerationRef = useRef(0);
   /** Whether audio should be sent to Inworld (gated by VAD). */
   const shouldSendAudioRef = useRef(false);
+  /** Unsubscribes the mixer-store listener attached during mic capture. */
+  const mixerUnsubRef = useRef<(() => void) | null>(null);
+  /** Master output gain node for TTS playback (created lazily per context). */
+  const playbackGainRef = useRef<GainNode | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -136,6 +147,20 @@ export function useInworldSession(
   // they are all scheduled ahead of time via `source.start(startTime)`.
   const nextPlayTimeRef = useRef(0);
 
+  /**
+   * Lazily create (per AudioContext) the master TTS output gain so the
+   * mixer's output volume applies to every scheduled chunk. Re-created if
+   * the playback context was closed and replaced.
+   */
+  const ensurePlaybackGain = useCallback((ctx: AudioContext): GainNode => {
+    if (!playbackGainRef.current || playbackGainRef.current.context !== ctx) {
+      const gain = ctx.createGain();
+      gain.gain.value = clampVolume(useMixerStore.getState().outputVolume);
+      playbackGainRef.current = gain;
+    }
+    return playbackGainRef.current;
+  }, []);
+
   const decodePcm16ToAudioBuffer = useCallback((base64: string): AudioBuffer | null => {
     const ctx = playbackContextRef.current;
     if (!ctx) return null;
@@ -162,7 +187,9 @@ export function useInworldSession(
       const chunk = playbackQueueRef.current.shift()!;
       const source = ctx.createBufferSource();
       source.buffer = chunk;
-      source.connect(ctx.destination);
+      // Route through the mixer's master output gain instead of connecting
+      // straight to the destination so the output-volume slider applies.
+      source.connect(ensurePlaybackGain(ctx));
       scheduledSourcesRef.current.add(source);
 
       // Schedule seamlessly: start exactly when the previous chunk ends, or
@@ -185,7 +212,7 @@ export function useInworldSession(
       source.start(startTime);
       isPlayingRef.current = true;
     }
-  }, []);
+  }, [ensurePlaybackGain]);
 
   // Audio playback queue — currently unused in STT-only mode but kept for
   // potential future TTS provider integration. eslint-disable to avoid
@@ -265,8 +292,10 @@ export function useInworldSession(
   // --- Microphone capture ---
   const startMicCapture = useCallback(async () => {
     try {
+      // Mic & Mixer: merge the canonical voice gate constraints with the
+      // persisted input-device selection (null/absent = OS default).
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: VOICE_GATE_CONFIG.audioConstraints,
+        audio: buildMicAudioConstraints({ deviceId: readStoredDeviceId() }),
       });
       micStreamRef.current = stream;
 
@@ -276,12 +305,43 @@ export function useInworldSession(
 
       const source = audioContext.createMediaStreamSource(stream);
 
+      // ── Mic & Mixer input stage ──
+      // Graph: source → inputGain → analyser → processor.
+      // Placing the analyser AFTER the gain node means the VAD and the level
+      // meter both see post-gain audio: lowering the input gain genuinely
+      // quiets the pipeline instead of only scaling the on-screen meter.
+      const mixerState = useMixerStore.getState();
+      const inputGainNode = audioContext.createGain();
+      inputGainNode.gain.value = mixerState.muted ? 0 : clampGain(mixerState.inputGain);
+      source.connect(inputGainNode);
+
       // Analyser for audio level visualization AND VAD
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.5;
-      source.connect(analyser);
+      inputGainNode.connect(analyser);
       analyserRef.current = analyser;
+
+      // Hard-mute via track.enabled too, so a muted mic feeds silence into
+      // every downstream consumer (VAD sees no speech → nothing is sent).
+      if (mixerState.muted) {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+
+      // Live-apply mixer changes while capture is running — sliders update
+      // the audio graph in real time without restarting capture.
+      mixerUnsubRef.current?.();
+      mixerUnsubRef.current = useMixerStore.subscribe((s) => {
+        inputGainNode.gain.value = s.muted ? 0 : clampGain(s.inputGain);
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = !s.muted;
+        });
+        if (playbackGainRef.current) {
+          playbackGainRef.current.gain.value = clampVolume(s.outputVolume);
+        }
+      });
 
       // ── Client-side VAD ──
       // Only send audio to Inworld when real speech is detected.
@@ -348,7 +408,7 @@ export function useInworldSession(
         );
       };
 
-      source.connect(processor);
+      inputGainNode.connect(processor);
       processor.connect(audioContext.destination);
 
       setIsListening(true);
@@ -385,6 +445,13 @@ export function useInworldSession(
   }, [ensureAudioContextRunning, setState, setError]);
 
   const stopMicCapture = useCallback(() => {
+    // Detach the mixer-store subscription first so no late callbacks touch
+    // the nodes we're about to tear down.
+    if (mixerUnsubRef.current) {
+      mixerUnsubRef.current();
+      mixerUnsubRef.current = null;
+    }
+
     // Stop VAD
     if (vadRef.current) {
       vadRef.current.destroy();
@@ -760,6 +827,7 @@ export function useInworldSession(
       playbackContextRef.current.close().catch(() => {});
       playbackContextRef.current = null;
     }
+    playbackGainRef.current = null;
     setIsConnected(false);
     setIsListening(false);
     isListeningRef.current = false;

@@ -402,6 +402,10 @@ export function useCockpitStore() {
     return 33; // ~30fps — the sweet spot (not 200-500ms, which feels dead)
   })();
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the id of the currently-streaming assistant message so
+  // appendAssistantDelta/finalizeAssistantMessage can auto-pass it
+  // to the store without every caller needing to thread the id through.
+  const streamingIdRef = useRef<string | null>(null);
 
   /** Immediate flush — cancels any pending coalesced flush first. */
   const syncTranscript = useCallback(() => {
@@ -453,6 +457,9 @@ export function useCockpitStore() {
   /** Append a new user or assistant message. Returns the message id. */
   const addChatMessage = useCallback((msg: Omit<ChatMessage, "id">): string => {
     const id = transcriptStore.add(msg);
+    if (msg.role === "assistant" && msg.status === "streaming") {
+      streamingIdRef.current = id;
+    }
     syncTranscript();
     return id;
   }, [transcriptStore, syncTranscript]);
@@ -470,8 +477,9 @@ export function useCockpitStore() {
    * (~30fps). This is the streaming hot path; the immediate syncTranscript
    * would rerender the entire CockpitApp on every token.
    */
-  const appendAssistantDelta = useCallback((text: string) => {
-    transcriptStore.appendDelta(text);
+  const appendAssistantDelta = useCallback((id: string, text: string) => {
+    const effectiveId = id || streamingIdRef.current;
+    if (effectiveId) transcriptStore.appendDelta(effectiveId, text);
     flushTranscriptSoon();
   }, [transcriptStore, flushTranscriptSoon]);
 
@@ -491,9 +499,26 @@ export function useCockpitStore() {
     servedModel?: string | null;
     durationMs?: number | null;
   }) => {
-    transcriptStore.finalize(options);
+    const effectiveId = id || streamingIdRef.current;
+    if (effectiveId) transcriptStore.finalize(effectiveId, options);
+    streamingIdRef.current = null;
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
+
+  /**
+   * The canonical transcript, read straight from the pure store.
+   *
+   * Prefer this over `state.chatTranscript` whenever a caller needs the
+   * transcript AS OF NOW inside an async handler. `state.chatTranscript`
+   * is a render-time snapshot: a handler created by useCallback closes
+   * over the transcript from its defining render, so a message appended
+   * during the same turn is invisible there. It also lags by up to one
+   * coalesced flush (~30fps) while streaming. The pure store has neither
+   * property — it is updated synchronously on every mutation.
+   */
+  const getChatTranscript = useCallback((): ChatMessage[] => {
+    return transcriptStore.snapshot();
+  }, [transcriptStore]);
 
   /** Clear the chat transcript (e.g. /clear). */
   const clearChatTranscript = useCallback(() => {
@@ -863,6 +888,7 @@ export function useCockpitStore() {
       addChatMessage,
       appendAssistantDelta,
       finalizeAssistantMessage,
+      getChatTranscript,
       clearChatTranscript,
       startToolProgressMission,
       completeToolProgressMission,

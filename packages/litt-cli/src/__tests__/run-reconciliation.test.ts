@@ -29,14 +29,13 @@ function harness() {
     stopBusy(): void { calls.push("stopBusy"); },
     setHoloState(s: string): void { calls.push(`setHoloState:${s}`); },
     updateMissionState(s: string): void { calls.push(`updateMissionState:${s}`); },
-    finalizeAssistantMessage(opts: { content: string; status: string }): void {
+    finalizeAssistantMessage(id: string, opts: { content: string; status: string }): void {
       calls.push(`finalize:${opts.status}`);
-      transcript.finalize({ content: opts.content, status: opts.status as "complete" | "error" });
+      transcript.finalize(id, { content: opts.content, status: opts.status as "complete" | "error" });
     },
-    addChatMessage: (m: { role: "user" | "assistant"; content: string; status: string }) => {
-      transcript.add({ role: m.role, content: m.content, ts: Date.now(), status: m.status as never });
-    },
-    appendAssistantDelta: (t: string) => transcript.appendDelta(t),
+    addChatMessage: (m: { role: "user" | "assistant"; content: string; status: string }): string =>
+      transcript.add({ role: m.role, content: m.content, ts: Date.now(), status: m.status as never }),
+    appendAssistantDelta: (id: string, t: string) => transcript.appendDelta(id, t),
   };
   const transcript = new ChatTranscriptStore();
   return { actions, calls, transcript };
@@ -50,7 +49,9 @@ async function chatPath(
   h.actions.setIsProcessing(true);
   h.calls.push("startBusy");
   h.actions.addChatMessage({ role: "user", content: "hi", status: "complete" });
-  h.actions.addChatMessage({ role: "assistant", content: "", status: "streaming" });
+  // The controller captures THIS turn's assistant id and targets every
+  // finalize at it (ChatTranscriptStore invariant 7) — mirrored here.
+  const assistantMsgId = h.actions.addChatMessage({ role: "assistant", content: "", status: "streaming" });
   try {
     await run(h);
     // Tool events pushed holoState to RUNNING mid-run — a successful
@@ -58,7 +59,7 @@ async function chatPath(
     // stuck in "Working · 0s" with the composer disabled).
     h.actions.setHoloState("IDLE");
   } catch (err) {
-    h.actions.finalizeAssistantMessage({ content: `Agent error: ${err instanceof Error ? err.message : String(err)}`, status: "error" });
+    h.actions.finalizeAssistantMessage(assistantMsgId, { content: `Agent error: ${err instanceof Error ? err.message : String(err)}`, status: "error" });
     h.actions.setHoloState("FAILED");
   } finally {
     h.actions.setIsProcessing(false);
@@ -149,7 +150,7 @@ async function missionPath(outcome: "success" | "failed" | "planning-error"): Pr
   h.actions.startBusy = () => h.calls.push("startBusy");
   h.actions.setIsProcessing(false); // missions drive holoState, not isProcessing
   h.actions.addChatMessage({ role: "user", content: "task", status: "complete" });
-  h.actions.addChatMessage({ role: "assistant", content: "", status: "streaming" });
+  const assistantMsgId = h.actions.addChatMessage({ role: "assistant", content: "", status: "streaming" });
 
   let settled = false;
   try {
@@ -167,7 +168,7 @@ async function missionPath(outcome: "success" | "failed" | "planning-error"): Pr
       throw new Error("MissionPlanningError: Analyze performance — No work was started and nothing was changed");
     }
   } catch (err) {
-    h.actions.finalizeAssistantMessage({ content: err instanceof Error ? err.message : String(err), status: "error" });
+    h.actions.finalizeAssistantMessage(assistantMsgId, { content: err instanceof Error ? err.message : String(err), status: "error" });
     h.actions.setHoloState("FAILED");
     h.actions.updateMissionState("FAILED");
     settled = true;

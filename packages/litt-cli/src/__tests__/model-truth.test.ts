@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  hasOpenRouterKey,
+  hasProviderKey,
   resolveConfiguredModel,
   buildModelState,
   modelDisplayLabel,
@@ -27,7 +27,7 @@ import {
 
 // ─── Env management ────────────────────────────────────────────────
 
-const ENV_KEYS = ["OPENROUTER_API_KEY", "LITT_MODEL", "OPENROUTER_MODEL"] as const;
+const ENV_KEYS = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "LITT_MODEL", "OPENROUTER_MODEL"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -168,7 +168,7 @@ describe("Model truth — configured ≠ active ≠ proven", () => {
 
   it("provider availability is separate from model selection", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test-key";
-    expect(hasOpenRouterKey()).toBe(true);
+    expect(hasProviderKey()).toBe(true);
 
     // Provider is available but no model is active
     const state = buildModelState();
@@ -176,8 +176,8 @@ describe("Model truth — configured ≠ active ≠ proven", () => {
     expect(state.activeModel).toBeNull();
   });
 
-  it("no provider key → hasOpenRouterKey is false, state is fully unresolved", () => {
-    expect(hasOpenRouterKey()).toBe(false);
+  it("no provider key → hasProviderKey is false, state is fully unresolved", () => {
+    expect(hasProviderKey()).toBe(false);
     const state = buildModelState();
     expect(state.provider).toBeNull();
     expect(state.configuredModel).toBeNull();

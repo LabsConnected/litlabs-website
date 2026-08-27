@@ -3,9 +3,9 @@
  * the OpenRouterModelProvider.stream() emits real delta text.
  */
 import { describe, it, expect } from "vitest";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey } from "../lib/model-provider.js";
 
-const skip = !hasOpenRouterKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
+const skip = !hasProviderKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
 
 describe.skipIf(skip)("live provider stream — direct OpenRouter deltas", () => {
   it("emits real delta text from the live model", async () => {

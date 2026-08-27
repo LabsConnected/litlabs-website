@@ -25,7 +25,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject, resolveProjectCwd } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -51,9 +51,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   header("LiTT Ask");
 
   // If no API key, fall back to heuristic analysis
-  if (!hasOpenRouterKey()) {
-    warn("No OPENROUTER_API_KEY set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
+  if (!hasProviderKey()) {
+    warn("No API key set — using local heuristic analysis (no agent loop).");
+    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENAI_API_KEY or OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
     return heuristicAnalysis(question, project);
   }
 

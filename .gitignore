@@ -197,3 +197,9 @@ tests/playwright/test_output*.txt
 .vercel
 
 .env.railway-import
+
+# Temp commit message artifacts
+COMMIT_MSG_DO_FIX*
+# Temp source archives
+*-source.tar.gz
+

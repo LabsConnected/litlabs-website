@@ -3,6 +3,12 @@ import { beforeEach } from "vitest";
 // Set test API keys before any module imports.
 // In local dev these come from .env.local; in CI they must be set here
 // so that llm.ts and env.ts don't reject them as missing.
+// OPENAI_API_KEY must be explicitly unset so that llm.ts uses the
+// no-OpenAI fallback chain (gemini → groq → openrouter-free) that the
+// tests expect. Without this, a real key from .env.local leaks into
+// the test environment and shifts the provider chain.
+delete process.env.OPENAI_API_KEY;
+delete process.env.OPENAI_MODEL;
 process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "test-gemini-key";
 process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "test-openrouter-key";
 process.env.GROQ_API_KEY = process.env.GROQ_API_KEY ?? "test-groq-key";

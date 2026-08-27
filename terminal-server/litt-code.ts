@@ -14,6 +14,37 @@ export type ChatMessage = {
  * only field every provider guarantees. OpenRouter and direct OpenAI
  * (the two providers ever billed) always populate all three.
  */
+// ── Output-token policy — ONE canonical default ─────────────────────
+//
+// 3000 is the canonical managed-remote default and MUST match the CLI's
+// DEFAULT_MAX_TOKENS (packages/litt-cli/src/lib/model-provider.ts).
+// Competing defaults (3000 client / 4096 server) made the effective cap
+// depend on which layer happened to fill it in.
+//
+// Leaving max_tokens undefined is what caused the original bug: the
+// provider then applies the MODEL's own output ceiling (65536 for
+// GPT-5.6), which burns credits and 402s a low-balance account on a
+// trivial prompt. Every request path resolves through
+// resolveServerMaxTokens() so undefined can never reach a provider.
+export const DEFAULT_MAX_TOKENS = 3000;
+
+// Hard safety ceiling. An explicit caller value below this is preserved
+// verbatim; anything above it is clamped. This is the backstop that keeps
+// a mis-set client from ever requesting the model ceiling again.
+export const MAX_OUTPUT_TOKENS = 16_384;
+
+/**
+ * Resolve the output-token cap for a provider request.
+ * Explicit sane value -> preserved. Missing/invalid -> canonical default.
+ * Anything above the ceiling -> clamped.
+ */
+export function resolveServerMaxTokens(requested?: number): number {
+  if (typeof requested === "number" && requested > 0) {
+    return Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS);
+  }
+  return DEFAULT_MAX_TOKENS;
+}
+
 export type LiTTUsage = {
   total_tokens: number;
   prompt_tokens?: number;
@@ -601,8 +632,7 @@ async function streamOpenRouterRemote(
     // Cap at 4096 output tokens by default — leaving this undefined
     // causes OpenRouter to default to the model's max_output_tokens
     // (e.g. 65536), which wastes credits and causes 402 errors.
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
-    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -1003,6 +1033,8 @@ export async function streamLiTTMessagesWithTools(
     tools,
     tool_choice: nativeTools.length > 0 ? "auto" : "none",
     parallel_tool_calls: false,
+    // Canonical output cap (3000) — see resolveServerMaxTokens above.
+    max_tokens: resolveServerMaxTokens(),
   };
 
   const startedAt = Date.now();

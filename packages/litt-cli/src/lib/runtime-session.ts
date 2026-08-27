@@ -21,6 +21,7 @@
  *   reconnect and resync state from the server's RuntimeStore.
  */
 
+import { restoreTerminal } from "./terminal-teardown.js";
 import {
   createShellExecutor,
   CommandExecutor,
@@ -377,6 +378,11 @@ export class RuntimeSession {
         });
       } else {
         // No active run — exit
+        // process.exit() skips React/Ink effect cleanup, so raw mode and
+        // bracketed paste would otherwise leak into the parent shell.
+        // Restore synchronously BEFORE exiting rather than relying on an
+        // 'exit' listener that races Ink's own teardown.
+        restoreTerminal();
         process.stderr.write(`\nExiting...\n`);
         process.exit(130);
       }

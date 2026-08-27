@@ -48,6 +48,14 @@
  * earliest timestamp — the truthful time-to-first-token.
  */
 
+/**
+ * The run classes a trace can close with — one per submit lane.
+ *   chat / mission  — model-backed turns
+ *   read            — bounded read-only tools, optional single synthesis call
+ *   local / utility  — answered with no model call at all
+ */
+export type PerfLane = "chat" | "mission" | "local" | "read" | "utility";
+
 export class PerfTrace {
   readonly enabled: boolean;
   private readonly intent: string;
@@ -78,8 +86,9 @@ export class PerfTrace {
   /** Print the report and freeze. Safe to call once (idempotent).
    *
    * `kind` is the run class: "chat" / "mission" for model-backed turns,
-   * "local" for the deterministic Local Fast Lane (no model/provider). */
-  end(kind: "chat" | "mission" | "local" | "read"): void {
+   * "read" for the bounded read-only tool lane, and "local" / "utility"
+   * for the two lanes that answer without a model call at all. */
+  end(kind: PerfLane): void {
     if (!this.enabled || this.ended) return;
     this.ended = true;
     const total = Date.now() - this.t0;

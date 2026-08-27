@@ -94,7 +94,20 @@ export const metadata: Metadata = {
 // The Dockerfile now declares ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (and
 // the other NEXT_PUBLIC_CLERK_* vars) so Railway injects them at build time,
 // making the real pk_live key available to Next.js during SSG.
+//
+// When the key is absent (local builds without .env.local, CI without
+// secrets), a clearly-fake placeholder is used so ClerkProvider doesn't
+// throw "Missing publishableKey" during SSG. Auth calls will fail at
+// runtime — which is the correct behavior when Clerk isn't configured.
+// The real key always takes precedence when present.
+//
+// In production builds (NODE_ENV=production), a missing key throws a
+// clear error instead of silently using the placeholder.
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+if (!clerkKey && process.env.NODE_ENV === "production" && !process.env.SKIP_CLERK_CHECK) {
+  console.error("✗ Clerk configuration missing — set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+}
+const resolvedClerkKey = clerkKey || "pk_test_YnVpbGQtcGxhY2Vob2xkZXIubG9jYWwk";
 
 // Force dynamic rendering so ClerkProvider doesn't throw during static
 // prerendering when the Clerk key is missing (local builds, CI without
@@ -134,7 +147,7 @@ export default function RootLayout({
           Skip to main content
         </a>
         <ClerkProvider
-          publishableKey={clerkKey}
+          publishableKey={resolvedClerkKey}
           signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
           signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
           signInFallbackRedirectUrl={

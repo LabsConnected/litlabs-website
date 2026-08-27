@@ -1,56 +1,58 @@
 /**
  * Welcome — the idle LiTT shell face.
  *
- * One-shot entrance (~440ms): letters of "LiTT" appear one at a time,
- * then the tagline, then the prompt + hints. Then it is STATIC — never
- * animates again. The moment the user submits, this area becomes the
- * transcript inside the SAME reserved region — no reflow, no jumping.
+ * One-shot entrance (~300ms): "LiTT" fades in, then tagline, then prompt
+ * + hints. Then it is STATIC — never animates again. The moment the user
+ * submits, this area becomes the transcript inside the SAME reserved
+ * region — no reflow, no jumping.
  *
  * Minimal on purpose: this is a developer instrument, not a dashboard.
+ * No letter-spacing on the brand. No giant ASCII logo. No visual noise.
  */
 
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "../colors.js";
 
-const LETTER_DELAY_MS = 110;
+const REVEAL_MS = 300;
 
 export function Welcome(): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
-  const [frame, setFrame] = useState(0);
+  const [revealed, setRevealed] = useState(false);
 
-  // One-shot entrance: L → L i → L i T → L i T T (+ tagline/hints at the end).
+  // One-shot entrance: brand appears, then the rest fades in.
   useEffect(() => {
-    if (frame >= 4) return;
-    const t = setTimeout(() => setFrame((f) => f + 1), LETTER_DELAY_MS);
+    if (revealed) return;
+    const t = setTimeout(() => setRevealed(true), REVEAL_MS);
     return () => clearTimeout(t);
-  }, [frame]);
+  }, [revealed]);
 
-  const letters = ["L", "i", "T", "T"].slice(0, frame).join(" ");
-  const full = frame >= 4;
-  const pad = Math.max(0, Math.floor((width - 20) / 2) - 2);
+  // Center the content responsively, but never narrower than 2 spaces.
+  const pad = Math.max(2, Math.floor((width - 24) / 2));
 
   return (
-    <Box flexDirection="column" paddingTop={full ? 3 : 4}>
+    <Box flexDirection="column" paddingTop={3}>
       <Box paddingLeft={pad}>
-        <Text bold color={COLORS.brand}>
-          {full ? "L i T T" : letters}
-        </Text>
+        <Text bold color={COLORS.brand}>LiTT</Text>
       </Box>
 
-      {full && (
+      {revealed && (
         <>
           <Box paddingLeft={pad} marginTop={1}>
-            <Text dimColor>build · ship · create</Text>
+            <Text dimColor>BUILD · SHIP · CREATE</Text>
           </Box>
+
           <Box paddingLeft={pad} marginTop={2}>
-            <Text color={COLORS.text}>What are we making tonight?</Text>
+            <Text color={COLORS.text}>What do you want to build?</Text>
           </Box>
+
           <Box paddingLeft={pad} marginTop={2}>
             <Text dimColor>/ commands</Text>
             <Text dimColor>    </Text>
             <Text dimColor>@ context</Text>
+            <Text dimColor>    </Text>
+            <Text dimColor>? help</Text>
           </Box>
         </>
       )}
