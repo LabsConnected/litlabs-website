@@ -56,6 +56,7 @@ import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
 import { detectProject, ok, fail, header, c, resolveProjectCwd } from "./lib/utils.js";
+import { resolveActiveProject } from "./lib/active-project.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
@@ -338,10 +339,20 @@ async function main(): Promise<number> {
   // Use the resolved project cwd (--cwd flag > LITT_CWD env > process.cwd())
   // then walk upward for the real root — so a launcher that chdir'd into
   // the LiTT install dir can still point LiTT at the caller's real repo.
+  // If no project is found in cwd, run the canonical resolution pipeline
+  // (recent → picker → discovery → scaffold) so `litt ask` / `litt build`
+  // etc. recover instead of dying on "No package.json found".
   let session: RuntimeSession | undefined;
   if (SESSION_COMMANDS.has(command)) {
-    const project = detectProject(resolveProjectCwd(dispatch.cwd));
-    session = createRuntimeSession({ cwd: project.rootDir, mode });
+    const startCwd = resolveProjectCwd(dispatch.cwd);
+    let projectRoot = detectProject(startCwd).rootDir;
+    if (!detectProject(startCwd).hasPackageJson || detectProject(startCwd).isSelfInstall) {
+      const resolved = await resolveActiveProject({ cwd: startCwd });
+      if (resolved) {
+        projectRoot = resolved.project.rootDir;
+      }
+    }
+    session = createRuntimeSession({ cwd: projectRoot, mode });
     // Install Ctrl+C handler for all session commands
     session.installSigintHandler();
   }
