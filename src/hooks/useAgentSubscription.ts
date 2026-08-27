@@ -30,7 +30,7 @@ export function useAgentSubscription(sessionId: string) {
   const fetchTasks = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`/api/agent-tasks/${encodeURIComponent(sessionId)}`);
+      const res = await fetch(`/api/agent-tasks/session/${encodeURIComponent(sessionId)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.tasks) setTasks(data.tasks as TaskItem[]);

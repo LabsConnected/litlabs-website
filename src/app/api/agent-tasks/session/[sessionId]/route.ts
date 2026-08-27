@@ -4,9 +4,14 @@ import { getUserByClerkId } from "@/lib/user-db";
 import { getAdminSupabase } from "@/lib/supabase-admin";
 
 /**
- * GET /api/agent-tasks/[sessionId]
+ * GET /api/agent-tasks/session/[sessionId]
  *
  * Returns agent tasks for a specific orchestration session.
+ *
+ * Lives under `session/` rather than as a bare `[sessionId]` segment:
+ * Next.js refuses two differently-named dynamic slugs at the same path
+ * level, and `/api/agent-tasks/[taskId]` already occupies that slot.
+ * Having both broke the build outright.
  * Authenticated via Clerk — the server resolves the Clerk user to an
  * internal Supabase user, then queries agent_tasks with the service
  * role key. The browser never touches Supabase directly.
