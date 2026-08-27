@@ -50,8 +50,10 @@ export interface RoutedModel {
   id: string;
   /** Display label (e.g. "Claude Sonnet 5"). */
   label: string;
-  /** Provider that serves the call (source truth). */
+  /** Provider that serves the call (source truth, from local credentials). */
   servedBy: ProviderId;
+  /** Native provider from the catalog (e.g. "openai", "anthropic"). */
+  provider: ProviderId;
   /** Routing reason for display. */
   reason: string;
   /** Fallback reason if the requested policy was not honored exactly. */
@@ -143,6 +145,7 @@ export class ModelRuntime {
       id: result.model.canonicalId,
       label: result.model.displayName,
       servedBy: result.servedBy,
+      provider: result.model.provider,
       reason: result.reason,
       fallbackReason: result.fallbackReason,
       appliedPolicy: result.appliedPolicy,

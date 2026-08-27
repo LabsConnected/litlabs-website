@@ -476,7 +476,11 @@ export async function streamModelForRemoteClient(
     !isOpenRouterKeyInOpenaiSlot &&
     !model.includes("/");
 
+  // Debug: log transport selection (no key values exposed)
+  console.log(`[transport] hint=${hint} model=${model} hasOpenAIKey=${!!openaiKey} openAIKeyPrefix=${openaiKey?.slice(0, 7) ?? "none"} isOpenRouterInOpenAI=${!!isOpenRouterKeyInOpenaiSlot} hasSlash=${model.includes("/")} canUseDirect=${canUseDirectOpenAI} hasOpenRouterKey=${!!openrouterKey}`);
+
   if (canUseDirectOpenAI) {
+    console.log(`[transport] → direct OpenAI (api.openai.com)`);
     return streamOpenAIDirect(messages, tools, emit, {
       model, // provider-native id (e.g. "gpt-5.6-luna")
       apiKey: openaiKey!,
@@ -485,6 +489,8 @@ export async function streamModelForRemoteClient(
       profile,
     });
   }
+
+  console.log(`[transport] → OpenRouter fallback (openrouter.ai)`);
 
   // Fallback: OpenRouter transport
   if (!openrouterKey) {
@@ -526,7 +532,10 @@ async function streamOpenAIDirect(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : undefined,
+    // Cap at 4096 output tokens by default — leaving this undefined
+    // causes OpenRouter to default to the model's max_output_tokens
+    // (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
@@ -566,7 +575,10 @@ async function streamOpenRouterRemote(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : undefined,
+    // Cap at 4096 output tokens by default — leaving this undefined
+    // causes OpenRouter to default to the model's max_output_tokens
+    // (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
