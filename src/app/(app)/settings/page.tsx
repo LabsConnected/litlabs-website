@@ -1680,6 +1680,12 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     sparkVoice: boolean;
     wsUrl: boolean;
   } | null>(null);
+  const [livekitStatus, setLivekitStatus] = useState<{
+    configured: boolean;
+    url: boolean;
+    apiKey: boolean;
+    apiSecret: boolean;
+  } | null>(null);
   const [connectionTest, setConnectionTest] = useState<{
     state: "idle" | "testing" | "ok" | "fail";
     message: string;
@@ -1687,7 +1693,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
   }>({ state: "idle", message: "" });
 
   useEffect(() => {
-    fetch("/api/voice/token", { cache: "no-store" })
+    fetch("/api/voice/health", { cache: "no-store" })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (data.details) {
@@ -1698,6 +1704,14 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
             sparkVoice: data.details.sparkVoice ?? false,
             wsUrl: data.details.wsUrl ?? false,
           });
+          if (data.details.livekit) {
+            setLivekitStatus({
+              configured: data.details.livekit.configured ?? false,
+              url: data.details.livekit.url ?? false,
+              apiKey: data.details.livekit.apiKey ?? false,
+              apiSecret: data.details.livekit.apiSecret ?? false,
+            });
+          }
         }
       })
       .catch(() => {});
@@ -2009,6 +2023,25 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   </div>
                 )}
               </div>
+
+              {/* LiveKit status — the newer preferred realtime transport */}
+              {livekitStatus && (
+                <div className="mt-3 border-t border-white/5 pt-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Realtime transport (LiveKit)</div>
+                  <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
+                    <div>LIVEKIT_URL: <span className={livekitStatus.url ? "text-emerald-400" : "text-red-400"}>{livekitStatus.url ? "Set" : "Missing"}</span></div>
+                    <div>LIVEKIT_API_KEY: <span className={livekitStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiKey ? "Set" : "Missing"}</span></div>
+                    <div>LIVEKIT_API_SECRET: <span className={livekitStatus.apiSecret ? "text-emerald-400" : "text-red-400"}>{livekitStatus.apiSecret ? "Set" : "Missing"}</span></div>
+                    {livekitStatus.configured ? (
+                      <div className="mt-1.5 text-emerald-400">LiveKit realtime voice is configured and ready. This is the preferred transport for Studio voice sessions.</div>
+                    ) : (
+                      <div className="mt-1.5 text-amber-400">
+                        LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in Vercel env to enable realtime voice in the Studio.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Connection test button + result */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
