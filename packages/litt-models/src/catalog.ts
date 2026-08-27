@@ -567,6 +567,7 @@ const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
     description: "Free tier — general purpose, 1M context. Rate-limited.",
     recommendedFor: ["free", "general", "reasoning", "large-context"],
     domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
     notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
   },
   {
@@ -586,6 +587,7 @@ const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
     description: "Free tier — coding + reasoning, 256K context. Rate-limited.",
     recommendedFor: ["free", "coding", "reasoning"],
     domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
     notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
   },
   {
@@ -605,6 +607,7 @@ const FREE_OPENROUTER_MODELS: ModelDefinition[] = [
     description: "Free tier — Google open model, 262K context. Rate-limited.",
     recommendedFor: ["free", "general", "fast"],
     domain: "text",
+    pricing: { inputPer1M: 0, outputPer1M: 0, unit: "free" },
     notes: "OpenRouter free model. No credits required. Rate-limited upstream.",
   },
 ];
