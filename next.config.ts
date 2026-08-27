@@ -42,6 +42,41 @@ const nextConfig: NextConfig = {
       "react-markdown",
       "zustand",
     ],
+    // Server Actions origin validation (CSRF protection).
+    //
+    // Next.js rejects Server Action POSTs when the browser's Origin header
+    // doesn't match the Host / X-Forwarded-Host header. Behind reverse
+    // proxies (Cloudflare → Railway) the proxy-origin can differ from the
+    // internal host, and in local dev a tunnel/proxy (e.g. stitch-mcp,
+    // cloudflared) can forward to localhost:3001 while the browser's Origin
+    // is 127.0.0.1:<dynamic-port>.  Listing the trusted frontend origins
+    // here lets those legitimate cross-host action requests through without
+    // disabling the CSRF check entirely.
+    //
+    // Production domains:
+    //   litlabs.net / www.litlabs.net  — Cloudflare → Railway
+    //   *.up.railway.app               — direct Railway internal domain
+    //
+    // Local dev origins:
+    //   localhost:3001 / 127.0.0.1:3001 — direct dev server access
+    //
+    // NOTE: tunnel/proxy origins with dynamic ports (e.g. 127.0.0.1:21151)
+    // cannot be statically listed. The correct fix for those is to configure
+    // the proxy to set X-Forwarded-Host to the *original* request host (not
+    // the destination). This config covers the known stable origins.
+    serverActions: {
+      allowedOrigins: [
+        // Production — Cloudflare frontend
+        "litlabs.net",
+        "www.litlabs.net",
+        // Production — Railway internal domain
+        "*.up.railway.app",
+        // Local dev — direct access
+        "localhost:3001",
+        "127.0.0.1:3001",
+        "[::1]:3001",
+      ],
+    },
   },
 
   // Clerk must be transpiled by Next.js so that ClerkProvider (root layout)
