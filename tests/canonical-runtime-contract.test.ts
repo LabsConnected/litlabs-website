@@ -132,7 +132,9 @@ describe("PHASE 3: One operator brain path", () => {
     });
 
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools");
+    // Spy the transport the operator ACTUALLY calls — spying on one it never
+    // calls would make the not.toHaveBeenCalled() assertion below vacuous.
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode");
     try {
       const result = await runLiTTOperator({
         prompt: "do something expensive",
@@ -162,18 +164,21 @@ describe("PHASE 3: One operator brain path", () => {
     // Mock the model provider so we don't need a real LLM.
     // We do this by mocking the native tool-aware model transport.
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
-      async (_messages, _tools, emit) => {
+    // Spy on streamLiTTCode — the transport runLiTTOperator actually calls.
+    // (An earlier spy targeted streamLiTTMessagesWithTools, which the
+    // operator no longer uses, so the assertion could never fire.)
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
+      async (_prompt, emit) => {
         emit({ type: "meta", provider: "openrouter", model: "test-model", profile: "fast" });
         emit({ type: "delta", text: "I am LiTT, operating on the project." });
         emit({ type: "done", model: "test-model", usage: { total_tokens: 10 }, timing: { ttftMs: 1, generationMs: 1, totalMs: 2 } });
         return {
           content: "I am LiTT, operating on the project.",
           model: "test-model",
-          provider: "openrouter",
+          provider: "openrouter" as const,
           usage: { total_tokens: 10 },
           timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
-          profile: "fast",
+          profile: "fast" as const,
         };
       },
     );
@@ -379,18 +384,20 @@ describe("PHASE 8: Operator context — identity & intent", () => {
     store.setPhase("verifying");
 
     const littCode = await import("../terminal-server/litt-code.js");
-    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools").mockImplementation(
-      async (messages, _tools, _emit) => {
-        // The prompt should contain the runtime context
-        const prompt = messages.map((message) => String(message.content ?? "")).join("\n");
+    // streamLiTTCode receives the already-flattened prompt string, so the
+    // runtime context is asserted directly on it. (The previous spy targeted
+    // streamLiTTMessagesWithTools, which the operator no longer calls, so the
+    // assertion below could never fire.)
+    const streamSpy = vi.spyOn(littCode, "streamLiTTCode").mockImplementation(
+      async (prompt, _emit) => {
         expect(prompt).toContain("verifying");
         return {
           content: "ok",
           model: "test",
-          provider: "openrouter",
+          provider: "openrouter" as const,
           usage: { total_tokens: 1 },
           timing: { ttftMs: 1, generationMs: 1, totalMs: 2 },
-          profile: "fast",
+          profile: "fast" as const,
         };
       },
     );
