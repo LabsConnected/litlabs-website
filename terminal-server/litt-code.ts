@@ -757,8 +757,20 @@ export async function streamLiTTMessages(
         profile,
       });
     } catch (openaiErr) {
-      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
-      // Fall through to OpenRouter fallback below
+      const errMsg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
+      console.log(`[transport] /api/chat direct OpenAI failed: ${errMsg} → falling back to OpenRouter`);
+      // Failover to free OpenRouter model on billing errors (429/402)
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
+      if (openrouterKey && (errMsg.includes("429") || errMsg.includes("402") || errMsg.includes("insufficient_quota") || errMsg.includes("credit_balance"))) {
+        const freeModel = "minimax/minimax-m3:free";
+        console.log(`[transport] OpenAI billing error → failover to free OpenRouter model ${freeModel}`);
+        try {
+          return await streamChatWithOpenRouter(messages, emit, freeModel, profile, false);
+        } catch (freeErr) {
+          console.log(`[transport] free model failover also failed: ${freeErr instanceof Error ? freeErr.message : String(freeErr)}`);
+        }
+      }
+      // Fall through to standard OpenRouter fallback below
     }
   }
 
