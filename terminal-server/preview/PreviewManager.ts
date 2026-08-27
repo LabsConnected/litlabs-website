@@ -420,10 +420,11 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   if (ws.userId !== userId) throw new Error("Forbidden");
   if (!ws.ready) throw new Error("Workspace not ready");
 
-  // Stop existing runtime if any
+  // Stop existing runtime if any — wait for the process to exit so
+  // the port is released before we try to rebind.
   const existing = runtimes.get(workspaceId);
   if (existing) {
-    stopPreview(workspaceId);
+    await stopPreviewAndWait(workspaceId);
   }
 
   // Detect framework
@@ -638,6 +639,32 @@ export function stopPreview(workspaceId: string): void {
   pushLog(rt, "[preview] Stopped");
 }
 
+/**
+ * Stop a preview and wait for the process to actually exit so the port
+ * is released. Use this before rebinding to the same port.
+ */
+export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
+  const rt = runtimes.get(workspaceId);
+  if (!rt) return;
+
+  rt.status = "stopped";
+  if (rt.process) {
+    const proc = rt.process;
+    const exitPromise = new Promise<void>((resolve) => {
+      proc.once("exit", () => resolve());
+      setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch {}
+      }, 5000);
+      setTimeout(resolve, 7000);
+    });
+    try { proc.kill("SIGTERM"); } catch {}
+    rt.process = null;
+    await exitPromise;
+  }
+  releasePort(rt.port);
+  pushLog(rt, "[preview] Stopped (waited for exit)");
+}
+
 export async function restartPreview(workspaceId: string): Promise<PreviewRuntime> {
   const rt = runtimes.get(workspaceId);
   if (!rt) throw new Error("No preview runtime to restart");
@@ -648,29 +675,10 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   // Stop current process and wait for it to actually exit so the port
   // is released before we try to rebind. A 1-second delay is not enough
   // for Next.js/Turbopack to release the port — it causes EADDRINUSE.
-  if (rt.process) {
-    const proc = rt.process;
-    const exitPromise = new Promise<void>((resolve) => {
-      proc.once("exit", () => resolve());
-      // Force kill after 5s if SIGTERM didn't work
-      setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {}
-      }, 5000);
-      // Resolve after 7s regardless (safety net)
-      setTimeout(resolve, 7000);
-    });
-    try {
-      proc.kill("SIGTERM");
-    } catch {}
-    rt.process = null;
-    await exitPromise;
-  }
-  releasePort(rt.port);
+  await stopPreviewAndWait(workspaceId);
 
   // Additional delay to ensure the OS releases the socket
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 
   // Start again with same config
   return startPreview({
