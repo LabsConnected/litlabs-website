@@ -24,7 +24,7 @@ import { SessionEventBridge } from "../ink/session-event-bridge.js";
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { RuntimeClient } from "../lib/runtime-client.js";
 import { ensureConfig } from "../lib/config.js";
-import { detectProject, fail, header, c } from "../lib/utils.js";
+import { detectProject, fail, header, c, resolveProjectCwd } from "../lib/utils.js";
 import { buildModelState, modelDisplayLabel } from "../lib/model-provider.js";
 import { getGitState } from "../lib/git-state.js";
 import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
@@ -83,9 +83,18 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   // First-run config bootstrap — creates ~/.litt/config.json if missing
   ensureConfig();
 
-  // Auto-detect project root by walking upward from cwd.
-  // The user can be in any subdirectory — LiTT finds the root.
-  const project = detectProject();
+  // Auto-detect project root by walking upward from the resolved cwd.
+  // Resolution: --cwd flag > LITT_CWD env > process.cwd(). A launcher
+  // that chdir'd into the LiTT install dir passes the caller's real
+  // directory via --cwd / LITT_CWD so LiTT inspects the user's repo,
+  // not its own runtime copy. detectProject also guards against
+  // self-inspection (isSelfInstall) even when no override is set.
+  const project = detectProject(resolveProjectCwd());
+
+  if (project.isSelfInstall) {
+    console.error(`${c.dim}LiTT detected its own install dir as the project root.${c.reset}`);
+    console.error(`${c.dim}Launch LiTT from inside your project, or pass --cwd <project-dir>.${c.reset}`);
+  }
 
   if (!project.hasPackageJson) {
     fail("No package.json found. LiTT needs a project to work with.");

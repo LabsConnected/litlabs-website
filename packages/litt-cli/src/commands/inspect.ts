@@ -5,10 +5,10 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ok, fail, warn, header, label, value, detectProject, exec, c } from "../lib/utils.js";
+import { ok, fail, warn, header, label, value, detectProject, exec, c, resolveProjectCwd } from "../lib/utils.js";
 
 export async function inspectCommand(_args: string[]): Promise<number> {
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
 
   header("Deep Inspection");
 

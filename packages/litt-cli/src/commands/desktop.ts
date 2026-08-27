@@ -44,6 +44,7 @@ import {
   header,
   ok,
   warn,
+  resolveProjectCwd,
 } from "../lib/utils.js";
 
 const RUNTIME_PORT = 4001;
@@ -517,7 +518,7 @@ async function launchDesktop(
 export async function desktopCommand(
   _args: string[],
 ): Promise<number> {
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
   const projectRoot = project.rootDir;
 
   const repoRoot = getLiTTRepoRoot();

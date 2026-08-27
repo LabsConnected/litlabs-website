@@ -10,7 +10,7 @@
  *   - Model provider availability
  */
 
-import { exec, ok, fail, warn, header, label, value, detectProject, c } from "../lib/utils.js";
+import { exec, ok, fail, warn, header, label, value, detectProject, resolveProjectCwd, c } from "../lib/utils.js";
 import { getGitState } from "../lib/git-state.js";
 import { hasOpenRouterKey } from "../lib/model-provider.js";
 import { CLI_VERSION, CLI_PACKAGE_NAME } from "../lib/version.js";
@@ -96,7 +96,7 @@ export async function doctorCommand(_args: string[]): Promise<number> {
 
   // Project
   header("Project");
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
   if (project.hasPackageJson) {
     ok(`package.json found at ${project.rootDir}`);
     if (project.framework) ok(`Framework: ${project.framework}`);

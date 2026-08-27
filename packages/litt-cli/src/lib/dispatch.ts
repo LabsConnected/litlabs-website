@@ -39,6 +39,17 @@ export interface DispatchResult {
   useRemote: boolean;
   /** Workspace ID extracted from --workspace <id>. */
   workspaceId?: string;
+  /**
+   * Project cwd extracted from --cwd <path>. When set, the CLI uses this
+   * as the starting directory for project detection instead of
+   * process.cwd(). This is the canonical way for a launcher script
+   * (e.g. the Termux `litt` wrapper) to preserve the caller's real
+   * working directory when it cannot avoid chdir'ing into the LiTT
+   * install dir before exec'ing node.
+   *
+   * Resolution priority in the CLI: --cwd flag > LITT_CWD env > process.cwd().
+   */
+  cwd?: string;
 }
 
 /** Commands that launch the Ink operator cockpit (current terminal). */
@@ -54,6 +65,7 @@ const DESKTOP_COMMANDS = new Set(["desktop"]);
  *   --remote       (stripped — caller checks useRemote)
  *   --mode <m>     (stripped — caller reads mode)
  *   --workspace <id> (stripped — caller reads workspaceId)
+ *   --cwd <path>   (stripped — caller reads cwd; preserves caller dir when a launcher chdirs)
  *   --tui          (stripped — redundant, bare `litt` already launches cockpit)
  *   --help / -h    (returns isHelp=true, command=undefined)
  *   --version / -v (returns isVersion=true, command=undefined)
@@ -91,12 +103,27 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
   // Extract --workspace flag (for --remote workspace selection)
   const workspaceIdx = argsWithoutTui.indexOf("--workspace");
   let workspaceId: string | undefined;
-  let cleanArgs = argsWithoutTui;
+  let argsWithoutWorkspace = argsWithoutTui;
   if (workspaceIdx !== -1 && workspaceIdx + 1 < argsWithoutTui.length) {
     workspaceId = argsWithoutTui[workspaceIdx + 1];
-    cleanArgs = [
+    argsWithoutWorkspace = [
       ...argsWithoutTui.slice(0, workspaceIdx),
       ...argsWithoutTui.slice(workspaceIdx + 2),
+    ];
+  }
+
+  // Extract --cwd flag (project working directory override).
+  // A launcher that must chdir into the LiTT install dir before exec'ing
+  // node passes --cwd "$PWD" so the CLI inspects the caller's real repo
+  // instead of its own runtime directory.
+  const cwdIdx = argsWithoutWorkspace.indexOf("--cwd");
+  let cwd: string | undefined;
+  let cleanArgs = argsWithoutWorkspace;
+  if (cwdIdx !== -1 && cwdIdx + 1 < argsWithoutWorkspace.length) {
+    cwd = argsWithoutWorkspace[cwdIdx + 1];
+    cleanArgs = [
+      ...argsWithoutWorkspace.slice(0, cwdIdx),
+      ...argsWithoutWorkspace.slice(cwdIdx + 2),
     ];
   }
 
@@ -115,6 +142,7 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
       mode,
       useRemote,
       workspaceId,
+      cwd,
     };
   }
 
@@ -139,5 +167,6 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
     mode,
     useRemote,
     workspaceId,
+    cwd,
   };
 }

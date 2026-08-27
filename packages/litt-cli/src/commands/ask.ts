@@ -27,10 +27,11 @@ import {
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
-import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
+import { ok, fail, warn, header, c, detectProject, resolveProjectCwd } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
+import { createPolicyApproval } from "../lib/approval-policy.js";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -40,7 +41,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     return 1;
   }
 
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
 
   if (!project.hasPackageJson) {
     fail("No package.json found. Run this command from your project root.");
@@ -72,6 +73,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     executor,
     store,
     projectId: projectRoot,
+    // Policy-aware approval: safe→approve, elevated→approve in ACT,
+    // dangerous→deny (requires --yes flag or interactive UI).
+    onApprovalRequired: createPolicyApproval(),
   });
 
   // Route through the same ModelRuntime as the TUI — picks the best

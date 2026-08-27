@@ -5,6 +5,7 @@
 import { execSync, execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -86,6 +87,99 @@ export interface ProjectInfo {
   packageManager: string | null;
   rootDir: string;
   dirName: string;
+  /**
+   * True when the detected root is LiTT's own install/runtime directory
+   * (the CLI package dir or a dir whose package.json name is a known
+   * LiTT runtime package). When true, the caller should NOT treat this
+   * as the user's active project — it's the launcher chdir'ing into the
+   * install dir before exec'ing node.
+   */
+  isSelfInstall: boolean;
+}
+
+/**
+ * Resolve the effective starting directory for project detection.
+ *
+ * Priority:
+ *   1. `cwdFlag` — the `--cwd <path>` value parsed by resolveDispatch()
+ *      (lets a launcher that must chdir into the LiTT install dir pass
+ *      the caller's real working directory).
+ *   2. `process.env.LITT_CWD` — same purpose, env-var form (convenient
+ *      for shell wrappers that can't easily rewrite argv).
+ *   3. `process.cwd()` — the default when neither override is set.
+ *
+ * The resolved path is normalized to absolute. A non-existent override
+ * is ignored (falls back to process.cwd()) so a stale env var can never
+ * break startup.
+ */
+export function resolveProjectCwd(cwdFlag?: string): string {
+  const override = cwdFlag ?? process.env.LITT_CWD;
+  if (override) {
+    const abs = resolve(override);
+    if (existsSync(abs)) return abs;
+  }
+  return process.cwd();
+}
+
+/**
+ * Package.json `name` values that identify a LiTT runtime/install dir.
+ * If `detectProject` walks upward and lands on a directory whose
+ * package.json has one of these names, that's LiTT inspecting itself —
+ * not the user's project.
+ */
+const LITT_RUNTIME_PACKAGE_NAMES = new Set([
+  "litt-runtime",
+  "litt-cli",
+  "@litlabs/litt-cli",
+  "@litt/litt-cli",
+  "@litt/agent-core",
+]);
+
+/**
+ * The on-disk location of THIS CLI package, computed from import.meta.url.
+ * Used to detect when the detected project root is the LiTT install dir
+ * itself (compare against rootDir). Computed once, lazily.
+ */
+let cliPackageDir: string | null | undefined;
+function getCliPackageDir(): string | null {
+  if (cliPackageDir !== undefined) return cliPackageDir;
+  try {
+    // dist/lib/utils.js → dist → package root (packages/litt-cli)
+    const here = dirname(fileURLToPath(import.meta.url));
+    cliPackageDir = resolve(here, "..");
+  } catch {
+    cliPackageDir = null;
+  }
+  return cliPackageDir;
+}
+
+/**
+ * Returns true if `dir` is LiTT's own install/runtime directory:
+ *   - `dir` equals the CLI package dir (packages/litt-cli), OR
+ *   - `dir`'s package.json `name` is a known LiTT runtime package name.
+ *
+ * Used by `detectProject` to reject self-inspection: when a launcher
+ * chdirs into ~/litt before exec'ing node, the upward walk would land
+ * on the install dir and LiTT would inspect itself instead of the
+ * user's real repo.
+ */
+export function isLiTTInstallDir(dir: string): boolean {
+  const abs = resolve(dir);
+  const cliDir = getCliPackageDir();
+  if (cliDir && abs === cliDir) return true;
+
+  const pkgPath = join(abs, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { name?: unknown };
+      if (typeof pkg.name === "string" && LITT_RUNTIME_PACKAGE_NAMES.has(pkg.name)) {
+        return true;
+      }
+    } catch {
+      // unreadable package.json — not enough evidence to call it self-install
+    }
+  }
+  return false;
 }
 
 export function detectProject(dir = process.cwd()): ProjectInfo {
@@ -95,6 +189,7 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
   //   2. Walk up looking for package.json (may be a workspace package)
   //   3. Fall back to the starting directory
   let rootDir = resolve(dir);
+  const startDir = resolve(dir);
 
   // First pass: look for .git or pnpm-workspace.yaml
   let searchDir = resolve(dir);
@@ -110,7 +205,7 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
   }
 
   // If no .git found, second pass: look for package.json
-  if (rootDir === resolve(dir) && !existsSync(join(rootDir, ".git"))) {
+  if (rootDir === startDir && !existsSync(join(rootDir, ".git"))) {
     searchDir = resolve(dir);
     for (let i = 0; i < 20; i++) {
       if (existsSync(join(searchDir, "package.json"))) {
@@ -121,6 +216,20 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
       if (parent === searchDir) break;
       searchDir = parent;
     }
+  }
+
+  // ─── Self-install guard ──────────────────────────────────────────
+  // If the upward walk landed on LiTT's own install/runtime directory
+  // (a launcher chdir'd into ~/litt before exec'ing node, so process.cwd()
+  // IS the install dir), do NOT inspect LiTT itself. Fall back to the
+  // starting directory and flag it so the caller can warn the user.
+  // This is the workspace-context bug: without this guard, LiTT reports
+  // `litt-runtime@0.0.0` / "unknown branch" / "no scripts" because it's
+  // inspecting its own runtime copy instead of the user's real repo.
+  let isSelfInstall = false;
+  if (isLiTTInstallDir(rootDir)) {
+    isSelfInstall = true;
+    rootDir = startDir;
   }
 
   const pkgPath = join(rootDir, "package.json");
@@ -180,6 +289,7 @@ export function detectProject(dir = process.cwd()): ProjectInfo {
     packageManager,
     rootDir,
     dirName: basename(rootDir),
+    isSelfInstall,
   };
 }
 

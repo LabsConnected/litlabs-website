@@ -55,7 +55,7 @@ import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js"
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
 import { createRuntimeSession } from "./lib/runtime-session.js";
-import { detectProject, ok, fail, header, c } from "./lib/utils.js";
+import { detectProject, ok, fail, header, c, resolveProjectCwd } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
@@ -207,6 +207,17 @@ async function main(): Promise<number> {
   const rest = dispatch.rest;
   const mode = dispatch.mode;
 
+  // ─── Project cwd override ───────────────────────────────────────
+  // `--cwd <path>` lets a launcher that must chdir into the LiTT install
+  // dir before exec'ing node pass the caller's real working directory.
+  // Promote it to LITT_CWD so every code path (lazy-loaded cockpit,
+  // session commands, detectProject) resolves the same project root via
+  // resolveProjectCwd(). Without this, a Termux launcher that does
+  // `cd ~/litt && node ...` makes LiTT inspect its own runtime copy.
+  if (dispatch.cwd) {
+    process.env.LITT_CWD = dispatch.cwd;
+  }
+
   // ─── Auth gate ──────────────────────────────────────────────────
   // Commands that require a valid user session are blocked when signed
   // out. Only login, logout, whoami, doctor, version, and help work
@@ -312,11 +323,12 @@ async function main(): Promise<number> {
   }
 
   // Create a shared RuntimeSession for session commands.
-  // Use the detected project root (walks upward from cwd) — not process.cwd()
-  // directly — so the user can run commands from any subdirectory.
+  // Use the resolved project cwd (--cwd flag > LITT_CWD env > process.cwd())
+  // then walk upward for the real root — so a launcher that chdir'd into
+  // the LiTT install dir can still point LiTT at the caller's real repo.
   let session: RuntimeSession | undefined;
   if (SESSION_COMMANDS.has(command)) {
-    const project = detectProject();
+    const project = detectProject(resolveProjectCwd(dispatch.cwd));
     session = createRuntimeSession({ cwd: project.rootDir, mode });
     // Install Ctrl+C handler for all session commands
     session.installSigintHandler();
@@ -449,6 +461,7 @@ Options:
   -v, --version  Show version
   --remote       Dispatch through terminal-server (shared RuntimeStore with Studio)
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
+  --cwd <path>   Project working directory (use when a launcher chdir'd elsewhere)
   --workspace <id>  Workspace ID for --remote (selects which project workspace to use)
   --tui          Redundant — bare 'litt' already launches the cockpit (kept for compat)
 
