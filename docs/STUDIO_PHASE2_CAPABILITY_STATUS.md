@@ -1,77 +1,119 @@
 # Studio Phase 2 Capability Status
 
 **Branch:** `studio/phase-2`
-**Date:** 2026-08-26
+**Date:** 2026-08-26 (updated after acceptance audit)
 **Principle:** If LiTT advertises it, the user can actually use it.
 
-## GREEN — Functional end-to-end
+## Acceptance Audit Results
 
-| Capability | Implementation | Notes |
+- **Branch integrity:** 9 commits, clean working tree, no contamination
+- **Typecheck:** 3 pre-existing errors in `packages/litt-cli` (NOT in Studio code)
+- **Lint:** 0 errors, 82 warnings (all pre-existing unused vars / `<img>`)
+- **Tests:** 3211 passed, 6 failed (all 6 pre-existing on origin/main), 52 skipped
+- **Build:** Production build passes (exit 0)
+- **E2E smoke tests:** NOT RUN — missing Clerk, Supabase, R2 env vars + Gemini quota exhausted
+
+## GREEN — Functional (code + unit/integration tests pass)
+
+| Capability | Implementation | Evidence |
 |---|---|---|
-| Project read/write | Terminal server + files API | `/api/studio-projects/[id]/files` |
-| Terminal commands | terminal-server | `isBlockedCommand()` is authoritative |
-| Current-app inspection | StudioPreviewPanel + preview API | Device modes, refresh, restart |
-| File modification | Terminal write + files API | Binary write supported |
-| Build/runtime error visibility | Preview status + build-fix loop | Real logs from dev server |
-| Error correction | agent-loop-v2 build-fix loop | Auto-repair with retry limit |
-| Real Preview control | StudioPreviewPanel | Desktop/tablet/mobile, Ctrl+R, copy URL |
-| Image creation | `/api/media/generate` | R2 persistence + generation_jobs |
-| Image editing | `/api/media/edit-image` | Gemini reference-image editing, persisted variant |
-| Video generation | `/api/media/generate` | Multiple video providers |
-| Audio/music generation | `/api/media/generate-audio` | Gemini TTS, R2 persistence |
-| Asset management | Asset Lake + generation_jobs | No duplicate asset table |
-| Use assets in project | `/api/studio-projects/[id]/assets/insert` | Server-side download + safe path write |
-| Agent coordination | agent-loop-v2 + execution store | Real SSE events, no fabrication |
-| Project context awareness | StudioContext + workspace APIs | Full project/workspace resolution |
-| Live visible feedback | LiTTLiveActivity in Work tab | Real tool calls, builds, approvals |
+| Chat | CommandComposer + StudioTranscript | Routing tests pass |
+| Plan | StudioWorkSurface + destination routing | Routing tests pass |
+| Act | agent-loop-v2 + tool registry | 65 agent-loop tests pass |
+| Agents | Agent registry + execution store | Tests pass |
+| Preview | StudioPreviewPanel + preview API | 3 preview tests pass |
+| Terminal | terminal-server + isBlockedCommand | Regression tests pass (pre-existing failures unrelated) |
+| Files | Files API + ContextDrawer | Routing tests pass |
+| Inspector | StudioInspector embedded in ContextDrawer | Routing tests pass |
+| Activity | LiTTLiveActivity (single instance) + LiTTWorkSummary (real exec store) | Routing tests verify exactly 1 instance |
+| Image generation | `/api/media/generate` | Code path verified; E2E blocked by Gemini quota |
+| Video generation | `/api/media/generate` | Code path verified |
+| Music generation | `/api/media/generate-music` | Code path verified |
+| Asset management | Asset Lake + generation_jobs | Code path verified |
+| Use in project | `/api/studio-projects/[id]/assets/insert` | Code path verified |
 
-## YELLOW — Implemented but needs operator verification
+## YELLOW — Implemented but needs operator E2E verification
+
+### Image editing
+- **Status:** YELLOW
+- **What exists:** `/api/media/edit-image` route, AssetsPanel edit UI
+- **What's needed:** Real E2E with valid Gemini quota — generate image, edit it, verify persisted variant
+- **Cannot verify now:** Gemini API quota exhausted (free tier limit: 0)
+
+### Audio persistence
+- **Status:** YELLOW
+- **What exists:** `/api/media/generate-audio` with R2 persistence, AudioTool with durable URL handling
+- **What's needed:** Real E2E — generate audio, verify R2/Supabase persistence, reload, playback
+- **Cannot verify now:** No R2 env vars, no Supabase env vars, Gemini quota exhausted
+- **Unit test:** audio-lab.test.ts passes (verifies no base64 in localStorage, durable URL handling)
 
 ### Voice (LiveKit)
 - **Status:** YELLOW
-- **What exists:** Token route (`/api/voice/livekit-token`), LiveKitAudioTransport, LiTTRealtimeSessionController, voice session context, settings page with LiveKit status
-- **What's needed:** Operator must set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in production env and run an E2E smoke test
-- **Fallback:** Legacy Gemini Live WebSocket if LiveKit is not configured
+- **What exists:** Token route, LiveKitAudioTransport, settings page with LiveKit status
+- **Configuration:** `LIVEKIT_URL` NOT SET, `LIVEKIT_API_KEY` NOT SET, `LIVEKIT_API_SECRET` NOT SET
+- **What's needed:** Operator must configure LiveKit env vars and run E2E
 
 ### Game/app creation
 - **Status:** YELLOW
-- **What exists:** All required tools are functional — file write, terminal, image generation, asset insertion, build, preview, iteration
-- **What's needed:** E2E smoke test with a real "build a playable browser game with generated artwork" request on this branch
-- **The capability path is complete** but has not been smoke-tested end-to-end on `studio/phase-2`
+- **What exists:** All required tools functional — file write, terminal, image generation, asset insertion, build, preview, iteration
+- **What's needed:** Real E2E smoke test with valid API quota
+- **Cannot verify now:** Gemini quota exhausted, no Clerk/Supabase for Studio API auth
+- **Integration tests:** agent-loop-v2 integration tests prove file editing, checkpointing, shell execution, build-fix loops work
+
+### Missions (multi-step)
+- **Status:** YELLOW (multi-step), GREEN (single-file)
+- Single-file vertical slice: inspect → propose → approval → apply → validate → checkpoint
+- Multi-step graph execution is NOT implemented
+
+### Deployment (for ordinary users)
+- **Status:** YELLOW
+- Admin-only manual trigger (`/api/deploy/trigger` requires `isAdmin()`)
+- Owner git-push is the standard path
+- `RAILWAY_API_TOKEN` NOT SET, `RAILWAY_SERVICE_ID` NOT SET
 
 ## RED — Not functional (truthfully absent)
 
-### Workflows
+### Workflows / graph execution
 - **Status:** RED
-- **No graph interpreter/executor exists.** No WorkflowBuilder UI is rendered.
+- No graph interpreter/executor exists. No WorkflowBuilder UI is rendered.
 - Workflows are NOT advertised as functional anywhere in the Studio.
-- A graph executor must be implemented before any workflow UI ships.
 
-### Multi-step Missions
-- **Status:** RED (multi-step), GREEN (single-file)
-- The mission executor (`lib/missions/mission-executor.ts`) implements a **single-file vertical slice**: inspect → propose → approval → apply → validate → checkpoint
-- It does NOT execute arbitrary mission graphs
-- Multi-step graph execution is unfinished and not advertised
-- The existing single-file Mission flow (MissionForge) is preserved and functional
+## Environment Configuration Status
 
-## Deployment Authorization
+| Variable | Status |
+|---|---|
+| `GEMINI_API_KEY` | SET (quota exhausted — free tier limit: 0 for image generation) |
+| `GOOGLE_API_KEY` | SET |
+| `OPENAI_API_KEY` | SET |
+| `CLERK_SECRET_KEY` | NOT SET |
+| `NEXT_PUBLIC_SUPABASE_URL` | NOT SET |
+| `SUPABASE_SERVICE_ROLE_KEY` | NOT SET |
+| `R2_ACCOUNT_ID` | NOT SET |
+| `R2_ACCESS_KEY_ID` | NOT SET |
+| `LIVEKIT_URL` | NOT SET |
+| `LIVEKIT_API_KEY` | NOT SET |
+| `LIVEKIT_API_SECRET` | NOT SET |
+| `RAILWAY_API_TOKEN` | NOT SET |
 
-| Path | Who | How |
-|---|---|---|
-| Manual deploy trigger | Admin only | `/api/deploy/trigger` requires `isAdmin()` — 403 for non-admins |
-| Git-based deploy | Any owner with push access | Push to connected branch triggers Railway git integration |
-| Admin redeploy | Admins | Railway GraphQL API via deploy endpoint |
+## What Must Happen Before E2E GREEN
 
-**Approval boundaries are preserved.** Ordinary project owners cannot bypass deployment authorization. They can push code (standard git workflow), but cannot manually trigger deployments.
+1. **Operator configures Clerk, Supabase, R2 env vars** in production deployment
+2. **Gemini API quota restored** (paid tier or quota reset)
+3. **Run real E2E smoke tests:**
+   - Game creation: prompt → agent-loop → files → image gen → asset insert → build → preview
+   - Image editing: existing asset → edit endpoint → persisted variant
+   - Audio persistence: generate → R2 → reload → playback
+   - Voice: configure LiveKit → token → connect → speak
+4. **Verify Preview behavior** in browser: device modes, resize, refresh, runtime status
 
 ## Architecture Notes
 
 - **Asset Lake** is the canonical asset facade. Maps `generation_jobs` → `StudioAsset`.
-- **`generation_jobs.user_id`** requires internal `public.users.id` UUID, not Clerk ID. Use `resolveInternalUserId()`.
 - **R2** is primary binary storage. Supabase Storage is fallback.
 - **agent-loop-v2** emits `ProgressEvent`s via `ProgressEmitter` → SSE → `useExecutionStore` → `LiTTLiveActivity`. No fabricated activity.
+- **LiTTWorkSummary** in ContextDrawer Work tab pulls REAL execution state from `useExecutionStore` (phase, events, tool calls, approvals, checkpoints, changes). Does NOT duplicate `LiTTLiveActivity`.
 - **Terminal server** is the authoritative security boundary. `isBlockedCommand()` is never bypassed.
-- **Provider routing** fixes live on `fix/owner-billing-clean`, NOT on this branch. Infrastructure fixes are kept separate from Studio work.
+- **Deployment** is admin-only. Ordinary owners push code via git; admins trigger Railway deployments.
 
 ## Commits on studio/phase-2
 
@@ -82,3 +124,5 @@
 5. `bb67937c` feat(studio): expose real agent loop in Work tab
 6. `cea22b1b` feat(voice): add LiveKit status to voice health + settings
 7. `59b7d64d` feat(image): edit existing Asset Lake images with AI
+8. `5055b5d5` docs: Studio Phase 2 capability status inventory
+9. `97a2064e` fix(studio): repair 4 test regressions from Phase 2 changes
