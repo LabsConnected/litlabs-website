@@ -54,7 +54,7 @@ const DEFAULT_CLERK_OAUTH_CLIENT_ID = "YWeGjVVwoNnX4RTY";
  * the mere existence of this URL does NOT mean the runtime is
  * connected. Use isRemoteAvailable() to check actual connectivity.
  */
-const DEFAULT_TERMINAL_URL = "https://litlabs-terminal-server-production-0be1.up.railway.app";
+const DEFAULT_TERMINAL_URL = "https://terminal-server-production-68ac.up.railway.app";
 
 export interface ResolvedAuthConfig {
   issuer: string;
