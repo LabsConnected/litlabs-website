@@ -140,6 +140,12 @@ export interface AgentLoopOptions {
   modelResolver?: ModelResolver | null;
   /** Task kind for escalation model selection (default: "coding"). */
   taskKind?: string;
+  /**
+   * Prior conversation messages from earlier turns (e.g. chat history).
+   * Inserted between the system prompt and the current user prompt so
+   * the model has context from previous turns in the same session.
+   */
+  priorMessages?: ChatMessage[];
 }
 
 /**
@@ -469,6 +475,7 @@ export async function runAgentLoop(
   // Build the conversation
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
+    ...(options.priorMessages ?? []),
     { role: "user", content: prompt },
   ];
 

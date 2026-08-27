@@ -4,15 +4,15 @@ export type ChatMessage = {
 };
 
 // ── NDJSON event protocol (emitted by streamLiTTCode) ───────────────────────
-// {"type":"meta","provider":"ollama|openrouter","model":"...","profile":"fast|smart|long|auto"}
+// {"type":"meta","provider":"ollama|openrouter|openai","model":"...","profile":"fast|smart|long|auto"}
 // {"type":"delta","text":"chunk"}
 // {"type":"done","model":"...","usage":{"total_tokens":N},"timing":{"ttftMs":N,"generationMs":N,"totalMs":N}}
 // {"type":"error","message":"..."}
 /**
  * `prompt_tokens`/`completion_tokens` are optional because Ollama's
  * local responses don't always report a split — `total_tokens` is the
- * only field every provider guarantees. OpenRouter (the only provider
- * ever billed) always populates all three.
+ * only field every provider guarantees. OpenRouter and direct OpenAI
+ * (the two providers ever billed) always populate all three.
  */
 export type LiTTUsage = {
   total_tokens: number;
@@ -20,8 +20,10 @@ export type LiTTUsage = {
   completion_tokens?: number;
 };
 
+export type LiTTProvider = "ollama" | "openrouter" | "openai";
+
 export type LiTTEvent =
-  | { type: "meta"; provider: "ollama" | "openrouter"; model: string; profile: ModelProfile }
+  | { type: "meta"; provider: LiTTProvider; model: string; profile: ModelProfile }
   | { type: "delta"; text: string }
   | { type: "tool_call_chunk"; index: number; id?: string; name?: string; argsChunk?: string }
   | { type: "done"; model: string; usage: LiTTUsage; timing: LiTTTiming }
@@ -30,7 +32,7 @@ export type LiTTEvent =
 export type LiTTResult = {
   content: string;
   model: string;
-  provider: "ollama" | "openrouter";
+  provider: LiTTProvider;
   usage: LiTTUsage;
   timing: LiTTTiming;
   profile: ModelProfile;
@@ -270,6 +272,10 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
+    // Cap at 4096 output tokens — leaving this undefined causes OpenRouter
+    // to default to the model's max_output_tokens (e.g. 65536), which
+    // wastes credits and causes 402 errors on low-balance accounts.
+    max_tokens: 4096,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -403,18 +409,42 @@ export type RemoteToolSchema = {
 
 export interface StreamModelForRemoteClientOptions {
   /**
-   * The OpenRouter model id to use (e.g. "anthropic/claude-sonnet-5"),
-   * already resolved by the CLIENT's own routing. Required — this
-   * function never re-derives a model from the conversation content.
+   * The model id to use, already resolved by the CLIENT's own routing.
+   * For direct OpenAI: the provider-native id (e.g. "gpt-5.6-luna").
+   * For OpenRouter: the OpenRouter slug (e.g. "openai/gpt-5.6-luna").
+   * Required — this function never re-derives a model from the conversation content.
    */
   model: string;
+  /**
+   * The provider the CLIENT routed to ("openai", "openrouter", etc.).
+   * The server uses this as a HINT — if the direct credential is
+   * available, it prefers direct transport; otherwise it falls back
+   * to OpenRouter and reports the actual provider truthfully.
+   */
+  providerHint?: string;
+  /**
+   * The OpenRouter fallback model id, used when the server cannot
+   * serve the request via direct transport and falls back to OpenRouter.
+   */
+  openRouterModelId?: string;
   maxTokens?: number;
   signal?: AbortSignal;
 }
 
 /**
  * Stream a model completion for the CLI's remote model transport.
- * OpenRouter only (the only provider ever billed) — never Ollama.
+ *
+ * Server-side transport selection:
+ *   - If the CLI routed to "openai" and OPENAI_API_KEY is configured,
+ *     use the DIRECT OpenAI transport (api.openai.com) with the
+ *     provider-native model id. This is the preferred path for managed
+ *     OpenAI access — no OpenRouter intermediary, no :nitro suffix,
+ *     truthful provider attribution.
+ *   - Otherwise (or if the direct key is absent), fall back to the
+ *     OpenRouter transport with the OpenRouter model slug. The meta
+ *     event always reports the ACTUAL provider, never a hardcoded value.
+ *
+ * Never Ollama — this channel is for managed cloud model access only.
  * Throws on any upstream failure; the caller (server.ts) is responsible
  * for redacting the error message before it reaches the client.
  */
@@ -424,28 +454,154 @@ export async function streamModelForRemoteClient(
   emit: (e: LiTTEvent) => void,
   options: StreamModelForRemoteClientOptions,
 ): Promise<LiTTResult> {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw new Error("OPENROUTER_API_KEY not configured");
-
-  // The CLIENT resolves which model to use — via its own @litt/models
-  // routing (AUTO/FIXED/BUDGET/MAX, catalog-aware) — and sends the
-  // already-resolved OpenRouter model id. This server does NOT
-  // re-derive a model from a cruder heuristic (that's what
-  // streamLiTTCode/resolveProfile is for elsewhere): doing so would
-  // silently override the CLI's routing decision and break "model
-  // truth" for remote execution. profile is "auto" here because the
-  // actual profile classification already happened client-side.
   const model = options.model;
   if (!model) throw new Error("model is required for streamModelForRemoteClient");
   const profile: ModelProfile = "auto";
 
+  // ── Server-side transport selection ──────────────────────────────
+  // The CLI sends a providerHint ("openai", "openrouter", etc.) and
+  // both model IDs. The server decides the actual transport based on
+  // which managed credentials are available — the CLI never sees the
+  // raw keys (PTY allowlist blocks them), so the server is the authority.
+  const hint = options.providerHint?.toLowerCase();
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+  // Direct OpenAI transport: preferred when the CLI routed to openai
+  // AND a real OpenAI key is configured AND the model id is NOT an
+  // OpenRouter slug (no "/" prefix — OpenRouter slugs are "openai/...").
+  // We also guard against an OpenRouter key accidentally placed in
+  // OPENAI_API_KEY by checking the prefix.
+  const isOpenRouterKeyInOpenaiSlot =
+    openaiKey && openaiKey.startsWith("sk-or-v1-");
+  const canUseDirectOpenAI =
+    hint === "openai" &&
+    !!openaiKey &&
+    !isOpenRouterKeyInOpenaiSlot &&
+    !model.includes("/");
+
+  // Log transport selection (no key values exposed)
+  console.log(`[transport] hint=${hint} model=${model} hasOpenAIKey=${!!openaiKey} isOpenRouterInOpenAI=${!!isOpenRouterKeyInOpenaiSlot} hasSlash=${model.includes("/")} canUseDirect=${canUseDirectOpenAI} hasOpenRouterKey=${!!openrouterKey}`);
+
+  if (canUseDirectOpenAI) {
+    console.log(`[transport] → direct OpenAI (api.openai.com)`);
+    try {
+      return await streamOpenAIDirect(messages, tools, emit, {
+        model, // provider-native id (e.g. "gpt-5.6-luna")
+        apiKey: openaiKey!,
+        maxTokens: options.maxTokens,
+        signal: options.signal,
+        profile,
+      });
+    } catch (openaiErr) {
+      const msg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
+      // Failover to a free OpenRouter model on billing errors (429 insufficient_quota, 402)
+      // so users without funded OpenAI accounts can still use LiTT.
+      if (openrouterKey && (msg.includes("429") || msg.includes("402") || msg.includes("insufficient_quota") || msg.includes("credit_balance"))) {
+        const freeModel = "minimax/minimax-m3:free";
+        console.log(`[transport] OpenAI billing error → failover to free OpenRouter model ${freeModel}`);
+        emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
+        return streamOpenRouterRemote(messages, tools, emit, {
+          model: freeModel,
+          apiKey: openrouterKey,
+          maxTokens: options.maxTokens,
+          signal: options.signal,
+          profile,
+        });
+      }
+      throw openaiErr;
+    }
+  }
+
+  console.log(`[transport] → OpenRouter fallback (openrouter.ai)`);
+
+  // Fallback: OpenRouter transport
+  if (!openrouterKey) {
+    if (isOpenRouterKeyInOpenaiSlot) {
+      throw new Error(
+        "OPENAI_API_KEY contains an OpenRouter key (sk-or-v1-...) — cannot use direct OpenAI transport. " +
+        "Set a real OpenAI key (sk-proj-...) or configure OPENROUTER_API_KEY for fallback.",
+      );
+    }
+    throw new Error("OPENROUTER_API_KEY not configured and direct OpenAI transport unavailable");
+  }
+
+  // Use the OpenRouter slug if available, otherwise the model id as-is
+  const orModel = options.openRouterModelId ?? model;
+  return streamOpenRouterRemote(messages, tools, emit, {
+    model: orModel,
+    apiKey: openrouterKey,
+    maxTokens: options.maxTokens,
+    signal: options.signal,
+    profile,
+  });
+}
+
+/**
+ * Direct OpenAI transport — calls api.openai.com/v1/chat/completions
+ * with the provider-native model id. Emits truthful meta events with
+ * provider: "openai". Never uses OpenRouter.
+ */
+async function streamOpenAIDirect(
+  messages: ChatMessage[],
+  tools: RemoteToolSchema[],
+  emit: (e: LiTTEvent) => void,
+  options: { model: string; apiKey: string; maxTokens?: number; signal?: AbortSignal; profile: ModelProfile },
+): Promise<LiTTResult> {
+  const { model, apiKey, profile } = options;
   const t0 = Date.now();
   const body: Record<string, unknown> = {
     model,
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : undefined,
+    // Cap at 4096 output tokens by default — leaving this undefined
+    // causes OpenRouter to default to the model's max_output_tokens
+    // (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
+    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+  };
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  if (!res.ok || !res.body) {
+    const errorText = await res.text().catch(() => "");
+    throw new Error(`OpenAI API error ${res.status}: ${errorText || res.statusText}`);
+  }
+
+  emit({ type: "meta", provider: "openai", model, profile });
+  return consumeSSEStream(res, emit, model, "openai", t0, profile);
+}
+
+/**
+ * OpenRouter transport for the remote model channel. Calls
+ * openrouter.ai/api/v1/chat/completions with the OpenRouter model slug.
+ * Emits truthful meta events with provider: "openrouter".
+ */
+async function streamOpenRouterRemote(
+  messages: ChatMessage[],
+  tools: RemoteToolSchema[],
+  emit: (e: LiTTEvent) => void,
+  options: { model: string; apiKey: string; maxTokens?: number; signal?: AbortSignal; profile: ModelProfile },
+): Promise<LiTTResult> {
+  const { model, apiKey, profile } = options;
+  const t0 = Date.now();
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+    stream_options: { include_usage: true },
+    // Cap at 4096 output tokens by default — leaving this undefined
+    // causes OpenRouter to default to the model's max_output_tokens
+    // (e.g. 65536), which wastes credits and causes 402 errors.
+    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
@@ -453,7 +609,7 @@ export async function streamModelForRemoteClient(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
       "X-Title": "LiTT CLI (remote)",
     },
@@ -466,6 +622,23 @@ export async function streamModelForRemoteClient(
   }
 
   emit({ type: "meta", provider: "openrouter", model, profile });
+  return consumeSSEStream(res, emit, model, "openrouter", t0, profile);
+}
+
+/**
+ * Shared SSE stream consumer for OpenAI-compatible streaming responses
+ * (both direct OpenAI and OpenRouter use the same SSE format).
+ * Emits delta, tool_call_chunk, and done events. Returns the final
+ * LiTTResult with the actual provider that served the request.
+ */
+async function consumeSSEStream(
+  res: Response,
+  emit: (e: LiTTEvent) => void,
+  model: string,
+  provider: LiTTProvider,
+  t0: number,
+  profile: ModelProfile,
+): Promise<LiTTResult> {
   let content = "";
   let total_tokens = 0;
   let prompt_tokens = 0;
@@ -473,7 +646,7 @@ export async function streamModelForRemoteClient(
   let finalModel = model;
   let tFirst = -1;
 
-  const reader = res.body.getReader();
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";
   for (;;) {
@@ -496,11 +669,11 @@ export async function streamModelForRemoteClient(
 
       if (obj.error) {
         const code = obj.error?.code ?? obj.choices?.[0]?.finish_reason ?? "unknown";
-        const message = obj.error?.message ?? "Unknown OpenRouter streaming error";
-        throw new Error(`OpenRouter stream error ${code}: ${message}`);
+        const message = obj.error?.message ?? "Unknown streaming error";
+        throw new Error(`${provider} stream error ${code}: ${message}`);
       }
       if (obj.choices?.[0]?.finish_reason === "error") {
-        throw new Error("OpenRouter stream terminated with finish_reason=error");
+        throw new Error(`${provider} stream terminated with finish_reason=error`);
       }
 
       if (obj.model) finalModel = obj.model;
@@ -535,7 +708,7 @@ export async function streamModelForRemoteClient(
   };
   const usage: LiTTUsage = { total_tokens, prompt_tokens, completion_tokens };
   emit({ type: "done", model: finalModel, usage, timing });
-  return { content, model: finalModel, provider: "openrouter", usage, timing, profile };
+  return { content, model: finalModel, provider, usage, timing, profile };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -562,6 +735,32 @@ export async function streamLiTTMessages(
 
   const { profile, model } = resolveProfile(promptForRouting);
   const webSearch = needsWebSearch(promptForRouting);
+
+  // ── Direct OpenAI preferred path ──────────────────────────────
+  // When OPENAI_API_KEY is set and the resolved model is an OpenAI
+  // model (OpenRouter slug "openai/..."), convert to the native id
+  // and call api.openai.com directly — no OpenRouter intermediary.
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const isOpenRouterKeyInOpenaiSlot = openaiKey?.startsWith("sk-or-v1-");
+  const isOpenAIModel = model.startsWith("openai/") && !webSearch;
+  const canUseDirectOpenAI = !!openaiKey && !isOpenRouterKeyInOpenaiSlot && isOpenAIModel;
+
+  if (canUseDirectOpenAI) {
+    // Convert "openai/gpt-oss-20b:nitro" → "gpt-oss-20b"
+    const nativeModel = model.replace(/^openai\//, "").replace(/:nitro$/, "");
+    console.log(`[transport] /api/chat → direct OpenAI (api.openai.com) model=${nativeModel}`);
+    try {
+      return await streamOpenAIDirect(messages, [], emit, {
+        model: nativeModel,
+        apiKey: openaiKey!,
+        maxTokens: 4096,
+        profile,
+      });
+    } catch (openaiErr) {
+      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
+      // Fall through to OpenRouter fallback below
+    }
+  }
 
   if (webSearch) {
     emit({ type: "meta", provider: "openrouter", model, profile });

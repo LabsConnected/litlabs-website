@@ -27,10 +27,11 @@ import {
 import { createRuntimeSession } from "../lib/runtime-session.js";
 import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
-import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
+import { ok, fail, warn, header, c, detectProject, resolveProjectCwd } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
+import { createPolicyApproval } from "../lib/approval-policy.js";
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
   const question = args.join(" ").trim();
@@ -40,7 +41,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     return 1;
   }
 
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
 
   if (!project.hasPackageJson) {
     fail("No package.json found. Run this command from your project root.");
@@ -72,16 +73,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     executor,
     store,
     projectId: projectRoot,
-  });
-
-  // Route through the same ModelRuntime as the TUI — picks the best
-  // available provider (OpenAI direct, OpenRouter, etc.) and passes
-  // native tool schemas so the model can call tools.
-  const modelRuntime = new ModelRuntime();
-  await modelRuntime.refresh();
-  const routed = modelRuntime.route("auto", null, question);
-  const model = resolveProviderAdapter(routed, {
-    tools: tools.list(),
+    // Policy-aware approval: safe→approve, elevated→approve in ACT,
+    // dangerous→deny (requires --yes flag or interactive UI).
+    onApprovalRequired: createPolicyApproval(),
   });
 
   // Resolve auth + REMOTE state so the model knows who it's acting for
@@ -91,6 +85,17 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const authSession = getAuthSession();
   const authState = await authSession.getAuthState();
   const remoteUrl = getTerminalUrl();
+
+  // Route through the same ModelRuntime as the TUI — picks the best
+  // available provider (OpenAI direct, OpenRouter, etc.) and passes
+  // native tool schemas so the model can call tools.
+  // In remote mode (signed in), the server holds all provider keys.
+  const modelRuntime = new ModelRuntime(authState.signedIn);
+  await modelRuntime.refresh();
+  const routed = modelRuntime.route("auto", null, question);
+  const model = resolveProviderAdapter(routed, {
+    tools: tools.list(),
+  });
 
   console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
 

@@ -6,15 +6,21 @@
  * (model-provider.ts): same ModelProvider interface, same native
  * tool_calls accumulation → `tool_call` fence-block translation, same
  * OpenAI-safe tool-name sanitization (openai-tool-names.js) — but the
- * actual HTTP request to OpenRouter happens on terminal-server, never
- * in this process. The CLI never reads, requires, or transmits
- * OPENROUTER_API_KEY when this adapter is used.
+ * actual HTTP request happens on terminal-server, never in this
+ * process. The CLI never reads, requires, or transmits provider API
+ * keys when this adapter is used.
  *
  *   RemoteModelProvider.stream()
  *     → RuntimeClient.streamModel()  (authenticated Socket.IO channel)
  *     → terminal-server: billing.ts authorize() + streamModelForRemoteClient()
- *     → OpenRouter (server-side key)
+ *     → server selects transport: direct OpenAI (api.openai.com) OR
+ *       OpenRouter fallback (openrouter.ai), based on which managed
+ *       credentials are available
  *     → relayed delta/tool_call_chunk/done/error events back to the CLI
+ *
+ * The server reports the ACTUAL provider in the meta event. This
+ * provider is never hardcoded — it reflects the real transport that
+ * served the request. The CLI displays it truthfully.
  *
  * Tool EXECUTION still happens locally — this adapter only ever returns
  * model text + `tool_call` fence blocks; the caller's existing agent
@@ -42,8 +48,13 @@ import type { RuntimeClient, RemoteModelStreamEvent, RemoteChatMessage } from ".
 export interface RemoteModelProviderOptions {
   /** Already-connected RuntimeClient. streamModel() throws if it is not. */
   client: RuntimeClient;
-  /** The OpenRouter model id already resolved by the CLI's own routing. */
+  /** The provider-native model id (e.g. "gpt-5.6-luna") for direct
+   *  transport, or the OpenRouter slug if no native id exists. */
   model: string;
+  /** Provider the CLI routed to ("openai", "openrouter", etc.). */
+  providerHint?: string;
+  /** OpenRouter fallback slug, used if server falls back to OpenRouter. */
+  openRouterModelId?: string;
   profile?: ModelProfile;
   maxTokens?: number;
   tools?: ToolDefinition[];
@@ -62,10 +73,18 @@ export class RemoteExecutionError extends Error {
 }
 
 export class RemoteModelProvider implements ModelProvider {
-  /** Execution truth: this adapter always executes server-side via OpenRouter. */
-  readonly providerId = "openrouter" as const;
+  /**
+   * The provider that ACTUALLY served the most recent request, as
+   * reported by the server's meta event. Starts as the providerHint
+   * (the CLI's routing decision) and is updated to the server's
+   * truthful report once the meta event arrives. Never hardcoded to
+   * "openrouter" — reflects the real transport.
+   */
+  providerId: string;
   private readonly _client: RuntimeClient;
   private readonly _model: string;
+  private readonly _providerHint: string | undefined;
+  private readonly _openRouterModelId: string | undefined;
   private readonly _profile: ModelProfile;
   private readonly _maxTokens: number | undefined;
   private readonly _tools: NativeToolSchema[] | null;
@@ -77,8 +96,13 @@ export class RemoteModelProvider implements ModelProvider {
   constructor(options: RemoteModelProviderOptions) {
     this._client = options.client;
     this._model = options.model;
+    this._providerHint = options.providerHint;
+    this._openRouterModelId = options.openRouterModelId;
     this._profile = options.profile ?? "smart";
     this._maxTokens = options.maxTokens;
+    // Initial providerId is the CLI's routing hint — updated to the
+    // server's truthful report once the meta event arrives.
+    this.providerId = options.providerHint ?? "openrouter";
     if (options.tools && options.tools.length > 0) {
       const { schemas, map } = toOpenAiToolSchemas(options.tools);
       this._tools = schemas;
@@ -111,12 +135,16 @@ export class RemoteModelProvider implements ModelProvider {
 
     let content = "";
     let resolvedModel = this._model;
+    let resolvedProvider = this.providerId;
     const nativeToolCalls: Array<{ name: string; args: string }> = [];
 
     const handleEvent = (event: RemoteModelStreamEvent): void => {
       switch (event.type) {
         case "meta":
-          emit({ type: "meta", provider: "openrouter", model: event.model, profile: this._profile });
+          // Server reports the ACTUAL provider — update our truthful state.
+          resolvedProvider = event.provider;
+          this.providerId = event.provider;
+          emit({ type: "meta", provider: event.provider, model: event.model, profile: this._profile });
           break;
         case "delta":
           content += event.text;
@@ -147,7 +175,11 @@ export class RemoteModelProvider implements ModelProvider {
         remoteMessages,
         this._tools ?? [],
         handleEvent,
-        { maxTokens: this._maxTokens },
+        {
+          maxTokens: this._maxTokens,
+          providerHint: this._providerHint,
+          openRouterModelId: this._openRouterModelId,
+        },
       );
     } catch (err) {
       // Never fall back to a local provider — surface a distinct,
@@ -182,7 +214,7 @@ export class RemoteModelProvider implements ModelProvider {
     return {
       content,
       model: resolvedModel,
-      provider: "openrouter",
+      provider: resolvedProvider,
       usage: { total_tokens: result.usage.total_tokens },
       timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
       profile: this._profile,

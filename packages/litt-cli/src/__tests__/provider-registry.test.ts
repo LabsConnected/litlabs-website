@@ -93,7 +93,7 @@ describe("Credential-aware discovery", () => {
     expect(hasCredential(provider)).toBe(true);
   });
 
-  it("hasCredential returns true via OpenRouter fallback (altEnvKeys)", () => {
+  it("hasCredential returns false when only OpenRouter fallback key is set (SEC-5.9)", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-test";
     const provider: ModelProvider = {
       id: "anthropic",
@@ -102,7 +102,11 @@ describe("Credential-aware discovery", () => {
       envKey: "ANTHROPIC_API_KEY",
       altEnvKeys: ["OPENROUTER_API_KEY"],
     };
-    expect(hasCredential(provider)).toBe(true);
+    // SEC-5.9: an OpenRouter key is NOT a credential for Anthropic.
+    // resolveServedBy() correctly reports OpenRouter as the server,
+    // but hasCredential() must not treat a cross-provider key as a
+    // direct credential.
+    expect(hasCredential(provider)).toBe(false);
   });
 
   it("hasCredential returns true for local providers (no key needed)", () => {
@@ -205,7 +209,10 @@ describe("ProviderRegistry", () => {
     await registry.refresh();
     const anthropic = registry.getProviderStatus("anthropic");
     expect(anthropic).not.toBeNull();
-    expect(anthropic!.hasCredential).toBe(true);
+    // SEC-5.9: hasCredential is false (no direct Anthropic key), but
+    // models are still available because OpenRouter serves them.
+    expect(anthropic!.hasCredential).toBe(false);
+    expect(anthropic!.servedBy).toBe("openrouter");
     expect(anthropic!.models.length).toBeGreaterThan(0);
   });
 

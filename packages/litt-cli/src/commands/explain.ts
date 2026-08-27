@@ -8,7 +8,7 @@
  *   pnpm build 2>&1 | litt explain
  */
 
-import { ok, fail, warn, header, label, value, c, readStdin, detectProject } from "../lib/utils.js";
+import { ok, fail, warn, header, label, value, c, readStdin, detectProject, resolveProjectCwd } from "../lib/utils.js";
 
 export async function explainCommand(args: string[]): Promise<number> {
   // Get input from stdin or args
@@ -28,7 +28,7 @@ export async function explainCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  const project = detectProject();
+  const project = detectProject(resolveProjectCwd());
   header("LiTT Explain");
 
   console.log(`${label("Project:")} ${value(String(project.packageJson?.name ?? "unknown"), c.bold)}`);

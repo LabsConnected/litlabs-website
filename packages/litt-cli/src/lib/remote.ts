@@ -182,7 +182,7 @@ async function getTerminalToken(options: RemoteDispatchOptions): Promise<string>
     // credentials exist but refresh failed, instead of collapsing that
     // into an indistinguishable null. The distinction matters because an
     // expired session must also be CLEARED, not merely reported.
-    clerkToken = await authSession.getAccessTokenStrict() ?? "";
+    clerkToken = await authSession.getAccessToken() ?? "";
   }
 
   if (!clerkToken) {

@@ -716,6 +716,82 @@ describe("CLI workspace error propagation", () => {
     }
   });
 
+  // ─── Billing denials are NOT authentication failures ──────────────
+  //
+  // Regression: terminal-server's billing gate denies calls for reasons
+  // that have nothing to do with the credential (plan lacks CLI access,
+  // LiTTBits exhausted, Supabase unreachable). Those denials arrive on
+  // 401/402/403/503, and classifying by STATUS ALONE produced
+  // `auth_revoked` — which told the user to run 'litt login' (a dead end)
+  // AND, because auth_revoked is in CREDENTIAL_CLEARING_REASONS, deleted
+  // their perfectly valid stored credential. Observed in the wild as:
+  //   "Remote chat failed: Billing service unavailable
+  //    Your session is no longer valid. Run 'litt login' to sign in again."
+
+  const BILLING_CASES = [
+    { code: "billing_unavailable", status: 503, message: "Billing service unavailable" },
+    { code: "plan_not_entitled", status: 403, message: "Your plan does not include LiTT CLI access." },
+    { code: "insufficient_credits", status: 402, message: "Insufficient LiTTBits balance." },
+  ] as const;
+
+  for (const { code, status, message } of BILLING_CASES) {
+    it(`${code} (HTTP ${status}) → its own reason, never auth_revoked`, async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: { code, message } }, status));
+
+      const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+      try {
+        await dispatchRemote("status", [], {
+          clerkToken: CLERK_TOKEN,
+          terminalUrl: EXCHANGE_URL,
+        });
+        expect.fail("Should have thrown");
+      } catch (error) {
+        expect(isRemoteUnavailable(error)).toBe(true);
+        const rue = error as InstanceType<typeof RemoteUnavailableError>;
+        expect(rue.reason).toBe(code);
+        expect(rue.reason).not.toBe("auth_revoked");
+        // The remedy must NOT send the user to `litt login` — re-authenticating
+        // fixes none of these, and following it wastes the user's time.
+        expect(rue.message).not.toMatch(/litt login/i);
+        expect(rue.message).not.toMatch(/no longer valid/i);
+      }
+    });
+  }
+
+  it("billing denials never clear the stored credential", async () => {
+    const { CREDENTIAL_CLEARING_REASONS } = await import("../lib/remote-unavailable.js");
+    for (const { code } of BILLING_CASES) {
+      expect(CREDENTIAL_CLEARING_REASONS.has(code)).toBe(false);
+    }
+  });
+
+  it("402 with no code is still read as insufficient_credits", async () => {
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: "Payment required" }, 402));
+
+    const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+    try {
+      await dispatchRemote("status", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL });
+      expect.fail("Should have thrown");
+    } catch (error) {
+      expect(isRemoteUnavailable(error)).toBe(true);
+      expect((error as InstanceType<typeof RemoteUnavailableError>).reason).toBe("insufficient_credits");
+    }
+  });
+
+  it("the billing gate's own auth codes DO still mean auth_revoked", async () => {
+    for (const code of ["unauthenticated", "user_not_found"] as const) {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: { code, message: "x" } }, 401));
+      const { RemoteUnavailableError, isRemoteUnavailable } = await import("../lib/remote-unavailable.js");
+      try {
+        await dispatchRemote("status", [], { clerkToken: CLERK_TOKEN, terminalUrl: EXCHANGE_URL });
+        expect.fail("Should have thrown");
+      } catch (error) {
+        expect(isRemoteUnavailable(error)).toBe(true);
+        expect((error as InstanceType<typeof RemoteUnavailableError>).reason).toBe("auth_revoked");
+      }
+    }
+  });
+
   it("workspace errors do NOT suggest local fallback", async () => {
     fetchSpy.mockResolvedValueOnce(mockFetchResponse({
       error: {

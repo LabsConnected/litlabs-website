@@ -470,8 +470,8 @@ export function useCockpitStore() {
    * (~30fps). This is the streaming hot path; the immediate syncTranscript
    * would rerender the entire CockpitApp on every token.
    */
-  const appendAssistantDelta = useCallback((id: string, text: string) => {
-    transcriptStore.appendDelta(id, text);
+  const appendAssistantDelta = useCallback((text: string) => {
+    transcriptStore.appendDelta(text);
     flushTranscriptSoon();
   }, [transcriptStore, flushTranscriptSoon]);
 
@@ -491,7 +491,7 @@ export function useCockpitStore() {
     servedModel?: string | null;
     durationMs?: number | null;
   }) => {
-    transcriptStore.finalize(id, options);
+    transcriptStore.finalize(options);
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
 

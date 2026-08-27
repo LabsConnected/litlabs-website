@@ -52,7 +52,6 @@ import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
-import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -110,14 +109,27 @@ function resolveModelProvider(
       "Check your network connection, or run `litt login` if your session expired.",
     );
   }
-  if (!routed.openRouterModelId) {
+  if (!routed.openRouterModelId && !routed.providerModelId) {
     throw new RemoteExecutionError(
-      `Remote execution cannot serve ${routed.label} — no OpenRouter-compatible model id is available for it.`,
+      `Remote execution cannot serve ${routed.label} — no model id is available for it.`,
     );
   }
   return new RemoteModelProvider({
     client,
-    model: routed.openRouterModelId,
+    // Send the provider-native model id if available (for direct OpenAI
+    // transport), otherwise the OpenRouter slug. The server decides
+    // the actual transport based on which managed credentials are set.
+    model: routed.providerModelId ?? routed.openRouterModelId!,
+    // For remote execution, send the model's NATIVE provider (from the
+    // catalog) as the hint — NOT the local credential resolver's
+    // servedBy. The server has managed keys and decides the transport;
+    // the CLI's local env (which may have OPENROUTER_API_KEY for BYOK
+    // but no OPENAI_API_KEY) must not override the server's managed
+    // direct-OpenAI transport. Without this, an OpenAI model served
+    // locally via OpenRouter (BYOK) would force the server to use
+    // OpenRouter too, even though the server has a direct OpenAI key.
+    providerHint: routed.provider,
+    openRouterModelId: routed.openRouterModelId,
     tools: opts.tools,
     maxTokens: opts.maxTokens,
   });
@@ -1213,53 +1225,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");
 
-    // ─── UTILITY lane — trivial factual/utility lookups bypass the
-    // full model+tool agent loop entirely (weather/time/calculator/
-    // business-hours/local-place). Checked ONLY for "chat"-classified,
-    // non-mission input — read and mission intents (coding, tool-heavy,
-    // build, deploy) are completely untouched. Deliberately placed
-    // BEFORE @mention context resolution so a hit skips that work too.
-    // See lib/utility-lane.ts for why this exists and how it's scoped.
-    if (intent === "chat" && !isMission) {
-      const utilityMatch = classifyUtilityIntent(input);
-      if (utilityMatch) {
-        perf.mark("utility_route");
-        const gateway = session.getGateway();
-        const cwd = session.getCwd();
-        perf.mark("utility_lookup_start");
-        const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
-          const r = await gateway.execute({
-            toolId,
-            inputs: args,
-            cwd,
-            mode: session.getMode(),
-            identity: CLI_IDENTITY,
-          });
-          return r.result;
-        });
-        perf.mark("utility_lookup_end");
-        if (lookup.satisfied) {
-          store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
-          store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
-          store.actions.addActivity({
-            id: `act_${Date.now()}_utility`,
-            ts: Date.now(),
-            type: "info",
-            tag: "UTILITY",
-            text: `Direct lookup (${utilityMatch.kind}) — no model call`,
-          });
-          perf.mark("finalize");
-          perf.end("utility");
-          persistSession();
-          return;
-        }
-        // Direct path could not satisfy the request (e.g. empty search,
-        // unparseable expression) — nothing was rendered; fall through
-        // to the normal chat path below exactly as if no utility match
-        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
-        // call, never an LLM round trip.
-      }
-    }
+    // NOTE: The utility-lane fast-path (weather/time/calculator lookups
+    // that bypass the model call) was introduced in commit 4f4e83d3 but
+    // the implementation file (lib/utility-lane.ts) was never created.
+    // The broken import and usage have been removed to restore the build.
+    // If utility-lane is needed, it must be implemented from scratch with
+    // proper billing/auth/provider attribution — do not re-add the import
+    // without the implementation.
 
     // ─── @mention context resolution ──────────────────────────────
     // The transcript shows the original input (@tokens intact); the
@@ -1380,7 +1352,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 if (event.type === "delta") {
                   synthesized += event.text;
                   perf.mark("first_token");
-                  store.actions.appendAssistantDelta(readAssistantMsgId!, event.text);
+                  store.actions.appendAssistantDelta(event.text);
                 }
               },
             );
@@ -1606,7 +1578,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
-                store.actions.appendAssistantDelta(chatAssistantMsgId!, visible);
+                store.actions.appendAssistantDelta(visible);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -2035,7 +2007,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
               perf.mark("first_token");
-              store.actions.appendAssistantDelta(missionAssistantMsgId!, visible);
+              store.actions.appendAssistantDelta(visible);
             }
           },
           onToolStream: (chunk: StreamChunk) => {

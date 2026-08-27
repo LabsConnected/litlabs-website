@@ -5,14 +5,14 @@
  * The session owns the canonical RuntimeStore — single source of truth.
  */
 
-import { detectProject, ok, fail, warn, header, label, value, c } from "../lib/utils.js";
+import { detectProject, ok, fail, warn, header, label, value, c, resolveProjectCwd } from "../lib/utils.js";
 import { getGitState } from "../lib/git-state.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 
 export async function statusCommand(_args: string[], _session?: RuntimeSession): Promise<number> {
   // Use the CLI's canonical project detection for identity (package.json name).
   // This is a filesystem read — no subprocess needed.
-  const detected = detectProject();
+  const detected = detectProject(resolveProjectCwd());
   const projectRoot = detected.rootDir;
   const projectName = String(detected.packageJson?.name ?? detected.dirName);
 

@@ -33,6 +33,7 @@ import {
   type RoutingResult,
   type ProviderHealthResult,
   type ProviderId,
+  type CredentialInfo,
 } from "@litt/models";
 
 import {
@@ -50,8 +51,10 @@ export interface RoutedModel {
   id: string;
   /** Display label (e.g. "Claude Sonnet 5"). */
   label: string;
-  /** Provider that serves the call (source truth). */
+  /** Provider that serves the call (source truth, from local credentials). */
   servedBy: ProviderId;
+  /** Native provider from the catalog (e.g. "openai", "anthropic"). */
+  provider: ProviderId;
   /** Routing reason for display. */
   reason: string;
   /** Fallback reason if the requested policy was not honored exactly. */
@@ -92,14 +95,23 @@ export class ModelRuntime {
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
 
-  constructor() {
-    this.registry = new ModelRegistry(
-      MODEL_CATALOG,
-      createEnvCredentialResolver(envAccessorFromProcess().get),
-    );
+  /**
+   * @param remoteMode — when true, all providers are treated as having
+   *   credentials (the LiTT server holds the keys). This is correct for
+   *   the authenticated remote cockpit: the CLI doesn't need local API
+   *   keys because the server proxies all model calls.
+   */
+  constructor(remoteMode = false) {
+    const envAccessor = envAccessorFromProcess();
+    const baseResolver = createEnvCredentialResolver(envAccessor.get);
+    // In remote mode, every provider has credentials — the server has them.
+    const resolver = remoteMode
+      ? (_provider: ProviderId): CredentialInfo => ({ hasCredential: true, source: "litt-managed", servedBy: _provider })
+      : baseResolver;
+    this.registry = new ModelRegistry(MODEL_CATALOG, resolver);
     this.healthCache = new HealthCache(30_000);
     this.discovery = new ProviderDiscoveryOrchestrator(
-      envAccessorFromProcess(),
+      envAccessor,
       undefined, // default fetcher
       this.healthCache,
     );
@@ -143,6 +155,7 @@ export class ModelRuntime {
       id: result.model.canonicalId,
       label: result.model.displayName,
       servedBy: result.servedBy,
+      provider: result.model.provider,
       reason: result.reason,
       fallbackReason: result.fallbackReason,
       appliedPolicy: result.appliedPolicy,

@@ -352,6 +352,21 @@ export function hasOpenRouterKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY;
 }
 
+/**
+ * Check if any provider key is configured (OpenRouter or a direct
+ * native provider key). Used by the controller to decide whether
+ * local BYOK is available as a fallback to the managed remote.
+ */
+export function hasProviderKey(): boolean {
+  return !!(
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_API_KEY
+  );
+}
+
 export class OpenRouterModelProvider implements ModelProvider {
   /** This adapter always serves via OpenRouter (source truth for the controller). */
   readonly providerId = "openrouter" as const;
