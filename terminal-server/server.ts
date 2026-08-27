@@ -1104,8 +1104,11 @@ app.use("/preview/:workspaceId", async (req: AuthenticatedRequest, res: Response
   const status = getPreviewStatus(workspaceId);
   if (status.status !== "ready" || !status.port) {
     res.status(503).json({
-      error: "Preview not ready",
+      error: status.error ?? "Preview not ready",
+      errorCode: status.errorCode ?? "preview_not_ready",
       status: status.status,
+      command: status.command,
+      framework: status.framework,
     });
     return;
   }

@@ -93,6 +93,14 @@ RUN apt-get update && apt-get install -y \
 # Verify git is available in the runner stage — project.search depends on it
 RUN command -v git && git --version
 
+# Enable pnpm via corepack in the RUNTIME image.
+# PreviewManager spawns `pnpm dev` (or npm/yarn) inside user workspaces.
+# Without this, the preview child process gets exit 127 (pnpm: command not found)
+# because the non-interactive shell has no NVM/.bashrc init.
+# Matches packageManager: pnpm@9.15.0 declared in the root package.json.
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate \
+    && pnpm --version && node --version
+
 WORKDIR /app
 
 ENV NODE_ENV=production

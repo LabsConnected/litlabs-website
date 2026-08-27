@@ -113,6 +113,7 @@ export interface PreviewStatusResponse {
   startedAt: number | null;
   lastHealthCheck: number | null;
   error: string | null;
+  errorCode: string | null;
   logs: string[];
 }
 
