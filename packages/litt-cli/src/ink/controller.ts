@@ -46,7 +46,7 @@ import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, Executio
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
-import { hasOpenRouterKey, resolveProviderAdapter, type ResolvedModelProvider } from "../lib/model-provider.js";
+import { hasOpenRouterKey, hasProviderKey, resolveProviderAdapter, type ResolvedModelProvider } from "../lib/model-provider.js";
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
@@ -79,6 +79,14 @@ import {
 } from "../lib/git-workflow.js";
 import { saveSession, summarize, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
+import { remoteChat, isRemoteAvailable, type RemoteChatEvent } from "../lib/remote.js";
+import { isRemoteUnavailable, RemoteUnavailableError } from "../lib/remote-unavailable.js";
+import { getSelectedRemoteWorkspace } from "../lib/remote-workspace-store.js";
+import { getAuthSession } from "../lib/auth/auth-session.js";
+
+function truncateActivity(text: string, max = 80): string {
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
 
 /**
  * Resolve the ModelProvider for a routed model, honoring executionTarget.
@@ -1450,7 +1458,41 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // if intent classification is correct, but defensive).
     }
 
-    if (modelExecutionAvailable(store.state.executionTarget)) {
+    // Submission correlation ID — shared across CHAT, MISSION, and the
+    // no-key fallback so a single submission is traceable end-to-end
+    // (user message → model stream → assistant finalize). Emitted to
+    // stderr when LITT_DIAG=1.
+    const submissionId = `sub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    if (process.env.LITT_DIAG === "1") {
+      process.stderr.write(
+        `[litt-diag][SUBMIT] submissionId=${submissionId} intent=${intent} input="${truncateActivity(input, 60)}"\n`,
+      );
+    }
+
+    // ─── Routing priority: managed remote PREFERRED for signed-in chat ───
+    // A signed-in LiTT user should use the managed backend (server-side
+    // OPENROUTER_API_KEY / OPENAI_API_KEY), NOT their personal OpenRouter
+    // balance. Local BYOK is a FALLBACK for:
+    //   - users who are NOT signed in (have their own key)
+    //   - mission intent (the local agent loop has rich UI: approval
+    //     bridge, diff viewer, holo states, tool progress)
+    //   - server unreachable (fall back to local key if available)
+    //
+    // This fixes the production gate: install litt → litt login → type
+    // "What's up?" → get an answer WITHOUT entering any API key or
+    // buying OpenRouter credits.
+    const _authSession = getAuthSession();
+    const _signedIn = await _authSession.isSignedIn().catch(() => false);
+    const _serverReachable = _signedIn ? await isRemoteAvailable().catch(() => false) : false;
+    const preferManagedRemote = _signedIn && _serverReachable;
+    if (process.env.LITT_DIAG === "1") {
+      process.stderr.write(
+        `[litt-diag][ROUTE-GATE] signedIn=${_signedIn} serverReachable=${_serverReachable} ` +
+        `preferManagedRemote=${preferManagedRemote} isMission=${isMission} hasProviderKey=${hasProviderKey()}\n`,
+      );
+    }
+
+    if (hasProviderKey() && !(preferManagedRemote && !isMission)) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
       // holoState stays IDLE throughout — CHAT never enters mission
@@ -2460,9 +2502,159 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // Reached only in LOCAL (developer) mode without a provider key —
-    // "remote" is always modelExecutionAvailable (see above), so this
-    // branch never fires for a normal signed-in customer session.
+    // ─── Managed remote chat path (PREFERRED for signed-in users) ───
+    // This block is reached when:
+    //   1. The user is signed in + server reachable + CHAT intent →
+    //      managed remote is PREFERRED over local BYOK (the local block
+    //      above was skipped). The server uses its managed keys.
+    //   2. No local API key exists (not signed in, or signed in but
+    //      server down) → shows "run litt login" or "can't reach server".
+    //
+    // A signed-in LiTT user should NEVER depend on their personal
+    // OpenRouter balance. The managed backend is the primary path.
+    if (process.env.LITT_DIAG === "1") {
+      process.stderr.write(
+        `[litt-diag][REMOTE-PATH] submissionId=${submissionId} preferManagedRemote=${preferManagedRemote} input="${truncateActivity(input, 60)}"\n`,
+      );
+    }
+    store.actions.addChatMessage({
+      role: "user",
+      content: input,
+      ts: Date.now(),
+      status: "complete",
+      submissionId,
+    });
+
+    // Check if the user is signed in and the server is reachable
+    const authSession = getAuthSession();
+    const signedIn = await authSession.isSignedIn().catch(() => false);
+    const serverReachable = signedIn ? await isRemoteAvailable().catch(() => false) : false;
+
+    if (signedIn && serverReachable) {
+      // ─── Managed-key remote chat path ───────────────────────────
+      // The server has OPENROUTER_API_KEY configured — stream the
+      // response back through the same transcript rendering as local.
+      store.actions.setIsProcessing(true);
+      store.actions.startBusy();
+      let assistantText = "";
+      let servedModel: string | null = null;
+
+      try {
+        const selectedWs = getSelectedRemoteWorkspace();
+        await remoteChat(input, (event: RemoteChatEvent) => {
+          switch (event.type) {
+            case "meta":
+              servedModel = event.model;
+              act(store, `Route: ${event.provider}/${event.model} (${event.profile})`, "info", "decision", "ROUTE");
+              break;
+            case "delta":
+              assistantText += event.text;
+              store.actions.appendAssistantDelta(event.text);
+              break;
+            case "done":
+              servedModel = event.model;
+              break;
+            case "error":
+              act(store, `Remote chat error: ${event.message}`, "error", "failed", "CHAT");
+              break;
+          }
+        }, selectedWs ? { workspaceId: selectedWs.workspaceId } : {});
+
+        store.actions.finalizeAssistantMessage({
+          content: assistantText,
+          status: "complete",
+          servedModel,
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "agent.chat",
+          tag: "CHAT",
+          text: `LiTT responded (remote) · ${servedModel ?? "unknown"}`,
+        });
+      } catch (err) {
+        // Handle workspace_selection_required with an actionable message
+        // instead of a generic error — the user needs to select a workspace.
+        if (err instanceof RemoteUnavailableError && err.reason === "workspace_selection_required") {
+          const wsMsg = "Multiple LiTT workspaces are available. Run: litt workspace select";
+          store.actions.finalizeAssistantMessage({
+            content: wsMsg,
+            status: "error",
+            servedModel: null,
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}`,
+            ts: Date.now(),
+            type: "info",
+            text: wsMsg,
+          });
+        } else {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          store.actions.finalizeAssistantMessage({
+            content: assistantText || `Remote chat failed: ${errMsg}`,
+            status: "error",
+            servedModel: null,
+          });
+          store.actions.addActivity({
+            id: `act_${Date.now()}`,
+            ts: Date.now(),
+            type: "info",
+            text: `Remote chat failed: ${errMsg}`,
+          });
+        }
+      } finally {
+        store.actions.setIsProcessing(false);
+        store.actions.stopBusy();
+      }
+
+      // Persist the conversation
+      const remotePair: SessionMessage[] = [
+        { role: "user", content: input, status: "complete", ts: Date.now(), submissionId },
+        { role: "assistant", content: assistantText, status: "complete", ts: Date.now(), submissionId },
+      ];
+      const transcript: SessionMessage[] = store.actions
+        .getChatTranscript()
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          status: m.status,
+          ts: m.ts,
+          ...(m.submissionId ? { submissionId: m.submissionId } : {}),
+        }));
+      saveSession(
+        buildConversationSave(
+          {
+            project: store.state.project || projectName || "unnamed",
+            cwd: session.getCwd(),
+            branch: store.state.branch,
+            mode: store.state.mode,
+            routingMode: store.state.routingMode,
+            selectedModel: store.state.selectedModel,
+          },
+          transcript,
+          remotePair,
+        ),
+      );
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      return;
+    }
+
+    // ─── Not signed in or server unreachable ──────────────────────
+    // Show a clear onboarding message. Do NOT tell the user to paste
+    // an API key — that's the old broken UX. The correct path is
+    // `litt login` which uses the server's managed keys.
+    const noKeyText = signedIn
+      ? "Can't reach the LiTT server. Check your connection and try again, or run /doctor for diagnostics."
+      : "Run `litt login` to start using LiTT — no API key needed. " +
+        "If you have your own OpenRouter key, set OPENROUTER_API_KEY in your environment.";
+    store.actions.addChatMessage({
+      role: "assistant",
+      content: noKeyText,
+      ts: Date.now(),
+      status: "error",
+      servedModel: null,
+      submissionId,
+    });
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
