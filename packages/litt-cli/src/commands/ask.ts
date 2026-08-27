@@ -28,6 +28,7 @@ import { createRuntimeSession } from "../lib/runtime-session.js";
 import { OpenRouterModelProvider, hasAnyProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
+import { resolveActiveProject } from "../lib/active-project.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { getTerminalUrl } from "../lib/auth/auth-config.js";
@@ -40,11 +41,16 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     return 1;
   }
 
-  const project = detectProject();
+  let project = detectProject();
 
   if (!project.hasPackageJson) {
-    fail("No package.json found. Run this command from your project root.");
-    return 1;
+    // Recover via the canonical resolution pipeline instead of dying.
+    const resolved = await resolveActiveProject();
+    if (!resolved) {
+      fail("No package.json found. Run this command from your project root.");
+      return 1;
+    }
+    project = resolved.project;
   }
 
   header("LiTT Ask");
