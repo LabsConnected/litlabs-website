@@ -36,6 +36,8 @@ export interface HeaderProps {
   /** Provider source (e.g. "OpenRouter • BYOK ✓") */
   source: string;
   connected: boolean;
+  /** Execution target — "local" or "remote" (managed backend). */
+  executionTarget?: string;
   localRuntime: string;
   remoteRuntime: string;
   mode: string;
