@@ -99,7 +99,7 @@ export class RemoteModelProvider implements ModelProvider {
     this._providerHint = options.providerHint;
     this._openRouterModelId = options.openRouterModelId;
     this._profile = options.profile ?? "smart";
-    this._maxTokens = options.maxTokens;
+    this._maxTokens = options.maxTokens ?? 3000;
     // Initial providerId is the CLI's routing hint — updated to the
     // server's truthful report once the meta event arrives.
     this.providerId = options.providerHint ?? "openrouter";

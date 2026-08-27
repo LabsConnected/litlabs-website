@@ -419,8 +419,9 @@ export class ProviderRegistry {
     const source = credentialSource(provider);
     const servedBy = resolveServedBy(provider);
 
-    // No credential → no-key status, no models
-    if (!cred) {
+    // No credential at all (neither direct nor via altEnvKeys like
+    // OpenRouter) → no-key status, no models.
+    if (!cred && !source) {
       this.statuses.set(provider.id, {
         provider,
         health: "no-key",
@@ -433,6 +434,11 @@ export class ProviderRegistry {
       });
       return;
     }
+
+    // If we reach here with !cred but source is set, the provider is
+    // accessible via an altEnvKey (e.g. OpenRouter serves Anthropic
+    // models). hasCredential stays false (SEC-5.9: the provider doesn't
+    // have its OWN key), but models ARE available via the alt provider.
 
     // Has credential — check health if URL available
     let health: ProviderHealth = "unverified"; // Default: routable but not proven
@@ -499,7 +505,10 @@ export class ProviderRegistry {
     this.statuses.set(provider.id, {
       provider,
       health,
-      hasCredential: true,
+      // SEC-5.9: hasCredential reflects the provider's OWN direct key,
+      // not altEnvKeys. When accessible only via OpenRouter, this is
+      // false — the provider doesn't have its own credential.
+      hasCredential: cred,
       servedBy,
       models,
       latencyMs,

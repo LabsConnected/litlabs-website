@@ -255,13 +255,17 @@ export function CockpitApp({
     || store.state.holoState === "VERIFYING" || store.state.holoState === "APPROVAL";
 
   const handleModelSelect = useCallback((selected: ModelChoice) => {
-    store.actions.setSelectedModel(selected.id);
+    // Picking an explicit model switches routing to FIXED — in "auto" mode
+    // cliModeToRouteOptions() ignores selectedModel entirely, so the pick
+    // would never be honored ("models don't stick").
+    store.actions.updateSelectedModel(selected.id);
+    store.actions.updateRoutingMode("fixed");
     store.actions.setOverlay("none");
     store.actions.setOverlayQuery("");
   }, [store]);
 
   const handleRoutingModeSelect = useCallback((routing: typeof store.state.routingMode) => {
-    store.actions.setRoutingMode(routing);
+    store.actions.updateRoutingMode(routing);
     store.actions.setOverlayQuery("");
   }, [store]);
 

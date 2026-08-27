@@ -42,11 +42,26 @@ import * as os from "os";
 
 // ─── Env management ────────────────────────────────────────────────
 
+// Every provider credential the CLI + @litt/models layers read, plus
+// LITT_HOME. Clearing ALL of these makes the suite hermetic: results
+// depend only on the keys each test explicitly sets, never on whatever
+// real keys happen to exist on the developer machine.
 const ENV_KEYS = [
+  // Meta-provider (serves every altEnvKeys provider)
   "OPENROUTER_API_KEY",
+  // Direct provider keys
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "XAI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "MOONSHOT_API_KEY",
+  "KIMI_API_KEY",
+  "MISTRAL_API_KEY",
+  "DASHSCOPE_API_KEY",
+  "QWEN_API_KEY",
+  // Prefs home
   "LITT_HOME",
 ] as const;
 
