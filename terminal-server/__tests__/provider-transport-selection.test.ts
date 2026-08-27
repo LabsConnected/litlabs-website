@@ -307,4 +307,154 @@ describe("Provider transport selection", () => {
     const meta = events.find((e) => e.type === "meta");
     expect(meta?.provider).toBe("openrouter");
   });
+
+  // ─── max_tokens regression tests ──────────────────────────────
+
+  it("I: missing maxTokens → server defaults to 4096, never 65536", async () => {
+    process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      { content: "OK", model: "gpt-5.6-luna", usage: { total_tokens: 5 } },
+    ]));
+
+    await streamModelForRemoteClient(
+      messages,
+      tools,
+      () => {},
+      {
+        model: "gpt-5.6-luna",
+        providerHint: "openai",
+        openRouterModelId: "openai/gpt-5.6-luna",
+        // maxTokens intentionally omitted
+      },
+    );
+
+    const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
+    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).not.toBe(65536);
+  });
+
+  it("J: explicit valid maxTokens is preserved (not overwritten by default)", async () => {
+    process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      { content: "OK", model: "gpt-5.6-luna", usage: { total_tokens: 5 } },
+    ]));
+
+    await streamModelForRemoteClient(
+      messages,
+      tools,
+      () => {},
+      {
+        model: "gpt-5.6-luna",
+        providerHint: "openai",
+        openRouterModelId: "openai/gpt-5.6-luna",
+        maxTokens: 256,
+      },
+    );
+
+    const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
+    expect(callBody.max_tokens).toBe(256);
+    expect(callBody.max_tokens).not.toBe(4096);
+    expect(callBody.max_tokens).not.toBe(65536);
+  });
+
+  it("K: missing maxTokens on OpenRouter fallback → defaults to 4096, never 65536", async () => {
+    // No OPENAI_API_KEY → falls back to OpenRouter
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      { content: "OK", model: "openai/gpt-5.6-luna", usage: { total_tokens: 5 } },
+    ]));
+
+    await streamModelForRemoteClient(
+      messages,
+      tools,
+      () => {},
+      {
+        model: "gpt-5.6-luna",
+        providerHint: "openai",
+        openRouterModelId: "openai/gpt-5.6-luna",
+        // maxTokens intentionally omitted
+      },
+    );
+
+    const callUrl = fetchMock.mock.calls[0][0];
+    expect(callUrl).toBe("https://openrouter.ai/api/v1/chat/completions");
+
+    const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
+    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).not.toBe(65536);
+  });
+
+  // ─── Error surfacing tests ────────────────────────────────────
+
+  it("L: OpenAI 401 error is surfaced as OpenAI error, not mislabeled as OpenRouter", async () => {
+    process.env.OPENAI_API_KEY = "sk-proj-invalid-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    // OpenAI returns 401
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: { message: "Incorrect API key provided", type: "invalid_request_error", code: "invalid_api_key" },
+      }), { status: 401, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const events: Array<{ type: string; provider?: string; message?: string }> = [];
+    await expect(
+      streamModelForRemoteClient(
+        messages,
+        tools,
+        (e) => events.push(e),
+        {
+          model: "gpt-5.6-luna",
+          providerHint: "openai",
+          openRouterModelId: "openai/gpt-5.6-luna",
+        },
+      ),
+    ).rejects.toThrow(/OpenAI API error 401/);
+
+    // The error must mention OpenAI, not OpenRouter
+    const errorEvents = events.filter((e) => e.type === "error");
+    // streamModelForRemoteClient throws — no error event is emitted,
+    // but the thrown error message must reference OpenAI, not OpenRouter
+  });
+
+  it("M: OpenAI 429 (insufficient quota) is surfaced as OpenAI error, not silently switched to OpenRouter", async () => {
+    process.env.OPENAI_API_KEY = "sk-proj-real-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    // OpenAI returns 429 — insufficient quota
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: {
+          message: "You have no credits remaining.",
+          type: "insufficient_quota",
+          code: "credit_balance_exhausted",
+        },
+      }), { status: 429, headers: { "Content-Type": "application/json" } }),
+    );
+
+    // The server must NOT silently fall back to OpenRouter.
+    // It must surface the OpenAI 429 error truthfully.
+    await expect(
+      streamModelForRemoteClient(
+        messages,
+        tools,
+        () => {},
+        {
+          model: "gpt-5.6-luna",
+          providerHint: "openai",
+          openRouterModelId: "openai/gpt-5.6-luna",
+        },
+      ),
+    ).rejects.toThrow(/OpenAI API error 429/);
+
+    // Verify it only called OpenAI once — no OpenRouter fallback attempt
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const callUrl = fetchMock.mock.calls[0][0];
+    expect(callUrl).toBe("https://api.openai.com/v1/chat/completions");
+  });
 });
