@@ -39,6 +39,9 @@ const eslintConfig = defineConfig([
     // Generated / copied
     "public/**",
     "**/public/**",
+    // Playwright snapshot baselines (huge serialized .ts blobs) — never lint
+    "**/*.ts-snapshots/**",
+    "**/*-snapshots/**",
     "*.lock",
     "pnpm-lock.yaml",
     // Consolidation scratch copies

@@ -81,6 +81,9 @@
     "build",
     "**/build/**",
     "coverage",
-    "**/coverage/**"
+    "**/coverage/**",
+    // Playwright snapshot artifacts (huge serialized .ts blobs) — not source, skip type-check
+    "tests/playwright/**/*-snapshots/**",
+    "**/*.ts-snapshots/**"
   ]
 }
