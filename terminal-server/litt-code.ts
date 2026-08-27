@@ -22,6 +22,49 @@ export type LiTTUsage = {
 
 export type LiTTProvider = "ollama" | "openrouter" | "openai";
 
+// ── Output-token policy — ONE canonical default ─────────────────────
+//
+// 3000 is the canonical managed-remote default and MUST match the CLI's
+// DEFAULT_MAX_TOKENS. Competing defaults (3000 client / 4096 server) make
+// the effective cap depend on which layer happened to fill it in.
+//
+// Leaving max_tokens undefined is what caused the original bug: the
+// provider then applies the MODEL's own output ceiling (65536 for
+// GPT-5.6), which burns credits and 402s a low-balance account on a
+// trivial prompt. Every request path resolves through
+// resolveServerMaxTokens() so undefined can never reach a provider.
+export const DEFAULT_MAX_TOKENS = 3000;
+
+// Hard safety ceiling. An explicit caller value below this is preserved
+// verbatim; anything above it is clamped. This is the backstop that keeps
+// a mis-set client from ever requesting the model ceiling again.
+export const MAX_OUTPUT_TOKENS = 16_384;
+
+/**
+ * Resolve the output-token cap for a provider request.
+ * Explicit sane value -> preserved. Missing/invalid -> canonical default.
+ * Anything above the ceiling -> clamped.
+ */
+export function resolveServerMaxTokens(requested?: number): number {
+  if (typeof requested === "number" && requested > 0) {
+    return Math.min(Math.floor(requested), MAX_OUTPUT_TOKENS);
+  }
+  return DEFAULT_MAX_TOKENS;
+}
+
+/**
+ * Is OpenRouter permitted as a FALLBACK for a model whose own provider
+ * could not serve the request?
+ *
+ * Default: NO. An OpenAI model with a missing or invalid OpenAI key
+ * surfaces a clear configuration error instead of silently switching
+ * providers behind the user's back. Explicit OpenRouter selection is a
+ * different thing entirely and is always honored.
+ */
+export function openRouterFallbackAllowed(): boolean {
+  return process.env.LITT_ALLOW_OPENROUTER_FALLBACK === "1";
+}
+
 export type LiTTEvent =
   | { type: "meta"; provider: LiTTProvider; model: string; profile: ModelProfile }
   | { type: "delta"; text: string }
@@ -272,10 +315,8 @@ async function streamChatWithOpenRouter(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens — leaving this undefined causes OpenRouter
-    // to default to the model's max_output_tokens (e.g. 65536), which
-    // wastes credits and causes 402 errors on low-balance accounts.
-    max_tokens: 4096,
+    // Canonical output cap. Never undefined — see resolveServerMaxTokens.
+    max_tokens: DEFAULT_MAX_TOKENS,
 
     // TEMPORARY compatibility routing:
     // Groq currently rejects this model when it attempts native tool use
@@ -494,6 +535,26 @@ export async function streamModelForRemoteClient(
     });
   }
 
+  // ── Fallback policy gate (C) ──────────────────────────────────────
+  // Reaching here means direct OpenAI was NOT used. If the CLI asked for
+  // openai, that is a missing/invalid credential, not an invitation to
+  // switch providers. Surface a clear configuration error unless the
+  // operator explicitly enabled fallback. Explicit OpenRouter selection
+  // (hint !== "openai") is unaffected and always proceeds.
+  if (hint === "openai" && !openRouterFallbackAllowed()) {
+    const reason = isOpenRouterKeyInOpenaiSlot
+      ? "OPENAI_API_KEY contains an OpenRouter key (sk-or-v1-...)"
+      : !openaiKey
+        ? "OPENAI_API_KEY is not configured"
+        : `model id "${model}" is an OpenRouter slug, not a native OpenAI model id`;
+    throw new Error(
+      `Cannot serve this request with OpenAI: ${reason}. ` +
+      `Refusing to silently reroute an OpenAI request through OpenRouter. ` +
+      `Fix the OpenAI configuration, select an OpenRouter model explicitly, ` +
+      `or set LITT_ALLOW_OPENROUTER_FALLBACK=1 to permit fallback.`,
+    );
+  }
+
   console.log(`[transport] → OpenRouter fallback (openrouter.ai)`);
 
   // Fallback: OpenRouter transport
@@ -536,10 +597,8 @@ async function streamOpenAIDirect(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens by default — leaving this undefined
-    // causes OpenRouter to default to the model's max_output_tokens
-    // (e.g. 65536), which wastes credits and causes 402 errors.
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
+    // Canonical output cap. Never undefined — see resolveServerMaxTokens.
+    max_tokens: resolveServerMaxTokens(options.maxTokens),
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
@@ -579,10 +638,8 @@ async function streamOpenRouterRemote(
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    // Cap at 4096 output tokens by default — leaving this undefined
-    // causes OpenRouter to default to the model's max_output_tokens
-    // (e.g. 65536), which wastes credits and causes 402 errors.
-    max_tokens: options.maxTokens && options.maxTokens > 0 ? options.maxTokens : 4096,
+    // Canonical output cap. Never undefined — see resolveServerMaxTokens.
+    max_tokens: resolveServerMaxTokens(options.maxTokens),
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   };
 
@@ -734,11 +791,17 @@ export async function streamLiTTMessages(
       return await streamOpenAIDirect(messages, [], emit, {
         model: nativeModel,
         apiKey: openaiKey!,
-        maxTokens: 4096,
+        maxTokens: DEFAULT_MAX_TOKENS,
         profile,
       });
     } catch (openaiErr) {
-      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter`);
+      // A direct-OpenAI failure is an OpenAI failure. Rerouting it to
+      // OpenRouter hides the real cause (bad key, quota, 429) and bills a
+      // different provider. Only fall through when explicitly permitted.
+      if (!openRouterFallbackAllowed()) {
+        throw openaiErr;
+      }
+      console.log(`[transport] /api/chat direct OpenAI failed: ${openaiErr instanceof Error ? openaiErr.message : String(openaiErr)} → falling back to OpenRouter (LITT_ALLOW_OPENROUTER_FALLBACK=1)`);
       // Fall through to OpenRouter fallback below
     }
   }

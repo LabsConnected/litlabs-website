@@ -4,7 +4,8 @@
  * These tests prove that:
  *   1. OpenAI selection invokes the direct OpenAI transport (api.openai.com)
  *   2. OpenRouter selection invokes the OpenRouter transport (openrouter.ai)
- *   3. OpenAI credential absence falls back to OpenRouter (visibly reported)
+ *   3. OpenAI credential absence is a CONFIGURATION ERROR, not a silent
+ *      provider switch. Fallback requires LITT_ALLOW_OPENROUTER_FALLBACK=1.
  *   4. OpenRouter fallback is reported as "openrouter", not "openai"
  *   5. Response metadata cannot claim direct OpenAI when route is OpenRouter
  *   6. An OpenRouter key in OPENAI_API_KEY slot is detected and rejected
@@ -28,12 +29,14 @@ beforeEach(() => {
   // Clean all provider keys between tests
   delete process.env.OPENAI_API_KEY;
   delete process.env.OPENROUTER_API_KEY;
+  delete process.env.LITT_ALLOW_OPENROUTER_FALLBACK;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.OPENAI_API_KEY;
   delete process.env.OPENROUTER_API_KEY;
+  delete process.env.LITT_ALLOW_OPENROUTER_FALLBACK;
 });
 
 // Helper: build a streaming SSE response with a single text delta
@@ -124,38 +127,49 @@ describe("Provider transport selection", () => {
     expect(meta?.provider).toBe("openrouter");
   });
 
-  it("C: OpenAI hint but no OPENAI_API_KEY → falls back to OpenRouter, reported as openrouter", async () => {
-    // No OPENAI_API_KEY, only OPENROUTER_API_KEY
+  it("C: OpenAI hint + no OPENAI_API_KEY + fallback disabled → clear config error, NO provider switch", async () => {
+    // Policy: a missing OpenAI credential is a configuration problem, not
+    // an invitation to bill a different provider. Previously this fell
+    // back to OpenRouter automatically; that behavior is now opt-in.
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+
+    await expect(
+      streamModelForRemoteClient(messages, tools, () => {}, {
+        model: "gpt-5.6-luna",
+        providerHint: "openai",
+        openRouterModelId: "openai/gpt-5.6-luna",
+      }),
+    ).rejects.toThrow(/OPENAI_API_KEY is not configured|Refusing to silently reroute/);
+
+    // Nothing was sent anywhere — not to OpenAI, not to OpenRouter.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("C2: OpenAI hint + no OPENAI_API_KEY + fallback ENABLED → OpenRouter, reported as openrouter", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
 
     fetchMock.mockResolvedValueOnce(sseResponse([
       { content: "Fallback response", model: "openai/gpt-5.6-luna", usage: { total_tokens: 10 } },
     ]));
 
     const events: Array<{ type: string; provider?: string }> = [];
-    await streamModelForRemoteClient(
-      messages,
-      tools,
-      (e) => events.push(e),
-      {
-        model: "gpt-5.6-luna",
-        providerHint: "openai",
-        openRouterModelId: "openai/gpt-5.6-luna",
-      },
-    );
+    await streamModelForRemoteClient(messages, tools, (e) => events.push(e), {
+      model: "gpt-5.6-luna",
+      providerHint: "openai",
+      openRouterModelId: "openai/gpt-5.6-luna",
+    });
 
-    // Must fall back to OpenRouter
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const callUrl = fetchMock.mock.calls[0][0];
-    expect(callUrl).toBe("https://openrouter.ai/api/v1/chat/completions");
-
-    // meta must report "openrouter", NOT "openai" — the fallback is visible
+    expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+    // The switch stays visible in metadata.
     const meta = events.find((e) => e.type === "meta");
     expect(meta?.provider).toBe("openrouter");
-    expect(meta?.provider).not.toBe("openai");
   });
 
   it("D: OpenRouter fallback cannot claim direct OpenAI in metadata", async () => {
+    // Exercises the fallback path deliberately — opt in explicitly.
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
 
     fetchMock.mockResolvedValueOnce(sseResponse([
@@ -183,6 +197,8 @@ describe("Provider transport selection", () => {
   });
 
   it("E: OpenRouter key in OPENAI_API_KEY slot → falls back to OpenRouter (not treated as direct OpenAI)", async () => {
+    // Exercises the fallback path deliberately — opt in explicitly.
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
     process.env.OPENAI_API_KEY = "sk-or-v1-misplaced-key";
     process.env.OPENROUTER_API_KEY = "sk-or-v1-real-openrouter-key";
 
@@ -256,6 +272,20 @@ describe("Provider transport selection", () => {
           openRouterModelId: "openai/gpt-5.6-luna",
         },
       ),
+      // With hint=openai the OpenAI configuration error now fires first
+      // and names the actual problem, rather than reporting the absence
+      // of the fallback provider the user never asked for.
+    ).rejects.toThrow(/OPENAI_API_KEY is not configured/i);
+  });
+
+  it("G3: no provider keys at all + fallback ENABLED → reports the missing OpenRouter key", async () => {
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
+    await expect(
+      streamModelForRemoteClient(messages, tools, () => {}, {
+        model: "gpt-5.6-luna",
+        providerHint: "openai",
+        openRouterModelId: "openai/gpt-5.6-luna",
+      }),
     ).rejects.toThrow(/OPENROUTER_API_KEY not configured/i);
   });
 
@@ -278,6 +308,8 @@ describe("Provider transport selection", () => {
   });
 
   it("H: OpenAI hint with OpenRouter slug model (has /) → falls back to OpenRouter", async () => {
+    // Exercises the fallback path deliberately — opt in explicitly.
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
     // Edge case: CLI sends an OpenRouter slug as the model id even though
     // providerHint is "openai". This can happen for models that have no
     // providerModelId. Server should fall back to OpenRouter.
@@ -310,7 +342,7 @@ describe("Provider transport selection", () => {
 
   // ─── max_tokens regression tests ──────────────────────────────
 
-  it("I: missing maxTokens → server defaults to 4096, never 65536", async () => {
+  it("I: missing maxTokens → server defaults to 3000, never 65536", async () => {
     process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
 
@@ -331,7 +363,7 @@ describe("Provider transport selection", () => {
     );
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
-    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 
@@ -357,11 +389,13 @@ describe("Provider transport selection", () => {
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
     expect(callBody.max_tokens).toBe(256);
-    expect(callBody.max_tokens).not.toBe(4096);
+    expect(callBody.max_tokens).not.toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 
-  it("K: missing maxTokens on OpenRouter fallback → defaults to 4096, never 65536", async () => {
+  it("K: missing maxTokens on OpenRouter fallback → defaults to 3000, never 65536", async () => {
+    // Exercises the fallback path deliberately — opt in explicitly.
+    process.env.LITT_ALLOW_OPENROUTER_FALLBACK = "1";
     // No OPENAI_API_KEY → falls back to OpenRouter
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
 
@@ -385,7 +419,7 @@ describe("Provider transport selection", () => {
     expect(callUrl).toBe("https://openrouter.ai/api/v1/chat/completions");
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
-    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 
@@ -456,5 +490,71 @@ describe("Provider transport selection", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = fetchMock.mock.calls[0][0];
     expect(callUrl).toBe("https://api.openai.com/v1/chat/completions");
+  });
+
+  it("N: explicit OpenRouter selection is honored regardless of the fallback flag", async () => {
+    // Choosing OpenRouter yourself is not a "fallback" — the opt-in gate
+    // must never block it, in either flag state.
+    for (const flag of [undefined, "1"]) {
+      fetchMock.mockReset();
+      process.env.OPENROUTER_API_KEY = "sk-or-v1-key";
+      process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
+      if (flag) process.env.LITT_ALLOW_OPENROUTER_FALLBACK = flag;
+      else delete process.env.LITT_ALLOW_OPENROUTER_FALLBACK;
+
+      fetchMock.mockResolvedValueOnce(sseResponse([
+        { content: "ok", model: "anthropic/claude-sonnet-5", usage: { total_tokens: 3 } },
+      ]));
+
+      const events: Array<{ type: string; provider?: string }> = [];
+      await streamModelForRemoteClient(messages, tools, (e) => events.push(e), {
+        model: "anthropic/claude-sonnet-5",
+        providerHint: "openrouter",
+        openRouterModelId: "anthropic/claude-sonnet-5",
+      });
+
+      expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+      expect(events.find((e) => e.type === "meta")?.provider).toBe("openrouter");
+    }
+  });
+
+  it("O: OpenAI hint + valid OpenAI key still goes direct with the fallback flag OFF", async () => {
+    // The gate must not accidentally block the happy path it protects.
+    process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-key";
+    delete process.env.LITT_ALLOW_OPENROUTER_FALLBACK;
+
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      { content: "direct", model: "gpt-5.6-luna", usage: { total_tokens: 4 } },
+    ]));
+
+    const events: Array<{ type: string; provider?: string }> = [];
+    await streamModelForRemoteClient(messages, tools, (e) => events.push(e), {
+      model: "gpt-5.6-luna",
+      providerHint: "openai",
+      openRouterModelId: "openai/gpt-5.6-luna",
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.openai.com/v1/chat/completions");
+    expect(events.find((e) => e.type === "meta")?.provider).toBe("openai");
+  });
+
+  it("P: server clamps an absurd maxTokens instead of forwarding the model ceiling", async () => {
+    process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
+
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      { content: "ok", model: "gpt-5.6-luna", usage: { total_tokens: 2 } },
+    ]));
+
+    await streamModelForRemoteClient(messages, tools, () => {}, {
+      model: "gpt-5.6-luna",
+      providerHint: "openai",
+      openRouterModelId: "openai/gpt-5.6-luna",
+      maxTokens: 65536,
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.max_tokens).toBe(16384);
+    expect(body.max_tokens).not.toBe(65536);
   });
 });
