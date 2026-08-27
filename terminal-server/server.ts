@@ -24,7 +24,8 @@ import { handleLiTTCodeCommand, streamLiTTMessages, type LiTTEvent } from "./lit
 import { streamLiTTOperator } from "./litt-agent";
 import { runLiTTOperator, operatorAvailable } from "./litt-operator";
 import { handleModelRequest, handleModelCancel, type ModelRequestPayload } from "./model-relay";
-import { getBillingClient } from "./billing";
+import { getBillingClient, type AuthorizationDenialCode } from "./billing";
+import { getRunRegistry } from "./run-registry";
 import { dispatchMobileCommand } from "./mobile-commands";
 import {
   initRuntime,
@@ -318,7 +319,7 @@ app.get("/api/runtime", (req: AuthenticatedRequest, res: Response) => {
 
 // ─── User-authenticated cancel endpoint ───────────────────────────
 // POST /api/cancel — cancel the currently active run using USER auth.
-app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/cancel", async (req: AuthenticatedRequest, res: Response) => {
   try {
     verifyTerminalToken(bearerToken(req.headers.authorization));
   } catch {
@@ -330,8 +331,12 @@ app.post("/api/cancel", (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: "Missing 'runId'" });
     return;
   }
-  // TODO: wire to actual cancel — for now returns ok
-  res.json({ ok: true, runId });
+  // Kill the actual child-process tree for this runId and report whether a
+  // running process was found. Previously this returned ok:true without
+  // cancelling anything — the caller believed the run had stopped while it
+  // kept executing (and kept generating billed tokens).
+  const cancelled = await getRunRegistry().cancel(runId);
+  res.json({ ok: true, runId, cancelled });
 });
 
 // ─── Command bridge endpoint ──────────────────────────────────────
@@ -385,6 +390,36 @@ app.post("/internal/command", requireInternalServiceAuth, async (req: Authentica
 //   {"type":"delta","text":"chunk"}
 //   {"type":"done","model":"...","usage":{"total_tokens":N},"timing":{...}}
 //   {"type":"error","message":"..."}
+// HTTP status per billing denial.
+//
+// These are deliberately NOT all 401/403. The CLI classifies a failure by
+// the server's typed `code` first and falls back to the STATUS when no code
+// is present — so answering "you are out of credits" with a bare 403 makes a
+// perfectly valid session look revoked. The CLI then tells the user to run
+// `litt login` (which fixes none of these) and, because `auth_revoked` is a
+// credential-clearing reason, DELETES their stored credential.
+//
+// That is the exact failure operators reported as:
+//   "Remote chat failed: Billing service unavailable
+//    Your session is no longer valid. Run 'litt login' to sign in again."
+//
+// The Socket.IO model relay already returns `denialCode`; this is the HTTP
+// path catching up, so both entry points describe a denial the same way.
+function billingDenialStatus(code: AuthorizationDenialCode | undefined): number {
+  switch (code) {
+    case "unauthenticated":
+    case "user_not_found":
+      return 401; // genuinely an identity failure
+    case "plan_not_entitled":
+      return 403; // authenticated, not permitted
+    case "insufficient_credits":
+      return 402; // Payment Required
+    case "billing_unavailable":
+    default:
+      return 503; // server-side problem — the caller's credential is fine
+  }
+}
+
 app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 1. Verify user JWT ──────────────────────────────────────────
   let userId: string;
@@ -400,7 +435,11 @@ app.post("/api/chat", async (req: AuthenticatedRequest, res: Response) => {
   // ─── 2. Billing authorization (same gate as litt:model:request) ──
   const authz = await getBillingClient().authorize(userId);
   if (!authz.ok) {
-    res.status(403).json({ error: authz.message ?? "Not authorized." });
+    // Typed shape `{ error: { code, message } }` — the CLI branches on `code`
+    // and must never have to string-match the message.
+    res.status(billingDenialStatus(authz.code)).json({
+      error: { code: authz.code, message: authz.message ?? "Not authorized." },
+    });
     return;
   }
 

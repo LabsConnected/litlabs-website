@@ -14,6 +14,19 @@ export type ChatMessage = {
  * only field every provider guarantees. OpenRouter and direct OpenAI
  * (the two providers ever billed) always populate all three.
  */
+/**
+ * Output cap for terminal-server's OWN OpenRouter calls (operator turns,
+ * /api/chat, the native tool transport).
+ *
+ * These calls are debited against the user's LiTTBits balance by billing.ts,
+ * so an absent cap is unbounded spend per turn. The billing gate decides
+ * WHETHER a call may happen; this bounds HOW MUCH one call can cost.
+ *
+ * The remote model relay (`streamModelForRemoteClient`) is deliberately NOT
+ * capped here — the CLI passes its own `maxTokens` per request.
+ */
+const OPENROUTER_MAX_TOKENS = 4096;
+
 export type LiTTUsage = {
   total_tokens: number;
   prompt_tokens?: number;
@@ -989,6 +1002,7 @@ export async function streamLiTTMessagesWithTools(
     tools,
     tool_choice: nativeTools.length > 0 ? "auto" : "none",
     parallel_tool_calls: false,
+    max_tokens: OPENROUTER_MAX_TOKENS,
   };
 
   const startedAt = Date.now();
