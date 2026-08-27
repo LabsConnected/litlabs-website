@@ -78,6 +78,15 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     onApprovalRequired: createPolicyApproval(),
   });
 
+  // Route through the same ModelRuntime as the TUI — picks the best
+  // available provider (OpenAI direct, OpenRouter, etc.) and passes
+  // native tool schemas so the model can call tools.
+  const modelRuntime = new ModelRuntime();
+  await modelRuntime.refresh();
+  const routed = modelRuntime.route("auto", null, question);
+  const model = resolveProviderAdapter(routed, {
+    tools: tools.list(),  });
+
   // Resolve auth + REMOTE state so the model knows who it's acting for
   // and whether the REMOTE transport is available. Without this, the
   // agent cannot truthfully answer "am I authenticated?" or "is REMOTE
