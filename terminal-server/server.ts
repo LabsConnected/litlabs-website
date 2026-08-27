@@ -1303,6 +1303,7 @@ app.post("/ws-files/read", (req: AuthenticatedRequest, res) => {
 app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
   const filePath = String(req.body.path || "");
   const content = String(req.body.content || "");
+  const encoding = String(req.body.encoding || "utf-8");
   if (Buffer.byteLength(content, "utf8") > MAX_WRITE_SIZE) {
     return res.status(413).json({ error: `Content exceeds max write size (${MAX_WRITE_SIZE} bytes)` });
   }
@@ -1312,7 +1313,15 @@ app.post("/ws-files/write", (req: AuthenticatedRequest, res) => {
   try {
     const target = resolveWorkspacePath(req.workspaceId!, req.terminalUserId!, filePath);
     mkdirSync(resolve(target, ".."), { recursive: true });
-    writeFileSync(target, content, "utf-8");
+    if (encoding === "base64") {
+      // Binary file write — decode base64 to buffer before writing.
+      // Used by the "Use asset in project" feature to save generated
+      // images/audio/video into the project workspace.
+      const buf = Buffer.from(content, "base64");
+      writeFileSync(target, buf);
+    } else {
+      writeFileSync(target, content, "utf-8");
+    }
     res.json({ saved: true, workspaceId: req.workspaceId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to write file";
