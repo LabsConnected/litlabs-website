@@ -295,16 +295,22 @@ const PROVIDERS: ModelProvider[] = [
 // ─── Credential resolution ─────────────────────────────────────────
 
 /**
- * Check if a provider has credentials (direct or via OpenRouter).
+ * Check if a provider has its OWN direct credentials.
+ *
+ * SEC-5.9: This must NOT return true merely because an OpenRouter key
+ * is present. An OpenRouter key is a credential for OpenRouter, not
+ * for OpenAI/Anthropic/Google. Treating it as such lets a cross-provider
+ * credential satisfy a different provider's gate, which can expose the
+ * key to a provider that never issued it.
+ *
+ * The `altEnvKeys` field is still honored by `resolveServedBy()` and
+ * `credentialSource()` — those correctly report that OpenRouter will
+ * serve the request. But `hasCredential()` answers "does THIS provider
+ * have its own key?", and the answer is no.
  */
 export function hasCredential(provider: ModelProvider): boolean {
   if (provider.credentialType === "local") return true;
   if (provider.envKey && process.env[provider.envKey]) return true;
-  if (provider.altEnvKeys) {
-    for (const altKey of provider.altEnvKeys) {
-      if (process.env[altKey]) return true;
-    }
-  }
   return false;
 }
 
