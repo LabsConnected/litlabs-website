@@ -442,7 +442,13 @@ export function parseToolCalls(content: string): ParsedToolCall[] {
  * JSON tool objects anywhere in the text.
  */
 export function stripToolCallBlocks(content: string): string {
+  // Strip fenced tool_call blocks (with closing fence).
   let stripped = content.replace(/```tool_call[ \t]*\r?\n?[\s\S]*?```/gi, "");
+  // Also strip UNCLOSED tool_call fences — smaller/free models sometimes
+  // emit ` ```tool_call ` without a closing fence because they don't
+  // properly support function calling. Without this, the raw fence
+  // text leaks into the user-facing chat.
+  stripped = stripped.replace(/```tool_call[ \t]*\r?\n?[\s\S]*$/gi, "");
   // Strip bare JSON tool objects (fenced handling above; this covers
   // unfenced `{ "tool": ... }` objects that models emit without fences,
   // even when split from the surrounding prose by a newline or not).
