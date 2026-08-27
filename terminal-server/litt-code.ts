@@ -495,11 +495,11 @@ export async function streamModelForRemoteClient(
       });
     } catch (openaiErr) {
       const msg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
-      // Failover to a free OpenRouter model on billing errors (429 insufficient_quota, 402)
-      // so users without funded OpenAI accounts can still use LiTT.
-      if (openrouterKey && (msg.includes("429") || msg.includes("402") || msg.includes("insufficient_quota") || msg.includes("credit_balance"))) {
+      // Failover to a free OpenRouter model on ANY OpenAI error so users
+      // without funded OpenAI accounts can still use LiTT.
+      if (openrouterKey) {
         const freeModel = "minimax/minimax-m3:free";
-        console.log(`[transport] OpenAI billing error → failover to free OpenRouter model ${freeModel}`);
+        console.log(`[transport] OpenAI error → failover to free OpenRouter model ${freeModel}`);
         emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
         return streamOpenRouterRemote(messages, tools, emit, {
           model: freeModel,
@@ -759,11 +759,13 @@ export async function streamLiTTMessages(
     } catch (openaiErr) {
       const errMsg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
       console.log(`[transport] /api/chat direct OpenAI failed: ${errMsg} → falling back to OpenRouter`);
-      // Failover to free OpenRouter model on billing errors (429/402)
+      // Failover to free OpenRouter model on ANY OpenAI error (billing,
+      // model not found, rate limit, etc.) so users without funded
+      // OpenAI accounts can still use LiTT.
       const openrouterKey = process.env.OPENROUTER_API_KEY;
-      if (openrouterKey && (errMsg.includes("429") || errMsg.includes("402") || errMsg.includes("insufficient_quota") || errMsg.includes("credit_balance"))) {
+      if (openrouterKey) {
         const freeModel = "minimax/minimax-m3:free";
-        console.log(`[transport] OpenAI billing error → failover to free OpenRouter model ${freeModel}`);
+        console.log(`[transport] OpenAI error → failover to free OpenRouter model ${freeModel}`);
         try {
           return await streamChatWithOpenRouter(messages, emit, freeModel, profile, false);
         } catch (freeErr) {
