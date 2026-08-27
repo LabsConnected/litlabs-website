@@ -268,11 +268,14 @@ export async function dispatchRemote(
     const legacyMessage = typeof payload?.error === "string" ? payload.error : undefined;
     const detail = typedMessage ?? legacyMessage ?? `Remote command failed (${response.status}).`;
 
-    // Check workspace error codes FIRST — before the generic 401/403 check.
-    // workspace_unauthorized returns HTTP 403 but is NOT an auth revocation —
-    // it means the workspace doesn't belong to the user. It must remain a
-    // distinct reason so the CLI does NOT clear valid Clerk credentials
-    // or tell the user to log in again.
+    // Check typed error codes FIRST — before the generic 401/403 check.
+    // Several typed codes arrive on 401/403/402/503 but are NOT auth
+    // revocations. workspace_unauthorized returns HTTP 403 but means the
+    // workspace doesn't belong to the user. billing_unavailable returns
+    // 503, plan_not_entitled returns 403, insufficient_credits returns
+    // 402 — none are auth failures. They must remain distinct reasons so
+    // the CLI does NOT clear valid Clerk credentials or tell the user to
+    // log in again for a non-auth problem.
     if (typedError?.code === "workspace_required") {
       throw new RemoteUnavailableError("workspace_required", detail);
     }
@@ -281,6 +284,22 @@ export async function dispatchRemote(
     }
     if (typedError?.code === "workspace_unauthorized") {
       throw new RemoteUnavailableError("workspace_unauthorized", detail);
+    }
+    if (typedError?.code === "billing_unavailable") {
+      throw new RemoteUnavailableError("billing_unavailable", detail);
+    }
+    if (typedError?.code === "plan_not_entitled") {
+      throw new RemoteUnavailableError("plan_not_entitled", detail);
+    }
+    if (typedError?.code === "insufficient_credits") {
+      throw new RemoteUnavailableError("insufficient_credits", detail);
+    }
+
+    // 402 with no typed code — payment required, treat as insufficient
+    // credits. This is the billing gate's "you're out of LiTTBits" path
+    // when it doesn't include a structured error code.
+    if (response.status === 402) {
+      throw new RemoteUnavailableError("insufficient_credits", detail);
     }
 
     if (response.status === 401 || response.status === 403) {
