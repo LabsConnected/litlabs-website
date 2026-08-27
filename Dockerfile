@@ -49,9 +49,18 @@ WORKDIR /app
 
 RUN corepack enable pnpm
 
-# Copy installed node_modules from deps stage
+# Copy installed node_modules from deps stage.
+# Copy the root node_modules (has .bin/tsc) plus each workspace package's
+# node_modules so pnpm --filter build works for all packages.
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
+COPY --from=deps /app/packages/litt-models/node_modules ./packages/litt-models/node_modules
+COPY --from=deps /app/packages/litt-cli/node_modules ./packages/litt-cli/node_modules
+COPY --from=deps /app/packages/litt-shell/node_modules ./packages/litt-shell/node_modules
+COPY --from=deps /app/packages/litt-companion/node_modules ./packages/litt-companion/node_modules
+COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
+COPY --from=deps /app/voice-server/node_modules ./voice-server/node_modules
+COPY --from=deps /app/cli/node_modules ./cli/node_modules
 
 # Copy source code
 COPY . .
