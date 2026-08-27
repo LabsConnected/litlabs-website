@@ -379,7 +379,6 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
   const { askLiTTCode } = require("./litt-code");
 
   const canUseOperator = await operatorAvailable().catch(() => false);
-  console.log(`[ask] operatorAvailable=${canUseOperator} prompt=${prompt.slice(0, 60)}`);
 
   if (canUseOperator) {
     try {
@@ -389,7 +388,6 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
         userId: ctx.userId,
         mode: ctx.mode ?? "act",
       });
-      console.log(`[ask] operator result: termination=${result.termination} content=${result.content.slice(0, 100)}`);
       return {
         kind: "brain_response",
         ok: result.termination !== "error",
