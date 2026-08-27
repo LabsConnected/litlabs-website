@@ -495,6 +495,21 @@ export function useCockpitStore() {
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
 
+  /**
+   * The canonical transcript, read straight from the pure store.
+   *
+   * Prefer this over `state.chatTranscript` whenever a caller needs the
+   * transcript AS OF NOW inside an async handler. `state.chatTranscript`
+   * is a render-time snapshot: a handler created by useCallback closes
+   * over the transcript from its defining render, so a message appended
+   * during the same turn is invisible there. It also lags by up to one
+   * coalesced flush (~30fps) while streaming. The pure store has neither
+   * property — it is updated synchronously on every mutation.
+   */
+  const getChatTranscript = useCallback((): ChatMessage[] => {
+    return transcriptStore.snapshot();
+  }, [transcriptStore]);
+
   /** Clear the chat transcript (e.g. /clear). */
   const clearChatTranscript = useCallback(() => {
     transcriptStore.clear();
@@ -863,6 +878,7 @@ export function useCockpitStore() {
       addChatMessage,
       appendAssistantDelta,
       finalizeAssistantMessage,
+      getChatTranscript,
       clearChatTranscript,
       startToolProgressMission,
       completeToolProgressMission,

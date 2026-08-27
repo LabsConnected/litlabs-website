@@ -165,6 +165,10 @@ function modelExecutionAvailable(target: ExecutionTarget): boolean {
  * or errored message is not a settled turn and must not be replayed into
  * a new request. Only user/assistant content is passed; runAgentLoop
  * itself rejects any other role.
+ *
+ * Call this with store.actions.getChatTranscript() (the canonical store)
+ * and BEFORE the current turn's own user message is appended — the
+ * result is then exactly the settled conversation that preceded now.
  */
 export function buildPriorMessages(chatTranscript: ChatMessage[]): AgentCoreChatMessage[] {
   return chatTranscript
@@ -1226,6 +1230,13 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");
 
+    // Conversation history for THIS turn, captured BEFORE any of this
+    // turn's own messages are appended — so it is exactly what was said
+    // before now, and the current turn is never sent twice. Read from
+    // the canonical store (see getChatTranscript) rather than
+    // store.state, which is a render-time snapshot inside this closure.
+    const priorMessages = buildPriorMessages(store.actions.getChatTranscript());
+
     // ─── UTILITY lane — trivial factual/utility lookups bypass the
     // full model+tool agent loop entirely (weather/time/calculator/
     // business-hours/local-place). Checked ONLY for "chat"-classified,
@@ -1606,7 +1617,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             // Prior completed turns from THIS cockpit session — without
             // this, every chat message is a fresh, context-free request
             // (see buildPriorMessages doc).
-            priorMessages: buildPriorMessages(store.state.chatTranscript),
+            priorMessages,
             onModelStream: (event) => {
               if (event.type === "delta") {
                 // Suppress tool_call/json protocol markup — never dump
@@ -2008,7 +2019,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // Prior completed chat turns from THIS cockpit session — a
           // mission trigger ("build it") often depends on context from
           // the conversation that preceded it (see buildPriorMessages doc).
-          priorMessages: buildPriorMessages(store.state.chatTranscript),
+          priorMessages,
           // ─── Wire the VerificationGate into the agent loop ───
           // This is the REAL repair/revalidation path: when the model
           // says "done", the loop runs the gate. If the gate fails,

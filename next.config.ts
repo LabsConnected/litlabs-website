@@ -10,13 +10,15 @@ const nextConfig: NextConfig = {
   // copies .next/standalone + .next/static + public into the runtime image.
   output: "standalone",
 
-  // Type checking is run separately via `pnpm type-check` (tsc --noEmit)
-  // which passes cleanly. Next.js 16's build-time type check uses generated
-  // validator files in .next/types/ that can have module resolution issues
-  // with `moduleResolution: "bundler"`. We enforce type safety via the
-  // separate tsc step, not the build step.
+  // Production builds MUST fail on TypeScript errors.
+  //
+  // This was `ignoreBuildErrors: true`, justified by "tsc --noEmit is run
+  // separately and passes cleanly". It did not: the CLI package failed to
+  // compile for weeks behind this flag, because vitest transpiles without
+  // type-checking and nothing else gated the build. A type error that
+  // cannot fail any pipeline is a type error nobody sees.
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
 
   // ============================================

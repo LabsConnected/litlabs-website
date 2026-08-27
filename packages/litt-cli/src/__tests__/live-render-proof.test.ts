@@ -48,7 +48,7 @@ describe.skipIf(skip)("live render proof — controller transcript path with rea
     // User message
     transcript.add({ role: "user", content: "Reply with exactly: RENDER_PROOF_OK", ts: Date.now(), status: "complete" });
     // Streaming assistant message (controller opens this before the loop)
-    transcript.add({
+    const assistantMsgId = transcript.add({
       role: "assistant", content: "", ts: Date.now(), status: "streaming",
       requestedModel: "live-proof", resolvedModel: "claude-sonnet-5", servedModel: null, fallbackReason: null,
     });
@@ -62,7 +62,7 @@ describe.skipIf(skip)("live render proof — controller transcript path with rea
         if (event.type === "delta") {
           // Same filter as controller.isToolCallMarkup
           if (isToolCallMarkup(event.text)) return;
-          transcript.appendDelta(event.text);
+          transcript.appendDelta(assistantMsgId, event.text);
         }
       },
       onToolStream: (_chunk: StreamChunk) => {},
@@ -74,7 +74,7 @@ describe.skipIf(skip)("live render proof — controller transcript path with rea
       ? result.content
       : "LiTT returned an empty response. The turn was not completed.";
     const finalStatus: "complete" | "error" = result.termination === "complete" ? "complete" : "error";
-    transcript.finalize({ content: finalContent, status: finalStatus, servedModel: model.activeModel });
+    transcript.finalize(assistantMsgId, { content: finalContent, status: finalStatus, servedModel: model.activeModel });
 
     // Diagnostic — prove what the live model produced
     console.log(`[live-render-proof] termination=${result.termination} contentLen=${result.content.length} activeModel=${model.activeModel ?? "null"}`);

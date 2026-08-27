@@ -190,6 +190,7 @@ export {
   stripToolCallBlocks,
   buildDefaultSystemPrompt,
   classifyAgentFailure,
+  sanitizePriorMessages,
 } from "./agent-loop.js";
 export type {
   AgentLoopOptions,
