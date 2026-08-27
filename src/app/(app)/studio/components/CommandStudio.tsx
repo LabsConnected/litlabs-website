@@ -341,23 +341,37 @@ function CommandStudioContent() {
     direction: "left",
   });
   // Context Drawer: 280–480px open, 0px closed (closed handled by `open` prop).
+  // Phase 1: repositioned left-of-center, narrower default (~210px) to act
+  // as the contextual secondary panel beside the nav rail.
   const contextResize = useResizableWidth({
     storageKey: "littree:studio:context-width",
-    defaultWidth: 320,
-    minWidth: 280,
-    maxWidth: 480,
+    defaultWidth: 210,
+    minWidth: 180,
+    maxWidth: 320,
+    direction: "right",
+  });
+  // Phase 1: permanent right-side Preview column — resizable, dominant width.
+  const previewResize = useResizableWidth({
+    storageKey: "littree:studio:preview-width",
+    defaultWidth: 600,
+    minWidth: 400,
+    maxWidth: 1200,
     direction: "right",
   });
 
-  // Context Drawer — right side. Replaces old Files panel + Inspector side panel.
+  // Context Drawer — left-of-center contextual panel (Phase 1 reorientation).
+  // Default OPEN on desktop so the contextual secondary panel is visible
+  // alongside the nav rail. Users can still close it; the choice persists.
   const CONTEXT_OPEN_KEY = "littree:studio:context-open";
   const CONTEXT_TAB_KEY = "littree:studio:context-tab";
   const [contextDrawerOpen, setContextDrawerOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined") return true;
     try {
-      return localStorage.getItem(CONTEXT_OPEN_KEY) === "true";
+      const stored = localStorage.getItem(CONTEXT_OPEN_KEY);
+      // Default to open (true) unless explicitly closed before.
+      return stored === null ? true : stored === "true";
     } catch {
-      return false;
+      return true;
     }
   });
   const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
@@ -1223,18 +1237,111 @@ function CommandStudioContent() {
           onExecutionModeChange={setExecutionMode}
         />
 
-        {/* Body: LiTT (left) | Workspace (center) | Context Drawer (right).
-            Phase C2: LiTT moved from right to left. Files/Inspector moved
-            from left-of-workspace to right Context Drawer. */}
+        {/* Body: Context Drawer (left) | LiTT (center) | Workspace+Preview (right).
+            Phase 1: shell geometry reorientation.
+              - ContextDrawer moved from right to left-of-center (contextual panel)
+              - LiTTPanel moved from left to center (LiTT conversation/execution)
+              - StudioPreviewPanel promoted from center workspace tab to permanent
+                right column (dominant live preview)
+            Mobile behavior is unchanged: ContextDrawer is a right-side fixed
+            overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          {/* LiTT panel — left side on desktop/laptop (>=1024px).
-              Expanded: 320px with Chat/Live tabs.
+          {/* Contextual panel — LEFT on desktop (was right ContextDrawer).
+              Reuses existing ContextDrawer with position="left" so it renders
+              left-of-center on desktop while staying a right-side fixed overlay
+              on mobile. Fully controlled by CommandStudio (Phase C2.1). */}
+          {viewportTier !== null && !isMobileLitt && (
+            <>
+              <ContextDrawer
+                open={contextDrawerOpen}
+                position="left"
+                activeTab={contextDrawerTab}
+                onTabChange={setContextDrawerTab}
+                onClose={() => setContextDrawerOpen(false)}
+                width={contextResize.width}
+                workContent={
+                  <LiTTWorkSummary
+                    busy={conversation.busy || creatingProject}
+                    messages={conversation.messages}
+                    onOpenLiveTab={() => setLittActiveTab("live")}
+                  />
+                }
+                filesContent={
+                  <div className="flex h-full flex-col overflow-hidden">
+                    <div
+                      className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+                      style={{ borderColor: "var(--studio-border)" }}
+                    >
+                      <span
+                        className="text-[10px] font-black uppercase tracking-[0.12em]"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        Files / Components
+                      </span>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+                      <StudioProjectFiles
+                        projectId={capabilities.projectId}
+                        repositoryName={capabilities.repositoryName}
+                        branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                        workspaceStatus={capabilities.workspaceStatus}
+                        writeAccess={capabilities.writeAccess}
+                        onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                        onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                        onWorkspacePrepared={() => { void refreshCapabilities(); }}
+                      />
+                    </div>
+                  </div>
+                }
+                assetsContent={
+                  <AssetsPanel projectId={capabilities.projectId} />
+                }
+                inspectorContent={
+                  <StudioInspector
+                    embedded
+                    open={true}
+                    onToggle={() => setContextDrawerOpen(false)}
+                    activeTab={inspectorTab}
+                    onTabChange={setInspectorTab}
+                    data={{
+                      capabilities,
+                      modelLabel,
+                      modelHealth,
+                      activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+                      destination,
+                      surface: studioMode,
+                      messages: conversation.messages,
+                      busy: conversation.busy,
+                      workspaceRevision,
+                      healthRunTrigger,
+                      onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                      onWorkspacePrepared: () => { void refreshCapabilities(); },
+                    }}
+                  />
+                }
+              />
+              {/* Resize handle — between ContextDrawer (left) and LiTT (center).
+                  direction="right": dragging left grows the context panel. */}
+              {contextDrawerOpen && (
+                <ResizeHandle
+                  onDragStart={contextResize.onDragStart}
+                  onReset={contextResize.reset}
+                  isDragging={contextResize.isDragging}
+                  direction="right"
+                  ariaLabel="Resize context panel"
+                  testId="context-resize-handle"
+                />
+              )}
+            </>
+          )}
+
+          {/* LiTT panel — CENTER on desktop/laptop (>=1024px).
+              Was on the left (Phase C2); moved to center in Phase 1.
+              Expanded: resizable width with Chat/Live tabs.
               Collapsed: 64px ambient HUD with phase/voice indicators.
               Below 1024px, LiTT is NOT rendered here at all — it is
               accessed via the mobile trigger + overlay sheet below
-              (Phase C2.1). `viewportTier === null` means the client
-              hasn't measured yet; render nothing for a tick rather than
-              guess, to avoid a flash of the wrong tier's chrome. */}
+              (Phase C2.1). */}
           {viewportTier !== null && !isMobileLitt && (
             <>
               <LiTTPanel
@@ -1249,7 +1356,8 @@ function CommandStudioContent() {
                 liveContent={littLiveContent}
                 expandedWidth={littResize.width}
               />
-              {/* Resize handle — only visible when LiTT is expanded */}
+              {/* Resize handle — between LiTT (center) and workspace (right).
+                  direction="left": dragging right grows the LiTT panel. */}
               {!littCollapsed && (
                 <ResizeHandle
                   onDragStart={littResize.onDragStart}
@@ -1264,7 +1372,11 @@ function CommandStudioContent() {
           )}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
-            {/* Persistent primary workspace switcher: Chat | Canvas | Code | Preview */}
+            {/* Persistent primary workspace switcher: Plan | Canvas | Code | Preview | Media
+                Preview tab is kept for mobile compatibility — on desktop the
+                Preview is always visible as a permanent right column, so
+                selecting "Preview" shows the Plan surface (conversation) in
+                the center while the live Preview remains on the right. */}
             <div
               className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
               style={{
@@ -1310,7 +1422,7 @@ function CommandStudioContent() {
               })}
 
               {/* Visual divider — separates workspace stages from context controls.
-                  Work and Files are NOT workspace stages; they open the right
+                  Work and Files are NOT workspace stages; they open the left
                   Context Drawer. Work shows LiTT's live execution activity.
                   Files shows the project file tree. */}
               <div
@@ -1319,7 +1431,7 @@ function CommandStudioContent() {
                 aria-hidden
               />
 
-              {/* Work toggle — opens Context Drawer on the right, on the
+              {/* Work toggle — opens Context Drawer on the left, on the
                   Work tab. Shows LiTT's live execution: tool calls, file
                   edits, commands, checks, previews. This is where users
                   watch their agent work in real time. */}
@@ -1349,12 +1461,10 @@ function CommandStudioContent() {
                 )}
               </button>
 
-              {/* Files toggle — opens Context Drawer on the right, on the
+              {/* Files toggle — opens Context Drawer on the left, on the
                   Files tab specifically (Phase C2.1). Only highlighted
                   when the drawer is open AND showing Files — it must not
-                  light up while Inspector happens to be the active tab.
-                  Visually distinguished from workspace stages via folder icon
-                  and muted styling — it is a context control, not a stage. */}
+                  light up while Inspector happens to be the active tab. */}
               <button
                 type="button"
                 onClick={handleFilesButtonClick}
@@ -1363,7 +1473,7 @@ function CommandStudioContent() {
                   color: filesButtonActive ? "var(--text-main)" : "var(--text-dim)",
                   backgroundColor: filesButtonActive ? "var(--purple-soft)" : "transparent",
                 }}
-                aria-label="Files — open context drawer"
+                aria-label="Files — open context panel"
                 aria-pressed={filesButtonActive}
                 data-testid="workspace-tab-files"
               >
@@ -1382,8 +1492,9 @@ function CommandStudioContent() {
               </button>
             </div>
 
-            {/* Workspace content — main workspace surface only.
-                Files/Inspector now live in the right Context Drawer (Phase C2). */}
+            {/* Workspace content + permanent Preview (desktop split).
+                On desktop: [workspace-content flex-1] [ResizeHandle] [Preview fixed-width]
+                On mobile: [workspace-content flex-1] only — Preview is a workspace tab. */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {isPlan ? (
@@ -1415,14 +1526,33 @@ function CommandStudioContent() {
                     />
                   </div>
                 ) : isPreview ? (
+                  /* Phase 1: On desktop, the Preview tab shows the Plan surface
+                     (conversation) in the center — the actual live Preview is
+                     permanently rendered in the right column below. On mobile,
+                     the Preview tab still shows StudioPreviewPanel in the center
+                     (preserving existing mobile behavior). */
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    <StudioPreviewPanel
-                      projectId={capabilities.projectId}
-                      projectName={capabilities.projectName}
-                      repositoryName={capabilities.repositoryName}
-                      branch={capabilities.activeBranch}
-                      workspaceStatus={capabilities.workspaceStatus ?? null}
-                    />
+                    {isMobileLitt ? (
+                      <StudioPreviewPanel
+                        projectId={capabilities.projectId}
+                        projectName={capabilities.projectName}
+                        repositoryName={capabilities.repositoryName}
+                        branch={capabilities.activeBranch}
+                        workspaceStatus={capabilities.workspaceStatus ?? null}
+                      />
+                    ) : (
+                      <StudioPlanSurface
+                        capabilities={capabilities}
+                        modelLabel={modelLabel}
+                        onOpenCode={() => { setDestination("studio"); setStudioMode("code"); }}
+                        onOpenCanvas={() => { setDestination("studio"); setStudioMode("files"); }}
+                        onOpenPreview={() => { setDestination("studio"); setStudioMode("preview"); }}
+                        onOpenTerminal={handleOpenTerminal}
+                        onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+                        onOpenFiles={handleOpenContextFiles}
+                        onRollback={handleRollback}
+                      />
+                    )}
                   </div>
                 ) : isMedia ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-auto">
@@ -1450,11 +1580,44 @@ function CommandStudioContent() {
                 )}
               </div>
 
-              {/* Right inspector — folded into LiTT Live Activity panel.
-                  StudioInspector is no longer rendered as a permanent column.
-                  Files/checks/context are accessible via the LiTT Live panel
-                  and the Files drawer. */}
-
+              {/* Permanent Live Preview — RIGHT column (desktop only).
+                  Phase 1: promoted from a center workspace tab to a permanent
+                  right-side column. Always rendered on desktop regardless of
+                  which workspace tab is selected. Reuses the existing real
+                  StudioPreviewPanel (iframe, device modes, refresh, restart,
+                  maximize, logs, open-external, truthful runtime states).
+                  Not rendered on mobile — mobile keeps Preview as a workspace
+                  tab (preserving existing behavior). */}
+              {viewportTier !== null && !isMobileLitt && (
+                <>
+                  <ResizeHandle
+                    onDragStart={previewResize.onDragStart}
+                    onReset={previewResize.reset}
+                    isDragging={previewResize.isDragging}
+                    direction="right"
+                    ariaLabel="Resize preview panel"
+                    testId="preview-resize-handle"
+                  />
+                  <div
+                    className="flex min-h-0 shrink-0 flex-col overflow-hidden border-l"
+                    style={{
+                      width: previewResize.width,
+                      borderColor: "var(--studio-border)",
+                      backgroundColor: "var(--studio-card)",
+                    }}
+                    data-testid="permanent-preview-column"
+                  >
+                    <StudioPreviewPanel
+                      projectId={capabilities.projectId}
+                      projectName={capabilities.projectName}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch}
+                      workspaceStatus={capabilities.workspaceStatus ?? null}
+                      refreshKey={workspaceRevision}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Bottom drawer — collapsed by default, sits above composer */}
@@ -1488,90 +1651,79 @@ function CommandStudioContent() {
             </StudioDrawer>
           </main>
 
-          {/* Context Drawer — right side. Files | Inspector.
-              Replaces the old left Files panel and right Inspector.
-              Closes completely to 0px — workspace reclaims width.
-              Fully controlled: CommandStudio owns contextDrawerTab as the
-              single source of truth (Phase C2.1 — no internal drawer
-              state duplicating this). */}
-          {/* Resize handle — only visible when drawer is open on desktop */}
-          {contextDrawerOpen && !isMobileLitt && (
-            <ResizeHandle
-              onDragStart={contextResize.onDragStart}
-              onReset={contextResize.reset}
-              isDragging={contextResize.isDragging}
-              direction="right"
-              ariaLabel="Resize context drawer"
-              testId="context-resize-handle"
+          {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
+              On mobile, the ContextDrawer is NOT repositioned to the left;
+              it stays as a right-side overlay (position defaults to "right").
+              Only the desktop instance above uses position="left". */}
+          {viewportTier !== null && isMobileLitt && (
+            <ContextDrawer
+              open={contextDrawerOpen}
+              activeTab={contextDrawerTab}
+              onTabChange={setContextDrawerTab}
+              onClose={() => setContextDrawerOpen(false)}
+              width={contextResize.width}
+              workContent={
+                <LiTTWorkSummary
+                  busy={conversation.busy || creatingProject}
+                  messages={conversation.messages}
+                  onOpenLiveTab={() => setLittActiveTab("live")}
+                />
+              }
+              filesContent={
+                <div className="flex h-full flex-col overflow-hidden">
+                  <div
+                    className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
+                    style={{ borderColor: "var(--studio-border)" }}
+                  >
+                    <span
+                      className="text-[10px] font-black uppercase tracking-[0.12em]"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      Files / Components
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
+                    <StudioProjectFiles
+                      projectId={capabilities.projectId}
+                      repositoryName={capabilities.repositoryName}
+                      branch={capabilities.activeBranch ?? capabilities.defaultBranch}
+                      workspaceStatus={capabilities.workspaceStatus}
+                      writeAccess={capabilities.writeAccess}
+                      onSaved={() => setWorkspaceRevision((value) => value + 1)}
+                      onMutation={() => setWorkspaceRevision((value) => value + 1)}
+                      onWorkspacePrepared={() => { void refreshCapabilities(); }}
+                    />
+                  </div>
+                </div>
+              }
+              assetsContent={
+                <AssetsPanel projectId={capabilities.projectId} />
+              }
+              inspectorContent={
+                <StudioInspector
+                  embedded
+                  open={true}
+                  onToggle={() => setContextDrawerOpen(false)}
+                  activeTab={inspectorTab}
+                  onTabChange={setInspectorTab}
+                  data={{
+                    capabilities,
+                    modelLabel,
+                    modelHealth,
+                    activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
+                    destination,
+                    surface: studioMode,
+                    messages: conversation.messages,
+                    busy: conversation.busy,
+                    workspaceRevision,
+                    healthRunTrigger,
+                    onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
+                    onWorkspacePrepared: () => { void refreshCapabilities(); },
+                  }}
+                />
+              }
             />
           )}
-          <ContextDrawer
-            open={contextDrawerOpen}
-            activeTab={contextDrawerTab}
-            onTabChange={setContextDrawerTab}
-            onClose={() => setContextDrawerOpen(false)}
-            width={contextResize.width}
-            workContent={
-              <LiTTWorkSummary
-                busy={conversation.busy || creatingProject}
-                messages={conversation.messages}
-                onOpenLiveTab={() => setLittActiveTab("live")}
-              />
-            }
-            filesContent={
-              <div className="flex h-full flex-col overflow-hidden">
-                <div
-                  className="flex shrink-0 items-center justify-between border-b px-2.5 py-2"
-                  style={{ borderColor: "var(--studio-border)" }}
-                >
-                  <span
-                    className="text-[10px] font-black uppercase tracking-[0.12em]"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    Files / Components
-                  </span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto studio-scroll">
-                  <StudioProjectFiles
-                    projectId={capabilities.projectId}
-                    repositoryName={capabilities.repositoryName}
-                    branch={capabilities.activeBranch ?? capabilities.defaultBranch}
-                    workspaceStatus={capabilities.workspaceStatus}
-                    writeAccess={capabilities.writeAccess}
-                    onSaved={() => setWorkspaceRevision((value) => value + 1)}
-                    onMutation={() => setWorkspaceRevision((value) => value + 1)}
-                    onWorkspacePrepared={() => { void refreshCapabilities(); }}
-                  />
-                </div>
-              </div>
-            }
-            assetsContent={
-              <AssetsPanel projectId={capabilities.projectId} />
-            }
-            inspectorContent={
-              <StudioInspector
-                embedded
-                open={true}
-                onToggle={() => setContextDrawerOpen(false)}
-                activeTab={inspectorTab}
-                onTabChange={setInspectorTab}
-                data={{
-                  capabilities,
-                  modelLabel,
-                  modelHealth,
-                  activeAgentName: AGENT_META[activeAgentId]?.displayName ?? "LiTT",
-                  destination,
-                  surface: studioMode,
-                  messages: conversation.messages,
-                  busy: conversation.busy,
-                  workspaceRevision,
-                  healthRunTrigger,
-                  onFilesSaved: () => setWorkspaceRevision((value) => value + 1),
-                  onWorkspacePrepared: () => { void refreshCapabilities(); },
-                }}
-              />
-            }
-          />
         </div>
 
         {/* Operator status bar — bottom. Uses real execution state. */}
