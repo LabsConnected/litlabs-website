@@ -81,6 +81,29 @@ export interface AgentLoopOptions {
   gateway?: ExecutionGateway | null;
   /** @deprecated Use gateway instead. Kept for backward compatibility. */
   executor?: CommandExecutor | null;
+  /**
+   * Prior conversation turns, replayed between the system prompt and
+   * `prompt` so a follow-up is understood in context.
+   *
+   * Each runAgentLoop call is otherwise a fresh, context-free
+   * conversation: the model sees only the system prompt and the current
+   * `prompt`. That makes a follow-up like "49456" (answering an earlier
+   * "what city or ZIP?") arrive in isolation, with the question that
+   * prompted it gone.
+   *
+   * Contract:
+   *   - Only "user" and "assistant" roles are replayed. A caller-supplied
+   *     "system" message is dropped — the system prompt is built here and
+   *     is the only system message in the conversation.
+   *   - Empty/whitespace-only content is dropped (a still-streaming turn
+   *     is not a settled one).
+   *   - Order is preserved exactly as given — it IS the conversation.
+   *   - A trailing "user" message identical to `prompt` is dropped, so a
+   *     caller that appends the current turn to its own transcript before
+   *     calling does not send that turn twice.
+   * Nothing else is reordered, merged, or summarized.
+   */
+  priorMessages?: ChatMessage[];
   /** System prompt (prepended to the conversation) */
   systemPrompt?: string;
   /** Project context to embed in the default system prompt (prevents model hallucination) */
@@ -140,12 +163,6 @@ export interface AgentLoopOptions {
   modelResolver?: ModelResolver | null;
   /** Task kind for escalation model selection (default: "coding"). */
   taskKind?: string;
-  /**
-   * Prior conversation messages from earlier turns (e.g. chat history).
-   * Inserted between the system prompt and the current user prompt so
-   * the model has context from previous turns in the same session.
-   */
-  priorMessages?: ChatMessage[];
 }
 
 /**
@@ -449,6 +466,36 @@ export function stripToolCallBlocks(content: string): string {
 // ─── Agent Loop ────────────────────────────────────────────────────
 
 /**
+ * Normalize caller-supplied prior turns into replayable conversation
+ * messages. See AgentLoopOptions.priorMessages for the contract.
+ *
+ * Exported for tests — the ordering/filtering rules are the whole
+ * behavior, so they are asserted directly rather than only through a
+ * full loop run.
+ */
+export function sanitizePriorMessages(
+  prior: ChatMessage[] | undefined | null,
+  prompt?: string,
+): ChatMessage[] {
+  if (!prior || prior.length === 0) return [];
+  const kept = prior.filter(
+    (m) =>
+      m
+      && (m.role === "user" || m.role === "assistant")
+      && typeof m.content === "string"
+      && m.content.trim().length > 0,
+  );
+  // Drop a trailing user turn identical to the current prompt: callers
+  // that render the user message into their own transcript before
+  // calling would otherwise send this turn twice.
+  const last = kept[kept.length - 1];
+  if (prompt !== undefined && last && last.role === "user" && last.content === prompt) {
+    return kept.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+  }
+  return kept.map((m) => ({ role: m.role, content: m.content }));
+}
+
+/**
  * Run the agent loop.
  *
  * The loop calls the model, parses tool calls, dispatches them through
@@ -472,10 +519,11 @@ export async function runAgentLoop(
   const toolDefs = options.tools.list();
   const systemPrompt = options.systemPrompt ?? buildDefaultSystemPrompt(toolDefs, options.projectContext ?? null);
 
-  // Build the conversation
+  // Build the conversation: system prompt, prior turns (context), then
+  // the current prompt. See AgentLoopOptions.priorMessages.
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
-    ...(options.priorMessages ?? []),
+    ...sanitizePriorMessages(options.priorMessages, prompt),
     { role: "user", content: prompt },
   ];
 

@@ -45,6 +45,7 @@ const ENV_KEYS = [
   "MISTRAL_API_KEY",
   "DASHSCOPE_API_KEY",
   "LITT_MAX_TOKENS",
+  "LITT_CREDIT_RETRY",
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -511,6 +512,8 @@ describe("OpenRouterModelProvider: insufficient-credits graceful retry", () => {
   }
 
   it("retries down the ladder on a 402 credit error and succeeds at a lower step", async () => {
+    // Retry after a credit rejection is opt-in now (policy A).
+    process.env.LITT_CREDIT_RETRY = "1";
     process.env.OPENROUTER_API_KEY = "sk-or";
     delete process.env.LITT_MAX_TOKENS;
     // initial 4096 → ladder [4096, 3072, 2048]. Affordable = 3000 means
@@ -534,6 +537,22 @@ describe("OpenRouterModelProvider: insufficient-credits graceful retry", () => {
     expect(events.some((e) => e.type === "delta")).toBe(true);
     // Meta was emitted exactly once (not re-emitted on retry).
     expect(events.filter((e) => e.type === "meta").length).toBe(1);
+  });
+
+  it("stops immediately on a 402 by default — no ladder retry (policy A)", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or";
+    delete process.env.LITT_MAX_TOKENS;
+    delete process.env.LITT_CREDIT_RETRY;
+    // affordable=100 rejects every ladder step, so a retrying provider
+    // would request all three.
+    const { fetch: stub, requested } = creditGatedFetch(100);
+    globalThis.fetch = stub;
+
+    const provider = new OpenRouterModelProvider({ model: "openrouter/auto", maxTokens: 4096 });
+    await expect(
+      provider.stream([{ role: "user", content: "hi" }], () => {}),
+    ).rejects.toThrow(/402|credit|balance/i);
+    expect(requested).toEqual([4096]);
   });
 
   it("does NOT retry non-credit failures (auth error surfaces as a hard error)", async () => {
@@ -582,6 +601,8 @@ describe("OpenRouterModelProvider: insufficient-credits graceful retry", () => {
   });
 
   it("surfaces the original credit error when the whole ladder is rejected", async () => {
+    // Retry after a credit rejection is opt-in now (policy A).
+    process.env.LITT_CREDIT_RETRY = "1";
     process.env.OPENROUTER_API_KEY = "sk-or";
     // Affordable below the floor → every step rejected.
     const { fetch: stub, requested } = creditGatedFetch(100);

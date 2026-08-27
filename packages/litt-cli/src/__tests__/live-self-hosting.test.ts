@@ -34,9 +34,9 @@ import {
   type ToolResult,
   type ToolContext,
 } from "@litt/agent-core";
-import { OpenRouterModelProvider, hasOpenRouterKey } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasProviderKey } from "../lib/model-provider.js";
 
-const skip = !hasOpenRouterKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
+const skip = !hasProviderKey() || process.env.LITT_RUN_LIVE_TESTS !== "1";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // __dirname = packages/litt-cli/src/__tests__

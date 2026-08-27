@@ -2,7 +2,7 @@
  * Submit / Transcript State Regression — covers the Termux/ADB bug where
  * pressing Enter caused the typed text to vanish with no response.
  *
- * Root cause: when hasOpenRouterKey() was false, the controller's submit()
+ * Root cause: when hasProviderKey() was false, the controller's submit()
  * skipped addChatMessage entirely — only an activityLog entry was added.
  * The composer was already cleared by app.tsx, so:
  *   - chatTranscript stayed empty
@@ -53,15 +53,15 @@ function chatTurn(
   submissionId: string,
 ): void {
   store.add({ role: "user", content: input, ts: Date.now(), status: "complete", submissionId });
-  store.add({
+  const assistantId = store.add({
     role: "assistant",
     content: "",
     ts: Date.now(),
     status: "streaming",
     submissionId,
   });
-  store.appendDelta(response);
-  store.finalize({ content: response, status: "complete", servedModel: "gpt-5.6-luna" });
+  store.appendDelta(assistantId, response);
+  store.finalize(assistantId, { content: response, status: "complete", servedModel: "gpt-5.6-luna" });
 }
 
 // ─── Tests: the no-key bug fix ───────────────────────────────────
@@ -287,8 +287,8 @@ describe("Submit/transcript — failure does not erase state", () => {
   it("a provider error finalizes as an error message — user message stays", () => {
     // Simulate: user submits, streaming starts, provider fails.
     store.add({ role: "user", content: "what's up", ts: Date.now(), status: "complete", submissionId: "sub_050" });
-    store.add({ role: "assistant", content: "", ts: Date.now(), status: "streaming", submissionId: "sub_050" });
-    store.finalize({ content: "Agent error: network timeout", status: "error" });
+    const assistantId = store.add({ role: "assistant", content: "", ts: Date.now(), status: "streaming", submissionId: "sub_050" });
+    store.finalize(assistantId, { content: "Agent error: network timeout", status: "error" });
 
     const transcript = store.snapshot();
     expect(transcript.length).toBe(2);
@@ -299,8 +299,8 @@ describe("Submit/transcript — failure does not erase state", () => {
 
   it("an empty model response finalizes as an explicit error — never blank", () => {
     store.add({ role: "user", content: "hello", ts: Date.now(), status: "complete", submissionId: "sub_051" });
-    store.add({ role: "assistant", content: "", ts: Date.now(), status: "streaming", submissionId: "sub_051" });
-    store.finalize({
+    const assistantId = store.add({ role: "assistant", content: "", ts: Date.now(), status: "streaming", submissionId: "sub_051" });
+    store.finalize(assistantId, {
       content: "LiTT returned an empty response. The turn was not completed.",
       status: "error",
     });

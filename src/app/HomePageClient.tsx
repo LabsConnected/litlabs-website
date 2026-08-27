@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import { LandingHeroV3 } from "@/app/landing/_components/LandingHeroV3";
 import { MissionSequence } from "@/components/landing/MissionSequence";
 import { InteractiveProductDemo } from "@/components/landing/InteractiveProductDemo";
@@ -229,14 +228,12 @@ function LandingPage() {
 
 export default function HomePageClient() {
   const { isSignedIn: clerkSignedIn, isLoaded: clerkLoaded } = useClerkAuth();
-  const { isSignedIn: supabaseSignedIn, loading: supabaseLoading } =
-    useSupabaseAuthHook();
   const router = useRouter();
 
   useEffect(() => {
-    if (!clerkLoaded || supabaseLoading) return;
-    if (clerkSignedIn || supabaseSignedIn) router.replace("/studio");
-  }, [clerkSignedIn, supabaseSignedIn, clerkLoaded, supabaseLoading, router]);
+    if (!clerkLoaded) return;
+    if (clerkSignedIn) router.replace("/studio");
+  }, [clerkSignedIn, clerkLoaded, router]);
 
   return <LandingPage />;
 }

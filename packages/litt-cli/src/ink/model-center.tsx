@@ -245,7 +245,7 @@ export function ModelCenter({
       <Box flexDirection="column" marginBottom={1}>
         {statuses.length === 0 && (
           <Box marginLeft={2}>
-            <Text dimColor>No providers checked yet. {hasApiKey ? "Refresh to discover." : "Set OPENROUTER_API_KEY."}</Text>
+            <Text dimColor>No providers checked yet. {hasApiKey ? "Refresh to discover." : "Set OPENAI_API_KEY or OPENROUTER_API_KEY."}</Text>
           </Box>
         )}
         {statuses.map((status) => {
@@ -321,12 +321,12 @@ export function ModelCenter({
             <Box marginLeft={2} marginBottom={1} flexDirection="column">
               <Text color={COLORS.error} bold>✗ Discovery failed</Text>
               <Text color={COLORS.error}>  {discoveryError ?? "Unknown error"}</Text>
-              <Text dimColor>  Check OPENROUTER_API_KEY and network. Esc to close.</Text>
+              <Text dimColor>  Check OPENAI_API_KEY / OPENROUTER_API_KEY and network. Esc to close.</Text>
             </Box>
           )}
           {discoveryState === "empty" && (
             <Box marginLeft={2} marginBottom={1}>
-              <Text color={COLORS.warning}>No models discovered. {hasApiKey ? "Provider returned zero models." : "Set OPENROUTER_API_KEY."}</Text>
+              <Text color={COLORS.warning}>No models discovered. {hasApiKey ? "Provider returned zero models." : "Set OPENAI_API_KEY or OPENROUTER_API_KEY."}</Text>
             </Box>
           )}
 

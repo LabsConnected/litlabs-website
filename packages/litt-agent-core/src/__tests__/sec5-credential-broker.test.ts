@@ -358,15 +358,25 @@ describe("SEC-5.8 — Wrong capability (resource scope) denied", () => {
 
 describe("SEC-5.9 — Wrong credential scope denied", () => {
   it("credential from different provider than request is denied", async () => {
+    // The stored/registered credential is VERCEL; the request asks for
+    // GITHUB. Previously every one of these three said "github", so the
+    // suite named "Wrong credential scope denied" never presented a wrong
+    // scope — it asserted denial of a perfectly valid match, and the real
+    // cross-provider behaviour went unverified. The stale comment
+    // ("only vercel is registered") preserved the original intent.
     const store = new InMemoryCredentialStore();
-    store.addCredential(makeStoredCredential({ provider: "github", scope: { provider: "github", account: "litlabs", projectId: null } }));
+    store.addCredential(makeStoredCredential({
+      ref: "ref_vercel_001",
+      provider: "vercel",
+      scope: { provider: "vercel", account: "litlabs", projectId: null },
+    }));
     const broker = new ProductionCredentialBroker(store);
-    broker.registerCredential(makeCredentialRef("github"));
+    broker.registerCredential(makeCredentialRef("vercel"));
 
     const result = await broker.resolve(
       makeRuntimeIdentity(),
       makeVerifiedGrant(),
-      makeRequest({ provider: "github" }), // requesting github but only vercel is registered
+      makeRequest({ provider: "github" }), // requesting github, only vercel is registered
     );
 
     assert.equal(result.status, "denied");

@@ -23,6 +23,7 @@ import { createHmac } from "crypto";
 import { mintTerminalToken, verifyTerminalToken, bearerToken } from "../auth.js";
 import type { AuthenticatedRequest } from "../internal-auth.js";
 import type { LiTTEvent } from "../litt-code.js";
+import type { BillingClient, AuthorizationResult } from "../billing.js";
 
 // ─── Constants ────────────────────────────────────────────────────
 
@@ -90,6 +91,49 @@ vi.mock("../litt-agent.js", () => ({
 
 // ─── Test app builder (mirrors the real /api/chat handler) ────────
 
+function billingDenialStatus(code: string | undefined): number {
+  switch (code) {
+    case "unauthenticated":
+    case "user_not_found":
+      return 401;
+    case "plan_not_entitled":
+      return 403;
+    case "insufficient_credits":
+      return 402;
+    default:
+      return 503;
+  }
+}
+
+/** Billing client that authorizes everyone — the default for these tests. */
+function allowAllBilling(): BillingClient {
+  return {
+    async authorize(clerkId) {
+      return {
+        ok: true,
+        identity: { internalUserId: "internal-1", clerkId: clerkId ?? "u", planId: "owner" },
+      };
+    },
+    async recordUsage() {
+      return { recorded: true, debited: true, replayed: false, balanceAfter: 100, costBits: 1 };
+    },
+  };
+}
+
+/** Billing client that denies with a fixed result. */
+function denyingBilling(result: AuthorizationResult): BillingClient {
+  return {
+    async authorize() {
+      return result;
+    },
+    async recordUsage() {
+      return { recorded: false, debited: false, replayed: false, balanceAfter: null, costBits: 0 };
+    },
+  };
+}
+
+let getBillingClient: () => BillingClient;
+
 function createTestApp(): express.Application {
   const app = express();
   app.use(express.json());
@@ -114,7 +158,18 @@ function createTestApp(): express.Application {
       return;
     }
 
-    // 3. Resolve workspace cwd
+    // 3. Billing gate — the SAME check the real handler runs. /api/chat
+    // streams the server's managed OPENROUTER_API_KEY, so without this it
+    // is a free, ungated entry point into model execution.
+    const authz = await getBillingClient().authorize(userId);
+    if (!authz.ok) {
+      res.status(billingDenialStatus(authz.code)).json({
+        error: { code: authz.code, message: authz.message ?? "Not authorized." },
+      });
+      return;
+    }
+
+    // 4. Resolve workspace cwd
     let cwd: string;
     if (payload.wid) {
       const ws = mockWorkspaces.get(payload.wid);
@@ -141,7 +196,7 @@ function createTestApp(): express.Application {
       cwd = userWorkspaces[0].root;
     }
 
-    // 4. Stream NDJSON
+    // 5. Stream NDJSON
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -172,12 +227,19 @@ function createTestApp(): express.Application {
 
 describe("/api/chat endpoint", () => {
   let oldAuthSecret: string | undefined;
+  let setBilling: (c: BillingClient) => void;
 
   beforeEach(() => {
     oldAuthSecret = process.env.TERMINAL_AUTH_SECRET;
     process.env.TERMINAL_AUTH_SECRET = VALID_SECRET;
     resetMockWorkspaces();
     mockStreamFn.mockReset();
+    // Default: billing authorizes. Denial cases override per-test.
+    let billing = allowAllBilling();
+    getBillingClient = () => billing;
+    setBilling = (c: BillingClient) => {
+      billing = c;
+    };
   });
 
   afterEach(() => {
@@ -407,5 +469,56 @@ describe("/api/chat endpoint", () => {
     // The workspace auto-selection used alice's userId, not bob's
     const [, cwd] = mockStreamFn.mock.calls[0];
     expect(cwd).toBe("/data/ws1"); // alice's workspace, not bob's
+  });
+
+  // ─── Billing gate ──────────────────────────────────────────────
+  //
+  // Regression: /api/chat streams the server's MANAGED OpenRouter key.
+  // It must run the same billing.ts entitlement/credit check as
+  // /api/command's ask path and the Socket.IO model relay — otherwise
+  // it is a free, ungated entry point into model execution.
+  //
+  // The denial STATUS matters as much as the denial: the CLI falls back
+  // to status when no typed code is present, and answering "no credits"
+  // with a 401 makes a valid session look revoked.
+
+  const DENIALS = [
+    { code: "billing_unavailable", status: 503, message: "Billing service unavailable" },
+    { code: "plan_not_entitled", status: 403, message: "Your plan does not include LiTT CLI access." },
+    { code: "insufficient_credits", status: 402, message: "Insufficient LiTTBits balance." },
+    { code: "user_not_found", status: 401, message: "No account found for this identity." },
+  ] as const;
+
+  for (const { code, status, message } of DENIALS) {
+    it(`denies with HTTP ${status} and code ${code}, and never calls the model`, async () => {
+      setBilling(denyingBilling({ ok: false, code, message }));
+      const app = createTestApp();
+      const res = await request(app)
+        .post("/api/chat")
+        .set("Authorization", `Bearer ${mintServerToken("user-1", VALID_SECRET, { cwd: "/tmp/ws" })}`)
+        .send({ message: "hello" });
+
+      expect(res.status).toBe(status);
+      expect(res.body.error?.code).toBe(code);
+      expect(res.body.error?.message).toBe(message);
+      // The load-bearing assertion: the provider was never reached.
+      expect(mockStreamFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("authorized requests still reach the model", async () => {
+    mockStreamFn.mockImplementation(
+      async (_msg: string, _cwd: string, write: (e: LiTTEvent) => void) => {
+        write({ type: "delta", text: "hi" });
+      },
+    );
+    const app = createTestApp();
+    const res = await request(app)
+      .post("/api/chat")
+      .set("Authorization", `Bearer ${mintServerToken("user-1", VALID_SECRET, { cwd: "/tmp/ws" })}`)
+      .send({ message: "hello" });
+
+    expect(res.status).toBe(200);
+    expect(mockStreamFn).toHaveBeenCalled();
   });
 });

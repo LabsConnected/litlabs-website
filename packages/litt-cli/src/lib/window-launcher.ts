@@ -9,7 +9,7 @@
  * launching another installation.
  *
  *   Windows Terminal (preferred)
- *       ↓  wt -w new [--size c,r] nt --title "⚡ LiTT"
+ *       ↓  wt -w new [--size c,r] nt --title "LiTT"
  *          --suppressApplicationTitle --startingDirectory <cwd>
  *          <node.exe> <cli-entry> shell
  *   PowerShell window (fallback, only when wt.exe is unavailable)
@@ -24,7 +24,7 @@
  *     are `new-tab` parameters and follow `nt`.
  *   - `--startingDirectory` is set EXPLICITLY — terminal profiles can
  *     configure their own starting directory that would otherwise win.
- *   - `--suppressApplicationTitle` keeps the title "⚡ LiTT" instead of
+ *   - `--suppressApplicationTitle` keeps the title "LiTT" instead of
  *     letting PowerShell/the app overwrite it.
  *
  * NO WT PROBING (dogfood): Windows Terminal is a GUI application — its
@@ -52,7 +52,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const LITT_WINDOW_TITLE = "⚡ LiTT";
+export const LITT_WINDOW_TITLE = "LiTT";
 export const LITT_WINDOW_SIZE = "118,36";
 
 // ─── The command to re-launch (the CURRENT LiTT CLI build) ─────────
@@ -207,7 +207,7 @@ export function resolveWindowsTerminal(env: LauncherEnv = {}): string | null {
 /**
  * The wt.exe argument vector.
  *
- *   wt -w new [--size c,r] nt --title "⚡ LiTT"
+ *   wt -w new [--size c,r] nt --title "LiTT"
  *      --suppressApplicationTitle --startingDirectory <cwd>
  *      <node.exe> <entry> shell
  *

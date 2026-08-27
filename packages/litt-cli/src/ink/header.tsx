@@ -2,11 +2,11 @@
  * Header — the one-line LiTT brand band.
  *
  * ```
- *   ⚡ LiTT                              ● LOCAL  ● REMOTE
- *   ⚡ LiTT                    ● SIGNED OUT
- *   ⚡ LiTT            ● LOCAL · user@email.com
- *   ⚡ LiTT            ● REMOTE · user@email.com
- *   ⚡ LiTT            ● REMOTE↻ · user@email.com
+ *   LiTT                              ● LOCAL  ● REMOTE
+ *   LiTT                    ● SIGNED OUT
+ *   LiTT            ● LOCAL · user@email.com
+ *   LiTT            ● REMOTE · user@email.com
+ *   LiTT            ● REMOTE↻ · user@email.com
  * ```
  *
  * The header ONLY brands the surface. Project, branch, model, and
@@ -16,14 +16,16 @@
  * connection state to terminal-server. On narrow terminals the
  * indicators drop off.
  *
- * Auth state (email) is shown when the user is signed in. When signed
- * out, a SIGNED OUT indicator replaces the runtime indicators.
+ * Auth state is NOT shown in the header by default — email is private.
+ * Use /whoami, /account, or /doctor --verbose for full identity.
+ * When signed out, a SIGNED OUT indicator replaces the runtime indicators.
  */
 
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "./colors.js";
 import { deriveTransport } from "../lib/transport-projection.js";
+import type { ExecutionTarget } from "../lib/execution-target.js";
 
 export interface HeaderProps {
   project: string;
@@ -36,8 +38,19 @@ export interface HeaderProps {
   /** Provider source (e.g. "OpenRouter • BYOK ✓") */
   source: string;
   connected: boolean;
-  /** Execution target — "local" or "remote" (managed backend). */
-  executionTarget?: string;
+  /**
+   * The CONFIGURED execution target (see lib/execution-target.ts) —
+   * where the cockpit intends model calls to run.
+   *
+   * Accepted so the header shares one descriptor with the rest of the
+   * cockpit, but deliberately NOT rendered: the indicators below report
+   * the ACTUAL transport, derived from localRuntime/remoteRuntime through
+   * the shared deriveTransport projection. Rendering the configured
+   * target here would let the header claim REMOTE while the connection
+   * is offline — the exact duplication this component avoids. The
+   * configured target is surfaced in the status bar's source line.
+   */
+  executionTarget: ExecutionTarget;
   localRuntime: string;
   remoteRuntime: string;
   mode: string;
@@ -65,7 +78,7 @@ export function Header({
   if (signedIn === false) {
     return (
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.brand}>⚡ LiTT</Text>
+        <Text bold color={COLORS.brand}>LiTT</Text>
         {width >= 50 && (
           <Text color={COLORS.error}>● SIGNED OUT</Text>
         )}
@@ -97,23 +110,19 @@ export function Header({
     : transport.headerSeverity === "error" ? COLORS.error : COLORS.warning;
   const remoteLabel = transport.headerLabel;
 
-  // ─── Email suffix — shown when signed in (e.g. "· user@email.com") ──
-  // Truncated on narrow terminals to avoid wrapping.
-  const emailSuffix = authEmail
-    ? ` · ${authEmail.length > 25 ? authEmail.slice(0, 22) + "…" : authEmail}`
-    : "";
-  const showEmail = width >= 70 && !!authEmail;
+  // ─── No email in header — privacy by default ──────────────────────
+  // Full identity is available via /whoami, /account, /doctor --verbose.
+  // The header shows only REMOTE/TOOLS indicators, never the user's email.
 
   // Build the right-side indicator block
-  // Priority: REMOTE (if connected/connecting) > LOCAL
-  // Email is appended to whichever indicator is shown
+  // Priority: REMOTE (if connected/connecting) > TOOLS
   const primaryIndicator = showRemote
-    ? <Text color={remoteColor} dimColor={remoteRuntime === "connected"}>{remoteIcon} {remoteLabel}{showEmail && emailSuffix}</Text>
-    : <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}{showEmail && emailSuffix}</Text>;
+    ? <Text color={remoteColor} dimColor={remoteRuntime === "connected"}>{remoteIcon} {remoteLabel}</Text>
+    : <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>;
 
   return (
     <Box justifyContent="space-between">
-      <Text bold color={COLORS.brand}>⚡ LiTT</Text>
+      <Text bold color={COLORS.brand}>LiTT</Text>
       {width >= 50 && (
         <Box gap={2}>
           {primaryIndicator}

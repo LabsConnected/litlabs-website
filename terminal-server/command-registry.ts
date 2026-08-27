@@ -17,7 +17,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { createShellExecutor } from "@litt/agent-core";
 import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
-import { getRuntimeStore, getRuntimeState, getExecutionGateway } from "./runtime.js";
+import { getRuntimeStore, getRuntimeState, getExecutionGateway, getCanonicalShell } from "./runtime.js";
+import { getRunRegistry } from "./run-registry.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
 // ─── Secret redaction ─────────────────────────────────────────────
@@ -143,11 +144,15 @@ export interface CommandSpec {
 
 // ─── Helpers for handlers ─────────────────────────────────────────
 
-function getRouter(cwd: string, userId: string | null): CommandRouter {
+function getRouter(cwd: string, userId: string | null, runId?: string): CommandRouter {
   // Lazy import to avoid circular dependency at module load time
   const { CommandRouter } = require("@litt/agent-core");
   const store = getRuntimeStore();
   const shell = createShellExecutor(cwd);
+  // Register the shell so /api/cancel (or a client disconnect) can kill it.
+  if (runId) {
+    getRunRegistry().register(runId, shell);
+  }
   return new CommandRouter(shell, { cwd, userId, store });
 }
 
@@ -170,17 +175,28 @@ function execShell(
   args: string[],
   cwd: string,
   timeoutMs: number,
+  runId?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const child = execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (runId) getRunRegistry().unregister(runId);
       resolve({
         stdout: stdout ?? "",
         stderr: stderr ?? "",
         exitCode: err ? (err as { code?: number }).code ?? -1 : 0,
       });
     });
-    // Guard against orphan — if the promise resolved, child already exited
-    void child;
+    // Register the child process so /api/cancel or a client disconnect can
+    // kill it. Without this the endpoint reports success while the process
+    // keeps running (and keeps generating billed tokens).
+    if (runId) {
+      getRunRegistry().register(runId, {
+        cancel: async () => {
+          try { child.kill("SIGTERM"); } catch { /* already exited */ }
+          return [child.pid ?? 0];
+        },
+      });
+    }
   });
 }
 
@@ -188,7 +204,7 @@ function execShell(
 
 async function handleStatus(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.status();
   return routerResultToResponse("status", result, t0);
 }
@@ -196,28 +212,28 @@ async function handleStatus(_args: string[], ctx: CommandContext): Promise<Comma
 async function handleDiff(args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
   const staged = args.includes("--staged") || args.includes("-s");
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.diff(staged);
   return routerResultToResponse("diff", result, t0);
 }
 
 async function handleCheck(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.check(ctx.runId);
   return routerResultToResponse("check", result, t0);
 }
 
 async function handleBuild(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.build(ctx.runId);
   return routerResultToResponse("build", result, t0);
 }
 
 async function handleTest(_args: string[], ctx: CommandContext): Promise<CommandResponse> {
   const t0 = Date.now();
-  const router = getRouter(ctx.cwd, ctx.userId);
+  const router = getRouter(ctx.cwd, ctx.userId, ctx.runId);
   const result = await router.test(ctx.runId);
   return routerResultToResponse("test", result, t0);
 }
@@ -236,7 +252,7 @@ async function handleGit(args: string[], ctx: CommandContext): Promise<CommandRe
     };
   }
   const gitArgs = subcmd === "log" ? ["log", "--oneline", "-10"] : [subcmd];
-  const result = await execShell("git", gitArgs, ctx.cwd, 15_000);
+  const result = await execShell("git", gitArgs, ctx.cwd, 15_000, ctx.runId);
   return {
     kind: "git_result",
     ok: result.exitCode === 0,
@@ -375,10 +391,15 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
       return {
         kind: "brain_response",
         ok: result.termination !== "error",
+        message: redactSecrets(result.content),
         data: {
           text: redactSecrets(result.content),
           runId: result.runId,
           toolCalls: result.toolCalls.length,
+          // Expose safe tool IDs (canonical toolId ONLY — never inputs or
+          // args, which can carry secrets) so the CLI can render tool
+          // labels and callers can verify which tools actually ran.
+          toolIds: result.toolCalls.map((tc: { toolId?: string }) => tc.toolId).filter(Boolean),
           rounds: result.rounds,
         },
         durationMs: Date.now() - t0,
@@ -450,6 +471,10 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
   const cmdArgs = args.slice(1);
 
   const gateway = getExecutionGateway(ctx.cwd, ctx.mode ?? "act");
+  // Register the canonical shell so a cancel can kill whatever /do starts.
+  if (ctx.runId) {
+    getRunRegistry().register(ctx.runId, getCanonicalShell(ctx.cwd));
+  }
   const gwResult = await gateway.execute({
     toolId: "project.run",
     inputs: { command, args: cmdArgs },
@@ -457,14 +482,18 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
     mode: ctx.mode ?? "act",
     runId: ctx.runId,
     identity: {
-      tenantId: "terminal-server",
+      tenantId: "default",
       userId: ctx.userId ?? "terminal-server",
       actorId: ctx.userId ?? "terminal-server",
-      // terminal-server's /internal/command is authenticated at the HTTP
-      // boundary (X-Internal-Service-Key). The gateway still enforces
-      // mode/policy/approval — but the caller is a trusted service.
+      // /do is a direct authenticated user action (JWT verified at the HTTP
+      // boundary), NOT an untrusted model/agent action. runtime.ts's
+      // onApprovalRequired documents exactly this case as
+      // "trusted + interactive -> approved"; the call site had drifted to
+      // "headless", which the callback denies — so /do could not run even
+      // safe commands. PLAN mode and destructive-command policy are still
+      // enforced BEFORE the callback is consulted.
       trusted: true,
-      interaction: "headless",
+      interaction: "interactive" as const,
     },
     timeoutMs: 30_000,
   });

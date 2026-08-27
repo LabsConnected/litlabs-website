@@ -1,16 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-const supabase =
-  SUPABASE_URL && SUPABASE_URL.length >= 10 && SUPABASE_URL.startsWith("http") &&
-  SUPABASE_KEY && SUPABASE_KEY.length >= 10
-    ? createClient(SUPABASE_URL, SUPABASE_KEY)
-    : null;
+import { useEffect, useState, useCallback } from "react";
 
 interface TaskItem {
   id: string;
@@ -23,58 +13,56 @@ interface TaskItem {
   task_output: Record<string, unknown>;
 }
 
+/**
+ * Subscribe to agent tasks for a given orchestration session.
+ *
+ * This hook polls the authenticated /api/agent-tasks/[sessionId] endpoint
+ * instead of accessing Supabase directly from the browser. The server
+ * endpoint uses Clerk identity → service-role Supabase, keeping all
+ * database access server-side.
+ *
+ * Polls every 2 seconds while the session has active (queued/processing) tasks.
+ * Stops polling when all tasks are terminal (success/failed) or after 5 minutes.
+ */
 export function useAgentSubscription(sessionId: string) {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
 
+  const fetchTasks = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/agent-tasks/session/${encodeURIComponent(sessionId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.tasks) setTasks(data.tasks as TaskItem[]);
+    } catch {
+      // Network error — keep existing state, will retry on next poll
+    }
+  }, [sessionId]);
+
   useEffect(() => {
-    if (!sessionId || !supabase) return;
+    if (!sessionId) return;
 
-    // 1. Fetch initial pipeline snapshot
-    supabase
-      .from("agent_tasks")
-      .select("*")
-      .eq("session_id", sessionId)
-      .order("sequence_order", { ascending: true })
-      .then(({ data }) => {
-        if (data) setTasks(data as TaskItem[]);
-      });
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startTime = Date.now();
+    const MAX_DURATION = 5 * 60 * 1000; // 5 minutes
 
-    // 2. Open live listening channel for orchestration state mutations
-    const pipelineChannel = supabase
-      .channel(`active-pipeline:${sessionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "agent_tasks",
-          filter: `session_id=eq.${sessionId}`,
-        },
-        (payload) => {
-          setTasks((prev) => {
-            const index = prev.findIndex(
-              (t) => t.id === (payload.new as TaskItem).id,
-            );
+    // Initial fetch
+    fetchTasks();
 
-            // If the row exists, update it; otherwise, append a new task entry
-            if (index !== -1) {
-              const updated = [...prev];
-              updated[index] = payload.new as TaskItem;
-              return updated;
-            }
-
-            return [...prev, payload.new as TaskItem].sort(
-              (a, b) => a.sequence_order - b.sequence_order,
-            );
-          });
-        },
-      )
-      .subscribe();
+    // Poll every 2 seconds
+    interval = setInterval(() => {
+      // Stop after max duration
+      if (Date.now() - startTime > MAX_DURATION) {
+        if (interval) clearInterval(interval);
+        return;
+      }
+      fetchTasks();
+    }, 2000);
 
     return () => {
-      supabase.removeChannel(pipelineChannel);
+      if (interval) clearInterval(interval);
     };
-  }, [sessionId]);
+  }, [sessionId, fetchTasks]);
 
   return tasks;
 }
