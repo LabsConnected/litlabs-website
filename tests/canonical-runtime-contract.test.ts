@@ -27,6 +27,7 @@ import {
   getRuntimeState,
 } from "../terminal-server/runtime.js";
 import { runLiTTOperator, operatorAvailable } from "../terminal-server/litt-operator.js";
+import { setBillingClientForTests } from "../terminal-server/billing.js";
 import { RuntimeStore } from "@litt/agent-core";
 
 const repoRoot = path.resolve(__dirname, "..");
@@ -86,9 +87,69 @@ describe("PHASE 2: Canonical runtime singleton", () => {
   });
 });
 
+// ─── Billing seam ─────────────────────────────────────────────────
+//
+// runLiTTOperator is gated by billing.ts BEFORE it constructs any runtime
+// or model resource. Without Supabase configured (as in CI) the real
+// client denies every call, so these runtime-contract tests — which are
+// about the agent loop, not about billing — install an authorizing stub.
+// The fail-closed behaviour itself is asserted by its own test in
+// PHASE 3, which overrides this stub with a denying one.
+
+beforeEach(() => {
+  setBillingClientForTests({
+    async authorize(clerkId) {
+      return {
+        ok: true,
+        identity: {
+          internalUserId: "internal-test",
+          clerkId: clerkId ?? "test-user",
+          planId: "owner",
+        },
+      };
+    },
+    async recordUsage() {
+      return { recorded: true, debited: false, replayed: false, balanceAfter: null, costBits: 0 };
+    },
+  });
+});
+
+afterEach(() => {
+  setBillingClientForTests(null);
+});
+
 // ─── Phase 3: One operator brain path ─────────────────────────────
 
 describe("PHASE 3: One operator brain path", () => {
+  it("denies the turn before any model call when billing does not authorize", async () => {
+    setBillingClientForTests({
+      async authorize() {
+        return { ok: false, code: "plan_not_entitled", message: "Your plan does not include LiTT CLI access." };
+      },
+      async recordUsage() {
+        return { recorded: false, debited: false, replayed: false, balanceAfter: null, costBits: 0 };
+      },
+    });
+
+    const littCode = await import("../terminal-server/litt-code.js");
+    const streamSpy = vi.spyOn(littCode, "streamLiTTMessagesWithTools");
+    try {
+      const result = await runLiTTOperator({
+        prompt: "do something expensive",
+        cwd: repoRoot,
+        userId: "test-user",
+        mode: "act",
+      });
+      expect(result.denied).toBe(true);
+      expect(result.denialCode).toBe("plan_not_entitled");
+      expect(result.termination).toBe("error");
+      // The load-bearing assertion: the provider was never reached.
+      expect(streamSpy).not.toHaveBeenCalled();
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
   it("runLiTTOperator is the canonical NL execution path", async () => {
     // We can't call the real operator without a model provider, but we
     // can verify the function exists and uses canonical resources.

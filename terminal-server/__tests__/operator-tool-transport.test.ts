@@ -387,6 +387,10 @@ describe("LiTTModelProvider construction", () => {
     expect(capturedBody.tools[0].function.name).toBe("project_search");
     expect(capturedBody.tool_choice).toBe("auto");
     expect(capturedBody.parallel_tool_calls).toBe(false);
-    expect(capturedBody.max_tokens).toBe(1024);
+    // Raised from 1024 (which truncated ordinary answers mid-sentence).
+    // The cap must stay PRESENT and finite — these calls are billed
+    // against the user's LiTTBits balance, so an absent cap is unbounded
+    // spend. See OPENROUTER_MAX_TOKENS in litt-code.ts.
+    expect(capturedBody.max_tokens).toBe(4096);
   });
 });
