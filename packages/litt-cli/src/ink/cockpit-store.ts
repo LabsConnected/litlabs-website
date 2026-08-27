@@ -402,6 +402,10 @@ export function useCockpitStore() {
     return 33; // ~30fps — the sweet spot (not 200-500ms, which feels dead)
   })();
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the id of the currently-streaming assistant message so
+  // appendAssistantDelta/finalizeAssistantMessage can auto-pass it
+  // to the store without every caller needing to thread the id through.
+  const streamingIdRef = useRef<string | null>(null);
 
   /** Immediate flush — cancels any pending coalesced flush first. */
   const syncTranscript = useCallback(() => {
@@ -453,6 +457,9 @@ export function useCockpitStore() {
   /** Append a new user or assistant message. Returns the message id. */
   const addChatMessage = useCallback((msg: Omit<ChatMessage, "id">): string => {
     const id = transcriptStore.add(msg);
+    if (msg.role === "assistant" && msg.status === "streaming") {
+      streamingIdRef.current = id;
+    }
     syncTranscript();
     return id;
   }, [transcriptStore, syncTranscript]);
@@ -470,8 +477,9 @@ export function useCockpitStore() {
    * (~30fps). This is the streaming hot path; the immediate syncTranscript
    * would rerender the entire CockpitApp on every token.
    */
-  const appendAssistantDelta = useCallback((text: string) => {
-    transcriptStore.appendDelta(text);
+  const appendAssistantDelta = useCallback((id: string, text: string) => {
+    const effectiveId = id || streamingIdRef.current;
+    if (effectiveId) transcriptStore.appendDelta(effectiveId, text);
     flushTranscriptSoon();
   }, [transcriptStore, flushTranscriptSoon]);
 
@@ -491,7 +499,9 @@ export function useCockpitStore() {
     servedModel?: string | null;
     durationMs?: number | null;
   }) => {
-    transcriptStore.finalize(options);
+    const effectiveId = id || streamingIdRef.current;
+    if (effectiveId) transcriptStore.finalize(effectiveId, options);
+    streamingIdRef.current = null;
     syncTranscript();
   }, [transcriptStore, syncTranscript]);
 

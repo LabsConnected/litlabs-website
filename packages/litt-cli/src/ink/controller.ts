@@ -46,6 +46,7 @@ import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, Executio
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
 import { createEscalationHook, createEscalationTracker, createModelResolver } from "../lib/escalation-adapter.js";
+import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
 import {
   hasOpenRouterKey,
   hasAnyNativeProviderKey,
@@ -1411,7 +1412,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 if (event.type === "delta") {
                   synthesized += event.text;
                   perf.mark("first_token");
-                  store.actions.appendAssistantDelta(event.text);
+                  store.actions.appendAssistantDelta("", event.text);
                 }
               },
             );
@@ -1637,7 +1638,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
-                store.actions.appendAssistantDelta(visible);
+                store.actions.appendAssistantDelta("", visible);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -2066,7 +2067,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
               perf.mark("first_token");
-              store.actions.appendAssistantDelta(visible);
+              store.actions.appendAssistantDelta("", visible);
             }
           },
           onToolStream: (chunk: StreamChunk) => {
