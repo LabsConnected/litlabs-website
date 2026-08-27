@@ -415,12 +415,18 @@ export class ProviderRegistry {
    * Check a single provider's health and resolve its models.
    */
   private async checkProvider(provider: ModelProvider): Promise<void> {
-    const cred = hasCredential(provider);
+    const directCred = hasCredential(provider);
     const source = credentialSource(provider);
     const servedBy = resolveServedBy(provider);
 
-    // No credential → no-key status, no models
-    if (!cred) {
+    // SEC-5.9: hasCredential only checks the provider's OWN direct key.
+    // But a provider can still be routable via OpenRouter (altEnvKeys).
+    // credentialSource returns the actual env var granting access
+    // (direct or alt). If neither exists, the provider is truly no-key.
+    const hasAnyAccess = directCred || source !== null;
+
+    // No credential at all (neither direct nor via OpenRouter) → no-key
+    if (!hasAnyAccess) {
       this.statuses.set(provider.id, {
         provider,
         health: "no-key",
@@ -499,7 +505,9 @@ export class ProviderRegistry {
     this.statuses.set(provider.id, {
       provider,
       health,
-      hasCredential: true,
+      // SEC-5.9: hasCredential reflects whether THIS provider has its own
+      // direct key. servedBy tracks who actually serves the request.
+      hasCredential: directCred,
       servedBy,
       models,
       latencyMs,
