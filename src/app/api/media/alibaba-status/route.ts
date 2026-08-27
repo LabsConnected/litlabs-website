@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { pollAlibabaVideoTask, downloadVideo } from "@/lib/alibaba-video";
 import { uploadAudio } from "@/lib/r2";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
 import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata } from "@/lib/generation/jobs";
 import { resolveInternalUserId } from "@/lib/generation/identity";
@@ -94,7 +95,10 @@ export async function POST(req: NextRequest) {
     let refunded = false;
     if (result.taskStatus === "FAILED") {
       const canRefund = markVideoJobRefunded(job.jobId);
-      if (canRefund && job.cost > 0) {
+      // Skip refund for billing-exempt owner (they were never debited)
+      const alibabaSim = await getActiveSimulation().catch(() => null);
+      const alibabaExempt = isBillingExempt(userId, alibabaSim);
+      if (canRefund && job.cost > 0 && !alibabaExempt) {
         await adjustWalletBalance({
           clerkId: userId,
           amount: job.cost,

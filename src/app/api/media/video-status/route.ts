@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { adjustWalletBalance } from "@/lib/wallet-ledger";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { findJobByOperationId, markVideoJobRefunded } from "@/lib/video-jobs";
 import { getGenerationJobByProviderJobId, completeGenerationJob, updateGenerationJobMetadata, failGenerationJob } from "@/lib/generation/jobs";
 import { resolveInternalUserId } from "@/lib/generation/identity";
@@ -66,7 +67,10 @@ export async function POST(req: NextRequest) {
     if (updated.done && !videoUri) {
       // Idempotent refund — can only happen once per job
       const canRefund = markVideoJobRefunded(job.jobId);
-      if (canRefund && job.cost > 0) {
+      // Skip refund for billing-exempt owner (they were never debited)
+      const refundSim = await getActiveSimulation().catch(() => null);
+      const refundExempt = isBillingExempt(userId, refundSim);
+      if (canRefund && job.cost > 0 && !refundExempt) {
         await adjustWalletBalance({
           clerkId: userId,
           amount: job.cost,

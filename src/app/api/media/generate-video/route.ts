@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI } from "@google/genai";
 import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
 import { getVideoModel, getVideoModelPricing } from "@/lib/studio-models";
@@ -131,25 +132,33 @@ async function handler(req: NextRequest) {
           { status: 400 },
         );
 
-      // Check balance
-      const balances = await getCreditBalances(userId);
-      if (balances.total < cost)
-        return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
+      // Check billing exemption — owner skips balance check and debit
+      const sim = await getActiveSimulation().catch(() => null);
+      const exempt = isBillingExempt(userId, sim);
+      let alibabaBalance: number | null = null;
 
-      // Reserve LiTTBits (atomic debit — refunded on failure)
-      const reservation = await adjustWalletBalance({
-        clerkId: userId,
-        amount: -cost,
-        type: "spend",
-        reason: `Video: ${videoModel.label} — Alibaba i2v`,
-        idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
-      });
+      if (!exempt) {
+        // Check balance
+        const balances = await getCreditBalances(userId);
+        if (balances.total < cost)
+          return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
 
-      if (reservation.replayed) {
-        return NextResponse.json(
-          { error: "This video request was already processed." },
-          { status: 409 },
-        );
+        // Reserve LiTTBits (atomic debit — refunded on failure)
+        const reservation = await adjustWalletBalance({
+          clerkId: userId,
+          amount: -cost,
+          type: "spend",
+          reason: `Video: ${videoModel.label} — Alibaba i2v`,
+          idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
+        });
+
+        if (reservation.replayed) {
+          return NextResponse.json(
+            { error: "This video request was already processed." },
+            { status: 409 },
+          );
+        }
+        alibabaBalance = reservation.balance;
       }
 
       try {
@@ -210,17 +219,19 @@ async function handler(req: NextRequest) {
           taskId: result.taskId,
           taskStatus: result.taskStatus,
           cost,
-          balance: reservation.balance,
+          balance: alibabaBalance,
         });
       } catch (submitErr) {
-        // Refund the reserved LiTTBits on submission failure
-        await adjustWalletBalance({
-          clerkId: userId,
-          amount: cost,
-          type: "refund",
-          reason: `Video refund: ${videoModel.label} submission failed`,
-          idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
-        });
+        // Refund the reserved LiTTBits on submission failure (skip if exempt)
+        if (!exempt) {
+          await adjustWalletBalance({
+            clerkId: userId,
+            amount: cost,
+            type: "refund",
+            reason: `Video refund: ${videoModel.label} submission failed`,
+            idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+          });
+        }
         throw submitErr;
       }
     }
@@ -232,32 +243,42 @@ async function handler(req: NextRequest) {
         { status: 500 },
       );
 
-    // Check balance
-    const balances = await getCreditBalances(userId);
-    if (balances.total < cost) {
-      return NextResponse.json(
-        { error: `Need ${cost} LiTTBits` },
-        { status: 402 },
-      );
+    // Check billing exemption — owner skips balance check and debit
+    const veoSim = await getActiveSimulation().catch(() => null);
+    const veoExempt = isBillingExempt(userId, veoSim);
+
+    if (!veoExempt) {
+      // Check balance
+      const balances = await getCreditBalances(userId);
+      if (balances.total < cost) {
+        return NextResponse.json(
+          { error: `Need ${cost} LiTTBits` },
+          { status: 402 },
+        );
+      }
     }
 
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
     // Reserve LiTTBits (atomic debit — refunded on failure)
-    const reservation = await adjustWalletBalance({
-      clerkId: userId,
-      amount: -cost,
-      type: "spend",
-      reason: `Video: ${videoModel.label} — Veo generation`,
-      idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
-    });
+    let reservation: { balance: number; replayed: boolean } | null = null;
+    if (!veoExempt) {
+      const res = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -cost,
+        type: "spend",
+        reason: `Video: ${videoModel.label} — Veo generation`,
+        idempotencyKey: `video_${model}_${userId}_${Date.now()}`,
+      });
 
-    if (reservation.replayed) {
-      return NextResponse.json(
-        { error: "This video request was already processed." },
-        { status: 409 },
-      );
+      if (res.replayed) {
+        return NextResponse.json(
+          { error: "This video request was already processed." },
+          { status: 409 },
+        );
+      }
+      reservation = res;
     }
 
     try {
@@ -341,17 +362,19 @@ async function handler(req: NextRequest) {
         provider: "veo",
         operationName: operation.name,
         cost,
-        balance: reservation.balance,
+        balance: reservation ? reservation.balance : null,
       });
     } catch (genErr) {
-      // Refund the reserved LiTTBits on generation failure
-      await adjustWalletBalance({
-        clerkId: userId,
-        amount: cost,
-        type: "refund",
-        reason: `Video refund: ${videoModel.label} generation failed`,
-        idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
-      });
+      // Refund the reserved LiTTBits on generation failure (skip if exempt)
+      if (reservation) {
+        await adjustWalletBalance({
+          clerkId: userId,
+          amount: cost,
+          type: "refund",
+          reason: `Video refund: ${videoModel.label} generation failed`,
+          idempotencyKey: `video_refund_${model}_${userId}_${Date.now()}`,
+        });
+      }
       throw genErr;
     }
   } catch (err: unknown) {

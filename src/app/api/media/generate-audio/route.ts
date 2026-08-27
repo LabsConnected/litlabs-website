@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // ── Route configuration ──────────────────────────────────────────
@@ -59,19 +60,34 @@ async function handler(req: NextRequest) {
       response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) throw new Error("No audio data returned.");
 
-    // Atomic debit via canonical ledger
-    const reservation = await adjustWalletBalance({
-      clerkId: userId,
-      amount: -COST,
-      type: "spend",
-      reason: `TTS: voice=${voice}`,
-      idempotencyKey: `tts_${userId}_${Date.now()}`,
-    });
+    // Check billing exemption — owner skips debit
+    const audioSim = await getActiveSimulation().catch(() => null);
+    const audioExempt = isBillingExempt(userId, audioSim);
+
+    let audioBalance: number | null = null;
+    if (audioExempt) {
+      try {
+        const balances = await getCreditBalances(userId);
+        audioBalance = balances.total;
+      } catch {
+        audioBalance = null;
+      }
+    } else {
+      // Atomic debit via canonical ledger
+      const reservation = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -COST,
+        type: "spend",
+        reason: `TTS: voice=${voice}`,
+        idempotencyKey: `tts_${userId}_${Date.now()}`,
+      });
+      audioBalance = reservation.balance;
+    }
 
     return NextResponse.json({
       audioBase64: `data:audio/wav;base64,${base64Audio}`,
       cost: COST,
-      balance: reservation.balance,
+      balance: audioBalance,
     });
   } catch (err: unknown) {
     return NextResponse.json(

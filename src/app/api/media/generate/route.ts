@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
 import {
   MEDIA_PROVIDERS,
@@ -1171,15 +1172,28 @@ async function handler(req: NextRequest) {
   let newBalance: number | null = null;
 
   if (!usedProvider.free && usedCost > 0) {
-    // Idempotent debit — same requestId = no double charge
-    const charge = await adjustWalletBalance({
-      clerkId: userId,
-      amount: -usedCost,
-      type: "spend",
-      reason: `Image generation: ${usedProviderId} — ${prompt.slice(0, 60)}`,
-      idempotencyKey: `image:charge:${requestId}`,
-    });
-    newBalance = charge.balance;
+    // Check billing exemption — owner is metered but not debited
+    const simulation = await getActiveSimulation().catch(() => null);
+    const exempt = isBillingExempt(userId, simulation);
+    if (exempt) {
+      // Owner: skip debit, still get balance for display
+      try {
+        const balances = await getCreditBalances(userId);
+        newBalance = balances.total;
+      } catch {
+        newBalance = null;
+      }
+    } else {
+      // Idempotent debit — same requestId = no double charge
+      const charge = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -usedCost,
+        type: "spend",
+        reason: `Image generation: ${usedProviderId} — ${prompt.slice(0, 60)}`,
+        idempotencyKey: `image:charge:${requestId}`,
+      });
+      newBalance = charge.balance;
+    }
   } else {
     // Free provider — still get balance for display
     try {

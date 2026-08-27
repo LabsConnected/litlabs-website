@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import {
   getVideoTier,
   type VideoAspectRatio,
@@ -53,37 +54,41 @@ async function handler(req: NextRequest) {
       );
     }
 
-    // Check balance
-    const balances = await getCreditBalances(userId);
-    if (balances.total < tier.priceLiTTBits) {
-      return NextResponse.json(
-        {
-          error: `Need ${tier.priceLiTTBits} LiTTBits for ${tier.name}. You have ${balances.total}.`,
-          required: tier.priceLiTTBits,
-          balance: balances.total,
-        },
-        { status: 402 },
-      );
-    }
+    // Check billing exemption — owner skips balance check and debit
+    const studioVideoSim = await getActiveSimulation().catch(() => null);
+    const studioVideoExempt = isBillingExempt(userId, studioVideoSim);
+    let studioBalance: number | null = null;
 
-    // Check daily spend limit
-    // (Simplified — a full implementation would query the ledger for today's video spend)
-    // For now, the balance check is the primary gate.
+    if (!studioVideoExempt) {
+      // Check balance
+      const balances = await getCreditBalances(userId);
+      if (balances.total < tier.priceLiTTBits) {
+        return NextResponse.json(
+          {
+            error: `Need ${tier.priceLiTTBits} LiTTBits for ${tier.name}. You have ${balances.total}.`,
+            required: tier.priceLiTTBits,
+            balance: balances.total,
+          },
+          { status: 402 },
+        );
+      }
 
-    // Reserve LiTTBits (atomic debit)
-    const adjustment = await adjustWalletBalance({
-      clerkId: userId,
-      amount: -tier.priceLiTTBits,
-      type: "spend",
-      reason: `Video: ${tier.name} — ${tier.maxDuration}s clip`,
-      idempotencyKey: `video_${tierId}_${userId}_${Date.now()}`,
-    });
+      // Reserve LiTTBits (atomic debit)
+      const adjustment = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -tier.priceLiTTBits,
+        type: "spend",
+        reason: `Video: ${tier.name} — ${tier.maxDuration}s clip`,
+        idempotencyKey: `video_${tierId}_${userId}_${Date.now()}`,
+      });
 
-    if (adjustment.replayed) {
-      return NextResponse.json(
-        { error: "This video request was already processed." },
-        { status: 409 },
-      );
+      if (adjustment.replayed) {
+        return NextResponse.json(
+          { error: "This video request was already processed." },
+          { status: 409 },
+        );
+      }
+      studioBalance = adjustment.balance;
     }
 
     // Submit to fal.ai
@@ -112,14 +117,16 @@ async function handler(req: NextRequest) {
     });
 
     if (!falResponse.ok) {
-      // Refund the reserved LiTTBits on failure
-      await adjustWalletBalance({
-        clerkId: userId,
-        amount: tier.priceLiTTBits,
-        type: "refund",
-        reason: `Video refund: ${tier.name} failed (provider error ${falResponse.status})`,
-        idempotencyKey: `video_refund_${tierId}_${userId}_${Date.now()}`,
-      });
+      // Refund the reserved LiTTBits on failure (skip if exempt)
+      if (!studioVideoExempt) {
+        await adjustWalletBalance({
+          clerkId: userId,
+          amount: tier.priceLiTTBits,
+          type: "refund",
+          reason: `Video refund: ${tier.name} failed (provider error ${falResponse.status})`,
+          idempotencyKey: `video_refund_${tierId}_${userId}_${Date.now()}`,
+        });
+      }
 
       const errText = await falResponse.text().catch(() => "");
       return NextResponse.json(
@@ -135,7 +142,7 @@ async function handler(req: NextRequest) {
       tierName: tier.name,
       model: tier.model,
       cost: tier.priceLiTTBits,
-      balance: adjustment.balance,
+      balance: studioBalance,
       videoUrl: result.video?.url ?? result.url ?? null,
       requestId: result.request_id ?? null,
       status: "completed",

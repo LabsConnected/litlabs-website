@@ -15,7 +15,7 @@
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { calculateLlmCost, isShadowMode, type CostCalculation } from "@/lib/llm-cost-engine";
-import { isOwnerClerkId, isBillingExempt, type SimulatedPlan } from "@/lib/owner";
+import { isOwnerClerkId, isBillingExempt, isOwnerWithinSpendCeiling, OWNER_SPEND_CEILING_USD, type SimulatedPlan } from "@/lib/owner";
 
 export interface LlmBillingInput {
   /** Clerk user ID */
@@ -56,6 +56,44 @@ export interface LlmBillingResult {
   replayed: boolean;
   /** Error message if the debit failed */
   error?: string;
+}
+
+/**
+ * Pre-flight billing authorization check.
+ *
+ * Call this BEFORE executing a provider request to determine whether
+ * the request should be allowed. This checks:
+ *   - Owner spend ceiling (if billing-exempt owner)
+ *   - Returns the exemption status so callers can skip balance checks
+ *
+ * Returns:
+ *   - { allowed: true, billingExempt: true }  → owner, skip balance check
+ *   - { allowed: true, billingExempt: false } → normal user, check balance
+ *   - { allowed: false, reason: "spend_ceiling_exceeded" } → owner over ceiling
+ */
+export async function preflightBillingAuth(
+  clerkId: string,
+  simulation?: SimulatedPlan | null,
+): Promise<
+  | { allowed: true; billingExempt: boolean }
+  | { allowed: false; reason: string; spendMicros?: number }
+> {
+  const exempt = isBillingExempt(clerkId, simulation);
+
+  if (exempt) {
+    // Check the monthly spend ceiling for the owner
+    const { withinCeiling, spendMicros } = await isOwnerWithinSpendCeiling(clerkId);
+    if (!withinCeiling) {
+      return {
+        allowed: false,
+        reason: "spend_ceiling_exceeded",
+        spendMicros: spendMicros ?? undefined,
+      };
+    }
+    return { allowed: true, billingExempt: true };
+  }
+
+  return { allowed: true, billingExempt: false };
 }
 
 /**

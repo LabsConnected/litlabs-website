@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // ── Route configuration ──────────────────────────────────────────
@@ -66,19 +67,34 @@ async function handler(req: NextRequest) {
 
     const audioMime = audioPart.inlineData.mimeType || "audio/mp3";
 
-    // Atomic debit via canonical ledger
-    const reservation = await adjustWalletBalance({
-      clerkId: userId,
-      amount: -COST,
-      type: "spend",
-      reason: `Music: model=${model}`,
-      idempotencyKey: `music_${userId}_${Date.now()}`,
-    });
+    // Check billing exemption — owner skips debit
+    const musicSim = await getActiveSimulation().catch(() => null);
+    const musicExempt = isBillingExempt(userId, musicSim);
+
+    let musicBalance: number | null = null;
+    if (musicExempt) {
+      try {
+        const balances = await getCreditBalances(userId);
+        musicBalance = balances.total;
+      } catch {
+        musicBalance = null;
+      }
+    } else {
+      // Atomic debit via canonical ledger
+      const reservation = await adjustWalletBalance({
+        clerkId: userId,
+        amount: -COST,
+        type: "spend",
+        reason: `Music: model=${model}`,
+        idempotencyKey: `music_${userId}_${Date.now()}`,
+      });
+      musicBalance = reservation.balance;
+    }
 
     return NextResponse.json({
       audioBase64: `data:${audioMime};base64,${audioPart.inlineData.data}`,
       cost: COST,
-      balance: reservation.balance,
+      balance: musicBalance,
     });
   } catch (err: unknown) {
     return NextResponse.json(

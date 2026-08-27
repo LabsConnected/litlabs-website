@@ -181,6 +181,63 @@ export function isBillingExempt(
   return false;
 }
 
+// ─── Owner spend ceiling ────────────────────────────────────────────
+
+/**
+ * Returns the owner's total provider spend for the current calendar month
+ * (UTC) in USD micros, or null if the query fails.
+ *
+ * Only counts rows where billing_exempt=true (owner's own usage, not
+ * simulated customer runs which are debited normally).
+ */
+export async function getOwnerMonthlySpendMicros(
+  clerkId: string,
+): Promise<number | null> {
+  try {
+    const { getSupabaseAdmin } = await import("@/lib/supabase");
+    const admin = getSupabaseAdmin();
+    if (!admin) return null;
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+    const { data, error } = await admin
+      .from("llm_usage_records")
+      .select("provider_cost_micros")
+      .eq("clerk_id", clerkId)
+      .eq("billing_exempt", true)
+      .gte("created_at", monthStart.toISOString());
+
+    if (error) return null;
+
+    const totalMicros = (data ?? []).reduce(
+      (sum, row) => sum + (row.provider_cost_micros ?? 0),
+      0,
+    );
+    return totalMicros;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns true if the owner is within the monthly spend ceiling.
+ * Returns true (allow) if the spend query fails — fail-open to avoid
+ * blocking the owner on a transient DB error. The ceiling is a safety
+ * net, not a hard gate.
+ */
+export async function isOwnerWithinSpendCeiling(
+  clerkId: string,
+): Promise<{ withinCeiling: boolean; spendMicros: number | null }> {
+  const spendMicros = await getOwnerMonthlySpendMicros(clerkId);
+  if (spendMicros === null) {
+    // Query failed — fail-open (allow, but flag that we couldn't verify)
+    return { withinCeiling: true, spendMicros: null };
+  }
+  const ceilingMicros = OWNER_SPEND_CEILING_USD * 1_000_000;
+  return { withinCeiling: spendMicros < ceilingMicros, spendMicros };
+}
+
 // ─── Simulation cookie reader ───────────────────────────────────────
 
 /**

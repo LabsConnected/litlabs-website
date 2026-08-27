@@ -91,6 +91,7 @@ export type AuthorizationDenialCode =
   | "user_not_found"
   | "plan_not_entitled"
   | "insufficient_credits"
+  | "spend_ceiling_exceeded"
   | "billing_unavailable";
 
 export interface AuthorizationResult {
@@ -152,6 +153,46 @@ export interface BillingClient {
 // AMOUNT only — the gate/record MECHANISM (auth, entitlement, idempotent
 // debit, usage row) is the part under contract here.
 const BITS_PER_1K_TOKENS = 10;
+
+// ─── Owner spend ceiling ────────────────────────────────────────────
+//
+// Monthly provider-spend safety ceiling for the billing-exempt owner.
+// Prevents runaway spend if a loop goes wrong. Configurable via
+// OWNER_MONTHLY_SPEND_CEILING_USD env var. Default: $250/month.
+const OWNER_SPEND_CEILING_USD = Number(
+  process.env.OWNER_MONTHLY_SPEND_CEILING_USD ?? "250",
+);
+
+/**
+ * Returns the owner's total provider spend for the current calendar month
+ * (UTC) in USD micros, or null if the query fails. Only counts rows where
+ * billing_exempt=true.
+ */
+async function getOwnerMonthlySpendMicros(
+  client: SupabaseClient,
+  clerkId: string,
+): Promise<number | null> {
+  try {
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+    const { data, error } = await client
+      .from("llm_usage_records")
+      .select("provider_cost_micros")
+      .eq("clerk_id", clerkId)
+      .eq("billing_exempt", true)
+      .gte("created_at", monthStart.toISOString());
+
+    if (error) return null;
+
+    return (data ?? []).reduce(
+      (sum, row) => sum + ((row as { provider_cost_micros?: number }).provider_cost_micros ?? 0),
+      0,
+    );
+  } catch {
+    return null;
+  }
+}
 
 export function estimateCostBits(totalTokens: number): number {
   if (!Number.isFinite(totalTokens) || totalTokens <= 0) return 0;
@@ -225,7 +266,20 @@ class SupabaseBillingClient implements BillingClient {
 
       // Owner billing exemption: skip credit check entirely.
       // Usage is still recorded (recordUsage skips the debit for exempt users).
+      // BUT: enforce the monthly spend ceiling to prevent runaway costs.
       if (ownerExempt) {
+        const spendMicros = await getOwnerMonthlySpendMicros(this.client, clerkId);
+        if (spendMicros !== null) {
+          const ceilingMicros = OWNER_SPEND_CEILING_USD * 1_000_000;
+          if (spendMicros >= ceilingMicros) {
+            return {
+              ok: false,
+              code: "spend_ceiling_exceeded",
+              message: `Owner monthly spend ceiling ($${OWNER_SPEND_CEILING_USD}) exceeded. Current spend: $${(spendMicros / 1_000_000).toFixed(2)}.`,
+            };
+          }
+        }
+        // Spend within ceiling (or query failed — fail-open)
         return {
           ok: true,
           identity: { internalUserId, clerkId, planId },
