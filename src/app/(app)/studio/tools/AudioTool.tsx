@@ -175,8 +175,12 @@ export default function AudioTool() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw) as AudioGen[];
-      // Strip audioUrl from persisted history — don't store base64 in localStorage
-      return parsed.map((g) => ({ ...g, audioUrl: undefined }));
+      // Keep durable URLs (http/https) in persisted history — they survive
+      // reloads and are lightweight. Strip base64 data URLs (too large).
+      return parsed.map((g) => ({
+        ...g,
+        audioUrl: g.audioUrl?.startsWith("http") ? g.audioUrl : undefined,
+      }));
     } catch {
       return [];
     }
@@ -195,11 +199,12 @@ export default function AudioTool() {
 
   useEffect(() => { refreshWallet(); }, [refreshWallet]);
 
-  // Persist only lightweight metadata (no audioUrl/base64)
+  // Persist lightweight metadata — keep durable URLs (http), strip base64
   useEffect(() => {
     const lightweight = history.slice(0, MAX_HISTORY).map((g) => ({
       ...g,
-      audioUrl: undefined, // never persist audio data
+      // Only persist durable URLs; base64 data URLs are too large for localStorage
+      audioUrl: g.audioUrl?.startsWith("http") ? g.audioUrl : undefined,
     }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lightweight));
   }, [history]);
@@ -395,11 +400,17 @@ export default function AudioTool() {
         body: JSON.stringify({ prompt: finalText, voice, styleDirection }),
       });
       const audioBase64 = data.audioBase64 as string | undefined;
-      if (!audioBase64) throw new Error("No audio returned from generation.");
+      const durableAudioUrl = data.audioUrl as string | undefined;
+      if (!audioBase64 && !durableAudioUrl) throw new Error("No audio returned from generation.");
+
+      // Prefer the durable URL for playback — it survives reloads and
+      // is registered in the Asset Lake. Fall back to base64 for
+      // immediate playback if persistence failed.
+      const playbackUrl = durableAudioUrl || audioBase64!;
 
       setGenStatus("ready");
-      setCurrent((prev) => prev?.id === id ? { ...prev, status: "ready", audioUrl: audioBase64 } : prev);
-      setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "ready", audioUrl: audioBase64 } : g));
+      setCurrent((prev) => prev?.id === id ? { ...prev, status: "ready", audioUrl: playbackUrl } : prev);
+      setHistory((prev) => prev.map((g) => g.id === id ? { ...g, status: "ready", audioUrl: playbackUrl } : g));
       refreshWallet().catch(() => {});
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Audio generation failed";
