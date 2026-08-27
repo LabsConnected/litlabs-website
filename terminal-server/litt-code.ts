@@ -449,6 +449,18 @@ export interface StreamModelForRemoteClientOptions {
  * Throws on any upstream failure; the caller (server.ts) is responsible
  * for redacting the error message before it reaches the client.
  */
+
+// ── Free-model cooldown tracking ────────────────────────────────────
+// Records when each free OpenRouter model last failed with a rate-limit
+// or 404. Models in cooldown are skipped during failover to prevent
+// one request from blindly hammering all models. TTL: 60 seconds.
+const freeModelCooldown = new Map<string, number>();
+
+/** Test helper: clear the free-model cooldown map. */
+export function _clearFreeModelCooldown(): void {
+  freeModelCooldown.clear();
+}
+
 export async function streamModelForRemoteClient(
   messages: ChatMessage[],
   tools: RemoteToolSchema[],
@@ -486,13 +498,147 @@ export async function streamModelForRemoteClient(
 
   if (canUseDirectOpenAI) {
     console.log(`[transport] → direct OpenAI (api.openai.com)`);
-    return streamOpenAIDirect(messages, tools, emit, {
-      model, // provider-native id (e.g. "gpt-5.6-luna")
-      apiKey: openaiKey!,
-      maxTokens: options.maxTokens,
-      signal: options.signal,
-      profile,
-    });
+    try {
+      return await streamOpenAIDirect(messages, tools, emit, {
+        model, // provider-native id (e.g. "gpt-5.6-luna")
+        apiKey: openaiKey!,
+        maxTokens: options.maxTokens,
+        signal: options.signal,
+        profile,
+      });
+    } catch (openaiErr) {
+      const msg = openaiErr instanceof Error ? openaiErr.message : String(openaiErr);
+      const status = (openaiErr as any)?.status;
+      const retryAfter = (openaiErr as any)?.retryAfter;
+      // ── Failover policy ───────────────────────────────────────────
+      // 401 (invalid_api_key) → STOP, configuration error (no failover)
+      // 429 + insufficient_quota/credit_balance → immediate free fallback
+      // 429 + rate_limit (transient) → short backoff, retry OpenAI once,
+      //   THEN free fallback if still blocked. Keeps OpenAI primary.
+      // 402 / 503 / service_unavailable → immediate free fallback
+      const isInvalidKey = status === 401 || msg.includes("401") || msg.includes("invalid_api_key");
+      const isInsufficientQuota =
+        msg.includes("insufficient_quota") || msg.includes("credit_balance") ||
+        msg.includes("credit_balance_exhausted") || msg.includes("credits remaining") ||
+        msg.includes("billing");
+      const isTransientRateLimit =
+        (status === 429 || msg.includes("429")) &&
+        (msg.includes("rate_limit") || msg.includes("rate limit") ||
+         msg.includes("Rate limit") || !!retryAfter);
+      const isBillingOrAvail =
+        msg.includes("402") || msg.includes("503") ||
+        msg.includes("service_unavailable");
+
+      if (isInvalidKey) {
+        // Configuration error — surface clearly, do NOT failover
+        console.log(`[transport] OpenAI 401 invalid key → surfacing as config error (no failover)`);
+        throw new Error(
+          "OpenAI API key is invalid or revoked. Set a valid OPENAI_API_KEY " +
+          "(sk-proj-...) to use direct OpenAI. This is a configuration error, " +
+          "not a billing issue — failover to OpenRouter is intentionally disabled."
+        );
+      }
+
+      // 429 transient rate-limit: retry OpenAI once with backoff before
+      // falling back to free models. Keeps OpenAI genuinely primary.
+      if (isTransientRateLimit && !isInsufficientQuota) {
+        const backoffMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 5000) : 2000;
+        console.log(`[transport] OpenAI 429 transient rate-limit → retrying after ${backoffMs}ms backoff`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        try {
+          return await streamOpenAIDirect(messages, tools, emit, {
+            model,
+            apiKey: openaiKey!,
+            maxTokens: options.maxTokens,
+            signal: options.signal,
+            profile,
+          });
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          console.log(`[transport] OpenAI retry still failing (${retryMsg.slice(0, 80)}) → free fallback`);
+          // Fall through to free fallback below
+        }
+      }
+
+      const shouldFailover = openrouterKey && (isInsufficientQuota || isBillingOrAvail || isTransientRateLimit);
+
+      if (shouldFailover) {
+        // VERIFIED 2026-08-27 via https://openrouter.ai/api/v1/models
+        // Only models that currently exist in OpenRouter's free tier.
+        const freeModels = [
+          "minimax/minimax-m3:free",
+          "z-ai/glm-5.2:free",
+          "nvidia/nemotron-3.5-lightning:free",
+          "google/gemma-4-31b-it:free",
+          "thinkingmachines/inkling:free",
+          "cohere/north-mini-code:free",
+        ];
+        // Cooldown tracking: skip models that failed recently (60s window)
+        // This prevents one request from blindly hammering all models.
+        const now = Date.now();
+        const COOLDOWN_MS = 60_000;
+        const tryable = freeModels.filter(m => {
+          const failTime = freeModelCooldown.get(m);
+          if (failTime && (now - failTime) < COOLDOWN_MS) {
+            console.log(`[transport] skipping ${m} (cooldown ${(now - failTime) / 1000 | 0}s/${COOLDOWN_MS / 1000}s)`);
+            return false;
+          }
+          return true;
+        });
+
+        if (tryable.length === 0) {
+          throw new Error(
+            "All free OpenRouter models are on cooldown (recently failed). " +
+            "Please retry in a minute, add credits at https://openrouter.ai/settings/credits, " +
+            "or add an OpenAI key with credits."
+          );
+        }
+
+        console.log(`[transport] OpenAI billing error → trying ${tryable.length}/${freeModels.length} free OpenRouter models`);
+        for (const freeModel of tryable) {
+          console.log(`[transport]   trying ${freeModel}`);
+          try {
+            emit({ type: "meta", provider: "openrouter", model: freeModel, profile });
+            const result = await streamOpenRouterRemote(messages, tools, emit, {
+              model: freeModel,
+              apiKey: openrouterKey,
+              maxTokens: options.maxTokens,
+              signal: options.signal,
+              profile,
+            });
+            // Success — clear cooldown for this model
+            freeModelCooldown.delete(freeModel);
+            return result;
+          } catch (orErr) {
+            const orMsg = orErr instanceof Error ? orErr.message : String(orErr);
+            console.log(`[transport]   ${freeModel} failed: ${orMsg.slice(0, 120)}`);
+            // Record cooldown for rate-limited / unavailable models
+            if (orMsg.includes("429") || orMsg.includes("rate_limit") || orMsg.includes("rate-limited")) {
+              freeModelCooldown.set(freeModel, now);
+              continue; // try next model
+            }
+            // 404 = model doesn't exist (shouldn't happen with verified list, but handle it)
+            if (orMsg.includes("404")) {
+              freeModelCooldown.set(freeModel, now);
+              continue;
+            }
+            // 402 = OpenRouter out of credits entirely — no point trying more
+            if (orMsg.includes("402") || orMsg.includes("credits")) {
+              throw orErr;
+            }
+            // Other error — surface it
+            throw orErr;
+          }
+        }
+        // All tryable models failed
+        throw new Error(
+          "All available free OpenRouter models are rate-limited or unavailable. " +
+          "Please retry in a minute, add credits at https://openrouter.ai/settings/credits, " +
+          "or add an OpenAI key with credits."
+        );
+      }
+      throw openaiErr;
+    }
   }
 
   console.log(`[transport] → OpenRouter fallback (openrouter.ai)`);
@@ -556,7 +702,14 @@ async function streamOpenAIDirect(
   });
   if (!res.ok || !res.body) {
     const errorText = await res.text().catch(() => "");
-    throw new Error(`OpenAI API error ${res.status}: ${errorText || res.statusText}`);
+    // Enrich the error with status + Retry-After so the failover layer
+    // can distinguish a temporary rate-limit (retry with backoff) from
+    // an exhausted-quota 429 (immediate free fallback).
+    const retryAfter = res.headers.get("retry-after");
+    const err = new Error(`OpenAI API error ${res.status}: ${errorText || res.statusText}`);
+    (err as any).status = res.status;
+    (err as any).retryAfter = retryAfter;
+    throw err;
   }
 
   emit({ type: "meta", provider: "openai", model, profile });

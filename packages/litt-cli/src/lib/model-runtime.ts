@@ -33,6 +33,7 @@ import {
   type RoutingResult,
   type ProviderHealthResult,
   type ProviderId,
+  type CredentialInfo,
 } from "@litt/models";
 
 import {
@@ -94,14 +95,16 @@ export class ModelRuntime {
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
 
-  constructor() {
-    this.registry = new ModelRegistry(
-      MODEL_CATALOG,
-      createEnvCredentialResolver(envAccessorFromProcess().get),
-    );
+  constructor(remoteMode = false) {
+    const envAccessor = envAccessorFromProcess();
+    const baseResolver = createEnvCredentialResolver(envAccessor.get);
+    const resolver = remoteMode
+      ? (_provider: ProviderId): CredentialInfo => ({ hasCredential: true, source: "litt-managed", servedBy: _provider })
+      : baseResolver;
+    this.registry = new ModelRegistry(MODEL_CATALOG, resolver);
     this.healthCache = new HealthCache(30_000);
     this.discovery = new ProviderDiscoveryOrchestrator(
-      envAccessorFromProcess(),
+      envAccessor,
       undefined, // default fetcher
       this.healthCache,
     );

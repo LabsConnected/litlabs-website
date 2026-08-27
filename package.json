@@ -110,6 +110,7 @@
     "@axe-core/playwright": "^4.12.1",
     "@clerk/testing": "^2.2.15",
     "@litt/agent-core": "workspace:*",
+    "@litt/models": "workspace:^",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.6.3",

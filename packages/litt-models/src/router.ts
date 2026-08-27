@@ -96,17 +96,22 @@ function selectForTask(
     available.find((m) => m.littTier === tier);
   const byCap = (cap: keyof ModelDefinition["capabilities"]) =>
     available.filter((m) => m.capabilities[cap]);
+  const freeModels = available.filter((m) => m.pricing?.unit === "free");
+  const freeFallback = (reason: string) =>
+    freeModels.length > 0
+      ? { model: freeModels[0], reason }
+      : { model: available[0], reason: "First available" };
 
   switch (taskKind) {
     case "fast":
       if (find(LITT_DEFAULTS.fast)) return { model: find(LITT_DEFAULTS.fast)!, reason: "Fast default — quick task" };
       if (byTier("fast")) return { model: byTier("fast")!, reason: "Fast tier" };
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
 
     case "chat":
       if (find(LITT_DEFAULTS.fast)) return { model: find(LITT_DEFAULTS.fast)!, reason: "Default chat" };
       if (byTier("fast")) return { model: byTier("fast")!, reason: "Fast tier for chat" };
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
 
     case "coding": {
       // "build a React feature" → balanced; finer-grained split can layer on top.
@@ -114,7 +119,7 @@ function selectForTask(
       if (byTier("balanced")) return { model: byTier("balanced")!, reason: "Balanced tier for coding" };
       const coders = byCap("coding");
       if (coders.length) return { model: coders[0], reason: "Coding-capable model" };
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
     }
 
     case "reasoning":
@@ -125,7 +130,7 @@ function selectForTask(
         const reasoners = byCap("reasoning").filter((m) => m.intelligence === "frontier");
         if (reasoners.length) return { model: reasoners[0], reason: "Frontier reasoning model" };
       }
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
 
     case "large-context": {
       // Prefer long-context + frontier coding (Kimi K3 / GPT-5.6 Sol)
@@ -135,7 +140,7 @@ function selectForTask(
         .sort((a, b) => b.contextWindow - a.contextWindow);
       if (longCtx.length) return { model: longCtx[0], reason: "Largest long-context coding model" };
       if (find(LITT_DEFAULTS.max)) return { model: find(LITT_DEFAULTS.max)!, reason: "Max fallback for large context" };
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
     }
 
     case "agent": {
@@ -144,7 +149,7 @@ function selectForTask(
       const agents = byCap("tools").filter((m) => m.intelligence !== "light");
       if (agents.length) return { model: agents[0], reason: "Tool-capable agent model" };
       if (find(LITT_DEFAULTS.balanced)) return { model: find(LITT_DEFAULTS.balanced)!, reason: "Balanced fallback for agent" };
-      return { model: available[0], reason: "First available" };
+      return freeFallback("Free model — no credits required");
     }
 
     case "vision": {
@@ -155,7 +160,7 @@ function selectForTask(
         if (gemini) return { model: gemini, reason: "Fast multimodal vision model" };
         return { model: vision[0], reason: "Vision-capable model" };
       }
-      return { model: available[0], reason: "No vision model available — first available" };
+      return freeFallback("Free model — no credits required");
     }
 
     case "image":

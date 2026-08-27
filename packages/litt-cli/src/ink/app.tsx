@@ -83,7 +83,7 @@ export function CockpitApp({
   useEventBridge(client, store, sessionBridge);
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
-  const [modelRuntime] = useState(() => new ModelRuntime());
+  const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
 
   const controller = useCockpitController({
     session, store, approvalBridge, sessionBridge,

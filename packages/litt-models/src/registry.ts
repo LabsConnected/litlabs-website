@@ -105,9 +105,12 @@ export class ModelRegistry {
 
   /**
    * Is a model routable? Has credential + not offline/deprecated.
+   * Free-priced models (pricing.unit === "free") are always routable —
+   * they require no user credentials (the server holds the OpenRouter key).
    */
   isRoutable(model: ModelDefinition): boolean {
     if (model.availability === "offline" || model.availability === "deprecated") return false;
+    if (model.pricing?.unit === "free") return true;
     return this.resolver(model.provider).hasCredential;
   }
 
