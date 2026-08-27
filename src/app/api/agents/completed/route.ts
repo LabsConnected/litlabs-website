@@ -20,9 +20,19 @@ export async function GET(req: NextRequest) {
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    // Resolve Clerk ID → internal user UUID for tenant isolation.
+    // service_role bypasses RLS, so we MUST filter explicitly.
+    const { data: userRow } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("clerk_id", userId)
+      .single();
+    if (!userRow) return NextResponse.json(FALLBACK_COMPLETED);
+
     const { data, error } = await supabaseAdmin
       .from("active_tasks")
       .select("output, updated_at, agents(display_name)")
+      .eq("user_id", userRow.id)
       .eq("status", "completed")
       .order("updated_at", { ascending: false })
       .limit(20);
