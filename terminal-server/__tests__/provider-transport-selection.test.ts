@@ -310,7 +310,7 @@ describe("Provider transport selection", () => {
 
   // ─── max_tokens regression tests ──────────────────────────────
 
-  it("I: missing maxTokens → server defaults to 4096, never 65536", async () => {
+  it("I: missing maxTokens → server defaults to 3000, never 65536", async () => {
     process.env.OPENAI_API_KEY = "sk-proj-real-openai-key";
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
 
@@ -331,7 +331,7 @@ describe("Provider transport selection", () => {
     );
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
-    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 
@@ -357,11 +357,11 @@ describe("Provider transport selection", () => {
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
     expect(callBody.max_tokens).toBe(256);
-    expect(callBody.max_tokens).not.toBe(4096);
+    expect(callBody.max_tokens).not.toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 
-  it("K: missing maxTokens on OpenRouter fallback → defaults to 4096, never 65536", async () => {
+  it("K: missing maxTokens on OpenRouter fallback → defaults to 3000, never 65536", async () => {
     // No OPENAI_API_KEY → falls back to OpenRouter
     process.env.OPENROUTER_API_KEY = "sk-or-v1-fallback-key";
 
@@ -385,7 +385,7 @@ describe("Provider transport selection", () => {
     expect(callUrl).toBe("https://openrouter.ai/api/v1/chat/completions");
 
     const callBody = JSON.parse(fetchMock.mock.calls[0][1]?.body);
-    expect(callBody.max_tokens).toBe(4096);
+    expect(callBody.max_tokens).toBe(3000);
     expect(callBody.max_tokens).not.toBe(65536);
   });
 

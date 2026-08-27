@@ -1404,7 +1404,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 if (event.type === "delta") {
                   synthesized += event.text;
                   perf.mark("first_token");
-                  store.actions.appendAssistantDelta(event.text);
+                  store.actions.appendAssistantDelta(readAssistantMsgId!, event.text);
                 }
               },
             );
@@ -1630,7 +1630,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                 perf.mark("first_token");
                 // Live streaming preview — append to the pending
                 // assistant message. Finalized once on completion.
-                store.actions.appendAssistantDelta(visible);
+                store.actions.appendAssistantDelta(chatAssistantMsgId!, visible);
               }
             },
             onToolStream: (chunk: StreamChunk) => {
@@ -2059,7 +2059,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const visible = toolCallFilter.next(event.text);
               if (!visible) return;
               perf.mark("first_token");
-              store.actions.appendAssistantDelta(visible);
+              store.actions.appendAssistantDelta(missionAssistantMsgId!, visible);
             }
           },
           onToolStream: (chunk: StreamChunk) => {

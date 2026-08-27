@@ -16,7 +16,7 @@ import { execFile } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { createShellExecutor } from "@litt/agent-core";
-import type { CommandRouter, CommandResult, MissionMode } from "@litt/agent-core";
+import type { CommandRouter, CommandResult, MissionMode, AgentToolCallRecord } from "@litt/agent-core";
 import { getRuntimeStore, getRuntimeState, getExecutionGateway } from "./runtime.js";
 import { runDoctor, runDoctorDeep } from "./doctor.js";
 
@@ -379,6 +379,11 @@ async function handleAsk(args: string[], ctx: CommandContext): Promise<CommandRe
           text: redactSecrets(result.content),
           runId: result.runId,
           toolCalls: result.toolCalls.length,
+          // Expose canonical tool IDs (which tools were called) without
+          // exposing raw inputs (which may contain secrets). This is the
+          // safe audit surface — count alone is insufficient for
+          // observability, but inputs must never leak.
+          toolIds: result.toolCalls.map((tc: AgentToolCallRecord) => tc.toolId),
           rounds: result.rounds,
         },
         durationMs: Date.now() - t0,
@@ -463,8 +468,12 @@ async function handleDo(args: string[], ctx: CommandContext): Promise<CommandRes
       // terminal-server's /internal/command is authenticated at the HTTP
       // boundary (X-Internal-Service-Key). The gateway still enforces
       // mode/policy/approval — but the caller is a trusted service.
+      // /do is a DIRECT human command (not the autonomous agent path),
+      // so it qualifies as interactive for the approval callback. The
+      // agent/operator path (runAgentLoop) passes trusted:false and is
+      // denied regardless of this setting.
       trusted: true,
-      interaction: "headless",
+      interaction: "interactive",
     },
     timeoutMs: 30_000,
   });
