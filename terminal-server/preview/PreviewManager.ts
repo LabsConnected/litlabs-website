@@ -622,12 +622,13 @@ export function stopPreview(workspaceId: string): void {
 
   rt.status = "stopped";
   if (rt.process) {
+    const proc = rt.process;
     try {
-      rt.process.kill("SIGTERM");
+      proc.kill("SIGTERM");
       // Force kill after 5s
       setTimeout(() => {
         try {
-          rt.process?.kill("SIGKILL");
+          proc.kill("SIGKILL");
         } catch {}
       }, 5000);
     } catch {}
@@ -644,17 +645,32 @@ export async function restartPreview(workspaceId: string): Promise<PreviewRuntim
   rt.status = "restarting";
   pushLog(rt, "[preview] Restarting...");
 
-  // Stop current process
+  // Stop current process and wait for it to actually exit so the port
+  // is released before we try to rebind. A 1-second delay is not enough
+  // for Next.js/Turbopack to release the port — it causes EADDRINUSE.
   if (rt.process) {
+    const proc = rt.process;
+    const exitPromise = new Promise<void>((resolve) => {
+      proc.once("exit", () => resolve());
+      // Force kill after 5s if SIGTERM didn't work
+      setTimeout(() => {
+        try {
+          proc.kill("SIGKILL");
+        } catch {}
+      }, 5000);
+      // Resolve after 7s regardless (safety net)
+      setTimeout(resolve, 7000);
+    });
     try {
-      rt.process.kill("SIGTERM");
+      proc.kill("SIGTERM");
     } catch {}
     rt.process = null;
+    await exitPromise;
   }
   releasePort(rt.port);
 
-  // Small delay to let port free up
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Additional delay to ensure the OS releases the socket
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Start again with same config
   return startPreview({
