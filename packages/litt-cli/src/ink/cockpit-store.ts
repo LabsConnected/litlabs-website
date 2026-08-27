@@ -15,6 +15,12 @@ import { ChatTranscriptStore } from "./chat-transcript-store.js";
 import { ToolProgressStore, type ToolProgressSnapshot } from "./tool-progress-store.js";
 import { FocusEpochTracker } from "./focus-state.js";
 import { resolveExecutionTarget } from "../lib/execution-target.js";
+import {
+  loadModelPrefs,
+  saveModelPrefs,
+  getDefaultPrefsPath,
+  type ModelPrefs,
+} from "../lib/provider-registry.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -340,8 +346,11 @@ export function useCockpitStore() {
   // switch mid-session). No setter is exposed in actions.
   const [executionTarget] = useState<ExecutionTarget>(() => resolveExecutionTarget());
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [routingMode, setRoutingMode] = useState<RoutingMode>("auto");
+  // Model prefs — loaded once from ~/.litt/model-prefs.json so the chosen
+  // model + routing mode survive closing and reopening litt.
+  const [modelPrefs] = useState(() => loadModelPrefs(getDefaultPrefsPath()));
+  const [selectedModel, setSelectedModel] = useState<string | null>(modelPrefs.selectedModel);
+  const [routingMode, setRoutingMode] = useState<RoutingMode>(modelPrefs.routingMode);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   // The provider that ACTUALLY served the most recent request (source
   // truth). Set optimistically from routed.servedBy before streaming,
@@ -446,6 +455,24 @@ export function useCockpitStore() {
       : entry;
     setActivityLog((prev) => [...prev.slice(-200), bounded]);
   }, []);
+
+  // ─── Persisted model prefs ───────────────────────────────────────
+  // setSelectedModel/setRoutingMode also write ~/.litt/model-prefs.json
+  // so the choice sticks across sessions (saveModelPrefs is non-fatal).
+  const savePrefs = useCallback((patch: Partial<ModelPrefs>) => {
+    const path = getDefaultPrefsPath();
+    saveModelPrefs({ ...loadModelPrefs(path), ...patch }, path);
+  }, []);
+
+  const updateSelectedModel = useCallback((modelId: string | null) => {
+    setSelectedModel(modelId);
+    savePrefs({ selectedModel: modelId, lastUsedModel: modelId });
+  }, [savePrefs]);
+
+  const updateRoutingMode = useCallback((mode: RoutingMode) => {
+    setRoutingMode(mode);
+    savePrefs({ routingMode: mode });
+  }, [savePrefs]);
 
   // ─── Chat transcript actions ─────────────────────────────────────
   // The transcript is the PERSISTED assistant response body. All
@@ -863,8 +890,8 @@ export function useCockpitStore() {
       setLocalRuntime,
       setRemoteRuntime,
       setCurrentRunId,
-      setSelectedModel,
-      setRoutingMode,
+      updateSelectedModel,
+      updateRoutingMode,
       setActiveModel,
       setActiveProvider,
       setOverlay,

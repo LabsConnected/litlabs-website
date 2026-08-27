@@ -29,10 +29,11 @@
 
 import React, { useCallback, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
+import { normalizeKey, type KeyInfo } from "../input-keys.js";
 import {
-  isEnter, isEscape, isUpArrow, isDownArrow, isBackspace,
-  type KeyInfo,
-} from "../keyboard-utils.js";
+  applyKeyEvent, createComposerState, graphemeToCodeUnit,
+  type ComposerState,
+} from "../composer-editor.js";
 import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
 import { deriveFocusState } from "../focus-state.js";
@@ -61,7 +62,11 @@ export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
   onOpenPalette, onOpenContext, disabled, busy, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
-  const [caret, setCaret] = React.useState(value.length);
+  const [caret, setCaret] = React.useState(() => {
+    // Initialize caret in grapheme coordinates
+    const graphemes = value.split(""); // fallback — fine for initial
+    return graphemes.length;
+  });
 
   // ─── Focus ownership — ONE authority (focus-state.ts) ────────────
   // The composer renders its caret and runs its blink timer ONLY from
@@ -103,110 +108,94 @@ export function Composer({
   useInput(useCallback((input: string, key: KeyInfo) => {
     if (disabledRef.current) return;
 
-    const current = valueRef.current;
-    const pos = caretRef.current;
+    const evt = normalizeKey(input, key);
 
-    // Enter — submit (always full value; slash/@ commands handled by the controller).
-    if (isEnter(key, input)) {
-      const text = current.trim();
-      if (!text) return;
-      onSubmitRef.current(text);
-      return;
-    }
-
-    // Esc — clear draft (autocomplete menus are gone; overlays own their own Esc).
-    if (isEscape(key, input)) {
-      if (current) {
-        onChangeRef.current("");
-        setCaret(0);
-        // Synchronously update refs — when multiple useInput calls fire
-        // in the same macrotask (same stdin read), useEffect hasn't run
-        // yet, so valueRef/caretRef would be stale for the next call.
-        valueRef.current = "";
-        caretRef.current = 0;
-        pokeRef.current();
+    // Handle non-editing keys first (they have side effects).
+    switch (evt.kind) {
+      case "SUBMIT": {
+        const text = valueRef.current.trim();
+        if (!text) return;
+        onSubmitRef.current(text);
+        return;
       }
-      return;
-    }
-
-    // Tab — intentionally NOT handled here: the app shortcut handler
-    // toggles Plan/Act. (Ink delivers Tab as key.tab with empty input,
-    // so the insert path below is never reached for Tab.)
-
-    // History navigation — only when the draft is empty (↑↓).
-    if (isUpArrow(key) || isDownArrow(key)) {
-      const prev = onNavigateHistoryRef.current(isUpArrow(key) ? "up" : "down");
-      if (prev !== null) {
-        onChangeRef.current(prev);
-        setCaret(prev.length);
-        // Synchronously update refs (see Esc comment above).
-        valueRef.current = prev;
-        caretRef.current = prev.length;
-        pokeRef.current();
+      case "ESCAPE": {
+        if (valueRef.current) {
+          onChangeRef.current("");
+          setCaret(0);
+          valueRef.current = "";
+          caretRef.current = 0;
+          pokeRef.current();
+        }
+        return;
       }
-      return;
-    }
+      case "UP": {
+        const prev = onNavigateHistoryRef.current("up");
+        if (prev !== null) {
+          onChangeRef.current(prev);
+          setCaret(prev.length);
+          valueRef.current = prev;
+          caretRef.current = prev.length;
+          pokeRef.current();
+        }
+        return;
+      }
+      case "DOWN": {
+        const prev = onNavigateHistoryRef.current("down");
+        if (prev !== null) {
+          onChangeRef.current(prev);
+          setCaret(prev.length);
+          valueRef.current = prev;
+          caretRef.current = prev.length;
+          pokeRef.current();
+        }
+        return;
+      }
+      case "INSERT_TEXT": {
+        // Typing while scrolled into history is an explicit "I'm back in
+        // the composer" signal — return to live.
+        if (scrolledRef.current) onReturnToLiveRef.current?.();
 
-    // Backspace / Delete.
-    if (isBackspace(key, input)) {
-      if (pos === 0) return;
-      const next = current.slice(0, pos - 1) + current.slice(pos);
-      const nextCaret = Math.max(0, pos - 1);
-      onChangeRef.current(next);
-      setCaret(nextCaret);
-      // Synchronously update refs — critical for fast typing where
-      // multiple useInput calls (type + backspace) arrive in the same
-      // stdin read. Without this, the backspace handler reads stale
-      // valueRef/caretRef from before the typing handler ran, sees
-      // pos=0, and becomes a no-op.
-      valueRef.current = next;
-      caretRef.current = nextCaret;
-      pokeRef.current();
-      return;
-    }
+        // Apply through the grapheme-safe editor.
+        const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
+        const next = applyKeyEvent(state, evt);
+        onChangeRef.current(next.text);
+        setCaret(next.caret);
+        valueRef.current = next.text;
+        caretRef.current = next.caret;
+        pokeRef.current();
 
-    // Left / Right caret movement.
-    if (key.leftArrow && pos > 0) {
-      const nextCaret = pos - 1;
-      setCaret(nextCaret);
-      caretRef.current = nextCaret;
-      pokeRef.current();
-      return;
-    }
-    if (key.rightArrow && pos < current.length) {
-      const nextCaret = pos + 1;
-      setCaret(nextCaret);
-      caretRef.current = nextCaret;
-      pokeRef.current();
-      return;
-    }
-
-    // Printable input — insert at caret. Paste arrives as a multi-char string.
-    if (input && !key.ctrl && !key.meta && key.tab === false) {
-      // Typing while scrolled into history is an explicit "I'm back in
-      // the composer" signal — return to live (focus restored once by
-      // the store's bumpFocus). Never yank the view while merely
-      // streaming or on timer ticks.
-      if (scrolledRef.current) onReturnToLiveRef.current?.();
-
-      const next = current.slice(0, pos) + input + current.slice(pos);
-      const nextCaret = pos + input.length;
-      onChangeRef.current(next);
-      setCaret(nextCaret);
-      // Synchronously update refs (see Backspace comment above).
-      valueRef.current = next;
-      caretRef.current = nextCaret;
-      pokeRef.current();
-
-      // / and @ triggers fire when the draft STARTS with them (typed at
-      // the very first position). The overlay takes the partial query so
-      // fast typing isn't lost — whatever made it into the draft becomes
-      // the palette's initial filter.
-      if (pos === 0 && input === "/") onOpenPaletteRef.current("");
-      else if (pos === 0 && input === "@") onOpenContextRef.current("");
-      else if (pos === 0 && next.startsWith("/") && next.length > 1) onOpenPaletteRef.current(next.slice(1));
-      else if (pos === 0 && next.startsWith("@") && next.length > 1) onOpenContextRef.current(next.slice(1));
-      return;
+        // / and @ triggers fire when the draft STARTS with them.
+        if (caretRef.current === 0 || next.text.startsWith("/") || next.text.startsWith("@")) {
+          // Check if this was the first character
+          if (evt.text === "/" && valueRef.current.length === 0) onOpenPaletteRef.current("");
+          else if (evt.text === "@" && valueRef.current.length === 0) onOpenContextRef.current("");
+          else if (next.text.startsWith("/") && next.text.length > 1) onOpenPaletteRef.current(next.text.slice(1));
+          else if (next.text.startsWith("@") && next.text.length > 1) onOpenContextRef.current(next.text.slice(1));
+        }
+        return;
+      }
+      case "CANCEL":
+      case "TAB":
+      case "SHIFT_TAB":
+      case "PAGE_UP":
+      case "PAGE_DOWN":
+        // These are handled by the app-level handler, not the composer.
+        return;
+      default: {
+        // Editing keys: BACKSPACE, DELETE, DELETE_WORD_LEFT,
+        // DELETE_TO_START, DELETE_TO_END, MOVE_LEFT, MOVE_RIGHT,
+        // MOVE_HOME, MOVE_END — all go through the grapheme-safe editor.
+        const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
+        const next = applyKeyEvent(state, evt);
+        if (next.text !== state.text || next.caret !== state.caret) {
+          onChangeRef.current(next.text);
+          setCaret(next.caret);
+          valueRef.current = next.text;
+          caretRef.current = next.caret;
+          pokeRef.current();
+        }
+        return;
+      }
     }
   }, []));
 
@@ -220,8 +209,10 @@ export function Composer({
     if (busy || disabled) {
       return <Text dimColor>LiTT is working…</Text>;
     }
-    const before = value.slice(0, caret);
-    const after = value.slice(caret);
+    // Convert grapheme caret to code-unit index for rendering
+    const codeUnitCaret = graphemeToCodeUnit(value, caret);
+    const before = value.slice(0, codeUnitCaret);
+    const after = value.slice(codeUnitCaret);
     if (value.length === 0) {
       return (
         <>

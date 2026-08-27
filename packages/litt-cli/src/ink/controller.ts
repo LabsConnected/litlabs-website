@@ -549,8 +549,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       store.actions.setMode(snapshot.mode);
       session.setMode(snapshot.mode);
     }
-    if (snapshot.routingMode) store.actions.setRoutingMode(snapshot.routingMode as RoutingMode);
-    if (snapshot.selectedModel) store.actions.setSelectedModel(snapshot.selectedModel);
+    if (snapshot.routingMode) store.actions.updateRoutingMode(snapshot.routingMode as RoutingMode);
+    if (snapshot.selectedModel) store.actions.updateSelectedModel(snapshot.selectedModel);
     // Workspace (when the dir still exists).
     try {
       if (existsSync(snapshot.cwd)) {
@@ -943,8 +943,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     if (input.startsWith("/route force ")) {
       const modelId = input.slice(13).trim();
-      store.actions.setSelectedModel(modelId);
-      store.actions.setRoutingMode("fixed");
+      store.actions.updateSelectedModel(modelId);
+      store.actions.updateRoutingMode("fixed");
       store.actions.addActivity({
         id: `act_${Date.now()}`,
         ts: Date.now(),

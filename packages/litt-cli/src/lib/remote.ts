@@ -302,6 +302,20 @@ export async function dispatchRemote(
       throw new RemoteUnavailableError("insufficient_credits", detail);
     }
 
+    // Billing/entitlement codes — these are NOT auth failures. The
+    // session is valid; the user just can't use the service for billing
+    // reasons. They must remain distinct reasons so the CLI does NOT
+    // clear valid Clerk credentials or tell the user to log in again.
+    if (typedError?.code === "billing_unavailable") {
+      throw new RemoteUnavailableError("billing_unavailable", detail);
+    }
+    if (typedError?.code === "plan_not_entitled") {
+      throw new RemoteUnavailableError("plan_not_entitled", detail);
+    }
+    if (typedError?.code === "insufficient_credits" || response.status === 402) {
+      throw new RemoteUnavailableError("insufficient_credits", detail);
+    }
+
     if (response.status === 401 || response.status === 403) {
       throw new RemoteUnavailableError("auth_revoked", detail);
     }
@@ -406,6 +420,16 @@ export async function remoteChat(
     }
     if (typedError?.code === "workspace_unauthorized") {
       throw new RemoteUnavailableError("workspace_unauthorized", detail);
+    }
+    // Billing/entitlement codes — NOT auth failures (see dispatchRemote).
+    if (typedError?.code === "billing_unavailable") {
+      throw new RemoteUnavailableError("billing_unavailable", detail);
+    }
+    if (typedError?.code === "plan_not_entitled") {
+      throw new RemoteUnavailableError("plan_not_entitled", detail);
+    }
+    if (typedError?.code === "insufficient_credits" || response.status === 402) {
+      throw new RemoteUnavailableError("insufficient_credits", detail);
     }
     if (response.status === 401 || response.status === 403) {
       throw new RemoteUnavailableError("auth_revoked", detail);
