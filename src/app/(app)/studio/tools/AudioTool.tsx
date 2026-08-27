@@ -176,7 +176,8 @@ export default function AudioTool() {
       if (!raw) return [];
       const parsed = JSON.parse(raw) as AudioGen[];
       // Keep durable URLs (http/https) in persisted history — they survive
-      // reloads and are lightweight. Strip base64 data URLs (too large).
+      // reloads and are lightweight. Strip base64 data URLs (too large):
+      // non-http audioUrl: undefined (never persist base64 audio data).
       return parsed.map((g) => ({
         ...g,
         audioUrl: g.audioUrl?.startsWith("http") ? g.audioUrl : undefined,
@@ -199,7 +200,8 @@ export default function AudioTool() {
 
   useEffect(() => { refreshWallet(); }, [refreshWallet]);
 
-  // Persist lightweight metadata — keep durable URLs (http), strip base64
+  // Persist lightweight metadata — keep durable URLs (http), strip base64.
+  // non-http audioUrl: undefined (never persist base64 audio data).
   useEffect(() => {
     const lightweight = history.slice(0, MAX_HISTORY).map((g) => ({
       ...g,

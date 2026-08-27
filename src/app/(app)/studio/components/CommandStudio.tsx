@@ -6,6 +6,8 @@ import {
   Image as ImageIcon,
   FolderOpen,
   Activity,
+  AlertTriangle,
+  GitBranch,
 } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -360,18 +362,18 @@ function CommandStudioContent() {
   });
 
   // Context Drawer — left-of-center contextual panel (Phase 1 reorientation).
-  // Default OPEN on desktop so the contextual secondary panel is visible
-  // alongside the nav rail. Users can still close it; the choice persists.
+  // Default CLOSED; users open it via the Files/Inspector/Work workspace tabs.
+  // The choice persists across reloads.
   const CONTEXT_OPEN_KEY = "littree:studio:context-open";
   const CONTEXT_TAB_KEY = "littree:studio:context-tab";
   const [contextDrawerOpen, setContextDrawerOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     try {
       const stored = localStorage.getItem(CONTEXT_OPEN_KEY);
-      // Default to open (true) unless explicitly closed before.
-      return stored === null ? true : stored === "true";
+      // Default to closed (false) unless explicitly opened before.
+      return stored === "true";
     } catch {
-      return true;
+      return false;
     }
   });
   const [contextDrawerTab, setContextDrawerTab] = useState<ContextDrawerTab>(() => {
@@ -1259,7 +1261,17 @@ function CommandStudioContent() {
                 onTabChange={setContextDrawerTab}
                 onClose={() => setContextDrawerOpen(false)}
                 width={contextResize.width}
-                workContent={littLiveContent}
+                workContent={
+                  <LiTTWorkSummary
+                    busy={conversation.busy}
+                    messages={conversation.messages}
+                    onOpenLiveTab={() => {
+                      setLittActiveTab("live");
+                      setLittCollapsed(false);
+                      if (isMobileLitt) setMobileLittOpen(true);
+                    }}
+                  />
+                }
                 filesContent={
                   <div className="flex h-full flex-col overflow-hidden">
                     <div
@@ -2151,11 +2163,11 @@ function ScreenDock({ pos, onClose, onMove }: { pos: DockPosition; onClose: () =
 }
 
 // ─── LiTT Work Summary ──────────────────────────────────────────
-// Compact live execution summary for the right-side Work tab.
-// Shows working state, recent tool calls, file edits, and a link to
-// open the full Live activity in the LiTT panel.
-// Does NOT duplicate the LiTTLiveActivity component — this is a
-// lightweight summary derived from the conversation messages.
+// Compact live execution summary for the ContextDrawer Work tab.
+// Shows REAL execution state from the Zustand execution store (tool calls,
+// phases, build results, approvals, checkpoints) — NOT a second
+// LiTTLiveActivity instance. The full LiTTLiveActivity lives in the LiTT
+// panel's Live tab; this is a lightweight summary that links to it.
 function LiTTWorkSummary({
   busy,
   messages,
@@ -2165,31 +2177,67 @@ function LiTTWorkSummary({
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   onOpenLiveTab: () => void;
 }) {
-  // Count recent assistant messages with actions (tool calls / canvas actions)
+  // Pull REAL execution state from the Zustand store — no fabrication.
+  const execPhase = useExecutionStore((s) => s.phase);
+  const execRunning = useExecutionStore((s) => s.isRunning);
+  const execEvents = useExecutionStore((s) => s.events);
+  const execApproval = useExecutionStore((s) => s.pendingApproval);
+  const execCheckpoint = useExecutionStore((s) => s.checkpoint);
+  const execChanges = useExecutionStore((s) => s.changesSummary);
+
+  // Derive truthful status label from real execution state
+  const phaseLabel = execApproval
+    ? "Approval Required"
+    : execRunning
+      ? execPhase === "verifying"
+        ? "Verifying"
+        : execPhase === "done"
+          ? "Complete"
+          : "Working"
+      : busy
+        ? "Working"
+        : "Idle";
+
+  const isActive = execRunning || busy;
+
+  // Recent real events (tool starts/results, build, approvals, checkpoints)
+  const recentEvents = execEvents.slice(-8);
+
+  // Also include conversation-derived actions as a fallback signal source
   const recentActions = messages
     .filter((m) => m.role === "assistant" && m.actions && m.actions.length > 0)
-    .slice(-5)
+    .slice(-3)
     .flatMap((m) => m.actions ?? []);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header — working state indicator */}
+      {/* Header — truthful working state indicator */}
       <div
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5"
         style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(13,9,22,0.6)" }}
       >
         <div
-          className={`h-2 w-2 rounded-full ${busy ? "animate-pulse" : ""}`}
+          className={`h-2 w-2 rounded-full ${isActive ? "animate-pulse" : ""}`}
           style={{
-            backgroundColor: busy ? "var(--litt-primary)" : "var(--text-muted)",
-            boxShadow: busy ? "0 0 6px var(--litt-primary)" : "none",
+            backgroundColor: execApproval
+              ? "#f59e0b"
+              : isActive
+                ? "var(--litt-primary)"
+                : "var(--text-muted)",
+            boxShadow: isActive ? "0 0 6px var(--litt-primary)" : "none",
           }}
         />
         <span
           className="text-[11px] font-black uppercase tracking-[0.12em]"
-          style={{ color: busy ? "var(--litt-primary)" : "var(--text-secondary)" }}
+          style={{
+            color: execApproval
+              ? "#f59e0b"
+              : isActive
+                ? "var(--litt-primary)"
+                : "var(--text-secondary)",
+          }}
         >
-          {busy ? "Working" : "Idle"}
+          {phaseLabel}
         </span>
         <div className="flex-1" />
         <button
@@ -2203,22 +2251,82 @@ function LiTTWorkSummary({
         </button>
       </div>
 
-      {/* Body — scrollable summary */}
+      {/* Body — scrollable summary with REAL execution events */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {busy && (
-          <div className="mb-3 flex items-center gap-2">
-            <div
-              className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
-              style={{ borderColor: "var(--litt-primary)", borderTopColor: "transparent" }}
-            />
-            <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
-              LiTT is executing...
-            </span>
+        {/* Approval required — prominent banner */}
+        {execApproval && (
+          <div
+            className="mb-3 rounded-lg border p-2.5"
+            style={{ borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.08)" }}
+          >
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle size={12} style={{ color: "#f59e0b" }} />
+              <span className="text-[11px] font-bold" style={{ color: "#f59e0b" }}>
+                Approval needed
+              </span>
+            </div>
+            <div className="mt-1 text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>
+              {execApproval.toolId.replace(/_/g, " ")}
+            </div>
           </div>
         )}
 
-        {/* Recent actions */}
-        {recentActions.length > 0 && (
+        {/* Checkpoint */}
+        {execCheckpoint && (
+          <div className="mb-2 flex items-center gap-1.5 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            <GitBranch size={10} />
+            <span className="font-mono">{execCheckpoint.gitSha.slice(0, 7)}</span>
+            <span>{execCheckpoint.label}</span>
+          </div>
+        )}
+
+        {/* Changes summary */}
+        {execChanges && (execChanges.added > 0 || execChanges.modified > 0 || execChanges.deleted > 0) && (
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+            <span style={{ color: "#22c55e" }}>+{execChanges.added}</span>
+            <span style={{ color: "#f59e0b" }}>~{execChanges.modified}</span>
+            <span style={{ color: "#ef4444" }}>-{execChanges.deleted}</span>
+          </div>
+        )}
+
+        {/* Real execution events */}
+        {recentEvents.length > 0 && (
+          <div className="mb-3">
+            <div
+              className="mb-1.5 text-[10px] font-black uppercase tracking-[0.1em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Activity
+            </div>
+            {recentEvents.map((evt) => (
+              <div
+                key={evt.id}
+                className="flex items-center gap-1.5 py-0.5 text-[11px] font-mono"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {evt.type === "tool_result" && (
+                  <span style={{ color: evt.success ? "#22c55e" : "#ef4444" }}>
+                    {evt.success ? "✓" : "✗"}
+                  </span>
+                )}
+                {evt.type === "tool_start" && <span style={{ color: "var(--litt-primary)" }}>→</span>}
+                {evt.type === "build_result" && (
+                  <span style={{ color: evt.success ? "#22c55e" : "#ef4444" }}>
+                    {evt.success ? "✓ build" : "✗ build"}
+                  </span>
+                )}
+                {evt.type === "approval_required" && <span style={{ color: "#f59e0b" }}>⚠</span>}
+                {evt.type === "checkpoint" && <span style={{ color: "var(--litt-primary)" }}>◆</span>}
+                {evt.type === "finished" && <span style={{ color: "#22c55e" }}>✓ done</span>}
+                {evt.type === "cancelled" && <span style={{ color: "#ef4444" }}>✗ cancelled</span>}
+                <span className="truncate">{evt.summary}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Fallback: conversation-derived actions when no exec events */}
+        {recentEvents.length === 0 && recentActions.length > 0 && (
           <div className="mb-3">
             <div
               className="mb-1.5 text-[10px] font-black uppercase tracking-[0.1em]"
@@ -2226,7 +2334,7 @@ function LiTTWorkSummary({
             >
               Recent Actions
             </div>
-            {recentActions.slice(-8).map((action, i) => (
+            {recentActions.slice(-5).map((action, i) => (
               <div
                 key={i}
                 className="flex items-center gap-1.5 py-0.5 text-[11px] font-mono"
@@ -2239,8 +2347,21 @@ function LiTTWorkSummary({
           </div>
         )}
 
+        {/* Active spinner */}
+        {isActive && recentEvents.length === 0 && recentActions.length === 0 && (
+          <div className="mb-3 flex items-center gap-2">
+            <div
+              className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
+              style={{ borderColor: "var(--litt-primary)", borderTopColor: "transparent" }}
+            />
+            <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
+              LiTT is executing...
+            </span>
+          </div>
+        )}
+
         {/* Empty state */}
-        {!busy && recentActions.length === 0 && (
+        {!isActive && recentEvents.length === 0 && recentActions.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 py-8">
             <Activity size={24} style={{ color: "var(--text-muted)" }} className="pointer-events-none" />
             <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
