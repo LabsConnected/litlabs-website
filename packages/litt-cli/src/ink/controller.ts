@@ -110,14 +110,19 @@ function resolveModelProvider(
       "Check your network connection, or run `litt login` if your session expired.",
     );
   }
-  if (!routed.openRouterModelId) {
+  if (!routed.openRouterModelId && !routed.providerModelId) {
     throw new RemoteExecutionError(
-      `Remote execution cannot serve ${routed.label} — no OpenRouter-compatible model id is available for it.`,
+      `Remote execution cannot serve ${routed.label} — no model id is available for it.`,
     );
   }
   return new RemoteModelProvider({
     client,
-    model: routed.openRouterModelId,
+    // Send the provider-native model id if available (for direct OpenAI
+    // transport), otherwise the OpenRouter slug. The server decides
+    // the actual transport based on which managed credentials are set.
+    model: routed.providerModelId ?? routed.openRouterModelId!,
+    providerHint: routed.servedBy,
+    openRouterModelId: routed.openRouterModelId,
     tools: opts.tools,
     maxTokens: opts.maxTokens,
   });

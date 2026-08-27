@@ -537,18 +537,27 @@ export class RuntimeClient {
    * on a "done" event; rejects on an "error" event (including
    * entitlement/auth denials — the message is server-redacted and
    * user-facing) or if the socket is not connected.
+   *
+   * The server uses `providerHint` and `openRouterModelId` to select
+   * the actual transport (direct OpenAI vs OpenRouter fallback). The
+   * returned `provider` is the ACTUAL provider that served the request,
+   * reported truthfully by the server — never a client-side assumption.
    */
   async streamModel(
     requestId: string,
-    /** The OpenRouter model id already resolved by the CALLER's own
-     *  routing (@litt/models). The server does not re-derive a model —
-     *  it uses exactly this id, preserving the CLI's routing decision
-     *  (AUTO/FIXED/BUDGET/MAX) for remote execution too. */
+    /** The provider-native model id (e.g. "gpt-5.6-luna") for direct
+     *  transport, or the OpenRouter slug if no native id exists. */
     model: string,
     messages: RemoteChatMessage[],
     tools: RemoteToolSchema[],
     onEvent: (event: RemoteModelStreamEvent) => void,
-    options: { maxTokens?: number } = {},
+    options: {
+      maxTokens?: number;
+      /** Provider the CLI routed to ("openai", "openrouter", etc.). */
+      providerHint?: string;
+      /** OpenRouter fallback slug, used if server falls back to OpenRouter. */
+      openRouterModelId?: string;
+    } = {},
   ): Promise<{ provider: string; model: string; usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number } }> {
     if (!this.socket?.connected) {
       throw new Error("Remote runtime is not connected. Cannot stream a remote model completion.");
@@ -578,6 +587,8 @@ export class RuntimeClient {
         messages,
         tools,
         maxTokens: options.maxTokens,
+        providerHint: options.providerHint,
+        openRouterModelId: options.openRouterModelId,
       });
     });
   }
