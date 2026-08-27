@@ -110,8 +110,13 @@ export async function buildCanonicalRuntimeContext(
 
   ctx.projectId = projectId;
 
-  // Get studio context (may be passed in to avoid duplicate fetch)
-  const studioCtx = options?.studioContext ?? await getStudioContext(userId);
+  // Get studio context (may be passed in to avoid duplicate fetch).
+  // Pass projectId so getStudioContext resolves the canonical project
+  // (studio_projects first, then legacy) instead of only querying the
+  // legacy projects table. This fixes the divergence where LiTT said
+  // "repository not connected" for projects the Studio UI showed as
+  // connected.
+  const studioCtx = options?.studioContext ?? await getStudioContext(userId, projectId);
 
   ctx.githubConnected = studioCtx.repositoryConnected;
   ctx.repository = studioCtx.repositoryName ?? null;
