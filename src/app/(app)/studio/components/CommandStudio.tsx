@@ -1259,13 +1259,7 @@ function CommandStudioContent() {
                 onTabChange={setContextDrawerTab}
                 onClose={() => setContextDrawerOpen(false)}
                 width={contextResize.width}
-                workContent={
-                  <LiTTWorkSummary
-                    busy={conversation.busy || creatingProject}
-                    messages={conversation.messages}
-                    onOpenLiveTab={() => setLittActiveTab("live")}
-                  />
-                }
+                workContent={littLiveContent}
                 filesContent={
                   <div className="flex h-full flex-col overflow-hidden">
                     <div
@@ -1662,13 +1656,7 @@ function CommandStudioContent() {
               onTabChange={setContextDrawerTab}
               onClose={() => setContextDrawerOpen(false)}
               width={contextResize.width}
-              workContent={
-                <LiTTWorkSummary
-                  busy={conversation.busy || creatingProject}
-                  messages={conversation.messages}
-                  onOpenLiveTab={() => setLittActiveTab("live")}
-                />
-              }
+              workContent={littLiveContent}
               filesContent={
                 <div className="flex h-full flex-col overflow-hidden">
                   <div
