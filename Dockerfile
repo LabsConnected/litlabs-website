@@ -57,9 +57,9 @@ COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agen
 COPY . .
 
 # Build workspace packages that the web app depends on.
-# @litt/agent-core is imported in production code (useLiTTRuntime.ts,
-# LandingMissionProof.tsx) and must be compiled before next build.
-RUN pnpm --filter @litt/agent-core build
+# @litt/agent-core and @litt/models are imported in production code
+# and must be compiled before next build.
+RUN pnpm --filter @litt/agent-core --filter @litt/models build
 
 # Build the Next.js app (produces .next/standalone/)
 # Next.js standalone output copies only the needed node_modules into
