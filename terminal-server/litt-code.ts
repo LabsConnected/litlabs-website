@@ -887,6 +887,8 @@ export async function streamLiTTMessages(
   const { profile, model } = resolveProfile(promptForRouting);
   const webSearch = needsWebSearch(promptForRouting);
 
+  console.log(`[transport] streamLiTTMessages called: model=${model} webSearch=${webSearch} openaiKey=${!!process.env.OPENAI_API_KEY} openrouterKey=${!!process.env.OPENROUTER_API_KEY}`);
+
   // ── Direct OpenAI preferred path ──────────────────────────────
   // When OPENAI_API_KEY is set and the resolved model is an OpenAI
   // model (OpenRouter slug "openai/..."), convert to the native id
