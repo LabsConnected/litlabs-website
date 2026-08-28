@@ -526,6 +526,14 @@ function fixClerkProxyHost(req: NextRequest): NextRequest {
 // Dev proxy header fix wraps the bot detection so it runs first.
 // Bot detection wraps the Clerk/passthrough middleware so it runs next.
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
+  // Temporary debug: check env var access in middleware runtime
+  if (req.nextUrl.pathname === "/__clerk/_env") {
+    return Promise.resolve(NextResponse.json({
+      CLERK_FAPI_URL: process.env.CLERK_FAPI_URL || "(not set)",
+      CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ? "(set)" : "(not set)",
+      NODE_ENV: process.env.NODE_ENV,
+    }));
+  }
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);
   const clerkReq = fixClerkProxyHost(req);
