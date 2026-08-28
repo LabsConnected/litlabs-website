@@ -77,6 +77,8 @@ const healthServer = http.createServer((req, res) => {
         status: "alive",
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
+        commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+        version: process.env.npm_package_version ?? "unknown",
       }),
     );
     return;
@@ -102,6 +104,8 @@ const healthServer = http.createServer((req, res) => {
         status: allReady ? "ok" : "degraded",
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
+        commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+        version: process.env.npm_package_version ?? "unknown",
         readiness: allReady ? "ready" : "not_ready",
         agent: agentSlug,
         concurrency: maxConcurrency,

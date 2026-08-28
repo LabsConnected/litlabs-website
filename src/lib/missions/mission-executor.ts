@@ -32,14 +32,13 @@ import {
   type MissionApproval,
   type ValidationResult,
 } from "./mission-repository";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 const TERMINAL_BASE = () => {
-  const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-    "";
+  const raw = process.env.TERMINAL_SERVER_INTERNAL_URL ?? "";
   return raw && !raw.includes("localhost")
     ? raw
-    : "https://terminal-server-production-68ac.up.railway.app";
+    : getTerminalServerUrl();
 };
 
 /**

@@ -11,6 +11,7 @@
 import "server-only";
 
 import { createCheckpoint } from "@/lib/missions/mission-repository";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 export interface WorkspaceCheckpointInput {
   projectId: string;
@@ -29,8 +30,7 @@ export interface WorkspaceCheckpointResult {
 function terminalBase(): string {
   return (
     process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-    "https://terminal-server-production-68ac.up.railway.app"
+    getTerminalServerUrl()
   );
 }
 

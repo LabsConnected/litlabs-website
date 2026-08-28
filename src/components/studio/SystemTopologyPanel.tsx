@@ -9,6 +9,8 @@ import type { CapabilityStatus } from "@/lib/capabilities/types";
 
 type CheckState = "checking" | "ready" | "warning" | "offline";
 
+// Client-side terminal URL resolution — mirrors getTerminalServerUrl() from
+// src/lib/terminal-url.ts (server-only). Uses NEXT_PUBLIC env vars directly.
 const terminalUrl = () => {
   const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
   const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;

@@ -1,4 +1,5 @@
 import { checkEnvVars, INTEGRATION_ENV_REQUIREMENTS, type IntegrationStatus, type IntegrationStatusResponse } from "./types";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 const HEALTH_CACHE_TTL_MS = 30_000;
 const healthCache = new Map<string, { result: boolean | null; timestamp: number }>();
@@ -101,18 +102,8 @@ async function testR2Health(): Promise<boolean | null> {
   return true;
 }
 
-const RAILWAY_TERMINAL_URL = "https://terminal-server-production-68ac.up.railway.app";
-
 async function testTerminalHealth(): Promise<{ serverReachable: boolean; url: string | null }> {
-  const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
-  const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  const rawEndpoint = explicit
-    ? explicit.replace(/\/$/, "")
-    : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
-  // Fall back to Railway terminal URL if env var is empty or points to localhost
-  const endpoint = rawEndpoint && !rawEndpoint.includes("localhost")
-    ? rawEndpoint
-    : RAILWAY_TERMINAL_URL;
+  const endpoint = getTerminalServerUrl();
   try {
     const res = await fetch(`${endpoint}/health`, {
       signal: AbortSignal.timeout(4000),

@@ -1,19 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import type { TerminalCapability } from "@/lib/capabilities/types";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 export const runtime = "nodejs";
 
 function getTerminalHttpUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
-  const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
-  const raw = explicit
-    ? explicit.replace(/\/$/, "")
-    : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
-  // Fall back to Railway terminal URL if env var is empty or points to localhost
-  return raw && !raw.includes("localhost")
-    ? raw
-    : "https://terminal-server-production-68ac.up.railway.app";
+  return getTerminalServerUrl();
 }
 
 async function handler(req: NextRequest) {

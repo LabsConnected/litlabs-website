@@ -4,6 +4,7 @@ import { verifyProjectWorkspace, getProject } from "@/lib/projects/project-repos
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { ensureWorkspaceAlive, normalizeFileError, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 /**
  * Project-bound file operations.
@@ -17,8 +18,7 @@ import { ensureWorkspaceAlive, normalizeFileError, reprepareWorkspace } from "@/
 
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://terminal-server-production-68ac.up.railway.app";
+  getTerminalServerUrl();
 
 /**
  * GET /api/studio-projects/[projectId]/files?path=...

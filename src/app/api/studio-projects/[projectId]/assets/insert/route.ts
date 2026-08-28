@@ -4,6 +4,7 @@ import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
 import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 /**
  * POST /api/studio-projects/[projectId]/assets/insert
@@ -33,8 +34,7 @@ export const dynamic = "force-dynamic";
 
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://terminal-server-production-68ac.up.railway.app";
+  getTerminalServerUrl();
 
 const MAX_ASSET_SIZE = 50 * 1024 * 1024; // 50 MB
 

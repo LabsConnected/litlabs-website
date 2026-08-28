@@ -17,6 +17,7 @@ import "server-only";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -106,8 +107,7 @@ export interface WorkspaceTransport {
 function terminalBase(): string {
   return (
     process.env.TERMINAL_SERVER_INTERNAL_URL ??
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-    "https://terminal-server-production-68ac.up.railway.app"
+    getTerminalServerUrl()
   );
 }
 

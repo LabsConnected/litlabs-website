@@ -57,6 +57,7 @@ import {
   type RequestSource,
 } from "@/lib/browser-jobs";
 import { executeBrowserJob } from "@/lib/browser-job-executor";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -67,9 +68,7 @@ import { executeBrowserJob } from "@/lib/browser-job-executor";
 export const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
   process.env.TERMINAL_SERVER_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://terminal-server-production-68ac.up.railway.app";
+  getTerminalServerUrl();
 
 export function internalHeaders(): Record<string, string> {
   return {

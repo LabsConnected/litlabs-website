@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { createHmac } from "crypto";
+import { getVoiceServerUrl } from "@/lib/terminal-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
   const sparkVoice = process.env.INWORLD_SPARK_VOICE;
   const authSecret = process.env.VOICE_AUTH_SECRET;
   const wsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL ||
-    "wss://voice-proxy-production-3f9c.up.railway.app/voice";
+    `${getVoiceServerUrl().replace(/^https:/, "wss:")}/voice`;
 
   // Check configuration (env vars exist)
   const configured = !!(apiKey && littVoice && authSecret && authSecret.length >= 32);

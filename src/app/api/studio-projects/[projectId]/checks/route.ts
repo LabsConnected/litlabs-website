@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints } from "@/lib/missions/mission-repository";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ function parseChangedFiles(output: string): string[] {
 }
 
 async function runWorkspaceCommand(workspaceId: string, userId: string, command: string) {
-  const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ?? process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "https://terminal-server-production-68ac.up.railway.app";
+  const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ?? getTerminalServerUrl();
   const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
     method: "POST",
     headers: {

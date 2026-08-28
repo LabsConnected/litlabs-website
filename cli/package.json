@@ -4,7 +4,6 @@
   "description": "LiTT Code + MyAios CLI tools",
   "type": "module",
   "bin": {
-    "litt": "./dist/litt-code-cli.js",
     "litt-code": "./dist/litt-code-cli.js",
     "myaios": "./dist/myaios-cli.js"
   },

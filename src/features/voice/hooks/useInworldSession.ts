@@ -497,8 +497,7 @@ export function useInworldSession(
         // Get voice config (voices, etc.) but connect through our proxy
         const conn = await getVoiceConnection();
 
-        // Use our WebSocket proxy — the browser can't set Authorization headers
-        // so we connect to our proxy which adds the Inworld API key header.
+        // Client-side — mirrors getVoiceServerUrl() from src/lib/terminal-url.ts (server-only).
         // The NEXT_PUBLIC_VOICE_WS_URL env var is the canonical source, but
         // the Vercel CLI on Windows has trouble piping the value, so we
         // hardcode the production proxy URL as a fallback. This is a PUBLIC

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 /**
  * GET /api/studio-projects/[projectId]/files/raw?path=...
@@ -11,8 +12,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
  */
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://terminal-server-production-68ac.up.railway.app";
+  getTerminalServerUrl();
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 

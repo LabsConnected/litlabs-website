@@ -1,0 +1,84 @@
+name: Release Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 30 minutes — verify deployed SHAs match source
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-deployment-sha:
+    name: Verify Deployed SHA Matches Source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get source SHA
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Check web health endpoint
+        id: web
+        run: |
+          RESPONSE=$(curl -sSf --max-time 10 \
+            "https://www.litlabs.net/api/health" || echo '{"status":"unreachable"}')
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.checks.build.detail // "unknown"')
+          echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
+          echo "Web deployed SHA: $DEPLOYED_SHA"
+
+      - name: Check terminal-server health endpoint
+        id: terminal
+        run: |
+          RESPONSE=$(curl -sSf --max-time 10 \
+            "https://litlabs-terminal-server-production-0be1.up.railway.app/health" \
+            || echo '{"status":"unreachable"}')
+          DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.commit // "unknown"')
+          echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
+          echo "Terminal deployed SHA: $DEPLOYED_SHA"
+
+      - name: Compare SHAs
+        run: |
+          SOURCE_SHA="${{ steps.source.outputs.sha }}"
+          SOURCE_SHORT="${SOURCE_SHA:0:8}"
+          WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
+          TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}
+
+          echo "Source:  $SOURCE_SHORT"
+          echo "Web:     $WEB_SHA"
+          echo "Terminal: $TERMINAL_SHA"
+
+          FAIL=0
+
+          if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
+            echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
+            FAIL=1
+          elif [ "$WEB_SHA" != "$SOURCE_SHORT" ]; then
+            echo "❌ Web SHA mismatch: source=$SOURCE_SHORT deployed=$WEB_SHA"
+            FAIL=1
+          else
+            echo "✅ Web SHA matches source"
+          fi
+
+          if [ "$TERMINAL_SHA" = "unknown" ] || [ "$TERMINAL_SHA" = "dev" ]; then
+            echo "⚠️  Terminal health endpoint did not report a real SHA (got: $TERMINAL_SHA)"
+            FAIL=1
+          elif [ "$TERMINAL_SHA" != "$SOURCE_SHORT" ]; then
+            echo "❌ Terminal SHA mismatch: source=$SOURCE_SHORT deployed=$TERMINAL_SHA"
+            FAIL=1
+          else
+            echo "✅ Terminal SHA matches source"
+          fi
+
+          if [ "$FAIL" = "1" ]; then
+            echo ""
+            echo "Release gate FAILED — deployed services are out of sync with source."
+            exit 1
+          fi
+
+          echo ""
+          echo "Release gate PASSED — all services report the source SHA."

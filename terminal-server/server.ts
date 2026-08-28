@@ -186,6 +186,8 @@ app.get("/health/live", (_req, res) => {
     status: "alive",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+    version: process.env.npm_package_version ?? "unknown",
   });
 });
 
@@ -619,6 +621,8 @@ app.get("/health/ready", async (_req, res) => {
     service: "terminal-server",
     readiness: allReady ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+    version: process.env.npm_package_version ?? "unknown",
     checks,
     reasons: allReady
       ? []
@@ -646,6 +650,8 @@ app.get("/health", async (_req, res) => {
     activeSessions: ptyManager.size,
     timestamp: new Date().toISOString(),
     readiness: allReady ? "ready" : "not_ready",
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ?? "dev",
+    version: process.env.npm_package_version ?? "unknown",
     checks: {
       authConfigured,
       internalServiceConfigured,

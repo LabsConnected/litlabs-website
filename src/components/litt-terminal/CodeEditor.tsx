@@ -21,6 +21,7 @@ export function CodeEditor({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Client-side — mirrors getTerminalServerUrl() from src/lib/terminal-url.ts (server-only).
   const envUrl = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
   const wsUrl = envUrl && !envUrl.includes("localhost")
     ? envUrl

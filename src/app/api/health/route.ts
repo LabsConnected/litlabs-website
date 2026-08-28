@@ -95,7 +95,12 @@ export async function GET() {
 
   return NextResponse.json(
     {
+      service: "web",
       status: allOk ? "ok" : hasError ? "error" : "degraded",
+      commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 8) ??
+        process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
+        "dev",
+      version: process.env.npm_package_version ?? "unknown",
       checks,
       timestamp: new Date().toISOString(),
     },
