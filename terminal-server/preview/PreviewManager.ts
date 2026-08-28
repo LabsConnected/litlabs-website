@@ -302,7 +302,15 @@ function detectFramework(root: string): FrameworkInfo {
   if (declaredPm) packageManager = declaredPm;
 
   if (hasNextConfig || (hasPkgJson && devScript?.includes("next dev"))) {
-    return { framework: "nextjs", command: `${packageManager} dev`, packageManager };
+    // Run `next dev` directly with the allocated port via $PORT placeholder.
+    // We bypass the project's dev script because it may hardcode a port
+    // (e.g. "next dev --turbo -p 3001") which would conflict with the
+    // PreviewManager's allocated port. Using `--port $PORT` ensures the
+    // preview always binds to the port we probe for health checks.
+    // `--turbopack` is added explicitly to match the default Next.js 16 dev
+    // experience; older Next.js versions ignore unknown flags gracefully.
+    const nextBin = `${packageManager} exec next`;
+    return { framework: "nextjs", command: `${nextBin} dev --port $PORT --hostname 0.0.0.0`, packageManager };
   }
 
   if (hasViteConfig || (hasPkgJson && devScript?.includes("vite"))) {
@@ -509,6 +517,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     PORT: String(port),
     HOSTNAME: "0.0.0.0",
     HOME: ws.root,
+    // Allow pnpm to add deps to the workspace root if Next.js auto-installs
+    // TypeScript deps during dev server startup. Without this, pnpm rejects
+    // the auto-install with ERR_PNPM_ADDING_TO_ROOT.
+    NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
   } as Record<string, string>;
 
   // For Next.js, set PORT and HOSTNAME
