@@ -20,7 +20,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
+import { tryCommandOutputAsync, type WhichEnv } from "../lib/which.js";
 
 export async function doctorCommand(args: string[]): Promise<number> {
   // Subcommand: litt doctor input — interactive input diagnostic
@@ -41,24 +41,11 @@ export async function doctorCommand(args: string[]): Promise<number> {
     console.log(`${c.dim}  Cockpit and other Ink-based commands will crash on Node <22.${c.reset}`);
   }
 
-  // Git + package managers — run version checks in parallel using
-  // execFileSync (no PowerShell shell overhead). Each call spawns the
-  // binary directly, saving ~1s per command vs the old exec() which
-  // spawned powershell.exe for every call.
-  //
-  // Performance: old code ran hasCommand() + exec(--version) sequentially
-  // for each tool = 2 PowerShell spawns × 4 tools = 8 spawns × ~1.5s =
-  // ~12s. Now: 4 direct spawns in parallel = ~1.5s total.
-  const toolResults = await Promise.allSettled([
-    tryExecFileSync("git", ["--version"]),
-    tryExecFileSync("pnpm", ["--version"]),
-    tryExecFileSync("npm", ["--version"]),
-    tryExecFileSync("yarn", ["--version"]),
-  ]);
-
-  const [gitVer, pnpmVer, npmVer, yarnVer] = toolResults.map((r) =>
-    r.status === "fulfilled" ? r.value : null,
-  );
+  // Git + package managers — probed in parallel through the canonical
+  // executable resolver (lib/which.ts). See probeToolVersions below for
+  // why the resolver is mandatory rather than a nicety.
+  const { git: gitVer, pnpm: pnpmVer, npm: npmVer, yarn: yarnVer } =
+    await probeToolVersions();
 
   if (gitVer) {
     ok(`Git: ${gitVer}`);
@@ -229,22 +216,42 @@ export async function doctorCommand(args: string[]): Promise<number> {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
+/** The tool versions `litt doctor` reports. `null` means genuinely absent. */
+export interface ToolVersions {
+  git: string | null;
+  pnpm: string | null;
+  npm: string | null;
+  yarn: string | null;
+}
+
 /**
- * Run a command via execFileSync (no shell) and return trimmed stdout.
- * Returns null if the command is not found or fails.
- * Used for version checks — avoids PowerShell shell overhead.
+ * Probe the version of each tool doctor reports on, in parallel.
+ *
+ * This MUST go through the canonical resolver in lib/which.ts. The
+ * previous implementation called `execFileSync(cmd, args, { shell: false })`
+ * directly, which on Windows is a raw CreateProcess and can only launch
+ * real PE executables. `git` resolves to `git.exe` and worked; `pnpm`,
+ * `npm` and `yarn` are `.CMD` batch shims, so every call threw ENOENT and
+ * doctor reported "pnpm: not installed" on machines where pnpm was
+ * installed and actively running the build. A diagnostic that lies is
+ * worse than no diagnostic.
+ *
+ * `whichSync` walks PATH with PATHEXT applied and routes genuine batch
+ * shims through cmd.exe, so detection matches what would actually run.
+ * The parallel-probe performance win of the old code is kept: resolution
+ * is pure filesystem work and nothing here ever spawns a shell to FIND a
+ * command.
+ *
+ * `env` is injected by tests; production always uses the real PATH.
  */
-function tryExecFileSync(command: string, args: string[]): string | null {
-  try {
-    return execFileSync(command, args, {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    }).trim();
-  } catch {
-    return null;
-  }
+export async function probeToolVersions(env: WhichEnv = {}): Promise<ToolVersions> {
+  const [git, pnpm, npm, yarn] = await Promise.all([
+    tryCommandOutputAsync("git", ["--version"], env),
+    tryCommandOutputAsync("pnpm", ["--version"], env),
+    tryCommandOutputAsync("npm", ["--version"], env),
+    tryCommandOutputAsync("yarn", ["--version"], env),
+  ]);
+  return { git, pnpm, npm, yarn };
 }
 
 // ─── litt doctor input ───────────────────────────────────────────────

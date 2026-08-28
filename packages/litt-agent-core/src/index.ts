@@ -191,6 +191,7 @@ export {
   buildDefaultSystemPrompt,
   classifyAgentFailure,
   sanitizePriorMessages,
+  PROJECT_EVIDENCE_TOOL_ID,
 } from "./agent-loop.js";
 export type {
   AgentLoopOptions,

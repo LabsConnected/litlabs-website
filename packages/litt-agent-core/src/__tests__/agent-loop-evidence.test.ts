@@ -23,6 +23,7 @@ import {
   runAgentLoop,
   parseToolCall,
   stripToolCallBlocks,
+  PROJECT_EVIDENCE_TOOL_ID,
 } from "../agent-loop.js";
 import {
   createDefaultRegistry,
@@ -228,12 +229,12 @@ describe("Agent loop evidence discipline", () => {
     assert.equal(result.termination, "complete");
   });
 
-  it("an unknown tool + fabricated success cannot produce a verified result", async () => {
+  it("an unknown tool never becomes project evidence", async () => {
     const shell = new NodeShellExecutor(process.cwd());
     const store = new RuntimeStore(() => {});
     const tools = createDefaultRegistry();
-    // The model calls a tool that is NOT in the registry, then fabricates
-    // a verified repository inspection.
+    // The model calls a tool that is NOT in the registry, then asserts a
+    // verified repository inspection it never performed.
     const model = makeMockModel([
       '```tool_call\n{ "tool": "nonexistent.tool", "inputs": {} }\n```',
       "Repository verified: branch main, working tree clean.",
@@ -245,10 +246,29 @@ describe("Agent loop evidence discipline", () => {
       verificationGate: makeProvingGate(),
     });
 
-    // The loop must NOT terminate complete with fabricated success.
-    assert.notEqual(result.termination, "complete");
-    assert.ok(!result.content.includes("Repository verified"),
-      "fabricated verified claim must not survive");
+    // The rejected call is never recorded, so it can never satisfy the
+    // evidence requirement — that is the invariant this test owns.
+    assert.equal(
+      result.toolCalls.some((tc) => tc.toolId === "nonexistent.tool"),
+      false,
+      "an unknown tool must never be recorded as evidence",
+    );
+
+    // This test previously asserted the loop could not reach "complete"
+    // here. That held only because the runtime had no way to obtain
+    // repository evidence on its own: the model's bad tool name left the
+    // mission with nothing, and it re-prompted until the round limit —
+    // the live REMOTE failure. The runtime now runs the canonical
+    // read-only inspection itself, so whatever the model then says is
+    // backed by a real project.status result rather than by nothing.
+    // The evidence requirement is satisfied by RUNTIME execution here,
+    // never by the model's claim.
+    assert.ok(
+      result.toolCalls.some(
+        (tc) => tc.toolId === PROJECT_EVIDENCE_TOOL_ID && tc.result.success,
+      ),
+      "the runtime must have acquired real repository evidence itself",
+    );
   });
 
   it("a failing inspection tool + fabricated success cannot produce a verified result", async () => {
