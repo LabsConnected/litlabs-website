@@ -223,6 +223,7 @@ export default function StudioProjectFiles({
           const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
           if (prepPayload && prepPayload.workspaceStatus === "ready") {
             onWorkspacePrepared?.();
+            window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
             await new Promise((resolve) => setTimeout(resolve, 600));
             const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
             if (retryPayload && Array.isArray(retryPayload.entries)) {
