@@ -189,8 +189,9 @@ export default function StudioProjectFiles({
     const safeDirectory = normalizePath(directory);
     if (!silent) setLoading(true);
     setError(null);
+    let response: Response | undefined;
     try {
-      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
+      response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
         ...(await authHeaders()),
         signal: AbortSignal.timeout(20_000),
       });
@@ -215,8 +216,8 @@ export default function StudioProjectFiles({
       const recoverable =
         msg.includes("Workspace") ||
         msg.includes("reparation") ||
-        response.status === 500 ||
-        response.status === 503;
+        response?.status === 500 ||
+        response?.status === 503;
       if (recoverable && !preparing) {
         setPreparing(true);
         try {
