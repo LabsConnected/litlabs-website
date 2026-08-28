@@ -22,6 +22,6 @@ Set-Alias -Name "tc" -Value "npx tsc --noEmit --incremental"
 Set-Alias -Name "clean" -Value "Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue"
 
 # Quick navigation
-Function litlab { Set-Location "C:\Users\litbi\CascadeProjects\litlab" }
+Function litlab { Set-Location "E:\LiTT\Worktrees\main" }
 
 Write-Host "⚡ LiTT God Mode Enabled - Type 'lb', 'lt', 'ld', 'lp' for magic"
