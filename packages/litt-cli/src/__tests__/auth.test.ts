@@ -38,6 +38,7 @@ import { getAuthSession, resetAuthSession } from "../lib/auth/auth-session.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as net from "node:net";
 
 // ─── PKCE ─────────────────────────────────────────────────────────
 
@@ -249,6 +250,181 @@ describe("Auth Server", () => {
     // Catch the rejection from close() to prevent unhandled rejection
     server.waitForCallback().catch(() => {});
     server.close();
+  });
+});
+
+// ─── Auth Server port allocation ──────────────────────────────────
+//
+// Regression coverage for the callback-port allocator. The previous
+// implementation called listen(0) and *rejected* any port the OS chose
+// below 49152, retrying up to 32 times. Windows hands out its dynamic
+// range (which starts at 1024) sequentially, so 32 consecutive retries
+// return 32 consecutive low ports and the loop can never succeed —
+// startAuthServer threw "Failed to obtain a browser-safe local auth
+// callback port" deterministically. The allocator now *chooses* a port
+// in the browser-safe range and only retries on real bind failures.
+
+describe("Auth Server port allocation", () => {
+  /**
+   * Occupy a loopback port *inside the browser-safe range* so a bind
+   * attempt on it fails. It must be in-range: listen(0) yields whatever
+   * the OS ephemeral counter is on (low, on Windows), which is exactly
+   * the port class the allocator refuses to hand a browser.
+   */
+  const occupyPort = async (): Promise<{ port: number; release: () => Promise<void> }> => {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const candidate = 49_152 + Math.floor(Math.random() * (65_535 - 49_152 + 1));
+      const blocker = net.createServer();
+      const bound = await new Promise<boolean>((resolve) => {
+        blocker.once("error", () => resolve(false));
+        blocker.listen(candidate, "127.0.0.1", () => resolve(true));
+      });
+      if (bound) {
+        return {
+          port: candidate,
+          release: () => new Promise<void>((resolve) => blocker.close(() => resolve())),
+        };
+      }
+    }
+    throw new Error("could not occupy a browser-safe port for the test");
+  };
+
+  it("selects a browser-safe port without relying on the OS ephemeral range", async () => {
+    const server = await startAuthServer({ expectedState: generateState(), timeoutMs: 5000 });
+    try {
+      expect(server.port).toBeGreaterThanOrEqual(49_152);
+      expect(server.port).toBeLessThanOrEqual(65_535);
+      expect(server.redirectUri).toBe(`http://127.0.0.1:${server.port}/callback`);
+    } finally {
+      server.waitForCallback().catch(() => {});
+      server.close();
+    }
+  });
+
+  it("binds only to 127.0.0.1 and is not reachable on another local address", async () => {
+    const server = await startAuthServer({ expectedState: generateState(), timeoutMs: 5000 });
+    try {
+      // Reachable on loopback...
+      const loopback = await fetch(`http://127.0.0.1:${server.port}/other`);
+      expect(loopback.status).toBe(404);
+
+      // ...but the listener is not bound to the wildcard address, so a
+      // second server can claim the same port on 0.0.0.0's behalf.
+      const wildcardRefused = await new Promise<boolean>((resolve) => {
+        const probe = net.createServer();
+        probe.once("error", () => resolve(false));
+        probe.listen(server.port, "127.0.0.2", () => probe.close(() => resolve(true)));
+      });
+      expect(wildcardRefused).toBe(true);
+    } finally {
+      server.waitForCallback().catch(() => {});
+      server.close();
+    }
+  });
+
+  it("skips occupied candidate ports and binds the first free one", async () => {
+    const first = await occupyPort();
+    const second = await occupyPort();
+    const free = await occupyPort();
+    await free.release(); // known-free port, kept out of the other two
+
+    try {
+      const server = await startAuthServer({
+        expectedState: generateState(),
+        timeoutMs: 5000,
+        portCandidates: [first.port, second.port, free.port],
+      });
+      try {
+        expect(server.port).toBe(free.port);
+        expect(server.redirectUri).toContain(`127.0.0.1:${free.port}`);
+      } finally {
+        server.waitForCallback().catch(() => {});
+        server.close();
+      }
+    } finally {
+      await first.release();
+      await second.release();
+    }
+  });
+
+  it("returns a clear AuthError when every candidate is occupied", async () => {
+    const a = await occupyPort();
+    const b = await occupyPort();
+    try {
+      await expect(
+        startAuthServer({
+          expectedState: generateState(),
+          timeoutMs: 5000,
+          portCandidates: [a.port, b.port],
+        }),
+      ).rejects.toThrow(/browser-safe local auth callback port after 2 attempts/);
+    } finally {
+      await a.release();
+      await b.release();
+    }
+  });
+
+  it("surfaces a clear AuthError when an explicit port is already in use", async () => {
+    const taken = await occupyPort();
+    try {
+      await expect(
+        startAuthServer({ expectedState: generateState(), port: taken.port, timeoutMs: 5000 }),
+      ).rejects.toThrow(/Failed to bind local auth callback port/);
+    } finally {
+      await taken.release();
+    }
+  });
+
+  it("does not emit an unhandled rejection when a handle is closed unobserved", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      // Never call waitForCallback() — close() still rejects the internal
+      // callback promise, which must stay observed.
+      const server = await startAuthServer({ expectedState: generateState(), timeoutMs: 5000 });
+      server.close();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
+  it("releases the listening socket after close", async () => {
+    const server = await startAuthServer({ expectedState: generateState(), timeoutMs: 5000 });
+    const { port } = server;
+    server.waitForCallback().catch(() => {});
+    server.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The port is free again — a fresh listener can claim it.
+    const rebound = await new Promise<boolean>((resolve) => {
+      const probe = net.createServer();
+      probe.once("error", () => resolve(false));
+      probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+    });
+    expect(rebound).toBe(true);
+  });
+
+  it("repeated allocations each get a distinct browser-safe port", async () => {
+    const servers = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        startAuthServer({ expectedState: generateState(), timeoutMs: 5000 }),
+      ),
+    );
+    try {
+      const ports = servers.map((s) => s.port);
+      expect(new Set(ports).size).toBe(ports.length);
+      for (const p of ports) {
+        expect(p).toBeGreaterThanOrEqual(49_152);
+      }
+    } finally {
+      for (const s of servers) {
+        s.waitForCallback().catch(() => {});
+        s.close();
+      }
+    }
   });
 });
 
