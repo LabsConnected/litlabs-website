@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkFrontendApiProxy } from "@clerk/backend/proxy";
 import { NextResponse, NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
@@ -394,11 +395,10 @@ const innerMiddleware = useClerkMiddleware
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
     },
     {
-      // No server-side /__clerk proxy — the browser loads Clerk JS directly
-      // from clerk.litlabs.net (DNS-only in Cloudflare). The server-side proxy
-      // was removed because Railway → Cloudflare FAPI returns Error 1000
-      // (Cloudflare-to-Cloudflare loop). The browser can access
-      // clerk.litlabs.net directly since it's DNS-only.
+      // The /__clerk proxy is handled by handleClerkProxy() in the middleware
+      // wrapper below, which calls clerkFrontendApiProxy() with an explicit
+      // fapiUrl override AND strips Cloudflare infrastructure headers that
+      // trigger Error 1000 when forwarded to clerk.litlabs.net.
       frontendApiProxy: { enabled: false },
       ...(clerkAuthorizedParties.length > 0
         ? { authorizedParties: clerkAuthorizedParties }
@@ -414,6 +414,86 @@ const innerMiddleware = useClerkMiddleware
       // Redirect protected routes to sign-in when Clerk is not configured
       return protectRoute(req);
     };
+
+// ─── Clerk Frontend API proxy with Cloudflare header stripping ─────
+//
+// The Clerk domain is registered as `litlabs.net` (proxy_url =
+// https://litlabs.net/__clerk) in the Clerk Dashboard. The production app
+// is served at `www.litlabs.net` via a Cloudflare Worker that forwards to
+// Railway.
+//
+// When the Cloudflare Worker fetches from Railway, it passes Cloudflare
+// infrastructure headers (cf-connecting-ip, cf-ray, etc.) through to the
+// Next.js app. If handleClerkProxy() forwards these headers to
+// clerk.litlabs.net (which is also on Cloudflare's edge), Cloudflare
+// detects a Cloudflare-to-Cloudflare loop and returns Error 1000
+// ("DNS points to prohibited IP").
+//
+// The fix: strip all cf-* and related Cloudflare infrastructure headers
+// from the request before calling clerkFrontendApiProxy(), so the
+// Railway → Clerk hop looks like a clean origin request, not a
+// Cloudflare-internal forwarding chain.
+//
+// We do NOT strip: cookie, authorization, user-agent, origin, referer,
+// host, accept, content-type, or other standard HTTP headers that Clerk
+// needs to function.
+
+const CLERK_PROXY_HOST = "litlabs.net";
+const CLERK_FAPI_URL = "https://clerk.litlabs.net";
+
+/**
+ * Cloudflare infrastructure headers that must NOT be forwarded to
+ * clerk.litlabs.net. These are injected by Cloudflare's edge and, when
+ * forwarded to another Cloudflare-backed host, trigger Error 1000
+ * (loop detection).
+ */
+const CLOUDFLARE_HOP_HEADERS: readonly string[] = [
+  "cf-connecting-ip",
+  "cf-ipcountry",
+  "cf-ray",
+  "cf-visitor",
+  "cf-worker",
+  "cf-ew-via",
+  "cf-radius",
+  "cf-place",
+  "cf-timezone",
+  "cf-access-jwt-assertion",
+  "cf-access-client-id",
+  "x-real-ip",
+];
+
+/**
+ * Clerk Frontend API proxy with explicit fapiUrl override and
+ * Cloudflare header stripping.
+ *
+ * Strips cf-* and related infrastructure headers that cause Error 1000
+ * when forwarded to clerk.litlabs.net (Cloudflare loop detection).
+ * Rewrites x-forwarded-host to match the registered Clerk proxy domain.
+ */
+async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> {
+  if (!req.nextUrl.pathname.startsWith("/__clerk")) return null;
+  if (!isDeployed()) return null;
+
+  const requestHeaders = new Headers(req.headers);
+
+  // Strip Cloudflare infrastructure headers that trigger Error 1000
+  // when forwarded to clerk.litlabs.net (another Cloudflare-backed host).
+  for (const header of CLOUDFLARE_HOP_HEADERS) {
+    requestHeaders.delete(header);
+  }
+
+  // Rewrite x-forwarded-host so Clerk-Proxy-Url matches the registered domain
+  requestHeaders.set("x-forwarded-host", CLERK_PROXY_HOST);
+
+  const proxyReq = new NextRequest(req, { headers: requestHeaders });
+
+  // Use Clerk's own proxy function with explicit fapiUrl override
+  const response = await clerkFrontendApiProxy(proxyReq, {
+    proxyPath: "/__clerk",
+    fapiUrl: CLERK_FAPI_URL,
+  });
+  return response as unknown as NextResponse;
+}
 
 // ─── Dev proxy header fix ──────────────────────────────────────────
 //
@@ -497,6 +577,14 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);
+  // Handle /__clerk proxy requests before clerkMiddleware (which would
+  // forward to frontend-api.clerk.dev without the fapiUrl override or
+  // Cloudflare header stripping).
+  if (req.nextUrl.pathname.startsWith("/__clerk") && isDeployed()) {
+    return handleClerkProxy(req).then(res =>
+      res ?? withBotProtection(innerMiddleware)(req, ...rest as never[])
+    );
+  }
   return withBotProtection(innerMiddleware)(req, ...rest as never[]);
 };
 
@@ -509,9 +597,9 @@ export const config = {
     // static asset extensions. Running Clerk + bot middleware on these caused
     // 500s and wasted RAM.
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.json|emulatorjs|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|font|woff|woff2|ttf|eot|css|js|map)).*)",
-    // Legacy /__clerk proxy path — no longer proxied server-side. Kept in
-    // matcher so any stale requests are handled gracefully by the middleware
-    // instead of hitting a raw route handler.
+    // Clerk Frontend API proxy path — handled by handleClerkProxy() in
+    // the middleware. Must be in the matcher so the middleware intercepts
+    // these requests before they reach a raw route handler.
     "/__clerk/(.*)",
   ],
 };

@@ -344,15 +344,11 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // The Clerk Frontend API proxy is now handled by Clerk's built-in
-  // `frontendApiProxy` option in clerkMiddleware() (src/proxy.ts), NOT by a
-  // manual Next.js rewrite. The previous rewrite forwarded /__clerk/* to
-  // https://clerk.litlabs.net/*, which was broken (Cloudflare error 1000 —
-  // DNS/proxy loop). Clerk's supported proxy forwards /__clerk/* to
-  // frontend-api.clerk.dev with the required headers (Clerk-Proxy-Url,
-  // Clerk-Secret-Key, X-Forwarded-For) and auto-derives the server-side
-  // proxyUrl for the auth handshake. The browser side is configured via
-  // NEXT_PUBLIC_CLERK_PROXY_URL (read by ClerkProvider in layout.tsx).
+  // The Clerk Frontend API proxy is handled by handleClerkProxy() in
+  // src/proxy.ts, which calls clerkFrontendApiProxy() with an explicit
+  // fapiUrl override and strips Cloudflare infrastructure headers (cf-*,
+  // x-real-ip) that trigger Error 1000 when forwarded to clerk.litlabs.net.
+  // No manual Next.js rewrite is needed.
 };
 
 export default withSentryConfig(nextConfig, {
