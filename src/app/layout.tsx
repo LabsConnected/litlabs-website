@@ -126,14 +126,9 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>
-        <link
-          rel="preconnect"
-          href="https://clerk.litlabs.net"
-          crossOrigin="anonymous"
-        />
-        <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
-      </head>
+      <head>{/* Clerk Frontend API is now proxied through /__clerk on this
+             same origin (frontendApiProxy in src/proxy.ts), so no
+             cross-origin preconnect to clerk.litlabs.net is needed. */}</head>
       <body
         className="antialiased min-h-dvh"
         style={{ backgroundColor: "#03050b" }}
@@ -163,8 +158,8 @@ export default function RootLayout({
             variables: {
               colorPrimary: "#a970ff",
               colorBackground: "#060914",
-              colorText: "#eef4ff",
-              colorTextSecondary: "#9ba7c7",
+              colorForeground: "#eef4ff",
+              colorMutedForeground: "#9ba7c7",
               colorDanger: "#ef4444",
               colorSuccess: "#22c55e",
               borderRadius: "8px",

@@ -83,14 +83,17 @@ const nextConfig: NextConfig = {
 
   // Clerk must be transpiled by Next.js so that ClerkProvider (root layout)
   // and useSession() (used inside <SignIn/>) share ONE React context instance.
-  // Without this, Turbopack can emit two separate copies of @clerk/clerk-react
+  // Without this, Turbopack can emit two separate copies of @clerk/react
   // in the client bundle — each with its own createContext() — so the context
   // ClerkProvider sets is not the same context useSession reads from, causing
   // "useSession can only be used within the <ClerkProvider /> component" on the
   // /sign-in page even though ClerkProvider is present in the tree.
+  //
+  // NOTE: @clerk/clerk-react was renamed to @clerk/react in Clerk Core 3
+  // (shipped with @clerk/nextjs v7). The old package name is no longer used.
   transpilePackages: [
     "@clerk/nextjs",
-    "@clerk/clerk-react",
+    "@clerk/react",
     "@clerk/shared",
   ],
 
@@ -185,20 +188,20 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
-              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
+              "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.com https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com https://link.msgsndr.com",
               "script-src-attr 'none'",
               "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "style-src-elem 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
               "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org https://v8.js-dos.com https://thumbnails.libretro.com",
               "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org https://v8.js-dos.com",
-              `connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone https://backend.leadconnectorhq.com https://link.msgsndr.com https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://*.livekit.cloud wss://*.livekit.cloud${process.env.NODE_ENV === "development" ? " ws://localhost:4001 http://localhost:4001 ws://127.0.0.1:4001 http://127.0.0.1:4001" : ""}`,
+              `connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone https://backend.leadconnectorhq.com https://link.msgsndr.com https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://*.livekit.cloud wss://*.livekit.cloud${process.env.NODE_ENV === "development" ? " ws://localhost:4001 http://localhost:4001 ws://127.0.0.1:4001 http://127.0.0.1:4001" : ""}`,
               "frame-src 'self' blob: data: https://open.spotify.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://*.browserbase.com https://www.browserbase.com",
               "worker-src 'self' blob: https://litlabs.net https://www.litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
               "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
-              "form-action 'self' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
+              "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
               "upgrade-insecure-requests",
             ].join("; "),
           },
@@ -341,29 +344,15 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  async rewrites() {
-    const clerkFrontendApi =
-      process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL;
-    return {
-      beforeFiles: [
-        // Clerk proxy: forward /__clerk/* to the Clerk Frontend API so that
-        // session cookies are set on the app domain (litlabs.net) instead of
-        // the Clerk domain (clerk.litlabs.net). Without this, API routes on
-        // litlabs.net never receive Clerk session cookies, causing 401 on
-        // every authenticated request, even after a fresh sign-in.
-        ...(clerkFrontendApi
-          ? [
-              {
-                source: "/__clerk/:path*",
-                destination: clerkFrontendApi + "/:path*",
-              },
-            ]
-          : []),
-      ],
-      afterFiles: [],
-      fallback: [],
-    };
-  },
+  // The Clerk Frontend API proxy is now handled by Clerk's built-in
+  // `frontendApiProxy` option in clerkMiddleware() (src/proxy.ts), NOT by a
+  // manual Next.js rewrite. The previous rewrite forwarded /__clerk/* to
+  // https://clerk.litlabs.net/*, which was broken (Cloudflare error 1000 —
+  // DNS/proxy loop). Clerk's supported proxy forwards /__clerk/* to
+  // frontend-api.clerk.dev with the required headers (Clerk-Proxy-Url,
+  // Clerk-Secret-Key, X-Forwarded-For) and auto-derives the server-side
+  // proxyUrl for the auth handshake. The browser side is configured via
+  // NEXT_PUBLIC_CLERK_PROXY_URL (read by ClerkProvider in layout.tsx).
 };
 
 export default withSentryConfig(nextConfig, {

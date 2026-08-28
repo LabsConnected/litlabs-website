@@ -393,9 +393,19 @@ const innerMiddleware = useClerkMiddleware
 
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
     },
-    clerkAuthorizedParties.length > 0
-      ? { authorizedParties: clerkAuthorizedParties }
-      : {},
+    {
+      // Clerk Frontend API proxy — the supported replacement for the old
+      // manual Next.js rewrite to clerk.litlabs.net (which was broken with
+      // Cloudflare error 1000). This intercepts /__clerk/* in middleware,
+      // forwards to frontend-api.clerk.dev with the required headers
+      // (Clerk-Proxy-Url, Clerk-Secret-Key, X-Forwarded-For), and
+      // auto-derives the server-side proxyUrl for the auth handshake.
+      // The browser side uses NEXT_PUBLIC_CLERK_PROXY_URL (ClerkProvider).
+      frontendApiProxy: { enabled: true },
+      ...(clerkAuthorizedParties.length > 0
+        ? { authorizedParties: clerkAuthorizedParties }
+        : {}),
+    },
   )
   : function passthroughMiddleware(req: NextRequest) {
       // When test auth is disabled (Playwright CI), allow all routes through
@@ -501,6 +511,9 @@ export const config = {
     // static asset extensions. Running Clerk + bot middleware on these caused
     // 500s and wasted RAM.
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.json|emulatorjs|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|font|woff|woff2|ttf|eot|css|js|map)).*)",
-    "/__clerk/:path*",
+    // Clerk Frontend API proxy path — handled by frontendApiProxy in
+    // clerkMiddleware(). Must be in the matcher so the middleware intercepts
+    // these requests before they hit a route handler.
+    "/__clerk/(.*)",
   ],
 };
