@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
   }
 
   const projectId = request.nextUrl.searchParams.get("projectId");
-  const baseUrl = process.env.TERMINAL_SERVER_URL || "";
+  // The baseUrl is used by the browser to connect the WebSocket.
+  // TERMINAL_SERVER_URL is the internal Railway URL (not browser-reachable).
+  // NEXT_PUBLIC_TERMINAL_WS_URL is the public WebSocket URL the browser needs.
+  const baseUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || process.env.TERMINAL_SERVER_URL || "";
 
   try {
     // If projectId is provided, the token MUST be bound to the project's
