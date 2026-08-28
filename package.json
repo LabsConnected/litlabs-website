@@ -55,6 +55,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1085.0",
     "@browserbasehq/sdk": "^2.16.0",
     "@browserbasehq/stagehand": "^3.7.1",
+    "@clerk/backend": "3.16.10",
     "@clerk/nextjs": "7.8.0",
     "@google/genai": "^2.11.0",
     "@google/generative-ai": "^0.24.1",
