@@ -126,9 +126,8 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>{/* Clerk Frontend API is now proxied through /__clerk on this
-             same origin (frontendApiProxy in src/proxy.ts), so no
-             cross-origin preconnect to clerk.litlabs.net is needed. */}</head>
+      <head>{/* Clerk JS loads directly from clerk.litlabs.net (DNS-only in
+             Cloudflare, CNAME → Clerk FAPI). No same-origin proxy needed. */}</head>
       <body
         className="antialiased min-h-dvh"
         style={{ backgroundColor: "#03050b" }}
@@ -143,12 +142,12 @@ export default function RootLayout({
         </a>
         <ClerkProvider
           publishableKey={resolvedClerkKey}
-          proxyUrl={
-            process.env.NEXT_PUBLIC_CLERK_PROXY_URL ||
-            (process.env.NODE_ENV === "production"
-              ? "https://www.litlabs.net/__clerk"
-              : undefined)
-          }
+          // No same-origin proxy — the browser loads Clerk JS directly from
+          // clerk.litlabs.net (DNS-only in Cloudflare, CNAME → Clerk FAPI).
+          // The server-side /__clerk proxy was removed because Railway →
+          // Cloudflare FAPI returns Error 1000 (Cloudflare-to-Cloudflare loop).
+          // The browser can access clerk.litlabs.net directly since it's
+          // DNS-only and resolves to Clerk's worker IPs.
           signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
           signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
           signInFallbackRedirectUrl={

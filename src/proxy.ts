@@ -1,5 +1,4 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { clerkFrontendApiProxy } from "@clerk/backend/proxy";
 import { NextResponse, NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
@@ -395,11 +394,11 @@ const innerMiddleware = useClerkMiddleware
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
     },
     {
-      // The /__clerk proxy is handled by handleClerkProxy() in the middleware
-      // wrapper above, which calls clerkFrontendApiProxy() with an explicit
-      // fapiUrl override. The frontendApiProxy option here is disabled because
-      // it doesn't expose fapiUrl and would forward to frontend-api.clerk.dev
-      // (which returns Cloudflare Error 1000 from Railway's IP range).
+      // No server-side /__clerk proxy — the browser loads Clerk JS directly
+      // from clerk.litlabs.net (DNS-only in Cloudflare). The server-side proxy
+      // was removed because Railway → Cloudflare FAPI returns Error 1000
+      // (Cloudflare-to-Cloudflare loop). The browser can access
+      // clerk.litlabs.net directly since it's DNS-only.
       frontendApiProxy: { enabled: false },
       ...(clerkAuthorizedParties.length > 0
         ? { authorizedParties: clerkAuthorizedParties }
@@ -493,72 +492,11 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
   });
 }
 
-/**
- * Clerk proxy host normalization.
- *
- * The Clerk Frontend API proxy is registered for the apex domain `litlabs.net`
- * in the Clerk Dashboard (proxy_url = https://litlabs.net/__clerk). However,
- * the production app is served at `www.litlabs.net` (Cloudflare redirects
- * apex → www). The `frontendApiProxy` middleware derives `Clerk-Proxy-Url`
- * from the request's `x-forwarded-host`, so when the browser is at
- * `www.litlabs.net` it sends `Clerk-Proxy-Url: https://www.litlabs.net/__clerk`,
- * which Clerk rejects ("Proxy url is invalid. Cannot be on a different domain").
- *
- * This fix rewrites `x-forwarded-host` to `litlabs.net` for `/__clerk` requests
- * in production so the `Clerk-Proxy-Url` header matches the registered domain.
- * It only runs for the proxy path and only in deployed environments.
- */
-/**
- * Clerk Frontend API proxy with explicit fapiUrl override.
- *
- * The Clerk domain is registered as `litlabs.net` (proxy_url =
- * https://litlabs.net/__clerk) but the app is served at `www.litlabs.net`.
- * clerkMiddleware's built-in `frontendApiProxy` option:
- *   1. Derives `Clerk-Proxy-Url` from `x-forwarded-host` (would be www.litlabs.net)
- *   2. Derives the upstream FAPI URL from the publishable key, which always
- *      resolves to `https://frontend-api.clerk.dev` for production keys.
- *
- * Both are problematic:
- *   - `frontend-api.clerk.dev` returns Cloudflare Error 1000 from Railway's IP range
- *   - `www.litlabs.net` doesn't match the registered proxy_url
- *
- * This handler calls Clerk's own `clerkFrontendApiProxy` (NOT a hand-rolled proxy)
- * with explicit `fapiUrl` and corrected `x-forwarded-host` headers, bypassing
- * the limitations of `clerkMiddleware`'s `frontendApiProxy` option which doesn't
- * expose `fapiUrl`.
- */
-const CLERK_PROXY_HOST = "litlabs.net";
-const CLERK_FAPI_URL = "https://clerk.litlabs.net";
-
-async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> {
-  if (!req.nextUrl.pathname.startsWith("/__clerk")) return null;
-  if (!isDeployed()) return null;
-
-  // Rewrite x-forwarded-host so Clerk-Proxy-Url matches the registered domain
-  const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-forwarded-host", CLERK_PROXY_HOST);
-  const proxyReq = new NextRequest(req, { headers: requestHeaders });
-
-  // Use Clerk's own proxy function with explicit fapiUrl override
-  const response = await clerkFrontendApiProxy(proxyReq, {
-    proxyPath: "/__clerk",
-    fapiUrl: CLERK_FAPI_URL,
-  });
-  return response as unknown as NextResponse;
-}
-
 // Dev proxy header fix wraps the bot detection so it runs first.
 // Bot detection wraps the Clerk/passthrough middleware so it runs next.
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);
-  // Handle /__clerk proxy requests before clerkMiddleware (which would
-  // forward to frontend-api.clerk.dev without the fapiUrl override).
-  if (req.nextUrl.pathname.startsWith("/__clerk") && isDeployed()) {
-    return handleClerkProxy(req).then(res =>
-      res ?? withBotProtection(innerMiddleware)(req, ...rest as never[])
-    );
-  }
   return withBotProtection(innerMiddleware)(req, ...rest as never[]);
 };
 
@@ -571,9 +509,9 @@ export const config = {
     // static asset extensions. Running Clerk + bot middleware on these caused
     // 500s and wasted RAM.
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.json|emulatorjs|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|font|woff|woff2|ttf|eot|css|js|map)).*)",
-    // Clerk Frontend API proxy path — handled by frontendApiProxy in
-    // clerkMiddleware(). Must be in the matcher so the middleware intercepts
-    // these requests before they hit a route handler.
+    // Legacy /__clerk proxy path — no longer proxied server-side. Kept in
+    // matcher so any stale requests are handled gracefully by the middleware
+    // instead of hitting a raw route handler.
     "/__clerk/(.*)",
   ],
 };
