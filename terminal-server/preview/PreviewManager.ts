@@ -516,10 +516,10 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     PATH: childPath,
     PORT: String(port),
     HOSTNAME: "0.0.0.0",
-    // Keep HOME as the process default (not ws.root) so pnpm uses the same
-    // store location that was used during `pnpm install` in prepareWorkspace.
-    // Setting HOME to ws.root causes ERR_PNPM_UNEXPECTED_STORE because pnpm
-    // looks for a store under the new HOME instead of /root.
+    // Override NODE_ENV=production (inherited from Railway) to development
+    // for the dev server. Next.js warns about non-standard NODE_ENV values
+    // and pnpm skips devDependencies when NODE_ENV=production.
+    NODE_ENV: "development",
     // Allow pnpm to add deps to the workspace root if Next.js auto-installs
     // TypeScript deps during dev server startup. Without this, pnpm rejects
     // the auto-install with ERR_PNPM_ADDING_TO_ROOT.

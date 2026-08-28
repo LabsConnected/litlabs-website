@@ -122,13 +122,15 @@ export async function prepareWorkspace(
       : existsSync(join(root, "yarn.lock")) ? "yarn"
       : "npm";
     try {
-      // Don't set CI=1 — it can cause pnpm to skip devDependencies in
-      // some configurations, which breaks Next.js dev server startup.
+      // Force NODE_ENV=development during install so pnpm/npm include
+      // devDependencies. The Railway service runs with NODE_ENV=production,
+      // which causes pnpm to skip devDeps by default — this breaks Next.js
+      // dev server startup (TypeScript types are in devDependencies).
       execFileSync(pm, ["install", "--prefer-offline"], {
         cwd: root,
         stdio: "pipe",
         timeout: 300_000,
-        env: { ...process.env },
+        env: { ...process.env, NODE_ENV: "development" },
       });
     } catch {
       // Non-fatal — the workspace is still usable for file browsing and
@@ -155,7 +157,7 @@ export async function prepareWorkspace(
             cwd: root,
             stdio: "pipe",
             timeout: 120_000,
-            env: { ...process.env },
+            env: { ...process.env, NODE_ENV: "development" },
           });
         } catch {
           // Non-fatal — Next.js will attempt its own auto-install.
