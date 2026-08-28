@@ -34,6 +34,7 @@ import type {
   RuntimeEvent,
   StreamChunk,
   ToolStatus,
+  ChatMessage as AgentCoreChatMessage,
 } from "@litt/agent-core";
 import {
   redactSecrets,
@@ -119,6 +120,8 @@ export interface AgentLoopOptions {
   userId?: string;
   /** Project ID for approval context */
   projectId?: string;
+  /** Prior conversation messages to include as context (see buildPriorMessages) */
+  priorMessages?: AgentCoreChatMessage[];
 }
 
 // ─── AgentLoop ────────────────────────────────────────────────────
