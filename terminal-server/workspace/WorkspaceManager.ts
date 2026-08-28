@@ -111,7 +111,10 @@ export async function prepareWorkspace(
   // because the cloned repo has no installed dependencies.
   if (existsSync(join(root, "package.json")) && !existsSync(join(root, "node_modules"))) {
     const pkgRaw = readFileSync(join(root, "package.json"), "utf-8");
-    const pkg = JSON.parse(pkgRaw) as { packageManager?: string };
+    const pkg = JSON.parse(pkgRaw) as {
+      packageManager?: string;
+      devDependencies?: Record<string, string>;
+    };
     // Prefer the packageManager field, then pnpm, then npm.
     const pm = pkg.packageManager?.startsWith("pnpm") ? "pnpm"
       : pkg.packageManager?.startsWith("yarn") ? "yarn"
@@ -130,6 +133,28 @@ export async function prepareWorkspace(
       // the preview will surface a clear "next: not found" error if the
       // dev command needs deps. We don't fail prepare because some repos
       // have optional install steps or the user may install via chat.
+    }
+
+    // Pre-install TypeScript dev deps if tsconfig.json exists but typescript
+    // is not in devDependencies. Next.js auto-installs these during dev
+    // startup, but the auto-install can fail in pnpm workspaces with
+    // ERR_PNPM_UNEXPECTED_STORE or ERR_PNPM_ADDING_TO_ROOT. Pre-installing
+    // them here avoids that race.
+    if (existsSync(join(root, "tsconfig.json"))) {
+      const hasTs = pkg.devDependencies?.typescript != null;
+      if (!hasTs) {
+        try {
+          execFileSync(pm, ["add", "--save-dev", "--save-exact",
+            "typescript", "@types/react", "@types/node"], {
+            cwd: root,
+            stdio: "pipe",
+            timeout: 120_000,
+            env: { ...process.env, CI: "1" },
+          });
+        } catch {
+          // Non-fatal — Next.js will attempt its own auto-install.
+        }
+      }
     }
   }
 
