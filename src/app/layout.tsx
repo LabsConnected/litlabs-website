@@ -126,10 +126,8 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>{/* Clerk Frontend API is proxied via /__clerk (server-side).
-             The browser loads Clerk JS through the same-origin proxy,
-             which forwards to clerk.litlabs.net with Cloudflare headers
-             stripped to avoid Error 1000. */}</head>
+      <head>{/* Clerk JS loads directly from clerk.litlabs.net (DNS-only in
+             Cloudflare, CNAME → Clerk FAPI). No same-origin proxy needed. */}</head>
       <body
         className="antialiased min-h-dvh"
         style={{ backgroundColor: "#03050b" }}
@@ -144,19 +142,14 @@ export default function RootLayout({
         </a>
         <ClerkProvider
           publishableKey={resolvedClerkKey}
-          // The /__clerk proxy is handled server-side by handleClerkProxy()
-          // in src/proxy.ts. It forwards to clerk.litlabs.net with Cloudflare
-          // infrastructure headers stripped to prevent Error 1000.
-          signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in"}
-          signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up"}
-          signInFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ||
-            "/studio"
-          }
-          signUpFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ||
-            "/studio"
-          }
+          // No same-origin proxy — the browser loads Clerk JS directly from
+          // clerk.litlabs.net (DNS-only in Cloudflare, CNAME → Clerk FAPI).
+          // Hardcoded URLs because Dockerfile ENV sets NEXT_PUBLIC_* vars to
+          // empty string when build args are not provided.
+          signInUrl="/sign-in"
+          signUpUrl="/sign-up"
+          signInFallbackRedirectUrl="/studio"
+          signUpFallbackRedirectUrl="/studio"
           appearance={{
             variables: {
               colorPrimary: "#a970ff",
