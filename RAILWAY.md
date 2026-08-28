@@ -174,7 +174,7 @@ All production env vars must be set on the Railway web service.
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `CLERK_WEBHOOK_SECRET`
-- `NEXT_PUBLIC_CLERK_PROXY_URL` — Clerk Frontend API proxy URL (https://litlabs.net/__clerk/)
+- `NEXT_PUBLIC_CLERK_PROXY_URL` — Clerk Frontend API proxy URL (https://www.litlabs.net/__clerk/)
 - `AUTH_SECRET`
 - `TURNSTILE_SECRET_KEY`
 - `NEXT_PUBLIC_TURNSTILE_SITE_KEY`

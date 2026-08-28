@@ -1,5 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { isAnonymousDevAllowed, isClerkConfigured, isDeployed } from "@/lib/env";
 
 // ─── Bot detection ────────────────────────────────────────────────
@@ -494,12 +494,42 @@ function fixDevProxyHeaders(req: NextRequest): NextResponse | undefined {
   });
 }
 
+/**
+ * Clerk proxy host normalization.
+ *
+ * The Clerk Frontend API proxy is registered for the apex domain `litlabs.net`
+ * in the Clerk Dashboard (proxy_url = https://litlabs.net/__clerk). However,
+ * the production app is served at `www.litlabs.net` (Cloudflare redirects
+ * apex → www). The `frontendApiProxy` middleware derives `Clerk-Proxy-Url`
+ * from the request's `x-forwarded-host`, so when the browser is at
+ * `www.litlabs.net` it sends `Clerk-Proxy-Url: https://www.litlabs.net/__clerk`,
+ * which Clerk rejects ("Proxy url is invalid. Cannot be on a different domain").
+ *
+ * This fix rewrites `x-forwarded-host` to `litlabs.net` for `/__clerk` requests
+ * in production so the `Clerk-Proxy-Url` header matches the registered domain.
+ * It only runs for the proxy path and only in deployed environments.
+ */
+const CLERK_PROXY_HOST = "litlabs.net";
+
+function fixClerkProxyHost(req: NextRequest): NextRequest {
+  if (!isDeployed()) return req;
+  if (!req.nextUrl.pathname.startsWith("/__clerk")) return req;
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  if (forwardedHost === CLERK_PROXY_HOST) return req;
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-forwarded-host", CLERK_PROXY_HOST);
+  // Return a new NextRequest with modified headers so downstream middleware
+  // (clerkMiddleware's frontendApiProxy) sees the corrected x-forwarded-host.
+  return new NextRequest(req, { headers: requestHeaders });
+}
+
 // Dev proxy header fix wraps the bot detection so it runs first.
 // Bot detection wraps the Clerk/passthrough middleware so it runs next.
 const middleware = (req: NextRequest, ...rest: never[]): Promise<NextResponse> => {
   const fixed = fixDevProxyHeaders(req);
   if (fixed) return Promise.resolve(fixed);
-  return withBotProtection(innerMiddleware)(req, ...rest as never[]);
+  const clerkReq = fixClerkProxyHost(req);
+  return withBotProtection(innerMiddleware)(clerkReq, ...rest as never[]);
 };
 
 export default middleware;
