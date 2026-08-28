@@ -1,5 +1,6 @@
 import { resolve, join } from "path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { simpleGit, type SimpleGit } from "simple-git";
 import { randomUUID } from "crypto";
 
@@ -104,6 +105,33 @@ export async function prepareWorkspace(
   }
 
   const commitSha = (await git.revparse("HEAD")).trim();
+
+  // Install dependencies if package.json exists and node_modules is missing.
+  // Without this, the preview dev server fails with "next: not found" (exit 1)
+  // because the cloned repo has no installed dependencies.
+  if (existsSync(join(root, "package.json")) && !existsSync(join(root, "node_modules"))) {
+    const pkgRaw = readFileSync(join(root, "package.json"), "utf-8");
+    const pkg = JSON.parse(pkgRaw) as { packageManager?: string };
+    // Prefer the packageManager field, then pnpm, then npm.
+    const pm = pkg.packageManager?.startsWith("pnpm") ? "pnpm"
+      : pkg.packageManager?.startsWith("yarn") ? "yarn"
+      : existsSync(join(root, "pnpm-lock.yaml")) ? "pnpm"
+      : existsSync(join(root, "yarn.lock")) ? "yarn"
+      : "npm";
+    try {
+      execFileSync(pm, ["install", "--prefer-offline"], {
+        cwd: root,
+        stdio: "pipe",
+        timeout: 300_000,
+        env: { ...process.env, CI: "1" },
+      });
+    } catch {
+      // Non-fatal — the workspace is still usable for file browsing and
+      // the preview will surface a clear "next: not found" error if the
+      // dev command needs deps. We don't fail prepare because some repos
+      // have optional install steps or the user may install via chat.
+    }
+  }
 
   const descriptor: WorkspaceDescriptor = {
     workspaceId,
