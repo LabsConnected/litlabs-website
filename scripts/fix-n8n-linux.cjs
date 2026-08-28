@@ -7,7 +7,7 @@ console.log(JSON.stringify(wfs, null, 2));
 const vwf = wfs.find(w => w.name.includes("Voice Call"));
 if (vwf && !vwf.activeVersionId) {
   const vid = vwf.versionId || crypto.randomUUID();
-  const wf = JSON.parse(fs.readFileSync("/mnt/c/Users/litbi/CascadeProjects/litlabs-website/n8n/workflows/04-voice-call-orchestration.json", "utf8"));
+  const wf = JSON.parse(fs.readFileSync("/mnt/e/LiTT/Worktrees/main/n8n/workflows/04-voice-call-orchestration.json", "utf8"));
   const ex = db.prepare("SELECT versionId FROM workflow_history WHERE versionId = ?").get(vid);
   if (!ex) {
     db.prepare("INSERT INTO workflow_history (versionId, workflowId, authors, createdAt, updatedAt, nodes, connections, name, autosaved, description) VALUES (?,?,?,datetime('now'),datetime('now'),?,?,?,0,'')").run(vid, vwf.id, "{}", JSON.stringify(wf.nodes), JSON.stringify(wf.connections || {}), wf.name);

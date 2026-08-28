@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 
 const DB_PATH = "/home/litbit/.n8n/database.sqlite";
-const WORKFLOW_PATH = "/mnt/c/Users/litbi/CascadeProjects/litlabs-website/n8n/workflows/04-voice-call-orchestration.json";
+const WORKFLOW_PATH = "/mnt/e/LiTT/Worktrees/main/n8n/workflows/04-voice-call-orchestration.json";
 
 const db = new Database(DB_PATH);
 
