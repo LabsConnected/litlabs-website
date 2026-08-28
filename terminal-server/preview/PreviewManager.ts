@@ -423,6 +423,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   // Stop existing runtime if any — wait for the process to exit so
   // the port is released before we try to rebind.
   const existing = runtimes.get(workspaceId);
+  const preservedLogs = existing?.logs ?? [];
   if (existing) {
     await stopPreviewAndWait(workspaceId);
   }
@@ -529,7 +530,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     lastHealthCheck: null,
     error: null,
     errorCode: null,
-    logs: [],
+    logs: [...preservedLogs],
   };
 
   runtimes.set(workspaceId, runtime);

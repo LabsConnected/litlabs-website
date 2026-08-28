@@ -65,7 +65,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
 COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
 # Bust builder cache to ensure source changes are picked up
-ARG BUILDER_CACHE_BUST=3
+ARG BUILDER_CACHE_BUST=4
 RUN echo "cache bust: $BUILDER_CACHE_BUST"
 
 # Copy workspace config
