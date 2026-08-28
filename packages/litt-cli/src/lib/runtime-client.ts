@@ -95,6 +95,19 @@ export type StateListener = (state: RuntimeState) => void;
 export type ConnectionListener = (state: ConnectionState) => void;
 export type ErrorListener = (error: { code: string; message: string }) => void;
 
+/**
+ * Thrown when waitForConnection times out or the connection enters an
+ * error state. This is a REMOTE-runtime error — it must never trigger
+ * fallback to a local provider. The caller surfaces it as an explicit
+ * "remote connection failed" error.
+ */
+export class RemoteConnectionTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RemoteConnectionTimeoutError";
+  }
+}
+
 // ─── Token exchange (Clerk token → short-lived terminal JWT) ──────
 // The CLI NEVER holds TERMINAL_AUTH_SECRET. It exchanges a Clerk token
 // for a terminal JWT via /api/token-exchange, then uses that JWT.
@@ -710,6 +723,65 @@ export class RuntimeClient {
 
   is_connected(): boolean {
     return this.connectionState === "connected";
+  }
+
+  /**
+   * Wait for the remote connection to reach "connected" state.
+   *
+   * Resolves immediately if already connected. Otherwise returns a
+   * promise that resolves when the connection state becomes "connected",
+   * or rejects with a RemoteConnectionTimeoutError after `timeoutMs`
+   * (default 15s). This lets the submit flow block gracefully while the
+   * Socket.IO transport establishes — the user sees "Connecting to LiTT
+   * server…" instead of an immediate "not connected" error.
+   *
+   * If the connection enters "error" state, rejects immediately with a
+   * RemoteConnectionTimeoutError rather than waiting for the timeout.
+   *
+   * Never falls back to a local provider — the caller must surface the
+   * rejection as an explicit remote-runtime error.
+   */
+  waitForConnection(timeoutMs = 15_000): Promise<void> {
+    if (this.connectionState === "connected") return Promise.resolve();
+    if (this.connectionState === "error") {
+      return Promise.reject(new RemoteConnectionTimeoutError(
+        "Remote connection failed — the LiTT server could not be reached. " +
+        "Check your network connection, or run `litt login` if your session expired.",
+      ));
+    }
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new RemoteConnectionTimeoutError(
+          `Remote connection timed out after ${timeoutMs / 1000}s — the LiTT server ` +
+          `did not respond. Check your network connection, or run \`litt login\` if your session expired.`,
+        ));
+      }, timeoutMs);
+
+      const onConn = (state: ConnectionState) => {
+        if (settled) return;
+        if (state === "connected") {
+          settled = true;
+          cleanup();
+          resolve();
+        } else if (state === "error") {
+          settled = true;
+          cleanup();
+          reject(new RemoteConnectionTimeoutError(
+            "Remote connection failed — the LiTT server could not be reached. " +
+            "Check your network connection, or run `litt login` if your session expired.",
+          ));
+        }
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.listeners.connection.delete(onConn);
+      };
+      this.listeners.connection.add(onConn);
+    });
   }
 
   hasActiveRun(): boolean {

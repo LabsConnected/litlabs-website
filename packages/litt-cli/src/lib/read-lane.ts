@@ -200,3 +200,69 @@ export function formatReadResultsForSynthesis(
     "If the tools did not return the requested information, say so honestly.",
   ].join("\n");
 }
+
+// ─── Full inspection (for /inspect) ────────────────────────────────
+
+/**
+ * Build a comprehensive inspection match — runs ALL key read-only tools
+ * in parallel so the inspection is GUARANTEED to gather real evidence,
+ * regardless of whether the model would have called tools on its own.
+ *
+ * This is the /inspect fast path: instead of forcing a mission that
+ * relies on the model to emit tool_call blocks (which weak/free models
+ * often skip — they say "I'll check..." and then answer from memory),
+ * we execute the tools directly and hand the results to the model for
+ * synthesis only.
+ */
+export function buildFullInspectionMatch(extraFocus?: string): ReadMatch {
+  const calls: ReadToolCall[] = [
+    { toolId: "project.status", args: {}, label: "Git status" },
+    { toolId: "project.log", args: { count: 10 }, label: "Recent commits" },
+    { toolId: "project.branch", args: {}, label: "Current branch" },
+    { toolId: "project.inspect_package", args: {}, label: "Package metadata" },
+    { toolId: "project.list_files", args: { path: "." }, label: "Root directory" },
+    { toolId: "project.list_files", args: { path: "src" }, label: "src/ directory" },
+  ];
+
+  const summary = extraFocus
+    ? `Full inspection (focus: ${extraFocus})`
+    : "Full project inspection";
+
+  return { calls, needsSynthesis: true, summary };
+}
+
+/**
+ * Format full inspection results into a comprehensive synthesis prompt.
+ * The model gets ALL the evidence and produces a structured rundown.
+ */
+export function formatInspectionForSynthesis(
+  results: ReadToolResult[],
+  extraFocus?: string,
+): string {
+  const evidence = results.map((r) => {
+    const data = r.result.data;
+    return `[${r.toolId}] ${r.result.message}\nData: ${JSON.stringify(data, null, 2)}`;
+  }).join("\n\n");
+
+  const focusSection = extraFocus
+    ? `\nThe user specifically wants focus on: ${extraFocus}\n`
+    : "";
+
+  return [
+    "You are LiTT. The following read-only tool results were gathered by DIRECTLY executing project inspection tools.",
+    "Do NOT say you will check — the checks have already been run. Summarize the ACTUAL results below.",
+    focusSection,
+    "Tool results (real evidence — use ONLY this, do not fabricate):",
+    evidence,
+    "",
+    "Provide a structured project rundown covering:",
+    "1. Current branch and git status",
+    "2. Latest commits (summarize the recent work)",
+    "3. Uncommitted/untracked files",
+    "4. Project structure and major packages",
+    "5. Known issues or concerns visible in the state",
+    "6. What should be done next, in priority order",
+    "",
+    "Be concise and factual. If a tool failed, report the failure honestly.",
+  ].join("\n");
+}
