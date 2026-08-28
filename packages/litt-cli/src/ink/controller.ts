@@ -42,6 +42,7 @@ import {
 import type { RuntimeSession } from "../lib/runtime-session.js";
 import type { RuntimeClient } from "../lib/runtime-client.js";
 import { RemoteModelProvider, RemoteExecutionError } from "../lib/remote-model-provider.js";
+import { RemoteConnectionTimeoutError } from "../lib/runtime-client.js";
 import type { CockpitStore, ActivitySemantic, RoutingMode, ChatMessage, ExecutionTarget } from "./cockpit-store.js";
 import type { ApprovalBridge } from "./approval-bridge.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
@@ -57,7 +58,7 @@ import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from 
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
-import { matchReadTools, executeReadTools, formatReadResultsForSynthesis } from "../lib/read-lane.js";
+import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -157,6 +158,83 @@ function modelExecutionAvailable(target: ExecutionTarget): boolean {
   // Requiring only an OpenRouter key made BYOK-only setups
   // (OPENAI_API_KEY and nothing else) read as "no model available".
   return target === "remote" || hasOpenRouterKey() || hasAnyNativeProviderKey();
+}
+
+/**
+ * Ensure the remote runtime is connected before proceeding with a model
+ * call. When executionTarget === "remote", the submit flow MUST NOT
+ * attempt a model call until the Socket.IO transport is established.
+ *
+ * This closes the readiness race: previously, the non-blocking
+ * client.connect() in cockpit.ts let the user submit before the
+ * connection was ready, producing "Remote execution is unavailable"
+ * errors on the very first prompt after launch.
+ *
+ * Behavior:
+ *   - If already connected, returns immediately (no UI flicker).
+ *   - If connecting/reconnecting, shows a "Connecting to LiTT server…"
+ *     activity and waits up to `timeoutMs` (default 15s) for the
+ *     connection to establish.
+ *   - If the wait times out or the connection enters "error" state,
+ *     throws a RemoteConnectionTimeoutError — which the caller surfaces
+ *     as an explicit remote-runtime error. NEVER falls back to a local
+ *     provider or free-model routing.
+ *   - In "local" mode, this is a no-op — local execution doesn't need
+ *     the remote transport.
+ *
+ * @param store     Cockpit store (for surfacing the connecting activity)
+ * @param client    RuntimeClient (may be null — treated as not connected)
+ * @param target    Execution target ("remote" or "local")
+ * @param timeoutMs Max wait before rejecting (default 15s)
+ */
+async function awaitRemoteReady(
+  store: CockpitStore,
+  client: RuntimeClient | null,
+  target: ExecutionTarget,
+  timeoutMs = 15_000,
+): Promise<void> {
+  if (target !== "remote") return; // no-op for local execution
+  if (client && client.is_connected()) return; // already ready
+
+  // Surface the connecting state so the user knows why there's a pause.
+  const connectActivityId = `act_${Date.now()}_conn`;
+  store.actions.addActivity({
+    id: connectActivityId,
+    ts: Date.now(),
+    type: "info",
+    tag: "CONNECT",
+    text: "Connecting to LiTT server…",
+  });
+
+  try {
+    if (!client) {
+      throw new RemoteConnectionTimeoutError(
+        "Remote execution is unavailable — no connection to the LiTT server. " +
+        "Run `litt login` if your session expired, then relaunch.",
+      );
+    }
+    await client.waitForConnection(timeoutMs);
+    // Connection established — update the activity to confirm.
+    store.actions.addActivity({
+      id: `act_${Date.now()}_conn_ok`,
+      ts: Date.now(),
+      type: "info",
+      tag: "CONNECT",
+      text: "Connected to LiTT server.",
+    });
+  } catch (err) {
+    // Surface the explicit remote-runtime failure. NEVER fall back.
+    const msg = err instanceof Error ? err.message : String(err);
+    store.actions.addActivity({
+      id: `act_${Date.now()}_conn_fail`,
+      ts: Date.now(),
+      type: "error",
+      tag: "CONNECT",
+      text: `Remote connection failed: ${msg}`,
+      fullText: msg,
+    });
+    throw err;
+  }
 }
 
 /**
@@ -659,8 +737,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   // Self-reference for nested submissions (/inspect /fix → mission goal).
   // Kept in a ref so recursion always calls the LATEST submit.
-  const submitRef = useRef<(input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => void>(() => {});
-  const submit = useCallback(async (input: string, opts?: { forceMission?: boolean; promptOverride?: string }) => {
+  const submitRef = useRef<(input: string, opts?: { forceMission?: boolean; forceRead?: boolean; promptOverride?: string }) => void>(() => {});
+  // /inspect pre-builds a comprehensive read match so tools execute
+  // directly without relying on the model to call them.
+  const inspectMatchRef = useRef<{ match: import("../lib/read-lane.js").ReadMatch; focus: string } | null>(null);
+  const submit = useCallback(async (input: string, opts?: { forceMission?: boolean; forceRead?: boolean; promptOverride?: string }) => {
     // ─── Re-entrancy guard (defense in depth) ──────────────────────
     // The composer UI disables input while isProcessing is true, but
     // that's a UI-layer debounce, not a hard guarantee — a fast double
@@ -847,11 +928,24 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       act(store, `Mode: ${store.state.mode.toUpperCase()} (Tab toggles)`, "info", undefined, "SETTINGS");
       return;
     }
-    // ─── Inspect / Fix — real agent missions ──────────────────────
+    // ─── Inspect — DIRECT tool execution (guaranteed evidence) ────
+    // /inspect runs ALL key read-only tools directly through the
+    // ExecutionGateway BEFORE any model call. This guarantees real
+    // evidence is gathered even when a weak/free model would otherwise
+    // say "I'll check..." without actually calling tools. The model
+    // only synthesizes the already-gathered results.
     if (input === "/inspect" || input.startsWith("/inspect ")) {
       const rest = input.slice(9).trim();
-      const goal = rest ? `Inspect the repository and report: ${rest}` : "Inspect this repository and report its structure, stack, and current state.";
-      submitRef.current(goal, { forceMission: true });
+      const inspectMatch = buildFullInspectionMatch(rest || undefined);
+      // Defer to the READ lane path by setting a flag the submit handler checks.
+      // We reuse the READ intent infrastructure but with our comprehensive match.
+      inspectMatchRef.current = { match: inspectMatch, focus: rest };
+      submitRef.current(
+        rest
+          ? `Inspect the repository and report: ${rest}`
+          : "Inspect this repository and report its structure, stack, and current state.",
+        { forceRead: true },
+      );
       return;
     }
     if (input === "/fix" || input.startsWith("/fix ")) {
@@ -1314,8 +1408,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // gateway, then optionally makes one synthesis model call to format
     // results. Does NOT create a Mission, invoke the planner, or run
     // VerificationGate.
-    if (intent === "read") {
-      const readMatch = matchReadTools(input);
+    //
+    // forceRead (/inspect) bypasses intent classification and uses a
+    // pre-built comprehensive match — ALL key tools run directly,
+    // guaranteeing real evidence even when a weak model would otherwise
+    // skip tool calls.
+    if (intent === "read" || opts?.forceRead === true) {
+      const readMatch = opts?.forceRead === true && inspectMatchRef.current
+        ? inspectMatchRef.current.match
+        : matchReadTools(input);
+      // Clear the inspect match ref so it doesn't leak into later turns.
+      if (inspectMatchRef.current) inspectMatchRef.current = null;
       if (readMatch) {
         perf.mark("read_match");
 
@@ -1387,13 +1490,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           // ─── Optional synthesis ───
           if (readMatch.needsSynthesis && modelExecutionAvailable(store.state.executionTarget)) {
             perf.mark("synthesis_start");
-            const synthesisPrompt = formatReadResultsForSynthesis(input, readResults);
+            // /inspect uses the comprehensive inspection synthesis prompt;
+            // regular READ queries use the standard read-results format.
+            const inspectFocus = opts?.forceRead === true ? undefined : undefined;
+            const synthesisPrompt = opts?.forceRead === true
+              ? formatInspectionForSynthesis(readResults, inspectFocus)
+              : formatReadResultsForSynthesis(input, readResults);
             const routed = modelRuntime.route(
               store.state.routingMode,
               store.state.selectedModel,
               synthesisPrompt,
             );
             store.actions.setActiveModel(routed.label);
+            await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
             if (adapter instanceof RemoteModelProvider) currentRemoteModelRef.current = adapter;
             store.actions.setActiveProvider(adapter.providerId);
@@ -1570,6 +1679,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
             );
           }
+          await awaitRemoteReady(store, client, store.state.executionTarget);
           const model = resolveModelProvider(store.state.executionTarget, client, routed, {
             tools: tools.list(),
           });
@@ -1842,6 +1952,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             `hasOpenRouterKey=${!!process.env.OPENROUTER_API_KEY}\n`,
           );
         }
+        await awaitRemoteReady(store, client, store.state.executionTarget);
         const model = resolveModelProvider(store.state.executionTarget, client, routed, {
           tools: tools.list(),
         });

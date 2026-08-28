@@ -111,6 +111,16 @@ export function OverlayKeyboardProvider({
         debugKey(`raw input=${JSON.stringify(s)} activeOverlay=${topOwner ?? "none"}`);
       }
 
+      // Also log to file when LITT_INPUT_DEBUG is set — for first-backspace tracing
+      if (process.env.LITT_INPUT_DEBUG === "1") {
+        try {
+          const fs = require("fs");
+          const f = process.env.LITT_INPUT_DEBUG_FILE ?? (process.platform === "android" ? "/sdcard/litt-input-debug.log" : "./litt-input-debug.log");
+          const hex = Buffer.from(s, "utf8").toString("hex");
+          fs.appendFileSync(f, `[${new Date().toISOString()}] RAW input=${JSON.stringify(s)} hex=${hex} topOwner=${topOwner ?? "none"}\n`);
+        } catch { /* ignore */ }
+      }
+
       // F2 — opens Model Center (only when no overlay is active)
       if (isRawF2(data)) {
         if (stack.length > 0) return;
@@ -153,6 +163,15 @@ export function OverlayKeyboardProvider({
 
     if (KEY_DEBUG) {
       debugKey(`useInput input=${JSON.stringify(input)} return=${key.return} escape=${key.escape} tab=${key.tab} up=${key.upArrow} down=${key.downArrow} ctrl=${key.ctrl} activeOverlay=${topOwner ?? "none"}`);
+    }
+
+    // Also log to file when LITT_INPUT_DEBUG is set — for first-backspace tracing
+    if (process.env.LITT_INPUT_DEBUG === "1") {
+      try {
+        const fs = require("fs");
+        const f = process.env.LITT_INPUT_DEBUG_FILE ?? (process.platform === "android" ? "/sdcard/litt-input-debug.log" : "./litt-input-debug.log");
+        fs.appendFileSync(f, `[${new Date().toISOString()}] OVERLAY useInput input=${JSON.stringify(input)} backspace=${key.backspace} ctrl=${key.ctrl} meta=${key.meta} tab=${key.tab} escape=${key.escape} topOwner=${topOwner ?? "none"}\n`);
+      } catch { /* ignore */ }
     }
 
     if (topOwner) {

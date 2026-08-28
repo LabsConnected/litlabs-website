@@ -695,8 +695,16 @@ export class ProviderRegistry {
 /**
  * Persisted model preferences — survives closing and reopening litt.
  * Stored in ~/.litt/model-prefs.json
+ *
+ * `prefsVersion` enables forward-only migrations. When the prefs schema
+ * or the routing defaults change in a way that would make old saved
+ * state misleading, bump `CURRENT_PREFS_VERSION` and add a migration
+ * branch in `loadModelPrefs`. The migration only touches the specific
+ * legacy state that needs fixing — it never overrides an explicit user
+ * choice that is still valid under the current schema.
  */
 export interface ModelPrefs {
+  prefsVersion: number;
   routingMode: "auto" | "fixed" | "budget" | "max";
   selectedModel: string | null;
   /** Per-capability overrides: { coding: "openai/gpt-5.6-codex", ... } */
@@ -705,7 +713,22 @@ export interface ModelPrefs {
   showFallbackNotifications: boolean;
 }
 
+/**
+ * Current prefs schema version. Bump this when adding a migration.
+ *
+ *   1 → 2: The remote-readiness fix (2026-08-27). The previous routing
+ *          implementation could write `routingMode: "fixed"` +
+ *          `selectedModel: "gemma-4-31b-free"` as a side effect of
+ *          free-model fallback testing, not a deliberate user choice.
+ *          Version 2 migrates that specific legacy state back to AUTO
+ *          so the OpenAI primary route is not silently overridden.
+ *          All other prefs (including explicit free-model pins made
+ *          via /model under the new code) are preserved as-is.
+ */
+const CURRENT_PREFS_VERSION = 2;
+
 const DEFAULT_PREFS: ModelPrefs = {
+  prefsVersion: CURRENT_PREFS_VERSION,
   routingMode: "auto",
   selectedModel: null,
   capabilityOverrides: {},
@@ -713,12 +736,78 @@ const DEFAULT_PREFS: ModelPrefs = {
   showFallbackNotifications: true,
 };
 
+/**
+ * Known legacy preference states that were written by the previous
+ * (pre-versioned) routing implementation and are almost certainly not
+ * deliberate user choices. These get reset to AUTO during migration.
+ *
+ * This is an EXHAUSTIVE list — only these exact combinations are
+ * migrated. Any other prefs state (including an explicit free-model
+ * pin made via /model under the new code) is preserved as-is.
+ *
+ * The broken state was caused by the old routing code writing free-model
+ * fallback selections into model-prefs.json during testing/local-mode
+ * experiments, which then silently overrode the OpenAI primary route
+ * when the user launched in remote mode.
+ */
+const LEGACY_BROKEN_PREFS: Array<{ selectedModel: string; routingMode: string }> = [
+  // The specific free-model fallback that was written by the old
+  // routing implementation's free-model testing path.
+  { routingMode: "fixed", selectedModel: "gemma-4-31b-free" },
+];
+
+/**
+ * Migrate prefs from an older version to the current schema.
+ * Only touches the specific legacy state that needs fixing — never
+ * overrides a valid explicit user choice.
+ *
+ * @returns The migrated prefs (with prefsVersion set to CURRENT_PREFS_VERSION)
+ */
+function migratePrefs(prefs: Partial<ModelPrefs>): ModelPrefs {
+  const version = prefs.prefsVersion ?? 0;
+  const base: ModelPrefs = {
+    ...DEFAULT_PREFS,
+    ...prefs,
+  };
+
+  // Already current — no migration needed.
+  if (version >= CURRENT_PREFS_VERSION) {
+    base.prefsVersion = CURRENT_PREFS_VERSION;
+    return base;
+  }
+
+  // ─── Migration 0/1 → 2: reset known broken legacy states ───────
+  // The previous routing implementation could write free-model fallback
+  // selections into model-prefs.json that were NOT deliberate user
+  // choices. Reset ONLY those exact known-broken combinations to AUTO.
+  // An explicit /model selection of a free model made under the new
+  // code writes prefsVersion: 2 and is never touched by this migration.
+  if (version < 2) {
+    const isLegacyBroken = LEGACY_BROKEN_PREFS.some(
+      (legacy) =>
+        base.routingMode === legacy.routingMode &&
+        base.selectedModel === legacy.selectedModel,
+    );
+    if (isLegacyBroken) {
+      // Reset to AUTO — the OpenAI primary route is the correct default
+      // for remote mode. Preserve the stale selection in lastUsedModel
+      // so it's still accessible in history.
+      base.lastUsedModel = base.selectedModel;
+      base.routingMode = "auto";
+      base.selectedModel = null;
+    }
+  }
+
+  base.prefsVersion = CURRENT_PREFS_VERSION;
+  return base;
+}
+
 export function loadModelPrefs(prefsPath: string): ModelPrefs {
   try {
     if (!existsSync(prefsPath)) return { ...DEFAULT_PREFS };
     const raw = readFileSync(prefsPath, "utf-8");
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PREFS, ...parsed };
+    return migratePrefs(parsed);
   } catch {
     return { ...DEFAULT_PREFS };
   }

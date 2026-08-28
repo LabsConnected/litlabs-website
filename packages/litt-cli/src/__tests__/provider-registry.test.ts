@@ -437,6 +437,7 @@ describe("Model preferences persistence", () => {
     const prefsPath = path.join(tmpDir, "model-prefs.json");
 
     const prefs: ModelPrefs = {
+      prefsVersion: 2,
       routingMode: "fixed",
       selectedModel: "qwen/qwen3-coder",
       capabilityOverrides: { coding: "qwen/qwen3-coder" },
@@ -462,6 +463,7 @@ describe("Model preferences persistence", () => {
     const prefsPath = path.join(nestedDir, "model-prefs.json");
 
     saveModelPrefs({
+      prefsVersion: 2,
       routingMode: "budget",
       selectedModel: null,
       capabilityOverrides: {},
@@ -504,6 +506,7 @@ describe("Model preferences persistence", () => {
     const prefsPath = path.join(tmpDir, "model-prefs.json");
 
     const original: ModelPrefs = {
+      prefsVersion: 2,
       routingMode: "max",
       selectedModel: "openai/gpt-5.6-sol",
       capabilityOverrides: {
@@ -681,6 +684,7 @@ describe("RoutingEngine", () => {
     const registry = new ProviderRegistry(MODEL_CATALOG);
     await registry.refresh();
     const prefs: ModelPrefs = {
+      prefsVersion: 2,
       routingMode: "auto",
       selectedModel: null,
       capabilityOverrides: { coding: "anthropic/claude-sonnet-5" },

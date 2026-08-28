@@ -288,4 +288,90 @@ describe("Backspace — real Composer driven by real terminal bytes", () => {
       h.cleanup();
     }
   });
+
+  // ─── First-Backspace-after-startup (physical device regression) ─────
+  // On Termux/Android, the reported bug was: "The first Backspace after
+  // LiTT starts may be ignored until Esc or another interaction
+  // initializes input state." These tests prove the fix: the very first
+  // Backspace after mount (simulating fresh launch) edits the composer
+  // immediately, with no Esc or second key required.
+
+  it("first Backspace after fresh mount: abc → ab (no Esc needed)", async () => {
+    // Exact reproduction of the physical-device test:
+    // 1. Mount composer (simulates LiTT startup)
+    // 2. Type "abc"
+    // 3. Press Backspace ONCE
+    // 4. Verify value is "ab" (not "abc")
+    const h = await mountComposer();
+    try {
+      // Type abc one char at a time (as a physical keyboard does)
+      await h.send("a");
+      await h.send("b");
+      await h.send("c");
+      expect(h.value()).toBe("abc");
+
+      // THE FIRST Backspace — must work immediately
+      await h.send(DEL);
+
+      expect(h.value()).toBe("ab");
+      // The value is the source of truth — the frame accumulates render
+      // history so we check the value, not the frame for "not abc".
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("first Backspace after fresh mount with pasted text: abc → ab", async () => {
+    // Same scenario but text arrives as a single paste event
+    const h = await mountComposer();
+    try {
+      await h.send("abc");
+      expect(h.value()).toBe("abc");
+
+      await h.send(DEL);
+
+      expect(h.value()).toBe("ab");
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("first Backspace with 0x08 (conhost/Ctrl+H) after fresh mount", async () => {
+    // Some terminals send 0x08 instead of 0x7f — both must work
+    const h = await mountComposer();
+    try {
+      await h.send("abc");
+      await h.send(BS);
+      expect(h.value()).toBe("ab");
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("first Backspace after fresh mount: abc + DEL in same read → ab", async () => {
+    // Fast typing: text and Backspace arrive in the same stdin read
+    const h = await mountComposer();
+    try {
+      await h.send(`abc${DEL}`);
+      expect(h.value()).toBe("ab");
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("repeated fresh-mount first-Backspace is consistent", async () => {
+    // Run the test 3 times with fresh mounts to prove consistency
+    // (matches the physical-device consistency test)
+    for (let i = 0; i < 3; i++) {
+      const h = await mountComposer();
+      try {
+        await h.send("abc");
+        expect(h.value()).toBe("abc");
+        await h.send(DEL);
+        expect(h.value()).toBe("ab");
+      } finally {
+        h.cleanup();
+      }
+    }
+  });
 });

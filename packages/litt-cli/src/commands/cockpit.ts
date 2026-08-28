@@ -148,13 +148,23 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     // The SessionEventBridge will project it to the cockpit UI.
   }
 
-  // Try to connect to terminal-server for realtime events
+  // Start terminal-server connection in the BACKGROUND — don't block
+  // the UI on a network call. On devices with slow/no internet (e.g.
+  // Termux on a phone), awaiting connect() here caused the cockpit to
+  // appear "frozen" for up to 20+ seconds before the Ink render started.
+  // The RuntimeClient handles reconnection internally; useEventBridge
+  // subscribes to connection-state changes and updates the UI when the
+  // connection succeeds or fails.
   let client: RuntimeClient | null = null;
   try {
     client = new RuntimeClient();
-    await client.connect();
+    client.connect().catch(() => {
+      // Non-fatal — cockpit works without realtime connection.
+      // The client remains in a disconnected state; useEventBridge
+      // will show "offline" in the UI.
+    });
   } catch {
-    // Non-fatal — cockpit works without realtime connection
+    // Synchronous construction error — extremely unlikely, but guard it.
     client = null;
   }
 
@@ -198,19 +208,27 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   // ─── Auth state for header display ──────────────────────────────
   // The auth gate in index.ts already verified the user is signed in
   // before reaching here. We fetch the auth state for the header UX
-  // (email display). This is non-blocking — if it fails, the cockpit
-  // still launches with signedIn=true (the gate already confirmed it).
-  let authEmail: string | null = null;
-  try {
-    const authSession = getAuthSession();
-    const authState = await authSession.getAuthState();
-    authEmail = authState.email;
-  } catch {
-    // Non-fatal — cockpit launches without email in header
-  }
+  // (email display) IN THE BACKGROUND — don't block the UI on a
+  // potentially slow network call (token refresh + userinfo fetch).
+  // The cockpit launches immediately with authEmail=null and updates
+  // via rerender() once the email is available.
+  const authEmailPromise = (async () => {
+    try {
+      const authSession = getAuthSession();
+      const authState = await authSession.getAuthState();
+      return authState.email;
+    } catch {
+      // Non-fatal — cockpit launches without email in header
+      return null;
+    }
+  })();
 
-  // Launch the Ink cockpit, wrapped in an error boundary (spec §39).
-  const { waitUntilExit } = render(
+  // Launch the Ink cockpit IMMEDIATELY — don't wait for network calls.
+  // The auth email starts as null and is updated via rerender() once
+  // the background fetch resolves. The client connection also runs in
+  // the background (above) and useEventBridge handles the "connecting"
+  // and "offline" states.
+  const { waitUntilExit, rerender } = render(
     React.createElement(CockpitErrorBoundary, null,
       React.createElement(CockpitApp, {
         session,
@@ -224,11 +242,35 @@ export async function cockpitCommand(args: string[]): Promise<number> {
         mode: session.getMode(),
         gitModified,
         gitUntracked,
-        authEmail,
+        authEmail: null, // updated via rerender when auth resolves
         signedIn: true,
       }),
     ),
   );
+
+  // Update the header with the auth email once it resolves — re-render
+  // the same tree so React reconciles and preserves all component state.
+  authEmailPromise.then((authEmail) => {
+    rerender(
+      React.createElement(CockpitErrorBoundary, null,
+        React.createElement(CockpitApp, {
+          session,
+          client,
+          approvalBridge,
+          sessionBridge,
+          project: String(project.packageJson?.name ?? "unnamed"),
+          branch: project.gitBranch ?? "unknown",
+          model,
+          cwd: projectRoot,
+          mode: session.getMode(),
+          gitModified,
+          gitUntracked,
+          authEmail,
+          signedIn: true,
+        }),
+      ),
+    );
+  });
 
   try {
     await waitUntilExit();

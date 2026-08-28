@@ -38,6 +38,26 @@ import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
 import { deriveFocusState } from "../focus-state.js";
 
+// ─── Debug instrumentation for first-input tracing ────────────────
+// Set LITT_INPUT_DEBUG=1 to trace the first several key events to a
+// file (LITT_INPUT_DEBUG_FILE, default /sdcard/litt-input-debug.log on
+// mobile, or ./litt-input-debug.log elsewhere). This does NOT write to
+// stdout/stderr so it never corrupts the Ink render.
+const INPUT_DEBUG = process.env.LITT_INPUT_DEBUG === "1";
+const INPUT_DEBUG_FILE = process.env.LITT_INPUT_DEBUG_FILE
+  ?? (process.platform === "android" ? "/sdcard/litt-input-debug.log" : "./litt-input-debug.log");
+let inputDebugCount = 0;
+function debugInput(msg: string): void {
+  if (!INPUT_DEBUG) return;
+  if (inputDebugCount >= 50) return; // cap at 50 events
+  inputDebugCount++;
+  try {
+    const fs = require("fs");
+    const line = `[${new Date().toISOString()}] #${inputDebugCount} ${msg}\n`;
+    fs.appendFileSync(INPUT_DEBUG_FILE, line);
+  } catch { /* ignore — debug only */ }
+}
+
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
@@ -106,9 +126,16 @@ export function Composer({
   useEffect(() => { pokeRef.current = cursor.poke; }, [cursor.poke]);
 
   useInput(useCallback((input: string, key: KeyInfo) => {
-    if (disabledRef.current) return;
+    // Debug: trace first key events for first-backspace investigation
+    debugInput(`useInput input=${JSON.stringify(input)} key.backspace=${key.backspace} key.return=${key.return} key.escape=${key.escape} key.ctrl=${key.ctrl} key.meta=${key.meta} disabled=${disabledRef.current} value=${JSON.stringify(valueRef.current)} caret=${caretRef.current}`);
+
+    if (disabledRef.current) {
+      debugInput(`SKIPPED: disabled=true`);
+      return;
+    }
 
     const evt = normalizeKey(input, key);
+    debugInput(`normalized: kind=${evt.kind} raw=${JSON.stringify(evt.raw ?? "")} text=${JSON.stringify(evt.text ?? "")}`);
 
     // Handle non-editing keys first (they have side effects).
     switch (evt.kind) {
@@ -187,6 +214,7 @@ export function Composer({
         // MOVE_HOME, MOVE_END — all go through the grapheme-safe editor.
         const state: ComposerState = { text: valueRef.current, caret: caretRef.current };
         const next = applyKeyEvent(state, evt);
+        debugInput(`edit: kind=${evt.kind} before=${JSON.stringify(state.text)}@${state.caret} after=${JSON.stringify(next.text)}@${next.caret} changed=${next.text !== state.text || next.caret !== state.caret}`);
         if (next.text !== state.text || next.caret !== state.caret) {
           onChangeRef.current(next.text);
           setCaret(next.caret);
