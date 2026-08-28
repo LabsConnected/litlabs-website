@@ -126,8 +126,10 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>{/* Clerk JS loads directly from clerk.litlabs.net (DNS-only in
-             Cloudflare, CNAME → Clerk FAPI). No same-origin proxy needed. */}</head>
+      <head>{/* Clerk Frontend API is proxied via /__clerk (server-side).
+             The browser loads Clerk JS through the same-origin proxy,
+             which forwards to clerk.litlabs.net with Cloudflare headers
+             stripped to avoid Error 1000. */}</head>
       <body
         className="antialiased min-h-dvh"
         style={{ backgroundColor: "#03050b" }}
@@ -142,20 +144,17 @@ export default function RootLayout({
         </a>
         <ClerkProvider
           publishableKey={resolvedClerkKey}
-          // No same-origin proxy — the browser loads Clerk JS directly from
-          // clerk.litlabs.net (DNS-only in Cloudflare, CNAME → Clerk FAPI).
-          // The server-side /__clerk proxy was removed because Railway →
-          // Cloudflare FAPI returns Error 1000 (Cloudflare-to-Cloudflare loop).
-          // The browser can access clerk.litlabs.net directly since it's
-          // DNS-only and resolves to Clerk's worker IPs.
-          signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
-          signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
+          // The /__clerk proxy is handled server-side by handleClerkProxy()
+          // in src/proxy.ts. It forwards to clerk.litlabs.net with Cloudflare
+          // infrastructure headers stripped to prevent Error 1000.
+          signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in"}
+          signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up"}
           signInFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
+            process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ||
             "/studio"
           }
           signUpFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
+            process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ||
             "/studio"
           }
           appearance={{
