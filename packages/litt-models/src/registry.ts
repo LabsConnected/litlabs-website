@@ -105,12 +105,23 @@ export class ModelRegistry {
 
   /**
    * Is a model routable? Has credential + not offline/deprecated.
-   * Free-priced models (pricing.unit === "free") are always routable —
-   * they require no user credentials (the server holds the OpenRouter key).
+   * Free-priced models (pricing.unit === "free") are routable when either
+   * the server holds the OpenRouter key (managed mode) OR the user has
+   * OPENROUTER_API_KEY set locally. Without either, free OpenRouter
+   * models cannot actually be served locally.
    */
   isRoutable(model: ModelDefinition): boolean {
     if (model.availability === "offline" || model.availability === "deprecated") return false;
-    if (model.pricing?.unit === "free") return true;
+    if (model.pricing?.unit === "free") {
+      // Free models are served via OpenRouter — need either a local
+      // OpenRouter key or the managed server path (checked by the caller
+      // via remoteMode). When neither is available, skip free models
+      // so the router falls back to directly-credentialed providers.
+      if (model.provider === "openrouter" || (model.openRouterModelId && !model.providerModelId)) {
+        return this.resolver("openrouter").hasCredential;
+      }
+      return true;
+    }
     return this.resolver(model.provider).hasCredential;
   }
 

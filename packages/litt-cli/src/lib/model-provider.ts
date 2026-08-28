@@ -244,8 +244,18 @@ export const DEFAULT_IDLE_STALL_MS = 90_000;
 // The configurable limit is the clean fix. The insufficient-credits
 // retry ladder (below) is the graceful-degradation backstop on top of it.
 
-/** Conservative default max response tokens (avoids OpenRouter credit rejections). */
-export const DEFAULT_MAX_TOKENS = 3000;
+/**
+ * Default max response tokens.
+ *
+ * 4096 is enough for Qwen 3.8 27B's thinking mode (which consumes visible
+ * token budget) while remaining safe for OpenRouter credit limits. Groq's
+ * Qwen 3.8 supports up to 16,384 output tokens; OpenAI supports up to 128K.
+ * The insufficient-credits retry ladder handles edge cases where 4096
+ * exceeds a provider's balance.
+ *
+ * Override with LITT_MAX_TOKENS env or per-call maxTokens option.
+ */
+export const DEFAULT_MAX_TOKENS = 4096;
 
 /**
  * Resolve the max_tokens for a request.
@@ -377,7 +387,10 @@ export function hasAnyProviderKey(): boolean {
     process.env.OPENAI_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_API_KEY
+    process.env.GEMINI_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.MISTRAL_API_KEY
   );
 }
 
@@ -781,6 +794,7 @@ export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new S
   "kimi",
   "mistral",
   "qwen",
+  "groq",
 ]);
 
 export interface OpenAICompatibleModelOptions {
@@ -914,7 +928,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
           ...(this.providerId === "openai"
             ? { max_completion_tokens: this._maxTokens }
             : { max_tokens: this._maxTokens }),
-          ...(this._tools ? { tools: this._tools } : {}),
+          ...(this._tools ? { tools: this._tools, tool_choice: "auto" } : {}),
           // OpenAI reasoning models (gpt-5.x) default to a non-none
           // reasoning_effort that is incompatible with function tools on
           // /chat/completions. When tools are present, explicitly disable

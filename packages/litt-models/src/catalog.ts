@@ -546,6 +546,67 @@ const QWEN_MODELS: ModelDefinition[] = [
   },
 ];
 
+// ─── Groq — fast inference for open models (free tier: 1K RPD) ─────
+const GROQ_MODELS: ModelDefinition[] = [
+  {
+    canonicalId: "groq-qwen3.8-27b",
+    displayName: "Qwen 3.8 27B (Groq)",
+    provider: "groq",
+    providerModelId: "qwen/qwen3.8-27b",
+    openRouterModelId: "qwen/qwen3.8-27b",
+    capabilities: { ...TEXT_CHAT, longContext: true, vision: true },
+    speed: "fast",
+    intelligence: "frontier",
+    contextWindow: 131_072,
+    availability: "unverified",
+    verified: false,
+    verifiedAt: null,
+    source: "unverified",
+    description: "Qwen 3.8 27B on Groq — agentic coding, reasoning, 131K context. Free tier: 1,000 RPD.",
+    recommendedFor: ["coding", "reasoning", "agent", "free"],
+    domain: "text",
+    notes: "Groq free tier. Thinking/instruct dual-mode. 30 RPM, 1K RPD.",
+  },
+  {
+    canonicalId: "groq-gpt-oss-120b",
+    displayName: "GPT-OSS 120B (Groq)",
+    provider: "groq",
+    providerModelId: "openai/gpt-oss-120b",
+    openRouterModelId: "openai/gpt-oss-120b",
+    capabilities: { ...TEXT_CHAT, longContext: true },
+    speed: "fast",
+    intelligence: "frontier",
+    contextWindow: 131_072,
+    availability: "unverified",
+    verified: false,
+    verifiedAt: null,
+    source: "unverified",
+    description: "OpenAI GPT-OSS 120B on Groq — heavy reasoning. Free tier: 1K RPD, 200K TPD.",
+    recommendedFor: ["reasoning", "heavy", "free"],
+    domain: "text",
+    notes: "Groq free tier. 30 RPM, 1K RPD, 200K TPD.",
+  },
+  {
+    canonicalId: "groq-gpt-oss-20b",
+    displayName: "GPT-OSS 20B (Groq)",
+    provider: "groq",
+    providerModelId: "openai/gpt-oss-20b",
+    openRouterModelId: "openai/gpt-oss-20b",
+    capabilities: { ...TEXT_CHAT },
+    speed: "fast",
+    intelligence: "balanced",
+    contextWindow: 131_072,
+    availability: "unverified",
+    verified: false,
+    verifiedAt: null,
+    source: "unverified",
+    description: "OpenAI GPT-OSS 20B on Groq — fast, lightweight tasks. Free tier: 1K RPD.",
+    recommendedFor: ["fast", "light", "free"],
+    domain: "text",
+    notes: "Groq free tier. 30 RPM, 1K RPD.",
+  },
+];
+
 // ─── Free OpenRouter models (zero-cost, rate-limited) ──────────────
 // VERIFIED 2026-08-27 via https://openrouter.ai/api/v1/models — only
 // models that currently exist in the OpenRouter free tier are listed.
@@ -683,6 +744,7 @@ export const MODEL_CATALOG: ModelDefinition[] = [
   ...KIMI_MODELS,
   ...MISTRAL_MODELS,
   ...QWEN_MODELS,
+  ...GROQ_MODELS,
   ...FREE_OPENROUTER_MODELS,
 ];
 

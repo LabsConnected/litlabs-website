@@ -285,6 +285,14 @@ const PROVIDERS: ModelProvider[] = [
     altEnvKeys: ["OPENROUTER_API_KEY"],
   },
   {
+    id: "groq",
+    label: "Groq",
+    credentialType: "byok",
+    envKey: "GROQ_API_KEY",
+    altEnvKeys: ["OPENROUTER_API_KEY"],
+    healthUrl: "https://api.groq.com/openai/v1/models",
+  },
+  {
     id: "local",
     label: "Local",
     credentialType: "local",

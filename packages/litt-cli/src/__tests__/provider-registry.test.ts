@@ -46,6 +46,7 @@ const ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
+  "GROQ_API_KEY",
   "GOOGLE_API_KEY",
   "LITT_HOME",
 ] as const;

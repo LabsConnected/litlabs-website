@@ -87,6 +87,14 @@ export const PROVIDERS: ProviderDefinition[] = [
     chatUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   },
   {
+    id: "groq",
+    label: "Groq",
+    envKey: "GROQ_API_KEY",
+    altEnvKeys: ["OPENROUTER_API_KEY"],
+    modelsUrl: "https://api.groq.com/openai/v1/models",
+    chatUrl: "https://api.groq.com/openai/v1/chat/completions",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     envKey: "OPENROUTER_API_KEY",

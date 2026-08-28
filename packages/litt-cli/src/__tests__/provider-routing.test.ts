@@ -39,6 +39,7 @@ import type { ProviderId } from "@litt/models";
 const ENV_KEYS = [
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  "GROQ_API_KEY",
   "XAI_API_KEY",
   "DEEPSEEK_API_KEY",
   "MOONSHOT_API_KEY",
@@ -390,7 +391,7 @@ describe("provider routing: no silent model rewrite or max_tokens lowering", () 
 // ─── Configurable max_tokens + insufficient-credits retry ───────────
 //
 // Enforces the GPT-5.6 Luna / OpenRouter-credit-error fix:
-//   1. max_tokens is configurable via LITT_MAX_TOKENS (default 3000, not 4096).
+//   1. max_tokens is configurable via LITT_MAX_TOKENS (default 4096).
 //   2. The resolver/adapter never silently lower max_tokens — the ONLY
 //      place it steps down is the OpenRouter adapter's retry on a
 //      CONFIRMED insufficient-credits error, surfaced via [litt-diag].
@@ -399,10 +400,10 @@ describe("provider routing: no silent model rewrite or max_tokens lowering", () 
 //   4. A retry never happens after content has already streamed.
 
 describe("max_tokens policy: configurable limit + default", () => {
-  it("defaults to 3000 (not the old 4096) when nothing is configured", () => {
+  it("defaults to 4096 when nothing is configured", () => {
     delete process.env.LITT_MAX_TOKENS;
     expect(resolveMaxTokens()).toBe(DEFAULT_MAX_TOKENS);
-    expect(DEFAULT_MAX_TOKENS).toBe(3000);
+    expect(DEFAULT_MAX_TOKENS).toBe(4096);
   });
 
   it("honors LITT_MAX_TOKENS env var", () => {
@@ -432,7 +433,7 @@ describe("max_tokens policy: configurable limit + default", () => {
     const p = new OpenRouterModelProvider({ model: "openrouter/auto" });
     // Private field, but the diagnostic + ladder derive from it; verify
     // indirectly via the ladder the retry would build.
-    expect(buildMaxTokensLadder(3000)[0]).toBe(3000);
+    expect(buildMaxTokensLadder(4096)[0]).toBe(4096);
     // Explicit override is honored.
     const p2 = new OpenRouterModelProvider({ model: "openrouter/auto", maxTokens: 4096 });
     expect((p2 as unknown as { _maxTokens: number })._maxTokens).toBe(4096);

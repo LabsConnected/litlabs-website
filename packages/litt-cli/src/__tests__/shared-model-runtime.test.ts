@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ModelRuntime, type ProviderStatus } from "../lib/model-runtime.js";
 
-const ENV_KEYS = ["OPENROUTER_API_KEY"] as const;
+const ENV_KEYS = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {

@@ -116,14 +116,18 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
   // A launcher that must chdir into the LiTT install dir before exec'ing
   // node passes --cwd "$PWD" so the CLI inspects the caller's real repo
   // instead of its own runtime directory.
-  const cwdIdx = argsWithoutWorkspace.indexOf("--cwd");
+  // If --cwd appears multiple times (launcher injected one + user passed
+  // one), the LAST occurrence wins — user intent overrides launcher default.
   let cwd: string | undefined;
   let cleanArgs = argsWithoutWorkspace;
-  if (cwdIdx !== -1 && cwdIdx + 1 < argsWithoutWorkspace.length) {
-    cwd = argsWithoutWorkspace[cwdIdx + 1];
+  // Loop to handle multiple --cwd flags (last wins)
+  for (;;) {
+    const cwdIdx = cleanArgs.indexOf("--cwd");
+    if (cwdIdx === -1 || cwdIdx + 1 >= cleanArgs.length) break;
+    cwd = cleanArgs[cwdIdx + 1];
     cleanArgs = [
-      ...argsWithoutWorkspace.slice(0, cwdIdx),
-      ...argsWithoutWorkspace.slice(cwdIdx + 2),
+      ...cleanArgs.slice(0, cwdIdx),
+      ...cleanArgs.slice(cwdIdx + 2),
     ];
   }
 

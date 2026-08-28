@@ -134,6 +134,7 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   const envVars = [
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
     "LITT_TERMINAL_URL",
     "LITT_MODE",
   ];
@@ -141,7 +142,7 @@ export async function doctorCommand(_args: string[]): Promise<number> {
     if (process.env[envVar]) ok(`${envVar}: set`);
     else warn(`${envVar}: not set`);
   }
-  if (!process.env.OPENAI_API_KEY && !process.env.OPENROUTER_API_KEY) {
+  if (!process.env.OPENAI_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) {
     console.log(`${c.dim}  No local key — run 'litt login' to use managed server keys.${c.reset}`);
   }
 
@@ -188,9 +189,11 @@ export async function doctorCommand(_args: string[]): Promise<number> {
   console.log(`${label("ExecutionGateway:")} ${value("available", c.green)}`);
   const providerStatus = process.env.OPENAI_API_KEY
     ? value("OpenAI (key set)", c.green)
-    : process.env.OPENROUTER_API_KEY
-      ? value("OpenRouter (key set)", c.green)
-      : value("not configured", c.yellow);
+    : process.env.GROQ_API_KEY
+      ? value("Groq (key set)", c.green)
+      : process.env.OPENROUTER_API_KEY
+        ? value("OpenRouter (key set)", c.green)
+        : value("not configured", c.yellow);
   console.log(`${label("Model Provider:")} ${providerStatus}`);
   console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
 

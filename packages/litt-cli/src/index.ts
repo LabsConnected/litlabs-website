@@ -146,6 +146,24 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  */
 const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help"]);
 
+/**
+ * Commands allowed without auth when a BYOK provider key is present.
+ * These commands use the user's own API key (Groq, OpenAI, etc.) and
+ * don't need Clerk-managed server keys.
+ */
+const BYOK_ALLOWED = new Set(["ask", "explain", "status", "diff", "inspect", "check", "test", "build", "run"]);
+
+function hasByokKey(): boolean {
+  return !!(
+    process.env.GROQ_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.MISTRAL_API_KEY
+  );
+}
+
 async function main(): Promise<number> {
   // Engine check — LiTT CLI requires Node 22+
   const major = parseInt(process.version.slice(1), 10);
@@ -236,6 +254,7 @@ async function main(): Promise<number> {
   // authentication.
   if (
     !LOGGED_OUT_ALLOWED.has(command) &&
+    !(BYOK_ALLOWED.has(command) && hasByokKey()) &&
     !process.env.LITT_CLERK_TOKEN
   ) {
     const authSession = getAuthSession();

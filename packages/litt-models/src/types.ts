@@ -27,6 +27,7 @@ export type ProviderId =
   | "kimi"
   | "mistral"
   | "qwen"
+  | "groq"
   | "openrouter"
   | "ollama"
   | "lmstudio";

@@ -25,7 +25,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasOpenRouterKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasAnyProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -50,9 +50,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   header("LiTT Ask");
 
   // If no API key, fall back to heuristic analysis
-  if (!hasOpenRouterKey()) {
-    warn("No OPENROUTER_API_KEY set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set OPENROUTER_API_KEY for BYOK.${c.reset}\n`);
+  if (!hasAnyProviderKey()) {
+    warn("No provider API key set — using local heuristic analysis (no agent loop).");
+    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set GROQ_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY for BYOK.${c.reset}\n`);
     return heuristicAnalysis(question, project);
   }
 
@@ -83,10 +83,22 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const remoteUrl = getTerminalUrl();
 
   // Route through the same ModelRuntime as the TUI — picks the best
-  // available provider (OpenAI direct, OpenRouter, etc.) and passes
+  // available provider (OpenAI direct, OpenRouter, Groq, etc.) and passes
   // native tool schemas so the model can call tools.
   // In remote mode (signed in), the server holds all provider keys.
-  const modelRuntime = new ModelRuntime(authState.signedIn);
+  // BUT: when a local BYOK key is present, use local mode so the router
+  // only selects models the CLI can actually serve locally. This prevents
+  // the router from selecting OpenAI models (LiTT defaults) when only
+  // Groq is configured locally.
+  const hasLocalKey = !!(
+    process.env.GROQ_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.MISTRAL_API_KEY
+  );
+  const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
   await modelRuntime.refresh();
   const routed = modelRuntime.route("auto", null, question);
   const model = resolveProviderAdapter(routed, {

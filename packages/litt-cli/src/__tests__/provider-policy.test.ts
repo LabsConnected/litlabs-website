@@ -21,6 +21,7 @@ import {
 const ENV_KEYS = [
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  "GROQ_API_KEY",
   "XAI_API_KEY",
   "DEEPSEEK_API_KEY",
   "MISTRAL_API_KEY",
@@ -84,13 +85,13 @@ describe("B — native credentials count as model availability", () => {
 });
 
 describe("D — max_tokens is explicit, canonical and bounded", () => {
-  it("uses 3000 as the canonical default", () => {
-    expect(DEFAULT_MAX_TOKENS).toBe(3000);
-    expect(resolveMaxTokens()).toBe(3000);
+  it("uses 4096 as the canonical default", () => {
+    expect(DEFAULT_MAX_TOKENS).toBe(4096);
+    expect(resolveMaxTokens()).toBe(4096);
   });
 
   it("never yields undefined — the server must never fill in its own default", () => {
-    expect(resolveMaxTokens(undefined)).toBe(3000);
+    expect(resolveMaxTokens(undefined)).toBe(4096);
     expect(typeof resolveMaxTokens(undefined)).toBe("number");
   });
 
@@ -104,8 +105,8 @@ describe("D — max_tokens is explicit, canonical and bounded", () => {
   });
 
   it("ignores a non-positive override rather than zeroing the request", () => {
-    expect(resolveMaxTokens(0)).toBe(3000);
-    expect(resolveMaxTokens(-5)).toBe(3000);
+    expect(resolveMaxTokens(0)).toBe(4096);
+    expect(resolveMaxTokens(-5)).toBe(4096);
   });
 
   it("is far below the model output ceiling that caused the 402", () => {

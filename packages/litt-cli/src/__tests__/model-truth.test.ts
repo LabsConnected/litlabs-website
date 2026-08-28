@@ -27,7 +27,7 @@ import {
 
 // ─── Env management ────────────────────────────────────────────────
 
-const ENV_KEYS = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "LITT_MODEL", "OPENROUTER_MODEL"] as const;
+const ENV_KEYS = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "LITT_MODEL", "OPENROUTER_MODEL"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
