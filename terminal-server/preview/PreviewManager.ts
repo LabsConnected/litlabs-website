@@ -550,6 +550,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     cwd: ws.root,
     env,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   });
 
   runtime.process = child;
@@ -625,15 +626,19 @@ export function stopPreview(workspaceId: string): void {
   rt.status = "stopped";
   if (rt.process) {
     const proc = rt.process;
+    const pid = proc.pid;
     try {
-      proc.kill("SIGTERM");
-      // Force kill after 5s
-      setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {}
-      }, 5000);
-    } catch {}
+      // Kill the entire process group (negative PID) so child processes
+      // (pnpm → next dev) are also terminated.
+      if (pid) process.kill(-pid, "SIGTERM");
+    } catch {
+      try { proc.kill("SIGTERM"); } catch {}
+    }
+    // Force kill after 5s
+    setTimeout(() => {
+      try { if (pid) process.kill(-pid, "SIGKILL"); } catch {}
+      try { proc.kill("SIGKILL"); } catch {}
+    }, 5000);
     rt.process = null;
   }
   releasePort(rt.port);
@@ -651,14 +656,24 @@ export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
   rt.status = "stopped";
   if (rt.process) {
     const proc = rt.process;
+    const pid = proc.pid;
     const exitPromise = new Promise<void>((resolve) => {
       proc.once("exit", () => resolve());
       setTimeout(() => {
         try { proc.kill("SIGKILL"); } catch {}
+        // Also try killing the process group
+        try { if (pid) process.kill(-pid, "SIGKILL"); } catch {}
       }, 5000);
       setTimeout(resolve, 7000);
     });
-    try { proc.kill("SIGTERM"); } catch {}
+    try {
+      // Kill the entire process group (negative PID) so child processes
+      // (pnpm → next dev) are also terminated, not just the shell.
+      if (pid) process.kill(-pid, "SIGTERM");
+    } catch {
+      // Fallback: kill just the process
+      try { proc.kill("SIGTERM"); } catch {}
+    }
     rt.process = null;
     await exitPromise;
   }
