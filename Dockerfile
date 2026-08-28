@@ -92,6 +92,13 @@ ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
 ARG NEXT_PUBLIC_CLERK_PROXY_URL
 ENV NEXT_PUBLIC_CLERK_PROXY_URL=$NEXT_PUBLIC_CLERK_PROXY_URL
+# CLERK_FAPI_URL overrides the FAPI URL derived from the publishable key.
+# The publishable key encodes clerk.litlabs.net, but fapiUrlFromPublishableKey()
+# always returns frontend-api.clerk.dev for production keys. That endpoint
+# returns Cloudflare Error 1000 from Railway's IP range. Forwarding to
+# clerk.litlabs.net (CNAME → frontend-api.clerk.services) works from Railway.
+ARG CLERK_FAPI_URL
+ENV CLERK_FAPI_URL=$CLERK_FAPI_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
 ENV NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
