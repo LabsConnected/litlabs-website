@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const DB_PATH = "C:/Users/litbi/.n8n/database.sqlite";
+const DB_PATH = process.env.N8N_DB_PATH || `${process.env.USERPROFILE || process.env.HOME}/.n8n/database.sqlite`;
 const WORKFLOW_PATH = path.join(__dirname, "..", "n8n", "workflows", "04-voice-call-orchestration.json");
 
 const db = new Database(DB_PATH);

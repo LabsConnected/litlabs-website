@@ -2,7 +2,7 @@
 const Database = require("better-sqlite3");
 const crypto = require("crypto");
 
-const DB_PATH = "C:/Users/litbi/.n8n/database.sqlite";
+const DB_PATH = process.env.N8N_DB_PATH || `${process.env.USERPROFILE || process.env.HOME}/.n8n/database.sqlite`;
 const db = new Database(DB_PATH);
 
 // Check user_api_keys schema

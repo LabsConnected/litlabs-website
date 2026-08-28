@@ -56,7 +56,7 @@ async function triggerCommand(command: string): Promise<{ runId?: string; ok?: b
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         command,
-        cwd: "C:\\Users\\litbi\\CascadeProjects\\litlabs-website\\packages\\litt-agent-core",
+        cwd: "E:\\LiTT\\Worktrees\\main\\packages\\litt-agent-core",
       }),
     });
     const data = await res.json();
@@ -85,7 +85,7 @@ async function triggerCommandDirect(command: string): Promise<{ runId?: string; 
       },
       body: JSON.stringify({
         command,
-        cwd: "C:\\Users\\litbi\\CascadeProjects\\litlabs-website\\packages\\litt-agent-core",
+        cwd: "E:\\LiTT\\Worktrees\\main\\packages\\litt-agent-core",
       }),
     });
     const data = await res.json();

@@ -16,7 +16,7 @@ const { createHmac } = require("crypto");
 const BASE = process.env.TERMINAL_SERVER_URL ?? "http://127.0.0.1:4001";
 const INTERNAL_KEY = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "test-internal-key-" + "b".repeat(32);
 const AUTH_SECRET = process.env.TERMINAL_AUTH_SECRET ?? "test-auth-secret-" + "a".repeat(32);
-const CWD = "C:\\Users\\litbi\\CascadeProjects\\litlabs-website\\packages\\litt-agent-core";
+const CWD = "E:\\LiTT\\Worktrees\\main\\packages\\litt-agent-core";
 
 /**
  * Mint a terminal JWT-like token (HMAC-SHA256, matching terminal-server/auth.ts).
