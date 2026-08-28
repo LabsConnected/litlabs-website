@@ -52,6 +52,7 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
             Studio couldn&rsquo;t finish connecting.
           </div>
           <button
+            type="button"
             onClick={onRetry}
             className="rounded-xl border px-5 py-2.5 text-sm font-bold transition-all hover:opacity-80"
             style={{
@@ -121,7 +122,6 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 
 function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { tokens } = useTheme();
   const router = useRouter();
   const [retryKey, setRetryKey] = useState(0);
 

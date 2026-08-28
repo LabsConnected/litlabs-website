@@ -22,6 +22,31 @@ export interface AuthResult {
   clerkId: string | null;
 }
 
+function getAuthorizedParties(): string[] | undefined {
+  const values = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return values.length > 0 ? values : undefined;
+}
+
+function logAuthDiagnostic(
+  req: NextRequest | undefined,
+  details: Record<string, string | boolean | null>,
+): void {
+  if (process.env.CLERK_AUTH_DEBUG !== "1") return;
+  console.info("[clerk-auth-diagnostic]", {
+    ...details,
+    hostname: req?.nextUrl.hostname ?? null,
+    authorizationPresent: Boolean(req?.headers.get("authorization")),
+    sessionCookiePresent: Boolean(req?.cookies.get("__session")),
+    expectedIssuer:
+      process.env.CLERK_ISSUER ??
+      process.env.NEXT_PUBLIC_CLERK_FRONTEND_API_URL ??
+      null,
+  });
+}
+
 /**
  * Test-only auth bypass ΓÇö same conditions as middleware.
  * Only valid when CI=true, PLAYWRIGHT_TEST=true, and not in a deployed env.
@@ -51,10 +76,20 @@ async function authFromBearerToken(req: NextRequest): Promise<string | null> {
     const { verifyToken } = await loadClerk();
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY,
+      ...(getAuthorizedParties()
+        ? { authorizedParties: getAuthorizedParties() }
+        : {}),
     });
     // Clerk JWTs store the user ID in the `sub` claim
     return payload.sub || null;
   } catch {
+    logAuthDiagnostic(req, {
+      phase: "bearer",
+      userId: null,
+      sessionId: null,
+      status: "error",
+      errorCategory: "clerk_bearer_verification_failed",
+    });
     return null;
   }
 }
@@ -95,8 +130,21 @@ export async function auth(req?: NextRequest): Promise<AuthResult> {
     const { auth: clerkAuth } = await loadClerk();
     const result = await clerkAuth();
     clerkId = result.userId;
+    logAuthDiagnostic(req, {
+      phase: "cookie",
+      userId: result.userId,
+      sessionId: result.sessionId ?? null,
+      status: result.userId ? "authenticated" : "anonymous",
+      errorCategory: null,
+    });
   } catch {
-    // Cookie auth failed ΓÇö try Bearer token fallback below
+    logAuthDiagnostic(req, {
+      phase: "cookie",
+      userId: null,
+      sessionId: null,
+      status: "error",
+      errorCategory: "clerk_cookie_auth_exception",
+    });
   }
 
   if (clerkId) {
@@ -117,5 +165,12 @@ export async function auth(req?: NextRequest): Promise<AuthResult> {
     return { userId: "anonymous-dev", clerkId: null };
   }
 
+  logAuthDiagnostic(req, {
+    phase: "final",
+    userId: null,
+    sessionId: null,
+    status: "unauthorized",
+    errorCategory: "no_verified_clerk_session",
+  });
   return { userId: null, clerkId: null };
 }

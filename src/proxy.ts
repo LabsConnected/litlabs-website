@@ -273,6 +273,10 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 const clerkConfigured = isClerkConfigured();
+const clerkAuthorizedParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 /**
  * Test-only auth bypass.
@@ -388,7 +392,11 @@ const innerMiddleware = useClerkMiddleware
       }
 
       return setCacheHeaders(NextResponse.next(), req.nextUrl.pathname);
-    })
+    },
+    clerkAuthorizedParties.length > 0
+      ? { authorizedParties: clerkAuthorizedParties }
+      : {},
+  )
   : function passthroughMiddleware(req: NextRequest) {
       // When test auth is disabled (Playwright CI), allow all routes through
       // so E2E tests can access protected pages without authentication.
