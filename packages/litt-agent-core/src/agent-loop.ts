@@ -502,6 +502,17 @@ export function sanitizePriorMessages(
 }
 
 /**
+ * The canonical read-only repository-inspection capability.
+ *
+ * When a request requires repository evidence and the model has not
+ * produced any, the runtime executes THIS tool itself rather than
+ * spending rounds asking the model to choose it. It is the same tool id
+ * the model would call, dispatched through the same gateway, emitting
+ * the same lifecycle events — there is no second evidence path.
+ */
+export const PROJECT_EVIDENCE_TOOL_ID = "project.status";
+
+/**
  * Run the agent loop.
  *
  * The loop calls the model, parses tool calls, dispatches them through
@@ -599,6 +610,205 @@ export async function runAgentLoop(
     return true;
   }
 
+  // ─── The ONE tool dispatch path ─────────────────────────────────
+  // Shared by model-selected tool calls and by the runtime's own
+  // deterministic evidence acquisition. Both emit the same
+  // agent_tool_call / agent_tool_result pair, both route through the
+  // ExecutionGateway when one is configured, and both land in
+  // `toolCalls`. Nothing downstream — the controller's
+  // MissionEvidenceTracker, the mission's evidence types, the
+  // VerificationGate — can tell the two apart, and nothing should:
+  // provenance is identical because the execution is identical.
+
+  /** Execute one tool call. Returns the raw outcome; recording is separate. */
+  const dispatchToolCall = async (
+    parsed: ParsedToolCall,
+    entry: ToolEntry,
+  ): Promise<{ toolCallId: string; result: ToolResult; durationMs: number }> => {
+    const tcId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const t0 = Date.now();
+
+    // Emit agent_tool_call event
+    if (options.emitter) {
+      options.emitter({
+        type: "litt_event",
+        subtype: "agent_tool_call",
+        ts: Date.now(),
+        toolCallId: tcId,
+        data: {
+          tool: entry.definition.name,
+          toolId: entry.definition.id,
+          inputs: parsed.inputs,
+        },
+      });
+    }
+
+    // Track command start in the runtime store
+    if (options.store) {
+      options.store.commandStart(
+        entry.definition.name,
+        [],
+        options.cwd,
+        `agent_${tcId}`,
+      );
+    }
+
+    let res: ToolResult;
+    try {
+      if (options.gateway) {
+        // ─── CANONICAL path: ExecutionGateway ───
+        const gwResult = await options.gateway.execute({
+          toolId: parsed.toolId,
+          inputs: parsed.inputs,
+          cwd: options.cwd,
+          mode: options.mode ?? "act",
+          identity: {
+            tenantId: "agent-tenant",
+            userId: options.userId ?? "agent-user",
+            actorId: options.userId ?? "agent-user",
+            trusted: false, // model-originated execution is untrusted
+            interaction: "interactive",
+          },
+          runId: `agent_${tcId}`,
+          toolCallId: tcId,
+          onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
+        });
+        res = gwResult.result;
+      } else if (options.executor) {
+        // ─── Deprecated: direct CommandExecutor (for backward compat) ───
+        const cmdResult = await options.executor.execute(
+          entry.definition.name,
+          extractArgsFromToolCall(entry.definition.name, parsed.inputs),
+          {
+            cwd: options.cwd,
+            mode: options.mode,
+            runId: `agent_${tcId}`,
+            toolCallId: tcId,
+            commandLabel: entry.definition.name,
+            onStream: options.onToolStream,
+          },
+        );
+        res = cmdResult.result;
+      } else {
+        // ─── TEST ONLY: direct ToolRegistry.execute() (no security) ───
+        res = await options.tools.execute(parsed.toolId, {
+          cwd: options.cwd,
+          projectId: null,
+          userId: options.userId ?? null,
+          shell: options.shell,
+        }, parsed.inputs);
+      }
+    } catch (err) {
+      res = {
+        status: "failed",
+        success: false,
+        message: `Tool execution error: ${err instanceof Error ? err.message : String(err)}`,
+        data: {},
+      };
+    }
+    return { toolCallId: tcId, result: res, durationMs: Date.now() - t0 };
+  };
+
+  /**
+   * Record a dispatched tool's outcome: runtime store, the loop's own
+   * `toolCalls` ledger, the agent_tool_result event, and escalation
+   * tracking. Separated from dispatch so parallel calls can execute
+   * concurrently and still be recorded in deterministic document order.
+   */
+  const recordToolOutcome = (
+    call: ParsedToolCall,
+    entry: ToolEntry,
+    exec: { toolCallId: string; result: ToolResult; durationMs: number },
+  ): AgentToolCallRecord => {
+    const { toolCallId, result, durationMs } = exec;
+
+    // Track command end in the runtime store
+    if (options.store) {
+      options.store.commandEnd(
+        entry.definition.name,
+        result.success,
+        result.data?.exitCode as number | null ?? null,
+        durationMs,
+        result.message,
+        `agent_${toolCallId}`,
+      );
+    }
+
+    const toolCallRecord: AgentToolCallRecord = {
+      toolCallId,
+      toolId: entry.definition.id,
+      toolName: entry.definition.name,
+      inputs: call.inputs,
+      result,
+      durationMs,
+    };
+    toolCalls.push(toolCallRecord);
+
+    // Emit agent_tool_result event
+    if (options.emitter) {
+      options.emitter({
+        type: "litt_event",
+        subtype: "agent_tool_result",
+        ts: Date.now(),
+        toolCallId,
+        data: {
+          tool: entry.definition.name,
+          toolId: entry.definition.id,
+          status: result.status,
+          success: result.success,
+          message: result.message,
+          durationMs,
+        },
+      });
+    }
+
+    // Escalation: track tool success/failure.
+    if (missionId && escalation) {
+      if (result.success) {
+        escalation.recordSuccess(missionId);
+      } else {
+        escalation.recordFailure(missionId, "tool", result.message);
+        tryEscalate();
+      }
+    }
+
+    return toolCallRecord;
+  };
+
+  /** Render a tool outcome the way the model already sees tool results. */
+  const renderToolResult = (entry: ToolEntry, result: ToolResult): string =>
+    `Tool "${entry.definition.name}" returned:\n${JSON.stringify({
+      status: result.status,
+      message: result.message,
+      data: result.data,
+    }, null, 2)}`;
+
+  // ─── Deterministic repository-evidence acquisition ──────────────
+  // A repository-evidence request must not depend on the model
+  // repeatedly CHOOSING to call project.status. When the model has
+  // produced no successful evidence, the runtime runs the canonical
+  // read-only inspection itself — once — through the dispatch path
+  // above. The model then reasons over real evidence instead of being
+  // re-prompted until the round limit.
+  //
+  // This never fabricates: it EXECUTES the tool and reports whatever it
+  // truthfully returns. If the tool is not registered, the caller falls
+  // back to the pre-existing re-prompt path (still fail-closed).
+  let projectEvidenceAttempted = false;
+  const acquireProjectEvidence = async (): Promise<AgentToolCallRecord | null> => {
+    if (projectEvidenceAttempted) return null;
+    projectEvidenceAttempted = true;
+    // The model already ran it and it failed — reuse that real failure
+    // rather than paying for an identical second run.
+    const prior = toolCalls.find((tc) => tc.toolId === PROJECT_EVIDENCE_TOOL_ID);
+    if (prior) return prior;
+    const entry = options.tools.get(PROJECT_EVIDENCE_TOOL_ID);
+    if (!entry) return null;
+    const call: ParsedToolCall = { toolId: PROJECT_EVIDENCE_TOOL_ID, inputs: {} };
+    const exec = await dispatchToolCall(call, entry);
+    return recordToolOutcome(call, entry, exec);
+  };
+
   for (let round = 0; round < maxRounds; round++) {
     rounds++;
 
@@ -661,19 +871,36 @@ export async function runAgentLoop(
       totalTokens += doneEvent.usage.total_tokens;
     }
 
-    // Never silently accept an empty model turn.
-    // Empty output is not a successful assistant response and must not
-    // become a blank completed turn in CLI/Desktop surfaces.
+    // ─── Adopt the provider's canonical turn ────────────────────────
+    // The streamed deltas are a LIVE PREVIEW of model prose; the
+    // provider's returned ModelResult.content is the canonical turn.
+    // Native `tool_calls` are translated into `tool_call` fence blocks
+    // and appended to that returned content ONLY — never emitted as a
+    // delta, because the fence is a LiTT-internal construct rather than
+    // model prose.
     //
-    // EXCEPTION: when the model emitted ONLY native tool_calls (no prose
-    // deltas), the provider attaches the translated `tool_call` fence block
-    // to the returned ModelResult.content (not as a delta event, since the
-    // block is a LiTT-internal construct, not model prose). In that case
-    // modelContent is empty but modelResult.content carries the tool call —
-    // adopt it so the loop's single parser can execute the tool instead of
-    // misclassifying the turn as an empty response.
-    if (!modelContent.trim() && modelResult?.content?.trim()) {
-      modelContent = modelResult.content;
+    // So the deltas are missing every native tool call. Adopting the
+    // provider content only when the deltas were EMPTY silently
+    // discarded the tool call of any model that narrates before calling
+    // one ("Let me check the repository status." + tool_call) — the
+    // turn then looked like a plain prose answer, and an
+    // evidence-required request re-prompted until it hit the round
+    // limit. That is the live REMOTE failure this branch prevents.
+    //
+    // Rule: take the provider content when the deltas carried nothing,
+    // or whenever it carries MORE tool calls than the streamed text did.
+    // Prose is never lost — the provider content is a superset of the
+    // deltas — and a model that literally typed a fence is not
+    // double-counted, because that fence is present in both.
+    const providerContent = modelResult?.content ?? "";
+    if (providerContent.trim()) {
+      if (!modelContent.trim()) {
+        modelContent = providerContent;
+      } else if (
+        parseToolCalls(providerContent).length > parseToolCalls(modelContent).length
+      ) {
+        modelContent = providerContent;
+      }
     }
 
     if (!modelContent.trim()) {
@@ -726,6 +953,7 @@ export async function runAgentLoop(
       const cleanContent = stripToolCallBlocks(modelContent);
 
       if (requiresProjectEvidence && !hasSuccessfulToolEvidence) {
+
         // An honest failure report IS an acceptable answer: the model
         // recorded the failed attempt and explicitly states verification
         // could not be completed. A fabricated success is NOT — that is
@@ -750,6 +978,58 @@ export async function runAgentLoop(
             termination: "verification_failed",
             escalations: escalationEvents.length ? escalationEvents : undefined,
           };
+        }
+
+        // ─── Deterministic repository evidence, before any re-prompt ──
+        // The request needs repository evidence and the model has not
+        // produced any. Asking it again — and again, until the round
+        // limit — is what produced "LiTT could not obtain required
+        // project evidence before reaching the tool-call round limit".
+        // The runtime can obtain that evidence itself, so it does:
+        // one real execution of the canonical read-only inspection,
+        // through the same dispatch path and lifecycle events as a
+        // model-selected call.
+        if (!projectEvidenceAttempted) {
+          const acquired = await acquireProjectEvidence();
+
+          if (acquired?.result.success) {
+            // Real runtime evidence now exists. Hand it to the model and
+            // let it answer from it — the VerificationGate still owns
+            // whether the mission is COMPLETE.
+            const entry = options.tools.get(acquired.toolId);
+            messages.push({ role: "assistant", content: modelContent });
+            messages.push({
+              role: "user",
+              content:
+                (entry
+                  ? renderToolResult(entry, acquired.result)
+                  : `Tool "${acquired.toolName}" returned:\n${acquired.result.message}`) +
+                `\n\nLiTT ran this inspection for you — it is verified runtime evidence. ` +
+                `Answer the request from it. Do not ask the user to run commands, and do ` +
+                `not state anything this evidence does not show.`,
+            });
+            continue;
+          }
+
+          if (acquired) {
+            // The deterministic inspection genuinely failed. Fail ONCE,
+            // with the REAL underlying error — never ten re-prompts, and
+            // never a project-state claim.
+            return {
+              content:
+                `LiTT could not obtain repository evidence: ${acquired.result.message}\n\n` +
+                `No project-state claim is being made.`,
+              toolCalls,
+              rounds,
+              durationMs: Date.now() - startTime,
+              usage: { total_tokens: totalTokens },
+              termination: "verification_failed",
+              escalations: escalationEvents.length ? escalationEvents : undefined,
+            };
+          }
+          // acquired === null: no canonical inspection capability is
+          // registered for this loop. Fall through to the pre-existing
+          // re-prompt path below — still fail-closed, unchanged.
         }
 
         if (round >= maxRounds - 1) {
@@ -930,174 +1210,29 @@ export async function runAgentLoop(
     }
 
     // ─── Execute tool calls (parallel if all read-only, else single) ───
-    const toolStartTime = Date.now();
-    const executeOne = async (
-      parsed: ParsedToolCall,
-      entry: ToolEntry,
-    ): Promise<{ toolCallId: string; result: ToolResult; durationMs: number }> => {
-      const tcId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-      // Emit agent_tool_call event
-      if (options.emitter) {
-        options.emitter({
-          type: "litt_event",
-          subtype: "agent_tool_call",
-          ts: Date.now(),
-          toolCallId: tcId,
-          data: {
-            tool: entry.definition.name,
-            toolId: entry.definition.id,
-            inputs: parsed.inputs,
-          },
-        });
-      }
-
-      // Track command start in the runtime store
-      if (options.store) {
-        options.store.commandStart(
-          entry.definition.name,
-          [],
-          options.cwd,
-          `agent_${tcId}`,
-        );
-      }
-
-      let res: ToolResult;
-      try {
-        if (options.gateway) {
-          // ─── CANONICAL path: ExecutionGateway ───
-          const gwResult = await options.gateway.execute({
-            toolId: parsed.toolId,
-            inputs: parsed.inputs,
-            cwd: options.cwd,
-            mode: options.mode ?? "act",
-            identity: {
-              tenantId: "agent-tenant",
-              userId: options.userId ?? "agent-user",
-              actorId: options.userId ?? "agent-user",
-              trusted: false, // model-originated execution is untrusted
-              interaction: "interactive",
-            },
-            runId: `agent_${tcId}`,
-            toolCallId: tcId,
-            onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
-          });
-          res = gwResult.result;
-        } else if (options.executor) {
-          // ─── Deprecated: direct CommandExecutor (for backward compat) ───
-          const cmdResult = await options.executor.execute(
-            entry.definition.name,
-            extractArgsFromToolCall(entry.definition.name, parsed.inputs),
-            {
-              cwd: options.cwd,
-              mode: options.mode,
-              runId: `agent_${tcId}`,
-              toolCallId: tcId,
-              commandLabel: entry.definition.name,
-              onStream: options.onToolStream,
-            },
-          );
-          res = cmdResult.result;
-        } else {
-          // ─── TEST ONLY: direct ToolRegistry.execute() (no security) ───
-          res = await options.tools.execute(parsed.toolId, {
-            cwd: options.cwd,
-            projectId: null,
-            userId: options.userId ?? null,
-            shell: options.shell,
-          }, parsed.inputs);
-        }
-      } catch (err) {
-        res = {
-          status: "failed",
-          success: false,
-          message: `Tool execution error: ${err instanceof Error ? err.message : String(err)}`,
-          data: {},
-        };
-      }
-      const dur = Date.now() - toolStartTime;
-      return { toolCallId: tcId, result: res, durationMs: dur };
-    };
-
-    // Execute all calls — parallel if all read-only, else single.
+    // Dispatch goes through the ONE shared path defined above — the same
+    // one the runtime's deterministic evidence acquisition uses.
     const execResults = callsToExecute.length > 1
-      ? await Promise.all(callsToExecute.map(({ call, entry }) => executeOne(call, entry!)))
-      : [await executeOne(callsToExecute[0].call, callsToExecute[0].entry!)];
+      ? await Promise.all(callsToExecute.map(({ call, entry }) => dispatchToolCall(call, entry!)))
+      : [await dispatchToolCall(callsToExecute[0].call, callsToExecute[0].entry!)];
 
     // ─── Normalize results in document order ───────────────────────
     // Process results in the same order as the tool calls appeared in
     // the model response. This ensures deterministic evidence ordering.
     for (let i = 0; i < execResults.length; i++) {
-      const { toolCallId, result, durationMs } = execResults[i];
       const { call, entry } = callsToExecute[i];
-      const toolEntry = entry!;
-
-      // Track command end in the runtime store
-      if (options.store) {
-        options.store.commandEnd(
-          toolEntry.definition.name,
-          result.success,
-          result.data?.exitCode as number | null ?? null,
-          durationMs,
-          result.message,
-          `agent_${toolCallId}`,
-        );
-      }
-
-      const toolCallRecord: AgentToolCallRecord = {
-        toolCallId,
-        toolId: toolEntry.definition.id,
-        toolName: toolEntry.definition.name,
-        inputs: call.inputs,
-        result,
-        durationMs,
-      };
-      toolCalls.push(toolCallRecord);
-
-      // Emit agent_tool_result event
-      if (options.emitter) {
-        options.emitter({
-          type: "litt_event",
-          subtype: "agent_tool_result",
-          ts: Date.now(),
-          toolCallId,
-          data: {
-            tool: toolEntry.definition.name,
-            toolId: toolEntry.definition.id,
-            status: result.status,
-            success: result.success,
-            message: result.message,
-            durationMs,
-          },
-        });
-      }
-
-      // Escalation: track tool success/failure.
-      if (missionId && escalation) {
-        if (result.success) {
-          escalation.recordSuccess(missionId);
-        } else {
-          escalation.recordFailure(missionId, "tool", result.message);
-          tryEscalate();
-        }
-      }
+      recordToolOutcome(call, entry!, execResults[i]);
     }
 
     // Append the assistant's tool call(s) and ALL tool results to the
     // conversation. For parallel execution, all results are combined
     // into a single user message so the model sees all evidence at once.
     messages.push({ role: "assistant", content: modelContent });
-    const resultLines = execResults.map(({ result }, i) => {
-      const { entry } = callsToExecute[i];
-      return `Tool "${entry!.definition.name}" returned:\n${JSON.stringify({
-        status: result.status,
-        message: result.message,
-        data: result.data,
-      }, null, 2)}`;
-    });
     messages.push({
       role: "user",
-      content: resultLines.join("\n\n"),
+      content: execResults
+        .map(({ result }, i) => renderToolResult(callsToExecute[i].entry!, result))
+        .join("\n\n"),
     });
   }
 
