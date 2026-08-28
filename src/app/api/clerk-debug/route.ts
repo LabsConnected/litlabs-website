@@ -63,6 +63,9 @@ export async function GET() {
     defaultFapiStatus,
     CLERK_FAPI_URL: process.env.CLERK_FAPI_URL || "(not set)",
     NEXT_PUBLIC_CLERK_PROXY_URL: process.env.NEXT_PUBLIC_CLERK_PROXY_URL || "(not set)",
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: JSON.stringify(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL),
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: JSON.stringify(process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL),
+    NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: JSON.stringify(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL),
     NODE_ENV: process.env.NODE_ENV,
   });
 }
