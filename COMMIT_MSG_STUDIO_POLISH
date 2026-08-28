@@ -1,0 +1,21 @@
+polish(studio): make Preview primary, simplify top bar, collapse work logs
+
+Layout hierarchy pass — no runtime or feature changes.
+
+- Default workspace surface is now Preview (was Work/Plan). Chat lives
+  in the LiTT panel on the left; Preview gets the main workspace area.
+  This gives the intended Chat ~40% / Preview ~60% split on desktop.
+- Top bar simplified to: LiTT | Project | AUTO | Deploy | ...
+  - Removed workspace status popover trigger (absorbed into overflow menu)
+  - Removed duplicate branch chip (repo name already in project picker)
+  - Removed WritePermissionPill (write state visible in operator bar)
+  - Added AUTO execution mode dropdown (moved from composer radio group)
+- Work logs in LiTTLiveActivity now collapse by default (was expanded).
+  Low-level ops still auto-collapse on run completion.
+- Composer no longer renders the PLAN/ACT/AUTO radio group — the top
+  bar dropdown owns execution mode. Intent pills and tool modes remain.
+- Updated routing tests to expect Preview as the default active tab.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

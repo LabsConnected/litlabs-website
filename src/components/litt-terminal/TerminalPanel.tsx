@@ -611,6 +611,21 @@ export const TerminalPanel = forwardRef<
     projectId,
   ]);
 
+  // Auto-bind terminal to a recovered workspace without requiring the user
+  // to manually reconnect. This listens for the workspace-recovery event
+  // emitted by StudioProjectFiles after a successful workspace/prepare.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    const handler = async () => {
+      if (disposed) return;
+      terminalStore.setFailureStage(null);
+      clearTerminalTokenCache();
+      setRetryCount((c) => c + 1);
+    };
+    window.addEventListener("studio:workspace-recovered", handler);
+    return () => window.removeEventListener("studio:workspace-recovered", handler);
+  }, [isLoaded, isSignedIn]);
+
   useEffect(() => {
     if ((visible || fullScreen) && termRef.current && fitAddonRef.current) {
       // Delay slightly to allow the DOM transition/display update to complete

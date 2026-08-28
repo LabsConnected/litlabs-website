@@ -190,8 +190,14 @@ export default function StudioProjectFiles({
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-      if (!payload || !Array.isArray(payload.entries)) throw new Error("Malformed file-tree response");
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
+        ...(await authHeaders()),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok || !payload || !Array.isArray(payload.entries)) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`);
+      }
       const nextEntries = payload.entries.flatMap((entry) => {
         if (!entry || typeof entry !== "object") return [];
         const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
@@ -206,39 +212,42 @@ export default function StudioProjectFiles({
       setEntries((current) => ({ ...current, [safeDirectory]: nextEntries }));
     } catch (loadError) {
       const msg = loadError instanceof Error ? loadError.message : "Failed to load project files";
-      // Auto-recover: if workspace was lost, try to re-prepare automatically
-      if (msg.includes("Workspace not found") || msg.includes("Workspace not provisioned") || msg.includes("Workspace not ready")) {
-        if (!preparing) {
-          setPreparing(true);
-          try {
-            const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-            if (prepPayload && prepPayload.workspaceStatus === "ready") {
-              onWorkspacePrepared?.();
-              // Retry loading the directory
-              const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-              if (retryPayload && Array.isArray(retryPayload.entries)) {
-                const retryEntries = retryPayload.entries.flatMap((entry) => {
-                  if (!entry || typeof entry !== "object") return [];
-                  const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-                  if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-                  return [{
-                    name: raw.name,
-                    type: raw.type,
-                    size: typeof raw.size === "number" ? raw.size : undefined,
-                    path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-                  } satisfies FileEntry];
-                }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-                setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
-                return;
-              }
+      const recoverable =
+        msg.includes("Workspace") ||
+        msg.includes("reparation") ||
+        response.status === 500 ||
+        response.status === 503;
+      if (recoverable && !preparing) {
+        setPreparing(true);
+        try {
+          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
+          if (prepPayload && prepPayload.workspaceStatus === "ready") {
+            onWorkspacePrepared?.();
+            window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
+            if (retryPayload && Array.isArray(retryPayload.entries)) {
+              const retryEntries = retryPayload.entries.flatMap((entry) => {
+                if (!entry || typeof entry !== "object") return [];
+                const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
+                if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
+                return [{
+                  name: raw.name,
+                  type: raw.type,
+                  size: typeof raw.size === "number" ? raw.size : undefined,
+                  path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
+                } satisfies FileEntry];
+              }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
+              setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
+              return;
             }
-            const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
-            setError(prepErr);
-          } catch {
-            setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
-          } finally {
-            setPreparing(false);
           }
+          const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
+          setError(prepErr);
+        } catch {
+          setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
+        } finally {
+          setPreparing(false);
         }
       } else {
         setError(msg);
@@ -246,7 +255,7 @@ export default function StudioProjectFiles({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, preparing, onWorkspacePrepared]);
+  }, [projectId, requestJson, preparing, onWorkspacePrepared, authHeaders]);
 
   useEffect(() => {
     setEntries({});
