@@ -6,7 +6,7 @@
 #   bash scripts/install-termux.sh
 #
 # This script:
-#   1. Builds @litt/models and @litlabs/litt-cli from the current source
+#   1. Builds @litt/agent-core, @litt/models, and @litlabs/litt-cli from source
 #   2. Installs the litt launcher at ~/.local/bin/litt
 #   3. The launcher preserves the caller's cwd (no cd ~/litt trap)
 #   4. Groq support is built in — just set GROQ_API_KEY in ~/.bashrc
@@ -30,19 +30,25 @@ echo "LiTT CLI Termux install"
 echo "Project root: $PROJECT_ROOT"
 echo ""
 
-# ─── 1. Build @litt/models ──────────────────────────────────────────
+# ─── 1. Build @litt/agent-core ──────────────────────────────────────
+echo "Building @litt/agent-core..."
+cd "$PROJECT_ROOT/packages/litt-agent-core"
+pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+pnpm build
+
+# ─── 2. Build @litt/models ──────────────────────────────────────────
 echo "Building @litt/models..."
 cd "$PROJECT_ROOT/packages/litt-models"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 pnpm build
 
-# ─── 2. Build @litlabs/litt-cli ─────────────────────────────────────
+# ─── 3. Build @litlabs/litt-cli ─────────────────────────────────────
 echo "Building @litlabs/litt-cli..."
 cd "$PROJECT_ROOT/packages/litt-cli"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 pnpm build
 
-# ─── 3. Install launcher ────────────────────────────────────────────
+# ─── 4. Install launcher ────────────────────────────────────────────
 echo "Installing litt launcher..."
 mkdir -p ~/.local/bin
 
