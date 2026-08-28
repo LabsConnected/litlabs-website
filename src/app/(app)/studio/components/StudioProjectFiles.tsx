@@ -206,39 +206,42 @@ export default function StudioProjectFiles({
       setEntries((current) => ({ ...current, [safeDirectory]: nextEntries }));
     } catch (loadError) {
       const msg = loadError instanceof Error ? loadError.message : "Failed to load project files";
-      // Auto-recover: if workspace was lost, try to re-prepare automatically
-      if (msg.includes("Workspace not found") || msg.includes("Workspace not provisioned") || msg.includes("Workspace not ready")) {
-        if (!preparing) {
-          setPreparing(true);
-          try {
-            const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
-            if (prepPayload && prepPayload.workspaceStatus === "ready") {
-              onWorkspacePrepared?.();
-              // Retry loading the directory
-              const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-              if (retryPayload && Array.isArray(retryPayload.entries)) {
-                const retryEntries = retryPayload.entries.flatMap((entry) => {
-                  if (!entry || typeof entry !== "object") return [];
-                  const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-                  if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-                  return [{
-                    name: raw.name,
-                    type: raw.type,
-                    size: typeof raw.size === "number" ? raw.size : undefined,
-                    path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-                  } satisfies FileEntry];
-                }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
-                setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
-                return;
-              }
+      // Auto-recover on any files endpoint failure, not just workspace-state
+      // errors. A 500 from /ws-files often means the terminal-server lost the
+      // workspace root or the workspace was evicted; treat it as recoverable.
+      const recoverable =
+        msg.includes("Workspace") ||
+        response.status === 500 ||
+        response.status === 503;
+      if (recoverable && !preparing) {
+        setPreparing(true);
+        try {
+          const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
+          if (prepPayload && prepPayload.workspaceStatus === "ready") {
+            onWorkspacePrepared?.();
+            const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
+            if (retryPayload && Array.isArray(retryPayload.entries)) {
+              const retryEntries = retryPayload.entries.flatMap((entry) => {
+                if (!entry || typeof entry !== "object") return [];
+                const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
+                if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
+                return [{
+                  name: raw.name,
+                  type: raw.type,
+                  size: typeof raw.size === "number" ? raw.size : undefined,
+                  path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
+                } satisfies FileEntry];
+              }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
+              setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
+              return;
             }
-            const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
-            setError(prepErr);
-          } catch {
-            setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
-          } finally {
-            setPreparing(false);
           }
+          const prepErr = typeof prepPayload?.error === "string" ? prepPayload.error : "Workspace re-preparation failed. Click Prepare to retry.";
+          setError(prepErr);
+        } catch {
+          setError("Workspace was lost and could not be re-prepared automatically. Click Prepare to retry.");
+        } finally {
+          setPreparing(false);
         }
       } else {
         setError(msg);

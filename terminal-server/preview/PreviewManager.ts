@@ -249,6 +249,13 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     HOME: ws.root,
   };
 
+  // Service users on Railway often lack nvm-installed Node/pnpm in PATH.
+  // Prepend the Node bin directory so package manager binaries are found.
+  const nodeBinDir = process.env.NODE_BIN_DIR?.trim();
+  if (nodeBinDir) {
+    env.PATH = `${nodeBinDir}${env.PATH ? ":" + env.PATH : ""}`;
+  }
+
   // For Next.js, set PORT and HOSTNAME
   if (detected.framework === "nextjs") {
     env.PORT = String(port);
