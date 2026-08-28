@@ -23,7 +23,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const envUrl = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
   const wsUrl = envUrl && !envUrl.includes("localhost")
     ? envUrl
-    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
+    : "https://terminal-server-production-68ac.up.railway.app";
 
   const fetchEntries = useCallback(
     async (path: string) => {

@@ -52,7 +52,7 @@ function parseChangedFiles(output: string): string[] {
 }
 
 async function runWorkspaceCommand(workspaceId: string, userId: string, command: string) {
-  const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ?? process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ?? process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "https://terminal-server-production-68ac.up.railway.app";
   const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
     method: "POST",
     headers: {

@@ -101,7 +101,7 @@ async function testR2Health(): Promise<boolean | null> {
   return true;
 }
 
-const RAILWAY_TERMINAL_URL = "https://litlabs-terminal-server-production-0be1.up.railway.app";
+const RAILWAY_TERMINAL_URL = "https://terminal-server-production-68ac.up.railway.app";
 
 async function testTerminalHealth(): Promise<{ serverReachable: boolean; url: string | null }> {
   const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;

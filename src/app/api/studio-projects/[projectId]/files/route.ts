@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace, getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { logFileOperation } from "@/lib/file-audit";
-import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace-recovery";
+import { ensureWorkspaceAlive, normalizeFileError, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
 
 /**
  * Project-bound file operations.
@@ -18,7 +18,7 @@ import { ensureWorkspaceAlive, normalizeFileError } from "@/lib/studio/workspace
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  "https://terminal-server-production-68ac.up.railway.app";
 
 /**
  * GET /api/studio-projects/[projectId]/files?path=...
@@ -41,16 +41,21 @@ export async function GET(
     } catch (verifyErr) {
       const code = (verifyErr as { code?: string }).code;
       if (code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY") {
-        // Stale workspace — try auto-recovery via shared helper
+        // Auto-recovery: if the workspace was never provisioned (no
+        // workspaceId), provision it now. If it was provisioned but
+        // lost on the terminal server, re-prepare it.
         try {
-          // Get current workspace ID from DB
-          const { getProject } = await import("@/lib/projects/project-repository");
           const project = await getProject(projectId, userId);
           if (project?.workspaceId) {
+            // Workspace was provisioned but may be stale — verify and recover
             await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
             verified = await verifyProjectWorkspace(projectId, userId);
           } else {
-            throw verifyErr;
+            // Workspace was never provisioned — provision it now.
+            // This is the fix for the repeated /files?path=. 500s:
+            // instead of returning 500, we auto-provision and retry.
+            await reprepareWorkspace(projectId, userId);
+            verified = await verifyProjectWorkspace(projectId, userId);
           }
         } catch {
           throw verifyErr;
@@ -105,8 +110,16 @@ export async function GET(
     return NextResponse.json(await resp.json());
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to list files";
-    const status = msg.includes("not found") ? 404 : msg.includes("Forbidden") ? 403 : 500;
-    return NextResponse.json({ error: msg }, { status });
+    const code = (err as { code?: string }).code;
+    // Map known workspace errors to proper status codes instead of 500
+    const status =
+      code === "PROJECT_NOT_FOUND" ? 404 :
+      code === "FORBIDDEN" ? 403 :
+      code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY" ? 409 :
+      msg.includes("not found") ? 404 :
+      msg.includes("Forbidden") ? 403 :
+      500;
+    return NextResponse.json({ error: msg, code: code ?? null }, { status });
   }
 }
 
@@ -154,7 +167,24 @@ export async function POST(
   }
 
   try {
-    let { workspaceId } = await verifyProjectWorkspace(projectId, userId);
+    // Auto-provision if workspace is not ready (same recovery as GET)
+    let workspaceId: string;
+    try {
+      workspaceId = (await verifyProjectWorkspace(projectId, userId)).workspaceId;
+    } catch (verifyErr) {
+      const code = (verifyErr as { code?: string }).code;
+      if (code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY") {
+        const project = await getProject(projectId, userId);
+        if (project?.workspaceId) {
+          await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
+        } else {
+          await reprepareWorkspace(projectId, userId);
+        }
+        workspaceId = (await verifyProjectWorkspace(projectId, userId)).workspaceId;
+      } else {
+        throw verifyErr;
+      }
+    }
     let token = createTerminalToken(userId);
 
     let resp = await fetch(`${TERMINAL_BASE()}/ws-files/${action}`, {
@@ -231,7 +261,14 @@ export async function POST(
       }).catch(() => {});
     }
 
-    const status = msg.includes("not found") ? 404 : msg.includes("Forbidden") ? 403 : 500;
-    return NextResponse.json({ error: msg }, { status });
+    const code = (err as { code?: string }).code;
+    const status =
+      code === "PROJECT_NOT_FOUND" ? 404 :
+      code === "FORBIDDEN" ? 403 :
+      code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY" ? 409 :
+      msg.includes("not found") ? 404 :
+      msg.includes("Forbidden") ? 403 :
+      500;
+    return NextResponse.json({ error: msg, code: code ?? null }, { status });
   }
 }

@@ -12,7 +12,7 @@ import { createTerminalToken } from "@/lib/terminal-auth";
 const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  "https://terminal-server-production-68ac.up.railway.app";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 

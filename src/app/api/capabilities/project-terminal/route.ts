@@ -13,7 +13,7 @@ function getTerminalHttpUrl(): string {
   // Fall back to Railway terminal URL if env var is empty or points to localhost
   return raw && !raw.includes("localhost")
     ? raw
-    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
+    : "https://terminal-server-production-68ac.up.railway.app";
 }
 
 async function handler(req: NextRequest) {

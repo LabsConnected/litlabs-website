@@ -52,7 +52,7 @@ export async function POST(
     // Create a Git commit via terminal-server's exec endpoint
     const internalKey = process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
     const terminalBase = process.env.TERMINAL_SERVER_INTERNAL_URL ??
-      process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "https://litlabs-terminal-server-production-0be1.up.railway.app";
+      process.env.NEXT_PUBLIC_TERMINAL_WS_URL ?? "https://terminal-server-production-68ac.up.railway.app";
 
     const execInWorkspace = async (command: string, stdin?: string) => {
       const resp = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {

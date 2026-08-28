@@ -69,7 +69,7 @@ export const TERMINAL_BASE = () =>
   process.env.TERMINAL_SERVER_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ??
   process.env.NEXT_PUBLIC_TERMINAL_WS_URL ??
-  "https://litlabs-terminal-server-production-0be1.up.railway.app";
+  "https://terminal-server-production-68ac.up.railway.app";
 
 export function internalHeaders(): Record<string, string> {
   return {
