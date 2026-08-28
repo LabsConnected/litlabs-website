@@ -18,6 +18,12 @@ import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { AuthError } from "./types.js";
 
+// Browser Fetch implementations block a set of unsafe TCP ports.
+// Keep automatically-selected OAuth loopback callbacks inside the
+// IANA dynamic/private range so the browser can always reach them.
+const MIN_BROWSER_SAFE_DYNAMIC_PORT = 49_152;
+const MAX_DYNAMIC_PORT_ATTEMPTS = 32;
+
 export interface AuthServerOptions {
   expectedState: string;
   port?: number;
@@ -150,31 +156,63 @@ export function startAuthServer(options: AuthServerOptions): Promise<AuthServerH
     });
 
     // Bind ONLY to 127.0.0.1 — never 0.0.0.0
-    server.listen(port, "127.0.0.1", () => {
-      const address = server.address() as AddressInfo;
-      const actualPort = address.port;
-      const redirectUri = `http://127.0.0.1:${actualPort}/callback`;
+    let dynamicPortAttempts = 0;
 
-      timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        rejectCallback(new AuthError("timeout", `OAuth callback timed out after ${timeoutMs}ms.`));
-        closeListening(server);
-      }, timeoutMs);
+    const listenForCallback = () => {
+      server.listen(port, "127.0.0.1", () => {
+        const address = server.address() as AddressInfo;
+        const actualPort = address.port;
 
-      resolve({
-        port: actualPort,
-        redirectUri,
-        waitForCallback: () => callbackPromise,
-        close: () => {
-          if (timeout) clearTimeout(timeout);
-          if (!settled) {
-            settled = true;
-            rejectCallback(new AuthError("timeout", "OAuth callback server was closed."));
+        // A browser performs the real OAuth redirect. When the OS
+        // chooses a dynamic loopback port, keep it in the IANA
+        // dynamic/private range so Fetch/browser bad-port rules
+        // cannot make an otherwise healthy login intermittently fail.
+        if (port === 0 && actualPort < MIN_BROWSER_SAFE_DYNAMIC_PORT) {
+          dynamicPortAttempts += 1;
+
+          if (dynamicPortAttempts >= MAX_DYNAMIC_PORT_ATTEMPTS) {
+            server.close(() => {
+              reject(
+                new AuthError(
+                  "config",
+                  "Failed to obtain a browser-safe local auth callback port.",
+                ),
+              );
+            });
+            return;
           }
+
+          server.close(() => {
+            listenForCallback();
+          });
+          return;
+        }
+
+        const redirectUri = `http://127.0.0.1:${actualPort}/callback`;
+
+        timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          rejectCallback(new AuthError("timeout", `OAuth callback timed out after ${timeoutMs}ms.`));
           closeListening(server);
-        },
+        }, timeoutMs);
+
+        resolve({
+          port: actualPort,
+          redirectUri,
+          waitForCallback: () => callbackPromise,
+          close: () => {
+            if (timeout) clearTimeout(timeout);
+            if (!settled) {
+              settled = true;
+              rejectCallback(new AuthError("timeout", "OAuth callback server was closed."));
+            }
+            closeListening(server);
+          },
+        });
       });
-    });
+    };
+
+    listenForCallback();
   });
 }

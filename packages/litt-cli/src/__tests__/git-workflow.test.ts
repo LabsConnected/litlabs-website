@@ -197,7 +197,7 @@ describe("createOrSwitchBranch", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("creates a new feature branch", () => {
@@ -258,7 +258,7 @@ describe("stageFiles", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("stages only the specified files, preserving unrelated dirty files", () => {
@@ -324,7 +324,7 @@ describe("commitStaged", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("commits staged files and returns the commit SHA", () => {
@@ -379,7 +379,7 @@ describe("pushBranch", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("refuses to push to protected branch (main)", () => {
@@ -412,7 +412,7 @@ describe("createDraftPR", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("fails gracefully when gh CLI is not available", () => {
@@ -449,7 +449,7 @@ describe("shipWorkflow", () => {
     dir = makeTempRepo();
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("creates branch, stages only intended files, commits, preserves unrelated files", async () => {
@@ -614,7 +614,7 @@ describe("shipWorkflow — detached HEAD", () => {
     git(["checkout", "--detach"], dir);
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("recovers from detached HEAD by creating a feature branch", async () => {
