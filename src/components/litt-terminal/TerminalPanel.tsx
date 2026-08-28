@@ -616,6 +616,7 @@ export const TerminalPanel = forwardRef<
   // emitted by StudioProjectFiles after a successful workspace/prepare.
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
+    let disposed = false;
     const handler = async () => {
       if (disposed) return;
       terminalStore.setFailureStage(null);
@@ -623,7 +624,10 @@ export const TerminalPanel = forwardRef<
       setRetryCount((c) => c + 1);
     };
     window.addEventListener("studio:workspace-recovered", handler);
-    return () => window.removeEventListener("studio:workspace-recovered", handler);
+    return () => {
+      disposed = true;
+      window.removeEventListener("studio:workspace-recovered", handler);
+    };
   }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
