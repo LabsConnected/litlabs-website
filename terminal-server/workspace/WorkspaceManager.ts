@@ -122,11 +122,13 @@ export async function prepareWorkspace(
       : existsSync(join(root, "yarn.lock")) ? "yarn"
       : "npm";
     try {
+      // Don't set CI=1 — it can cause pnpm to skip devDependencies in
+      // some configurations, which breaks Next.js dev server startup.
       execFileSync(pm, ["install", "--prefer-offline"], {
         cwd: root,
         stdio: "pipe",
         timeout: 300_000,
-        env: { ...process.env, CI: "1" },
+        env: { ...process.env },
       });
     } catch {
       // Non-fatal — the workspace is still usable for file browsing and
@@ -144,12 +146,16 @@ export async function prepareWorkspace(
       const hasTs = pkg.devDependencies?.typescript != null;
       if (!hasTs) {
         try {
-          execFileSync(pm, ["add", "--save-dev", "--save-exact",
-            "typescript", "@types/react", "@types/node"], {
+          const addArgs = pm === "pnpm"
+            ? ["add", "--save-dev", "--save-exact", "--ignore-workspace-root-check",
+               "typescript", "@types/react", "@types/node"]
+            : ["add", "--save-dev", "--save-exact",
+               "typescript", "@types/react", "@types/node"];
+          execFileSync(pm, addArgs, {
             cwd: root,
             stdio: "pipe",
             timeout: 120_000,
-            env: { ...process.env, CI: "1" },
+            env: { ...process.env },
           });
         } catch {
           // Non-fatal — Next.js will attempt its own auto-install.
