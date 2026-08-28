@@ -143,7 +143,12 @@ export default function RootLayout({
         </a>
         <ClerkProvider
           publishableKey={resolvedClerkKey}
-          proxyUrl={process.env.NEXT_PUBLIC_CLERK_PROXY_URL || undefined}
+          proxyUrl={
+            process.env.NEXT_PUBLIC_CLERK_PROXY_URL ||
+            (process.env.NODE_ENV === "production"
+              ? "https://www.litlabs.net/__clerk"
+              : undefined)
+          }
           signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
           signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
           signInFallbackRedirectUrl={

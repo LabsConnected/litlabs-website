@@ -514,10 +514,6 @@ const CLERK_PROXY_HOST = "litlabs.net";
 function fixClerkProxyHost(req: NextRequest): NextRequest {
   if (!isDeployed()) return req;
   if (!req.nextUrl.pathname.startsWith("/__clerk")) return req;
-  // Temporary debug: return env var info for /__clerk/_debug
-  if (req.nextUrl.pathname === "/__clerk/_debug") {
-    return req;
-  }
   const forwardedHost = req.headers.get("x-forwarded-host");
   if (forwardedHost === CLERK_PROXY_HOST) return req;
   const requestHeaders = new Headers(req.headers);
