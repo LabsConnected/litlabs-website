@@ -190,8 +190,14 @@ export default function StudioProjectFiles({
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const payload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-      if (!payload || !Array.isArray(payload.entries)) throw new Error("Malformed file-tree response");
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
+        ...(await authHeaders()),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok || !payload || !Array.isArray(payload.entries)) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`);
+      }
       const nextEntries = payload.entries.flatMap((entry) => {
         if (!entry || typeof entry !== "object") return [];
         const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
@@ -206,11 +212,9 @@ export default function StudioProjectFiles({
       setEntries((current) => ({ ...current, [safeDirectory]: nextEntries }));
     } catch (loadError) {
       const msg = loadError instanceof Error ? loadError.message : "Failed to load project files";
-      // Auto-recover on any files endpoint failure, not just workspace-state
-      // errors. A 500 from /ws-files often means the terminal-server lost the
-      // workspace root or the workspace was evicted; treat it as recoverable.
       const recoverable =
         msg.includes("Workspace") ||
+        msg.includes("reparation") ||
         response.status === 500 ||
         response.status === 503;
       if (recoverable && !preparing) {
@@ -219,6 +223,7 @@ export default function StudioProjectFiles({
           const prepPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`, { method: "POST" });
           if (prepPayload && prepPayload.workspaceStatus === "ready") {
             onWorkspacePrepared?.();
+            await new Promise((resolve) => setTimeout(resolve, 600));
             const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
             if (retryPayload && Array.isArray(retryPayload.entries)) {
               const retryEntries = retryPayload.entries.flatMap((entry) => {
@@ -249,7 +254,7 @@ export default function StudioProjectFiles({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, requestJson, preparing, onWorkspacePrepared]);
+  }, [projectId, requestJson, preparing, onWorkspacePrepared, authHeaders]);
 
   useEffect(() => {
     setEntries({});
