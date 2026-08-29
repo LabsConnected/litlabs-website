@@ -425,10 +425,27 @@ async function main(): Promise<number> {
   // remote failure this returns without ever reaching the local handler
   // resolution below.
   if (dispatch.useRemote) {
+    // For `do --remote "echo hello"`, the shell passes one quoted string
+    // as a single arg. The server expects a structured argv array
+    // (["echo", "hello"]). Use a proper shell tokenizer that respects
+    // quotes and escaping — NOT split(/\s+/) which breaks on quoted
+    // args containing spaces.
+    let remoteArgs = rest;
+    if (command === "do" && rest.length === 1) {
+      const { tokenizeShellArgs } = await import("./lib/shell-args.js");
+      const result = tokenizeShellArgs(rest[0]);
+      if (result.error) {
+        console.error(`${c.red}✗${c.reset} Invalid shell arguments: ${result.error}`);
+        return 1;
+      }
+      if (result.tokens.length > 0) {
+        remoteArgs = result.tokens;
+      }
+    }
     const outcome = await executeCommand(command, {
       useRemote: true,
       isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
-      remoteExecutor: () => runRemote(command, rest, mode, dispatch.workspaceId),
+      remoteExecutor: () => runRemote(command, remoteArgs, mode, dispatch.workspaceId),
       // Unreachable by contract when useRemote is true. If this ever runs,
       // the fail-closed guarantee has been broken and we want a loud crash
       // rather than a silent relocation of the user's command.
