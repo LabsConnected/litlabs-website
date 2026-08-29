@@ -67,6 +67,7 @@ import {
 } from "../lib/machine-lane.js";
 import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
+import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -459,6 +460,260 @@ async function runMachineLane(
 
     perf?.mark("finalize");
     perf?.end("machine");
+  } finally {
+    store.actions.setIsProcessing(false);
+    store.actions.stopBusy();
+  }
+}
+
+/**
+ * Run a local-tool mission — deterministic tool execution with NO model
+ * inference. Used when the user is signed out + LOCAL and the prompt can
+ * be satisfied entirely with local tools (git status, typecheck, build,
+ * project inspection) + an evidence-grounded summary.
+ *
+ * This path:
+ *   - creates a real mission in the cockpit store + RuntimeStore
+ *   - executes tools through the local gateway (same as READ lane)
+ *   - populates toolProgress (observability blocks render)
+ *   - produces a canonical mission projection (MissionProgressBlock renders)
+ *   - formats a deterministic summary from actual tool results
+ *   - sets terminal mission state (SummaryBlock renders)
+ *
+ * It does NOT:
+ *   - call any model (no planning, no synthesis, no reasoning)
+ *   - contact any remote server
+ *   - fake any status — every line derives from real tool evidence
+ */
+async function runLocalToolMission(
+  input: string,
+  match: import("../lib/local-tool-mission.js").LocalToolMissionMatch,
+  session: RuntimeSession,
+  store: CockpitStore,
+  projectRoot: string,
+  perf: PerfTrace | null,
+): Promise<void> {
+  perf?.mark("local_tool_mission_start");
+
+  // ─── Mission lifecycle: start ─────────────────────────────────────
+  store.actions.startMission(input);
+  store.actions.startBusy();
+  store.actions.startToolProgressMission();
+  store.actions.setHoloState("UNDERSTANDING");
+  store.actions.addChatMessage({
+    role: "user",
+    content: input,
+    ts: Date.now(),
+    status: "complete",
+  });
+  act(store, "Understanding request", "agent.request", "working", "THINK");
+  // Mark as read-only so the SummaryBlock says "inspection verified"
+  // (not "verification passed. typecheck clean.") — avoiding redundancy
+  // with the deterministic summary in the chat message.
+  store.actions.setMissionReadOnly(true);
+  perf?.mark("mission_initialized");
+
+  // ─── Create a REAL Mission in the canonical RuntimeStore ──────────
+  const agentStore = session.getStore();
+  const mission = await agentStore.createMission({
+    goal: input,
+    mode: session.getMode(),
+    projectRoot,
+    sessionId: null,
+    workspaceId: null,
+    metadata: { source: "local-tool-mission", branch: store.state.branch },
+  });
+  perf?.mark("mission_created");
+
+  // Add steps to the canonical mission (for the MissionProgressBlock).
+  // Capture each step ID so we can advance + complete them.
+  const stepIds: string[] = [];
+  for (const call of match.calls) {
+    const step = await agentStore.addMissionStep({
+      title: call.stepTitle,
+      description: call.label,
+      allowedActionScope: ["act"],
+    });
+    if (step) stepIds.push(step.id);
+  }
+
+  store.actions.setHoloState("RUNNING");
+  store.actions.addActivity({
+    id: `act_${Date.now()}_local_mission`,
+    ts: Date.now(),
+    type: "info",
+    tag: "MISSION",
+    text: `Local-tool mission: ${match.summary}`,
+  });
+
+  // ─── Execute tools through the local gateway ──────────────────────
+  const gateway = session.getGateway();
+  const cwd = session.getCwd();
+  const mode = session.getMode();
+  const results: LocalToolResult[] = [];
+  let allOk = true;
+
+  try {
+    for (let i = 0; i < match.calls.length; i++) {
+      const call = match.calls[i];
+      const stepId = stepIds[i];
+      const toolCallId = `ltc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+      // Advance the canonical mission step to "working".
+      if (stepId) await agentStore.setCurrentStep(stepId);
+
+      // ─── Tool progress (deduplicated via toolCallId) ──────────────
+      // We manually start/complete tool progress with a friendly label
+      // (e.g. "Typecheck") BEFORE gateway.execute(). The gateway emits
+      // lifecycle events (tool_call/tool_result for project.run, or
+      // litt_event/gateway_execute for other tools) that the
+      // SessionEventBridge → EventBridge also maps to startToolProgress/
+      // completeToolProgress. We pass the SAME toolCallId to gateway.execute
+      // so the ToolProgressStore's idempotent startTool/completeTool
+      // deduplicates: our manual call wins (fired first), the event
+      // bridge's call is a no-op (entry already exists / already terminal).
+      //
+      // Without passing the toolCallId, the gateway generates a different
+      // ID, creating a DUPLICATE ToolProgressEntry — the "two typecheck
+      // blocks for one execution" bug.
+      store.actions.startToolProgress(toolCallId, call.toolId, call.label);
+      perf?.mark(`tool_start:${call.toolId}`);
+
+      const t0 = Date.now();
+      let result;
+      try {
+        const gr = await gateway.execute({
+          toolId: call.toolId,
+          inputs: call.args,
+          cwd,
+          mode,
+          identity: CLI_IDENTITY,
+          toolCallId,
+        });
+        result = gr.result;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result = {
+          status: "failed" as const,
+          success: false,
+          message: msg,
+          data: { error: msg },
+        };
+      }
+      const ms = Date.now() - t0;
+
+      // Complete tool progress (idempotent — event bridge's call is a no-op).
+      store.actions.completeToolProgress(toolCallId, result.success, result.message, ms);
+      perf?.mark(`tool_end:${call.toolId}`);
+
+      // Mark the canonical mission step as passed/failed.
+      if (stepId) {
+        await agentStore.updateMissionStepStatus(stepId, result.success ? "passed" : "failed");
+      }
+
+      // Track tools used in cockpit mission state.
+      store.actions.addMissionTool(call.toolId);
+      if (call.toolId === "project.run") {
+        const cmd = (call.args as { command?: string }).command ?? "unknown";
+        store.actions.addMissionCommand(cmd);
+      }
+
+      results.push({
+        toolId: call.toolId,
+        label: call.label,
+        stepTitle: call.stepTitle,
+        success: result.success,
+        message: result.message,
+        data: result.data,
+        durationMs: ms,
+      });
+
+      act(
+        store,
+        `LOCAL · ${call.label}: ${result.success ? "passed" : "failed"}`,
+        result.success ? "info" : "error",
+        result.success ? "success" : "failed",
+        "MISSION",
+      );
+
+      if (!result.success) allOk = false;
+    }
+
+    // ─── Deterministic summary from actual tool evidence ────────────
+    store.actions.setHoloState("VERIFYING");
+    const summary = formatLocalToolSummary(input, results);
+    perf?.mark("summary_formatted");
+
+    store.actions.addChatMessage({
+      role: "assistant",
+      content: summary,
+      ts: Date.now(),
+      status: "complete",
+      servedModel: "local-tool-mission",
+    });
+
+    // ─── Update cockpit mission evidence from real tool results ────
+    const typecheckResult = results.find((r) => r.toolId === "project.run" && /typecheck/i.test(r.label));
+    if (typecheckResult) store.actions.setMissionTypecheck(typecheckResult.success);
+    const buildResult = results.find((r) => r.toolId === "project.run" && /build/i.test(r.label));
+    if (buildResult) store.actions.setMissionBuild(buildResult.success);
+
+    // ─── Terminal mission state ─────────────────────────────────────
+    if (allOk) {
+      await agentStore.completeMission("Local-tool mission complete — all tools passed");
+      store.actions.setHoloState("COMPLETE");
+      store.actions.updateMissionState("COMPLETE");
+      store.actions.setMissionRuntimeProven(true);
+      store.actions.completeToolProgressMission();
+      store.actions.addActivity({
+        id: `act_${Date.now()}_local_mission_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "MISSION",
+        text: `Local-tool mission complete — ${match.summary}`,
+      });
+      store.actions.scheduleIdle(1500);
+    } else {
+      await agentStore.failMission("Local-tool mission failed — some tools failed");
+      store.actions.setHoloState("FAILED");
+      store.actions.updateMissionState("FAILED");
+      store.actions.setMissionRuntimeProven(false);
+      store.actions.failToolProgressMission();
+      store.actions.addActivity({
+        id: `act_${Date.now()}_local_mission_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "MISSION",
+        text: `Local-tool mission done — some tools failed`,
+      });
+      store.actions.scheduleIdle(2000);
+    }
+
+    perf?.mark("finalize");
+    perf?.end("local");
+  } catch (err) {
+    const errText = err instanceof Error ? err.message : String(err);
+    perf?.mark("finalize");
+    store.actions.addChatMessage({
+      role: "assistant",
+      content: `Local-tool mission failed: ${errText}`,
+      ts: Date.now(),
+      status: "complete",
+      servedModel: "local-tool-mission",
+    });
+    await agentStore.failMission(`Local-tool mission error: ${errText}`);
+    store.actions.setHoloState("FAILED");
+    store.actions.updateMissionState("FAILED");
+    store.actions.setMissionRuntimeProven(false);
+    store.actions.failToolProgressMission();
+    store.actions.addActivity({
+      id: `act_${Date.now()}_local_mission_err`,
+      ts: Date.now(),
+      type: "error",
+      tag: "MISSION",
+      text: `Local-tool mission error: ${errText}`,
+    });
+    perf?.end("local");
   } finally {
     store.actions.setIsProcessing(false);
     store.actions.stopBusy();
@@ -1677,55 +1932,104 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
 
     // ─── CAPABILITY GATE — signed-out local-only mode ──────────────
-    // When LITT_LOCAL_MODE=1 AND the user is not authenticated, the
-    // cockpit is in signed-out local-only mode. All local-only routing
-    // paths (LOCAL fast lane, MACHINE lane, slash commands) have already
-    // had their chance to match above. Anything that reaches here needs
-    // model inference, remote agent execution, or cloud features — none
-    // of which are available without authentication.
+    // When signed out + LOCAL (or local-only emergency mode), the
+    // cockpit blocks model/remote paths. But we must classify the intent
+    // FIRST so that local-tool-only requests (read-only inspection,
+    // typecheck, build, test) can still execute — they need no model
+    // inference.
     //
-    // This gate STOPS before classifyIntent(), resolveModelProvider(),
-    // awaitRemoteReady(), or any provider/remote call. It returns a
-    // clear local UI response instead of leaking provider errors (429,
-    // quota, network) to the user.
+    // The gate now runs AFTER classifyIntent() so we can distinguish:
+    //   - read intent → always allowed (READ lane handles no-model)
+    //   - local-tool mission → allowed (deterministic tool execution)
+    //   - model-required mission → blocked (needs model inference)
+    //   - chat intent → blocked (needs model inference)
     //
     // This is NOT a keyword matcher — it's a capability gate based on
-    // session/auth/local-mode state. The rule is simple:
-    //   signed out + local-only mode = no model/network path, period.
+    // session/auth/local-mode state + intent classification. The rule:
+    //   signed out + local = no model/network path, BUT local tools work.
     //
     // Authenticated users are completely unaffected — signedIn=true or
     // executionTarget="remote" means this gate never engages.
-    if (shouldBlockModelPath(signedIn, store.state.executionTarget, store.state.localOnly)) {
-      store.actions.addChatMessage({
-        role: "user",
-        content: input,
-        ts: Date.now(),
-        status: "complete",
-      });
-      const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
-      const gateReason = store.state.localOnly
-        ? "Capability gate: model/remote path blocked (local-only emergency mode)"
-        : "Capability gate: model/remote path blocked (signed out + local mode)";
-      store.actions.addChatMessage({
-        role: "assistant",
-        content: gateMessage,
-        ts: Date.now(),
-        status: "complete",
-        servedModel: "capability-gate",
-      });
-      store.actions.addActivity({
-        id: `act_${Date.now()}_gate`,
-        ts: Date.now(),
-        type: "info",
-        tag: "GATE",
-        text: gateReason,
-      });
-      persistSession();
-      return;
-    }
-
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
+
+    if (shouldBlockModelPath(signedIn, store.state.executionTarget, store.state.localOnly)) {
+      // ─── READ intent: always allowed (tools are local, synthesis optional) ───
+      if (intent === "read" || opts?.forceRead === true) {
+        // Fall through to the READ lane below — it handles no-model
+        // gracefully by formatting raw tool results.
+      } else if (isMission) {
+        // ─── Local-tool mission: check if it can run without a model ───
+        // A local-tool mission executes deterministic tools locally and
+        // produces an evidence-grounded summary with NO model inference.
+        // If the prompt can be decomposed into local tool calls, execute
+        // them. If not, block (the mission needs model reasoning).
+        const localToolMatch = matchLocalToolMission(input);
+        if (localToolMatch) {
+          // Execute the local-tool mission and return.
+          const localPerf = PerfTrace.start("local");
+          await runLocalToolMission(input, localToolMatch, session, store, projectRoot, localPerf);
+          persistSession();
+          return;
+        }
+        // Mission needs model reasoning — block.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
+        const gateReason = store.state.localOnly
+          ? "Capability gate: model/remote path blocked (local-only emergency mode)"
+          : "Capability gate: model/remote path blocked (signed out + local mode)";
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: gateMessage,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "capability-gate",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_gate`,
+          ts: Date.now(),
+          type: "info",
+          tag: "GATE",
+          text: gateReason,
+        });
+        persistSession();
+        return;
+      } else {
+        // ─── Chat/utility intent: blocked (needs model inference) ───
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
+        const gateReason = store.state.localOnly
+          ? "Capability gate: model/remote path blocked (local-only emergency mode)"
+          : "Capability gate: model/remote path blocked (signed out + local mode)";
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: gateMessage,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "capability-gate",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_gate`,
+          ts: Date.now(),
+          type: "info",
+          tag: "GATE",
+          text: gateReason,
+        });
+        persistSession();
+        return;
+      }
+    }
+
     // P0 perf instrumentation — no-op unless LITT_PERF=1.
     const perf = PerfTrace.start(intent);
     perf.mark("intent_classified");

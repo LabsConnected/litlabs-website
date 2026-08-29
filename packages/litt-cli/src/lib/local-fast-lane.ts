@@ -292,9 +292,17 @@ function detectCompoundLocalQuery(
   const aspectCount = [wantsRepo, wantsBranch, wantsMode, wantsClean].filter(Boolean).length;
   if (aspectCount < 2) return null;
 
-  // Reject if the query contains MUTATION verbs that suggest a mission
-  // intent. Read verbs like "show" and "check" are allowed — "show project
+  // Reject if the query contains ACTION verbs that suggest the user wants
+  // actual tool execution (a mission/read), not just a static local-state
+  // read. Read verbs like "show" and "check" are allowed — "show project
   // and branch" is a read-only compound query, not a mutation.
+  //
+  // The "tell me" question form is NOT an override for action verbs: a query
+  // like "tell me what's dirty and run typecheck" contains "run" (an action
+  // verb) and must fall through to the normal mission/read path so the
+  // typecheck actually executes and the observability blocks render. Without
+  // this, the compound fast path would answer with static git state and
+  // silently skip the requested tool execution.
   const mutationVerbs = /\b(fix|edit|create|delete|run|build|test|deploy|commit|push|install|add|remove|scan|inspect|verify|list|find|search|open|read file|cat|reset|discard|switch|checkout|stash|rebase|merge|pull|fetch|amend|revert)\b/i;
   // Question form includes "what/which/am i/is this/current/tell me" AND
   // "show" — "show project, branch, and working tree status" is a valid
@@ -303,8 +311,11 @@ function detectCompoundLocalQuery(
 
   if (!isQuestionForm) return null;
 
-  // Reject if mutation verbs present (except "tell me" which is question-form)
-  if (mutationVerbs.test(normalized) && !/\btell me\b/i.test(normalized)) return null;
+  // Reject if action verbs present — the user wants real work, not a
+  // static state read. "tell me what project and branch this is" has NO
+  // action verbs and still matches; "tell me what's dirty, run typecheck"
+  // has "run" and correctly falls through.
+  if (mutationVerbs.test(normalized)) return null;
 
   return { repo: wantsRepo, branch: wantsBranch, mode: wantsMode, clean: wantsClean };
 }

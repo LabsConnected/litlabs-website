@@ -1579,6 +1579,48 @@ describe("Local Fast Lane — classification safety (action verbs fall through)"
   it("clean this branch falls through (action verb)", () => {
     expect(matchLocalFastPath("clean this branch", baseCtx)).toBeNull();
   });
+
+  // ─── Regression: the exact compound prompt that short-circuited typecheck
+  // The prompt "Inspect this project, tell me what is currently dirty, run
+  // typecheck, and explain what you checked without changing anything"
+  // contains "project" + "dirty" (compound candidate) AND "tell me"
+  // (question form). Previously, the "tell me" exception overrode the
+  // action-verb rejection ("inspect", "run"), so the compound fast path
+  // answered with static git state ("Project: main / Git: clean") and
+  // NEVER ran typecheck — no mission, no toolProgress, no observability
+  // blocks. The fix: action verbs ALWAYS cause fallthrough, regardless of
+  // "tell me". The query must reach the normal mission/read path so the
+  // typecheck actually executes and the observability blocks render.
+  it("compound prompt with 'tell me' + action verbs falls through (not static state)", () => {
+    const prompt = "Inspect this project, tell me what is currently dirty, run typecheck, and explain what you checked without changing anything";
+    expect(matchLocalFastPath(prompt, baseCtx)).toBeNull();
+  });
+
+  it("compound prompt with 'tell me' + 'run' falls through", () => {
+    expect(matchLocalFastPath("tell me what's dirty and run typecheck", baseCtx)).toBeNull();
+  });
+
+  it("compound prompt with 'tell me' + 'inspect' falls through", () => {
+    expect(matchLocalFastPath("tell me about the project and inspect the branch", baseCtx)).toBeNull();
+  });
+
+  it("compound prompt with 'tell me' + 'verify' falls through", () => {
+    expect(matchLocalFastPath("tell me the project and verify the build", baseCtx)).toBeNull();
+  });
+
+  it("pure 'tell me' compound with NO action verbs still matches (read-only)", () => {
+    // "tell me what project and branch this is" — no action verbs → still
+    // matches the compound fast path (this is the intended use case).
+    const res = matchLocalFastPath("tell me what project and branch this is", baseCtx);
+    expect(res).not.toBeNull();
+    expect(res!.kind).toBe("compound");
+  });
+
+  it("pure 'tell me' compound with repo + clean still matches (read-only)", () => {
+    const res = matchLocalFastPath("tell me the project and git status", baseCtx);
+    expect(res).not.toBeNull();
+    expect(res!.kind).toBe("compound");
+  });
 });
 
 // ─── Git state / git status natural language ───────────────────────
