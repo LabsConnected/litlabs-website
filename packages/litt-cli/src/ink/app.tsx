@@ -418,6 +418,8 @@ export function CockpitApp({
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
             toolDetails={store.state.toolDetails}
+            executionTarget={store.state.executionTarget}
+            canonicalMission={store.state.canonicalMission}
             composerValue={store.state.composerValue}
             onComposerChange={(v) => store.actions.setComposerValue(v)}
             onSubmit={(v) => {

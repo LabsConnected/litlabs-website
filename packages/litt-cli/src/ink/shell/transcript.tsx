@@ -21,11 +21,22 @@ import React from "react";
 import { Box, Text } from "ink";
 import { COLORS } from "../colors.js";
 import { ChatMessageView } from "../chat-transcript.js";
-import { ToolProgress, estimateToolProgressHeight } from "../tool-progress.js";
 import { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS, type ViewportResult } from "../scroll-model.js";
-import type { ActivityEntry, ChatMessage, MissionState, ActivitySemantic } from "../cockpit-store.js";
+import type { ActivityEntry, ChatMessage, MissionState, ActivitySemantic, CanonicalMissionProjection } from "../cockpit-store.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
+import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { MissionResultBlock } from "./summary.js";
+import { ThinkingBlock, ToolResultBlock, MissionProgressBlock, SummaryBlock } from "../observability.js";
+import {
+  projectThinkingBlock,
+  projectToolResultBlocks,
+  projectMissionProgressBlock,
+  projectSummaryBlock,
+  estimateThinkingHeight,
+  estimateToolResultsHeight,
+  estimateMissionProgressHeight,
+  estimateSummaryHeight,
+} from "../observability-project.js";
 
 /** Tiny-vocabulary glyphs. */
 export const SEMANTIC_GLYPH: Record<ActivitySemantic, { glyph: string; color: string }> = {
@@ -141,7 +152,9 @@ export function fitContent(
 export interface TranscriptAreaProps {
   /** All logical messages (the shell slices the viewport). */
   messages: ChatMessage[];
-  /** Live-mode semantic events (rendered only at the bottom). */
+  /** Live-mode semantic events (kept for the feed helpers / /activity; the
+   *  raw feed is no longer rendered in the transcript — the observability
+   *  blocks replace it). */
   events: ActivityEntry[];
   /** Viewport slice (start/end indices). */
   viewport: ViewportResult;
@@ -150,12 +163,23 @@ export interface TranscriptAreaProps {
   mission: MissionState | null;
   gitModified: number;
   gitUntracked: number;
-  /** Structured per-tool progress — fills the main content area during
-   *  mission execution with friendly per-tool blocks. Rendered between
-   *  the chat messages and the activity feed (live mode only). */
+  /** Structured per-tool progress — mapped into ToolResultBlocks (live mode
+   *  only). Each entry becomes a grouped execution card with the LOCAL/REMOTE
+   *  locus preserved. */
   toolProgress: ToolProgressSnapshot | null;
   /** Ctrl+O — show result summaries for collapsed successful runs. */
   toolDetails?: boolean;
+  /** Current agent lifecycle phase — drives the ThinkingBlock header. */
+  holoState: string;
+  /** Chat-lane processing flag — surfaces a THINKING phase when no holo
+   *  phase is active. */
+  isProcessing: boolean;
+  /** Where the MODEL provider executes — preserved as the locus on every
+   *  execution block (LOCAL/REMOTE). */
+  executionTarget: ExecutionTarget;
+  /** Canonical mission projection — real mission steps drive the
+   *  MissionProgressBlock. null when no mission is active. */
+  canonicalMission: CanonicalMissionProjection | null;
 }
 
 export function TranscriptArea({
@@ -168,7 +192,17 @@ export function TranscriptArea({
   gitUntracked,
   toolProgress,
   toolDetails = false,
+  holoState,
+  isProcessing,
+  executionTarget,
+  canonicalMission,
 }: TranscriptAreaProps): React.ReactElement | null {
+  // `events` is no longer rendered directly (the raw semantic feed is
+  // replaced by the structured observability blocks). It remains in the
+  // props for the feed helpers / /activity / fitContent compatibility.
+  void events;
+  void toolDetails;
+
   if (messages.length === 0 || viewport.start >= viewport.end) return null;
 
   const visible = messages.slice(viewport.start, viewport.end);
@@ -178,6 +212,28 @@ export function TranscriptArea({
 
   const scrolled = !viewport.atBottom || viewport.hasAbove;
 
+  // ── Observability projections (pure; presentation layer only) ──────
+  // These map real runtime state into the four structured blocks. Runtime
+  // semantics are unchanged — every label/status/locus is derived from the
+  // live tool progress, canonical mission steps, or terminal mission
+  // evidence. LOCAL/REMOTE truth is preserved on every execution block.
+  const thinkingProps = viewport.atBottom
+    ? projectThinkingBlock(holoState, isProcessing, toolProgress ?? EMPTY_TOOL_PROGRESS, canonicalMission, executionTarget)
+    : null;
+
+  const toolBlocks = viewport.atBottom && toolProgress && toolProgress.entries.length > 0
+    ? projectToolResultBlocks(toolProgress, executionTarget)
+    : [];
+
+  const missionElapsedMs = mission && mission.startedAt != null && mission.endedAt != null
+    ? mission.endedAt - mission.startedAt
+    : null;
+  const missionProgressProps = viewport.atBottom
+    ? projectMissionProgressBlock(canonicalMission, mission, executionTarget, missionElapsedMs)
+    : null;
+
+  const summaryProps = viewport.atBottom ? projectSummaryBlock(mission) : null;
+
   return (
     <Box flexDirection="column">
       {visible.map((msg, idx) => (
@@ -186,16 +242,41 @@ export function TranscriptArea({
         </Box>
       ))}
 
-      {/* Tool progress — structured per-tool blocks during mission execution.
-       *  Fills the main content area with live, friendly tool feedback
-       *  instead of an empty streaming placeholder. Live mode only. */}
-      {viewport.atBottom && toolProgress && toolProgress.entries.length > 0 && (
+      {/* ThinkingBlock — the active reasoning/execution phase with ordered
+       *  micro-steps. Replaces the implicit "LiTT is working" + scattered
+       *  activity noise with one structured "watch LiTT work" header. Live
+       *  mode only. */}
+      {viewport.atBottom && thinkingProps && (
         <Box flexDirection="column" marginTop={1}>
-          <ToolProgress progress={toolProgress} width={contentWidth} details={toolDetails} />
+          <ThinkingBlock {...thinkingProps} width={contentWidth} />
         </Box>
       )}
 
-      {/* DONE/FAILED result block — live mode only (belongs to the newest turn) */}
+      {/* ToolResultBlocks — one grouped execution card per tool, each
+       *  carrying the LOCAL/REMOTE locus. Replaces the raw per-tool noise
+       *  with structured, bordered result blocks. Live mode only. */}
+      {viewport.atBottom && toolBlocks.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {toolBlocks.map((block, i) => (
+            <Box key={i} marginTop={i === 0 ? 0 : 1}>
+              <ToolResultBlock {...block} width={contentWidth} />
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {/* MissionProgressBlock — real mission step progress from the
+       *  canonical mission projection. Live mode only. */}
+      {viewport.atBottom && missionProgressProps && (
+        <Box flexDirection="column" marginTop={1}>
+          <MissionProgressBlock {...missionProgressProps} width={contentWidth} />
+        </Box>
+      )}
+
+      {/* DONE/FAILED result block — the canonical honest proof block.
+       *  Live mode only (belongs to the newest turn). Kept as the
+       *  structured terminal evidence; the SummaryBlock below adds the
+       *  plain-English conclusion. */}
       {viewport.atBottom && terminalMission && mission && (
         <Box marginTop={1}>
           <MissionResultBlock
@@ -206,22 +287,12 @@ export function TranscriptArea({
         </Box>
       )}
 
-      {/* Compact semantic feed — live mode only, indented + dim */}
-      {viewport.atBottom && visibleEvents(events, 4).length > 0 && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
-          {visibleEvents(events, 4).map((entry) => {
-            const sem = semanticOf(entry);
-            const { glyph, color } = SEMANTIC_GLYPH[sem];
-            const isStreamLine = isStream(entry);
-            return (
-              <Box key={entry.id}>
-                <Text color={isStreamLine ? COLORS.secondaryDim : color} bold={!isStreamLine}>
-                  {glyph}
-                </Text>
-                <Text dimColor> {truncate(entry.text, contentWidth - 4)}</Text>
-              </Box>
-            );
-          })}
+      {/* SummaryBlock — LiTT's plain-English conclusion at terminal state.
+       *  Derived honestly from mission evidence (never invented). Live mode
+       *  only. */}
+      {viewport.atBottom && summaryProps && (
+        <Box marginTop={1}>
+          <SummaryBlock {...summaryProps} width={contentWidth} />
         </Box>
       )}
 
@@ -246,6 +317,14 @@ export function TranscriptArea({
     </Box>
   );
 }
+
+/** A zero-entry tool progress snapshot for the idle/no-progress case. */
+const EMPTY_TOOL_PROGRESS: ToolProgressSnapshot = {
+  entries: [],
+  missionActive: false,
+  missionStatus: null,
+  hasRunning: false,
+};
 
 // Re-export for the shell and tests.
 export { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS };
@@ -308,22 +387,71 @@ export function estimateActivityFeedHeight(events: ActivityEntry[], max = 4): nu
 }
 
 /**
- * Total extra content height in live mode: tool progress + result block +
- * activity feed. Each section has marginTop(1) when present.
- * Pure — used by the shell to compute the viewport budget accurately.
+ * Total extra content height in live mode: the observability blocks
+ * (ThinkingBlock + ToolResultBlocks + MissionProgressBlock) plus the
+ * canonical MissionResultBlock and SummaryBlock. Each section has
+ * marginTop(1) when present.
+ *
+ * The raw semantic activity feed is no longer rendered in the transcript
+ * (the observability blocks replace it), so its height is no longer
+ * reserved here. `events` and `toolDetails` remain in the signature for
+ * call-site compatibility and are intentionally unused.
+ *
+ * Pure — used by the shell to compute the viewport budget accurately so
+ * the fixed-height content region never overflows (the 100×30 collision
+ * bug). The new observability inputs (holoState, isProcessing,
+ * canonicalMission, executionTarget, columns) default to values that
+ * zero out their sections, so callers that don't pass them get the
+ * tool-result + result-block + summary estimate only.
  */
 export function estimateExtraContentHeight(
   toolProgress: ToolProgressSnapshot | null,
   mission: MissionState | null,
   events: ActivityEntry[],
   toolDetails = false,
+  // Observability inputs (defaults zero out their sections):
+  holoState = "IDLE",
+  isProcessing = false,
+  canonicalMission: CanonicalMissionProjection | null = null,
+  executionTarget: ExecutionTarget = "local",
+  columns = 80,
 ): number {
+  void events; // feed removed — blocks replace it
+  void toolDetails; // ToolResultBlock always shows summaries (no collapse toggle)
+
   let h = 0;
+
+  // ThinkingBlock (during active work)
+  const thinking = projectThinkingBlock(
+    holoState, isProcessing,
+    toolProgress ?? EMPTY_TOOL_PROGRESS,
+    canonicalMission, executionTarget,
+  );
+  const th = estimateThinkingHeight(thinking);
+  if (th > 0) h += th + 1; // marginTop(1)
+
+  // ToolResultBlocks (replaces ToolProgress)
   if (toolProgress && toolProgress.entries.length > 0) {
-    h += estimateToolProgressHeight(toolProgress, toolDetails) + 1; // marginTop(1)
+    const blocks = projectToolResultBlocks(toolProgress, executionTarget);
+    h += estimateToolResultsHeight(blocks, columns) + 1; // marginTop(1)
   }
+
+  // MissionProgressBlock
+  const elapsedMs = mission && mission.startedAt != null && mission.endedAt != null
+    ? mission.endedAt - mission.startedAt
+    : null;
+  const mp = projectMissionProgressBlock(canonicalMission, mission, executionTarget, elapsedMs);
+  const mph = estimateMissionProgressHeight(mp);
+  if (mph > 0) h += mph + 1; // marginTop(1)
+
+  // MissionResultBlock (canonical terminal proof — kept)
   const resultH = estimateResultBlockHeight(mission);
   if (resultH > 0) h += resultH + 1; // marginTop(1)
-  h += estimateActivityFeedHeight(events);
+
+  // SummaryBlock (terminal plain-English conclusion — new)
+  const summary = projectSummaryBlock(mission);
+  const sh = estimateSummaryHeight(summary);
+  if (sh > 0) h += sh + 1; // marginTop(1)
+
   return h;
 }

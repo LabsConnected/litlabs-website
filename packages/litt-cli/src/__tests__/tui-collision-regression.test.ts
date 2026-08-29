@@ -25,7 +25,12 @@ import {
   estimateActivityFeedHeight,
   estimateExtraContentHeight,
 } from "../ink/shell/transcript.js";
-import { estimateToolProgressHeight } from "../ink/tool-progress.js";
+import {
+  projectToolResultBlocks,
+  projectSummaryBlock,
+  estimateToolResultsHeight,
+  estimateSummaryHeight,
+} from "../ink/observability-project.js";
 import type { ChatMessage, MissionState, ActivityEntry } from "../ink/cockpit-store.js";
 import type { ToolProgressSnapshot } from "../ink/tool-progress-store.js";
 
@@ -180,34 +185,53 @@ describe("estimateActivityFeedHeight", () => {
 });
 
 describe("estimateExtraContentHeight", () => {
+  // The rendering model changed: the raw activity feed is replaced by the
+  // observability blocks (ThinkingBlock + ToolResultBlocks +
+  // MissionProgressBlock + SummaryBlock). With the default holoState=IDLE
+  // and no canonical mission, only the ToolResultBlocks + result block +
+  // SummaryBlock contribute. The activity feed height is no longer reserved
+  // (it is no longer rendered in the transcript).
+  const COLS = 96; // matches the 100-col scenario below
+
   it("returns 0 when nothing is present", () => {
     expect(estimateExtraContentHeight(null, null, [])).toBe(0);
   });
 
-  it("includes tool progress + marginTop", () => {
+  it("includes tool result blocks + marginTop (replaces ToolProgress)", () => {
     const tp = toolProgressWith(2);
-    const h = estimateExtraContentHeight(tp, null, []);
-    expect(h).toBe(estimateToolProgressHeight(tp) + 1);
+    const h = estimateExtraContentHeight(tp, null, [], false, "IDLE", false, null, "local", COLS);
+    const blocks = projectToolResultBlocks(tp, "local");
+    expect(h).toBe(estimateToolResultsHeight(blocks, COLS) + 1);
   });
 
-  it("includes result block + marginTop", () => {
+  it("includes result block + SummaryBlock + marginTop for terminal mission", () => {
     const mission = failedReadOnlyMission();
-    const h = estimateExtraContentHeight(null, mission, []);
-    expect(h).toBe(estimateResultBlockHeight(mission) + 1);
+    const h = estimateExtraContentHeight(null, mission, [], false, "IDLE", false, null, "local", COLS);
+    // result block + marginTop(1) + summary + marginTop(1)
+    const expected = estimateResultBlockHeight(mission) + 1 + estimateSummaryHeight(projectSummaryBlock(mission)) + 1;
+    expect(h).toBe(expected);
   });
 
-  it("includes activity feed", () => {
+  it("activity feed is no longer reserved (removed from transcript rendering)", () => {
     const events = activityEntries(3);
-    const h = estimateExtraContentHeight(null, null, events);
-    expect(h).toBe(estimateActivityFeedHeight(events));
+    // The feed helpers still exist for /activity, but the transcript no
+    // longer renders the feed — so estimateExtraContentHeight reserves 0
+    // for events alone (no mission, no tools, idle).
+    const h = estimateExtraContentHeight(null, null, events, false, "IDLE", false, null, "local", COLS);
+    expect(h).toBe(0);
+    // The helper itself still works for /activity consumers.
+    expect(estimateActivityFeedHeight(events)).toBe(1 + 3);
   });
 
-  it("sums all three when all present", () => {
+  it("sums tool results + result block + summary when all present", () => {
     const tp = toolProgressWith(2);
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
-    const h = estimateExtraContentHeight(tp, mission, events);
-    const expected = estimateToolProgressHeight(tp) + 1 + estimateResultBlockHeight(mission) + 1 + estimateActivityFeedHeight(events);
+    const h = estimateExtraContentHeight(tp, mission, events, false, "IDLE", false, null, "local", COLS);
+    const blocks = projectToolResultBlocks(tp, "local");
+    const expected = estimateToolResultsHeight(blocks, COLS) + 1
+      + estimateResultBlockHeight(mission) + 1
+      + estimateSummaryHeight(projectSummaryBlock(mission)) + 1;
     expect(h).toBe(expected);
   });
 });
@@ -239,17 +263,20 @@ describe("100×30 collision regression", () => {
 
   it("with failed mission + events: budget reserves extra, no overflow", () => {
     // The exact bug scenario: a failed read-only mission with activity events.
+    // The activity feed is no longer rendered (observability blocks replace
+    // it), so events don't add height. The reserve = result block +
+    // SummaryBlock.
     const messages = [userMsg(0), asstMsg(1, 5), userMsg(2), asstMsg(3, 3)];
     const layout = layoutTranscript(messages, WIDTH);
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
-    const extraHeight = estimateExtraContentHeight(null, mission, events);
-    // extraHeight = resultBlock(6) + marginTop(1) + feed(5) = 12
-    expect(extraHeight).toBe(12);
+    const extraHeight = estimateExtraContentHeight(null, mission, events, false, "IDLE", false, null, "local", WIDTH);
+    // extraHeight = resultBlock(6) + marginTop(1) + summary(2) + marginTop(1) = 10
+    expect(extraHeight).toBe(10);
     // Reserve must be subtracted from the budget
     const reserve = extraHeight;
-    const budget = CONTENT_ROWS - reserve; // 23 - 12 = 11
-    expect(budget).toBe(11);
+    const budget = CONTENT_ROWS - reserve; // 23 - 10 = 13
+    expect(budget).toBe(13);
     const vp = computeViewport(messages, layout, budget, null, 0);
     // Messages must fit in the reduced budget
     const messageRows = layout.prefix[vp.end] - layout.prefix[vp.start];
@@ -263,7 +290,7 @@ describe("100×30 collision regression", () => {
     const tp = toolProgressWith(3);
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
-    const extraHeight = estimateExtraContentHeight(tp, mission, events);
+    const extraHeight = estimateExtraContentHeight(tp, mission, events, false, "IDLE", false, null, "local", WIDTH);
     const reserve = extraHeight;
     const budget = CONTENT_ROWS - reserve;
     // If budget < 4 (minimum), fall back to natural flow
@@ -286,10 +313,10 @@ describe("100×30 collision regression", () => {
     const layout = layoutTranscript(messages, WIDTH);
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
-    const extraHeight = estimateExtraContentHeight(null, mission, events);
+    const extraHeight = estimateExtraContentHeight(null, mission, events, false, "IDLE", false, null, "local", WIDTH);
     const budget = CONTENT_ROWS_24 - extraHeight;
-    // At 100×24 with 12 rows of extra content, budget = 5
-    // Messages need more than 5 rows → fits=false (natural flow)
+    // At 100×24 with extra content, budget shrinks
+    // Messages need more than the budget → fits=false (natural flow)
     if (budget < 4) {
       expect(true).toBe(true); // would fall back to natural flow
     } else {
@@ -321,7 +348,7 @@ describe("100×30 collision regression", () => {
       buildPassed: false,
     } as unknown as MissionState;
     const events = activityEntries(4);
-    const extraHeight = estimateExtraContentHeight(null, hugeMission, events);
+    const extraHeight = estimateExtraContentHeight(null, hugeMission, events, false, "IDLE", false, null, "local", WIDTH);
     // If extra >= contentRows, the shell forces fits=false
     if (extraHeight >= CONTENT_ROWS) {
       // The shell's logic: reserve >= contentRows → fits=false
@@ -351,7 +378,7 @@ describe("120×30 wide terminal", () => {
     const layout = layoutTranscript(messages, WIDTH);
     const mission = failedReadOnlyMission();
     const events = activityEntries(4);
-    const extraHeight = estimateExtraContentHeight(null, mission, events);
+    const extraHeight = estimateExtraContentHeight(null, mission, events, false, "IDLE", false, null, "local", WIDTH);
     const budget = CONTENT_ROWS - extraHeight;
     if (budget >= 4) {
       const vp = computeViewport(messages, layout, budget, null, 0);

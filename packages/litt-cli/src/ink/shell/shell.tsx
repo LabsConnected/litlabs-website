@@ -32,9 +32,10 @@ import { Composer } from "./composer.js";
 import { StatusBar } from "../status-bar.js";
 import { CONTENT_MEASURE } from "../chat-transcript.js";
 import { deriveRuntimeState } from "../runtime-state.js";
-import type { ActivityEntry, ApprovalPrompt, ChatMessage, HoloState, MissionState } from "../cockpit-store.js";
+import type { ActivityEntry, ApprovalPrompt, ChatMessage, HoloState, MissionState, CanonicalMissionProjection } from "../cockpit-store.js";
 import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
+import type { ExecutionTarget } from "../../lib/execution-target.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
@@ -53,6 +54,13 @@ export interface LiTTShellProps {
   /** Structured per-tool progress — fills the main content area during
    *  mission execution with friendly per-tool blocks. */
   toolProgress: ToolProgressSnapshot | null;
+
+  /** Where the MODEL provider executes — preserved as the LOCAL/REMOTE
+   *  locus on every observability execution block. */
+  executionTarget: ExecutionTarget;
+  /** Canonical mission projection — real mission steps drive the
+   *  MissionProgressBlock. null when no mission is active. */
+  canonicalMission: CanonicalMissionProjection | null;
 
   // Composer wiring
   composerValue: string;
@@ -106,6 +114,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
     gitModified, gitUntracked, toolProgress, toolDetails = false,
+    executionTarget, canonicalMission,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onClosePalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
@@ -153,8 +162,12 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // Without this, the Box overflows and Ink collides lines (the 100×30 bug).
   const extraHeight = useMemo(() => {
     if (anchor !== null) return 0; // scrolled mode — extra content not rendered
-    return estimateExtraContentHeight(toolProgress, missionState, activityLog, toolDetails);
-  }, [anchor, toolProgress, missionState, activityLog, toolDetails]);
+    return estimateExtraContentHeight(
+      toolProgress, missionState, activityLog, toolDetails,
+      holoState, isProcessing, canonicalMission, executionTarget, columns,
+    );
+  }, [anchor, toolProgress, missionState, activityLog, toolDetails,
+      holoState, isProcessing, canonicalMission, executionTarget, columns]);
 
   const viewport = useMemo(() => {
     if (messages.length === 0) {
@@ -213,6 +226,10 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitUntracked={gitUntracked}
             toolProgress={toolProgress}
             toolDetails={toolDetails}
+            holoState={holoState}
+            isProcessing={isProcessing}
+            executionTarget={executionTarget}
+            canonicalMission={canonicalMission}
           />
         ) : (
           <Welcome />
