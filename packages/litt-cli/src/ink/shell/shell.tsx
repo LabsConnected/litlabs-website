@@ -160,6 +160,17 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // activity feed. These render BELOW the messages inside the same
   // fixed-height Box, so the viewport budget must reserve rows for them.
   // Without this, the Box overflows and Ink collides lines (the 100×30 bug).
+  //
+  // In scrolled mode, the observability blocks are NOT rendered, so
+  // extraHeight=0 — the scrolled viewport gets the full contentRows
+  // budget (more messages visible). This is intentional: the user is
+  // browsing history, not watching live execution.
+  //
+  // The auto-return-to-live effect (below) uses a SEPARATE live-mode
+  // atBottom check to avoid the "scroll sticks" bug: previously, the
+  // scrolled viewport's larger budget caused atBottom=true immediately
+  // after PgUp, yanking the user back to live. Now the auto-return only
+  // fires when the anchor truly reaches the bottom in the LIVE budget.
   const extraHeight = useMemo(() => {
     if (anchor !== null) return 0; // scrolled mode — extra content not rendered
     return estimateExtraContentHeight(
@@ -167,6 +178,19 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
       holoState, isProcessing, canonicalMission, executionTarget, columns,
     );
   }, [anchor, toolProgress, missionState, activityLog, toolDetails,
+      holoState, isProcessing, canonicalMission, executionTarget, columns]);
+
+  // Live-mode extra height (for the auto-return atBottom check).
+  // This is the extraHeight as it would be in live mode — used to compute
+  // whether the anchored viewport would be at the bottom IF the user
+  // returned to live mode. Prevents premature auto-return when the
+  // scrolled viewport is larger than the live viewport.
+  const liveExtraHeight = useMemo(() => {
+    return estimateExtraContentHeight(
+      toolProgress, missionState, activityLog, toolDetails,
+      holoState, isProcessing, canonicalMission, executionTarget, columns,
+    );
+  }, [toolProgress, missionState, activityLog, toolDetails,
       holoState, isProcessing, canonicalMission, executionTarget, columns]);
 
   const viewport = useMemo(() => {
@@ -204,12 +228,33 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // the newest content, drop the anchor (auto-follow resumes). This
   // never yanks a scrolled view — it only fires once the user has
   // scrolled down to the bottom themselves (or the transcript shrank).
+  //
+  // CRITICAL FIX: The atBottom check uses the LIVE-MODE budget (with
+  // extraHeight reserved), not the scrolled-mode budget (which is larger
+  // because extraHeight=0 in scrolled mode). Without this, PgUp from live
+  // sets an anchor near the bottom, the scrolled viewport (with its larger
+  // budget) immediately reaches atBottom=true, and the auto-return yanks
+  // the user back to live — the "scroll sticks" bug. Now the auto-return
+  // only fires when the anchor would be at the bottom even in live mode.
   useEffect(() => {
-    if (anchor !== null && viewport.atBottom) {
+    if (anchor === null) return;
+    // Compute atBottom using the live-mode budget (with extraHeight).
+    // If the live-mode viewport from this anchor would be at the bottom,
+    // auto-return is safe — the user won't see a visual jump.
+    const liveReserve = liveExtraHeight;
+    if (liveReserve >= contentRows) return; // natural flow — no auto-return
+    const liveViewport = computeViewport(
+      messages,
+      layout,
+      contentRows - liveReserve,
+      anchor,
+      SCROLL_INDICATOR_ROWS,
+    );
+    if (liveViewport.atBottom) {
       onAnchorChange(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, viewport.atBottom]);
+  }, [anchor, messages, layout, contentRows, liveExtraHeight]);
 
   return (
     <Box flexDirection="column" paddingX={2}>
