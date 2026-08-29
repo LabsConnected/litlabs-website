@@ -206,12 +206,16 @@ export async function cockpitCommand(args: string[]): Promise<number> {
   const gitUntracked = gitState.untracked;
 
   // ─── Auth state for header display ──────────────────────────────
-  // The auth gate in index.ts already verified the user is signed in
-  // before reaching here. We fetch the auth state for the header UX
-  // (email display) IN THE BACKGROUND — don't block the UI on a
-  // potentially slow network call (token refresh + userinfo fetch).
+  // The auth gate in index.ts may have allowed this cockpit to launch
+  // without auth (LITT_LOCAL_MODE=1 — local-only mode). We fetch the
+  // auth state for the header UX (email display + signedIn flag) IN THE
+  // BACKGROUND — don't block the UI on a potentially slow network call.
   // The cockpit launches immediately with authEmail=null and updates
   // via rerender() once the email is available.
+  //
+  // signedIn is determined by the actual auth session, not hardcoded —
+  // in local-only mode without auth, signedIn=false so the UI can show
+  // the correct state and gate remote/cloud features appropriately.
   const authEmailPromise = (async () => {
     try {
       const authSession = getAuthSession();
@@ -222,6 +226,19 @@ export async function cockpitCommand(args: string[]): Promise<number> {
       return null;
     }
   })();
+
+  // Determine actual signed-in state — not hardcoded. In local-only
+  // mode (LITT_LOCAL_MODE=1) the cockpit may launch without auth.
+  const authSessionForCheck = getAuthSession();
+  const actuallySignedIn = await authSessionForCheck.isSignedIn().catch(() => false);
+
+  // In local-only mode without auth, surface a one-time notice so the
+  // user knows which features are available and which require sign-in.
+  if (!actuallySignedIn && process.env.LITT_LOCAL_MODE === "1") {
+    console.error(`${c.dim}LiTT running in LOCAL-ONLY mode (LITT_LOCAL_MODE=1).${c.reset}`);
+    console.error(`${c.dim}  Available: /local, machine lane, slash commands, local tools.${c.reset}`);
+    console.error(`${c.dim}  Sign in (litt login) for remote model, cloud agents, and Railway.${c.reset}`);
+  }
 
   // Launch the Ink cockpit IMMEDIATELY — don't wait for network calls.
   // The auth email starts as null and is updated via rerender() once
@@ -243,7 +260,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
         gitModified,
         gitUntracked,
         authEmail: null, // updated via rerender when auth resolves
-        signedIn: true,
+        signedIn: actuallySignedIn,
       }),
     ),
   );
@@ -266,7 +283,7 @@ export async function cockpitCommand(args: string[]): Promise<number> {
           gitModified,
           gitUntracked,
           authEmail,
-          signedIn: true,
+          signedIn: actuallySignedIn,
         }),
       ),
     );

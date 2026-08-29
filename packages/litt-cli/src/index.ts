@@ -144,8 +144,70 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  *
  * Everything else — including the interactive cockpit — requires a
  * valid user session. The auth gate enforces this before dispatching.
+ *
+ * EXCEPTION: LITT_LOCAL_MODE=1 explicitly opts into local-only execution.
+ * In that mode the cockpit may launch without auth — the user gets
+ * /local, the machine lane, slash commands, and local tools, but NO
+ * remote model, NO cloud agents, NO Railway execution. Remote/cloud
+ * features remain auth-gated at the provider level (resolveModelProvider
+ * and awaitRemoteReady enforce this at call time, not at the gate).
  */
 const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help"]);
+
+/**
+ * LITT_LOCAL_MODE=1 lets the cockpit launch without authentication.
+ * This is the explicit local-only opt-in: the user gets local tool
+ * execution (machine lane, /local, slash commands, git, adb, etc.)
+ * but cannot use remote model inference, cloud agents, or Railway
+ * execution without signing in. Remote features fail gracefully at
+ * call time with a clear "sign in required" error — they are never
+ * silently granted.
+ */
+function isLocalOnlyMode(): boolean {
+  return process.env.LITT_LOCAL_MODE === "1";
+}
+
+/** Cockpit commands (bare `litt`, `litt shell`, `litt cockpit`, `litt tui`). */
+const COCKPIT_COMMANDS = new Set(["cockpit", "shell", "tui"]);
+
+/**
+ * Pure auth-gate decision — extracted for testability.
+ *
+ * Returns true if the command requires authentication (i.e. the auth
+ * gate should engage and check isSignedIn). Returns false if the
+ * command is allowed without auth.
+ *
+ * Parameters:
+ *   command       — the resolved command name
+ *   hasByokKey    — whether a BYOK provider key is present
+ *   localMode     — whether LITT_LOCAL_MODE=1 is set
+ *   clerkToken    — whether LITT_CLERK_TOKEN is set (test bypass)
+ *
+ * The gate engages (returns true) when:
+ *   - the command is NOT in the logged-out allow-list, AND
+ *   - the command is NOT a BYOK-allowed command with a BYOK key, AND
+ *   - the command is NOT a cockpit command in local-only mode, AND
+ *   - LITT_CLERK_TOKEN is not set
+ *
+ * In local-only mode (LITT_LOCAL_MODE=1), cockpit commands bypass the
+ * gate — the user gets local execution without auth. Remote/cloud
+ * features remain auth-gated at the provider level (resolveModelProvider
+ * and awaitRemoteReady enforce this at call time, not at the gate).
+ */
+export function requiresAuth(
+  command: string,
+  hasByokKey: boolean,
+  localMode: boolean,
+  clerkToken: boolean,
+): boolean {
+  const localOnlyBypass = localMode && COCKPIT_COMMANDS.has(command);
+  return (
+    !LOGGED_OUT_ALLOWED.has(command) &&
+    !(BYOK_ALLOWED.has(command) && hasByokKey) &&
+    !localOnlyBypass &&
+    !clerkToken
+  );
+}
 
 /**
  * Commands allowed without auth when a BYOK provider key is present.
@@ -244,20 +306,25 @@ async function main(): Promise<number> {
   // `litt shell`, `litt cockpit`, `litt tui`) and all runtime/project
   // commands require authentication.
   //
+  // EXCEPTION: LITT_LOCAL_MODE=1 allows the cockpit to launch without
+  // auth — the user explicitly opts into local-only execution. They get
+  // /local, the machine lane, slash commands, and local tools, but NO
+  // remote model, NO cloud agents, NO Railway. Remote/cloud features
+  // remain auth-gated at the provider level (resolveModelProvider and
+  // awaitRemoteReady enforce this at call time).
+  //
   // LITT_CLERK_TOKEN (temporary acceptance-test mechanism) bypasses the
   // gate — it's kept only so existing automated tests don't break.
   //
   // The CLI ships safe production defaults for the Clerk issuer, OAuth
   // client_id, and terminal-server URL. Auth is ALWAYS configured for a
   // normal installed CLI — env overrides are for dev/staging/testing
-  // only. The gate therefore ALWAYS engages (except for LITT_CLERK_TOKEN
-  // test bypass). Absence of env overrides must NOT disable mandatory
-  // authentication.
-  if (
-    !LOGGED_OUT_ALLOWED.has(command) &&
-    !(BYOK_ALLOWED.has(command) && hasByokKey()) &&
-    !process.env.LITT_CLERK_TOKEN
-  ) {
+  // only. The gate therefore ALWAYS engages (except for LITT_LOCAL_MODE,
+  // LITT_CLERK_TOKEN test bypass, and the logged-out/BYOK allow-lists).
+  // Absence of env overrides must NOT disable mandatory authentication.
+  const isCockpitCommand = command === "cockpit" || command === "shell" || command === "tui";
+  const localOnlyBypass = isLocalOnlyMode() && isCockpitCommand;
+  if (requiresAuth(command, hasByokKey(), isLocalOnlyMode(), !!process.env.LITT_CLERK_TOKEN)) {
     const authSession = getAuthSession();
     const signedIn = await authSession.isSignedIn();
 
