@@ -227,17 +227,24 @@ export async function cockpitCommand(args: string[]): Promise<number> {
     }
   })();
 
-  // Determine actual signed-in state — not hardcoded. In local-only
-  // mode (LITT_LOCAL_MODE=1) the cockpit may launch without auth.
+  // Determine actual signed-in state — not hardcoded. The cockpit may
+  // launch without auth when the execution target is LOCAL (the default).
   const authSessionForCheck = getAuthSession();
   const actuallySignedIn = await authSessionForCheck.isSignedIn().catch(() => false);
 
-  // In local-only mode without auth, surface a one-time notice so the
-  // user knows which features are available and which require sign-in.
-  if (!actuallySignedIn && process.env.LITT_LOCAL_MODE === "1") {
-    console.error(`${c.dim}LiTT running in LOCAL-ONLY mode (LITT_LOCAL_MODE=1).${c.reset}`);
-    console.error(`${c.dim}  Available: /local, machine lane, slash commands, local tools.${c.reset}`);
-    console.error(`${c.dim}  Sign in (litt login) for remote model, cloud agents, and Railway.${c.reset}`);
+  // Surface a one-time notice when signed out so the user knows which
+  // features are available and which require sign-in.
+  if (!actuallySignedIn) {
+    const localOnly = process.env.LITT_LOCAL_ONLY === "1" || process.env.LITT_LOCAL_MODE === "1";
+    if (localOnly) {
+      console.error(`${c.dim}LiTT running in LOCAL-ONLY mode (emergency/offline).${c.reset}`);
+      console.error(`${c.dim}  Available: /local, machine lane, slash commands, local tools.${c.reset}`);
+      console.error(`${c.dim}  Model/cloud/remote blocked. Unset LITT_LOCAL_ONLY to enable.${c.reset}`);
+    } else {
+      console.error(`${c.dim}LiTT running in LOCAL mode (not signed in).${c.reset}`);
+      console.error(`${c.dim}  Available: /local, machine lane, slash commands, local tools.${c.reset}`);
+      console.error(`${c.dim}  Sign in (litt login) or /remote for remote model, cloud agents, Railway.${c.reset}`);
+    }
   }
 
   // Launch the Ink cockpit IMMEDIATELY — don't wait for network calls.

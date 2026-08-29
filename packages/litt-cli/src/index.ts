@@ -155,16 +155,38 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
 const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help"]);
 
 /**
- * LITT_LOCAL_MODE=1 lets the cockpit launch without authentication.
- * This is the explicit local-only opt-in: the user gets local tool
- * execution (machine lane, /local, slash commands, git, adb, etc.)
- * but cannot use remote model inference, cloud agents, or Railway
- * execution without signing in. Remote features fail gracefully at
- * call time with a clear "sign in required" error — they are never
- * silently granted.
+ * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
+ * without authentication. This is the explicit local-only opt-in:
+ * the user gets local tool execution (machine lane, /local, slash
+ * commands, git, adb, etc.) but cannot use remote model inference,
+ * cloud agents, or Railway execution without signing in.
+ *
+ * LITT_LOCAL_ONLY is the canonical env var for emergency/offline mode.
+ * LITT_LOCAL_MODE is kept as legacy compat (same behavior).
+ *
+ * Additionally, the DEFAULT execution target is now LOCAL — so the
+ * cockpit can launch without auth even without these env vars, as long
+ * as the user doesn't try to use remote/model features. The auth gate
+ * allows the cockpit through when the target override is "local" (from
+ * --local flag or default).
  */
 function isLocalOnlyMode(): boolean {
-  return process.env.LITT_LOCAL_MODE === "1";
+  return process.env.LITT_LOCAL_ONLY === "1" || process.env.LITT_LOCAL_MODE === "1";
+}
+
+/**
+ * Whether the cockpit is launching with LOCAL as the execution target.
+ * This includes: --local flag, LITT_TARGET_OVERRIDE=local, default (no
+ * flag). When true, the cockpit can launch without auth — local tools
+ * work, but model/remote features need auth (enforced by the capability
+ * gate in the controller, not at the auth gate).
+ */
+function isLocalTarget(): boolean {
+  const override = process.env.LITT_TARGET_OVERRIDE;
+  if (override === "remote") return false;
+  if (override === "local") return true;
+  // No explicit override: default is LOCAL (unless LITT_LOCAL_ONLY/MODE)
+  return true;
 }
 
 /** Cockpit commands (bare `litt`, `litt shell`, `litt cockpit`, `litt tui`). */
@@ -180,31 +202,39 @@ const COCKPIT_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * Parameters:
  *   command       — the resolved command name
  *   hasByokKey    — whether a BYOK provider key is present
- *   localMode     — whether LITT_LOCAL_MODE=1 is set
+ *   localOnly     — whether LITT_LOCAL_ONLY/MODE=1 is set (emergency mode)
+ *   localTarget   — whether the execution target is LOCAL (default or --local)
  *   clerkToken    — whether LITT_CLERK_TOKEN is set (test bypass)
  *
  * The gate engages (returns true) when:
  *   - the command is NOT in the logged-out allow-list, AND
  *   - the command is NOT a BYOK-allowed command with a BYOK key, AND
- *   - the command is NOT a cockpit command in local-only mode, AND
+ *   - the command is NOT a cockpit command with a local target, AND
  *   - LITT_CLERK_TOKEN is not set
  *
- * In local-only mode (LITT_LOCAL_MODE=1), cockpit commands bypass the
- * gate — the user gets local execution without auth. Remote/cloud
- * features remain auth-gated at the provider level (resolveModelProvider
- * and awaitRemoteReady enforce this at call time, not at the gate).
+ * The cockpit can launch without auth when the execution target is LOCAL
+ * (which is now the DEFAULT). The user gets local execution without auth.
+ * Remote/cloud features remain auth-gated at the provider level
+ * (resolveModelProvider and awaitRemoteReady enforce this at call time,
+ * not at the gate) and by the capability gate in the controller.
  */
 export function requiresAuth(
   command: string,
   hasByokKey: boolean,
-  localMode: boolean,
+  localOnly: boolean,
+  localTarget: boolean,
   clerkToken: boolean,
 ): boolean {
-  const localOnlyBypass = localMode && COCKPIT_COMMANDS.has(command);
+  // Cockpit commands bypass the auth gate when the target is LOCAL.
+  // This includes: default (no flag), --local, LITT_LOCAL_ONLY, LITT_LOCAL_MODE.
+  // The capability gate in the controller handles blocking model/remote
+  // paths when signed out — the auth gate just decides whether to
+  // check isSignedIn at all.
+  const cockpitLocalBypass = COCKPIT_COMMANDS.has(command) && (localOnly || localTarget);
   return (
     !LOGGED_OUT_ALLOWED.has(command) &&
     !(BYOK_ALLOWED.has(command) && hasByokKey) &&
-    !localOnlyBypass &&
+    !cockpitLocalBypass &&
     !clerkToken
   );
 }
@@ -288,6 +318,15 @@ async function main(): Promise<number> {
   const rest = dispatch.rest;
   const mode = dispatch.mode;
 
+  // ─── Execution target override ──────────────────────────────────
+  // --local / --remote flags set the initial execution target for the
+  // cockpit. Promote to LITT_TARGET_OVERRIDE so resolveExecutionTarget()
+  // in the cockpit picks it up. This is the highest-priority source:
+  //   CLI flag > LITT_LOCAL_ONLY > LITT_LOCAL_MODE > default LOCAL
+  if (dispatch.targetOverride) {
+    process.env.LITT_TARGET_OVERRIDE = dispatch.targetOverride;
+  }
+
   // ─── Project cwd override ───────────────────────────────────────
   // `--cwd <path>` lets a launcher that must chdir into the LiTT install
   // dir before exec'ing node pass the caller's real working directory.
@@ -324,7 +363,7 @@ async function main(): Promise<number> {
   // Absence of env overrides must NOT disable mandatory authentication.
   const isCockpitCommand = command === "cockpit" || command === "shell" || command === "tui";
   const localOnlyBypass = isLocalOnlyMode() && isCockpitCommand;
-  if (requiresAuth(command, hasByokKey(), isLocalOnlyMode(), !!process.env.LITT_CLERK_TOKEN)) {
+  if (requiresAuth(command, hasByokKey(), isLocalOnlyMode(), isLocalTarget(), !!process.env.LITT_CLERK_TOKEN)) {
     const authSession = getAuthSession();
     const signedIn = await authSession.isSignedIn();
 

@@ -1,51 +1,101 @@
 /**
- * executionTarget — the ONE canonical answer to "where does the model
- * call actually execute for this cockpit session".
+ * executionTarget — the canonical answer to "where does the model call
+ * execute for this cockpit session" AND "is the cockpit locked to
+ * local-only (emergency/offline mode)".
  *
- * This is deliberately a SEPARATE axis from two other, easily-confused
- * pieces of state that must never be conflated with it:
+ * Two SEPARATE concepts that must never be conflated:
  *
- *   - Transport state (RuntimeClient / cockpit-store `remoteRuntime`):
- *     offline | connecting | connected | reconnecting | error — whether
- *     the Socket.IO connection to terminal-server is currently up. This
- *     is connectivity, not a decision about where the model runs.
+ *   1. executionTarget: "local" | "remote"
+ *      - Where the model provider runs for this session.
+ *      - Switchable at runtime via /local and /remote commands.
+ *      - DEFAULT is "local" — LiTT starts LOCAL by default.
  *
- *   - Local tool-execution readiness (cockpit-store `localRuntime`):
- *     whether the CLI's own local RuntimeSession/ExecutionGateway is
- *     ready to run tools against the user's local project. This is
- *     ALWAYS "ready" once the cockpit boots, in BOTH executionTarget
- *     modes — REMOTE only moves the MODEL call server-side; tool calls
- *     always execute locally against the user's real project, because
- *     the server has no access to it.
+ *   2. localOnly: boolean
+ *      - Whether the cockpit is locked to local-only (emergency/offline).
+ *      - When true, model/remote/cloud paths are hard-blocked.
+ *      - Set by LITT_LOCAL_ONLY=1 (NOT LITT_LOCAL_MODE).
+ *      - When false, the user can freely switch between local and remote.
  *
- * executionTarget answers a third, different question: which
- * ModelProvider does the agent loop actually call — the LOCAL adapter
- * (model-provider.ts, direct fetch to openrouter.ai using a local
- * OPENROUTER_API_KEY) or RemoteModelProvider (remote-model-provider.ts,
- * an authenticated server-side proxy that never exposes a key to this
- * process).
+ * The distinction is critical:
+ *   executionTarget=local + localOnly=false
+ *     → LOCAL is active, but /remote can switch if authenticated
+ *   executionTarget=local + localOnly=true
+ *     → LOCAL is active AND remote is permanently blocked
+ *   executionTarget=remote
+ *     → REMOTE is active (implies localOnly=false)
  *
- * "remote" is the ONLY mode a normal paid customer should ever be in —
- * the cockpit already requires a signed-in Clerk session to launch at
- * all (see index.ts's auth gate), so there is no reason to require a
- * local provider key on top of that. "local" is an explicit developer/
- * BYOK opt-in, gated behind LITT_LOCAL_MODE=1 — never inferred from the
- * mere presence of a provider env var. That inference (a local key
- * happening to be set → silently execute locally) was the exact
- * production gap this module closes: REMOTE could show connected in
- * the header while every model call still ran locally underneath it.
+ * Resolution priority for the initial execution target:
+ *   explicit CLI flag (--local / --remote)
+ *   > LITT_LOCAL_ONLY=1 (forces local + localOnly)
+ *   > LITT_LOCAL_MODE=1 (legacy: forces local + localOnly)
+ *   > default LOCAL
  */
 
 export type ExecutionTarget = "local" | "remote";
 
 /**
- * Resolve the execution target for this process. Called once at cockpit
- * startup — the result does not change over the life of the session (a
- * developer restarts the CLI to flip LITT_LOCAL_MODE, they don't toggle
- * it mid-session).
+ * Full runtime mode — the two independent axes.
  */
-export function resolveExecutionTarget(): ExecutionTarget {
-  return process.env.LITT_LOCAL_MODE === "1" ? "local" : "remote";
+export interface RuntimeMode {
+  executionTarget: ExecutionTarget;
+  localOnly: boolean;
+}
+
+/**
+ * Resolve the initial runtime mode from env vars and CLI flags.
+ *
+ * Called once at cockpit startup. The executionTarget can be switched
+ * later via /local and /remote commands; localOnly is fixed for the
+ * session (changing it requires a restart with different env).
+ *
+ * Parameters:
+ *   flagTarget — "local" | "remote" | undefined (from --local/--remote)
+ *
+ * Resolution:
+ *   1. LITT_LOCAL_ONLY=1 → local + localOnly=true (emergency mode)
+ *   2. LITT_LOCAL_MODE=1 → local + localOnly=true (legacy compat)
+ *   3. --remote flag → remote + localOnly=false (if not locked)
+ *   4. --local flag → local + localOnly=false
+ *   5. default → local + localOnly=false
+ */
+export function resolveRuntimeMode(flagTarget?: ExecutionTarget): RuntimeMode {
+  // Emergency/offline mode: hard lock to local, block all remote
+  if (process.env.LITT_LOCAL_ONLY === "1") {
+    return { executionTarget: "local", localOnly: true };
+  }
+  // Legacy compat: LITT_LOCAL_MODE=1 behaves as local-only lock
+  if (process.env.LITT_LOCAL_MODE === "1") {
+    return { executionTarget: "local", localOnly: true };
+  }
+  // Explicit CLI flag (passed from index.ts via LITT_TARGET_OVERRIDE
+  // or directly as flagTarget)
+  const effectiveTarget = flagTarget ?? (
+    process.env.LITT_TARGET_OVERRIDE === "remote" ? "remote" :
+    process.env.LITT_TARGET_OVERRIDE === "local" ? "local" : undefined
+  );
+  if (effectiveTarget === "remote") {
+    return { executionTarget: "remote", localOnly: false };
+  }
+  if (effectiveTarget === "local") {
+    return { executionTarget: "local", localOnly: false };
+  }
+  // Default: LOCAL, remote available
+  return { executionTarget: "local", localOnly: false };
+}
+
+/**
+ * Resolve the initial execution target (backward compat).
+ * Uses resolveRuntimeMode and returns just the target.
+ */
+export function resolveExecutionTarget(flagTarget?: ExecutionTarget): ExecutionTarget {
+  return resolveRuntimeMode(flagTarget).executionTarget;
+}
+
+/**
+ * Resolve whether local-only mode is active.
+ */
+export function resolveLocalOnly(): boolean {
+  return resolveRuntimeMode().localOnly;
 }
 
 /** Human label for the header/status bar. */

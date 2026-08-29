@@ -55,7 +55,7 @@ describe("capability gate: integration — blocks before model routing", () => {
     expect(machineMatch).toBeNull(); // machine lane: no match
 
     // The gate decision:
-    const blocked = shouldBlockModelPath(false, "local");
+    const blocked = shouldBlockModelPath(false, "local", false);
     expect(blocked).toBe(true);
 
     // If the gate blocks, classifyIntent must NOT be called.
@@ -75,15 +75,15 @@ describe("capability gate: integration — blocks before model routing", () => {
     const machineMatch = matchMachineLane("Explain React hooks");
     expect(machineMatch).toBeNull();
 
-    const blocked = shouldBlockModelPath(false, "local");
+    const blocked = shouldBlockModelPath(false, "local", false);
     expect(blocked).toBe(true);
   });
 
   it("D. authenticated mode → gate does NOT block normal chat", () => {
     // Signed in + local mode (BYOK) — gate allows
-    expect(shouldBlockModelPath(true, "local")).toBe(false);
+    expect(shouldBlockModelPath(true, "local", false)).toBe(false);
     // Signed in + remote mode — gate allows
-    expect(shouldBlockModelPath(true, "remote")).toBe(false);
+    expect(shouldBlockModelPath(true, "remote", false)).toBe(false);
   });
 
   it("E. local fast-lane queries still work signed out (gate doesn't interfere)", () => {
@@ -101,7 +101,7 @@ describe("capability gate: integration — blocks before model routing", () => {
     // The gate is a pure state check. When it returns true, the controller
     // returns early with the gate message — BEFORE classifyIntent,
     // resolveModelProvider, awaitRemoteReady, or any provider call.
-    const blocked = shouldBlockModelPath(false, "local");
+    const blocked = shouldBlockModelPath(false, "local", false);
     expect(blocked).toBe(true);
 
     // Verify the gate message is the expected one (no provider error leaks)
@@ -117,8 +117,8 @@ describe("capability gate: integration — blocks before model routing", () => {
   it("gate blocks 'Railway production filesystem' and 'Explain React hooks' equally", () => {
     // Both are blocked by the same state check — the gate doesn't
     // inspect prompt wording at all.
-    const blockRailway = shouldBlockModelPath(false, "local");
-    const blockChat = shouldBlockModelPath(false, "local");
+    const blockRailway = shouldBlockModelPath(false, "local", false);
+    const blockChat = shouldBlockModelPath(false, "local", false);
     expect(blockRailway).toBe(blockChat);
     expect(blockRailway).toBe(true);
   });
@@ -127,7 +127,17 @@ describe("capability gate: integration — blocks before model routing", () => {
     // During startup, before auth resolves, don't block — avoid false
     // positives that would block an authenticated user during the
     // brief resolution window.
-    expect(shouldBlockModelPath(null, "local")).toBe(false);
-    expect(shouldBlockModelPath(undefined, "local")).toBe(false);
+    expect(shouldBlockModelPath(null, "local", false)).toBe(false);
+    expect(shouldBlockModelPath(undefined, "local", false)).toBe(false);
+  });
+
+  // ─── New: localOnly emergency mode ─────────────────────────────
+
+  it("G. localOnly=true blocks even when signed in", () => {
+    expect(shouldBlockModelPath(true, "local", true)).toBe(true);
+  });
+
+  it("H. localOnly=false + signed in + local → allows (can switch to remote)", () => {
+    expect(shouldBlockModelPath(true, "local", false)).toBe(false);
   });
 });

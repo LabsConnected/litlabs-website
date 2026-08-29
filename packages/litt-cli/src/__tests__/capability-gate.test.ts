@@ -1,110 +1,99 @@
 /**
- * Capability gate regression tests — signed-out local-only mode.
+ * Capability gate tests — local-only mode + signed-out local mode.
  *
- * Tests the `shouldBlockModelPath` pure function that decides whether
- * the model/remote path must be blocked because the cockpit is in
- * signed-out local-only mode.
+ * Tests the `shouldBlockModelPath` pure function with the new 3-parameter
+ * signature: (signedIn, executionTarget, localOnly).
  *
- * The rule: signed out + local-only mode = no model/network path, period.
+ * The gate blocks when:
+ *   - localOnly === true (emergency mode: hard block), OR
+ *   - signedIn === false AND executionTarget === "local" (signed-out local)
  *
- * This is a CAPABILITY gate based on session/auth/local-mode state,
- * NOT a keyword matcher. It does not inspect prompt wording.
+ * The gate allows when:
+ *   - signedIn === true AND localOnly === false (authenticated, not locked)
+ *   - executionTarget === "remote" AND localOnly === false (remote mode)
+ *   - signedIn === null/undefined (auth not yet resolved)
  */
 
 import { describe, it, expect } from "vitest";
-import { shouldBlockModelPath } from "../lib/capability-gate.js";
+import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
 
 describe("capability gate: shouldBlockModelPath", () => {
-  // ─── Core rule: signed out + local mode = BLOCK ────────────────
+  // ─── Emergency mode: localOnly=true always blocks ──────────────
 
-  it("blocks when signed out + local mode", () => {
-    expect(shouldBlockModelPath(false, "local")).toBe(true);
+  it("blocks when localOnly=true + signed in + local target", () => {
+    expect(shouldBlockModelPath(true, "local", true)).toBe(true);
   });
 
-  // ─── Authenticated mode: NEVER block ───────────────────────────
-
-  it("does NOT block when signed in + local mode", () => {
-    // BYOK local mode with auth — user can use local model provider
-    expect(shouldBlockModelPath(true, "local")).toBe(false);
+  it("blocks when localOnly=true + signed out + local target", () => {
+    expect(shouldBlockModelPath(false, "local", true)).toBe(true);
   });
 
-  it("does NOT block when signed in + remote mode", () => {
-    // Normal authenticated cloud mode
-    expect(shouldBlockModelPath(true, "remote")).toBe(false);
+  it("blocks when localOnly=true even with remote target", () => {
+    // localOnly hard-blocks regardless of target — emergency mode
+    expect(shouldBlockModelPath(true, "remote", true)).toBe(true);
   });
 
-  it("does NOT block when signed out + remote mode", () => {
-    // Remote mode requires auth at the gate (index.ts) — if somehow
-    // reached, the gate doesn't block here; the provider call will fail
-    // with a clear auth error. The capability gate is specifically for
-    // the local-only signed-out case.
-    expect(shouldBlockModelPath(false, "remote")).toBe(false);
+  // ─── Signed-out local mode: blocks ─────────────────────────────
+
+  it("blocks when signed out + local target + localOnly=false", () => {
+    expect(shouldBlockModelPath(false, "local", false)).toBe(true);
   });
 
-  // ─── Unknown auth state: do NOT block (avoid false positives) ──
+  // ─── Authenticated local mode: allows (can switch to remote) ───
+
+  it("does NOT block when signed in + local target + localOnly=false", () => {
+    // This is the key new behavior: LOCAL is the default, but the user
+    // is authenticated — they can use BYOK model or switch to /remote
+    expect(shouldBlockModelPath(true, "local", false)).toBe(false);
+  });
+
+  // ─── Remote mode: allows (when not localOnly) ──────────────────
+
+  it("does NOT block when signed in + remote target + localOnly=false", () => {
+    expect(shouldBlockModelPath(true, "remote", false)).toBe(false);
+  });
+
+  it("does NOT block when signed out + remote target + localOnly=false", () => {
+    // Remote target with signed-out: the auth gate at index.ts handles
+    // this (cockpit with --remote requires auth). The capability gate
+    // doesn't block here — the provider call will fail with auth error.
+    expect(shouldBlockModelPath(false, "remote", false)).toBe(false);
+  });
+
+  // ─── Unknown auth state: do NOT block ──────────────────────────
 
   it("does NOT block when auth state is null (not yet resolved)", () => {
-    // During the brief startup window before auth resolves, don't block
-    expect(shouldBlockModelPath(null, "local")).toBe(false);
+    expect(shouldBlockModelPath(null, "local", false)).toBe(false);
   });
 
-  it("does NOT block when auth state is undefined (not provided)", () => {
-    expect(shouldBlockModelPath(undefined, "local")).toBe(false);
+  it("does NOT block when auth state is undefined", () => {
+    expect(shouldBlockModelPath(undefined, "local", false)).toBe(false);
   });
 
-  // ─── The gate is state-based, NOT keyword-based ────────────────
-  // These tests verify the gate's decision does not depend on any
-  // prompt wording — it's purely auth + execution-target state.
+  // ─── Messages ──────────────────────────────────────────────────
 
-  it("gate decision is independent of prompt wording (Railway)", () => {
-    // The gate doesn't see the prompt at all — it's a pure state check
-    const blockRailwayRequest = shouldBlockModelPath(false, "local");
-    const blockChatRequest = shouldBlockModelPath(false, "local");
-    // Both are blocked equally — the gate doesn't care what the prompt says
-    expect(blockRailwayRequest).toBe(blockChatRequest);
-    expect(blockRailwayRequest).toBe(true);
+  it("CAPABILITY_GATE_MESSAGE mentions cloud/model access", () => {
+    expect(CAPABILITY_GATE_MESSAGE).toContain("cloud/model access");
   });
 
-  it("gate decision is independent of prompt wording (casual chat)", () => {
-    // "Explain React hooks" is blocked the same as "Show Railway filesystem"
-    // — both need the model, and the model is unavailable signed out
-    expect(shouldBlockModelPath(false, "local")).toBe(true);
-  });
-});
-
-// ─── Integration contract: what the gate protects against ──────────
-
-describe("capability gate: protected paths (contract)", () => {
-  // These tests document the contract: when the gate is active
-  // (shouldBlockModelPath === true), the following must NOT be called:
-  //   - classifyIntent()
-  //   - resolveModelProvider()
-  //   - awaitRemoteReady()
-  //   - RemoteModelProvider
-  //   - streamModel()
-  //   - any fetch() to terminal-server
-  //
-  // The gate returns a local UI response instead. The controller's
-  // implementation places the gate AFTER all local-only routing paths
-  // (LOCAL fast lane, MACHINE lane, slash commands) and BEFORE
-  // classifyIntent() — so anything that reaches the gate has already
-  // failed to match a local-only path and needs model/remote capability.
-
-  it("the gate blocks BEFORE classifyIntent (by construction)", () => {
-    // If shouldBlockModelPath returns true, the controller returns early
-    // before reaching classifyIntent(). This is verified by the code
-    // structure: the gate is placed after machine-lane and before
-    // classifyIntent() in the submit flow.
-    // Here we just verify the decision function returns the right value.
-    expect(shouldBlockModelPath(false, "local")).toBe(true);
+  it("CAPABILITY_GATE_MESSAGE does not leak provider errors", () => {
+    expect(CAPABILITY_GATE_MESSAGE).not.toContain("429");
+    expect(CAPABILITY_GATE_MESSAGE).not.toContain("OpenAI");
+    expect(CAPABILITY_GATE_MESSAGE).not.toContain("OpenRouter");
   });
 
-  it("the gate does NOT block local-only paths (by construction)", () => {
-    // LOCAL fast lane, MACHINE lane, and slash commands are handled
-    // BEFORE the gate in the controller. They never reach the gate.
-    // The gate only blocks what falls through after all local paths
-    // have failed to match.
-    expect(shouldBlockModelPath(true, "local")).toBe(false);
-    expect(shouldBlockModelPath(false, "remote")).toBe(false);
+  it("LOCAL_ONLY_GATE_MESSAGE mentions local-only mode", () => {
+    expect(LOCAL_ONLY_GATE_MESSAGE).toContain("Local-only mode");
+    expect(LOCAL_ONLY_GATE_MESSAGE).toContain("LITT_LOCAL_ONLY");
+  });
+
+  // ─── State-based, NOT keyword-based ────────────────────────────
+
+  it("gate decision is independent of prompt wording", () => {
+    // The gate doesn't see the prompt — it's a pure state check
+    const blockRailway = shouldBlockModelPath(false, "local", false);
+    const blockChat = shouldBlockModelPath(false, "local", false);
+    expect(blockRailway).toBe(blockChat);
+    expect(blockRailway).toBe(true);
   });
 });

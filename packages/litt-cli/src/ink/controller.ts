@@ -65,7 +65,7 @@ import {
   formatMachineResult,
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
-import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE } from "../lib/capability-gate.js";
+import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
@@ -1316,11 +1316,38 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // ─── /local slash command → MACHINE lane (deterministic, no remote) ──
-    // Runs explicit local commands through the local ExecutionGateway
+    // ─── /local slash command ──────────────────────────────────────
+    // Two forms:
+    //   /local              → switch execution target to LOCAL (session)
+    //   /local <command>    → execute command through MACHINE lane (local)
+    //
+    // The no-args form switches the cockpit's execution target to LOCAL.
+    // The with-args form runs commands through the local ExecutionGateway
     // WITHOUT contacting the remote model server. Works when Railway is
     // down. Each command's execution locus (LOCAL) is shown in the feed.
     if (input.startsWith("/local ") || input === "/local") {
+      // No-args form: switch execution target to LOCAL
+      if (input === "/local") {
+        store.actions.setExecutionTarget("local");
+        store.actions.addActivity({
+          id: `act_${Date.now()}_local`,
+          ts: Date.now(),
+          type: "info",
+          tag: "SWITCH",
+          text: "Execution target switched to LOCAL",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: "Execution target switched to LOCAL.",
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "system",
+        });
+        persistSession();
+        return;
+      }
+
+      // With-args form: MACHINE lane execution
       const machineMatch = matchMachineLane(input);
       if (!machineMatch || machineMatch.commands.length === 0) {
         store.actions.addActivity({
@@ -1337,6 +1364,90 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         perf: null,
         userMessage: input,
       });
+      return;
+    }
+
+    // ─── /remote slash command → switch execution target to REMOTE ──
+    // Validates auth + remote capability BEFORE switching. Does not
+    // switch on failure. Does not disconnect remote when switching to LOCAL.
+    if (input === "/remote") {
+      // Check local-only emergency mode first
+      if (store.state.localOnly) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}_remote`,
+          ts: Date.now(),
+          type: "error",
+          tag: "GATE",
+          text: "Remote mode blocked: local-only mode is active (LITT_LOCAL_ONLY=1)",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: LOCAL_ONLY_GATE_MESSAGE,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "system",
+        });
+        persistSession();
+        return;
+      }
+
+      // Check authentication
+      if (signedIn === false) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}_remote`,
+          ts: Date.now(),
+          type: "error",
+          tag: "GATE",
+          text: "Remote mode requires sign-in",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: "Remote mode requires sign-in.\nRun: litt login",
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "system",
+        });
+        persistSession();
+        return;
+      }
+
+      // Check remote transport availability
+      if (store.state.remoteRuntime === "offline" || store.state.remoteRuntime === "error") {
+        store.actions.addActivity({
+          id: `act_${Date.now()}_remote`,
+          ts: Date.now(),
+          type: "error",
+          tag: "GATE",
+          text: "REMOTE unavailable — local mode remains active",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: "REMOTE unavailable — local mode remains active.",
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "system",
+        });
+        persistSession();
+        return;
+      }
+
+      // Validation passed: switch to REMOTE
+      store.actions.setExecutionTarget("remote");
+      store.actions.addActivity({
+        id: `act_${Date.now()}_remote`,
+        ts: Date.now(),
+        type: "info",
+        tag: "SWITCH",
+        text: "Execution target switched to REMOTE",
+      });
+      store.actions.addChatMessage({
+        role: "assistant",
+        content: "Execution target switched to REMOTE.",
+        ts: Date.now(),
+        status: "complete",
+        servedModel: "system",
+      });
+      persistSession();
       return;
     }
 
@@ -1584,14 +1695,17 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     //
     // Authenticated users are completely unaffected — signedIn=true or
     // executionTarget="remote" means this gate never engages.
-    if (shouldBlockModelPath(signedIn, store.state.executionTarget)) {
+    if (shouldBlockModelPath(signedIn, store.state.executionTarget, store.state.localOnly)) {
       store.actions.addChatMessage({
         role: "user",
         content: input,
         ts: Date.now(),
         status: "complete",
       });
-      const gateMessage = CAPABILITY_GATE_MESSAGE;
+      const gateMessage = store.state.localOnly ? LOCAL_ONLY_GATE_MESSAGE : CAPABILITY_GATE_MESSAGE;
+      const gateReason = store.state.localOnly
+        ? "Capability gate: model/remote path blocked (local-only emergency mode)"
+        : "Capability gate: model/remote path blocked (signed out + local mode)";
       store.actions.addChatMessage({
         role: "assistant",
         content: gateMessage,
@@ -1604,7 +1718,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         ts: Date.now(),
         type: "info",
         tag: "GATE",
-        text: "Capability gate: model/remote path blocked (signed out + local-only mode)",
+        text: gateReason,
       });
       persistSession();
       return;

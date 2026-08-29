@@ -35,10 +35,17 @@ export interface DispatchResult {
   isVersion: boolean;
   /** Permission mode extracted from --mode <plan|act|auto>. */
   mode: "plan" | "act" | "auto";
-  /** True if --remote was present. */
+  /** True if --remote was present (legacy flag, maps to targetOverride="remote"). */
   useRemote: boolean;
   /** Workspace ID extracted from --workspace <id>. */
   workspaceId?: string;
+  /**
+   * Execution target override from --local or --remote flag.
+   * undefined = no explicit flag (use default/env resolution).
+   * "local" = --local was passed.
+   * "remote" = --remote was passed.
+   */
+  targetOverride?: "local" | "remote";
   /**
    * Project cwd extracted from --cwd <path>. When set, the CLI uses this
    * as the starting directory for project detection instead of
@@ -62,7 +69,8 @@ const DESKTOP_COMMANDS = new Set(["desktop"]);
  * Resolve raw argv (after process.argv.slice(2)) into a dispatch decision.
  *
  * Flags handled here:
- *   --remote       (stripped — caller checks useRemote)
+ *   --local        (stripped — caller reads targetOverride="local")
+ *   --remote       (stripped — caller reads targetOverride="remote" + useRemote)
  *   --mode <m>     (stripped — caller reads mode)
  *   --workspace <id> (stripped — caller reads workspaceId)
  *   --cwd <path>   (stripped — caller reads cwd; preserves caller dir when a launcher chdirs)
@@ -78,10 +86,21 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
     ? [...rawArgs.slice(0, remoteIdx), ...rawArgs.slice(remoteIdx + 1)]
     : rawArgs;
 
+  // Extract --local flag (can appear anywhere)
+  const localIdx = argsWithoutRemote.indexOf("--local");
+  const argsWithoutLocal = localIdx !== -1
+    ? [...argsWithoutRemote.slice(0, localIdx), ...argsWithoutRemote.slice(localIdx + 1)]
+    : argsWithoutRemote;
+
+  // Determine target override: --remote takes priority over --local
+  // (if both are passed, --remote wins — explicit remote request)
+  const targetOverride: "local" | "remote" | undefined =
+    useRemote ? "remote" : localIdx !== -1 ? "local" : undefined;
+
   // Extract --mode flag
-  const modeIdx = argsWithoutRemote.indexOf("--mode");
+  const modeIdx = argsWithoutLocal.indexOf("--mode");
   let mode: "plan" | "act" | "auto" = "act";
-  let argsWithoutMode = argsWithoutRemote;
+  let argsWithoutMode = argsWithoutLocal;
   if (modeIdx !== -1 && modeIdx + 1 < argsWithoutRemote.length) {
     const modeVal = argsWithoutRemote[modeIdx + 1];
     if (modeVal === "plan" || modeVal === "act" || modeVal === "auto") {
@@ -145,6 +164,7 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
       isVersion,
       mode,
       useRemote,
+      targetOverride,
       workspaceId,
       cwd,
     };
@@ -170,6 +190,7 @@ export function resolveDispatch(rawArgs: string[]): DispatchResult {
     isVersion: false,
     mode,
     useRemote,
+    targetOverride,
     workspaceId,
     cwd,
   };

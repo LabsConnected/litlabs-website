@@ -363,11 +363,30 @@ describe("remote readiness: transport projection during connecting", () => {
 });
 
 describe("remote readiness: executionTarget resolution", () => {
-  it("resolveExecutionTarget returns remote by default", () => {
-    const original = process.env.LITT_LOCAL_MODE;
+  it("resolveExecutionTarget returns local by default", () => {
+    const origLocalMode = process.env.LITT_LOCAL_MODE;
+    const origLocalOnly = process.env.LITT_LOCAL_ONLY;
+    const origOverride = process.env.LITT_TARGET_OVERRIDE;
     delete process.env.LITT_LOCAL_MODE;
-    expect(resolveExecutionTarget()).toBe("remote");
-    if (original !== undefined) process.env.LITT_LOCAL_MODE = original;
+    delete process.env.LITT_LOCAL_ONLY;
+    delete process.env.LITT_TARGET_OVERRIDE;
+    expect(resolveExecutionTarget()).toBe("local");
+    if (origLocalMode !== undefined) process.env.LITT_LOCAL_MODE = origLocalMode;
+    if (origLocalOnly !== undefined) process.env.LITT_LOCAL_ONLY = origLocalOnly;
+    if (origOverride !== undefined) process.env.LITT_TARGET_OVERRIDE = origOverride;
+  });
+
+  it("resolveExecutionTarget returns remote with --remote flag", () => {
+    const origLocalMode = process.env.LITT_LOCAL_MODE;
+    const origLocalOnly = process.env.LITT_LOCAL_ONLY;
+    const origOverride = process.env.LITT_TARGET_OVERRIDE;
+    delete process.env.LITT_LOCAL_MODE;
+    delete process.env.LITT_LOCAL_ONLY;
+    delete process.env.LITT_TARGET_OVERRIDE;
+    expect(resolveExecutionTarget("remote")).toBe("remote");
+    if (origLocalMode !== undefined) process.env.LITT_LOCAL_MODE = origLocalMode;
+    if (origLocalOnly !== undefined) process.env.LITT_LOCAL_ONLY = origLocalOnly;
+    if (origOverride !== undefined) process.env.LITT_TARGET_OVERRIDE = origOverride;
   });
 
   it("resolveExecutionTarget returns local when LITT_LOCAL_MODE=1", () => {
@@ -376,6 +395,14 @@ describe("remote readiness: executionTarget resolution", () => {
     expect(resolveExecutionTarget()).toBe("local");
     if (original !== undefined) process.env.LITT_LOCAL_MODE = original;
     else delete process.env.LITT_LOCAL_MODE;
+  });
+
+  it("resolveExecutionTarget returns local when LITT_LOCAL_ONLY=1", () => {
+    const origLocalOnly = process.env.LITT_LOCAL_ONLY;
+    process.env.LITT_LOCAL_ONLY = "1";
+    expect(resolveExecutionTarget()).toBe("local");
+    if (origLocalOnly !== undefined) process.env.LITT_LOCAL_ONLY = origLocalOnly;
+    else delete process.env.LITT_LOCAL_ONLY;
   });
 });
 

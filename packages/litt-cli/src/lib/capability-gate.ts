@@ -1,10 +1,25 @@
 /**
- * Capability gate — signed-out local-mode routing boundary.
+ * Capability gate — local-only mode routing boundary.
  *
  * Pure function that decides whether the model/remote path must be
- * blocked because the cockpit is in signed-out local-only mode.
+ * blocked because the cockpit is in local-only (emergency/offline) mode.
  *
- * The rule: signed out + local-only mode = no model/network path, period.
+ * The hard gate is based on `localOnly`, NOT merely `executionTarget === "local"`.
+ * This is the critical distinction:
+ *
+ *   executionTarget=local + localOnly=false
+ *     → LOCAL is the default/preferred, but /remote can switch
+ *     → model path is NOT blocked (the user may have a BYOK key)
+ *
+ *   executionTarget=local + localOnly=true
+ *     → emergency/offline mode, model/remote hard-blocked
+ *
+ *   signed out + executionTarget=local + localOnly=false
+ *     → local tools work, but model path needs auth
+ *     → blocked (no auth = no model access)
+ *
+ *   signed in + executionTarget=local + localOnly=false
+ *     → local tools work, model path allowed (BYOK or local provider)
  *
  * This is a CAPABILITY gate based on session/auth/local-mode state,
  * NOT a keyword matcher. It does not inspect prompt wording.
@@ -13,37 +28,52 @@
 import type { ExecutionTarget } from "./execution-target.js";
 
 /**
- * Returns true when the model/remote path must be blocked because the
- * cockpit is in signed-out local-only mode.
+ * Returns true when the model/remote path must be blocked.
  *
  * Parameters:
  *   signedIn        — whether the user is authenticated (null = unknown,
  *                     treated as not-blocked to avoid false positives
  *                     during the brief auth-resolution window at startup)
  *   executionTarget — "local" or "remote"
+ *   localOnly       — whether emergency/offline mode is active
  *
  * Returns true (block) when:
- *   - signedIn is explicitly false (NOT null/undefined), AND
- *   - executionTarget is "local" (LITT_LOCAL_MODE=1)
+ *   - localOnly is true (emergency mode: hard block all model/remote), OR
+ *   - signedIn is explicitly false AND executionTarget is "local"
+ *     (signed-out local mode: no auth = no model access)
  *
  * Returns false (allow) when:
- *   - the user is authenticated (signedIn === true), OR
- *   - executionTarget is "remote" (normal cloud mode), OR
- *   - signedIn is null/undefined (auth state not yet resolved — don't
- *     block during the startup window before auth resolves)
+ *   - the user is authenticated AND localOnly is false, OR
+ *   - executionTarget is "remote" AND localOnly is false, OR
+ *   - signedIn is null/undefined (auth state not yet resolved)
  */
 export function shouldBlockModelPath(
   signedIn: boolean | null | undefined,
   executionTarget: ExecutionTarget,
+  localOnly: boolean,
 ): boolean {
-  return signedIn === false && executionTarget === "local";
+  // Emergency/offline mode: hard block regardless of auth
+  if (localOnly) return true;
+  // Signed-out local mode: no auth = no model access
+  if (signedIn === false && executionTarget === "local") return true;
+  // All other cases: allow
+  return false;
 }
 
 /**
  * The user-facing message shown when the capability gate blocks a
- * model/remote request in signed-out local-only mode.
+ * model/remote request.
  */
 export const CAPABILITY_GATE_MESSAGE =
   "This request requires LiTT cloud/model access. " +
-  "Sign in (`litt login`) or leave local-only mode (unset LITT_LOCAL_MODE) to continue.\n\n" +
+  "Sign in (`litt login`) or switch to remote mode (`/remote`) to continue.\n\n" +
   "Available without auth: /local, machine lane, slash commands, local tools.";
+
+/**
+ * Message for when local-only (emergency) mode blocks a request.
+ */
+export const LOCAL_ONLY_GATE_MESSAGE =
+  "Local-only mode is active (LITT_LOCAL_ONLY=1). " +
+  "Model/cloud/remote access is blocked. " +
+  "Unset LITT_LOCAL_ONLY and restart to enable remote features.\n\n" +
+  "Available: /local, machine lane, slash commands, local tools.";

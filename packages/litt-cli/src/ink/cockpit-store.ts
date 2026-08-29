@@ -14,7 +14,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
 import { ToolProgressStore, type ToolProgressSnapshot } from "./tool-progress-store.js";
 import { FocusEpochTracker } from "./focus-state.js";
-import { resolveExecutionTarget } from "../lib/execution-target.js";
+import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import {
   loadModelPrefs,
   saveModelPrefs,
@@ -233,10 +233,14 @@ export interface CockpitUIState {
   localRuntime: LocalRuntimeState;
   /** Remote terminal-server connection state — independent of local */
   remoteRuntime: RemoteRuntimeState;
-  /** Where the MODEL provider executes for this session — set once at
-   *  startup (see resolveExecutionTarget). NOT the same thing as
+  /** Where the MODEL provider executes for this session — switchable
+   *  at runtime via /local and /remote commands. NOT the same thing as
    *  remoteRuntime (transport) or localRuntime (tool execution). */
   executionTarget: ExecutionTarget;
+  /** Whether emergency/offline mode is active (LITT_LOCAL_ONLY=1).
+   *  When true, model/remote/cloud paths are hard-blocked. Fixed for
+   *  the session — changing requires a restart. */
+  localOnly: boolean;
   currentRunId: string | null;
   /** Mission tracking — null when no mission is active */
   missionState: MissionState | null;
@@ -345,10 +349,14 @@ export function useCockpitStore() {
   const [connected, setConnected] = useState(false);
   const [localRuntime, setLocalRuntime] = useState<LocalRuntimeState>("starting");
   const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntimeState>("offline");
-  // Set ONCE for the life of the session — not toggled at runtime (a
-  // developer flips LITT_LOCAL_MODE and restarts the CLI, they don't
-  // switch mid-session). No setter is exposed in actions.
-  const [executionTarget] = useState<ExecutionTarget>(() => resolveExecutionTarget());
+  // executionTarget is switchable at runtime via /local and /remote.
+  // Initial value comes from resolveExecutionTarget (which checks
+  // --local/--remote flags, LITT_LOCAL_ONLY, LITT_LOCAL_MODE, then
+  // defaults to LOCAL).
+  const [executionTarget, setExecutionTarget] = useState<ExecutionTarget>(() => resolveExecutionTarget());
+  // localOnly is fixed for the session — emergency/offline mode.
+  // Changing it requires a restart with different env vars.
+  const [localOnly] = useState<boolean>(() => resolveLocalOnly());
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   // Model prefs — loaded once from ~/.litt/model-prefs.json so the chosen
   // model + routing mode survive closing and reopening litt.
@@ -895,6 +903,7 @@ export function useCockpitStore() {
       activityLog,
       connected,
       executionTarget,
+      localOnly,
       localRuntime,
       remoteRuntime,
       currentRunId,
@@ -937,6 +946,7 @@ export function useCockpitStore() {
       setConnected,
       setLocalRuntime,
       setRemoteRuntime,
+      setExecutionTarget,
       setCurrentRunId,
       updateSelectedModel,
       updateRoutingMode,
