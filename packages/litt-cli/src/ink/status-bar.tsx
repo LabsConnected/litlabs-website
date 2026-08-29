@@ -39,6 +39,7 @@ import {
   formatDuration, approvalWaitSeconds, busySecondsExcludingApproval,
   type RuntimeState,
 } from "./runtime-state.js";
+import { SectionDivider, classifyWidth, RepoStateBadge, ModeToggle } from "./ui-primitives.js";
 
 export interface StatusBarProps {
   project: string;
@@ -72,6 +73,7 @@ export function StatusBar({
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+  const w = classifyWidth(width);
 
   // ── ONE authoritative runtime state — never a self-derived status ──
   // Approval, working, and terminal states are decided by the shared
@@ -112,9 +114,6 @@ export function StatusBar({
   // ── Line 2 right: ⚠ APPROVAL / ◆ Running / ✓ Done / × failed / git ──
   let right: React.ReactElement;
   if (runtime === "waiting_for_approval") {
-    // Gold — attention is required. NEVER "Working" here. The duration
-    // counts ONLY the approval wait, and the pending count surfaces
-    // queued approvals ("· 2 pending") so depth is never invisible.
     const countSuffix = approvalCount > 1 ? ` · ${approvalCount} pending` : "";
     right = (
       <Text color={COLORS.gold} bold>
@@ -122,7 +121,6 @@ export function StatusBar({
       </Text>
     );
   } else if (runtime === "planning" || runtime === "running" || runtime === "verifying") {
-    // Purple ◆ — active LiTT work, duration secondary, approval-free.
     right = (
       <Text color={COLORS.brand}>
         {`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)} · ${formatDuration(activeSeconds)}`}
@@ -144,11 +142,9 @@ export function StatusBar({
         <Text dimColor>  v View</Text>
       </Text>
     );
-  } else if (gitModified + gitUntracked > 0) {
-    // Dirty state: subtle dim warning, not visually dominant.
-    right = <Text dimColor color={COLORS.warning}>+{gitModified + gitUntracked}</Text>;
   } else {
-    right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
+    // Use the reusable RepoStateBadge for clean/dirty state
+    right = <RepoStateBadge modified={gitModified} untracked={gitUntracked} />;
   }
   // runtimeColorRole is the semantic contract used by tests — the footer
   // must render each state in its declared role color.
@@ -198,13 +194,7 @@ export function StatusBar({
     </Text>
   );
 
-  const right1 = (
-    <Text>
-      <Text color={mode === "plan" ? COLORS.brand : COLORS.secondary} bold={mode === "plan"}>{planDot} Plan</Text>
-      <Text dimColor>   </Text>
-      <Text color={mode === "act" ? COLORS.brand : COLORS.secondary} bold={mode === "act"}>{actDot} Act</Text>
-    </Text>
-  );
+  const right1 = <ModeToggle active={mode} />;
 
   const projectShort = truncateTail(project, Math.max(10, Math.floor(left2Max * 0.42)));
   const branchShort = truncateTail(branch, Math.max(10, Math.floor(left2Max * 0.36)));
@@ -221,7 +211,7 @@ export function StatusBar({
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color={COLORS.secondaryDim}>{"─".repeat(Math.max(20, Math.min(width - 4, 72)))}</Text>
+      <SectionDivider width={Math.max(20, Math.min(width - 4, 72))} />
       <Box justifyContent="space-between">
         {left1}
         {right1}

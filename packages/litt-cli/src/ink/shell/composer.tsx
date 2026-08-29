@@ -305,23 +305,28 @@ export function Composer({
   };
 
   return (
-    <Box
-      flexDirection="row"
-      marginTop={1}
-      borderStyle="single"
-      borderTop={false}
-      borderRight={false}
-      borderBottom={false}
-      borderLeft
-      borderLeftColor={copy?.gold ? COLORS.gold : COLORS.brand}
-      paddingLeft={1}
-    >
-      <Box flexGrow={1}>
-        <Text bold color={copy?.gold ? COLORS.gold : COLORS.brand}>› </Text>
-        {renderInput()}
+    <Box flexDirection="column" marginTop={1}>
+      <Box
+        flexDirection="row"
+        borderStyle="single"
+        borderTop={false}
+        borderRight={false}
+        borderBottom={false}
+        borderLeft
+        borderLeftColor={copy?.gold ? COLORS.gold : value.startsWith("/") ? COLORS.info : value.startsWith("@") ? COLORS.secondaryBright : COLORS.brand}
+        paddingLeft={1}
+      >
+        <Box flexGrow={1}>
+          <Text bold color={copy?.gold ? COLORS.gold : COLORS.brand}>› </Text>
+          {renderInput()}
+        </Box>
+        {copy?.hint && (
+          <Text dimColor>{copy.hint}</Text>
+        )}
       </Box>
-      {copy?.hint && (
-        <Text dimColor>{copy.hint}</Text>
+      {/* Subtle mode hint — shows COMMAND or CONTEXT when input starts with / or @ */}
+      {(value.startsWith("/") || value.startsWith("@")) && !copy && (
+        <Text dimColor>  {value.startsWith("/") ? "COMMAND" : "CONTEXT"}</Text>
       )}
     </Box>
   );

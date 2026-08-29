@@ -8,27 +8,32 @@
  *
  * Minimal on purpose: this is a developer instrument, not a dashboard.
  * No letter-spacing on the brand. No giant ASCII logo. No visual noise.
+ *
+ * Visual upgrade (2026-08-29):
+ *   - Hints laid out vertically on narrow terminals
+ *   - Subtle separator below brand
+ *   - Cleaner hint formatting
  */
 
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "../colors.js";
+import { classifyWidth, SectionDivider } from "../ui-primitives.js";
 
 const REVEAL_MS = 300;
 
 export function Welcome(): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+  const w = classifyWidth(width);
   const [revealed, setRevealed] = useState(false);
 
-  // One-shot entrance: brand appears, then the rest fades in.
   useEffect(() => {
     if (revealed) return;
     const t = setTimeout(() => setRevealed(true), REVEAL_MS);
     return () => clearTimeout(t);
   }, [revealed]);
 
-  // Center the content responsively, but never narrower than 2 spaces.
   const pad = Math.max(2, Math.floor((width - 24) / 2));
 
   return (
@@ -39,6 +44,10 @@ export function Welcome(): React.ReactElement {
 
       {revealed && (
         <>
+          <Box paddingLeft={pad} marginTop={0}>
+            <SectionDivider width={20} />
+          </Box>
+
           <Box paddingLeft={pad} marginTop={1}>
             <Text dimColor>BUILD · SHIP · CREATE</Text>
           </Box>
@@ -48,11 +57,21 @@ export function Welcome(): React.ReactElement {
           </Box>
 
           <Box paddingLeft={pad} marginTop={2}>
-            <Text dimColor>/ commands</Text>
-            <Text dimColor>    </Text>
-            <Text dimColor>@ context</Text>
-            <Text dimColor>    </Text>
-            <Text dimColor>? help</Text>
+            {w === "narrow" ? (
+              <Box flexDirection="column">
+                <Text dimColor>/ commands</Text>
+                <Text dimColor>@ context</Text>
+                <Text dimColor>? help</Text>
+              </Box>
+            ) : (
+              <Text>
+                <Text dimColor>/ commands</Text>
+                <Text dimColor>    </Text>
+                <Text dimColor>@ context</Text>
+                <Text dimColor>    </Text>
+                <Text dimColor>? help</Text>
+              </Text>
+            )}
           </Box>
         </>
       )}

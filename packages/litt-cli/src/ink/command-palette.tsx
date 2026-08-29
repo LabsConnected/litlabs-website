@@ -6,18 +6,28 @@
  * Esc to close. Every command in the palette is wired in the
  * controller — the palette never executes anything itself.
  *
+ * Visual upgrades (2026-08-29):
+ *   - Compact: max 8 visible rows (no overwhelming the shell)
+ *   - Selected row: brand color + › arrow
+ *   - Group headers: dim uppercase
+ *   - Thin separator below header
+ *   - Clean empty/no-match state
+ *   - Keyboard hint footer
+ *
  * Keyboard (owns all keys while open):
  *   ↑↓       navigate
  *   Enter    select
  *   type     fuzzy filter
+ *   Space    close (args mode — see onSpace)
  *   Esc      close
  */
 
 import React, { useState, useCallback } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { useOverlayKeyboard } from "./overlay-manager.js";
 import { isEnter, isEscape, isUpArrow, isDownArrow, isBackspace, isPrintable } from "./keyboard-utils.js";
 import { COLORS } from "./colors.js";
+import { SectionDivider } from "./ui-primitives.js";
 
 export interface PaletteAction {
   /** The command executed on select (e.g. "/verify"). */
@@ -65,6 +75,8 @@ export function fuzzyScore(query: string, target: string): number {
 }
 
 export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQuery = "" }: CommandPaletteProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [query, setQuery] = useState(initialQuery);
 
@@ -108,17 +120,30 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
   }, [filtered, selectedIdx, onSelect, onCancel, onSpace]));
 
   // Render grouped; selectedIdx is a flat index across all groups.
+  // Max visible rows to avoid overwhelming the shell.
+  const MAX_ROWS = 8;
   const groups = [...new Set(filtered.map((a) => a.group))];
   let flatIdx = 0;
+  let rowsShown = 0;
+  const dividerWidth = Math.max(20, Math.min(width - 8, 48));
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={COLORS.secondaryDim} paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
+      {/* Header — compact, one line */}
+      <Box marginBottom={0}>
         <Text bold color={COLORS.text}>COMMANDS</Text>
-        <Text dimColor> — </Text>
-        <Text color={COLORS.text}>{query}</Text>
+        {query && (
+          <>
+            <Text dimColor> — </Text>
+            <Text color={COLORS.brand}>{query}</Text>
+          </>
+        )}
+      </Box>
+      <Box marginTop={0} marginBottom={1}>
+        <SectionDivider width={dividerWidth} />
       </Box>
 
+      {/* Command list — grouped, max MAX_ROWS visible */}
       {groups.map((group) => {
         const items = filtered.filter((a) => a.group === group);
         if (items.length === 0) return null;
@@ -128,10 +153,12 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
             {items.map((action) => {
               const idx = flatIdx++;
               const isSelected = idx === selectedIdx;
+              rowsShown++;
+              if (rowsShown > MAX_ROWS) return null;
               return (
                 <Box key={action.id}>
                   <Text color={isSelected ? COLORS.brand : COLORS.secondaryDim}>
-                    {isSelected ? ">" : " "}
+                    {isSelected ? "›" : " "}
                   </Text>
                   <Text color={isSelected ? COLORS.brand : COLORS.text} bold={isSelected}>
                     {" "}{action.id}
@@ -145,10 +172,19 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
         );
       })}
 
-      {filtered.length === 0 && <Text dimColor>No matches</Text>}
+      {/* Empty state — clean, not alarming */}
+      {filtered.length === 0 && (
+        <Text dimColor>No matches — type a command name or Esc to close</Text>
+      )}
 
+      {/* Truncation indicator */}
+      {rowsShown > MAX_ROWS && filtered.length > MAX_ROWS && (
+        <Text dimColor>  +{filtered.length - MAX_ROWS} more — type to filter</Text>
+      )}
+
+      {/* Footer — keyboard hints, dim */}
       <Box marginTop={1}>
-        <Text dimColor>↑↓ navigate · type to filter · Enter select · Esc close</Text>
+        <Text dimColor>↑↓ navigate · Enter select · Esc close</Text>
       </Box>
     </Box>
   );
@@ -158,6 +194,8 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
 export const DEFAULT_ACTIONS: PaletteAction[] = [
   { id: "/new", label: "New conversation", group: "NEW" },
   { id: "/resume", label: "Resume previous session", group: "NEW" },
+  { id: "/local", label: "Switch to LOCAL mode", group: "MODE" },
+  { id: "/remote", label: "Switch to REMOTE mode", group: "MODE" },
   { id: "/inspect", label: "Inspect project", group: "BUILD" },
   { id: "/plan", label: "Plan only — read, reason, propose", group: "BUILD", shortcut: "Tab" },
   { id: "/act", label: "Execute — edit, run, ship", group: "BUILD", shortcut: "Tab" },

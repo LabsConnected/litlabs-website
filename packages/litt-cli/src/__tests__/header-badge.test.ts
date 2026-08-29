@@ -29,27 +29,29 @@ import type { ExecutionTarget } from "../lib/execution-target.js";
  *
  * executionTarget === "local"  → LOCAL is primary, REMOTE is never primary
  * executionTarget === "remote" → remote transport state is primary
+ *
+ * SIGNED OUT is a SECONDARY badge — it does NOT suppress the primary
+ * LOCAL/REMOTE badge. This reflects the LOCAL-default architecture:
+ * the user should see ● LOCAL even when signed out.
  */
 function deriveHeaderBadge(
   executionTarget: ExecutionTarget,
   localRuntime: string,
   remoteRuntime: string,
   signedIn?: boolean,
-): { primaryLabel: string; primaryIsRemote: boolean; secondaryLabel: string } {
-  if (signedIn === false) {
-    return { primaryLabel: "SIGNED OUT", primaryIsRemote: false, secondaryLabel: "TOOLS OFF" };
-  }
-
+): { primaryLabel: string; primaryIsRemote: boolean; secondaryLabel: string; signedOut: boolean } {
   const transport = deriveTransport({ localRuntime, remoteRuntime, signedIn });
+  const signedOut = signedIn === false;
 
   if (executionTarget === "local") {
-    // Local-only mode: primary badge is LOCAL, never REMOTE
+    // LOCAL target: primary badge is always LOCAL, never REMOTE
     const primaryLabel = localRuntime === "ready" ? "LOCAL"
       : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
     return {
       primaryLabel,
       primaryIsRemote: false,
       secondaryLabel: transport.footerLabel,
+      signedOut,
     };
   }
 
@@ -59,6 +61,7 @@ function deriveHeaderBadge(
       primaryLabel: transport.headerLabel,
       primaryIsRemote: true,
       secondaryLabel: transport.footerLabel,
+      signedOut,
     };
   }
 
@@ -67,6 +70,7 @@ function deriveHeaderBadge(
     primaryLabel: transport.footerLabel,
     primaryIsRemote: false,
     secondaryLabel: transport.footerLabel,
+    signedOut,
   };
 }
 
@@ -122,14 +126,25 @@ describe("header badge: executionTarget truthfulness", () => {
     expect(badge.primaryLabel).toBe("REMOTE ERR");
   });
 
-  // ─── Case 5: signedOut behavior remains correct ────────────────
+  // ─── Case 5: signedOut behavior — SIGNED OUT is secondary, not primary ──
 
-  it("signedIn=false => SIGNED OUT regardless of executionTarget", () => {
-    const badgeLocal = deriveHeaderBadge("local", "ready", "connected", false);
-    expect(badgeLocal.primaryLabel).toBe("SIGNED OUT");
+  it("signedIn=false + executionTarget=local => LOCAL primary, SIGNED OUT secondary", () => {
+    const badge = deriveHeaderBadge("local", "ready", "connected", false);
+    // PRIMARY badge is LOCAL (the execution target), NOT SIGNED OUT
+    expect(badge.primaryLabel).toBe("LOCAL");
+    expect(badge.primaryIsRemote).toBe(false);
+    // SIGNED OUT is a secondary indicator
+    expect(badge.signedOut).toBe(true);
+  });
 
-    const badgeRemote = deriveHeaderBadge("remote", "ready", "connected", false);
-    expect(badgeRemote.primaryLabel).toBe("SIGNED OUT");
+  it("signedIn=false + executionTarget=remote => SIGNED OUT secondary (transport blocked)", () => {
+    const badge = deriveHeaderBadge("remote", "ready", "connected", false);
+    // When signed out, transport projection blocks REMOTE (showRemote=false),
+    // so the primary badge falls back to the local tools indicator.
+    // SIGNED OUT is shown as a secondary indicator.
+    expect(badge.signedOut).toBe(true);
+    // The primary badge is NOT "SIGNED OUT" — that's secondary now
+    expect(badge.primaryLabel).not.toBe("SIGNED OUT");
   });
 
   // ─── Critical: remote connected must NOT override LOCAL ────────
