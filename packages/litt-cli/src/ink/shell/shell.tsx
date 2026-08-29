@@ -147,6 +147,12 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const hasConversation = messages.length > 0 || isProcessing
     || (missionState !== null && missionState.state !== "IDLE");
 
+  // The Welcome screen is only for a truly idle composer.
+  // As soon as the user starts typing, clear the hero immediately so
+  // attention moves to the composer. If they erase the draft before
+  // submitting, the Welcome screen returns.
+  const isComposing = composerValue.trim().length > 0;
+
   // ── ONE authoritative runtime state (runtime-state.ts) ─────────────
   // Shared by the composer and threaded to surfaces below — the composer
   // copy can never contradict the footer, and a terminal mission
@@ -303,7 +309,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             canonicalMission={canonicalMission}
             workstream={workstream}
           />
-        ) : (
+        ) : isComposing ? null : (
           <Welcome
             project={project}
             branch={branch}

@@ -49,7 +49,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const LITT_WINDOW_TITLE = "LiTT";
@@ -139,12 +139,12 @@ function candidatePaths(name: string, env: LauncherEnv): string[] {
   const { systemRoot, programFiles, programFilesX86 } = resolveEnvDirs(env);
   // Only build candidates when the base directory exists — a blank base
   // would otherwise produce a relative "PowerShell\7\pwsh.exe" path.
-  if (programFiles) add(join(programFiles, "PowerShell", "7", name));       // pwsh 7
-  if (programFilesX86) add(join(programFilesX86, "PowerShell", "7", name)); // pwsh 7 (x86)
-  if (systemRoot) add(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", name)); // powershell 5.1
+  if (programFiles) add(win32.join(programFiles, "PowerShell", "7", name));       // pwsh 7
+  if (programFilesX86) add(win32.join(programFilesX86, "PowerShell", "7", name)); // pwsh 7 (x86)
+  if (systemRoot) add(win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", name)); // powershell 5.1
   const pathEnv = env.pathEnv ?? process.env.PATH ?? "";
   for (const dir of pathEnv.split(";")) {
-    if (dir.trim()) add(join(dir.trim(), name));
+    if (dir.trim()) add(win32.join(dir.trim(), name));
   }
   return out;
 }
@@ -193,8 +193,8 @@ export function resolveWindowsTerminal(env: LauncherEnv = {}): string | null {
   const localAppData = env.localAppData ?? process.env.LOCALAPPDATA ?? undefined;
   const { programFiles } = resolveEnvDirs(env);
   const candidates: string[] = [];
-  if (localAppData) candidates.push(join(localAppData, "Microsoft", "WindowsApps", "wt.exe"));
-  if (programFiles) candidates.push(join(programFiles, "WindowsApps", "wt.exe"));
+  if (localAppData) candidates.push(win32.join(localAppData, "Microsoft", "WindowsApps", "wt.exe"));
+  if (programFiles) candidates.push(win32.join(programFiles, "WindowsApps", "wt.exe"));
   for (const p of candidates) {
     if (exists(p)) return p;
   }

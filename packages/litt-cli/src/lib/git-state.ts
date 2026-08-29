@@ -174,12 +174,44 @@ export function readBranchFromGitDir(cwd: string): string | null {
   return state.kind === "branch" ? state.branch : null;
 }
 
+/**
+ * Git subprocess budget.
+ *
+ * Normal Windows/macOS/Linux filesystems keep the fast 5s fail-closed
+ * budget. WSL operating directly on a Windows DrvFS mount (/mnt/c,
+ * /mnt/e, etc.) can legitimately take substantially longer to refresh
+ * a large Git index, so give that environment a larger budget rather
+ * than falsely reporting "not a git repo".
+ *
+ * LITT_GIT_TIMEOUT_MS is an explicit diagnostic/CI override.
+ */
+function gitCommandTimeoutMs(cwd: string): number {
+  const override = Number.parseInt(process.env.LITT_GIT_TIMEOUT_MS ?? "", 10);
+
+  if (Number.isFinite(override) && override >= 1000 && override <= 60_000) {
+    return override;
+  }
+
+  const isWsl =
+    process.platform === "linux" &&
+    Boolean(
+      process.env.WSL_INTEROP ||
+      process.env.WSL_DISTRO_NAME ||
+      existsSync("/proc/sys/fs/binfmt_misc/WSLInterop"),
+    );
+
+  const normalizedCwd = resolve(cwd).replace(/\\/g, "/");
+  const isDrvFs = /^\/mnt\/[a-z](?:\/|$)/i.test(normalizedCwd);
+
+  return isWsl && isDrvFs ? 20_000 : 5_000;
+}
+
 function runGit(args: string[], cwd: string): string | null {
   try {
     return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
-      timeout: 5000,
+      timeout: gitCommandTimeoutMs(cwd),
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch {

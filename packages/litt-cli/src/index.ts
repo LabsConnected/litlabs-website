@@ -424,7 +424,10 @@ async function main(): Promise<number> {
   // tested function rather than being re-asserted here by hand. On any
   // remote failure this returns without ever reaching the local handler
   // resolution below.
-  if (dispatch.useRemote) {
+  // For cockpit surfaces, --remote selects where the MODEL executes.
+  // It must NOT enter the legacy one-shot remote-command dispatcher.
+  // Non-cockpit commands such as `litt status --remote` still use that path.
+  if (dispatch.useRemote && !isCockpitCommand) {
     const outcome = await executeCommand(command, {
       useRemote: true,
       isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
