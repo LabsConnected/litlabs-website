@@ -994,6 +994,16 @@ describe("Auth Config", () => {
     expect(getTerminalUrl()).toBe("https://staging-terminal.example.com");
   });
 
+  it("LITT_TERMINAL_URL empty string falls back to default", () => {
+    process.env.LITT_TERMINAL_URL = "";
+    expect(getTerminalUrl()).toBe(DEFAULT_TERMINAL_URL);
+  });
+
+  it("LITT_TERMINAL_URL whitespace-only falls back to default", () => {
+    process.env.LITT_TERMINAL_URL = "   ";
+    expect(getTerminalUrl()).toBe(DEFAULT_TERMINAL_URL);
+  });
+
   // ── Misconfiguration guards (explicit empty string) ──
 
   it("hasAuthConfig returns false when client_id explicitly set to empty", () => {

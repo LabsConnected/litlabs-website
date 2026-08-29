@@ -127,7 +127,8 @@ export function getIssuer(): string {
  * connectivity. The configured URL existing does not make REMOTE true.
  */
 export function getTerminalUrl(): string {
-  return process.env.LITT_TERMINAL_URL ?? DEFAULT_TERMINAL_URL;
+  const env = process.env.LITT_TERMINAL_URL;
+  return env && env.trim() ? env : DEFAULT_TERMINAL_URL;
 }
 
 /**

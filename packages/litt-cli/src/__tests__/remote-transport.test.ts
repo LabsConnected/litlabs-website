@@ -54,6 +54,7 @@ function mockFetchResponse(body: unknown, status = 200): MockResponse {
 }
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
+let savedTerminalUrl: string | undefined;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -61,6 +62,11 @@ beforeEach(() => {
   // Isolate tests from the real credential store and any persisted session.
   resetAuthSession();
   getAuthSession({ storage: createCredentialStore("memory") });
+  // Isolate from the real environment's LITT_TERMINAL_URL so tests
+  // that expect DEFAULT_TERMINAL_URL are deterministic. Individual
+  // tests that need to test env-override behavior set it explicitly.
+  savedTerminalUrl = process.env.LITT_TERMINAL_URL;
+  delete process.env.LITT_TERMINAL_URL;
 });
 
 afterEach(() => {
@@ -68,6 +74,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   clearTerminalTokenCache();
   resetAuthSession();
+  if (savedTerminalUrl === undefined) delete process.env.LITT_TERMINAL_URL;
+  else process.env.LITT_TERMINAL_URL = savedTerminalUrl;
 });
 
 // ─── dispatchRemote with pre-exchanged terminalToken ──────────────
@@ -164,6 +172,34 @@ describe("dispatchRemote (pre-exchanged terminalToken)", () => {
       expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/command`);
     } finally {
       if (oldEnv !== undefined) process.env.LITT_TERMINAL_URL = oldEnv;
+    }
+  });
+
+  it("falls back to default URL when LITT_TERMINAL_URL is empty string", async () => {
+    const oldEnv = process.env.LITT_TERMINAL_URL;
+    process.env.LITT_TERMINAL_URL = "";
+    fetchSpy.mockResolvedValue(mockFetchResponse({ ok: true, runId: "r", kind: "test", result: {}, timestamp: 0, durationMs: 0 }));
+
+    try {
+      await dispatchRemote("test", [], { terminalToken: TERMINAL_JWT });
+      expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/command`);
+    } finally {
+      if (oldEnv === undefined) delete process.env.LITT_TERMINAL_URL;
+      else process.env.LITT_TERMINAL_URL = oldEnv;
+    }
+  });
+
+  it("falls back to default URL when LITT_TERMINAL_URL is whitespace only", async () => {
+    const oldEnv = process.env.LITT_TERMINAL_URL;
+    process.env.LITT_TERMINAL_URL = "   ";
+    fetchSpy.mockResolvedValue(mockFetchResponse({ ok: true, runId: "r", kind: "test", result: {}, timestamp: 0, durationMs: 0 }));
+
+    try {
+      await dispatchRemote("test", [], { terminalToken: TERMINAL_JWT });
+      expect(fetchSpy.mock.calls[0][0]).toBe(`${DEFAULT_TERMINAL_URL}/api/command`);
+    } finally {
+      if (oldEnv === undefined) delete process.env.LITT_TERMINAL_URL;
+      else process.env.LITT_TERMINAL_URL = oldEnv;
     }
   });
 

@@ -515,7 +515,12 @@ describe("resolveActiveProject — canonical resolution pipeline", () => {
   });
 
   it("step 4: scaffold fallback creates a new project when chosen", async () => {
-    const emptyCwd = fs.mkdtempSync(path.join(os.tmpdir(), "litt-scaffold-cwd-"));
+    // Use a nested cwd inside a unique temp parent so that sibling-dir
+    // discovery (which scans siblings of cwd) only sees the parent's
+    // children — NOT every other parallel test's temp dir in os.tmpdir().
+    const tempParent = fs.mkdtempSync(path.join(os.tmpdir(), "litt-scaffold-parent-"));
+    const emptyCwd = path.join(tempParent, "empty-cwd");
+    fs.mkdirSync(emptyCwd, { recursive: true });
     try {
       // Build choices deterministically: discover first, then prompt
       // for the LAST index (create-new is always the final choice).
@@ -534,7 +539,7 @@ describe("resolveActiveProject — canonical resolution pipeline", () => {
       expect(resolved!.active.source).toBe("scaffolded");
       expect(fs.existsSync(path.join(emptyCwd, "package.json"))).toBe(true);
     } finally {
-      fs.rmSync(emptyCwd, { recursive: true, force: true });
+      fs.rmSync(tempParent, { recursive: true, force: true });
     }
   });
 
