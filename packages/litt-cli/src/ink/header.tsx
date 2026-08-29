@@ -37,6 +37,7 @@ import { COLORS } from "./colors.js";
 import { deriveTransport } from "../lib/transport-projection.js";
 import type { ExecutionTarget } from "../lib/execution-target.js";
 import { SectionDivider, classifyWidth } from "./ui-primitives.js";
+import { LiTTMark, type MarkState } from "./litt-mark.js";
 
 export interface HeaderProps {
   project: string;
@@ -120,6 +121,11 @@ export function Header({
     showToolsBadge = showRemote && w === "wide";
   }
 
+  // Determine mark state from execution target + runtime
+  const markState: MarkState = executionTarget === "remote"
+    ? (transport.showRemote ? "remote" : "idle")
+    : "local";
+
   // Assemble the right-side badges
   const rightBadges: React.ReactElement[] = [];
   if (w !== "narrow") {
@@ -140,7 +146,7 @@ export function Header({
   return (
     <Box flexDirection="column">
       <Box justifyContent="space-between">
-        <Text bold color={COLORS.brand}>LiTT</Text>
+        <LiTTMark state={markState} showWordmark={w !== "narrow"} size={w === "narrow" ? "compact" : "normal"} />
         {rightBadges.length > 0 && (
           <Box gap={2}>
             {rightBadges.map((badge, i) => (

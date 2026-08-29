@@ -19,6 +19,7 @@ import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "../colors.js";
 import { classifyWidth, SectionDivider } from "../ui-primitives.js";
+import { LiTTMark } from "../litt-mark.js";
 
 const REVEAL_MS = 300;
 
@@ -39,7 +40,7 @@ export function Welcome(): React.ReactElement {
   return (
     <Box flexDirection="column" paddingTop={3}>
       <Box paddingLeft={pad}>
-        <Text bold color={COLORS.brand}>LiTT</Text>
+        <LiTTMark state="idle" showWordmark />
       </Box>
 
       {revealed && (

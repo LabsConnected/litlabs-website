@@ -77,6 +77,9 @@ export const COLORS = {
 
   /** Links, commands, info — bright purple. */
   info: "#C084FC",
+
+  /** Remote / cloud — blue. Distinct from local green. */
+  remote: "#60A5FA",
 } as const;
 
 /** Agent lifecycle state → color */
