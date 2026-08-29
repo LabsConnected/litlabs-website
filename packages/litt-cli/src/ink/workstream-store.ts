@@ -29,6 +29,11 @@
  *   6. The store is bounded to MAX_ACTIVITIES (oldest dropped).
  *   7. Each activity knows its phase (INSPECTING / EDITING / TESTING / …).
  *   8. clear() resets everything (new session / Ctrl+L).
+ *   9. objective/nextAction are optional single-string fields; setting them
+ *      replaces the previous value (no history accumulation).
+ *  10. verification is a structured sub-state with checks array.
+ *  11. overallStatus tracks the workstream lifecycle:
+ *      idle → running → (complete | failed | blocked).
  */
 
 export const MAX_ACTIVITIES = 120;
@@ -49,6 +54,29 @@ export type WorkstreamKind =
 
 export type WorkstreamStatus = "running" | "complete" | "failed";
 
+/** The overall workstream lifecycle status. */
+export type WorkstreamOverallStatus =
+  | "idle"
+  | "running"
+  | "blocked"
+  | "complete"
+  | "failed";
+
+/** Standardized phase vocabulary for the active-state header. */
+export type WorkstreamPhase =
+  | "understanding"
+  | "inspecting"
+  | "planning"
+  | "editing"
+  | "running"
+  | "testing"
+  | "verifying"
+  | "deploying"
+  | "syncing"
+  | "complete"
+  | "blocked"
+  | "failed";
+
 /** Human phase labels driven by the live activity stream. */
 export const PHASE_LABELS = {
   inspect: "INSPECTING",
@@ -63,6 +91,39 @@ export const PHASE_LABELS = {
   failure: "FAILED",
   success: "COMPLETE",
 } as const;
+
+/** Display labels for the standardized phase vocabulary. */
+export const PHASE_DISPLAY: Record<WorkstreamPhase, string> = {
+  understanding: "UNDERSTANDING",
+  inspecting: "INSPECTING",
+  planning: "PLANNING",
+  editing: "EDITING",
+  running: "RUNNING",
+  testing: "TESTING",
+  verifying: "VERIFYING",
+  deploying: "DEPLOYING",
+  syncing: "SYNCING",
+  complete: "COMPLETE",
+  blocked: "BLOCKED",
+  failed: "FAILED",
+};
+
+/** A single verification check within the verification sub-state. */
+export interface VerificationCheck {
+  /** Stable id. */
+  id: string;
+  /** Human-readable label (e.g. "TypeScript", "Workstream tests"). */
+  label: string;
+  status: "pending" | "running" | "passed" | "failed";
+  /** Optional detail (e.g. "2141 passed · 4 skipped"). */
+  detail?: string;
+}
+
+/** Structured verification sub-state. */
+export interface VerificationState {
+  status: "pending" | "running" | "passed" | "failed";
+  checks: VerificationCheck[];
+}
 
 export interface WorkstreamActivity {
   /** Stable id. */
@@ -111,6 +172,18 @@ export interface WorkstreamSnapshot {
   currentPhase: string;
   /** True when any activity is still running. */
   hasRunning: boolean;
+  /** The overall workstream lifecycle status. */
+  overallStatus: WorkstreamOverallStatus;
+  /** One-sentence description of what LiTT is trying to accomplish. */
+  objective: string | null;
+  /** Standardized phase (drives the active-state header badge). */
+  phase: WorkstreamPhase | null;
+  /** What LiTT expects to do after the current step (null = unknown). */
+  nextAction: string | null;
+  /** Structured verification sub-state (null when no verification running). */
+  verification: VerificationState | null;
+  /** Count of activities hidden from the visible window (for "↑ N earlier"). */
+  hiddenCount: number;
 }
 
 let idCounter = 0;
@@ -122,18 +195,106 @@ function nextId(): string {
 export class WorkstreamStore {
   private activities: WorkstreamActivity[] = [];
   private currentPhase = "IDLE";
+  private _overallStatus: WorkstreamOverallStatus = "idle";
+  private _objective: string | null = null;
+  private _phase: WorkstreamPhase | null = null;
+  private _nextAction: string | null = null;
+  private _verification: VerificationState | null = null;
 
   snapshot(): WorkstreamSnapshot {
     return {
       activities: [...this.activities],
       currentPhase: this.currentPhase,
       hasRunning: this.activities.some((a) => a.status === "running"),
+      overallStatus: this._overallStatus,
+      objective: this._objective,
+      phase: this._phase,
+      nextAction: this._nextAction,
+      verification: this._verification,
+      hiddenCount: Math.max(0, this.activities.length - MAX_ACTIVITIES),
     };
   }
 
   /** Set the current phase without adding an activity. */
   setPhase(phase: string): void {
     this.currentPhase = phase;
+  }
+
+  /** Set the standardized workstream phase (drives the active-state header). */
+  setWorkstreamPhase(phase: WorkstreamPhase): void {
+    this._phase = phase;
+    // Map to the legacy currentPhase string for backward compat
+    this.currentPhase = PHASE_DISPLAY[phase];
+    // Update overall status to running if currently idle
+    if (this._overallStatus === "idle") this._overallStatus = "running";
+  }
+
+  /** Set the current objective (one sentence). */
+  setObjective(text: string): void {
+    this._objective = text;
+    if (this._overallStatus === "idle") this._overallStatus = "running";
+  }
+
+  /** Set the next action LiTT expects to take. */
+  setNextAction(text: string | null): void {
+    this._nextAction = text;
+  }
+
+  /** Start a verification phase with a set of named checks. */
+  startVerification(checkLabels: string[]): void {
+    this._verification = {
+      status: "running",
+      checks: checkLabels.map((label) => ({
+        id: nextId(),
+        label,
+        status: "pending" as const,
+      })),
+    };
+    this.setWorkstreamPhase("verifying");
+  }
+
+  /** Update a specific verification check by label. */
+  updateVerificationCheck(label: string, status: VerificationCheck["status"], detail?: string): void {
+    if (!this._verification) return;
+    const check = this._verification.checks.find((c) => c.label === label);
+    if (!check) return;
+    check.status = status;
+    if (detail !== undefined) check.detail = detail;
+    // Update overall verification status
+    const all = this._verification.checks;
+    if (all.every((c) => c.status === "passed")) {
+      this._verification.status = "passed";
+    } else if (all.some((c) => c.status === "failed")) {
+      this._verification.status = "failed";
+    } else {
+      this._verification.status = "running";
+    }
+  }
+
+  /** Clear verification state. */
+  clearVerification(): void {
+    this._verification = null;
+  }
+
+  /** Mark the workstream as blocked (e.g. waiting for approval). */
+  setBlocked(): void {
+    this._overallStatus = "blocked";
+    this._phase = "blocked";
+    this.currentPhase = "BLOCKED";
+  }
+
+  /** Mark the workstream as complete. */
+  setComplete(): void {
+    this._overallStatus = "complete";
+    this._phase = "complete";
+    this.currentPhase = "COMPLETE";
+  }
+
+  /** Mark the workstream as failed. */
+  setFailed(): void {
+    this._overallStatus = "failed";
+    this._phase = "failed";
+    this.currentPhase = "FAILED";
   }
 
   /** Add a new running activity. Returns its id. */
@@ -154,6 +315,7 @@ export class WorkstreamStore {
     };
     this.push(record);
     this.currentPhase = record.phase;
+    if (this._overallStatus === "idle") this._overallStatus = "running";
     return record.id;
   }
 
@@ -175,6 +337,7 @@ export class WorkstreamStore {
     };
     this.push(record);
     this.currentPhase = record.phase;
+    if (this._overallStatus === "idle") this._overallStatus = "running";
     return record.id;
   }
 
@@ -293,6 +456,8 @@ export class WorkstreamStore {
   /** Mark the whole workstream success (phase COMPLETE). */
   addSuccess(label: string): string {
     this.currentPhase = "COMPLETE";
+    this._overallStatus = "complete";
+    this._phase = "complete";
     return this.add("success", "COMPLETE", label);
   }
 
@@ -371,6 +536,11 @@ export class WorkstreamStore {
   clear(): void {
     this.activities = [];
     this.currentPhase = "IDLE";
+    this._overallStatus = "idle";
+    this._objective = null;
+    this._phase = null;
+    this._nextAction = null;
+    this._verification = null;
   }
 
   private push(a: WorkstreamActivity): void {

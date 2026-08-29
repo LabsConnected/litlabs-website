@@ -22,6 +22,7 @@ import type { RuntimeClient, LifecycleEvent } from "../lib/runtime-client.js";
 import type { RuntimeState } from "@litt/agent-core";
 import type { CockpitStore, ActivityEntry, HoloState } from "./cockpit-store.js";
 import type { SessionEventBridge } from "./session-event-bridge.js";
+import { toolKind, toolPhase, humanizeToolLabel } from "./workstream-normalizer.js";
 
 let entryCounter = 0;
 
@@ -286,14 +287,24 @@ export function useEventBridge(
     // Map lifecycle events onto structured workstream activities so the
     // operator WATCHES what LiTT is doing. `reason` entries are concise
     // conclusions only. Failures stay visible even when retried later.
+    // The normalization layer (workstream-normalizer.ts) maps raw tool
+    // names to semantic kinds + human-readable labels.
     store.actions.workstreamPush((ws) => {
       switch (event.type) {
-        case "run.started":
-          ws.addReason(`Working on ${String(event.data.command ?? "task")}`);
+        case "run.started": {
+          const cmd = String(event.data.command ?? "task");
+          ws.setObjective(cmd);
+          ws.setWorkstreamPhase("understanding");
+          ws.addReason(`Working on ${cmd}`);
           break;
+        }
         case "tool.started": {
-          const label = toolLabel(event.data);
-          const wsId = ws.begin("tool", "EXECUTING", "EXECUTING", label);
+          const toolName = String(event.data.tool ?? event.data.label ?? event.data.command ?? "tool");
+          const kind = toolKind(toolName);
+          const phase = toolPhase(toolName);
+          const label = humanizeToolLabel(toolName, event.data as Record<string, unknown>);
+          ws.setWorkstreamPhase(phase);
+          const wsId = ws.begin(kind, null, label, label);
           if (event.toolCallId) toolWsIds.set(event.toolCallId, wsId);
           break;
         }
@@ -330,10 +341,13 @@ export function useEventBridge(
         case "run.completed": {
           const status = (event.data.status as string) ?? "unknown";
           const dur = event.data.durationMs as number | undefined;
-          if (status === "success") ws.addVerify(`Run complete`, true, dur);
-          else {
+          if (status === "success") {
+            ws.addVerify(`Run complete`, true, dur);
+            ws.setComplete();
+          } else {
             const id = ws.begin("failure", "FAILED", `Run ${status}`);
             ws.fail(id, String(event.data.error ?? status));
+            ws.setFailed();
           }
           break;
         }

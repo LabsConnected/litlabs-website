@@ -37,6 +37,7 @@ import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
+import { WorkstreamDock, estimateWorkstreamDockRows } from "../workstream-dock.js";
 
 /** Rows consumed by fixed chrome below the content region:
  *  composer margin(1) + composer(1) + status margin(1) + divider(1) + 2 status lines. */
@@ -130,6 +131,14 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const columns = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
 
+  // ── Workstream dock: when LiTT is actively working, the dock becomes
+  //    the primary center view. The transcript still renders below it
+  //    (conversation record), but the workstream is the hero.
+  //    When idle, the Welcome or Transcript owns the center.
+  const hasWorkstream = workstream != null
+    && workstream.activities.length > 0
+    && (workstream.hasRunning || workstream.overallStatus !== "idle");
+
   // Guard for harnesses/surfaces that don't wire scroll yet.
   const anchor = transcriptAnchor ?? null;
   const onPageChange = onTranscriptPageChange ?? (() => {});
@@ -176,13 +185,16 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // fires when the anchor truly reaches the bottom in the LIVE budget.
   const extraHeight = useMemo(() => {
     if (anchor !== null) return 0; // scrolled mode — extra content not rendered
+    // When the workstream dock is the primary center, don't double-count
+    // it as extra content below the transcript.
+    const wsForExtra = hasWorkstream ? null : workstream;
     return estimateExtraContentHeight(
       toolProgress, missionState, activityLog, toolDetails,
       holoState, isProcessing, canonicalMission, executionTarget, columns,
-      workstream,
+      wsForExtra,
     );
   }, [anchor, toolProgress, missionState, activityLog, toolDetails,
-      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream]);
+      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream, hasWorkstream]);
 
   // Live-mode extra height (for the auto-return atBottom check).
   // This is the extraHeight as it would be in live mode — used to compute
@@ -190,13 +202,14 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // returned to live mode. Prevents premature auto-return when the
   // scrolled viewport is larger than the live viewport.
   const liveExtraHeight = useMemo(() => {
+    const wsForExtra = hasWorkstream ? null : workstream;
     return estimateExtraContentHeight(
       toolProgress, missionState, activityLog, toolDetails,
       holoState, isProcessing, canonicalMission, executionTarget, columns,
-      workstream,
+      wsForExtra,
     );
   }, [toolProgress, missionState, activityLog, toolDetails,
-      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream]);
+      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream, hasWorkstream]);
 
   const viewport = useMemo(() => {
     if (messages.length === 0) {
@@ -262,11 +275,18 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, messages, layout, contentRows, liveExtraHeight]);
 
+  // ── Workstream dock is the primary center when active (declared above).
   return (
     <Box flexDirection="column" paddingX={2}>
-      {/* The swap-in-place region: Welcome until the first message, then transcript. */}
+      {/* The swap-in-place region: Welcome until the first message, then transcript.
+          When workstream is active, the dock takes the primary slot. */}
       <Box flexDirection="column" height={viewport.fits ? contentRows : undefined}>
-        {hasConversation ? (
+        {hasWorkstream ? (
+          <WorkstreamDock
+            snapshot={workstream!}
+            width={contentWidth}
+          />
+        ) : hasConversation ? (
           <TranscriptArea
             messages={messages}
             events={activityLog}
