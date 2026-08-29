@@ -65,6 +65,7 @@ import {
   formatMachineResult,
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
+import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE } from "../lib/capability-gate.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
@@ -591,9 +592,16 @@ export interface CockpitControllerOptions {
    * resolveModelProvider below).
    */
   client: RuntimeClient | null;
+  /**
+   * Whether the user is authenticated (signed in via Clerk). When false
+   * AND executionTarget is "local" (LITT_LOCAL_MODE=1), the cockpit is
+   * in signed-out local-only mode: local tools work, but model/remote
+   * paths are capability-blocked before any provider call.
+   */
+  signedIn?: boolean;
 }
 
-export function useCockpitController({ session, store, approvalBridge, sessionBridge, onExit, projectName, branch, modelRuntime, client }: CockpitControllerOptions) {
+export function useCockpitController({ session, store, approvalBridge, sessionBridge, onExit, projectName, branch, modelRuntime, client, signedIn }: CockpitControllerOptions) {
   // Telemetry store is controller-local (not model truth).
   // useState lazy initializer keeps a single stable instance for the
   // hook's lifetime without touching refs during render.
@@ -1554,6 +1562,51 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         perf: machinePerf,
         userMessage: input,
       });
+      return;
+    }
+
+    // ─── CAPABILITY GATE — signed-out local-only mode ──────────────
+    // When LITT_LOCAL_MODE=1 AND the user is not authenticated, the
+    // cockpit is in signed-out local-only mode. All local-only routing
+    // paths (LOCAL fast lane, MACHINE lane, slash commands) have already
+    // had their chance to match above. Anything that reaches here needs
+    // model inference, remote agent execution, or cloud features — none
+    // of which are available without authentication.
+    //
+    // This gate STOPS before classifyIntent(), resolveModelProvider(),
+    // awaitRemoteReady(), or any provider/remote call. It returns a
+    // clear local UI response instead of leaking provider errors (429,
+    // quota, network) to the user.
+    //
+    // This is NOT a keyword matcher — it's a capability gate based on
+    // session/auth/local-mode state. The rule is simple:
+    //   signed out + local-only mode = no model/network path, period.
+    //
+    // Authenticated users are completely unaffected — signedIn=true or
+    // executionTarget="remote" means this gate never engages.
+    if (shouldBlockModelPath(signedIn, store.state.executionTarget)) {
+      store.actions.addChatMessage({
+        role: "user",
+        content: input,
+        ts: Date.now(),
+        status: "complete",
+      });
+      const gateMessage = CAPABILITY_GATE_MESSAGE;
+      store.actions.addChatMessage({
+        role: "assistant",
+        content: gateMessage,
+        ts: Date.now(),
+        status: "complete",
+        servedModel: "capability-gate",
+      });
+      store.actions.addActivity({
+        id: `act_${Date.now()}_gate`,
+        ts: Date.now(),
+        type: "info",
+        tag: "GATE",
+        text: "Capability gate: model/remote path blocked (signed out + local-only mode)",
+      });
+      persistSession();
       return;
     }
 

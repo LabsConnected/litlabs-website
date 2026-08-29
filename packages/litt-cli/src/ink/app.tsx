@@ -88,7 +88,7 @@ export function CockpitApp({
   const controller = useCockpitController({
     session, store, approvalBridge, sessionBridge,
     onExit: () => exit(), projectName: project, branch: store.state.branch, modelRuntime,
-    client,
+    client, signedIn,
   });
   const { submit, handleApproval } = controller;
 
