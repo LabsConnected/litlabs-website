@@ -1,34 +1,25 @@
 /**
  * ToolProgress — structured per-tool execution view for the shell.
  *
- * Renders during mission execution to fill the main content area with
- * live, friendly per-tool blocks instead of an empty streaming
- * placeholder. This is the "feel alive" surface:
+ * Renders during mission execution as ONE dense execution group instead
+ * of noisy standalone transcript blocks:
  *
- *   → Inspecting workspace
- *   ✓ Package inspection complete
- *
- *   → Type checking
- *   ✓ 0 errors
- *
- *   → Running tests
- *   ◉ Running…
- *   ✓ 926 passed · 4 skipped
- *
- *   → Production build
- *   ◉ Building…
- *
- *   ✓ Scan complete
+ *   ✓ Git status · 0.3s              ← collapsed success (1 line,
+ *                                      duration secondary/dim)
+ *   ✓ TypeScript · 22.7s
+ *   ◆ Running tests                  ← active stays expanded
+ *     pnpm vitest run --coverage…
+ *   × bash discovery                 ← failures stay expanded
+ *     denied by policy
  *
  * Design rules:
- *   - One block per tool: label line + status line.
- *   - Running tools show ◉ with the latest chunk (or "Running…").
- *   - Completed tools show ✓ with the concise summary.
- *   - Failed tools show × with the error summary.
- *   - The mission terminal line (✓ Scan complete / × Scan failed) appears
- *     when the mission reaches a terminal state.
+ *   - Successful runs collapse automatically to a single line.
+ *   - Failed/cancelled runs remain expanded with their summary.
+ *   - The active run remains expanded with its latest output chunk.
+ *   - Ctrl+O (`details`) expands the summaries of collapsed successes.
+ *   - Active glyph is the LiTT ◆ in purple — never a spinner.
  *   - Raw stdout is NEVER dumped — only the concise lastChunk/summary.
- *   - Compact: blocks are separated by a blank line, no borders.
+ *   - Duration is secondary (dim), never the dominant signal.
  */
 
 import React from "react";
@@ -36,7 +27,7 @@ import { Box, Text } from "ink";
 import { COLORS } from "./colors.js";
 import type { ToolProgressSnapshot, ToolProgressEntry } from "./tool-progress-store.js";
 
-const GLYPH_RUNNING = "◉";
+const GLYPH_ACTIVE = "◆";
 const GLYPH_SUCCESS = "✓";
 const GLYPH_FAILED = "×";
 const GLYPH_CANCELLED = "○";
@@ -45,7 +36,7 @@ const GLYPH_TIMEOUT = "⏱";
 function statusGlyph(entry: ToolProgressEntry): { glyph: string; color: string } {
   switch (entry.status) {
     case "running":
-      return { glyph: GLYPH_RUNNING, color: COLORS.working };
+      return { glyph: GLYPH_ACTIVE, color: COLORS.brand };
     case "completed":
       return { glyph: GLYPH_SUCCESS, color: COLORS.success };
     case "failed":
@@ -57,26 +48,49 @@ function statusGlyph(entry: ToolProgressEntry): { glyph: string; color: string }
   }
 }
 
-function ToolBlock({ entry }: { entry: ToolProgressEntry }): React.ReactElement {
+function ToolBlock({ entry, details }: { entry: ToolProgressEntry; details: boolean }): React.ReactElement {
   const { glyph, color } = statusGlyph(entry);
   const isRunning = entry.status === "running";
+  const duration = entry.durationMs != null ? ` · ${(entry.durationMs / 1000).toFixed(1)}s` : "";
 
+  if (isRunning) {
+    // Active run — expanded: ◆ label + latest output chunk.
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Text color={color} bold>{glyph} </Text>
+          <Text color={COLORS.brand} bold>{entry.label}</Text>
+        </Box>
+        <Text dimColor>  {entry.lastChunk ? entry.lastChunk : "Running…"}</Text>
+      </Box>
+    );
+  }
+
+  if (entry.status === "completed" && !details) {
+    // Collapsed success — ONE line, duration secondary/dim.
+    return (
+      <Box>
+        <Text color={COLORS.success}>{glyph} </Text>
+        <Text color={COLORS.text}>{entry.label}</Text>
+        <Text dimColor>{duration}</Text>
+      </Box>
+    );
+  }
+
+  // Failed / cancelled / timed out stay expanded. Completed runs expand
+  // to two lines when the operator toggles details (Ctrl+O).
+  const failed = entry.status !== "completed";
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={color} bold>{glyph} </Text>
-        <Text color={isRunning ? COLORS.working : COLORS.text} bold={isRunning}>
-          {entry.label}
-        </Text>
+        <Text color={color} bold={failed}>{glyph} </Text>
+        <Text color={failed ? COLORS.text : COLORS.text} bold={failed}>{entry.label}</Text>
+        <Text dimColor>{duration}</Text>
       </Box>
-      {isRunning ? (
-        <Text dimColor>  {entry.lastChunk ? entry.lastChunk : "Running…"}</Text>
-      ) : (
-        entry.summary && (
-          <Text color={entry.status === "failed" ? COLORS.error : COLORS.secondaryDim}>
-            {"  "}{entry.summary}{entry.durationMs != null ? ` · ${(entry.durationMs / 1000).toFixed(1)}s` : ""}
-          </Text>
-        )
+      {entry.summary && (
+        <Text color={failed ? COLORS.error : COLORS.secondaryDim}>
+          {"  "}{entry.summary}
+        </Text>
       )}
     </Box>
   );
@@ -86,9 +100,12 @@ export interface ToolProgressProps {
   progress: ToolProgressSnapshot;
   /** Content width for truncation (defaults to a safe measure). */
   width?: number;
+  /** Ctrl+O — expand result summaries of collapsed successful runs. */
+  details?: boolean;
 }
 
-export function ToolProgress({ progress, width = 72 }: ToolProgressProps): React.ReactElement | null {
+export function ToolProgress({ progress, width = 72, details = false }: ToolProgressProps): React.ReactElement | null {
+  void width;
   if (progress.entries.length === 0 && !progress.missionActive) return null;
 
   const missionDone = progress.missionStatus === "completed";
@@ -101,8 +118,8 @@ export function ToolProgress({ progress, width = 72 }: ToolProgressProps): React
   return (
     <Box flexDirection="column">
       {progress.entries.map((entry, idx) => (
-        <Box key={entry.id} flexDirection="column" marginTop={idx === 0 ? 0 : 1}>
-          <ToolBlock entry={entry} />
+        <Box key={entry.id} marginTop={idx === 0 ? 0 : 0}>
+          <ToolBlock entry={entry} details={details} />
         </Box>
       ))}
       {showMissionLine && (
@@ -118,15 +135,20 @@ export function ToolProgress({ progress, width = 72 }: ToolProgressProps): React
 }
 
 /**
- * Estimated rendered height of the tool progress view at a given width.
+ * Estimated rendered height of the tool progress view.
  * Pure — used by the shell to fit the progress view into the content region.
- * Each tool block is 2 lines (label + status), plus 1 blank line between
- * blocks, plus 1 line for the mission terminal line (if shown).
+ *
+ * Collapsed successful runs are ONE line. Active/failed runs are TWO
+ * (label + status). With `details` on, completed runs are TWO as well.
+ * Plus the mission terminal line (if shown).
  */
-export function estimateToolProgressHeight(progress: ToolProgressSnapshot): number {
+export function estimateToolProgressHeight(progress: ToolProgressSnapshot, details = false): number {
   if (progress.entries.length === 0 && !progress.missionActive) return 0;
-  const blocks = progress.entries.length;
-  const separators = Math.max(0, blocks - 1);
-  const missionLine = (progress.missionStatus === "completed" || progress.missionStatus === "failed") && blocks > 0 ? 2 : 0; // marginTop(1) + line
-  return blocks * 2 + separators + missionLine;
+  let lines = 0;
+  for (const entry of progress.entries) {
+    if (entry.status === "completed" && !details) lines += 1;
+    else lines += 2;
+  }
+  const missionLine = (progress.missionStatus === "completed" || progress.missionStatus === "failed") && progress.entries.length > 0 ? 2 : 0; // marginTop(1) + line
+  return lines + missionLine;
 }

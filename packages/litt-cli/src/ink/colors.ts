@@ -1,69 +1,82 @@
 /**
  * LiTT semantic color system — the premium shell palette.
  *
- * One controlled accent (warm LiTT orange/amber) and a strict contrast
- * hierarchy. If everything is orange, the design has failed.
+ * Purple is the product identity. Gold is reserved for the moments that
+ * need the operator's attention (approvals, high-value decisions). If
+ * everything is purple and gold, the design has failed.
  *
  * Priority:
  *   1. White  = content        (assistant body, user text, results)
  *   2. Gray   = metadata       (labels, timestamps, routing, events)
- *   3. Orange = LiTT/focus/action (mark, active selection, Plan/Act,
- *              composer accent, working glyph when appropriate)
- *   4. Green  = success
- *   5. Red    = failure
+ *   3. Purple = LiTT/focus/active (mark, active selection, Plan/Act,
+ *              composer accent, active work glyph)
+ *   4. Gold   = approval / attention / high-value emphasis ONLY
+ *   5. Green  = success
+ *   6. Red    = failure
  *
- * Warm near-black backgrounds (terminal default) pair with warm text
- * grays — no pure bright-white-on-pure-black anywhere.
+ * Near-black background (#09090B — the terminal's own) pairs with clean
+ * neutral text — no warm tint, no pure bright-white-on-pure-black.
  *
- * | Meaning   | Value     | Role                                  |
- * | --------- | --------- | ------------------------------------- |
- * | brand     | #ff9e64   | LiTT accent — identity, focus, active |
- * | brandBright| #ffc777  | brighter accent (hover/emphasis)      |
- * | text      | #e4e1da   | assistant body — warm soft white      |
- * | textBright| #f7f5f0   | user text / important results         |
- * | secondary | #8d897f   | metadata — medium gray                |
- * | secondaryDim | #5f5c55 | dim gray — de-emphasized               |
- * | success   | #9ece6a   | muted green — pass/complete           |
- * | working   | #ffb454   | active work — warm amber              |
- * | warning   | #e0af68   | muted amber — warn/approval           |
- * | error     | #f7768e   | muted red — failure                   |
- * | info      | #7aa2f7   | muted blue — links/commands           |
+ * | Meaning   | Value     | Role                                   |
+ * | --------- | --------- | -------------------------------------- |
+ * | brand     | #A855F7   | LiTT purple — identity, focus, active  |
+ * | brandBright| #C084FC  | brighter purple (hover/emphasis)       |
+ * | deep      | #7C3AED   | deep purple — borders, depth           |
+ * | gold      | #F5C451   | approval / attention / high-value      |
+ * | goldBright| #FFD76A   | bright gold (pinned approval accents)  |
+ * | text      | #F4F4F5   | assistant body — clean soft white      |
+ * | textBright| #FAFAFA   | user text / important results          |
+ * | secondary | #8B8FA3   | metadata — muted slate gray            |
+ * | secondaryBright | #A6AAB8 | emphasized metadata (branch names) |
+ * | secondaryDim | #5C5F6E | dim gray — de-emphasized             |
+ * | success   | #4ADE80   | green — pass/complete                  |
+ * | working   | #A855F7   | active work — LiTT purple (identity)   |
+ * | warning   | #FBBF24   | amber — warn (non-blocking attention)  |
+ * | error     | #F87171   | red — failure                          |
+ * | info      | #C084FC   | links/commands — bright purple         |
  */
 
 export const COLORS = {
-  /** LiTT accent — warm amber/orange. Identity, focus, active action. */
-  brand: "#ff9e64",
-  brandBright: "#ffc777",
+  /** LiTT purple — identity, focus, active action. */
+  brand: "#A855F7",
+  brandBright: "#C084FC",
 
-  /** Assistant body — warm near-white, never pure white. */
-  text: "#e4e1da",
+  /** Deep purple — borders, depth, secondary identity surfaces. */
+  deep: "#7C3AED",
+
+  /** Gold — approvals, high-value emphasis. Never decorative. */
+  gold: "#F5C451",
+  goldBright: "#FFD76A",
+
+  /** Assistant body — clean near-white. */
+  text: "#F4F4F5",
 
   /** User text / important results — brighter than metadata. */
-  textBright: "#f7f5f0",
+  textBright: "#FAFAFA",
 
-  /** Metadata — medium gray. */
-  secondary: "#8d897f",
+  /** Metadata — muted slate gray. */
+  secondary: "#8B8FA3",
 
   /** Slightly brighter gray — branch names, emphasized metadata. */
-  secondaryBright: "#a8a499",
+  secondaryBright: "#A6AAB8",
 
   /** Dim gray — de-emphasized (routing footers, inactive states). */
-  secondaryDim: "#5f5c55",
+  secondaryDim: "#5C5F6E",
 
-  /** Success, pass, complete — muted green. */
-  success: "#9ece6a",
+  /** Success, pass, complete — green. */
+  success: "#4ADE80",
 
-  /** Active work, in-progress, streaming — warm amber. */
-  working: "#ffb454",
+  /** Active work, in-progress, streaming — LiTT purple (identity). */
+  working: "#A855F7",
 
-  /** Warnings, approval needed — muted amber. */
-  warning: "#e0af68",
+  /** Warnings — amber. Approval surfaces use gold instead. */
+  warning: "#FBBF24",
 
-  /** Errors, failures, denied — muted red. */
-  error: "#f7768e",
+  /** Errors, failures, denied — red. */
+  error: "#F87171",
 
-  /** Links, commands, info — muted blue. */
-  info: "#7aa2f7",
+  /** Links, commands, info — bright purple. */
+  info: "#C084FC",
 } as const;
 
 /** Agent lifecycle state → color */
@@ -91,7 +104,7 @@ export function stateColor(state: string): string {
     case "TIMEOUT":
       return COLORS.warning;
     case "APPROVAL":
-      return COLORS.warning;
+      return COLORS.gold;
     default:
       return COLORS.secondary;
   }
@@ -114,8 +127,9 @@ export function activityColor(tag: string): string {
     case "ERROR":
       return COLORS.error;
     case "WARN":
-    case "APPROVAL":
       return COLORS.warning;
+    case "APPROVAL":
+      return COLORS.gold;
     case "CHAT":
     case "INFO":
       return COLORS.brand;

@@ -31,7 +31,9 @@ import { TranscriptArea, layoutTranscript, computeViewport, SCROLL_INDICATOR_ROW
 import { Composer } from "./composer.js";
 import { StatusBar } from "../status-bar.js";
 import { CONTENT_MEASURE } from "../chat-transcript.js";
-import type { ActivityEntry, ChatMessage, HoloState, MissionState } from "../cockpit-store.js";
+import { deriveRuntimeState } from "../runtime-state.js";
+import type { ActivityEntry, ApprovalPrompt, ChatMessage, HoloState, MissionState } from "../cockpit-store.js";
+import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
 
 /** Rows consumed by fixed chrome below the content region:
@@ -85,17 +87,30 @@ export interface LiTTShellProps {
   activeModel: string | null;
   activeProvider: string | null;
   mode: "plan" | "act";
+  /** Ctrl+O — expand execution details for collapsed successful runs. */
+  toolDetails?: boolean;
+
+  // Pinned approval wiring
+  /** The pending approval — when set, the approval panel is PINNED
+   *  directly above the composer (never buried in the transcript). */
+  approvalPrompt: ApprovalPrompt | null;
+  /** Approve once / approve similar (session) / deny. */
+  onApprovalDecision: (approved: boolean, scope: "once" | "session") => void;
+  /** Approval-wait clock (see cockpit-store pause/resumeBusyForApproval). */
+  approvalSince: number | null;
+  approvalAccumMs: number;
 }
 
 export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
-    gitModified, gitUntracked, toolProgress,
+    gitModified, gitUntracked, toolProgress, toolDetails = false,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
     transcriptAnchor, onTranscriptPageChange, onTranscriptAnchorChange,
     project, branch, localRuntime, remoteRuntime = "offline", brain, activeModel, activeProvider, mode,
+    approvalPrompt, onApprovalDecision, approvalSince, approvalAccumMs,
   } = props;
 
   const { stdout } = useStdout();
@@ -110,6 +125,21 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const hasConversation = messages.length > 0 || isProcessing
     || (missionState !== null && missionState.state !== "IDLE");
 
+  // ── ONE authoritative runtime state (runtime-state.ts) ─────────────
+  // Shared by the composer and threaded to surfaces below — the composer
+  // copy can never contradict the footer, and a terminal mission
+  // atomically unlocks the composer.
+  const runtimeState = useMemo(() => deriveRuntimeState({
+    holoState,
+    isProcessing,
+    missionState,
+    // `!= null` (loose) on purpose: an UNWIRED approval prompt (undefined)
+    // must not pin the shell into waiting_for_approval the way `!== null`
+    // alone did — undefined !== null is true, which rendered a phantom
+    // "⚠ APPROVAL" footer in every surface that doesn't wire approvals.
+    hasApproval: approvalPrompt != null,
+  }), [holoState, isProcessing, missionState, approvalPrompt]);
+
   // Content measure: readable width on wide terminals, natural on narrow.
   const contentWidth = Math.max(32, Math.min(CONTENT_MEASURE, columns - 4));
   const contentRows = Math.max(8, rows - 1 - CHROME_ROWS);
@@ -122,8 +152,8 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   // Without this, the Box overflows and Ink collides lines (the 100×30 bug).
   const extraHeight = useMemo(() => {
     if (anchor !== null) return 0; // scrolled mode — extra content not rendered
-    return estimateExtraContentHeight(toolProgress, missionState, activityLog);
-  }, [anchor, toolProgress, missionState, activityLog]);
+    return estimateExtraContentHeight(toolProgress, missionState, activityLog, toolDetails);
+  }, [anchor, toolProgress, missionState, activityLog, toolDetails]);
 
   const viewport = useMemo(() => {
     if (messages.length === 0) {
@@ -181,11 +211,23 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             gitModified={gitModified}
             gitUntracked={gitUntracked}
             toolProgress={toolProgress}
+            toolDetails={toolDetails}
           />
         ) : (
           <Welcome />
         )}
       </Box>
+
+      {/* Pinned approval panel — ALWAYS directly above the composer.
+          It never scrolls away with the transcript, so a pending approval
+          is actionable no matter where the user has scrolled. It owns
+          ALL keyboard input while pending (a/⇧a/d/Esc). */}
+      {approvalPrompt && (
+        <ApprovalUX
+          prompt={approvalPrompt}
+          onDecision={onApprovalDecision}
+        />
+      )}
 
       {/* The single input line — always visible, always in place */}
       <Composer
@@ -197,6 +239,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         onOpenContext={onOpenContext}
         disabled={composerDisabled}
         busy={isProcessing}
+        runtimeState={runtimeState}
         scrolled={composerScrolled}
         focusEpoch={composerFocusEpoch}
         onReturnToLive={onComposerReturnToLive}
@@ -215,6 +258,9 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
         mode={mode}
         isProcessing={isProcessing}
         busySince={busySince}
+        approvalSince={approvalSince}
+        approvalAccumMs={approvalAccumMs}
+        approvalCount={approvalPrompt ? approvalPrompt.depth : 0}
         missionState={missionState}
         gitModified={gitModified}
         gitUntracked={gitUntracked}

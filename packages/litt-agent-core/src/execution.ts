@@ -107,6 +107,50 @@ interface CommandSpec {
 }
 
 const COMMAND_SPECS: Record<string, CommandSpec> = {
+  // Discovery / lookup — pure read-only, no side effects.
+  // `where.exe bash 2>&1` is an executable lookup, NOT arbitrary code.
+  // Note: Windows executables invoked with their extension (`where.exe`,
+  // `where.cmd`) are normalized before this lookup — see normalizeCommand().
+  where: { defaultCapability: "read_only" },
+  which: { defaultCapability: "read_only" },
+  type: { defaultCapability: "read_only" }, // cmd: print file · sh builtin: describe command — both read-only
+  stat: { defaultCapability: "read_only" },
+  file: { defaultCapability: "read_only" },
+  tree: { defaultCapability: "read_only" },
+  du: { defaultCapability: "read_only" },
+  df: { defaultCapability: "read_only" },
+  diff: { defaultCapability: "read_only" },
+  cmp: { defaultCapability: "read_only" },
+  cut: { defaultCapability: "read_only" },
+  sort: { defaultCapability: "read_only" },
+  uniq: { defaultCapability: "read_only" },
+  md5sum: { defaultCapability: "read_only" },
+  sha256sum: { defaultCapability: "read_only" },
+  findstr: { defaultCapability: "read_only" },
+  more: { defaultCapability: "read_only" },
+  less: { defaultCapability: "read_only" },
+  date: { defaultCapability: "read_only" },
+  cal: { defaultCapability: "read_only" },
+  id: { defaultCapability: "read_only" },
+  groups: { defaultCapability: "read_only" },
+  // PowerShell read-only cmdlets (matched lowercase — PS is case-insensitive)
+  "get-location": { defaultCapability: "read_only" },
+  "get-childitem": { defaultCapability: "read_only" },
+  "get-content": { defaultCapability: "read_only" },
+  "get-command": { defaultCapability: "read_only" },
+  "get-item": { defaultCapability: "read_only" },
+  "get-process": { defaultCapability: "read_only" },
+  "get-date": { defaultCapability: "read_only" },
+  "test-path": { defaultCapability: "read_only" },
+  "select-string": { defaultCapability: "read_only" },
+  "measure-object": { defaultCapability: "read_only" },
+  // Common PowerShell aliases for the above
+  gci: { defaultCapability: "read_only" },
+  gc: { defaultCapability: "read_only" },
+  gi: { defaultCapability: "read_only" },
+  gl: { defaultCapability: "read_only" },
+  sls: { defaultCapability: "read_only" },
+
   // Interpreters — arbitrary code execution
   node: { defaultCapability: "arbitrary_code", arbitraryCode: true, pathArgs: ["--require", "-r", "--input-type"] },
   npx: { defaultCapability: "arbitrary_code", arbitraryCode: true },
@@ -317,11 +361,29 @@ function isVersionFlag(arg: string): boolean {
 // ─── Operation parser ─────────────────────────────────────────────
 
 /**
+ * Normalize a command token for registry lookup.
+ *
+ * Windows shells frequently invoke allowlisted tools with their extension
+ * (`where.exe bash`, `git.exe status`, `rg.cmd …`). The extension changes
+ * NOTHING about what the command can do, so it must not change the risk
+ * class — otherwise harmless discovery commands get classified as
+ * arbitrary code and block the run behind an approval prompt.
+ *
+ * This is a structural fix (suffix normalization), not a string whitelist:
+ * ANY registry command keeps its class when invoked with an executable
+ * extension, and unregistered commands remain arbitrary code.
+ */
+export function normalizeCommand(command: string): string {
+  const lower = command.toLowerCase();
+  return lower.replace(/\.(exe|cmd|bat|com|ps1)$/, "");
+}
+
+/**
  * Parse a command + args into a capability tier.
  * This is the core of the capability-based security model.
  */
 export function classifyCommand(command: string, args: string[], cwd?: string): RiskAssessment {
-  const cmd = command.toLowerCase();
+  const cmd = normalizeCommand(command);
 
   // Destructive commands — always dangerous
   if (DESTRUCTIVE_COMMANDS.has(cmd)) {

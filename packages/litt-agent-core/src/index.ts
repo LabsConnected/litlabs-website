@@ -137,6 +137,7 @@ export {
   runCommand as runCommandSecure,
   runShellCommand,
   classifyCommand,
+  normalizeCommand,
   inspectScriptBody,
   resolvePackageScript,
   redactSecrets,

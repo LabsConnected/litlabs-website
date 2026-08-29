@@ -37,6 +37,7 @@ import {
 import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
 import { deriveFocusState } from "../focus-state.js";
+import { composerCopy, isBusyState, type RuntimeState } from "../runtime-state.js";
 
 // ─── Debug instrumentation for first-input tracing ────────────────
 // Set LITT_INPUT_DEBUG=1 to trace the first several key events to a
@@ -70,6 +71,14 @@ export interface ComposerProps {
   disabled: boolean;
   /** True while a mission/chat is processing — composer shows a live indicator. */
   busy?: boolean;
+  /**
+   * The ONE authoritative runtime state (runtime-state.ts). When provided
+   * it outranks the raw busy/disabled flags: the composer copy matches the
+   * footer exactly — "LiTT is working… Esc to stop" while running,
+   * "Approval required above" (gold) while an approval is pending, and an
+   * editable input the moment execution reaches a terminal state.
+   */
+  runtimeState?: RuntimeState;
   /** True when the transcript is scrolled into history (not live). */
   scrolled?: boolean;
   /** Focus epoch from the store — caret restarts ONCE per transition. */
@@ -80,8 +89,16 @@ export interface ComposerProps {
 
 export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
-  onOpenPalette, onOpenContext, disabled, busy, scrolled, focusEpoch, onReturnToLive,
+  onOpenPalette, onOpenContext, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
+  // The derived runtime state is the single copy authority. The raw
+  // busy/disabled flags only apply when no runtime state was provided
+  // (legacy callers / tests).
+  const runtime: RuntimeState = runtimeState
+    ?? (disabled ? "waiting_for_approval" : busy ? "running" : "idle");
+  const copy = composerCopy(runtime);
+  const inputLocked = isBusyState(runtime) || disabled;
+
   const [caret, setCaret] = React.useState(() => {
     // Initialize caret in grapheme coordinates
     const graphemes = value.split(""); // fallback — fine for initial
@@ -95,8 +112,8 @@ export function Composer({
   // run settle, return-to-live) restart the caret via the epoch.
   const focus = deriveFocusState({
     overlayActive: false, // the composer only renders when no overlay is open
-    busy: !!(disabled || busy),
-    approvalActive: false, // covered by disabled (APPROVAL disables the composer)
+    busy: inputLocked,
+    approvalActive: runtime === "waiting_for_approval",
     scrolled: !!scrolled,
   });
   const cursor = useCursorBlink(550, 700, focus.blinkEnabled, focusEpoch ?? null);
@@ -234,8 +251,12 @@ export function Composer({
   const cursorVisible = focus.showCaret && cursor.visible;
 
   const renderInput = () => {
-    if (busy || disabled) {
-      return <Text dimColor>LiTT is working…</Text>;
+    if (copy) {
+      // Busy copy comes from the ONE runtime state — identical wording to
+      // the footer derivation, gold only for approvals.
+      return copy.gold
+        ? <Text color={COLORS.gold}>{copy.text}</Text>
+        : <Text dimColor>{copy.text}</Text>;
     }
     // Convert grapheme caret to code-unit index for rendering
     const codeUnitCaret = graphemeToCodeUnit(value, caret);
@@ -267,15 +288,15 @@ export function Composer({
       borderRight={false}
       borderBottom={false}
       borderLeft
-      borderLeftColor={COLORS.brand}
+      borderLeftColor={copy?.gold ? COLORS.gold : COLORS.brand}
       paddingLeft={1}
     >
       <Box flexGrow={1}>
-        <Text bold color={COLORS.brand}>› </Text>
+        <Text bold color={copy?.gold ? COLORS.gold : COLORS.brand}>› </Text>
         {renderInput()}
       </Box>
-      {(busy || disabled) && (
-        <Text dimColor>Esc to stop</Text>
+      {copy?.hint && (
+        <Text dimColor>{copy.hint}</Text>
       )}
     </Box>
   );

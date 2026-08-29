@@ -2,14 +2,15 @@
  * Tests for the semantic color system.
  *
  * Verifies that:
- *   - LiTT brand is warm amber/orange (the ONE controlled accent)
- *   - Content text is warm near-white (never pure white)
- *   - Metadata is gray; dim gray for de-emphasis
- *   - Success is muted green
- *   - Working is warm amber
- *   - Warning is muted amber
- *   - Failure is muted red
- *   - Info is muted blue
+ *   - LiTT brand is purple (the ONE identity accent)
+ *   - Gold is reserved for approvals / high-value attention (never decorative)
+ *   - Content text is clean neutral near-white (no warm tint)
+ *   - Metadata is slate gray; dim gray for de-emphasis
+ *   - Success is bright green
+ *   - Working is LiTT purple (identity)
+ *   - Warning is amber — distinct from approval gold
+ *   - Failure is soft red
+ *   - Info is bright purple
  *   - State colors map correctly
  *   - Activity tags map correctly
  */
@@ -19,41 +20,46 @@ import { COLORS, stateColor, activityColor, healthColor, costTier } from "../ink
 
 describe("colors", () => {
   describe("COLORS constants", () => {
-    it("brand is warm amber/orange", () => {
-      expect(COLORS.brand).toBe("#ff9e64");
+    it("brand is LiTT purple", () => {
+      expect(COLORS.brand).toBe("#A855F7");
     });
 
-    it("success is muted green", () => {
-      expect(COLORS.success).toBe("#9ece6a");
+    it("success is bright green", () => {
+      expect(COLORS.success).toBe("#4ADE80");
     });
 
-    it("working is warm amber", () => {
-      expect(COLORS.working).toBe("#ffb454");
+    it("working is LiTT purple (identity)", () => {
+      expect(COLORS.working).toBe(COLORS.brand);
     });
 
-    it("warning is muted amber", () => {
-      expect(COLORS.warning).toBe("#e0af68");
+    it("warning is amber", () => {
+      expect(COLORS.warning).toBe("#FBBF24");
     });
 
-    it("error is muted red", () => {
-      expect(COLORS.error).toBe("#f7768e");
+    it("gold is reserved for approvals and differs from warning amber", () => {
+      expect(COLORS.gold).toBe("#F5C451");
+      expect(COLORS.gold).not.toBe(COLORS.warning);
     });
 
-    it("secondary is medium gray", () => {
-      expect(COLORS.secondary).toBe("#8d897f");
+    it("error is soft red", () => {
+      expect(COLORS.error).toBe("#F87171");
+    });
+
+    it("secondary is muted slate gray", () => {
+      expect(COLORS.secondary).toBe("#8B8FA3");
     });
 
     it("secondaryDim is dim gray", () => {
-      expect(COLORS.secondaryDim).toBe("#5f5c55");
+      expect(COLORS.secondaryDim).toBe("#5C5F6E");
     });
 
-    it("content text is warm near-white — not pure white", () => {
-      expect(COLORS.text).toBe("#e4e1da");
+    it("content text is clean neutral near-white — not pure white", () => {
+      expect(COLORS.text).toBe("#F4F4F5");
       expect(COLORS.text).not.toBe("white");
     });
 
     it("user text is brighter than metadata", () => {
-      expect(COLORS.textBright).toBe("#f7f5f0");
+      expect(COLORS.textBright).toBe("#FAFAFA");
       expect(COLORS.textBright.length).toBe(7);
     });
   });
@@ -86,8 +92,9 @@ describe("colors", () => {
       expect(stateColor("TIMEOUT")).toBe(COLORS.warning);
     });
 
-    it("APPROVAL → yellow", () => {
-      expect(stateColor("APPROVAL")).toBe(COLORS.warning);
+    it("APPROVAL → gold (reserved for approvals, not generic warning amber)", () => {
+      expect(stateColor("APPROVAL")).toBe(COLORS.gold);
+      expect(stateColor("APPROVAL")).not.toBe(COLORS.warning);
     });
   });
 
@@ -113,7 +120,11 @@ describe("colors", () => {
 
     it("warning tags → amber", () => {
       expect(activityColor("WARN")).toBe(COLORS.warning);
-      expect(activityColor("APPROVAL")).toBe(COLORS.warning);
+    });
+
+    it("approval tags → gold (distinct from warning amber)", () => {
+      expect(activityColor("APPROVAL")).toBe(COLORS.gold);
+      expect(activityColor("APPROVAL")).not.toBe(COLORS.warning);
     });
 
     it("brand tags → amber", () => {

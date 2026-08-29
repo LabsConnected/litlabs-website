@@ -53,6 +53,10 @@ export interface ApprovalPrompt {
   action: string;
   risk: string;
   scope: string;
+  /** Epoch ms when this approval was requested — drives the wait timer. */
+  since: number;
+  /** Total approvals pending (this one + queued behind it). */
+  depth: number;
 }
 
 /**
@@ -374,6 +378,14 @@ export function useCockpitStore() {
   const [composerValue, setComposerValue] = useState("");
   const [overlayQuery, setOverlayQuery] = useState("");
   const [busySince, setBusySince] = useState<number | null>(null);
+  // ─── Approval-wait clock — blocked-on-human time is NOT work time ──
+  // approvalSince: when the CURRENT approval window opened (null = none).
+  // approvalAccumMs: total ms already spent waiting on RESOLVED approvals
+  // during this run. The footer's "Working · Ns" subtracts both, so a
+  // 3-minute approval never inflates agent execution time.
+  const [approvalSince, setApprovalSince] = useState<number | null>(null);
+  const [approvalAccumMs, setApprovalAccumMs] = useState(0);
+  const approvalSinceRef = useRef<number | null>(null);
   const [transcriptAnchor, setTranscriptAnchor] = useState<number | null>(null);
   // ─── Focus epoch — the single event-based focus authority ────────
   // The tracker decides exactly-once restoration transitions; the React
@@ -394,6 +406,10 @@ export function useCockpitStore() {
   // React state so renders stay reactive. Same pattern as ChatTranscriptStore.
   const [toolProgressStore] = useState(() => new ToolProgressStore());
   const [toolProgress, setToolProgress] = useState<ToolProgressSnapshot>(() => toolProgressStore.snapshot());
+  // Ctrl+O — execution-details toggle. Collapsed successful runs expand
+  // to show their result summaries; failed/active runs are always expanded.
+  const [toolDetails, setToolDetails] = useState(false);
+  const toggleToolDetails = useCallback(() => setToolDetails((v) => !v), []);
 
   // ─── P1: coalesced transcript UI flush (~30fps) ──────────────────
   // The canonical ChatTranscriptStore receives EVERY streamed delta
@@ -769,6 +785,10 @@ export function useCockpitStore() {
     const tracker = focusTrackerRef.current!;
     tracker.setBusy(true);
     setBusySince(Date.now());
+    // New run — reset the approval-wait clock for this run.
+    approvalSinceRef.current = null;
+    setApprovalSince(null);
+    setApprovalAccumMs(0);
     setFocusEpoch(tracker.epoch);
   }, []);
 
@@ -777,7 +797,32 @@ export function useCockpitStore() {
     const tracker = focusTrackerRef.current!;
     tracker.setBusy(false);
     setBusySince(null);
+    approvalSinceRef.current = null;
+    setApprovalSince(null);
     setFocusEpoch(tracker.epoch);
+  }, []);
+
+  /**
+   * Approval window opened — the run is BLOCKED on a human, not working.
+   * The busy clock keeps its start point, but every ms from here until
+   * resumeBusyAfterApproval() is excluded from agent execution time and
+   * counted as approval-wait time instead.
+   */
+  const pauseBusyForApproval = useCallback(() => {
+    if (approvalSinceRef.current == null) {
+      approvalSinceRef.current = Date.now();
+      setApprovalSince(approvalSinceRef.current);
+    }
+  }, []);
+
+  /** Approval resolved — fold the wait into the accumulated wait, resume the run. */
+  const resumeBusyAfterApproval = useCallback(() => {
+    const opened = approvalSinceRef.current;
+    if (opened != null) {
+      approvalSinceRef.current = null;
+      setApprovalAccumMs((acc) => acc + Math.max(0, Date.now() - opened));
+      setApprovalSince(null);
+    }
   }, []);
 
   // ─── Terminal → IDLE auto-transition (race-safe) ─────────────────
@@ -874,9 +919,12 @@ export function useCockpitStore() {
       composerValue,
       overlayQuery,
       busySince,
+      approvalSince,
+      approvalAccumMs,
       transcriptAnchor,
       transcriptPage,
       focusEpoch,
+      toolDetails,
     },
     actions: {
       setSelectedPanel,
@@ -933,6 +981,8 @@ export function useCockpitStore() {
       setOverlayQuery,
       startBusy,
       stopBusy,
+      pauseBusyForApproval,
+      resumeBusyAfterApproval,
       scheduleIdle,
       bumpFocus,
       setTranscriptAnchor,
@@ -942,6 +992,7 @@ export function useCockpitStore() {
       scrollHome,
       scrollEnd,
       resetTranscriptScroll,
+      toggleToolDetails,
     },
   };
 }

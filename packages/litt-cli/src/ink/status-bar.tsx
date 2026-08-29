@@ -15,8 +15,12 @@
  *   LOCAL        — muted, state-colored
  *   clean        — muted green
  *   dirty        — muted amber (+N)
- *   working      — small active indicator (◉ Working · Ns)
- *   error        — muted red (! failed · v View)
+ *   working      — small active indicator (◆ Running · m:ss). Excludes
+ *                  approval-wait time — blocked-on-human is NOT work time.
+ *   waiting      — gold (⚠ APPROVAL · waiting m:ss). Mutually exclusive
+ *                  with "Working": a pending approval is never rendered
+ *                  as active execution.
+ *   error        — muted red (× failed · v View)
  *
  * One dim divider above. No fake statuses — everything comes from
  * canonical state. Left/right segments never overlap: the left side
@@ -30,12 +34,11 @@ import { truncateTail, shortModelName } from "./text-wrap.js";
 import { providerLabel } from "../lib/model-provider.js";
 import type { HoloState, MissionState } from "./cockpit-store.js";
 import { deriveTransport } from "../lib/transport-projection.js";
-
-function isWorking(h: HoloState): boolean {
-  return h === "UNDERSTANDING" || h === "PLANNING" || h === "READING"
-    || h === "EDITING" || h === "RUNNING" || h === "TESTING"
-    || h === "VERIFYING" || h === "APPROVAL";
-}
+import {
+  deriveRuntimeState, isBusyState, isTerminalState, runtimeGlyph, runtimeLabel, runtimeColorRole,
+  formatDuration, approvalWaitSeconds, busySecondsExcludingApproval,
+  type RuntimeState,
+} from "./runtime-state.js";
 
 export interface StatusBarProps {
   project: string;
@@ -51,6 +54,12 @@ export interface StatusBarProps {
   mode: "plan" | "act";
   isProcessing: boolean;
   busySince: number | null;
+  /** Epoch ms when the current approval window opened (null = none). */
+  approvalSince: number | null;
+  /** Total ms already spent waiting on RESOLVED approvals this run. */
+  approvalAccumMs: number;
+  /** Total approvals pending (1 = just this one). */
+  approvalCount: number;
   missionState: MissionState | null;
   gitModified: number;
   gitUntracked: number;
@@ -58,43 +67,80 @@ export interface StatusBarProps {
 
 export function StatusBar({
   project, branch, localRuntime, remoteRuntime = "offline", holoState, brain, activeModel, activeProvider,
-  mode, isProcessing, busySince, missionState, gitModified, gitUntracked,
+  mode, isProcessing, busySince, approvalSince = null, approvalAccumMs = 0, approvalCount = 0, missionState,
+  gitModified, gitUntracked,
 }: StatusBarProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
 
-  const working = isProcessing || isWorking(holoState);
-  const busy = working || holoState === "COMPLETE" || holoState === "FAILED"
-    || holoState === "CANCELLED" || holoState === "TIMEOUT";
+  // ── ONE authoritative runtime state — never a self-derived status ──
+  // Approval, working, and terminal states are decided by the shared
+  // derivation, so the footer can never say "Working" while waiting for
+  // approval or after the mission has ended. A live approval-wait clock
+  // (approvalSince) OR the APPROVAL holo phase pins the waiting state.
+  const hasApproval = approvalSince !== null || holoState === "APPROVAL";
+  const runtime: RuntimeState = deriveRuntimeState({
+    holoState,
+    isProcessing,
+    missionState,
+    hasApproval,
+  });
+  const working = isBusyState(runtime) && runtime !== "waiting_for_approval";
+  const busy = isBusyState(runtime) || isTerminalState(runtime);
 
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
-    if (!working) return;
+    if (!busy) return;
     const timer = setInterval(() => {
       setTick((t) => t + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, [working]);
+  }, [busy]);
 
-  // ── Line 2 right: clean / +N / ◉ Working / ! failed ──
+  // ── Clock math — approval wait is NOT work time ──
+  // "Working · Ns" excludes open + accumulated approval windows, so a
+  // 3-minute decision never inflates agent execution time.
+  const now = Date.now();
+  const activeSeconds = busySecondsExcludingApproval(
+    busySince ?? missionState?.startedAt ?? null,
+    approvalSince,
+    approvalAccumMs,
+    now,
+  );
+  const waitSeconds = approvalWaitSeconds(approvalSince, now);
+
+  // ── Line 2 right: ⚠ APPROVAL / ◆ Running / ✓ Done / × failed / git ──
   let right: React.ReactElement;
-  if (working) {
-    const started = busySince ?? missionState?.startedAt ?? Date.now();
-    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  if (runtime === "waiting_for_approval") {
+    // Gold — attention is required. NEVER "Working" here. The duration
+    // counts ONLY the approval wait, and the pending count surfaces
+    // queued approvals ("· 2 pending") so depth is never invisible.
+    const countSuffix = approvalCount > 1 ? ` · ${approvalCount} pending` : "";
     right = (
-      <Text color={COLORS.working}>
-        ◉ Working · {seconds}s
+      <Text color={COLORS.gold} bold>
+        {`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)} · waiting ${formatDuration(waitSeconds)}${countSuffix}`}
       </Text>
     );
-  } else if (missionState
-    && (missionState.state === "FAILED" || missionState.state === "CANCELLED" || missionState.state === "TIMEOUT")) {
-    const label = missionState.state === "FAILED" ? "failed" : missionState.state.toLowerCase();
-    const tests = missionState.testResults && missionState.testResults.failed > 0
+  } else if (runtime === "planning" || runtime === "running" || runtime === "verifying") {
+    // Purple ◆ — active LiTT work, duration secondary, approval-free.
+    right = (
+      <Text color={COLORS.brand}>
+        {`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)} · ${formatDuration(activeSeconds)}`}
+      </Text>
+    );
+  } else if (runtime === "completed") {
+    right = (
+      <Text color={COLORS.success} dimColor={!busy}>
+        {`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}`}
+      </Text>
+    );
+  } else if (runtime === "failed" || runtime === "cancelled" || runtime === "timeout") {
+    const tests = missionState?.testResults && missionState.testResults.failed > 0
       ? ` · ${missionState.testResults.failed} test${missionState.testResults.failed !== 1 ? "s" : ""} failing`
       : "";
     right = (
       <Text>
-        <Text color={COLORS.error}>! {label}{tests}</Text>
+        <Text color={COLORS.error}>{`${runtimeGlyph(runtime)} ${runtimeLabel(runtime)}${tests}`}</Text>
         <Text dimColor>  v View</Text>
       </Text>
     );
@@ -104,6 +150,9 @@ export function StatusBar({
   } else {
     right = <Text color={COLORS.success} dimColor={!busy}>clean</Text>;
   }
+  // runtimeColorRole is the semantic contract used by tests — the footer
+  // must render each state in its declared role color.
+  void runtimeColorRole(runtime);
 
   // ── Line 1: model · PROVIDER   |   Plan/Act ──
   // Per spec: don't show "LiTT Auto →" — the user knows it's LiTT.

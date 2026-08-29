@@ -172,6 +172,13 @@ function defaultProps(over: Partial<LiTTShellProps> = {}): LiTTShellProps {
     activeModel: "GPT 5.6 Luna",
     activeProvider: null,
     mode: "act",
+
+    // Pinned approval wiring — no approval is pending in these scenarios.
+    approvalPrompt: null,
+    onApprovalDecision: () => {},
+    approvalSince: null,
+    approvalAccumMs: 0,
+
     ...over,
   };
 }
@@ -259,7 +266,9 @@ const overflowScenario = (): Partial<LiTTShellProps> => ({
     baselineGitFiles: [], missionDeltaFiles: [], readOnly: true,
     toolsUsed: ["web.search", "web.fetch"],
   } satisfies MissionState,
-  // Dirty repo footer: "+3" must survive next to "! failed".
+  // Dirty repo props: under the terminal-state precedence the FAILED
+  // footer ("× Failed") wins over the raw "+3" — dirty counts only
+  // render when the runtime is idle.
   gitModified: 1,
   gitUntracked: 2,
 });
@@ -312,9 +321,11 @@ describe("shell ANSI-grid regression", () => {
         await new Promise((r) => setTimeout(r, 100));
 
         assertCleanFrame(emulate(out.bytes), cols, {
-          // FAILED missions show "! failed  v View" — the FAILED state
+          // FAILED missions show "× Failed  v View" — the terminal state
           // takes priority over the raw dirty count in the status bar.
-          footer: ["Plan", "Act", "! failed"],
+          // (Pre-redesign the sentinel was "! failed"; the runtime-state
+          // consolidation renamed it to the shared glyph vocabulary.)
+          footer: ["Plan", "Act", "× Failed"],
           body: [
             "Web search failed (status 200)",
             // Tail line of the long answer — historically shredded first.
@@ -339,7 +350,10 @@ describe("shell ANSI-grid regression", () => {
         await new Promise((r) => setTimeout(r, 100));
 
         assertCleanFrame(emulate(out.bytes), cols, {
-          footer: ["Plan", "Act", "+2"],
+          // COMPLETE missions show "✓ Done" — terminal state now takes
+          // precedence over the raw git dirty count ("+2"), mirroring the
+          // FAILED-over-dirty precedence the overflow scenario asserts.
+          footer: ["Plan", "Act", "✓ Done"],
           body: ["DONE", "tests passed"],
         });
       } finally {
@@ -368,7 +382,7 @@ describe("shell ANSI-grid regression", () => {
       out.resize(120, 36);
       await new Promise((r) => setTimeout(r, 300));
       assertCleanFrame(emulate(out.bytes), 120, {
-        footer: ["Plan", "Act", "! failed"],
+        footer: ["Plan", "Act", "× Failed"],
       });
       out.reset();
 
@@ -378,7 +392,7 @@ describe("shell ANSI-grid regression", () => {
       inst.unmount();
       await new Promise((r) => setTimeout(r, 100));
       assertCleanFrame(emulate(out.bytes), 80, {
-        footer: ["Plan", "Act", "! failed"],
+        footer: ["Plan", "Act", "× Failed"],
         body: ["I did not verify the project as fully healthy."],
       });
     } finally {

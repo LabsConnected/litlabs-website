@@ -241,7 +241,10 @@ export function CockpitApp({
     } else if (isCtrl(input, key, "r")) {
       store.actions.setOverlay("resume-picker");
     } else if (isCtrl(input, key, "o")) {
-      store.actions.setOverlay("workspace-picker");
+      // Ctrl+O — toggle execution details: expand/collapse the result
+      // summaries of successful tool runs in the execution group.
+      // (Workspace switching lives at /workspace and in the palette.)
+      store.actions.toggleToolDetails();
     } else if (input === "?") {
       if (!store.state.isProcessing) store.actions.setOverlay("help");
     }
@@ -413,6 +416,7 @@ export function CockpitApp({
             gitModified={store.state.gitModified}
             gitUntracked={store.state.gitUntracked}
             toolProgress={store.state.toolProgress}
+            toolDetails={store.state.toolDetails}
             composerValue={store.state.composerValue}
             onComposerChange={(v) => store.actions.setComposerValue(v)}
             onSubmit={(v) => {
@@ -458,6 +462,10 @@ export function CockpitApp({
             activeModel={store.state.activeModel}
             activeProvider={store.state.activeProvider}
             mode={store.state.mode}
+            approvalPrompt={store.state.approvalPrompt}
+            onApprovalDecision={handleApproval}
+            approvalSince={store.state.approvalSince}
+            approvalAccumMs={store.state.approvalAccumMs}
           />
         </>
       )}

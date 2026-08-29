@@ -505,6 +505,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           action: pending.action,
           risk: pending.risk,
           scope: pending.scope,
+          since: pending.createdAt,
+          depth: pending.depth,
         });
         store.actions.setHoloState("APPROVAL");
         store.actions.setOverlay("none");

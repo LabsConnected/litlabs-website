@@ -154,6 +154,8 @@ export interface TranscriptAreaProps {
    *  mission execution with friendly per-tool blocks. Rendered between
    *  the chat messages and the activity feed (live mode only). */
   toolProgress: ToolProgressSnapshot | null;
+  /** Ctrl+O — show result summaries for collapsed successful runs. */
+  toolDetails?: boolean;
 }
 
 export function TranscriptArea({
@@ -165,6 +167,7 @@ export function TranscriptArea({
   gitModified,
   gitUntracked,
   toolProgress,
+  toolDetails = false,
 }: TranscriptAreaProps): React.ReactElement | null {
   if (messages.length === 0 || viewport.start >= viewport.end) return null;
 
@@ -188,7 +191,7 @@ export function TranscriptArea({
        *  instead of an empty streaming placeholder. Live mode only. */}
       {viewport.atBottom && toolProgress && toolProgress.entries.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <ToolProgress progress={toolProgress} width={contentWidth} />
+          <ToolProgress progress={toolProgress} width={contentWidth} details={toolDetails} />
         </Box>
       )}
 
@@ -313,10 +316,11 @@ export function estimateExtraContentHeight(
   toolProgress: ToolProgressSnapshot | null,
   mission: MissionState | null,
   events: ActivityEntry[],
+  toolDetails = false,
 ): number {
   let h = 0;
   if (toolProgress && toolProgress.entries.length > 0) {
-    h += estimateToolProgressHeight(toolProgress) + 1; // marginTop(1)
+    h += estimateToolProgressHeight(toolProgress, toolDetails) + 1; // marginTop(1)
   }
   const resultH = estimateResultBlockHeight(mission);
   if (resultH > 0) h += resultH + 1; // marginTop(1)

@@ -21,7 +21,7 @@ const CONTROLS: Array<[string, string]> = [
   ["Ctrl+L", "Clear transcript"],
   ["Ctrl+N", "New session"],
   ["Ctrl+R", "Resume session"],
-  ["Ctrl+O", "Switch workspace"],
+  ["Ctrl+O", "Toggle execution details"],
   ["Ctrl+D", "Diff view"],
   ["Esc", "Close overlay / stop working"],
   ["Ctrl+C", "Cancel run (exit when idle)"],
