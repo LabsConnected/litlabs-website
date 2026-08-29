@@ -25,6 +25,10 @@ import type { SessionEventBridge } from "./session-event-bridge.js";
 
 let entryCounter = 0;
 
+/** Maps a toolCallId → live workstream activity id so a tool.started can
+ *  be completed/failed by its matching terminal event. */
+const toolWsIds = new Map<string, string>();
+
 function makeEntry(
   type: string,
   text: string,
@@ -277,6 +281,78 @@ export function useEventBridge(
     if (entry) {
       store.actions.addActivity(entry);
     }
+
+    // ─── Live workstream feed (observable intent, NO chain-of-thought) ──
+    // Map lifecycle events onto structured workstream activities so the
+    // operator WATCHES what LiTT is doing. `reason` entries are concise
+    // conclusions only. Failures stay visible even when retried later.
+    store.actions.workstreamPush((ws) => {
+      switch (event.type) {
+        case "run.started":
+          ws.addReason(`Working on ${String(event.data.command ?? "task")}`);
+          break;
+        case "tool.started": {
+          const label = toolLabel(event.data);
+          const wsId = ws.begin("tool", "EXECUTING", "EXECUTING", label);
+          if (event.toolCallId) toolWsIds.set(event.toolCallId, wsId);
+          break;
+        }
+        case "tool.completed": {
+          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+          if (wsId) {
+            ws.complete(wsId, {
+              elapsedMs: event.data.durationMs as number | undefined,
+              success: (event.data.success as boolean) ?? true,
+              command: event.data.command as string | undefined,
+            });
+          }
+          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+          break;
+        }
+        case "tool.failed": {
+          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+          if (wsId) ws.fail(wsId, String(event.data.error ?? "error"));
+          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+          break;
+        }
+        case "tool.cancelled": {
+          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+          if (wsId) ws.fail(wsId, "Cancelled");
+          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+          break;
+        }
+        case "tool.timeout": {
+          const wsId = event.toolCallId ? toolWsIds.get(event.toolCallId) : undefined;
+          if (wsId) ws.fail(wsId, `Timed out after ${String(event.data.timeoutMs ?? 0)}ms`);
+          if (event.toolCallId) toolWsIds.delete(event.toolCallId);
+          break;
+        }
+        case "run.completed": {
+          const status = (event.data.status as string) ?? "unknown";
+          const dur = event.data.durationMs as number | undefined;
+          if (status === "success") ws.addVerify(`Run complete`, true, dur);
+          else {
+            const id = ws.begin("failure", "FAILED", `Run ${status}`);
+            ws.fail(id, String(event.data.error ?? status));
+          }
+          break;
+        }
+        case "mission.step_started":
+          ws.addReason(missionStepText(event.data));
+          break;
+        case "mission.step_passed":
+          ws.addVerify(missionStepText(event.data), true);
+          break;
+        case "mission.step_failed":
+          {
+            const id = ws.begin("failure", "FAILED", missionStepText(event.data));
+            ws.fail(id, "Step failed");
+          }
+          break;
+        default:
+          break;
+      }
+    });
 
     // ─── Tool progress updates ────────────────────────────────────
     // Drive the structured ToolProgressStore from the same lifecycle

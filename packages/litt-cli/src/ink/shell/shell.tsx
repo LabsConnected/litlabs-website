@@ -35,6 +35,7 @@ import { deriveRuntimeState } from "../runtime-state.js";
 import type { ActivityEntry, ApprovalPrompt, ChatMessage, HoloState, MissionState, CanonicalMissionProjection } from "../cockpit-store.js";
 import { ApprovalUX } from "../approval-ux.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
+import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
 
 /** Rows consumed by fixed chrome below the content region:
@@ -61,6 +62,8 @@ export interface LiTTShellProps {
   /** Canonical mission projection — real mission steps drive the
    *  MissionProgressBlock. null when no mission is active. */
   canonicalMission: CanonicalMissionProjection | null;
+  /** Live workstream snapshot — the "watch LiTT work" dock (live mode). */
+  workstream: WorkstreamSnapshot | null;
 
   // Composer wiring
   composerValue: string;
@@ -114,7 +117,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
   const {
     messages, activityLog, holoState, isProcessing, busySince, missionState,
     gitModified, gitUntracked, toolProgress, toolDetails = false,
-    executionTarget, canonicalMission,
+    executionTarget, canonicalMission, workstream,
     composerValue, onComposerChange, onSubmit, onNavigateHistory,
     onOpenPalette, onClosePalette, onOpenContext, composerDisabled,
     composerScrolled, composerFocusEpoch, onComposerReturnToLive,
@@ -176,9 +179,10 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     return estimateExtraContentHeight(
       toolProgress, missionState, activityLog, toolDetails,
       holoState, isProcessing, canonicalMission, executionTarget, columns,
+      workstream,
     );
   }, [anchor, toolProgress, missionState, activityLog, toolDetails,
-      holoState, isProcessing, canonicalMission, executionTarget, columns]);
+      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream]);
 
   // Live-mode extra height (for the auto-return atBottom check).
   // This is the extraHeight as it would be in live mode — used to compute
@@ -189,9 +193,10 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     return estimateExtraContentHeight(
       toolProgress, missionState, activityLog, toolDetails,
       holoState, isProcessing, canonicalMission, executionTarget, columns,
+      workstream,
     );
   }, [toolProgress, missionState, activityLog, toolDetails,
-      holoState, isProcessing, canonicalMission, executionTarget, columns]);
+      holoState, isProcessing, canonicalMission, executionTarget, columns, workstream]);
 
   const viewport = useMemo(() => {
     if (messages.length === 0) {
@@ -200,8 +205,9 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
     // Reserve rows for extra content (tool progress + result block + feed).
     // In scrolled mode, extra content is not rendered, so reserve = 0.
     const reserve = anchor === null ? extraHeight : 0;
-    // If the extra content alone exceeds the region, fall back to natural
-    // flow (terminal scrollback) instead of overflowing the fixed Box.
+    // If the extra content (observability + workstream dock) alone exceeds
+    // the region, fall back to natural flow (terminal scrollback) instead
+    // of overflowing the fixed Box — never invent a scroll anchor jump.
     if (reserve >= contentRows) {
       const last = messages.length - 1;
       return { start: last, end: messages.length, atBottom: true, hasAbove: last > 0, belowCount: 0, fits: false };
@@ -275,6 +281,7 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             isProcessing={isProcessing}
             executionTarget={executionTarget}
             canonicalMission={canonicalMission}
+            workstream={workstream}
           />
         ) : (
           <Welcome />

@@ -420,6 +420,7 @@ export function CockpitApp({
             toolDetails={store.state.toolDetails}
             executionTarget={store.state.executionTarget}
             canonicalMission={store.state.canonicalMission}
+            workstream={store.state.workstream}
             composerValue={store.state.composerValue}
             onComposerChange={(v) => store.actions.setComposerValue(v)}
             onSubmit={(v) => {

@@ -2,7 +2,7 @@
 # LiTT CLI Termux install script — builds from committed source.
 #
 # Usage on Termux:
-#   cd ~/litlabs-website
+#   cd ~/litt-canonical
 #   bash scripts/install-termux.sh
 #
 # This script:
@@ -18,7 +18,7 @@
 #
 # After install:
 #   export GROQ_API_KEY=gsk_your_key_here  # in ~/.bashrc
-#   cd ~/litlabs-website
+#   cd ~/litt-canonical
 #   litt ask "your question"
 
 set -e
@@ -108,7 +108,7 @@ echo ""
 echo "Install complete."
 echo ""
 echo "Verify:"
-echo "  cd ~/litlabs-website"
+echo "  cd ~/litt-canonical"
 echo "  litt doctor"
 echo "  litt ask 'Say hello'"
 echo ""

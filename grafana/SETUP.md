@@ -26,7 +26,7 @@ to your full project stack: metrics (Prometheus), logs (Loki), GitHub
 
 Run as Administrator:
 ```powershell
-cd "E:\LiTTreeLabStudio Prod"
+cd "E:\LiTT\Worktrees\main"
 .\scripts\fix-alloy-config.ps1 -LokiUrl "https://logs-prod-XXX-us-east-2.grafana.net/loki/api/v1/push"
 ```
 

@@ -13,6 +13,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { ChatTranscriptStore } from "./chat-transcript-store.js";
 import { ToolProgressStore, type ToolProgressSnapshot } from "./tool-progress-store.js";
+import { WorkstreamStore, type WorkstreamSnapshot } from "./workstream-store.js";
 import { FocusEpochTracker } from "./focus-state.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import {
@@ -418,6 +419,30 @@ export function useCockpitStore() {
   // to show their result summaries; failed/active runs are always expanded.
   const [toolDetails, setToolDetails] = useState(false);
   const toggleToolDetails = useCallback(() => setToolDetails((v) => !v), []);
+
+  // ─── Live workstream — "watch LiTT work" ───────────────────────────
+  // Owned by a pure WorkstreamStore (testable in node env without React).
+  // The hook mirrors its snapshot into React state; the EventBridge and
+  // controller push structured activities (inspect/reason/edit/tool/test/
+  // verify/failure/retry/success). NO chain-of-thought is ever stored.
+  const [workstreamStore] = useState(() => new WorkstreamStore());
+  const [workstream, setWorkstream] = useState<WorkstreamSnapshot>(() => workstreamStore.snapshot());
+  const commitWorkstream = useCallback(() => {
+    setWorkstream(workstreamStore.snapshot());
+  }, [workstreamStore]);
+  /** Push an activity via a mutation callback on the WorkstreamStore. */
+  const workstreamPush = useCallback((mutate: (s: WorkstreamStore) => void) => {
+    mutate(workstreamStore);
+    setWorkstream(workstreamStore.snapshot());
+  }, [workstreamStore]);
+  const workstreamToggleExpand = useCallback((id: string) => {
+    workstreamStore.toggleExpand(id);
+    setWorkstream(workstreamStore.snapshot());
+  }, [workstreamStore]);
+  const workstreamClear = useCallback(() => {
+    workstreamStore.clear();
+    setWorkstream(workstreamStore.snapshot());
+  }, [workstreamStore]);
 
   // ─── P1: coalesced transcript UI flush (~30fps) ──────────────────
   // The canonical ChatTranscriptStore receives EVERY streamed delta
@@ -934,6 +959,7 @@ export function useCockpitStore() {
       transcriptPage,
       focusEpoch,
       toolDetails,
+      workstream,
     },
     actions: {
       setSelectedPanel,
@@ -1003,6 +1029,9 @@ export function useCockpitStore() {
       scrollEnd,
       resetTranscriptScroll,
       toggleToolDetails,
+      workstreamPush,
+      workstreamToggleExpand,
+      workstreamClear,
     },
   };
 }

@@ -109,10 +109,10 @@ describe("status bar truncation contract", () => {
   });
 
   it("truncatePath truncates long Windows paths keeping drive + tail", () => {
-    const longPath = "C:\\Users\\litbi\\CascadeProjects\\litlabs-website\\packages\\litt-cli";
+    const longPath = "E:\\LiTT\\Worktrees\\main\\packages\\litt-cli";
     const result = truncatePath(longPath, 36);
     expect(result.length).toBeLessThanOrEqual(36);
-    expect(result.startsWith("C:")).toBe(true);
+    expect(result.startsWith("E:")).toBe(true);
   });
 
   it("truncatePath truncates long WSL/POSIX paths", () => {

@@ -24,9 +24,11 @@ import { ChatMessageView } from "../chat-transcript.js";
 import { layoutTranscript, computeViewport, SCROLL_INDICATOR_ROWS, type ViewportResult } from "../scroll-model.js";
 import type { ActivityEntry, ChatMessage, MissionState, ActivitySemantic, CanonicalMissionProjection } from "../cockpit-store.js";
 import type { ToolProgressSnapshot } from "../tool-progress-store.js";
+import type { WorkstreamSnapshot } from "../workstream-store.js";
 import type { ExecutionTarget } from "../../lib/execution-target.js";
 import { MissionResultBlock } from "./summary.js";
 import { ThinkingBlock, ToolResultBlock, MissionProgressBlock, SummaryBlock } from "../observability.js";
+import { WorkstreamView, estimateWorkstreamRows } from "../workstream.js";
 import {
   projectThinkingBlock,
   projectToolResultBlocks,
@@ -180,6 +182,9 @@ export interface TranscriptAreaProps {
   /** Canonical mission projection — real mission steps drive the
    *  MissionProgressBlock. null when no mission is active. */
   canonicalMission: CanonicalMissionProjection | null;
+  /** Live workstream snapshot — the "watch LiTT work" dock (live mode
+   *  only). Renders below the SummaryBlock; reserved in the viewport budget. */
+  workstream: WorkstreamSnapshot | null;
 }
 
 export function TranscriptArea({
@@ -196,6 +201,7 @@ export function TranscriptArea({
   isProcessing,
   executionTarget,
   canonicalMission,
+  workstream = null,
 }: TranscriptAreaProps): React.ReactElement | null {
   // `events` is no longer rendered directly (the raw semantic feed is
   // replaced by the structured observability blocks). It remains in the
@@ -293,6 +299,16 @@ export function TranscriptArea({
       {viewport.atBottom && summaryProps && (
         <Box marginTop={1}>
           <SummaryBlock {...summaryProps} width={contentWidth} />
+        </Box>
+      )}
+
+      {/* Workstream dock — the "watch LiTT work" feed. Live mode only,
+       * and only while work is running (so it never holds fixed space at
+       * rest — the viewport budget returns to its at-rest size). Reserved
+       * in estimateExtraContentHeight so it never overflows the region. */}
+      {viewport.atBottom && workstream && workstream.hasRunning && workstream.activities.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <WorkstreamView snapshot={workstream} width={contentWidth} />
         </Box>
       )}
 
@@ -415,11 +431,21 @@ export function estimateExtraContentHeight(
   canonicalMission: CanonicalMissionProjection | null = null,
   executionTarget: ExecutionTarget = "local",
   columns = 80,
+  workstream: WorkstreamSnapshot | null = null,
 ): number {
   void events; // feed removed — blocks replace it
   void toolDetails; // ToolResultBlock always shows summaries (no collapse toggle)
 
   let h = 0;
+
+  // ─── Live "watch LiTT work" dock ────────────────────────────────
+  // Rendered (and reserved) only in live mode while work is running. Gating
+  // on hasRunning keeps the dock ephemeral: it clears once idle, so the
+  // viewport budget returns to its at-rest size (no empty anchor jump).
+  if (workstream && workstream.hasRunning) {
+    const wsRows = estimateWorkstreamRows(workstream);
+    if (wsRows > 0) h += wsRows + 1; // marginTop(1)
+  }
 
   // ThinkingBlock (during active work)
   const thinking = projectThinkingBlock(

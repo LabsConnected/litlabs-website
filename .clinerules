@@ -29,7 +29,8 @@
 - There is NO src/lib/jarvis.ts. The `jarvis` export is defined in `src/lib/litt.ts` for compatibility.
 - Repository (git remote): https://github.com/LabsConnected/litlabs-website
 - Branch: main
-- Deployed on Vercel. Self-host via Dockerfile or docker-compose.yml.
+- Deployed on Railway via Dockerfiles (site serves through Cloudflare at litlabs.net;
+  GitHub Actions CI builds on push to main). Self-host via Dockerfile or docker-compose.yml.
 
 [CRITICAL_RULES]
 1. NEVER assume the workspace is empty or "minimal". If a file is missing, your context is
