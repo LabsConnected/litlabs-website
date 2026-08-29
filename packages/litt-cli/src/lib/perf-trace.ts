@@ -54,7 +54,7 @@
  *   read            — bounded read-only tools, optional single synthesis call
  *   local / utility  — answered with no model call at all
  */
-export type PerfLane = "chat" | "mission" | "local" | "read" | "utility";
+export type PerfLane = "chat" | "mission" | "local" | "read" | "utility" | "machine";
 
 export class PerfTrace {
   readonly enabled: boolean;

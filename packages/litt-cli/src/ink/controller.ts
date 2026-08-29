@@ -58,6 +58,13 @@ import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from 
 import { TelemetryStore } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
+import {
+  matchMachineLane,
+  classifyMachineCommand,
+  shouldRefuseUpFront,
+  formatMachineResult,
+  type MachineCommandResult,
+} from "../lib/machine-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
@@ -284,6 +291,177 @@ function act(store: CockpitStore, text: string, type = "info", semantic?: Activi
     ...(semantic ? { semantic } : {}),
     ...(tag ? { tag } : {}),
   });
+}
+
+/**
+ * Run a set of explicit local commands through the MACHINE lane.
+ *
+ * This is the P0 local-execution path: it executes commands through the
+ * local ExecutionGateway → `project.run` → `runCommand` with NO contact
+ * to the remote model server. Works when Railway/terminal-server is down.
+ *
+ * Each command's execution locus (LOCAL) is surfaced in the activity
+ * feed and the final assistant message. Destructive commands are refused
+ * up front (the machine lane is a read-only local inspection path);
+ * everything else goes through the gateway, which enforces PLAN/ACT
+ * mode, approval, path safety, env filtering, and secret redaction.
+ *
+ * No model call, no synthesis, no remote transport — pure deterministic
+ * local execution with real exit codes and real stdout/stderr.
+ */
+async function runMachineLane(
+  commands: import("../lib/machine-lane.js").MachineCommand[],
+  deps: {
+    store: CockpitStore;
+    session: RuntimeSession;
+    perf: PerfTrace | null;
+    userMessage: string;
+  },
+): Promise<void> {
+  const { store, session, perf, userMessage } = deps;
+
+  // Persist the user message to the transcript.
+  store.actions.addChatMessage({
+    role: "user",
+    content: userMessage,
+    ts: Date.now(),
+    status: "complete",
+  });
+  store.actions.setHoloState("RUNNING");
+  store.actions.setIsProcessing(true);
+  store.actions.startBusy();
+
+  const results: MachineCommandResult[] = [];
+  let allOk = true;
+
+  try {
+    const gateway = session.getGateway();
+    const cwd = session.getCwd();
+    const mode = session.getMode();
+
+    for (const cmd of commands) {
+      // ─── Up-front refusal for destructive commands ───────────────
+      // The machine lane is a read-only local inspection path. Destructive
+      // operations (rm, format, fastboot flash, etc.) require the full
+      // mission + approval flow, not a deterministic lane.
+      if (shouldRefuseUpFront(cmd)) {
+        const risk = classifyMachineCommand(cmd);
+        act(
+          store,
+          `LOCAL · ${cmd.raw} — REFUSED (destructive: ${risk.capability}). Use the mission path for destructive operations.`,
+          "error",
+          "failed",
+          "MACHINE",
+        );
+        results.push({
+          command: cmd,
+          result: {
+            status: "failed",
+            success: false,
+            message: `Refused: destructive command (${risk.capability}) not allowed in the local machine lane`,
+            data: { code: "DESTRUCTIVE_REFUSED", capability: risk.capability },
+          },
+          ms: 0,
+          locus: "local",
+        });
+        allOk = false;
+        continue;
+      }
+
+      // ─── Pre-classify for the activity feed (locus + risk class) ──
+      const risk = classifyMachineCommand(cmd);
+      perf?.mark(`machine_cmd_start:${cmd.command}`);
+      act(
+        store,
+        `LOCAL · ${cmd.raw} — risk: ${risk.level}/${risk.capability}`,
+        "info",
+        "decision",
+        "MACHINE",
+      );
+
+      // ─── Execute through the local gateway (no remote contact) ────
+      // gateway.execute() → project.run → runCommand handles:
+      //   capability classification, PLAN/ACT mode, approval gate,
+      //   path safety, env filtering, secret redaction.
+      const t0 = Date.now();
+      let result;
+      try {
+        const gr = await gateway.execute({
+          toolId: "project.run",
+          inputs: { command: cmd.command, args: cmd.args },
+          cwd,
+          mode,
+          identity: CLI_IDENTITY,
+        });
+        result = gr.result;
+      } catch (err) {
+        // Gateway threw (e.g. approval denied, plan-mode reject) — report honestly
+        const msg = err instanceof Error ? err.message : String(err);
+        result = {
+          status: "failed" as const,
+          success: false,
+          message: msg,
+          data: { error: msg },
+        };
+      }
+      const ms = Date.now() - t0;
+      perf?.mark(`machine_cmd_end:${cmd.command}`);
+
+      const res: MachineCommandResult = { command: cmd, result, ms, locus: "local" };
+      results.push(res);
+
+      // ─── Surface the result with locus ───────────────────────────
+      const formatted = formatMachineResult(res);
+      act(
+        store,
+        truncateActivity(formatted, 120),
+        result.success ? "info" : "error",
+        result.success ? "success" : "failed",
+        "MACHINE",
+      );
+      if (!result.success) allOk = false;
+    }
+
+    // ─── Deterministic final assistant message (no model synthesis) ──
+    // The machine lane never calls the model. The output is pure
+    // formatting of the real tool results, each tagged with its locus.
+    const output = results.map(formatMachineResult).join("\n\n");
+    store.actions.addChatMessage({
+      role: "assistant",
+      content: output,
+      ts: Date.now(),
+      status: "complete",
+      servedModel: "local-machine-lane",
+    });
+
+    if (allOk) {
+      store.actions.addActivity({
+        id: `act_${Date.now()}_machine_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "MACHINE",
+        text: `LOCAL · ${results.length} command(s) complete — no remote contact`,
+      });
+      store.actions.setHoloState("COMPLETE");
+      store.actions.scheduleIdle(1500);
+    } else {
+      store.actions.addActivity({
+        id: `act_${Date.now()}_machine_done`,
+        ts: Date.now(),
+        type: "agent.complete",
+        tag: "MACHINE",
+        text: `LOCAL · ${results.length} command(s) done — some failed (no remote contact)`,
+      });
+      store.actions.setHoloState("FAILED");
+      store.actions.scheduleIdle(2000);
+    }
+
+    perf?.mark("finalize");
+    perf?.end("machine");
+  } finally {
+    store.actions.setIsProcessing(false);
+    store.actions.stopBusy();
+  }
 }
 
 /** Open a file in the user's editor (UI action only — never agent execution). */
@@ -1130,6 +1308,30 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
+    // ─── /local slash command → MACHINE lane (deterministic, no remote) ──
+    // Runs explicit local commands through the local ExecutionGateway
+    // WITHOUT contacting the remote model server. Works when Railway is
+    // down. Each command's execution locus (LOCAL) is shown in the feed.
+    if (input.startsWith("/local ") || input === "/local") {
+      const machineMatch = matchMachineLane(input);
+      if (!machineMatch || machineMatch.commands.length === 0) {
+        store.actions.addActivity({
+          id: `act_${Date.now()}`,
+          ts: Date.now(),
+          type: "error",
+          text: "Usage: /local <command> [args...]  (one command per line for multiple)",
+        });
+        return;
+      }
+      await runMachineLane(machineMatch.commands, {
+        store,
+        session,
+        perf: null,
+        userMessage: input,
+      });
+      return;
+    }
+
     // Slash command → gateway
     if (input.startsWith("/")) {
       const parts = input.split(/\s+/);
@@ -1326,6 +1528,32 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       localPerf.mark("finalize");
       localPerf.end("local");
       persistSession();
+      return;
+    }
+
+    // ─── MACHINE lane — explicit local command execution (no model) ───
+    // Handles requests that explicitly ask to execute LOCAL commands
+    // ("execute locally", "do not use REMOTE") with a concrete command
+    // list, OR a /local slash command (handled earlier). Runs through
+    // the local ExecutionGateway → project.run → runCommand with NO
+    // contact to the remote model server — so read-only local machine
+    // inspection works even when Railway/terminal-server is down.
+    //
+    // This is the P0 routing fix: a LOCAL-capable read-only request
+    // must NOT die because the REMOTE model server is unreachable.
+    // Remote-only requests (e.g. "show Railway production filesystem")
+    // do NOT match this lane — they fall through to the normal path,
+    // which fails correctly when remote is down (no fake fallback).
+    const machineMatch = matchMachineLane(input);
+    if (machineMatch && machineMatch.commands.length > 0) {
+      const machinePerf = PerfTrace.start("machine");
+      machinePerf.mark("machine_match");
+      await runMachineLane(machineMatch.commands, {
+        store,
+        session,
+        perf: machinePerf,
+        userMessage: input,
+      });
       return;
     }
 
