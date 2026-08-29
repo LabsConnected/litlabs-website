@@ -52,6 +52,7 @@ import {
   verifyPreviewHealth,
   type PreviewStatus,
 } from "./preview/PreviewManager";
+import { registerWorkspaceRoutes } from "./workspace-routes";
 import { dispatchCommand } from "./command-bridge";
 import { PtySessionManager, type PtySessionSnapshot } from "./pty-session-manager";
 import { requireInternalServiceAuth, type AuthenticatedRequest } from "./internal-auth";
@@ -307,6 +308,12 @@ app.post("/api/revoke", (req: AuthenticatedRequest, res: Response) => {
     res.json({ revoked: true });
   }
 });
+
+// ─── User-authenticated workspace listing ─────────────────────────
+// GET /api/workspaces — the endpoint `litt workspace list|select`
+// calls. Handler lives in workspace-routes.ts so the endpoint tests
+// exercise the same code registered here.
+registerWorkspaceRoutes(app);
 
 // ─── User-authenticated runtime state endpoint ────────────────────
 // GET /api/runtime — returns the canonical runtime snapshot using

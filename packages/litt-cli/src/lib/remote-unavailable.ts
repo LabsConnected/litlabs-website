@@ -31,6 +31,18 @@ export type RemoteUnavailableReason =
   | "service_unavailable"
   /** Reached the service, but establishing the remote session failed. */
   | "session_failed"
+  /**
+   * Reached the service and authenticated, but it does not serve this
+   * endpoint (HTTP 404). Either the CLI is calling a stale path or the
+   * service is running a build that predates the route. This is NOT a
+   * session failure — reporting it as one sends the operator to retry
+   * and check service status for a problem neither can fix.
+   */
+  | "endpoint_missing"
+  /** Authenticated, but the service refused the request (HTTP 403). */
+  | "forbidden"
+  /** The service reached an internal error (HTTP 5xx). */
+  | "server_error"
   /** Remote session established, but the command could not be executed. */
   | "execution_failed"
   /** No remote project workspace is prepared for this account. */
@@ -57,6 +69,9 @@ const SUBJECT: Record<RemoteUnavailableReason, string> = {
   auth_revoked: "Authentication is no longer valid.",
   service_unavailable: "Remote service unavailable.",
   session_failed: "Remote session could not be established.",
+  endpoint_missing: "The terminal service does not provide this endpoint.",
+  forbidden: "The terminal service refused this request.",
+  server_error: "The terminal service reported an internal error.",
   execution_failed: "Remote execution failed.",
   workspace_required: "No remote project workspace is prepared.",
   workspace_selection_required: "Multiple remote workspaces are available.",
@@ -73,6 +88,12 @@ const REMEDY: Record<RemoteUnavailableReason, string> = {
   auth_revoked: "Your session is no longer valid. Run 'litt login' to sign in again.",
   service_unavailable: "The LiTT terminal service is unreachable. Check your connection or LITT_TERMINAL_URL.",
   session_failed: "Could not establish a remote session. Retry, or check the terminal service status.",
+  // NOT "retry" — a missing route does not appear on the next attempt.
+  // The CLI and the service disagree about the API surface; one of the
+  // two is out of date.
+  endpoint_missing: "The CLI and the terminal service disagree on the API. Update the CLI ('npm i -g @litt/cli'), or check that the terminal service is running a current build.",
+  forbidden: "Your session is valid but this request was refused. Check that your account has access to this resource.",
+  server_error: "This is a server-side fault, not a problem with your session. Retry shortly, or check the terminal service status.",
   execution_failed: "The remote runtime could not execute this command.",
   workspace_required: "Prepare a remote project workspace, then retry with --remote.",
   workspace_selection_required: "Specify which workspace to use with --workspace <id>.",

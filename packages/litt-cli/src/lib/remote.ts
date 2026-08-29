@@ -49,7 +49,7 @@ import type {
 } from "@litt/agent-core";
 import { isRemoteError, hasRemoteResult } from "@litt/agent-core";
 import { getTerminalUrl } from "./auth/auth-config.js";
-import { RemoteUnavailableError } from "./remote-unavailable.js";
+import { RemoteUnavailableError, type RemoteUnavailableReason } from "./remote-unavailable.js";
 
 // Re-export for CLI consumers (index.ts imports these from remote.ts)
 export { isRemoteError, hasRemoteResult };
@@ -491,12 +491,48 @@ export interface RemoteWorkspace {
   branch: string;
 }
 
+/** True when the value is a complete, usable workspace record. */
+function isValidRemoteWorkspace(value: unknown): value is RemoteWorkspace {
+  if (!value || typeof value !== "object") return false;
+  const w = value as Record<string, unknown>;
+  return (
+    typeof w.workspaceId === "string" && w.workspaceId.length > 0 &&
+    typeof w.projectId === "string" &&
+    typeof w.root === "string" && w.root.length > 0 &&
+    typeof w.branch === "string"
+  );
+}
+
+/**
+ * Map an HTTP failure status onto a typed reason.
+ *
+ * Every status that is NOT an auth problem must map to something other
+ * than a session/auth reason. Collapsing them all into `session_failed`
+ * is what made a missing server route surface as "Could not establish a
+ * remote session" — an accurate-sounding message that pointed at the
+ * wrong system entirely and offered a remedy (retry) that could never
+ * work.
+ *
+ * Pure — exported for direct testing.
+ */
+export function classifyHttpFailure(status: number): RemoteUnavailableReason {
+  if (status === 401) return "auth_revoked";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "endpoint_missing";
+  // 502/503/504 are "the service is not there right now" rather than
+  // "the service computed an error" — worth keeping distinct.
+  if (status === 502 || status === 503 || status === 504) return "service_unavailable";
+  if (status >= 500) return "server_error";
+  return "session_failed";
+}
+
 /**
  * List the authenticated user's ready workspaces from terminal-server.
  * Uses the same token-exchange flow as remoteChat/dispatchRemote.
  *
  * Returns an empty array if the user has no ready workspaces. Throws
- * RemoteUnavailableError on transport/auth failures.
+ * RemoteUnavailableError on transport/auth failures, with a reason that
+ * names the actual failure category (see classifyHttpFailure).
  */
 export async function listRemoteWorkspaces(
   options: RemoteDispatchOptions = {},
@@ -518,16 +554,26 @@ export async function listRemoteWorkspaces(
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    const reason = response.status === 401 || response.status === 403
-      ? "auth_revoked"
-      : "session_failed";
-    throw new RemoteUnavailableError(
-      reason,
-      body?.error ?? `Workspace list failed (${response.status}).`,
-    );
+    // A 404 body is Express's default HTML, not JSON — .json() rejects
+    // and we fall back to the status-derived detail.
+    const body = await response.json().catch(() => null) as
+      | { error?: string | { code?: string; message?: string } }
+      | null;
+    const typedMessage = body?.error && typeof body.error === "object"
+      ? body.error.message
+      : undefined;
+    const legacyMessage = typeof body?.error === "string" ? body.error : undefined;
+    const detail = typedMessage ?? legacyMessage
+      ?? `Workspace list failed (${response.status}).`;
+
+    throw new RemoteUnavailableError(classifyHttpFailure(response.status), detail);
   }
 
-  const data = await response.json() as { workspaces?: RemoteWorkspace[] };
-  return Array.isArray(data.workspaces) ? data.workspaces : [];
+  const data = await response.json().catch(() => null) as
+    | { workspaces?: unknown }
+    | null;
+  if (!data || !Array.isArray(data.workspaces)) return [];
+  // Drop malformed entries rather than failing the whole listing — one
+  // bad record must not hide every other workspace the user owns.
+  return data.workspaces.filter(isValidRemoteWorkspace);
 }

@@ -20,6 +20,7 @@
 
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { listRemoteWorkspaces, type RemoteWorkspace } from "../lib/remote.js";
+import { isRemoteUnavailable } from "../lib/remote-unavailable.js";
 import {
   getSelectedRemoteWorkspace,
   setSelectedRemoteWorkspace,
@@ -188,6 +189,45 @@ async function defaultPrompt(question: string): Promise<string> {
   }
 }
 
+/**
+ * One-line summary per failure category, printed above the remedy.
+ *
+ * The generic "Failed to list workspaces: <message>" wrapper hid WHICH
+ * system failed. A missing endpoint, an unreachable service and a
+ * revoked session need three different actions from the operator, so
+ * they get three different headlines.
+ *
+ * Exported for testability.
+ */
+export function describeWorkspaceListFailure(error: unknown): { headline: string; remedy?: string } {
+  if (!isRemoteUnavailable(error)) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { headline: `Failed to list workspaces: ${msg}` };
+  }
+  const HEADLINE: Record<string, string> = {
+    endpoint_missing: "The terminal service has no workspace-listing endpoint (404).",
+    service_unavailable: "The terminal service is unreachable.",
+    server_error: "The terminal service failed while listing workspaces.",
+    auth_revoked: "Your session is no longer valid.",
+    auth_expired: "Your session expired.",
+    not_authenticated: "Not signed in.",
+    forbidden: "Access to workspace listing was refused.",
+    workspace_unauthorized: "Not authorized for that workspace.",
+  };
+  return {
+    headline: HEADLINE[error.reason] ?? `Failed to list workspaces (${error.reason}).`,
+    remedy: error.remedy,
+  };
+}
+
+/** Print a listing failure with its real category, then its remedy. */
+function reportWorkspaceListFailure(error: unknown): number {
+  const { headline, remedy } = describeWorkspaceListFailure(error);
+  fail(headline);
+  if (remedy) console.error(`${c.dim}  ${remedy}${c.reset}`);
+  return 1;
+}
+
 export async function workspaceCommand(args: string[]): Promise<number> {
   const subcommand = args[0] ?? "list";
 
@@ -231,9 +271,7 @@ async function listWorkspaces(): Promise<number> {
   try {
     workspaces = await listRemoteWorkspaces({ clerkToken });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    fail(`Failed to list workspaces: ${msg}`);
-    return 1;
+    return reportWorkspaceListFailure(error);
   }
 
   if (workspaces.length === 0) {
@@ -290,9 +328,7 @@ async function selectWorkspace(args: string[]): Promise<number> {
   try {
     workspaces = await listRemoteWorkspaces({ clerkToken });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    fail(`Failed to list workspaces: ${msg}`);
-    return 1;
+    return reportWorkspaceListFailure(error);
   }
 
   if (workspaces.length === 0) {
