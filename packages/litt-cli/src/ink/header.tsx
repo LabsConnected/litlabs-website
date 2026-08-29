@@ -2,19 +2,26 @@
  * Header — the one-line LiTT brand band.
  *
  * ```
- *   LiTT                              ● LOCAL  ● REMOTE
+ *   LiTT                              ● LOCAL  ● TOOLS
+ *   LiTT                              ● REMOTE  ● TOOLS
  *   LiTT                    ● SIGNED OUT
- *   LiTT            ● LOCAL · user@email.com
- *   LiTT            ● REMOTE · user@email.com
- *   LiTT            ● REMOTE↻ · user@email.com
+ *   LiTT            ● REMOTE↻  ● TOOLS
  * ```
  *
  * The header ONLY brands the surface. Project, branch, model, and
- * runtime state live in the status bar — never duplicated. The LOCAL
- * and REMOTE indicators are independent truth sources — LOCAL is always
- * available (RuntimeSession), REMOTE reflects the actual transport
- * connection state to terminal-server. On narrow terminals the
- * indicators drop off.
+ * runtime state live in the status bar — never duplicated.
+ *
+ * The primary badge reflects the CONFIGURED execution target:
+ *   - executionTarget === "local"  → ● LOCAL (never REMOTE, even if
+ *     remote transport happens to be connected)
+ *   - executionTarget === "remote" → actual remote transport state
+ *     (● REMOTE / ○ REMOTE… / ✗ REMOTE ERR)
+ *
+ * The secondary badge shows local TOOL availability (● TOOLS), which is
+ * independent of the execution target — local tooling stays ready even
+ * while model calls execute remotely.
+ *
+ * On narrow terminals the indicators drop off.
  *
  * Auth state is NOT shown in the header by default — email is private.
  * Use /whoami, /account, or /doctor --verbose for full identity.
@@ -42,13 +49,11 @@ export interface HeaderProps {
    * The CONFIGURED execution target (see lib/execution-target.ts) —
    * where the cockpit intends model calls to run.
    *
-   * Accepted so the header shares one descriptor with the rest of the
-   * cockpit, but deliberately NOT rendered: the indicators below report
-   * the ACTUAL transport, derived from localRuntime/remoteRuntime through
-   * the shared deriveTransport projection. Rendering the configured
-   * target here would let the header claim REMOTE while the connection
-   * is offline — the exact duplication this component avoids. The
-   * configured target is surfaced in the status bar's source line.
+   * This IS rendered as the primary badge:
+   *   - "local"  → ● LOCAL (never REMOTE, even if remote transport is
+   *     connected — a connected transport is not the same as being the
+   *     active execution target)
+   *   - "remote" → actual remote transport state from deriveTransport
    */
   executionTarget: ExecutionTarget;
   localRuntime: string;
@@ -63,6 +68,7 @@ export interface HeaderProps {
 }
 
 export function Header({
+  executionTarget,
   localRuntime,
   remoteRuntime,
   authEmail,
@@ -100,19 +106,54 @@ export function Header({
     : transport.footerSeverity === "error" ? COLORS.error : COLORS.warning;
   const localLabel = transport.footerLabel;
 
-  // ─── Primary indicator: the ACTUAL execution path ─────────────────
-  // REMOTE is claimed only on an established connection; connecting,
-  // reconnecting and error render distinct labels.
+  // ─── Primary indicator: the CONFIGURED execution target ───────────
+  //
+  // executionTarget answers "what WILL this cockpit use for model calls?"
+  // remoteRuntime answers "is the remote transport connected right now?"
+  // These are DIFFERENT questions and must not be confused.
+  //
+  // When executionTarget === "local" (LITT_LOCAL_MODE=1):
+  //   - The primary badge is ALWAYS "● LOCAL"
+  //   - A connected remote transport must NOT override the LOCAL label
+  //   - Local tooling may additionally show "● TOOLS"
+  //   - The remote transport may exist (for future use) but is NOT the
+  //     active execution target, so it is never shown as primary
+  //
+  // When executionTarget === "remote":
+  //   - The badge reflects the ACTUAL remote connection state:
+  //     ● REMOTE / ○ REMOTE… / ✗ REMOTE ERR
+  //   - Local TOOLS may show as a secondary indicator
+  if (executionTarget === "local") {
+    // Local-only mode: primary badge is LOCAL, never REMOTE
+    const localPrimaryIcon = localRuntime === "ready" ? "●"
+      : localRuntime === "error" ? "✗" : "○";
+    const localPrimaryColor = localRuntime === "ready" ? COLORS.success
+      : localRuntime === "error" ? COLORS.error : COLORS.warning;
+    const localPrimaryLabel = localRuntime === "ready" ? "LOCAL"
+      : localRuntime === "error" ? "LOCAL ERR" : "LOCAL…";
+
+    return (
+      <Box justifyContent="space-between">
+        <Text bold color={COLORS.brand}>LiTT</Text>
+        {width >= 50 && (
+          <Box gap={2}>
+            <Text color={localPrimaryColor} dimColor={localRuntime === "ready"}>{localPrimaryIcon} {localPrimaryLabel}</Text>
+            {width >= 80 && (
+              <Text color={localColor} dimColor={localRuntime === "ready"}>{localIcon} {localLabel}</Text>
+            )}
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  // executionTarget === "remote": show actual remote transport state
   const showRemote = transport.showRemote;
   const remoteIcon = transport.remoteActive ? "●"
     : transport.headerSeverity === "error" ? "✗" : "○";
   const remoteColor = transport.headerSeverity === "ok" ? COLORS.success
     : transport.headerSeverity === "error" ? COLORS.error : COLORS.warning;
   const remoteLabel = transport.headerLabel;
-
-  // ─── No email in header — privacy by default ──────────────────────
-  // Full identity is available via /whoami, /account, /doctor --verbose.
-  // The header shows only REMOTE/TOOLS indicators, never the user's email.
 
   // Build the right-side indicator block
   // Priority: REMOTE (if connected/connecting) > TOOLS
