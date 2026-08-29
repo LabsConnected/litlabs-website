@@ -234,8 +234,14 @@ export type {
 } from "./mission-planner.js";
 
 // VerificationGate — the runtime truth boundary (COMPLETE = runtime proved it)
-export { VerificationGate, createVerificationGate, assertComplete } from "./verification-gate.js";
+export {
+  VerificationGate,
+  createVerificationGate,
+  assertComplete,
+  VerificationEvidenceCache,
+} from "./verification-gate.js";
 export type {
+  VerificationEvidence,
   VerificationCheckId,
   VerificationConfig,
   CheckResult,

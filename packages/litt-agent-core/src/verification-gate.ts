@@ -97,8 +97,96 @@ export interface CheckResult {
   stderr?: string;
   /** Why this check was skipped, if status === "skipped". */
   skippedReason?: string;
+  /**
+   * True when this result was REUSED from cached evidence rather than
+   * re-executed. An expensive check (test/build) must not run twice in
+   * one mission when nothing has changed since it last ran.
+   */
+  reused?: boolean;
   runId: string;
   toolCallId: string;
+}
+
+// ─── Verification evidence cache ───────────────────────────────────
+
+/** A recorded outcome for one exact command invocation. */
+export interface VerificationEvidence {
+  status: ToolStatus;
+  success: boolean;
+  exitCode: number | null;
+  message: string;
+  stdout?: string;
+  stderr?: string;
+  durationMs: number;
+  /** The generation this evidence was recorded in. */
+  generation: number;
+  ts: number;
+}
+
+/**
+ * Per-mission cache of verification command outcomes.
+ *
+ * A full test suite can take minutes. Running it twice in one mission —
+ * once because the model invoked project.test, again because the gate
+ * verified, and a third time on the repair round — costs real time and
+ * proves nothing new when the project has not changed in between.
+ *
+ * Evidence is valid only within a GENERATION. Any project mutation
+ * calls invalidate(), bumping the generation and making all prior
+ * evidence stale — because it now genuinely could be wrong. This keeps
+ * the truth contract intact: we never reuse evidence across a change.
+ *
+ * Failed evidence is cached too: a suite that just failed will fail
+ * again if nothing changed, and re-running it delays the honest report.
+ */
+export class VerificationEvidenceCache {
+  private _generation = 0;
+  private readonly _entries = new Map<string, VerificationEvidence>();
+
+  /** The current generation. Increments on every invalidate(). */
+  get generation(): number {
+    return this._generation;
+  }
+
+  /** Canonical key for a command invocation. */
+  static key(command: string, args: readonly string[], cwd: string): string {
+    return JSON.stringify([command, args, cwd]);
+  }
+
+  /**
+   * Mark all prior evidence stale. Call whenever the project changes —
+   * a file write, an edit, a mutating shell command.
+   */
+  invalidate(): void {
+    this._generation += 1;
+  }
+
+  /** Fresh evidence for this command, or null if absent/stale. */
+  get(command: string, args: readonly string[], cwd: string): VerificationEvidence | null {
+    const hit = this._entries.get(VerificationEvidenceCache.key(command, args, cwd));
+    if (!hit) return null;
+    if (hit.generation !== this._generation) return null;
+    return hit;
+  }
+
+  /** Record the outcome of a command run in the current generation. */
+  record(
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    evidence: Omit<VerificationEvidence, "generation" | "ts">,
+  ): void {
+    this._entries.set(VerificationEvidenceCache.key(command, args, cwd), {
+      ...evidence,
+      generation: this._generation,
+      ts: Date.now(),
+    });
+  }
+
+  /** Drop everything (does not change the generation). */
+  clear(): void {
+    this._entries.clear();
+  }
 }
 
 /**
@@ -157,6 +245,13 @@ export interface VerificationGateOptions {
   browserVerifier?: BrowserVerifier | null;
   /** Per-project config. */
   config?: VerificationConfig;
+  /**
+   * Optional per-mission evidence cache. When supplied, an identical
+   * check command is executed at most once per generation — repeat
+   * verifications reuse the recorded outcome until a mutation
+   * invalidates it.
+   */
+  evidenceCache?: VerificationEvidenceCache | null;
 }
 
 // ─── Defaults ──────────────────────────────────────────────────────
@@ -181,6 +276,7 @@ export class VerificationGate {
   private readonly _cwd: string;
   private readonly _browserVerifier: BrowserVerifier | null;
   private readonly _config: VerificationConfig;
+  private readonly _evidenceCache: VerificationEvidenceCache | null;
 
   constructor(options: VerificationGateOptions) {
     this._executor = options.executor;
@@ -190,6 +286,7 @@ export class VerificationGate {
     this._cwd = options.cwd;
     this._browserVerifier = options.browserVerifier ?? null;
     this._config = options.config ?? {};
+    this._evidenceCache = options.evidenceCache ?? null;
   }
 
   /**
@@ -270,6 +367,16 @@ export class VerificationGate {
       ranChecks,
       skippedChecks,
     };
+  }
+
+  /**
+   * The command this gate would run for a check, or null when the check
+   * is not resolvable. Exposed so a surface that runs the same command
+   * itself (the model invoking project.test) can record that outcome
+   * into the shared evidence cache and spare the gate a second run.
+   */
+  resolveCheckCommand(id: VerificationCheckId): { command: string; args: string[] } | null {
+    return this._resolveChecks().commands[id] ?? null;
   }
 
   // ─── Internal: check resolution ──────────────────────────────────
@@ -441,6 +548,43 @@ export class VerificationGate {
       return result;
     }
 
+    // ─── Reuse fresh evidence instead of re-running ──────────────
+    // An identical command already run in this generation (nothing has
+    // mutated since) cannot honestly produce a different answer. Reuse
+    // it rather than spending minutes proving the same fact twice.
+    const cached = this._evidenceCache?.get(cmd.command, cmd.args, this._cwd) ?? null;
+    if (cached) {
+      const reusedResult: CheckResult = {
+        id,
+        status: cached.status,
+        success: cached.success,
+        exitCode: cached.exitCode,
+        message: `${CHECK_LABELS[id]}: ${cached.message} (reused — already run in this mission, no changes since)`,
+        durationMs: 0,
+        stdout: cached.stdout,
+        stderr: cached.stderr,
+        reused: true,
+        runId,
+        toolCallId,
+      };
+      this._emit(
+        "verification_check_result",
+        {
+          runId,
+          toolCallId,
+          check: id,
+          status: cached.status,
+          success: cached.success,
+          exitCode: cached.exitCode,
+          durationMs: 0,
+          reused: true,
+        },
+        runId,
+        toolCallId,
+      );
+      return reusedResult;
+    }
+
     const t0 = Date.now();
     let execResult: CommandExecutorResult;
     try {
@@ -485,6 +629,18 @@ export class VerificationGate {
       : null;
 
     const message = `${CHECK_LABELS[id]}: ${execResult.result.message}`;
+
+    // Record the outcome — success or failure — so a repeat request in
+    // this same generation reuses it instead of re-executing.
+    this._evidenceCache?.record(cmd.command, cmd.args, this._cwd, {
+      status: execResult.status,
+      success: execResult.result.success,
+      exitCode,
+      message: execResult.result.message,
+      stdout,
+      stderr,
+      durationMs,
+    });
 
     this._emit(
       "verification_check_result",

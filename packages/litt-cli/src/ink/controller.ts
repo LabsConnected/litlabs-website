@@ -67,6 +67,7 @@ import { porcelainPaths, computeMissionDelta } from "../lib/mission-delta.js";
 import {
   MissionVerificationGate,
   createMissionEvidenceTracker,
+  requiresProjectHealth,
   isShipCommitAllowed,
   markInspectionStepsComplete,
 } from "../lib/mission-verification.js";
@@ -1862,10 +1863,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // tool runs so the DONE summary can distinguish "repository
       // state" from "mission delta". Pre-existing dirt is NEVER
       // attributed to this mission.
-      {
-        const gs = getGitState(projectRoot);
-        store.actions.setMissionBaseline(porcelainPaths(gs.porcelain));
-      }
+      // Held in a LOCAL binding, not read back from store.state at
+      // completion: store.state is a render-time snapshot captured when
+      // this closure was created — before setMissionBaseline ran — so
+      // reading it later yielded [] and attributed every already-dirty
+      // file in the repo to this mission. Same hazard the chat
+      // transcript avoids via getChatTranscript().
+      const missionBaselineFiles = porcelainPaths(getGitState(projectRoot).porcelain);
+      store.actions.setMissionBaseline(missionBaselineFiles);
       act(store, "Understanding request", "agent.request", "working", "THINK");
       // Persist the user message to the chat transcript (rendered once).
       store.actions.addChatMessage({
@@ -2112,9 +2117,29 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // full gate for an inspection would hold the mission in RUNNING
         // for minutes and proves nothing about the inspection. Mutating
         // missions keep the full gate.
+        //
+        // `project.run` is NOT a blanket mutation: it is the generic
+        // command tool, and a read-only `git status` through it must
+        // not flip the mission to "mutating" (which is what sent a
+        // one-second Git inspection to the full test suite). The
+        // tracker classifies each project.run call by its real command.
+        //
+        // Mutations also invalidate cached verification evidence, so a
+        // check is never reused across a change.
+        const verificationEvidenceCache = session.getVerificationEvidenceCache();
+        // Fresh generation per mission — never inherit another
+        // mission's check results.
+        verificationEvidenceCache.invalidate();
         const evidenceTracker = createMissionEvidenceTracker(
           new Set(["project.edit_file", "project.write_file", "project.run"]),
+          {
+            cwd: projectRoot,
+            onMutation: () => verificationEvidenceCache.invalidate(),
+          },
         );
+        // Did the user actually ask about project health? Only then may
+        // a read-only mission be gated on the full suite.
+        const healthRequested = requiresProjectHealth(input);
         // Stateful fence-aware filter: raw tool_call protocol must never
         // leak into the live chat preview, even split across deltas.
         const toolCallFilter = createToolCallStreamFilter();
@@ -2158,6 +2183,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             hasFailedEvidence: evidenceTracker.hasFailedEvidence,
             evidenceSummary: evidenceTracker.summary,
             failedSummary: evidenceTracker.failedSummary,
+            healthRequested: () => healthRequested,
+            hasFailedHealthCheck: evidenceTracker.hasFailedHealthCheck,
+            healthSummary: evidenceTracker.healthSummary,
           }),
           // ─── Wire the EscalationHook into the agent loop ───
           // The mission id + model id + resolver let the loop track
@@ -2205,7 +2233,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
               // Track mutation/evidence state synchronously — the
               // verification gate reads it when the loop calls verify().
-              evidenceTracker.recordToolCall(toolId);
+              evidenceTracker.recordToolCall(
+                toolId,
+                (event.data as { inputs?: Record<string, unknown> }).inputs ?? null,
+              );
 
               // Attach this tool call to an existing semantic step.
               // resolveStepForTool picks the current working step, or
@@ -2479,7 +2510,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         {
           const gs = getGitState(projectRoot);
           const delta = computeMissionDelta(
-            store.state.missionState?.baselineGitFiles ?? [],
+            missionBaselineFiles,
             porcelainPaths(gs.porcelain),
           );
           store.actions.setMissionDelta(delta.changed);

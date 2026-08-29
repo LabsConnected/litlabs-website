@@ -19,6 +19,7 @@
  * repair/revalidation loop then works unchanged for both kinds.
  */
 
+import { classifyCommand } from "@litt/agent-core";
 import type {
   VerificationGateLike,
   VerificationResult,
@@ -26,6 +27,122 @@ import type {
   RuntimeStore,
   RuntimeEventEmitter,
 } from "@litt/agent-core";
+
+// ─── Verification scope ────────────────────────────────────────────
+
+/**
+ * Tools that report PROJECT HEALTH rather than answer a question.
+ * They are expensive (a full suite is minutes) and, for an inspection
+ * mission, entirely optional: nothing about "what branch am I on" is
+ * proven or disproven by whether the test suite is green.
+ */
+const HEALTH_CHECK_TOOLS: ReadonlySet<string> = new Set([
+  "project.test",
+  "project.build",
+  "project.typecheck",
+]);
+
+/** Package-manager script names that mean "run project health checks". */
+const HEALTH_SCRIPTS: ReadonlySet<string> = new Set([
+  "test",
+  "tests",
+  "build",
+  "typecheck",
+  "type-check",
+  "lint",
+]);
+
+/**
+ * Phrases that mean the user actually asked about project health. Only
+ * then may an inspection mission be gated on the full suite.
+ *
+ * Deliberately narrow: "status" or "check the branch" must NOT match,
+ * or we are back to turning a one-second Git question into an
+ * eight-minute audit.
+ */
+const HEALTH_REQUEST_PATTERNS: readonly RegExp[] = [
+  /\b(run|execute)\b[^.?!]{0,40}\b(tests?|test suite|build|typecheck|type-check|lint)\b/i,
+  /\b(project|full|overall|repo|repository)\s+health\b/i,
+  /\bhealth\s+check\b/i,
+  /\bverify\b[^.?!]{0,40}\b(health|tests?|build|compiles?|typecheck)\b/i,
+  /\b(do|does|are)\b[^.?!]{0,30}\b(tests?|builds?)\b[^.?!]{0,20}\b(pass|passing|green|work)\b/i,
+  /\bis\b[^.?!]{0,30}\b(build|suite|project)\b[^.?!]{0,20}\b(green|passing|healthy|broken)\b/i,
+  /\b(compiles?|typechecks?|builds?)\s+(cleanly|successfully|ok)\b/i,
+];
+
+/**
+ * Does the user's request actually ask about project health?
+ *
+ * This is the switch between "prove the facts I asked for" and "prove
+ * the project is healthy". A read-only inspection defaults to the
+ * former — the expensive suite is not implied by asking a question.
+ */
+export function requiresProjectHealth(requestText: string | null | undefined): boolean {
+  if (!requestText) return false;
+  return HEALTH_REQUEST_PATTERNS.some((re) => re.test(requestText));
+}
+
+/**
+ * Is this tool call a project-health check rather than an objective?
+ *
+ * `project.run` is the generic escape hatch, so it is judged by the
+ * command it actually runs — `pnpm run test` is a health check, `git
+ * status` is not.
+ */
+export function isHealthCheckTool(
+  toolId: string,
+  inputs?: Record<string, unknown> | null,
+): boolean {
+  if (HEALTH_CHECK_TOOLS.has(toolId)) return true;
+  if (toolId !== "project.run" || !inputs) return false;
+  const command = typeof inputs.command === "string" ? inputs.command.toLowerCase() : "";
+  const args = Array.isArray(inputs.args)
+    ? inputs.args.filter((a): a is string => typeof a === "string")
+    : [];
+  if (["npm", "pnpm", "yarn", "bun"].includes(command)) {
+    // `pnpm test` and `pnpm run test` both count.
+    const script = args[0] === "run" ? args[1] : args[0];
+    return typeof script === "string" && HEALTH_SCRIPTS.has(script.toLowerCase());
+  }
+  if (command === "npx" || command === "tsc") {
+    return args.includes("--noEmit") || args.includes("tsc");
+  }
+  if (command === "vitest" || command === "jest") return true;
+  return false;
+}
+
+/**
+ * Does this tool call mutate the project?
+ *
+ * `project.run` must be judged by its actual command. Classifying the
+ * whole tool as mutating is what made a read-only Git inspection
+ * escalate to the full test suite: six `git rev-parse`/`status`/`log`
+ * calls flipped the mission to "mutating", which sent verification to
+ * the full typecheck/test/build gate.
+ *
+ * Falls back to the static tool set when no inputs are available —
+ * unknown means "assume mutating", never the reverse.
+ */
+export function isMutatingToolCall(
+  toolId: string,
+  mutationTools: ReadonlySet<string>,
+  inputs?: Record<string, unknown> | null,
+  cwd?: string,
+): boolean {
+  if (toolId === "project.run" && inputs) {
+    const command = typeof inputs.command === "string" ? inputs.command : "";
+    if (!command) return true; // malformed call — stay conservative
+    const args = Array.isArray(inputs.args)
+      ? inputs.args.filter((a): a is string => typeof a === "string")
+      : [];
+    try {
+      return classifyCommand(command, args, cwd).mutating;
+    } catch {
+      return true;
+    }
+  }
+  return mutationTools.has(toolId);
+}
 
 export interface MissionVerificationGateOptions {
   /** The full gate — used when the mission mutated the project. */
@@ -48,6 +165,17 @@ export interface MissionVerificationGateOptions {
   evidenceSummary: () => string;
   /** Human summary of FAILED results only (for truthful failure messages). */
   failedSummary: () => string;
+  /**
+   * True when the user's request actually asked about project health.
+   * When true, a read-only mission still delegates to the full gate —
+   * "do the tests pass?" can only be answered by running them.
+   * Defaults to false: asking a question is not asking for an audit.
+   */
+  healthRequested?: () => boolean;
+  /** True when an OPTIONAL project-health check failed. */
+  hasFailedHealthCheck?: () => boolean;
+  /** Human summary of failed optional health checks. */
+  healthSummary?: () => string;
 }
 
 export class MissionVerificationGate implements VerificationGateLike {
@@ -59,6 +187,9 @@ export class MissionVerificationGate implements VerificationGateLike {
   private readonly _hasFailedEvidence: () => boolean;
   private readonly _evidenceSummary: () => string;
   private readonly _failedSummary: () => string;
+  private readonly _healthRequested: () => boolean;
+  private readonly _hasFailedHealthCheck: () => boolean;
+  private readonly _healthSummary: () => string;
 
   constructor(options: MissionVerificationGateOptions) {
     this._fullGate = options.fullGate;
@@ -69,11 +200,21 @@ export class MissionVerificationGate implements VerificationGateLike {
     this._hasFailedEvidence = options.hasFailedEvidence;
     this._evidenceSummary = options.evidenceSummary;
     this._failedSummary = options.failedSummary;
+    this._healthRequested = options.healthRequested ?? (() => false);
+    this._hasFailedHealthCheck = options.hasFailedHealthCheck ?? (() => false);
+    this._healthSummary = options.healthSummary ?? (() => "");
   }
 
   async verify(): Promise<VerificationResult> {
     // Mutating missions keep the full runtime gate — nothing changes.
     if (!this._isReadOnly()) {
+      return this._fullGate.verify();
+    }
+
+    // The user explicitly asked about project health. Then the suite IS
+    // the requested objective, not an optional extra, and only the full
+    // gate can answer it.
+    if (this._healthRequested()) {
       return this._fullGate.verify();
     }
 
@@ -92,16 +233,27 @@ export class MissionVerificationGate implements VerificationGateLike {
     const hasFailures = this._hasFailedEvidence();
     const summary = this._evidenceSummary();
     const failedSummary = this._failedSummary();
+    const healthFailed = this._hasFailedHealthCheck();
+    const healthSummary = this._healthSummary();
 
-    // Proven only when there is positive evidence AND no failures.
+    // Proven only when there is positive evidence AND no failed
+    // OBJECTIVE. An optional health check the model volunteered — a
+    // test suite nobody asked about — is reported, never fatal: a red
+    // suite does not make "you are on main, tree clean" untrue.
     const proven = hasSuccess && !hasFailures;
 
     this._emit("verification_start", { runId, checks: ["evidence"] }, runId);
     if (this._store) this._store.setPhase("verifying");
 
     let message: string;
-    if (proven) {
-      message = `Evidence collected: ${summary}`;
+    if (proven && healthFailed) {
+      // Requirement: never silently redefine an inspection mission as
+      // "project fully healthy". Report both facts, separately.
+      message =
+        `REQUESTED TASK VERIFIED — Evidence collected: ${summary}. ` +
+        `OPTIONAL PROJECT HEALTH CHECK FAILED (not required by this request): ${healthSummary}`;
+    } else if (proven) {
+      message = `REQUESTED TASK VERIFIED — Evidence collected: ${summary}`;
     } else if (hasSuccess && hasFailures) {
       message = `Partial success — some objectives failed: ${failedSummary}. Succeeded: ${summary}`;
     } else if (hasFailures) {
@@ -196,20 +348,28 @@ export function isShipCommitAllowed(lastVerification: VerificationResult | null)
  * async store reads, no races with the loop's verify() call.
  */
 export interface MissionEvidenceTracker {
-  /** Call on every agent_tool_call. */
-  recordToolCall(toolId: string): void;
+  /**
+   * Call on every agent_tool_call. Pass the tool's `inputs` whenever
+   * they are available — `project.run` can only be classified by the
+   * command it actually runs.
+   */
+  recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void;
   /** Call on every agent_tool_result. */
   recordToolResult(toolId: string, success: boolean, message: string): void;
   /** True when the mission mutated the project. */
   isReadOnly(): boolean;
-  /** True when at least one tool result succeeded. */
+  /** True when at least one OBJECTIVE tool result succeeded. */
   hasSuccessfulEvidence(): boolean;
-  /** True when at least one tool result FAILED. */
+  /** True when at least one OBJECTIVE tool result FAILED. */
   hasFailedEvidence(): boolean;
+  /** True when an optional project-health check failed. */
+  hasFailedHealthCheck(): boolean;
   /** Human summary of results. */
   summary(): string;
-  /** Human summary of FAILED results only. */
+  /** Human summary of FAILED objective results only. */
   failedSummary(): string;
+  /** Human summary of failed optional health checks. */
+  healthSummary(): string;
 }
 
 /**
@@ -257,31 +417,67 @@ export async function markInspectionStepsComplete(
 /** Bounded history — long missions must not grow memory forever. */
 const MAX_EVIDENCE_RESULTS = 200;
 
+export interface MissionEvidenceTrackerOptions {
+  /** Project root — lets `project.run` commands be classified in context. */
+  cwd?: string;
+  /**
+   * Called when a mutating tool call is seen. Wire this to the
+   * VerificationEvidenceCache so cached check results are invalidated
+   * the moment the project changes.
+   */
+  onMutation?: () => void;
+}
+
 export function createMissionEvidenceTracker(
   mutationTools: ReadonlySet<string>,
+  options?: MissionEvidenceTrackerOptions,
 ): MissionEvidenceTracker {
   let mutated = false;
-  const results: { toolId: string; success: boolean; message: string }[] = [];
+  const cwd = options?.cwd;
+  const onMutation = options?.onMutation;
+  // A tool is an optional health check only if its CALL said so; the
+  // result event carries no inputs, so remember the classification.
+  const healthTools = new Set<string>();
+  const results: { toolId: string; success: boolean; message: string; health: boolean }[] = [];
 
   return {
-    recordToolCall(toolId: string): void {
-      if (mutationTools.has(toolId)) mutated = true;
+    recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void {
+      if (isHealthCheckTool(toolId, inputs)) healthTools.add(toolId);
+      if (!mutated && isMutatingToolCall(toolId, mutationTools, inputs, cwd)) {
+        mutated = true;
+        onMutation?.();
+      }
     },
     recordToolResult(toolId: string, success: boolean, message: string): void {
-      results.push({ toolId, success, message: message.slice(0, 200) });
+      results.push({
+        toolId,
+        success,
+        message: message.slice(0, 200),
+        health: healthTools.has(toolId),
+      });
       if (results.length > MAX_EVIDENCE_RESULTS) results.shift();
     },
     isReadOnly(): boolean {
       return !mutated;
     },
     hasSuccessfulEvidence(): boolean {
-      return results.some((r) => r.success);
+      return results.some((r) => r.success && !r.health);
     },
     hasFailedEvidence(): boolean {
-      return results.some((r) => !r.success);
+      return results.some((r) => !r.success && !r.health);
+    },
+    hasFailedHealthCheck(): boolean {
+      return results.some((r) => !r.success && r.health);
     },
     failedSummary(): string {
-      const failed = results.filter((r) => !r.success);
+      const failed = results.filter((r) => !r.success && !r.health);
+      if (failed.length === 0) return "";
+      return failed
+        .map((r) => `${r.toolId}: ${r.message.slice(0, 100)}`)
+        .join("; ");
+    },
+    healthSummary(): string {
+      const failed = results.filter((r) => !r.success && r.health);
       if (failed.length === 0) return "";
       return failed
         .map((r) => `${r.toolId}: ${r.message.slice(0, 100)}`)

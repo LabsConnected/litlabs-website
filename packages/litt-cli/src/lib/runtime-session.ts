@@ -30,6 +30,7 @@ import {
   ExecutionGateway,
   ToolRegistry,
   VerificationGate,
+  VerificationEvidenceCache,
   type RuntimeEvent,
   type RuntimeState,
   type ShellExecutor,
@@ -103,6 +104,7 @@ export class RuntimeSession {
   private _router: CommandRouter;
   private _gateway: ExecutionGateway | null = null;
   private _verificationGate: VerificationGate | null = null;
+  private readonly _verificationEvidence = new VerificationEvidenceCache();
   private _cwd: string;
   private _mode: "plan" | "act" | "auto";
   private _onEvent: ((event: RuntimeEvent) => void) | null;
@@ -308,8 +310,19 @@ export class RuntimeSession {
       cwd: this._cwd,
       browserVerifier: browserVerifier ?? null,
       config: config ?? {},
+      evidenceCache: this._verificationEvidence,
     });
     return this._verificationGate;
+  }
+
+  /**
+   * The shared verification evidence cache. An expensive check runs at
+   * most once per generation; callers bump the generation via
+   * invalidate() whenever the project changes (and at mission start, so
+   * no mission inherits another's evidence).
+   */
+  getVerificationEvidenceCache(): VerificationEvidenceCache {
+    return this._verificationEvidence;
   }
 
   /**

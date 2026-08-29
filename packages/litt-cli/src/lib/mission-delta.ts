@@ -52,18 +52,58 @@ export interface MissionDelta {
   added: string[];
   /** Files the mission cleaned up (were dirty at baseline, now clean). */
   removed: string[];
-  /** All files attributed to the mission (added + removed). */
+  /** All AUTHORED files attributed to the mission (added + removed). */
   changed: string[];
+  /** Build output/caches the mission produced — never counted as edits. */
+  generated: string[];
 }
 
-/** Compare baseline vs current dirty file sets — the mission's delta. */
+/**
+ * Build output and caches are PRODUCED by verification, not authored by
+ * the mission. A mission that merely ran a typecheck or a build leaves
+ * tsconfig.tsbuildinfo and dist/** dirty; reporting those as "files
+ * changed by this mission" tells the user LiTT edited their source when
+ * it did not.
+ *
+ * Matched on canonical forward-slash porcelain paths.
+ */
+const GENERATED_PATH_PATTERNS: readonly RegExp[] = [
+  /(^|\/)dist\//,
+  /(^|\/)\.next\//,
+  /(^|\/)node_modules\//,
+  /(^|\/)coverage\//,
+  /(^|\/)[^/]*\.tsbuildinfo$/,
+  /(^|\/)\.turbo\//,
+  /(^|\/)test-results\//,
+  /(^|\/)playwright-report\//,
+];
+
+/** Is this path a build artifact / cache rather than authored source? */
+export function isGeneratedArtifact(path: string): boolean {
+  const p = path.replace(/\\/g, "/");
+  return GENERATED_PATH_PATTERNS.some((re) => re.test(p));
+}
+
+/**
+ * Compare baseline vs current dirty file sets — the mission's delta.
+ *
+ * `changed` carries only authored source, which is what "N files changed
+ * by this mission" must mean. Generated artifacts the mission produced
+ * are reported separately in `generated` so they stay visible without
+ * being misattributed as edits.
+ */
 export function computeMissionDelta(
   baselineFiles: string[],
   currentFiles: string[],
 ): MissionDelta {
   const baseline = new Set(baselineFiles);
   const current = new Set(currentFiles);
-  const added = [...current].filter((f) => !baseline.has(f)).sort();
-  const removed = [...baseline].filter((f) => !current.has(f)).sort();
-  return { added, removed, changed: [...added, ...removed] };
+  const addedAll = [...current].filter((f) => !baseline.has(f)).sort();
+  const removedAll = [...baseline].filter((f) => !current.has(f)).sort();
+
+  const added = addedAll.filter((f) => !isGeneratedArtifact(f));
+  const removed = removedAll.filter((f) => !isGeneratedArtifact(f));
+  const generated = [...addedAll, ...removedAll].filter(isGeneratedArtifact).sort();
+
+  return { added, removed, changed: [...added, ...removed], generated };
 }

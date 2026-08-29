@@ -26,6 +26,7 @@ import {
   VerificationGate,
   createVerificationGate,
   assertComplete,
+  VerificationEvidenceCache,
 } from "../verification-gate.js";
 import { CommandExecutor } from "../command-executor.js";
 import { RuntimeStore } from "../state.js";
@@ -412,5 +413,184 @@ describe("VerificationGate — runtime-proved COMPLETE", () => {
     assert.equal(result.proven, false);
     assert.equal(result.status, "failed");
     assert.ok(result.message.includes("NOT VERIFIED"));
+  });
+});
+
+// ─── Duplicate expensive verification ──────────────────────────────
+//
+// Regression coverage for the duplicate-verification defect.
+//
+// In a live REMOTE mission the same `pnpm run test` ran three times at
+// ~111-118s each, pushing the mission to ~472s. An identical check in
+// an unchanged project cannot honestly produce a different answer, so
+// it must execute once per generation; a mutation bumps the generation
+// and makes prior evidence stale.
+
+/** A shell that records how many times each command was executed. */
+class CountingShell extends MockShell {
+  readonly calls: string[] = [];
+  async execute(options: ShellExecuteOptions): Promise<ShellResult> {
+    this.calls.push(`${options.command} ${(options.args ?? []).join(" ")}`);
+    return super.execute(options);
+  }
+  countOf(prefix: string): number {
+    return this.calls.filter((c) => c.startsWith(prefix)).length;
+  }
+}
+
+describe("VerificationEvidenceCache", () => {
+  it("returns null for an unrecorded command", () => {
+    const cache = new VerificationEvidenceCache();
+    assert.equal(cache.get("pnpm", ["run", "test"], "/p"), null);
+  });
+
+  it("returns recorded evidence within the same generation", () => {
+    const cache = new VerificationEvidenceCache();
+    cache.record("pnpm", ["run", "test"], "/p", {
+      status: "success", success: true, exitCode: 0, message: "ok", durationMs: 111_000,
+    });
+    assert.equal(cache.get("pnpm", ["run", "test"], "/p")?.success, true);
+  });
+
+  it("caches FAILED evidence too — a red suite stays red until something changes", () => {
+    const cache = new VerificationEvidenceCache();
+    cache.record("pnpm", ["run", "test"], "/p", {
+      status: "failed", success: false, exitCode: 1, message: "exit 1", durationMs: 118_000,
+    });
+    const hit = cache.get("pnpm", ["run", "test"], "/p");
+    assert.equal(hit?.success, false);
+    assert.equal(hit?.exitCode, 1);
+  });
+
+  it("invalidate() makes prior evidence stale", () => {
+    const cache = new VerificationEvidenceCache();
+    cache.record("pnpm", ["run", "test"], "/p", {
+      status: "success", success: true, exitCode: 0, message: "ok", durationMs: 1,
+    });
+    assert.notEqual(cache.get("pnpm", ["run", "test"], "/p"), null);
+    cache.invalidate();
+    assert.equal(cache.get("pnpm", ["run", "test"], "/p"), null);
+  });
+
+  it("distinguishes different commands, args and cwds", () => {
+    const cache = new VerificationEvidenceCache();
+    cache.record("pnpm", ["run", "test"], "/p", {
+      status: "success", success: true, exitCode: 0, message: "ok", durationMs: 1,
+    });
+    assert.equal(cache.get("pnpm", ["run", "build"], "/p"), null);
+    assert.equal(cache.get("npm", ["run", "test"], "/p"), null);
+    assert.equal(cache.get("pnpm", ["run", "test"], "/other"), null);
+  });
+});
+
+describe("VerificationGate — no duplicate expensive checks", () => {
+  it("D. the same test command requested twice in one mission executes ONCE", async () => {
+    const dir = makeTmpProject({ test: "vitest run" }, { "pnpm-lock.yaml": "" });
+    const shell = new CountingShell(dir);
+    const cache = new VerificationEvidenceCache();
+    const executor = new CommandExecutor(shell, null, null);
+    const gate = createVerificationGate({
+      executor, shell, cwd: dir,
+      config: { checks: ["test"] },
+      evidenceCache: cache,
+    });
+
+    const first = await gate.verify();
+    const second = await gate.verify();
+
+    assert.equal(first.proven, true);
+    assert.equal(second.proven, true);
+    // The expensive command ran exactly once across both verifications.
+    assert.equal(shell.countOf("pnpm run test"), 1);
+    assert.ok(!checkById(first, "test")?.reused);
+    assert.equal(checkById(second, "test")?.reused, true);
+    assert.ok(checkById(second, "test")?.message.includes("reused"));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("D2. a failing check is not re-run either — it reports the same failure", async () => {
+    const dir = makeTmpProject({ test: "vitest run" }, { "pnpm-lock.yaml": "" });
+    const shell = new CountingShell(dir);
+    shell.setBehavior("pnpm", ["run", "test"], { exitCode: 1, status: "failed", stderr: "2 failed" });
+    const cache = new VerificationEvidenceCache();
+    const executor = new CommandExecutor(shell, null, null);
+    const gate = createVerificationGate({
+      executor, shell, cwd: dir,
+      config: { checks: ["test"] },
+      evidenceCache: cache,
+    });
+
+    const first = await gate.verify();
+    const second = await gate.verify();
+
+    assert.equal(first.proven, false);
+    assert.equal(second.proven, false);
+    assert.equal(checkById(second, "test")?.exitCode, 1);
+    assert.equal(shell.countOf("pnpm run test"), 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("D3. a mutation invalidates the evidence and the check runs again", async () => {
+    const dir = makeTmpProject({ test: "vitest run" }, { "pnpm-lock.yaml": "" });
+    const shell = new CountingShell(dir);
+    const cache = new VerificationEvidenceCache();
+    const executor = new CommandExecutor(shell, null, null);
+    const gate = createVerificationGate({
+      executor, shell, cwd: dir,
+      config: { checks: ["test"] },
+      evidenceCache: cache,
+    });
+
+    await gate.verify();
+    assert.equal(shell.countOf("pnpm run test"), 1);
+
+    // The project changed — prior evidence could now genuinely be wrong.
+    cache.invalidate();
+    const afterChange = await gate.verify();
+
+    assert.equal(shell.countOf("pnpm run test"), 2);
+    assert.ok(!checkById(afterChange, "test")?.reused);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("D4. without a cache the gate behaves exactly as before (re-runs)", async () => {
+    const dir = makeTmpProject({ test: "vitest run" }, { "pnpm-lock.yaml": "" });
+    const shell = new CountingShell(dir);
+    const executor = new CommandExecutor(shell, null, null);
+    const gate = createVerificationGate({
+      executor, shell, cwd: dir,
+      config: { checks: ["test"] },
+    });
+
+    await gate.verify();
+    await gate.verify();
+    assert.equal(shell.countOf("pnpm run test"), 2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("D5. evidence recorded by a surface spares the gate the first run", async () => {
+    const dir = makeTmpProject({ test: "vitest run" }, { "pnpm-lock.yaml": "" });
+    const shell = new CountingShell(dir);
+    const cache = new VerificationEvidenceCache();
+    const executor = new CommandExecutor(shell, null, null);
+    const gate = createVerificationGate({
+      executor, shell, cwd: dir,
+      config: { checks: ["test"] },
+      evidenceCache: cache,
+    });
+
+    // The model already ran project.test itself; the surface records it
+    // against the command the gate would use.
+    const cmd = gate.resolveCheckCommand("test");
+    assert.deepEqual(cmd, { command: "pnpm", args: ["run", "test"] });
+    cache.record(cmd!.command, cmd!.args, dir, {
+      status: "failed", success: false, exitCode: 1, message: "exit 1", durationMs: 111_000,
+    });
+
+    const result = await gate.verify();
+    assert.equal(shell.countOf("pnpm run test"), 0); // never re-run
+    assert.equal(result.proven, false);
+    assert.equal(checkById(result, "test")?.reused, true);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

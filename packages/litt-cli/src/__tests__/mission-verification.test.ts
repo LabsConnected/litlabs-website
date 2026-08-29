@@ -16,6 +16,9 @@ import {
   createMissionEvidenceTracker,
   isShipCommitAllowed,
   markInspectionStepsComplete,
+  requiresProjectHealth,
+  isHealthCheckTool,
+  isMutatingToolCall,
 } from "../lib/mission-verification.js";
 
 function makeFullGate(result?: Partial<VerificationResult>): VerificationGateLike & { called: () => number } {
@@ -347,5 +350,296 @@ describe("isShipCommitAllowed (the /ship commit gate)", () => {
   it("a later failed verification revokes the commit right", () => {
     expect(isShipCommitAllowed(proven)).toBe(true);
     expect(isShipCommitAllowed({ ...proven, proven: false, status: "failed" })).toBe(false);
+  });
+});
+
+// ─── Verification scope ────────────────────────────────────────────
+//
+// Regression coverage for the verification-SCOPE defect.
+//
+// A live REMOTE mission asked only for repository facts (project, root,
+// branch, HEAD, clean/dirty, remote, latest commit, HEAD vs origin/main)
+// and proved every one of them through project.status/project.log/
+// project.run evidence — yet the mission was marked FAILED because
+// verification escalated to `pnpm run test`, which exited 1. The same
+// ~2-minute command ran three times, pushing the mission to ~472s.
+//
+// Root cause: `project.run` was classified as a MUTATION tool by tool id.
+// The inspection used project.run for six read-only git commands, which
+// flipped isReadOnly() to false and routed verification to the full
+// typecheck/test/build gate.
+
+const MUTATION_TOOLS = new Set(["project.edit_file", "project.write_file", "project.run"]);
+
+/** The six read-only git commands from the observed live mission. */
+const INSPECTION_RUNS: { command: string; args: string[] }[] = [
+  { command: "git", args: ["rev-parse", "HEAD"] },
+  { command: "git", args: ["branch", "--show-current"] },
+  { command: "git", args: ["remote", "-v"] },
+  { command: "git", args: ["status", "--porcelain"] },
+  { command: "git", args: ["rev-parse", "origin/main"] },
+  { command: "git", args: ["log", "-1", "--format=%H"] },
+];
+
+describe("isMutatingToolCall", () => {
+  it("does not treat read-only git commands through project.run as mutations", () => {
+    for (const run of INSPECTION_RUNS) {
+      expect(isMutatingToolCall("project.run", MUTATION_TOOLS, run)).toBe(false);
+    }
+  });
+
+  it("still treats a genuinely mutating command as a mutation", () => {
+    expect(
+      isMutatingToolCall("project.run", MUTATION_TOOLS, { command: "git", args: ["commit", "-m", "x"] }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("project.run", MUTATION_TOOLS, { command: "rm", args: ["-rf", "src"] }),
+    ).toBe(true);
+  });
+
+  it("file-writing tools remain mutations regardless of inputs", () => {
+    expect(isMutatingToolCall("project.edit_file", MUTATION_TOOLS, { file: "a.ts" })).toBe(true);
+    expect(isMutatingToolCall("project.write_file", MUTATION_TOOLS, { path: "a.ts" })).toBe(true);
+  });
+
+  it("falls back to the static set when inputs are unavailable (unknown = mutating)", () => {
+    expect(isMutatingToolCall("project.run", MUTATION_TOOLS)).toBe(true);
+    expect(isMutatingToolCall("project.run", MUTATION_TOOLS, { args: [] })).toBe(true);
+  });
+
+  it("read-only inspection tools are never mutations", () => {
+    expect(isMutatingToolCall("project.status", MUTATION_TOOLS, {})).toBe(false);
+    expect(isMutatingToolCall("project.log", MUTATION_TOOLS, {})).toBe(false);
+  });
+});
+
+describe("requiresProjectHealth", () => {
+  it("a read-only inspection request does NOT require the full suite", () => {
+    for (const request of [
+      "what branch am I on?",
+      "tell me the project root, branch, HEAD and whether the tree is clean",
+      "show me the remote and the latest commit",
+      "does local HEAD match origin/main?",
+      "git status please",
+      "inspect the repository and report the current state",
+    ]) {
+      expect(requiresProjectHealth(request)).toBe(false);
+    }
+  });
+
+  it("does not false-positive on 'latest' containing 'test'", () => {
+    // Without word boundaries, "run ... latest commit" matches /test/.
+    expect(requiresProjectHealth("run git log -1 to get the latest commit")).toBe(false);
+  });
+
+  it("an explicit health request DOES require the full suite", () => {
+    for (const request of [
+      "verify full project health",
+      "run the tests",
+      "do the tests pass?",
+      "run a health check",
+      "is the build green?",
+      "verify the build",
+      "does it compile cleanly?",
+    ]) {
+      expect(requiresProjectHealth(request)).toBe(true);
+    }
+  });
+
+  it("handles empty/missing request text", () => {
+    expect(requiresProjectHealth("")).toBe(false);
+    expect(requiresProjectHealth(null)).toBe(false);
+    expect(requiresProjectHealth(undefined)).toBe(false);
+  });
+});
+
+describe("isHealthCheckTool", () => {
+  it("classifies the dedicated health tools", () => {
+    expect(isHealthCheckTool("project.test")).toBe(true);
+    expect(isHealthCheckTool("project.build")).toBe(true);
+    expect(isHealthCheckTool("project.typecheck")).toBe(true);
+  });
+
+  it("classifies health commands run through project.run", () => {
+    expect(isHealthCheckTool("project.run", { command: "pnpm", args: ["run", "test"] })).toBe(true);
+    expect(isHealthCheckTool("project.run", { command: "pnpm", args: ["test"] })).toBe(true);
+    expect(isHealthCheckTool("project.run", { command: "npx", args: ["tsc", "--noEmit"] })).toBe(true);
+  });
+
+  it("does not classify git inspection as a health check", () => {
+    for (const run of INSPECTION_RUNS) {
+      expect(isHealthCheckTool("project.run", run)).toBe(false);
+    }
+    expect(isHealthCheckTool("project.status")).toBe(false);
+  });
+});
+
+describe("verification scope — mission outcomes", () => {
+  const inspectionTracker = () => {
+    const t = createMissionEvidenceTracker(MUTATION_TOOLS);
+    t.recordToolCall("project.status", {});
+    t.recordToolResult("project.status", true, "on main, tree clean");
+    for (const run of INSPECTION_RUNS) {
+      t.recordToolCall("project.run", run);
+      t.recordToolResult("project.run", true, "exit 0");
+    }
+    return t;
+  };
+
+  // ── A. Read-only Git inspection => PASS without pnpm test ──
+  it("A. a read-only git inspection is proven by evidence and never runs the full gate", async () => {
+    const tracker = inspectionTracker();
+    expect(tracker.isReadOnly()).toBe(true);
+
+    const fullGate = makeFullGate();
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      healthRequested: () => requiresProjectHealth("what branch am I on and is the tree clean?"),
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    expect(result.proven).toBe(true);
+    expect(result.ranChecks).toEqual(["evidence"]);
+    expect(fullGate.called()).toBe(0); // the whole point: no pnpm test
+  });
+
+  // ── B. Code modification => still requires the full gate ──
+  it("B. a code-modification mission still requires full test/typecheck verification", async () => {
+    const tracker = createMissionEvidenceTracker(MUTATION_TOOLS);
+    tracker.recordToolCall("project.edit_file", { file: "src/a.ts" });
+    tracker.recordToolResult("project.edit_file", true, "edited");
+    expect(tracker.isReadOnly()).toBe(false);
+
+    const fullGate = makeFullGate();
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    await gate.verify();
+    expect(fullGate.called()).toBe(1);
+  });
+
+  it("B2. a mutating shell command through project.run still requires the full gate", async () => {
+    const tracker = createMissionEvidenceTracker(MUTATION_TOOLS);
+    tracker.recordToolCall("project.run", { command: "git", args: ["commit", "-m", "wip"] });
+    tracker.recordToolResult("project.run", true, "exit 0");
+    expect(tracker.isReadOnly()).toBe(false);
+
+    const fullGate = makeFullGate();
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+    });
+    await gate.verify();
+    expect(fullGate.called()).toBe(1);
+  });
+
+  // ── C. Explicit health request => full suite may be required ──
+  it("C. an explicit 'verify full project health' request runs the full gate", async () => {
+    const tracker = inspectionTracker();
+    expect(tracker.isReadOnly()).toBe(true);
+
+    const fullGate = makeFullGate();
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      healthRequested: () => requiresProjectHealth("verify full project health"),
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    await gate.verify();
+    expect(fullGate.called()).toBe(1);
+  });
+
+  // ── E. An optional health check failing does not invalidate ──
+  it("E. a failed OPTIONAL health check does not invalidate a fully-proven inspection", async () => {
+    const tracker = inspectionTracker();
+    // The model volunteered the suite; nobody asked for it. It failed.
+    tracker.recordToolCall("project.test", {});
+    tracker.recordToolResult("project.test", false, "pnpm run test — exit 1");
+
+    expect(tracker.hasFailedEvidence()).toBe(false); // not an objective
+    expect(tracker.hasFailedHealthCheck()).toBe(true);
+
+    const fullGate = makeFullGate();
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      healthRequested: () => false,
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    expect(result.proven).toBe(true);
+    expect(fullGate.called()).toBe(0);
+    // Requirement 7: report both facts, never conflate them.
+    expect(result.message).toContain("REQUESTED TASK VERIFIED");
+    expect(result.message).toContain("OPTIONAL PROJECT HEALTH CHECK FAILED");
+    expect(result.message).toContain("exit 1");
+  });
+
+  it("a failed OBJECTIVE still blocks completion (no weakening)", async () => {
+    const tracker = createMissionEvidenceTracker(MUTATION_TOOLS);
+    tracker.recordToolCall("project.status", {});
+    tracker.recordToolResult("project.status", true, "ok");
+    tracker.recordToolCall("realtime.search", {});
+    tracker.recordToolResult("realtime.search", false, "network unreachable");
+
+    const gate = new MissionVerificationGate({
+      fullGate: makeFullGate(),
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    expect(result.proven).toBe(false);
+    expect(result.message).toContain("network unreachable");
+  });
+
+  it("a mutation invalidates cached verification evidence via onMutation", () => {
+    let invalidations = 0;
+    const tracker = createMissionEvidenceTracker(MUTATION_TOOLS, {
+      onMutation: () => { invalidations += 1; },
+    });
+    tracker.recordToolCall("project.run", { command: "git", args: ["status"] });
+    expect(invalidations).toBe(0);
+    tracker.recordToolCall("project.edit_file", { file: "a.ts" });
+    expect(invalidations).toBe(1);
+    // Already mutated — no repeat notification.
+    tracker.recordToolCall("project.write_file", { path: "b.ts" });
+    expect(invalidations).toBe(1);
   });
 });
