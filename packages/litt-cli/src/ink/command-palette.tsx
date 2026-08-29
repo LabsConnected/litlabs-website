@@ -32,6 +32,12 @@ export interface CommandPaletteProps {
   actions: PaletteAction[];
   onSelect: (action: PaletteAction) => void;
   onCancel: () => void;
+  /**
+   * Called when the user types a space — the palette should close and
+   * the composer should retain the full input for argument entry.
+   * If not provided, spaces are treated as part of the query (legacy).
+   */
+  onSpace?: () => void;
   /** Seed the filter (e.g. "ver" when opened by typing /ver). */
   initialQuery?: string;
 }
@@ -58,7 +64,7 @@ export function fuzzyScore(query: string, target: string): number {
   return score;
 }
 
-export function CommandPalette({ actions, onSelect, onCancel, initialQuery = "" }: CommandPaletteProps): React.ReactElement {
+export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQuery = "" }: CommandPaletteProps): React.ReactElement {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [query, setQuery] = useState(initialQuery);
 
@@ -89,10 +95,17 @@ export function CommandPalette({ actions, onSelect, onCancel, initialQuery = "" 
         setSelectedIdx(0);
       }
     } else if (isPrintable(input, key)) {
+      // A space after the command token means the user is starting to
+      // type arguments. Close the palette and let the composer handle
+      // the rest — the palette should never search arguments.
+      if (input === " " && onSpace) {
+        onSpace();
+        return;
+      }
       setQuery((prev) => prev + input);
       setSelectedIdx(0);
     }
-  }, [filtered, selectedIdx, onSelect, onCancel]));
+  }, [filtered, selectedIdx, onSelect, onCancel, onSpace]));
 
   // Render grouped; selectedIdx is a flat index across all groups.
   const groups = [...new Set(filtered.map((a) => a.group))];

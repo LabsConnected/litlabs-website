@@ -340,6 +340,7 @@ export function CockpitApp({
               initialQuery={store.state.overlayQuery}
               onSelect={handlePaletteSelect}
               onCancel={closeOverlay}
+              onSpace={closeOverlay}
             />
           )}
           {overlay === "context-picker" && (
@@ -442,6 +443,7 @@ export function CockpitApp({
             }}
             onNavigateHistory={store.actions.navigateHistory}
             onOpenPalette={controller.openPalette}
+            onClosePalette={closeOverlay}
             onOpenContext={controller.openContext}
             composerDisabled={disabled}
             composerScrolled={store.state.transcriptAnchor !== null}
