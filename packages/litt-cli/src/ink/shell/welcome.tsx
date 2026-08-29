@@ -16,17 +16,38 @@
  *   - Tagline in brand purple (not dim) for identity presence
  *   - Prompt in bright text with brand accent for dominance
  *   - Hints in slightly brighter dim for readability
+ *   - Repo status line: "litlabs-website · main · Git clean"
+ *   - "Local tools ready" indicator
  */
 
 import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import { COLORS } from "../colors.js";
-import { classifyWidth, SectionDivider } from "../ui-primitives.js";
+import { classifyWidth, SectionDivider, RepoStateBadge } from "../ui-primitives.js";
 import { LiTTMark } from "../litt-mark.js";
 
 const REVEAL_MS = 300;
 
-export function Welcome(): React.ReactElement {
+export interface WelcomeProps {
+  /** Project name (e.g. "litlabs-website"). */
+  project?: string;
+  /** Branch name (e.g. "main"). */
+  branch?: string;
+  /** Git modified file count. */
+  gitModified?: number;
+  /** Git untracked file count. */
+  gitUntracked?: number;
+  /** Execution target — "local" or "remote". */
+  executionTarget?: "local" | "remote";
+}
+
+export function Welcome({
+  project,
+  branch,
+  gitModified = 0,
+  gitUntracked = 0,
+  executionTarget = "local",
+}: WelcomeProps = {}): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
   const w = classifyWidth(width);
@@ -58,6 +79,30 @@ export function Welcome(): React.ReactElement {
 
           <Box paddingLeft={pad} marginTop={2}>
             <Text color={COLORS.textBright} bold>What do you want to build?</Text>
+          </Box>
+
+          {/* Repo status line — only show if project is known */}
+          {project && (
+            <Box paddingLeft={pad} marginTop={2}>
+              <Text>
+                <Text color={COLORS.secondary}>{project}</Text>
+                {branch && (
+                  <>
+                    <Text dimColor> · </Text>
+                    <Text color={COLORS.secondaryBright}>{branch}</Text>
+                  </>
+                )}
+                <Text dimColor> · </Text>
+                <RepoStateBadge modified={gitModified} untracked={gitUntracked} />
+              </Text>
+            </Box>
+          )}
+
+          {/* Local tools ready indicator */}
+          <Box paddingLeft={pad} marginTop={0}>
+            <Text color={COLORS.success} dimColor>
+              {executionTarget === "local" ? "Local tools ready" : "Remote tools ready"}
+            </Text>
           </Box>
 
           <Box paddingLeft={pad} marginTop={2}>

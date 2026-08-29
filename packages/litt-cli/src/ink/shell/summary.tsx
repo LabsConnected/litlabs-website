@@ -2,11 +2,15 @@
  * Summary — the compact result block after a mission terminates.
  *
  * ```
- *   DONE
+ *   COMPLETE
  *     ✓ verification passed
- *     2 files changed
+ *     2 files changed · 14.2s
  *     22 tests passed
  *     typecheck passed
+ *
+ *   COMPLETE WITH ISSUES
+ *     ✓ Repository inspected
+ *     ! Tests were not executed
  *
  *   FAILED
  *     × Verification failed
@@ -19,8 +23,11 @@
  * Rendered from canonical mission state (never invented): git counts
  * from the workspace, test/typecheck/build results from the
  * VerificationGate, runtime provenance from the mission itself.
- * DONE is only shown when the evidence justifies it — the header
- * always says what actually happened (DONE / FAILED / CANCELLED / TIMEOUT).
+ *
+ * VERIFICATION GATE: A mission may only show "COMPLETE" if verification
+ * actually passed. If verification is incomplete (tests not run, runtime
+ * not proven), the header says "COMPLETE WITH ISSUES" or "NOT VERIFIED"
+ * — NEVER "COMPLETE". Git clean ≠ task complete.
  */
 
 import React from "react";
@@ -103,18 +110,86 @@ function readOnlyLine(mission: MissionState): React.ReactElement | null {
   );
 }
 
+/** Format elapsed milliseconds as "14.2s" or "1m 23s". */
+function formatElapsed(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "";
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.floor(s % 60);
+  return `${m}m ${rem}s`;
+}
+
+/** Run metrics line: "3 files changed · 14.2s · 9 tools" */
+function metricsLine(mission: MissionState): React.ReactElement | null {
+  const delta = mission.missionDeltaFiles;
+  const fileCount = delta !== null ? delta.length : mission.filesTouched.length;
+  const elapsed = mission.startedAt && mission.endedAt
+    ? mission.endedAt - mission.startedAt
+    : null;
+  const toolCount = mission.toolsUsed.length;
+  const cmdCount = mission.commandsExecuted.length;
+
+  const parts: string[] = [];
+  if (fileCount > 0) parts.push(`${fileCount} file${fileCount !== 1 ? "s" : ""} changed`);
+  if (toolCount > 0) parts.push(`${toolCount} tool${toolCount !== 1 ? "s" : ""}`);
+  if (cmdCount > 0) parts.push(`${cmdCount} command${cmdCount !== 1 ? "s" : ""}`);
+  const elapsedStr = formatElapsed(elapsed);
+  if (elapsedStr) parts.push(elapsedStr);
+
+  if (parts.length === 0) return null;
+  return (
+    <Box>
+      <Text dimColor>{`  ${parts.join(" · ")}`}</Text>
+    </Box>
+  );
+}
+
+/**
+ * Determine the honest header. A mission may only say "COMPLETE" if
+ * verification actually passed. If verification is incomplete, the
+ * header reflects that — "COMPLETE WITH ISSUES" or "NOT VERIFIED".
+ */
+function deriveHeader(mission: MissionState): { text: string; color: string } {
+  const state = mission.state;
+
+  if (state === "FAILED") return { text: "FAILED", color: COLORS.error };
+  if (state === "CANCELLED") return { text: "CANCELLED", color: COLORS.error };
+  if (state === "TIMEOUT") return { text: "TIMEOUT", color: COLORS.error };
+
+  // state === "COMPLETE" — but is verification actually proven?
+  if (mission.readOnly) {
+    // Read-only: "inspection verified" is the gate
+    if (mission.runtimeProven === true) return { text: "COMPLETE", color: COLORS.success };
+    if (mission.runtimeProven === false) return { text: "FAILED", color: COLORS.error };
+    // runtimeProven === null — inspection not verified
+    return { text: "NOT VERIFIED", color: COLORS.gold };
+  }
+
+  // Mutating mission: verification gate must pass
+  if (mission.runtimeProven === true) return { text: "COMPLETE", color: COLORS.success };
+  if (mission.runtimeProven === false) return { text: "FAILED", color: COLORS.error };
+
+  // runtimeProven === null — verification was not run
+  // Check if at least some checks passed
+  const hasTests = mission.testResults !== null;
+  const hasTypecheck = mission.typecheckPassed !== null;
+  const hasBuild = mission.buildPassed !== null;
+
+  if (hasTests || hasTypecheck || hasBuild) {
+    // Some checks ran but runtime was not proven
+    return { text: "COMPLETE WITH ISSUES", color: COLORS.gold };
+  }
+
+  // No verification ran at all
+  return { text: "NOT VERIFIED", color: COLORS.gold };
+}
+
 /** The honest result block. */
 export function MissionResultBlock({ mission, gitModified, gitUntracked }: MissionResultBlockProps): React.ReactElement {
   const state = mission.state;
-  const isSuccess = state === "COMPLETE";
-  const header = state === "COMPLETE"
-    ? "DONE"
-    : state === "FAILED"
-      ? "FAILED"
-      : state === "CANCELLED"
-        ? "CANCELLED"
-        : "TIMEOUT";
-  const headerColor = isSuccess ? COLORS.success : COLORS.error;
+  const { text: header, color: headerColor } = deriveHeader(mission);
+  const isComplete = header === "COMPLETE";
 
   const failedTests = mission.testResults && mission.testResults.failed > 0
     ? mission.testResults.failed
@@ -144,8 +219,26 @@ export function MissionResultBlock({ mission, gitModified, gitUntracked }: Missi
       {line(mission.typecheckPassed, "typecheck passed")}
       {line(mission.buildPassed, "build passed")}
 
+      {/* Incomplete verification warnings */}
+      {!isComplete && state === "COMPLETE" && (
+        <Box flexDirection="column">
+          {mission.testResults === null && !mission.readOnly && (
+            <Box><Text color={COLORS.gold}>{"  ! "}</Text><Text color={COLORS.gold}>Tests were not executed</Text></Box>
+          )}
+          {mission.typecheckPassed === null && !mission.readOnly && (
+            <Box><Text color={COLORS.gold}>{"  ! "}</Text><Text color={COLORS.gold}>Typecheck was not run</Text></Box>
+          )}
+          {mission.runtimeProven === null && !mission.readOnly && (
+            <Box><Text color={COLORS.gold}>{"  ! "}</Text><Text color={COLORS.gold}>Runtime behavior not proven</Text></Box>
+          )}
+        </Box>
+      )}
+
+      {/* Run metrics */}
+      {metricsLine(mission)}
+
       {/* Failed-state next actions */}
-      {!isSuccess && state !== "CANCELLED" && state !== "TIMEOUT" && (
+      {state === "FAILED" && (
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>{"  /diff    review changes"}</Text>
           <Text dimColor>{"  /verify  retry checks"}</Text>

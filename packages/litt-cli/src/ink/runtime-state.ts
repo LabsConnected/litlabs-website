@@ -227,7 +227,7 @@ export function runtimeLabel(state: RuntimeState): string {
     case "planning": return "Planning";
     case "running": return "Running";
     case "verifying": return "Verifying";
-    case "completed": return "Done";
+    case "completed": return "Complete";
     case "failed": return "Failed";
     case "cancelled": return "Cancelled";
     case "timeout": return "Timeout";

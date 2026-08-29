@@ -117,16 +117,17 @@ export interface RepoStateBadgeProps {
   untracked: number;
 }
 
-/** Repository dirty/clean indicator. Clean is subtle, dirty is warning. */
+/** Repository dirty/clean indicator. Clean is subtle, dirty is warning.
+ *  Explicitly prefixed with "Git" so repo state is never confused with
+ *  mission/verification state — "Git clean" ≠ "task complete". */
 export function RepoStateBadge({ modified, untracked }: RepoStateBadgeProps): React.ReactElement {
   const total = modified + untracked;
   if (total === 0) {
-    return <Text color={COLORS.success} dimColor>clean</Text>;
+    return <Text color={COLORS.success} dimColor>Git clean</Text>;
   }
   return (
     <Text>
-      <Text color={COLORS.warning} dimColor> +{total}</Text>
-      <Text dimColor> changes</Text>
+      <Text color={COLORS.warning} dimColor> Git +{total}</Text>
     </Text>
   );
 }

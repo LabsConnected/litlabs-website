@@ -304,7 +304,13 @@ export function LiTTShell(props: LiTTShellProps): React.ReactElement {
             workstream={workstream}
           />
         ) : (
-          <Welcome />
+          <Welcome
+            project={project}
+            branch={branch}
+            gitModified={gitModified}
+            gitUntracked={gitUntracked}
+            executionTarget={executionTarget}
+          />
         )}
       </Box>
 

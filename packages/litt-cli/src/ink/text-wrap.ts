@@ -65,10 +65,16 @@ export function singleLine(text: string): string {
  * Shorten a model id to a friendly label:
  *   "anthropic/claude-sonnet-4.6" → "Claude Sonnet 4.6"
  *   "openai/gpt-5.6-luna"         → "GPT 5.6 Luna"
- * Display labels ("GPT-5.6 Luna") pass through untouched.
+ *   "GLM-5.2 (Free)"              → "GLM-5.2 FREE"
+ * Display labels pass through, but parenthetical suffixes like "(Free)"
+ * are compressed to uppercase for a more compact footer.
  */
 export function shortModelName(model: string | null | undefined): string {
   if (!model) return "";
+  // Compress parenthetical suffixes: "(Free)" → "FREE", "(Preview)" → "PREVIEW"
+  const compressed = model.replace(/\s*\((\w+)\)\s*$/i, " $1").trim().toUpperCase();
+  // If compression changed something, return the compressed form
+  if (compressed !== model.toUpperCase()) return compressed;
   // Already a display label (contains a space) → pass through.
   if (model.includes(" ")) return model;
   const withoutProvider = model.includes("/") ? model.split("/").slice(1).join("/") : model;

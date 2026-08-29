@@ -337,24 +337,24 @@ describe("shell ANSI-grid regression", () => {
       }
     });
 
-    it(`DONE summary @ ${cols}x${rows}`, async () => {
+    it(`COMPLETE summary @ ${cols}x${rows}`, async () => {
       const out = makeStdout(cols, rows);
       const inst = render(
         React.createElement(LiTTShell, defaultProps(doneSummaryScenario())),
         { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false },
       );
       try {
-        await waitForBytes(() => out.bytes, "DONE");
+        await waitForBytes(() => out.bytes, "COMPLETE");
         await new Promise((r) => setTimeout(r, 150));
         inst.unmount();
         await new Promise((r) => setTimeout(r, 100));
 
         assertCleanFrame(emulate(out.bytes), cols, {
-          // COMPLETE missions show "✓ Done" — terminal state now takes
+          // COMPLETE missions show "✓ Complete" — terminal state now takes
           // precedence over the raw git dirty count ("+2"), mirroring the
           // FAILED-over-dirty precedence the overflow scenario asserts.
-          footer: ["Plan", "Act", "✓ Done"],
-          body: ["DONE", "tests passed"],
+          footer: ["Plan", "Act", "✓ Complete"],
+          body: ["COMPLETE", "tests passed"],
         });
       } finally {
         inst.unmount();
