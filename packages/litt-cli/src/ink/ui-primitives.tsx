@@ -125,7 +125,7 @@ export function RepoStateBadge({ modified, untracked }: RepoStateBadgeProps): Re
   }
   return (
     <Text>
-      <Text color={COLORS.warning} dimColor>+{total}</Text>
+      <Text color={COLORS.warning} dimColor> +{total}</Text>
       <Text dimColor> changes</Text>
     </Text>
   );

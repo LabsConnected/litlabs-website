@@ -13,6 +13,9 @@
  *   - Hints laid out vertically on narrow terminals
  *   - Subtle separator below brand
  *   - Cleaner hint formatting
+ *   - Tagline in brand purple (not dim) for identity presence
+ *   - Prompt in bright text with brand accent for dominance
+ *   - Hints in slightly brighter dim for readability
  */
 
 import React, { useEffect, useState } from "react";
@@ -50,27 +53,27 @@ export function Welcome(): React.ReactElement {
           </Box>
 
           <Box paddingLeft={pad} marginTop={1}>
-            <Text dimColor>BUILD · SHIP · CREATE</Text>
+            <Text color={COLORS.brand} bold>BUILD · SHIP · CREATE</Text>
           </Box>
 
           <Box paddingLeft={pad} marginTop={2}>
-            <Text color={COLORS.text}>What do you want to build?</Text>
+            <Text color={COLORS.textBright} bold>What do you want to build?</Text>
           </Box>
 
           <Box paddingLeft={pad} marginTop={2}>
             {w === "narrow" ? (
               <Box flexDirection="column">
-                <Text dimColor>/ commands</Text>
-                <Text dimColor>@ context</Text>
-                <Text dimColor>? help</Text>
+                <Text color={COLORS.secondary}>  / commands</Text>
+                <Text color={COLORS.secondary}>  @ context</Text>
+                <Text color={COLORS.secondary}>  ? help</Text>
               </Box>
             ) : (
               <Text>
-                <Text dimColor>/ commands</Text>
-                <Text dimColor>    </Text>
-                <Text dimColor>@ context</Text>
-                <Text dimColor>    </Text>
-                <Text dimColor>? help</Text>
+                <Text color={COLORS.secondary}>  / commands</Text>
+                <Text color={COLORS.secondaryDim}>    </Text>
+                <Text color={COLORS.secondary}>@ context</Text>
+                <Text color={COLORS.secondaryDim}>    </Text>
+                <Text color={COLORS.secondary}>? help</Text>
               </Text>
             )}
           </Box>
