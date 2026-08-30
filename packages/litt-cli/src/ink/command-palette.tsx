@@ -74,6 +74,16 @@ export function fuzzyScore(query: string, target: string): number {
   return score;
 }
 
+/**
+ * Normalize a slash-prefixed query or command id for matching: strip the
+ * leading "/" so "doctor", "/doctor", "doc" and "/doc" all compare the
+ * same way. Displayed labels and ids are never altered — this is a
+ * matching-only normalization.
+ */
+export function normalizeCommandQuery(value: string): string {
+  return value.trim().replace(/^\/+/, "");
+}
+
 export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQuery = "" }: CommandPaletteProps): React.ReactElement {
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
@@ -81,10 +91,19 @@ export function CommandPalette({ actions, onSelect, onCancel, onSpace, initialQu
   const [query, setQuery] = useState(initialQuery);
 
   const filtered = useCallback(() => {
-    const q = query.trim();
+    // Normalize the leading "/" away on BOTH the query and the command id
+    // so "doctor", "/doctor", "doc" and "/doc" all find /doctor.
+    // Labels keep participating in matching as before.
+    const q = normalizeCommandQuery(query);
     if (!q) return actions;
     return actions
-      .map((a) => ({ a, score: Math.max(fuzzyScore(q, a.label), fuzzyScore(q, a.id)) }))
+      .map((a) => ({
+        a,
+        score: Math.max(
+          fuzzyScore(q, a.label),
+          fuzzyScore(q, normalizeCommandQuery(a.id)),
+        ),
+      }))
       .filter((x) => x.score >= 0)
       .sort((x, y) => y.score - x.score)
       .map((x) => x.a);

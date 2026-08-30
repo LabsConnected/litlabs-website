@@ -138,8 +138,144 @@ export async function resolveProjectContext(
 
 // ─── Read-Only Git Tools ──────────────────────────────────────────
 
+// ─── Consolidated Project Status ──────────────────────────────────
+//
+// Replaces the old pattern of calling resolveProjectContext (3 git
+// subprocesses) + gitStatus (1 git subprocess) = 4 total git spawns.
+// projectStatus does ONE git status --porcelain=v1 --branch call (which
+// yields branch name, dirty state, changed/untracked counts, AND file
+// list) + ONE git remote get-url origin (only if inside a git repo).
+//
+// This is the canonical fast path for project.status tool queries.
+// The canonical git-state.ts in litt-cli follows the same single-call
+// pattern; this is the agent-core equivalent using the ShellExecutor
+// abstraction so cross-platform / remote shells work identically.
+
+/** Result of a consolidated project.status query. */
+export interface ProjectStatusResult {
+  root: string;
+  name: string;
+  isGitRepo: boolean;
+  branch: string | null;
+  remote: string | null;
+  clean: boolean;
+  changed: number;
+  untracked: number;
+  files: string[];
+}
+
+/**
+ * Get consolidated project status in minimal git subprocess calls.
+ *
+ * Single call: `git status --porcelain=v1 --branch` — returns:
+ *   - branch name (from the `## ` header line)
+ *   - dirty state (tracked modifications)
+ *   - untracked file count
+ *   - full file list
+ *
+ * Remote URL is fetched in a second call only when inside a git repo.
+ * Project name comes from package.json (filesystem read, no subprocess).
+ *
+ * Total: 1 git call for branch+dirty, + 1 git call for remote (if git repo).
+ *      vs. 4 git calls in the old resolveProjectContext + gitStatus path.
+ */
+export async function projectStatus(
+  shell: ShellExecutor,
+  cwd?: string,
+): Promise<ProjectStatusResult> {
+  const root = detectProjectRoot(cwd ?? shell.cwd);
+
+  // Project name from package.json (filesystem, no git)
+  let name = path.basename(root);
+  try {
+    const pkgPath = path.join(root, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      if (typeof pkg.name === "string" && pkg.name.trim()) {
+        name = pkg.name;
+      }
+    }
+  } catch {
+    // keep basename fallback
+  }
+
+  // Single git call: branch + dirty state + file list
+  const statusRes = await shell.execute({
+    command: "git",
+    args: ["status", "--porcelain=v1", "--branch"],
+    cwd: root,
+    timeoutMs: 5000,
+  });
+
+  if (!statusRes.ok) {
+    // Not a git repo or git unavailable
+    return {
+      root,
+      name,
+      isGitRepo: false,
+      branch: null,
+      remote: null,
+      clean: true,
+      changed: 0,
+      untracked: 0,
+      files: [],
+    };
+  }
+
+  const lines = statusRes.stdout.trim().split("\n").filter((l) => l.trim());
+
+  // First line is the branch header: `## branchname...origin/branchname`
+  // or `## HEAD (no branch)` for detached HEAD
+  let branch: string | null = null;
+  let fileLines: string[] = [];
+
+  if (lines.length > 0 && lines[0].startsWith("## ")) {
+    const header = lines[0].slice(3); // strip "## "
+    if (header.startsWith("HEAD (no branch)")) {
+      branch = null; // detached
+    } else {
+      // "branchname...origin/branchname" or "branchname [ahead N, behind M]"
+      const branchPart = header.split("...")[0];
+      branch = branchPart || null;
+    }
+    fileLines = lines.slice(1).filter((l) => l.trim());
+  } else {
+    fileLines = lines;
+  }
+
+  const untracked = fileLines.filter((l) => l.startsWith("??")).length;
+  const changed = fileLines.length - untracked;
+
+  // Remote URL — second git call, only when we know this is a git repo
+  let remote: string | null = null;
+  const remoteRes = await shell.execute({
+    command: "git",
+    args: ["remote", "get-url", "origin"],
+    cwd: root,
+    timeoutMs: 3000,
+  });
+  if (remoteRes.ok && remoteRes.stdout.trim()) {
+    remote = remoteRes.stdout.trim() || null;
+  }
+
+  return {
+    root,
+    name,
+    isGitRepo: true,
+    branch,
+    remote,
+    clean: fileLines.length === 0,
+    changed,
+    untracked,
+    files: fileLines,
+  };
+}
+
 /**
  * Get git status (porcelain format).
+ * Maintained for backward compatibility — the project.status handler
+ * now uses projectStatus() which consolidates into a single call.
+ * New code should prefer projectStatus() to avoid redundant git spawns.
  */
 export async function gitStatus(shell: ShellExecutor, cwd?: string): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;

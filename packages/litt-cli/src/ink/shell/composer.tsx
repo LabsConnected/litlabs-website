@@ -15,8 +15,11 @@
  *
  * Owns ALL printable key handling (no ink-text-input) so the shell has
  * one keyboard truth:
- *   - typing `/` at the start   → opens the command palette
- *   - typing `@` at the start   → opens the context picker
+ *   - typing `/`                → plain text in the draft (Enter submits
+ *                                 the slash command through the normal
+ *                                 onSubmit/controller path — the full
+ *                                 command palette is Ctrl+K, app-level)
+ *   - typing `@` on empty draft → opens the context picker
  *   - Enter                     → submit
  *   - Esc                       → clear the draft
  *   - Tab                       → falls through to the app handler (Plan/Act)
@@ -38,7 +41,6 @@ import { COLORS } from "../colors.js";
 import { useCursorBlink } from "../use-cursor-blink.js";
 import { deriveFocusState } from "../focus-state.js";
 import { composerCopy, isBusyState, type RuntimeState } from "../runtime-state.js";
-import { parseSlashCommand, shouldPaletteBeOpen, paletteQuery } from "../../lib/slash-command-parser.js";
 
 // ─── Debug instrumentation for first-input tracing ────────────────
 // Set LITT_INPUT_DEBUG=1 to trace the first several key events to a
@@ -65,9 +67,14 @@ export interface ComposerProps {
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onNavigateHistory: (direction: "up" | "down") => string | null;
-  /** Opens the command palette, seeded with the partial query. */
-  onOpenPalette: (query: string) => void;
-  /** Closes the command palette (when a space is typed after a command token). */
+  /**
+   * Legacy palette hook — the composer no longer opens the palette by
+   * itself (typing "/" is plain input). Ctrl+K at the app level is the
+   * explicit command-palette entry point. Kept for call-site
+   * compatibility; unused inside the component.
+   */
+  onOpenPalette?: (query: string) => void;
+  /** Legacy palette-close hook — unused inside the component (see onOpenPalette). */
   onClosePalette?: () => void;
   /** Opens the context picker, seeded with the partial query. */
   onOpenContext: (query: string) => void;
@@ -92,7 +99,7 @@ export interface ComposerProps {
 
 export function Composer({
   value, onChange, onSubmit, onNavigateHistory,
-  onOpenPalette, onClosePalette, onOpenContext, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
+  onOpenContext, disabled, busy, runtimeState, scrolled, focusEpoch, onReturnToLive,
 }: ComposerProps): React.ReactElement {
   // The derived runtime state is the single copy authority. The raw
   // busy/disabled flags only apply when no runtime state was provided
@@ -136,10 +143,6 @@ export function Composer({
   useEffect(() => { onSubmitRef.current = onSubmit; }, [onSubmit]);
   const onNavigateHistoryRef = useRef(onNavigateHistory);
   useEffect(() => { onNavigateHistoryRef.current = onNavigateHistory; }, [onNavigateHistory]);
-  const onOpenPaletteRef = useRef(onOpenPalette);
-  useEffect(() => { onOpenPaletteRef.current = onOpenPalette; }, [onOpenPalette]);
-  const onClosePaletteRef = useRef(onClosePalette);
-  useEffect(() => { onClosePaletteRef.current = onClosePalette; }, [onClosePalette]);
   const onOpenContextRef = useRef(onOpenContext);
   useEffect(() => { onOpenContextRef.current = onOpenContext; }, [onOpenContext]);
   const onReturnToLiveRef = useRef(onReturnToLive);
@@ -213,32 +216,13 @@ export function Composer({
         caretRef.current = next.caret;
         pokeRef.current();
 
-        // / and @ triggers fire when the draft STARTS with them.
-        // The command palette only filters on the command NAME (first token),
-        // never on arguments. Once a space is typed after the command token,
-        // the palette closes and the user continues typing args in the composer.
-        if (next.text.startsWith("/")) {
-          const parsed = parseSlashCommand(next.text);
-          if (parsed) {
-            if (parsed.hasSpace) {
-              // Space detected after command token — close palette, keep composer
-              onClosePaletteRef.current?.();
-            } else {
-              // Still typing the command name — update palette filter
-              onOpenPaletteRef.current(parsed.command);
-            }
-          }
-        } else if (next.text.startsWith("@")) {
-          // @ context picker — same logic: only filter on first token
-          const spaceIdx = next.text.slice(1).indexOf(" ");
-          if (spaceIdx !== -1) {
-            onClosePaletteRef.current?.();
-          } else if (next.text.length > 1) {
-            onOpenContextRef.current(next.text.slice(1));
-          }
-        } else if (evt.text === "/" && valueRef.current.length === 0) {
-          onOpenPaletteRef.current("");
-        } else if (evt.text === "@" && valueRef.current.length === 0) {
+        // Slash commands are plain composer input — typing "/" does NOT
+        // open the full command palette. Ctrl+K is the explicit palette
+        // entry point; pressing Enter submits a slash command normally.
+        //
+        // The @ context picker only opens on the FIRST "@" character typed
+        // on an empty draft. Subsequent characters just extend the draft.
+        if (evt.text === "@" && valueRef.current === "@") {
           onOpenContextRef.current("");
         }
         return;

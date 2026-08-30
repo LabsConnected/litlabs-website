@@ -4,7 +4,7 @@
  *
  * Exercises:
  *   - Intent classification (classifyIntent)
- *   - Local fast lane (tryLocalFastLane) — if available on this branch
+ *   - Local fast lane (matchLocalFastPath) — if available on this branch
  *   - Tool registry execution for read-only project queries
  *
  * Usage: node --import tsx packages/litt-cli/scripts/bench-litt-perf.mjs
@@ -80,7 +80,7 @@ async function main() {
     const fastCtx = { cwd: repoRoot, projectName: "litlabs-website", mode: "act" };
     for (const q of QUERIES) {
       const { ms, result } = await time(() => matchLocalFastPath(q, fastCtx));
-      const matched = result ? `LOCAL_MATCH (${result.route})` : "no match";
+      const matched = result ? `LOCAL_MATCH (${result.kind})` : "no match";
       log(`  [${fmtMs(ms)}] "${q}" → ${matched}`);
     }
   } else {

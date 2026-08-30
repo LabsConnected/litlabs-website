@@ -21,7 +21,6 @@ import type {
 } from "./types.js";
 import { REALTIME_TOOL_ENTRIES } from "./realtime.js";
 import {
-  gitStatus,
   gitDiff,
   gitLog,
   gitBranch,
@@ -177,29 +176,42 @@ const READ_ONLY_META: ToolMetadata = {
 };
 
 const statusHandler: ToolHandler = async (ctx) => {
-  const { resolveProjectContext } = await import("./project.js");
-  const project = await resolveProjectContext(ctx.shell, ctx.cwd);
-  const statusResult = await gitStatus(ctx.shell, ctx.cwd);
-  const porcelain = typeof statusResult.data?.porcelain === "string"
-    ? (statusResult.data.porcelain as string)
-    : "";
-  const lines = porcelain.split("\n").filter((l) => l.trim());
-  const untracked = lines.filter((l) => l.startsWith("??")).length;
-  const changed = lines.length - untracked;
+  const { projectStatus } = await import("./project.js");
+  const status = await projectStatus(ctx.shell, ctx.cwd);
+  if (!status.isGitRepo) {
+    return {
+      status: "success",
+      success: true,
+      message: `${status.name} — not a git repository`,
+      data: {
+        root: status.root,
+        name: status.name,
+        isGitRepo: false,
+        branch: null,
+        remote: null,
+        clean: true,
+        changed: 0,
+        untracked: 0,
+        files: [],
+      },
+    };
+  }
   return {
     status: "success",
     success: true,
-    message: `${project.name} on ${project.branch ?? "detached"} — ${statusResult.message}`,
+    message: `${status.name} on ${status.branch ?? "detached"} — ${
+      status.clean ? "Working tree clean" : `${status.changed} changed, ${status.untracked} untracked`
+    }`,
     data: {
-      root: project.root,
-      name: project.name,
-      isGitRepo: project.isGitRepo,
-      branch: project.branch,
-      remote: project.remote,
-      clean: lines.length === 0,
-      changed,
-      untracked,
-      gitStatus: statusResult.data,
+      root: status.root,
+      name: status.name,
+      isGitRepo: status.isGitRepo,
+      branch: status.branch,
+      remote: status.remote,
+      clean: status.clean,
+      changed: status.changed,
+      untracked: status.untracked,
+      gitStatus: { porcelain: status.files.join("\n"), changeCount: status.changed + status.untracked, files: status.files },
     },
   };
 };

@@ -48,9 +48,11 @@ export type {
 export { NodeShellExecutor, createShellExecutor } from "./shell.js";
 
 // Project tools
+export type { ProjectStatusResult } from "./project.js";
 export {
   detectProjectRoot,
   resolveProjectContext,
+  projectStatus,
   gitStatus,
   gitDiff,
   gitLog,
