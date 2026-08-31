@@ -13,6 +13,7 @@ import {
   absoluteUrl,
 } from "@/lib/seo";
 import "./globals.css";
+import "./landing-upgrade.css";
 
 export const viewport: Viewport = {
   width: "device-width",
