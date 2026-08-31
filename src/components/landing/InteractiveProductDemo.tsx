@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, type CSSProperties } from "react";
 import { Check, CircleDot, FileCode, Folder, GitBranch, Play, Rocket, Send, Sparkles, Terminal } from "lucide-react";
 
 /**
@@ -27,6 +27,7 @@ const STAGES: StageDef[] = [
 export function InteractiveProductDemo() {
   const [active, setActive] = useState<DemoStage>("mission");
   const current = STAGES.find((s) => s.id === active)!;
+  const activeIndex = STAGES.findIndex((s) => s.id === active);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const focusTab = useCallback((index: number) => {
@@ -58,7 +59,21 @@ export function InteractiveProductDemo() {
 
   return (
     <div className="w-full">
-      <div role="tablist" aria-label="LiTTree Studio workflow stages" className="mb-6 flex flex-wrap gap-2">
+      {/* Honesty label — this walkthrough is a simulation, not a live mission. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">
+          Interactive product demonstration
+        </span>
+        <span className="text-[10px] font-bold text-white/20">Illustrative simulation</span>
+      </div>
+
+      <div
+        role="tablist"
+        aria-label="LiTTree Studio workflow stages"
+        className="litt-stage-tabs relative mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+        style={{ "--stage-progress": `${(activeIndex / (STAGES.length - 1)) * 100}%` } as CSSProperties}
+      >
+        <span aria-hidden="true" className="litt-stage-track"><span /></span>
         {STAGES.map((stage, index) => {
           const isActive = stage.id === active;
           const Icon = stage.icon;
@@ -73,15 +88,17 @@ export function InteractiveProductDemo() {
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActive(stage.id)}
               onKeyDown={(e) => handleKeyDown(e, index)}
-              className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-black transition-all duration-200 ${isActive ? "border-white/20 bg-white/8 text-white" : "border-white/8 bg-transparent text-white/40 hover:border-white/15 hover:text-white/70"}`}
-              style={isActive ? { borderColor: `${stage.accent}40`, color: stage.accent } : undefined}>
-              <Icon size={14} />{stage.label}
+              className={`litt-stage-tab ${isActive ? "is-active" : ""} ${index < activeIndex ? "is-complete" : ""}`}
+              style={{ "--stage-accent": stage.accent } as CSSProperties}
+            >
+              <span className="litt-stage-node"><Icon size={13} /></span>
+              <span>{stage.label}</span>
             </button>
           );
         })}
       </div>
 
-      <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} className="overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
+      <div id="demo-stage-panel" role="tabpanel" aria-labelledby={`demo-tab-${active}`} aria-live="polite" className="overflow-hidden rounded-2xl border border-white/12 bg-[#0a0d14] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
         <div className="flex items-center gap-2 border-b border-white/8 bg-[#0d1018] px-4 py-3">
           <span className="h-3 w-3 rounded-full bg-red-400/60" /><span className="h-3 w-3 rounded-full bg-amber-400/60" /><span className="h-3 w-3 rounded-full bg-green-400/60" />
           <div className="ml-3 flex items-center gap-2 text-xs font-bold text-white/40"><span className="grid h-5 w-5 place-items-center rounded bg-[#a8ff2f]/15 text-[10px] text-[#a8ff2f]">L</span>LiTTree Studio &mdash; {current.label}</div>
@@ -108,12 +125,16 @@ export function InteractiveProductDemo() {
             </div>
           </div>
 
-          <div className="flex-1 p-5">
+          <div key={active} className="litt-stage-panel-content flex-1 p-5">
             <div className="mb-4 flex items-center gap-3">
               <div className="grid h-8 w-8 place-items-center rounded-lg" style={{ backgroundColor: `${current.accent}15`, color: current.accent }}><current.icon size={16} /></div>
               <div><div className="text-sm font-black" style={{ color: current.accent }}>{current.label}</div><div className="text-xs text-white/40">{current.description}</div></div>
             </div>
-            <DemoStageContent stage={active} />
+            <DemoStageContent
+              stage={active}
+              onAdvance={() => focusTab(Math.min(STAGES.length - 1, activeIndex + 1))}
+              onReview={() => focusTab(STAGES.findIndex((stage) => stage.id === "preview"))}
+            />
           </div>
         </div>
       </div>
@@ -121,7 +142,15 @@ export function InteractiveProductDemo() {
   );
 }
 
-function DemoStageContent({ stage }: { stage: DemoStage }) {
+function DemoStageContent({
+  stage,
+  onAdvance,
+  onReview,
+}: {
+  stage: DemoStage;
+  onAdvance: () => void;
+  onReview: () => void;
+}) {
   switch (stage) {
     case "mission":
       return (
@@ -177,7 +206,7 @@ function DemoStageContent({ stage }: { stage: DemoStage }) {
             <div className="mb-3 flex items-center gap-2"><Check size={16} className="text-[#b58cff]" /><span className="text-xs font-black uppercase tracking-wider text-[#b58cff]">Approval Required</span></div>
             <div className="mb-4 text-sm text-white/80">LiTT wants to prepare the After Midnight launch page for deployment. Approve to proceed with deployment preparation.</div>
             <div className="mb-4 rounded-lg border border-white/8 bg-black/30 p-3 text-xs text-white/50"><div className="mb-1 font-bold text-white/70">What will happen:</div><div>&bull; Build the production bundle</div><div>&bull; Prepare for deployment</div><div>&bull; Save the project in your workspace</div></div>
-            <div className="flex gap-2"><button className="rounded-lg bg-[#b58cff] px-5 py-2.5 text-xs font-black text-black transition hover:bg-[#c89dff]">Approve</button><button className="rounded-lg border border-white/15 px-5 py-2.5 text-xs font-bold text-white/50 transition hover:bg-white/5">Review changes first</button></div>
+            <div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={onAdvance} className="litt-demo-approve rounded-lg bg-[#b58cff] px-5 py-2.5 text-xs font-black text-black">Approve and continue</button><button type="button" onClick={onReview} className="litt-demo-review rounded-lg border border-white/15 px-5 py-2.5 text-xs font-bold text-white/60">Review changes first</button></div>
           </div>
           <div className="text-xs text-white/40">LiTT never deploys, deletes, or performs sensitive actions without your approval.</div>
         </div>
