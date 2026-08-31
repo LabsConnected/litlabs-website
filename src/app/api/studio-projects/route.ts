@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getInstallationOctokit } from "@/lib/github-app";
 import {
   createBlankProject,
   createGithubProject,
   listProjects,
   PROJECT_TEMPLATES,
 } from "@/lib/projects/project-repository";
+import { supabaseAdmin } from "@/lib/supabase";
 import type { ProjectTemplateId } from "@/lib/projects/types";
 
 /**
@@ -97,17 +99,51 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const { data: installation, error: installationError } = await supabaseAdmin
+        .from("github_installations")
+        .select("installation_id")
+        .eq("user_id", userId)
+        .eq("installation_id", githubInstallationId)
+        .single();
+      if (installationError || !installation) {
+        return NextResponse.json({ error: "Installation not found" }, { status: 404 });
+      }
+
+      let verifiedOwner = githubOwner;
+      let verifiedRepo = githubRepo;
+      let verifiedFullName = githubFullName;
+      let verifiedDefaultBranch = (body.githubDefaultBranch as string) || "main";
+      try {
+        const octokit = await getInstallationOctokit(githubInstallationId);
+        const { data: repository } = await octokit.rest.repos.get({
+          owner: githubOwner,
+          repo: githubRepo,
+        });
+        if (repository.id !== githubRepositoryId) {
+          return NextResponse.json({ error: "Repository ID mismatch" }, { status: 400 });
+        }
+        verifiedOwner = repository.owner.login;
+        verifiedRepo = repository.name;
+        verifiedFullName = repository.full_name;
+        verifiedDefaultBranch = repository.default_branch;
+      } catch {
+        return NextResponse.json(
+          { error: "Repository not accessible through this installation" },
+          { status: 403 },
+        );
+      }
+
       const project = await createGithubProject({
         userId,
         name,
-        slug: (body.slug as string) || githubRepo,
+        slug: (body.slug as string) || verifiedRepo,
         githubInstallationId,
         githubRepositoryId,
-        githubOwner,
-        githubRepo,
-        githubFullName,
-        githubDefaultBranch: (body.githubDefaultBranch as string) || "main",
-        githubBranch: (body.githubBranch as string) || "main",
+        githubOwner: verifiedOwner,
+        githubRepo: verifiedRepo,
+        githubFullName: verifiedFullName,
+        githubDefaultBranch: verifiedDefaultBranch,
+        githubBranch: (body.githubBranch as string) || verifiedDefaultBranch,
         accessMode: body.accessMode === "shared" ? "shared" : "private",
       });
       return NextResponse.json({ project }, { status: 201 });
