@@ -3,8 +3,6 @@
 import {
   createContext,
   useContext,
-  useState,
-  useEffect,
   type ReactNode,
 } from "react";
 import { useAuth as useClerkAuthHook, useUser as useClerkUserHook } from "@clerk/nextjs";
@@ -39,50 +37,6 @@ const ClerkAuthContext = createContext<AuthState>(DEFAULT_AUTH);
 function ClerkAuthInner({ children }: { children: ReactNode }) {
   const clerk = useClerkAuthHook();
   const { user: clerkUser, isLoaded: userLoaded } = useClerkUserHook();
-  
-  const [sessionUser, setSessionUser] = useState<{
-    id: string;
-    name: string | null;
-    email: string;
-  } | null>(null);
-  const [sessionLoaded, setSessionLoaded] = useState(false);
-
-  useEffect(() => {
-    if (clerk.isSignedIn) {
-      const id = requestAnimationFrame(() => setSessionLoaded(true));
-      return () => cancelAnimationFrame(id);
-    }
-    if (!clerk.isLoaded) return;
-
-    fetch("/api/auth/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.user) {
-          setSessionUser({
-            id: data.user.id,
-            name: data.user.name,
-            email: data.user.email,
-          });
-        }
-        setSessionLoaded(true);
-      })
-      .catch(() => {
-        setSessionLoaded(true);
-      });
-  }, [clerk.isLoaded, clerk.isSignedIn]);
-
-  const isLoaded = (clerk.isLoaded && userLoaded) || sessionLoaded;
-  const isSignedIn = clerk.isSignedIn || !!sessionUser;
-  const userId = clerk.userId || sessionUser?.id || null;
-  const sessionClaims:
-    | { name?: string | null; username?: string | null }
-    | undefined =
-    (clerk.sessionClaims as
-      | { name?: string | null; username?: string | null }
-      | undefined) ||
-    (sessionUser
-      ? { name: sessionUser.name, username: sessionUser.email }
-      : undefined);
 
   let appUser: AppUser | null = null;
   if (clerkUser) {
@@ -97,26 +51,16 @@ function ClerkAuthInner({ children }: { children: ReactNode }) {
         : null,
       publicMetadata: clerkUser.publicMetadata,
     };
-  } else if (sessionUser) {
-    appUser = {
-      id: sessionUser.id,
-      firstName: sessionUser.name?.split(" ")[0] ?? null,
-      fullName: sessionUser.name,
-      username: sessionUser.email.split("@")[0] || null,
-      imageUrl: null,
-      primaryEmailAddress: sessionUser.email
-        ? { emailAddress: sessionUser.email }
-        : null,
-      publicMetadata: {},
-    };
   }
 
   const value: AuthState = {
-    isLoaded,
-    isSignedIn,
-    userId,
+    isLoaded: clerk.isLoaded && userLoaded,
+    isSignedIn: clerk.isSignedIn === true,
+    userId: clerk.userId ?? null,
     user: appUser,
-    sessionClaims,
+    sessionClaims: clerk.sessionClaims as
+      | { name?: string | null; username?: string | null }
+      | undefined,
     getToken: clerk.getToken ?? (async () => null),
     signOut: clerk.signOut ?? (async () => {}),
     redirectToSignIn: () => {},
@@ -130,63 +74,9 @@ function ClerkAuthInner({ children }: { children: ReactNode }) {
   );
 }
 
-function NoClerkAuth({ children }: { children: ReactNode }) {
-  const [sessionUser, setSessionUser] = useState<{
-    id: string;
-    name: string | null;
-    email: string;
-  } | null>(null);
-  const [sessionLoaded, setSessionLoaded] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/auth/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.user) {
-          setSessionUser({
-            id: data.user.id,
-            name: data.user.name,
-            email: data.user.email,
-          });
-        }
-        setSessionLoaded(true);
-      })
-      .catch(() => {
-        setSessionLoaded(true);
-      });
-  }, []);
-
-  let appUser: AppUser | null = null;
-  if (sessionUser) {
-    appUser = {
-      id: sessionUser.id,
-      firstName: sessionUser.name?.split(" ")[0] ?? null,
-      fullName: sessionUser.name,
-      username: sessionUser.email.split("@")[0] || null,
-      imageUrl: null,
-      primaryEmailAddress: sessionUser.email
-        ? { emailAddress: sessionUser.email }
-        : null,
-      publicMetadata: {},
-    };
-  }
-
-  const value: AuthState = {
-    isLoaded: sessionLoaded,
-    isSignedIn: !!sessionUser,
-    userId: sessionUser?.id ?? null,
-    user: appUser,
-    sessionClaims: sessionUser
-      ? { name: sessionUser.name, username: sessionUser.email }
-      : undefined,
-    getToken: async () => null,
-    signOut: async () => {},
-    redirectToSignIn: () => {},
-    redirectToSignUp: () => {},
-  };
-
+function ClerkUnavailableAuth({ children }: { children: ReactNode }) {
   return (
-    <ClerkAuthContext.Provider value={value}>
+    <ClerkAuthContext.Provider value={DEFAULT_AUTH}>
       {children}
     </ClerkAuthContext.Provider>
   );
@@ -202,7 +92,7 @@ export function ClerkAuthContextProvider({
   if (clerkAvailable) {
     return <ClerkAuthInner>{children}</ClerkAuthInner>;
   }
-  return <NoClerkAuth>{children}</NoClerkAuth>;
+  return <ClerkUnavailableAuth>{children}</ClerkUnavailableAuth>;
 }
 
 export function useClerkAuthContext() {

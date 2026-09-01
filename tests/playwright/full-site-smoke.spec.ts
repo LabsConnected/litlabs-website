@@ -210,12 +210,9 @@ test.describe("API endpoints — expected status codes", () => {
     expect(status).toBe(404);
   });
 
-  test("/api/auth/session returns expected status", async ({ request }) => {
+  test("removed legacy auth session endpoint is unavailable", async ({ request }) => {
     const resp = await request.get(`${BASE_URL}/api/auth/session`);
-    const status = resp.status();
-    console.log(`/api/auth/session: ${status}`);
-    // Public endpoint — should be 200 (returns null/empty session when unauthenticated)
-    expect(status).toBe(200);
+    expect(resp.status()).toBe(404);
   });
 });
 
@@ -553,7 +550,7 @@ test.describe("Studio page — sign-in prompt or studio UI", () => {
   test.setTimeout(60_000);
 
   test("studio redirects to sign-in when unauthenticated", async ({ page }) => {
-    const response = await page.goto(`${BASE_URL}/studio`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE_URL}/studio`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2000);
 
     // Middleware redirects signed-out users to /sign-in.

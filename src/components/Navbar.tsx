@@ -15,7 +15,6 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useSessionAuth } from "@/hooks/useSessionAuth";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import dynamic from "next/dynamic";
@@ -99,11 +98,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
-  const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
-  const { isLoaded: sessionLoaded, isSignedIn: sessionSignedIn } =
-    useSessionAuth();
-  const authLoaded = clerkLoaded || sessionLoaded;
-  const isSignedIn = clerkSignedIn || sessionSignedIn;
+  const { isLoaded: authLoaded, isSignedIn } = useClerkAuth();
 
   const markAllRead = async () => {
     try {

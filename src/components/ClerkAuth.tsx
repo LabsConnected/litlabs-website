@@ -57,120 +57,19 @@ class ClerkBoundary extends Component<{
   }
 }
 
-function useCustomSession() {
-  const [session, setSession] = useState<{
-    user?: { name?: string | null };
-  } | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    fetch("/api/auth/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        setSession(data);
-        setLoaded(true);
-      })
-      .catch(() => {
-        setSession(null);
-        setLoaded(true);
-      });
-  }, []);
-  return { session, loaded };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Custom auth fallback (when Clerk is not configured)                */
-/* ------------------------------------------------------------------ */
-function CustomAuthFallback({ linkColor }: NavAuthProps) {
-  const { session, loaded } = useCustomSession();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  if (!loaded) {
-    return (
-      <div
-        className="h-10 w-10 rounded-full animate-pulse"
-        style={{
-          backgroundColor: linkColor + "20",
-          border: `1px solid ${linkColor}40`,
-        }}
-      />
-    );
-  }
-
-  if (session?.user) {
-    const name = session.user.name || "Admin";
-    const initial = name.charAt(0).toUpperCase();
-    return (
-      <div className="relative" ref={ref}>
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition-all hover:opacity-90"
-          style={{
-            backgroundColor: linkColor + "10",
-            border: `1px solid ${linkColor}25`,
-            minHeight: 40,
-          }}
-          aria-label="Profile menu"
-          aria-expanded={open}
-        >
-          <div
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black text-white"
-            style={{ background: `linear-gradient(135deg, ${linkColor}, #a855f7)` }}
-          >
-            {initial}
-          </div>
-          <span className="hidden sm:block text-[12px] font-bold truncate max-w-20" style={{ color: linkColor }}>
-            {name}
-          </span>
-          <ChevronDown size={12} className="hidden sm:block" style={{ color: linkColor, opacity: 0.6 }} />
-        </button>
-        {open && (
-          <div
-            className="absolute right-0 top-full mt-2 w-56 rounded-xl border p-1.5 z-50"
-            style={{
-              backgroundColor: "#0b1020f0",
-              borderColor: "#3b4773",
-              backdropFilter: "blur(12px)",
-            }}
-          >
-            <DropdownItem href="/profile" icon={<User size={14} />} label="Account" />
-            <DropdownItem href="/settings" icon={<Settings size={14} />} label="Settings" />
-            <form action="/api/auth/logout" method="POST">
-              <button
-                type="submit"
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-bold transition-colors hover:bg-white/5"
-                style={{ color: "#ef4444" }}
-              >
-                <LogOut size={14} /> Sign out
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
-    );
-  }
-
+function SignedOutFallback({ linkColor }: NavAuthProps) {
   return (
-    <SignInButton mode="redirect" forceRedirectUrl="/dashboard">
-      <button
-        className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-[12px] font-bold cursor-pointer transition-all hover:scale-[1.03] active:scale-[0.98]"
-        style={{
-          background: `linear-gradient(135deg, ${linkColor}22, #a855f722)`,
-          color: linkColor,
-          border: `1px solid ${linkColor}50`,
-        }}
-      >
-        <LogIn size={13} /> Sign In
-      </button>
-    </SignInButton>
+    <Link
+      href="/sign-in"
+      className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-[12px] font-bold cursor-pointer transition-all hover:scale-[1.03] active:scale-[0.98]"
+      style={{
+        background: `linear-gradient(135deg, ${linkColor}22, #a855f722)`,
+        color: linkColor,
+        border: `1px solid ${linkColor}50`,
+      }}
+    >
+      <LogIn size={13} /> Sign In
+    </Link>
   );
 }
 
@@ -404,11 +303,11 @@ function AuthInner({ linkColor }: NavAuthProps) {
 
 export function NavAuth({ linkColor = "#6366f1" }: NavAuthProps) {
   if (!clerkConfigured) {
-    return <CustomAuthFallback linkColor={linkColor} />;
+    return <SignedOutFallback linkColor={linkColor} />;
   }
 
   return (
-    <ClerkBoundary fallback={<CustomAuthFallback linkColor={linkColor} />}>
+    <ClerkBoundary fallback={<SignedOutFallback linkColor={linkColor} />}>
       <AuthInner linkColor={linkColor} />
     </ClerkBoundary>
   );
