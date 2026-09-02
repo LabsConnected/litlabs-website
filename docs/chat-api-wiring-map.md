@@ -55,8 +55,8 @@
 | `src/app/studio/tools/{BuilderTool,FlowTool,PipelineTool,CodeTool,SpaceTool,GalleryTool,CLIBridgeTool,ColorByNumberTool,TerminalTool,AgentTool}.tsx` | various |
 
 ### Hooks & context
-- **Hooks:** `useAgentSubscription`, `useClerkAuth`, `useSelfHeal`, `useSessionAuth`, `useSupabaseAuth`
-- **Context:** `AuthContext`, `ClerkAuthContext`, `WalletContext`, `ThemeContext`, `NavDrawerContext`, `ProfileContext`, `VoiceSessionContext` (studio)
+- **Hooks:** `useAgentSubscription`, `useClerkAuth`, `useSelfHeal`, `useSupabaseAuth`
+- **Context:** `ClerkAuthContext`, `WalletContext`, `ThemeContext`, `NavDrawerContext`, `ProfileContext`, `VoiceSessionContext` (studio)
 - **Studio hooks:** `useBuilderSessions`, `useGeminiLiveVoice`, `useMediaPermissions`
 
 ---

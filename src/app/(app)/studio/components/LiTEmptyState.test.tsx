@@ -1,17 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import LiTEmptyState from "@/app/(app)/studio/components/LiTEmptyState";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom";
+import LiTEmptyState from "./LiTEmptyState";
+import {
+  deriveFirstMissionLaunchpadState,
+  type FirstMissionLaunchpadInput,
+} from "../lib/first-mission-launchpad";
+import {
+  INITIAL_RUNTIME_STATE,
+  type ProjectRuntimeState,
+} from "@/lib/projects/runtime-state";
 
-// Mock LiTTPresence to avoid next/image loading in unit tests.
-// LiTTPresence is the current production visual centerpiece rendered by
-// LiTEmptyState. We verify it renders with the expected props (state,
-// variant, size) rather than testing its internal image loading here.
-vi.mock("@/app/(app)/studio/components/LiTTPresence", () => ({
-  default: ({ state, variant, size }: {
-    state: string;
-    variant: string;
-    size: string;
-  }) => (
+vi.mock("./LiTTPresence", () => ({
+  default: ({ state, variant, size }: { state: string; variant: string; size: string }) => (
     <div
       data-testid="litt-presence"
       aria-label="LiTT Studio operator presence"
@@ -20,115 +21,193 @@ vi.mock("@/app/(app)/studio/components/LiTTPresence", () => ({
       data-size={size}
     />
   ),
-  __esModule: true,
 }));
 
-// Mock StudioActivityTimeline to avoid async fetch in the empty-state tests
-vi.mock("@/app/(app)/studio/components/StudioActivityTimeline", () => ({
-  default: () => null,
-  __esModule: true,
+vi.mock("./RecentConversations", () => ({
+  default: () => <div data-testid="recent-conversations" />,
 }));
 
-describe("LiTEmptyState", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+function runtime(overrides: Partial<ProjectRuntimeState>): ProjectRuntimeState {
+  return {
+    ...INITIAL_RUNTIME_STATE,
+    lastCheckedAt: "2026-08-31T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
-  it("shows project suggestions when hasProject is true with github source", () => {
+const project = {
+  projectId: "project-1",
+  projectName: "First project",
+  sourceType: "blank" as const,
+};
+
+function state(input: FirstMissionLaunchpadInput) {
+  return deriveFirstMissionLaunchpadState(input);
+}
+
+const renderCases = [
+  {
+    name: "no project",
+    expected: "Start blank project",
+    input: { runtime: runtime({ phase: "idle" }), runtimeLoading: false, providerHealth: "available" as const },
+  },
+  {
+    name: "workspace preparing",
+    expected: null,
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "workspace_not_ready",
+        workspaceId: "workspace-1",
+        workspaceStatus: "preparing",
+      }),
+      runtimeLoading: false,
+      providerHealth: "available" as const,
+    },
+  },
+  {
+    name: "workspace failed",
+    expected: "Retry workspace",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "workspace_not_ready",
+        workspaceId: "workspace-1",
+        workspaceStatus: "failed",
+        error: { code: "WORKSPACE_NOT_READY", message: "Clone failed" },
+      }),
+      runtimeLoading: false,
+      providerHealth: "available" as const,
+    },
+  },
+  {
+    name: "provider unavailable",
+    expected: "Configure provider",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "terminal_disconnected",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        readAccess: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "unavailable" as const,
+    },
+  },
+  {
+    name: "terminal disconnected",
+    expected: "Connect terminal",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "terminal_disconnected",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        readAccess: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available" as const,
+    },
+  },
+  {
+    name: "fully ready",
+    expected: "Prepare read-only inspection",
+    input: {
+      runtime: runtime({
+        ...project,
+        phase: "ready",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        terminalConnected: true,
+        executionAvailable: true,
+        readAccess: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available" as const,
+    },
+  },
+];
+
+describe("LiTEmptyState truthful launchpad", () => {
+  for (const testCase of renderCases) {
+    it(`renders exactly the valid primary action for ${testCase.name}`, () => {
+      render(
+        <LiTEmptyState
+          launchpadState={state(testCase.input)}
+          onPrimaryAction={vi.fn()}
+        />,
+      );
+
+      const primaryActions = screen.queryAllByTestId("first-mission-primary-action");
+      expect(primaryActions).toHaveLength(testCase.expected ? 1 : 0);
+      if (testCase.expected) {
+        expect(primaryActions[0]).toHaveTextContent(testCase.expected);
+      } else {
+        expect(screen.getAllByText(/remain unavailable until the workspace reports ready/i).length).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it("does not render unsupported readiness or action claims", () => {
     render(
       <LiTEmptyState
-        hasProject={true}
-        projectId="proj-1"
-        projectName="owner/repo"
-        sourceType="github"
-        githubInstalled={true}
-        onPickAction={vi.fn()}
-        onStartBlankAction={vi.fn()}
-        onConnectRepoAction={vi.fn()}
+        launchpadState={state({
+          runtime: runtime({ phase: "idle" }),
+          runtimeLoading: false,
+          providerHealth: "available",
+        })}
+        onPrimaryAction={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("Suggestions")).toBeDefined();
-    expect(screen.getByText("owner/repo")).toBeDefined();
+    expect(screen.queryByText(/workspace ready|workspace online|agents ready/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /deploy|terminal|typescript|artwork/i })).not.toBeInTheDocument();
   });
 
-  it("shows blank project badge when sourceType is blank", () => {
+  it("dispatches the derived action without submitting a mission", () => {
+    const onPrimaryAction = vi.fn();
+    const launchpadState = state({
+      runtime: runtime({
+        ...project,
+        phase: "ready",
+        workspaceId: "workspace-1",
+        workspaceStatus: "ready",
+        workspaceProvisioned: true,
+        terminalConnected: true,
+        executionAvailable: true,
+      }),
+      runtimeLoading: false,
+      providerHealth: "available",
+    });
+
     render(
       <LiTEmptyState
-        hasProject={true}
-        projectId="blank-1"
-        projectName="My Blank"
-        sourceType="blank"
-        githubInstalled={false}
-        onPickAction={vi.fn()}
-        onStartBlankAction={vi.fn()}
-        onConnectRepoAction={vi.fn()}
+        launchpadState={launchpadState}
+        onPrimaryAction={onPrimaryAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prepare read-only inspection" }));
+
+    expect(onPrimaryAction).toHaveBeenCalledOnce();
+    expect(onPrimaryAction).toHaveBeenCalledWith("prepare_inspection");
+  });
+
+  it("preserves LiTT operator presence", () => {
+    render(
+      <LiTEmptyState
+        launchpadState={state({
+          runtime: runtime({ phase: "idle" }),
+          runtimeLoading: false,
+          providerHealth: "available",
+        })}
+        onPrimaryAction={vi.fn()}
       />,
     );
 
-    expect(screen.getByText(/Blank project ready/)).toBeDefined();
-    expect(screen.getAllByText(/My Blank/).length).toBeGreaterThan(0);
-  });
-
-  it("shows GitHub connect prompt when githubInstalled but no project", () => {
-    render(
-      <LiTEmptyState
-        hasProject={false}
-        projectId={null}
-        projectName={null}
-        sourceType={null}
-        githubInstalled={true}
-        onPickAction={vi.fn()}
-        onStartBlankAction={vi.fn()}
-        onConnectRepoAction={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText(/GitHub connected — select a repository/i)).toBeDefined();
-    expect(screen.getByText("Connect repo")).toBeDefined();
-    expect(screen.getByText("Start blank")).toBeDefined();
-  });
-
-  it("shows no-project state when no GitHub and no project", () => {
-    render(
-      <LiTEmptyState
-        hasProject={false}
-        projectId={null}
-        projectName={null}
-        sourceType={null}
-        githubInstalled={false}
-        onPickAction={vi.fn()}
-        onStartBlankAction={vi.fn()}
-        onConnectRepoAction={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText(/workspace optional|Chat ready/)).toBeDefined();
-    expect(screen.getByText("Start blank")).toBeDefined();
-    expect(screen.getByText("Connect repo")).toBeDefined();
-    expect(screen.getByText("Upload project")).toBeDefined();
-  });
-
-  it("renders LiTTPresence with idle state and empty-state variant", () => {
-    const onPickAction = vi.fn();
-    render(
-      <LiTEmptyState
-        hasProject={false}
-        projectId={null}
-        projectName={null}
-        sourceType={null}
-        githubInstalled={false}
-        onPickAction={onPickAction}
-      />,
-    );
-
-    // LiTTPresence is the production visual centerpiece — verify it renders
-    // with the correct props passed from LiTEmptyState.
-    const presence = screen.getByTestId("litt-presence");
-    expect(presence).toBeDefined();
-    expect(presence.getAttribute("aria-label")).toBe("LiTT Studio operator presence");
-    expect(presence.getAttribute("data-state")).toBe("idle");
-    expect(presence.getAttribute("data-variant")).toBe("empty-state");
-    expect(presence.getAttribute("data-size")).toBe("xl");
+    expect(screen.getByTestId("litt-presence")).toHaveAttribute("data-variant", "empty-state");
   });
 });

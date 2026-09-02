@@ -140,8 +140,6 @@ const adminSchema = z.object({
   ADMIN_CLERK_ID: z.string().optional(),
   ADMIN_CLERK_IDS: z.string().optional(),
   ADMIN_EMAIL: z.string().optional(),
-  ADMIN_NAME: z.string().optional(),
-  ADMIN_PASSWORD_HASH: z.string().optional(),
   ADMIN_USER_ID: z.string().optional(),
   ADMIN_USER_IDS: z.string().optional(),
   INTERNAL_API_KEY: z.string().optional(),

@@ -89,7 +89,7 @@ export const metadata: Metadata = {
 // don't crash with "can only be used within ClerkProvider". Previously this
 // was conditional on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY being present at build
 // time — but if the key wasn't baked into the bundle during next build,
-// the NoClerkAuth fallback was permanent, causing the live sign-in page to
+// the signed-out compatibility fallback was permanent, causing the live sign-in page to
 // crash with "useSession can only be used within ClerkProvider".
 //
 // The Dockerfile now declares ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (and

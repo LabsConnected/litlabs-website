@@ -61,7 +61,7 @@ pnpm dev:all          # web + terminal + daemon concurrently
 
 `src/app/layout.tsx` (216 lines) — wraps everything in this provider stack:
 ```
-ClerkProvider (if key present) → ClerkAuthContextProvider
+ClerkProvider → ClerkAuthContextProvider
   → ThemeProvider → ProfileProvider → WalletProvider → VisualProvider
     → MediaHubProvider → YouTubePlayerProvider → LayoutShell
 ```
@@ -70,8 +70,7 @@ ClerkProvider (if key present) → ClerkAuthContextProvider
 - Manifest at `/manifest.json`, icons at `/icon.png`, `/favicon.ico`, `/apple-icon.png`
 
 ### Context Providers (`src/context/`)
-- `AuthContext.tsx` — client-side session state
-- `ClerkAuthContext.tsx` — Clerk availability flag
+- `ClerkAuthContext.tsx` — Clerk-backed compatibility state for app hooks
 - `ProfileContext.tsx` — user profile data
 - `ThemeContext.tsx` — theme/wallpaper
 - `VisualContext.tsx` — visual pack settings
@@ -83,8 +82,7 @@ ClerkProvider (if key present) → ClerkAuthContextProvider
 - `NavAuth` (`src/components/ClerkAuth.tsx`) calls `useUser()` in try-catch (intentional)
 - API auth via `src/lib/auth.ts` → `auth()` returns `{ userId, clerkId }`
 - Bearer token fallback for CLI/bridge clients
-- Custom JWT via `src/lib/jwt.ts` (`signToken`, `verifyToken`) using jose
-- API keys via `src/lib/api-keys.ts` (`validateApiKey`)
+- API keys via `src/lib/api-keys.ts` (`validateApiKey`, `ApiKeyAuthResult`)
 
 ---
 
@@ -426,7 +424,6 @@ All under `src/app/api/`. Grouped by domain:
 
 **Auth & Security:**
 - `auth.ts` (104) — `auth(req?)` → `{ userId, clerkId }`, `AuthResult`. Clerk + Bearer fallback
-- `jwt.ts` (27) — `signToken()`, `verifyToken()` (jose)
 - `api-keys.ts` (99) — `validateApiKey()`, `ApiKeyAuthResult`
 - `authz.ts`, `roles.ts`, `tokens.ts`, `fetch-auth.ts`, `require-database-user.ts`
 

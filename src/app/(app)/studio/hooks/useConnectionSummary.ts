@@ -95,7 +95,10 @@ export function useConnectionSummary() {
   );
 
   // Canonical project runtime — the ONE source of truth for project identity
-  const { state: runtimeState } = useProjectRuntime();
+  // and readiness. Return the complete result so consumers do not derive
+  // readiness from project existence or issue a second runtime request.
+  const runtime = useProjectRuntime();
+  const { state: runtimeState } = runtime;
 
   // Client-side terminal store is the source of truth for PTY status
   const terminalStatus = useTerminalStore((s) => s.status);
@@ -288,5 +291,5 @@ export function useConnectionSummary() {
     return () => window.clearInterval(interval);
   }, [refresh]);
 
-  return { capabilities, refresh, loading };
+  return { capabilities, refresh, loading, runtime };
 }

@@ -31,6 +31,10 @@ import {
   Check,
 } from "lucide-react";
 import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
+import {
+  runtimePhaseLabel,
+  type ProjectRuntimeState,
+} from "@/lib/projects/runtime-state";
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#72f238", label: "Available" },
@@ -64,7 +68,9 @@ export default function CommandStudioHeader({
   onRenameChatAction,
   onExportChatAction,
   hasConversation,
-  projectReady,
+  runtime,
+  runtimeLoading,
+  mutationActionsAllowed = false,
   capabilities,
   busy = false,
   executionMode = "auto",
@@ -88,7 +94,9 @@ export default function CommandStudioHeader({
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
   hasConversation?: boolean;
-  projectReady?: boolean;
+  runtime: ProjectRuntimeState;
+  runtimeLoading: boolean;
+  mutationActionsAllowed?: boolean;
   capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
   /** True while an agent/conversation turn is in flight. */
   busy?: boolean;
@@ -153,40 +161,33 @@ export default function CommandStudioHeader({
     };
   }, [statusOpen, overflowOpen, modeOpen, updateRect]);
 
-  const repoConnected = capabilities.repository === "connected";
-  const ptyAvailable = capabilities.terminalExecution === "available";
-  const ptyIdle = capabilities.terminalExecution === "idle";
   const writesAllowed = capabilities.writeAccess;
-  const modelHealth = providerHealth[selectedModel.provider] ?? "available";
+  const modelHealth = providerHealth[selectedModel.provider]
+    ?? providerHealth[selectedModel.apiProvider ?? ""];
   const hasAi = modelHealth === "available" || modelHealth === "degraded";
   const providerCount = hasAi ? 1 : 0;
 
-  // Truthful aggregate status — calculated from actual capabilities AND
-  // the real workspace readiness state. "Workspace available" requires
-  // the selected project's workspace to be verified ready (projectReady),
-  // not merely that repo/terminal capabilities exist.
-  // "idle" (server online, no session) counts as having a project —
-  // the terminal is ready to connect on demand.
-  const hasProject = repoConnected || ptyAvailable || ptyIdle;
-  const workspaceReady = Boolean(projectReady);
-  const statusColor = workspaceReady && hasAi
+  const runtimeReady = runtime.phase === "ready" && runtime.executionAvailable;
+  const statusLabel = runtimeLoading || runtime.phase === "resolving"
+    ? "Runtime status checking"
+    : runtime.phase === "idle" || !runtime.projectId
+      ? "No project selected"
+      : runtime.phase !== "ready"
+        ? runtimePhaseLabel(runtime.phase)
+        : modelHealth === undefined
+          ? "Runtime status checking"
+          : !hasAi
+            ? "AI provider unavailable"
+            : modelHealth === "available"
+              ? "Runtime verified"
+              : "Runtime verified · provider degraded";
+  const statusColor = statusLabel === "Runtime verified"
     ? "var(--litt-primary)"
-    : workspaceReady
+    : runtimeLoading || modelHealth === undefined
       ? "#e3b341"
-      : hasProject && hasAi
-        ? "#e3b341"
-        : hasAi
-          ? "var(--litt-primary)"
-          : "var(--text-muted)";
-  const statusLabel = workspaceReady && hasAi
-    ? "Workspace available"
-    : workspaceReady
-      ? "AI setup required"
-      : hasProject && hasAi
-        ? "Preparing workspace…"
-        : hasAi
-          ? "Chat ready"
-          : "Chat unavailable";
+      : runtime.phase === "error" || runtime.phase === "unauthenticated" || modelHealth === "unavailable"
+        ? "#ef4444"
+        : "#e3b341";
 
   return (
     <header
@@ -334,26 +335,24 @@ export default function CommandStudioHeader({
         ) : null}
       </Link>
 
-      {/* Deploy button — primary gradient action, disabled when no project */}
-      <button
-        type="button"
-        disabled={!projectReady}
-        onClick={onPreviewAction}
-        className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-        style={{
-          background: projectReady
-            ? "linear-gradient(135deg, var(--spark-primary), var(--violet-accent))"
-            : "var(--studio-surface)",
-          color: projectReady ? "#fff" : "var(--text-muted)",
-          border: "1px solid rgba(155,77,255,0.4)",
-          boxShadow: projectReady ? "var(--studio-glow-purple)" : "none",
-        }}
-        title={projectReady ? "Preview / Deploy project" : "No project to deploy"}
-        aria-label="Deploy"
-      >
-        <Rocket size={11} className="pointer-events-none" />
-        <span className="pointer-events-none">Deploy</span>
-      </button>
+      {mutationActionsAllowed && runtimeReady && (
+        <button
+          type="button"
+          onClick={onPreviewAction}
+          className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-black transition-all active:scale-95"
+          style={{
+            background: "linear-gradient(135deg, var(--spark-primary), var(--violet-accent))",
+            color: "#fff",
+            border: "1px solid rgba(155,77,255,0.4)",
+            boxShadow: "var(--studio-glow-purple)",
+          }}
+          title="Preview / Deploy project"
+          aria-label="Deploy"
+        >
+          <Rocket size={11} className="pointer-events-none" />
+          <span className="pointer-events-none">Deploy</span>
+        </button>
+      )}
 
       <button
         type="button"
@@ -423,7 +422,7 @@ export default function CommandStudioHeader({
             onExportChatAction={onExportChatAction}
             onOpenTerminalAction={onOpenTerminalAction}
             hasConversation={Boolean(hasConversation)}
-            previewDisabled={!projectReady}
+            previewDisabled={!runtimeReady}
             busy={busy}
             settingsHref={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
           />,

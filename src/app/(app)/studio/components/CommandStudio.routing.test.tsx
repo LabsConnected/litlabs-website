@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
 // ── Mocks ────────────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ vi.mock("@/context/MusicPlayerContext", () => ({
 
 vi.mock("./PersistentMusicPlayer", () => ({
   default: () => <div data-testid="music-player" />,
+}));
+
+vi.mock("./context/AssetsPanel", () => ({
+  default: () => <div data-testid="assets-panel-mock">Assets panel mock</div>,
 }));
 
 vi.mock("@/context/ProfileContext", () => ({
@@ -309,20 +314,29 @@ if (!Element.prototype.scrollTo) {
 
 import CommandStudio from "./CommandStudio";
 
+async function renderCommandStudio() {
+  const user = userEvent.setup();
+  const view = render(<CommandStudio />);
+
+  await screen.findAllByTestId("assets-panel-mock");
+
+  return { user, ...view };
+}
+
 describe("CommandStudio — mounted Work-surface routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("initializes with preview surface when ?tool=chat", () => {
-    render(<CommandStudio />);
+  it("initializes with preview surface when ?tool=chat", async () => {
+    await renderCommandStudio();
     // Preview tab is active by default (preview is the primary surface)
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     expect(previewBtn.className).toContain("glass-active");
   });
 
   it("routes to builder surface when ?tool=build via studio:switch-tool event", async () => {
-    render(<CommandStudio />);
+    await renderCommandStudio();
     // Preview tab starts active (default surface)
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     expect(previewBtn.className).toContain("glass-active");
@@ -340,7 +354,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   it("returns to conversation when chat is routed after Build", async () => {
-    render(<CommandStudio />);
+    await renderCommandStudio();
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     // Route to build
     act(() => {
@@ -357,7 +371,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   it("chat → build routes to builder, then build → chat returns to conversation", async () => {
-    render(<CommandStudio />);
+    await renderCommandStudio();
     const previewBtn = screen.getByTestId("workspace-tab-preview");
     // Start at preview (default surface)
     expect(previewBtn.className).toContain("glass-active");
@@ -376,100 +390,88 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   describe("canonical workspace tabs", () => {
-    it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", () => {
-      render(<CommandStudio />);
+    it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", async () => {
+      await renderCommandStudio();
       expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
 
-    it("Preview tab is active by default (preview is primary surface)", () => {
-      render(<CommandStudio />);
+    it("Preview tab is active by default (preview is primary surface)", async () => {
+      await renderCommandStudio();
       const previewBtn = screen.getByTestId("workspace-tab-preview");
       expect(previewBtn.className).toContain("glass-active");
     });
 
     it("clicking Canvas switches to canvas stage", async () => {
-      render(<CommandStudio />);
+      const { user } = await renderCommandStudio();
       const canvasBtn = screen.getByTestId("workspace-tab-canvas");
-      act(() => {
-        fireEvent.click(canvasBtn);
-      });
+      await user.click(canvasBtn);
       await waitFor(() => {
         expect(canvasBtn.className).toContain("glass-active");
       });
     });
 
     it("clicking Code switches to code stage", async () => {
-      render(<CommandStudio />);
+      const { user } = await renderCommandStudio();
       const codeBtn = screen.getByTestId("workspace-tab-code");
-      act(() => {
-        fireEvent.click(codeBtn);
-      });
+      await user.click(codeBtn);
       await waitFor(() => {
         expect(codeBtn.className).toContain("glass-active");
       });
     });
 
     it("clicking Preview switches to preview stage", async () => {
-      render(<CommandStudio />);
+      const { user } = await renderCommandStudio();
       const previewBtn = screen.getByTestId("workspace-tab-preview");
-      act(() => {
-        fireEvent.click(previewBtn);
-      });
+      await user.click(previewBtn);
       await waitFor(() => {
         expect(previewBtn.className).toContain("glass-active");
       });
     });
 
     it("clicking Plan returns to plan stage from another stage", async () => {
-      render(<CommandStudio />);
+      const { user } = await renderCommandStudio();
       // Go to Code first
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-code"));
-      });
+      await user.click(screen.getByTestId("workspace-tab-code"));
       // Then back to Plan
       const planBtn = screen.getByTestId("workspace-tab-plan");
-      act(() => {
-        fireEvent.click(planBtn);
-      });
+      await user.click(planBtn);
       await waitFor(() => {
         expect(planBtn.className).toContain("glass-active");
       });
     });
 
-    it("Files button toggles Context Drawer", () => {
-      render(<CommandStudio />);
+    it("Files button toggles Context Drawer", async () => {
+      const { user } = await renderCommandStudio();
       const filesBtn = screen.getByTestId("workspace-tab-files");
       expect(filesBtn).toBeTruthy();
       // Context drawer stays mounted (state-preserving) but closed by
       // default — `data-open` reflects the real open state.
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
       // Toggle it on
-      act(() => {
-        fireEvent.click(filesBtn);
-      });
+      await user.click(filesBtn);
       expect(filesBtn.className).toContain("glass-active");
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
     });
   });
 
   describe("Ultra Vision shell topology (Phase C2)", () => {
-    it("renders LiTT panel on the left side", () => {
-      render(<CommandStudio />);
+    it("renders LiTT panel on the left side", async () => {
+      await renderCommandStudio();
       const littPanel = screen.getByTestId("litt-panel");
       expect(littPanel).toBeTruthy();
     });
 
-    it("renders only one LiTT panel", () => {
-      render(<CommandStudio />);
+    it("renders only one LiTT panel", async () => {
+      await renderCommandStudio();
       const littPanels = screen.getAllByTestId("litt-panel");
       expect(littPanels.length).toBe(1);
     });
 
-    it("renders only one CommandComposer", () => {
-      render(<CommandStudio />);
+    it("renders only one CommandComposer", async () => {
+      await renderCommandStudio();
       // CommandComposer is inside the LiTT chat content
       // There should be at most one composer input
       const composers = screen.queryAllByTestId("model-picker-mock");
@@ -477,18 +479,16 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(composers.length).toBeLessThanOrEqual(1);
     });
 
-    it("renders Operator status bar at the bottom", () => {
-      render(<CommandStudio />);
+    it("renders Operator status bar at the bottom", async () => {
+      await renderCommandStudio();
       expect(screen.getByTestId("studio-operator-bar")).toBeTruthy();
     });
 
-    it("LiTT collapse button works", () => {
-      render(<CommandStudio />);
+    it("LiTT collapse button works", async () => {
+      const { user } = await renderCommandStudio();
       const collapseBtn = screen.getByTestId("litt-panel-collapse");
       expect(collapseBtn).toBeTruthy();
-      act(() => {
-        fireEvent.click(collapseBtn);
-      });
+      await user.click(collapseBtn);
       // After collapse, the ambient HUD chrome should be shown...
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
       expect(screen.getByTestId("litt-panel-collapsed-chrome")).toHaveStyle({ display: "flex" });
@@ -499,34 +499,26 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-panel")).toBeTruthy();
     });
 
-    it("collapsed LiTT can be expanded again and preserves the active tab", () => {
-      render(<CommandStudio />);
+    it("collapsed LiTT can be expanded again and preserves the active tab", async () => {
+      const { user } = await renderCommandStudio();
       // Switch to Live before collapsing
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-tab-live"));
-      });
+      await user.click(screen.getByTestId("litt-tab-live"));
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
       // Collapse
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
-      });
+      await user.click(screen.getByTestId("litt-panel-collapse"));
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
       // Expand
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-hud-expand"));
-      });
+      await user.click(screen.getByTestId("litt-hud-expand"));
       expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
       // Active tab (Live) survived the round trip because the content
       // was never unmounted.
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
     });
 
-    it("collapsed state does not remove workspace tabs", () => {
-      render(<CommandStudio />);
+    it("collapsed state does not remove workspace tabs", async () => {
+      const { user } = await renderCommandStudio();
       // Collapse LiTT
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
-      });
+      await user.click(screen.getByTestId("litt-panel-collapse"));
       // Workspace tabs should still be present
       expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
@@ -534,65 +526,53 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
 
-    it("Context drawer opens and closes", () => {
-      render(<CommandStudio />);
+    it("Context drawer opens and closes", async () => {
+      const { user } = await renderCommandStudio();
       // Closed by default — width 0, not interactable.
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
       // Open via Files toggle
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       // Close
-      act(() => {
-        fireEvent.click(screen.getByTestId("context-drawer-close"));
-      });
+      await user.click(screen.getByTestId("context-drawer-close"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
     });
 
-    it("old left Files permanent panel is gone (no studio-files-panel)", () => {
-      render(<CommandStudio />);
+    it("old left Files permanent panel is gone (no studio-files-panel)", async () => {
+      await renderCommandStudio();
       // The old files panel testid should not exist
       expect(screen.queryByTestId("studio-files-panel")).toBeNull();
     });
 
-    it("no Game placeholder is rendered", () => {
-      render(<CommandStudio />);
+    it("no Game placeholder is rendered", async () => {
+      await renderCommandStudio();
       expect(screen.queryByText(/coming soon/i)).toBeNull();
       expect(screen.queryByTestId("game-creator")).toBeNull();
     });
 
-    it("Files button opens the drawer on the Files tab", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+    it("Files button opens the drawer on the Files tab", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "false");
     });
 
-    it("Inspector header action opens the drawer on the Inspector tab", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
-      });
+    it("Inspector header action opens the drawer on the Inspector tab", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByLabelText("Open workspace inspector"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "false");
     });
 
-    it("switching tabs inside the drawer updates parent state, not internal state", () => {
-      render(<CommandStudio />);
+    it("switching tabs inside the drawer updates parent state, not internal state", async () => {
+      const { user } = await renderCommandStudio();
       // Open on Files
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-tab-files")).toHaveAttribute("aria-pressed", "true");
       // Click Inspector tab inside the drawer
-      act(() => {
-        fireEvent.click(screen.getByTestId("context-tab-inspector"));
-      });
+      await user.click(screen.getByTestId("context-tab-inspector"));
       expect(screen.getByTestId("context-tab-inspector")).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByTestId("context-inspector-panel")).toHaveAttribute("data-active", "true");
       // The Files workspace-tab button must no longer show as active —
@@ -602,79 +582,63 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(filesBtn.className).not.toContain("glass-active");
     });
 
-    it("Files workspace-tab button is inactive while Inspector is showing", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
-      });
+    it("Files workspace-tab button is inactive while Inspector is showing", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByLabelText("Open workspace inspector"));
       const filesBtn = screen.getByTestId("workspace-tab-files");
       expect(filesBtn.className).not.toContain("glass-active");
       expect(filesBtn).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("clicking Files while Inspector is open switches to Files without closing the drawer", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByLabelText("Open workspace inspector"));
-      });
+    it("clicking Files while Inspector is open switches to Files without closing the drawer", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByLabelText("Open workspace inspector"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("context-files-panel")).toHaveAttribute("data-active", "true");
     });
 
-    it("clicking Files again while Files is active closes the drawer", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+    it("clicking Files again while Files is active closes the drawer", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "true");
-      act(() => {
-        fireEvent.click(screen.getByTestId("workspace-tab-files"));
-      });
+      await user.click(screen.getByTestId("workspace-tab-files"));
       expect(screen.getByTestId("context-drawer")).toHaveAttribute("data-open", "false");
     });
 
-    it("mic HUD is not shown ON when the microphone is inactive", () => {
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
-      });
+    it("mic HUD is not shown ON when the microphone is inactive", async () => {
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("litt-panel-collapse"));
       // No live session in this test, so the mic indicator should not
       // render at all (voiceConnected is false), and definitely never
       // report mic-on merely because a session object exists.
       expect(screen.queryByTestId("litt-hud-mic-indicator")).toBeNull();
     });
 
-    it("desktop tier renders the LiTT rail, not the mobile sheet", () => {
-      render(<CommandStudio />);
+    it("desktop tier renders the LiTT rail, not the mobile sheet", async () => {
+      await renderCommandStudio();
       expect(screen.getByTestId("litt-panel")).toBeTruthy();
       expect(screen.queryByTestId("litt-mobile-trigger")).toBeNull();
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
     });
 
-    it("mobile tier does not render the desktop LiTT rail or a 64px HUD", () => {
+    it("mobile tier does not render the desktop LiTT rail or a 64px HUD", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      render(<CommandStudio />);
+      await renderCommandStudio();
       expect(screen.queryByTestId("litt-panel")).toBeNull();
       expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
       // Mobile access control must be present instead.
       expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
     });
 
-    it("mobile trigger opens a real LiTT sheet with chat and composer", () => {
+    it("mobile trigger opens a real LiTT sheet with chat and composer", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-mobile-trigger"));
-      });
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("litt-mobile-trigger"));
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
       // Closing returns to workspace-only mobile state.
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-mobile-sheet-close"));
-      });
+      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
       expect(screen.queryByTestId("litt-mobile-sheet")).toBeNull();
     });
 
@@ -684,7 +648,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // The old laptop-only auto-collapse was removed because it hid the
       // chat behind a 64px strip for first-time users.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-      render(<CommandStudio />);
+      await renderCommandStudio();
       await waitFor(() => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
@@ -693,7 +657,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("laptop tier does not override an explicit stored preference", async () => {
       localStorage.setItem("littree:studio:litt-collapsed", "false");
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-      render(<CommandStudio />);
+      await renderCommandStudio();
       await waitFor(() => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
@@ -701,7 +665,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
 
     it("desktop tier (>=1440px) defaults to expanded LiTT when no preference is stored", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
-      render(<CommandStudio />);
+      await renderCommandStudio();
       await waitFor(() => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
@@ -714,8 +678,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     // visible (pressed) state must truthfully reflect whether Live is
     // actually on screen — not merely whether the LiTT rail is expanded.
 
-    it("Activity button is present and is an open action (not a collapse toggle)", () => {
-      render(<CommandStudio />);
+    it("Activity button is present and is an open action (not a collapse toggle)", async () => {
+      await renderCommandStudio();
       const activityBtn = screen.getByTestId("activity-toggle");
       expect(activityBtn).toBeTruthy();
       // Default desktop state: LiTT expanded on Chat → Live NOT visible.
@@ -723,37 +687,31 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(activityBtn).toHaveAttribute("aria-label", "Open Activity");
     });
 
-    it("Activity opens Live on desktop when LiTT is expanded on Chat", () => {
-      render(<CommandStudio />);
+    it("Activity opens Live on desktop when LiTT is expanded on Chat", async () => {
+      const { user } = await renderCommandStudio();
       // Default: Chat is active, Live is not.
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
-      act(() => {
-        fireEvent.click(screen.getByTestId("activity-toggle"));
-      });
+      await user.click(screen.getByTestId("activity-toggle"));
       // Activity must switch the LiTT tab to Live.
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
       // And the Activity button must now truthfully reflect Live visibility.
       expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
     });
 
-    it("Activity expands a collapsed LiTT and activates Live (desktop)", () => {
-      render(<CommandStudio />);
+    it("Activity expands a collapsed LiTT and activates Live (desktop)", async () => {
+      const { user } = await renderCommandStudio();
       // Collapse LiTT first.
-      act(() => {
-        fireEvent.click(screen.getByTestId("litt-panel-collapse"));
-      });
+      await user.click(screen.getByTestId("litt-panel-collapse"));
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
       // Activity must expand the rail AND switch to Live.
-      act(() => {
-        fireEvent.click(screen.getByTestId("activity-toggle"));
-      });
+      await user.click(screen.getByTestId("activity-toggle"));
       expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
     });
 
-    it("Activity visible state is false while LiTT is expanded on Chat (not Live)", () => {
-      render(<CommandStudio />);
+    it("Activity visible state is false while LiTT is expanded on Chat (not Live)", async () => {
+      await renderCommandStudio();
       // LiTT is expanded (desktop default), but on Chat.
       expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
@@ -762,15 +720,13 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "false");
     });
 
-    it("Activity opens the mobile LiTT sheet and selects Live (mobile)", () => {
+    it("Activity opens the mobile LiTT sheet and selects Live (mobile)", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      render(<CommandStudio />);
+      const { user } = await renderCommandStudio();
       // Mobile: no desktop rail.
       expect(screen.queryByTestId("litt-panel")).toBeNull();
       // Activity must open the mobile sheet, NOT mutate littCollapsed.
-      act(() => {
-        fireEvent.click(screen.getByTestId("activity-toggle"));
-      });
+      await user.click(screen.getByTestId("activity-toggle"));
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
       // And Live must be the active tab inside the sheet.
       expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "true");
@@ -779,20 +735,18 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("activity-toggle")).toHaveAttribute("data-active", "true");
     });
 
-    it("Activity does not silently mutate littCollapsed on mobile", () => {
+    it("Activity does not silently mutate littCollapsed on mobile", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       // Store the desktop collapse preference before Activity.
       localStorage.setItem("littree:studio:litt-collapsed", "false");
-      render(<CommandStudio />);
-      act(() => {
-        fireEvent.click(screen.getByTestId("activity-toggle"));
-      });
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("activity-toggle"));
       // The desktop-specific collapse preference must be untouched.
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
     });
 
-    it("exactly one LiTTLiveActivity instance is rendered", () => {
-      render(<CommandStudio />);
+    it("exactly one LiTTLiveActivity instance is rendered", async () => {
+      await renderCommandStudio();
       // The Live activity component is always mounted in the LiTT panel
       // (preserved across collapse); there must be exactly one instance.
       // The Work tab in the ContextDrawer shows a lightweight summary
@@ -801,10 +755,10 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(liveActivities.length).toBe(1);
     });
 
-    it("no obsolete side-panel localStorage keys are written on mount", () => {
+    it("no obsolete side-panel localStorage keys are written on mount", async () => {
       localStorage.removeItem("littree:studio:side-panel");
       localStorage.removeItem("littree:studio:activity-rail-open");
-      render(<CommandStudio />);
+      await renderCommandStudio();
       expect(localStorage.getItem("littree:studio:side-panel")).toBeNull();
       expect(localStorage.getItem("littree:studio:activity-rail-open")).toBeNull();
     });

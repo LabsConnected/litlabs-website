@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { INITIAL_RUNTIME_STATE, type ProjectRuntimeState } from "@/lib/projects/runtime-state";
 
 // Mock wallet
 vi.mock("@/context/WalletContext", () => ({
@@ -34,6 +35,26 @@ const mockCapabilities = {
   voiceHealth: { configured: false, tokenService: "unknown" as const, available: false },
 };
 
+const noProjectRuntime: ProjectRuntimeState = {
+  ...INITIAL_RUNTIME_STATE,
+  lastCheckedAt: "2026-08-31T00:00:00.000Z",
+};
+
+const readyRuntime: ProjectRuntimeState = {
+  ...noProjectRuntime,
+  phase: "ready",
+  executionAvailable: true,
+  workspaceProvisioned: true,
+  terminalConnected: true,
+  projectId: "project-1",
+  projectName: "Project one",
+  workspaceId: "workspace-1",
+  workspaceStatus: "ready",
+  readAccess: true,
+};
+
+let mockProviderHealth: Record<string, string> = {};
+
 vi.mock("../hooks/useConnectionSummary", () => ({
   useConnectionSummary: () => ({ capabilities: mockCapabilities, loading: false }),
 }));
@@ -45,7 +66,7 @@ vi.mock("../stores/useStudioModelStore", () => ({
       selectedModel: { id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" },
       selectModel: vi.fn(),
       fallbackNotice: null,
-      providerHealth: {},
+      providerHealth: mockProviderHealth,
     }),
   MODELS: [{ id: "auto", label: "Auto Best", provider: "auto", category: "auto", model: "", apiProvider: "" }],
 }));
@@ -68,55 +89,52 @@ vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => 
 
 import CommandStudioHeader from "./CommandStudioHeader";
 
-describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
+describe("CommandStudioHeader — truthful status", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProviderHealth = {};
   });
 
-  it("does not say 'Workspace ready' when only AI is connected (no project)", () => {
+  it("reports checking while runtime is loading", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         onOpenActivityAction={vi.fn()}
-        projectReady={false}
+        runtime={noProjectRuntime}
+        runtimeLoading={true}
         capabilities={mockCapabilities}
       />,
     );
-    // The status label is now a compact dot with title tooltip — no text.
-    // "Workspace ready" should never appear without a project.
+    expect(screen.getByLabelText("Runtime status checking")).toBeTruthy();
     expect(screen.queryByText("Workspace ready")).toBeNull();
-    // The status dot is rendered with an aria-label for accessibility.
-    const statusDot = screen.getByLabelText("Chat ready");
-    expect(statusDot).toBeTruthy();
   });
 
-  it("Deploy button is disabled when no project is ready", () => {
+  it("does not expose Deploy before read-only inspection proof", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         onOpenActivityAction={vi.fn()}
-        projectReady={false}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
         capabilities={mockCapabilities}
       />,
     );
-    // Deploy is now a visible button in the header (not in overflow menu)
-    const deployBtn = screen.getByRole("button", { name: /deploy/i });
-    expect(deployBtn).toBeTruthy();
-    expect(deployBtn.hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: /deploy/i })).toBeNull();
   });
 
-  it("Preview button calls onPreview (lives in overflow menu)", () => {
+  it("Preview button calls onPreview when runtime is verified", () => {
+    mockProviderHealth = { auto: "available" };
     const onPreview = vi.fn();
     const onOpenActivity = vi.fn();
     render(
       <CommandStudioHeader
         onPreviewAction={onPreview}
         onOpenActivityAction={onOpenActivity}
-        projectReady={true}
+        runtime={readyRuntime}
+        runtimeLoading={false}
         capabilities={mockCapabilities}
       />,
     );
-    // Preview now lives behind the overflow menu — open it first.
     fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const previewBtn = screen.getByRole("button", { name: /preview/i });
     fireEvent.click(previewBtn);
@@ -130,7 +148,8 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         onOpenActivityAction={onOpenActivity}
-        projectReady={false}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
         capabilities={mockCapabilities}
       />,
     );
@@ -146,12 +165,11 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
         onPreviewAction={vi.fn()}
         onOpenActivityAction={vi.fn()}
         onOpenTerminalAction={onOpenTerminal}
-        projectReady={false}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
         capabilities={mockCapabilities}
       />,
     );
-    // Terminal access is now in the overflow menu (⋯) — the workspace
-    // status popover was removed to simplify the top bar.
     fireEvent.click(screen.getByRole("button", { name: /more actions/i }));
     const terminalBtn = screen.getByRole("button", { name: /terminal/i });
     fireEvent.click(terminalBtn);
@@ -163,11 +181,63 @@ describe("CommandStudioHeader — Phase 1.1 truthful status", () => {
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
         onOpenActivityAction={vi.fn()}
-        projectReady={false}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
         capabilities={mockCapabilities}
       />,
     );
-    // No project selector should be present — it was removed in Phase 1.1
     expect(container.querySelector("[data-testid='project-selector']")).toBeNull();
+  });
+
+  it("reports canonical partial runtime state without implying readiness", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        runtime={{
+          ...readyRuntime,
+          phase: "workspace_not_ready",
+          executionAvailable: false,
+          terminalConnected: false,
+          workspaceStatus: "preparing",
+        }}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    expect(screen.getByLabelText("Workspace not ready")).toBeTruthy();
+    expect(screen.queryByLabelText("Runtime verified")).toBeNull();
+  });
+
+  it("uses the strongest status only for canonical ready runtime and verified provider", () => {
+    mockProviderHealth = { auto: "available" };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    expect(screen.getByLabelText("Runtime verified")).toBeTruthy();
+  });
+
+  it("does not report ready when the provider is unavailable", () => {
+    mockProviderHealth = { auto: "unavailable" };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    expect(screen.getByLabelText("AI provider unavailable")).toBeTruthy();
+    expect(screen.queryByLabelText("Runtime verified")).toBeNull();
   });
 });

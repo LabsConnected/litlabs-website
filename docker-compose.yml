@@ -34,9 +34,8 @@ services:
       # Payments
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-      # Admin
+      # Notifications and integration state signing
       - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
       - AUTH_SECRET=${AUTH_SECRET}
       # Misc
       - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}

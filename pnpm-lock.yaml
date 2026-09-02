@@ -88,9 +88,6 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
-      bcryptjs:
-        specifier: ^3.0.3
-        version: 3.0.3
       braintrust:
         specifier: ^3.27.0
         version: 3.27.0(@aws-sdk/credential-provider-web-identity@3.972.63)(zod@4.4.3)
@@ -112,9 +109,6 @@ importers:
       immer:
         specifier: ^11.1.15
         version: 11.1.15
-      jose:
-        specifier: ^6.2.3
-        version: 6.2.3
       livekit-client:
         specifier: ^2.21.0
         version: 2.21.0(@types/dom-mediacapture-record@1.0.22)
@@ -213,6 +207,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.1.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@testing-library/user-event':
+        specifier: ^14.6.6
+        version: 14.6.6(@testing-library/dom@10.4.1)
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
@@ -3561,6 +3558,12 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
+  '@testing-library/user-event@14.6.6':
+    resolution: {integrity: sha512-Jbs9FpkkIDw8FgSc6kOVsOv8JuuqGAL7J4X1oot77JxAoDlkNn2GRkd0aYRVuQ+pVQAiHWVkE4rX/dkF5fBiCw==}
+    engines: {node: '>=12', npm: '>=6'}
+    peerDependencies:
+      '@testing-library/dom': '>=7.21.4'
+
   '@tsconfig/node10@1.0.12':
     resolution: {integrity: sha512-UCYBaeFvM11aU2y3YPZ//O5Rhj+xKyzy7mvcIoAjASbigy8mHMryP5cK7dgjlz2hWxh1g5pLw084E0a/wlUSFQ==}
 
@@ -4339,10 +4342,6 @@ packages:
   baseline-browser-mapping@2.11.8:
     resolution: {integrity: sha512-zAgkquC2WYF0PIc6XbNYkA2uuxxFavzgmX61R+dHDUa558V8Ejf8ozTZFR6QzM24RWu4kBcRkhJ5kpz77j9fnQ==}
     engines: {node: '>=6.0.0'}
-    hasBin: true
-
-  bcryptjs@3.0.3:
-    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
     hasBin: true
 
   before-after-hook@4.0.0:
@@ -12090,6 +12089,10 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.1
 
+  '@testing-library/user-event@14.6.6(@testing-library/dom@10.4.1)':
+    dependencies:
+      '@testing-library/dom': 10.4.1
+
   '@tsconfig/node10@1.0.12': {}
 
   '@tsconfig/node12@1.0.11': {}
@@ -12956,8 +12959,6 @@ snapshots:
   baseline-browser-mapping@2.11.13: {}
 
   baseline-browser-mapping@2.11.8: {}
-
-  bcryptjs@3.0.3: {}
 
   before-after-hook@4.0.0: {}
 

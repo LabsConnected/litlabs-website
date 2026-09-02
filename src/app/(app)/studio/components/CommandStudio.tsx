@@ -24,6 +24,7 @@ import { useConversationStore } from "../stores/useConversationStore";
 import { useLiTTRealtimeSession } from "../hooks/useLiTTRealtimeSession";
 import type { LiTTLiveSessionContext } from "@/lib/litt/live/types";
 import type { ArtifactAction } from "@/lib/canvas/types";
+import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
@@ -64,6 +65,12 @@ import {
   type LiTTMode,
 } from "../lib/studio-destinations";
 import type { StudioTool } from "./StudioSidebar";
+import {
+  FIRST_INSPECTION_PROMPT,
+  deriveFirstMissionLaunchpadState,
+  type FirstMissionActionId,
+  type FirstMissionLaunchpadState,
+} from "../lib/first-mission-launchpad";
 
 /* ── Legacy tool components (loaded through adapters) ──────────── */
 // ChatTool is NOT mounted here — the conversation controller
@@ -164,8 +171,14 @@ function CommandStudioContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { capabilities, refresh: refreshCapabilities } = useConnectionSummary();
-  const projectReady = Boolean(capabilities.projectId);
+  const {
+    capabilities,
+    refresh: refreshCapabilities,
+    loading: capabilitiesLoading,
+    runtime,
+  } = useConnectionSummary();
+  const runtimeState = runtime?.state ?? INITIAL_RUNTIME_STATE;
+  const projectReady = runtimeState.phase === "ready" && runtimeState.executionAvailable;
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
@@ -175,7 +188,6 @@ function CommandStudioContent() {
   // (e.g. "Auto" models route to "gemini" under the hood).
   const modelHealth = providerHealth[selectedModel.provider] ?? providerHealth[selectedModel.apiProvider ?? ""];
   const modelLabel = selectedModel.label;
-
   // Resolve initial destination from legacy ?tool= query.
   // Also read the canonical ?mode= query param (LiTT mode).
   const initial = useMemo(() => {
@@ -584,6 +596,21 @@ function CommandStudioContent() {
     cameraState: { active: cameraDock.open, status: cameraStatus },
   });
 
+  const launchpadState = useMemo(
+    () => deriveFirstMissionLaunchpadState({
+      runtime: runtimeState,
+      runtimeLoading: runtime ? runtime.loading || capabilitiesLoading : true,
+      runtimeError: runtime?.error,
+      providerHealth: capabilitiesLoading ? undefined : modelHealth,
+      inspection: conversation.busy ? {
+        status: "running" as const,
+        toolResults: [],
+        persistedAssistantResponse: false,
+      } : undefined,
+    }),
+    [runtimeState, runtime, capabilitiesLoading, modelHealth, conversation.busy],
+  );
+
   // ── LiTT Live realtime session ──
   const liveSession = useLiTTRealtimeSession();
 
@@ -606,7 +633,9 @@ function CommandStudioContent() {
     }
     // Build the target URL with both ?tool= and ?mode=
     const params = new URLSearchParams(searchParams.toString());
-    // Canonical: always tool=chat for the LiTT conversation surface.
+  
+
+  // Canonical: always tool=chat for the LiTT conversation surface.
     // Workspace stages (code/canvas/preview) get their own tool value.
     params.set("tool", legacyTool);
     // Write the LiTT mode to the URL when it's not "auto" (auto is the default,
@@ -741,10 +770,6 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, refreshCapabilities]);
 
-  const handleEmptyAction = useCallback((prompt: string) => {
-    setComposerValue(prompt);
-  }, []);
-
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
   const handleStartBlank = useCallback(async () => {
@@ -802,11 +827,34 @@ function CommandStudioContent() {
     }
   }, [searchParams, pathname, router, refreshCapabilities, userId, getToken]);
 
-  const handleConnectRepo = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.location.href = "/api/github/install";
+  const handlePrepareWorkspace = useCallback(async () => {
+    if (!runtimeState.projectId) return;
+    setCreatingProject(true);
+    setProjectCreateError(null);
+    try {
+      const token = await getToken?.();
+      const response = await fetch(
+        `/api/studio-projects/${encodeURIComponent(runtimeState.projectId)}/workspace/prepare`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string;
+        workspaceStatus?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Workspace preparation failed (${response.status})`);
+      }
+      await Promise.all([refreshCapabilities(), runtime?.refresh() ?? Promise.resolve()]);
+    } catch (error) {
+      setProjectCreateError(error instanceof Error ? error.message : "Workspace preparation failed.");
+    } finally {
+      setCreatingProject(false);
     }
-  }, []);
+  }, [getToken, refreshCapabilities, runtime, runtimeState.projectId]);
 
   const handleSelectProject = useCallback((projectId: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -829,6 +877,28 @@ function CommandStudioContent() {
     setDrawerOpen(true);
     setDrawerTab("terminal");
   }, []);
+
+  const handleFirstMissionAction = useCallback((action: FirstMissionActionId) => {
+    switch (action) {
+      case "start_blank_project":
+        void handleStartBlank();
+        break;
+      case "prepare_workspace":
+      case "retry_workspace":
+        void handlePrepareWorkspace();
+        break;
+      case "configure_provider":
+        router.push("/settings");
+        break;
+      case "connect_terminal":
+        handleOpenTerminal();
+        break;
+      case "prepare_inspection":
+        setExecutionMode("plan");
+        setComposerValue(FIRST_INSPECTION_PROMPT);
+        break;
+    }
+  }, [handleOpenTerminal, handlePrepareWorkspace, handleStartBlank, router, setExecutionMode]);
 
   // Real rollback: call restore_checkpoint via the Studio API (git reset --hard <sha>).
   // Falls back to opening Terminal if no checkpoint or API call fails.
@@ -1040,18 +1110,10 @@ function CommandStudioContent() {
         fallbackNotice={conversation.fallbackNotice}
         onRouteToolAction={handleRouteTool}
         onRegenerateAction={conversation.regenerate}
-        onEmptyAction={handleEmptyAction}
         onSelectConversation={handleSelectConversation}
-        hasProject={projectReady}
-        projectName={capabilities.projectName}
-        sourceType={capabilities.sourceType}
-        githubInstalled={capabilities.githubInstalled}
-        capabilities={capabilities}
-        modelHealth={modelHealth}
-        modelLabel={modelLabel}
+        launchpadState={launchpadState}
         displayName={profileDisplayName}
-        onStartBlank={handleStartBlank}
-        onConnectRepo={handleConnectRepo}
+        onFirstMissionAction={handleFirstMissionAction}
       />
       {(conversation.requiresReauth || conversation.sendError || projectCreateError) && (
         <div
@@ -1233,6 +1295,8 @@ function CommandStudioContent() {
           onExportChatAction={() => conversation.exportConversation()}
           hasConversation={Boolean(conversation.selectedConversationId)}
           projectReady={projectReady}
+          runtime={runtimeState}
+          runtimeLoading={runtime ? runtime.loading || capabilitiesLoading : true}
           capabilities={capabilities}
           busy={conversation.busy}
           executionMode={executionMode}
@@ -1975,18 +2039,10 @@ function StudioWorkSurface({
   fallbackNotice,
   onRouteToolAction,
   onRegenerateAction,
-  onEmptyAction,
   onSelectConversation,
-  hasProject,
-  projectName,
-  sourceType,
-  githubInstalled,
-  capabilities,
-  modelHealth,
-  modelLabel,
+  launchpadState,
   displayName,
-  onStartBlank,
-  onConnectRepo,
+  onFirstMissionAction,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   busy: boolean;
@@ -1995,18 +2051,10 @@ function StudioWorkSurface({
   fallbackNotice: string | null;
   onRouteToolAction: (tool: StudioTool, command?: string) => void;
   onRegenerateAction: () => void;
-  onEmptyAction: (prompt: string) => void;
   onSelectConversation?: (conversationId: string) => void;
-  hasProject: boolean;
-  projectName: string | null;
-  sourceType: "github" | "blank" | "template" | "upload" | null;
-  githubInstalled: boolean;
-  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
-  modelHealth: import("../stores/useStudioModelStore").ProviderHealth | undefined;
-  modelLabel: string | undefined;
+  launchpadState: FirstMissionLaunchpadState;
   displayName?: string | null;
-  onStartBlank: () => void;
-  onConnectRepo: () => void;
+  onFirstMissionAction: (action: FirstMissionActionId) => void;
 }) {
   // P0.14-15: Only show empty state when messages are truly empty AND
   // conversations have finished loading from the server. During loading,
@@ -2037,17 +2085,9 @@ function StudioWorkSurface({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
             activeAgentId={activeAgentId}
-            hasProject={hasProject}
-            projectName={projectName}
-            sourceType={sourceType}
-            githubInstalled={githubInstalled}
-            capabilities={capabilities}
-            modelHealth={modelHealth}
-            modelLabel={modelLabel}
+            launchpadState={launchpadState}
             displayName={displayName}
-            onPickAction={onEmptyAction}
-            onStartBlankAction={onStartBlank}
-            onConnectRepoAction={onConnectRepo}
+            onPrimaryAction={onFirstMissionAction}
             onSelectConversation={onSelectConversation}
           />
         </div>
