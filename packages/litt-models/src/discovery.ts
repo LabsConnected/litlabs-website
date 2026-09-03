@@ -712,6 +712,11 @@ export function matchAgainstCatalog(
 
   for (const model of candidates) {
     const candidateIds = candidateModelIdsFor(model, providerId);
+    // A provider must not mark a model offline if that model has no identifier
+    // for that provider. Dynamically discovered local models (e.g. Ollama) have
+    // no openRouterModelId, so an OpenRouter refresh would otherwise clobber
+    // them to offline even though the local lane confirmed them online.
+    if (candidateIds.length === 0) continue;
     const isConfirmed = candidateIds.some((id) => discoveredIds.has(id));
     if (isConfirmed) {
       confirmed.push(model.canonicalId);

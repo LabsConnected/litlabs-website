@@ -213,6 +213,61 @@ describe("matchAgainstCatalog", () => {
     assert.ok(result.confirmedCanonicalIds.includes("gpt-5.6-sol"));
     assert.ok(result.missingCanonicalIds.includes("gpt-5.6-terra"));
   });
+
+  // Regression: cross-provider discovery clobber.
+  // A dynamically discovered Ollama model has no openRouterModelId, so an
+  // OpenRouter refresh has no identifier to look it up by. It must be skipped,
+  // never reported missing — otherwise OpenRouter marks a live local model offline.
+  it("does not mark a local-only Ollama model missing during OpenRouter discovery", async () => {
+    const r = registry(onlyOpenRouterEnv());
+
+    // 1. Bring the dynamic local model online through the real Ollama lane.
+    await new ProviderDiscoveryOrchestrator(
+      envAccessorFromMap({}),
+      scriptFetcher({
+        [OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody(["qwen3:4b-instruct"])),
+        "http://localhost:11434/api/show": okResponse({
+          capabilities: ["completion", "tools"],
+          model_info: { "qwen3.context_length": 262144 },
+        }),
+      }),
+    ).refresh(r, { providers: ["ollama"] });
+
+    const local = r.getById("ollama:qwen3:4b-instruct")!;
+    assert.equal(local.provider, "ollama");
+    assert.equal(local.providerModelId, "qwen3:4b-instruct");
+    assert.equal(local.openRouterModelId, undefined);
+    assert.equal(local.availability, "online");
+
+    // 2. Run OpenRouter discovery, which considers registry.getAll().
+    const orDiscovery = matchAgainstCatalog(r, "openrouter", [
+      { id: "openai/gpt-5.6-luna" },
+    ]);
+
+    // 3. The local model has no OpenRouter identifier — it is neither confirmed
+    //    nor missing for OpenRouter.
+    assert.ok(!orDiscovery.missingCanonicalIds.includes("ollama:qwen3:4b-instruct"));
+    assert.ok(!orDiscovery.confirmedCanonicalIds.includes("ollama:qwen3:4b-instruct"));
+    // Real OpenRouter models absent from the live catalog are still missing.
+    assert.ok(orDiscovery.missingCanonicalIds.includes("gpt-5.6-sol"));
+
+    // 4. Availability survives the OpenRouter pass.
+    applyDiscoveryToRegistry(r, orDiscovery);
+    assert.equal(r.getById("ollama:qwen3:4b-instruct")!.availability, "online");
+    assert.equal(r.getById("ollama:qwen3:4b-instruct")!.verified, true);
+    assert.equal(r.getById("gpt-5.6-sol")!.availability, "offline");
+  });
+
+  it("still marks an Ollama model offline when it is absent from Ollama tags", () => {
+    const r = registry({});
+    const result = matchAgainstCatalog(r, "ollama", [{ id: "some-other-local-model" }]);
+    for (const m of r.getByProvider("ollama")) {
+      assert.ok(
+        result.missingCanonicalIds.includes(m.canonicalId),
+        `${m.canonicalId} should be missing from Ollama discovery`,
+      );
+    }
+  });
 });
 
 // ─── applyDiscoveryToRegistry ──────────────────────────────────────

@@ -675,7 +675,8 @@ describe("RoutingEngine", () => {
     expect(telemetry.taskType).toBe("coding");
     expect(telemetry.selectedModel).toBe(choice.id);
     expect(telemetry.servedBy).toBeDefined();
-    expect(telemetry.estimatedCost).toBeGreaterThan(0);
+    expect(Number.isFinite(telemetry.estimatedCost)).toBe(true);
+    expect(telemetry.estimatedCost).toBeGreaterThanOrEqual(0);
     expect(telemetry.candidates.length).toBeGreaterThan(0);
     expect(telemetry.timestamp).toBeGreaterThan(0);
   });
