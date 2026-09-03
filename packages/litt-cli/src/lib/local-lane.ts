@@ -62,8 +62,8 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 
 /**
- * The Ollama base URL, honouring LITT_OLLAMA_URL / OLLAMA_BASE_URL /
- * OLLAMA_HOST via the shared canonical resolver in @litt/models.
+ * The Ollama base URL, honouring LITT_OLLAMA_URL / OLLAMA_HOST_PC /
+ * OLLAMA_HOST / OLLAMA_BASE_URL via the shared canonical resolver in @litt/models.
  *
  * Re-exported for callers that need the resolved endpoint without probing.
  */
@@ -73,8 +73,8 @@ export function resolveLocalLaneEndpoint(): string {
 
 /**
  * Diagnostic: which env var was honoured for the current endpoint?
- * Returns "LITT_OLLAMA_URL", "OLLAMA_BASE_URL", "OLLAMA_HOST", "override",
- * or "default".
+ * Returns "LITT_OLLAMA_URL", "OLLAMA_HOST_PC", "OLLAMA_HOST",
+ * "OLLAMA_BASE_URL", "override", or "default".
  */
 export function localLaneEndpointSource(): string {
   return ollamaEndpointSource((key) => process.env[key]);
