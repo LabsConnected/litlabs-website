@@ -306,6 +306,10 @@ importers:
         version: 5.9.3
 
   packages/litt-agent-core:
+    dependencies:
+      '@litt/models':
+        specifier: workspace:*
+        version: link:../litt-models
     devDependencies:
       '@types/node':
         specifier: ^20
@@ -469,6 +473,9 @@ importers:
       '@litt/agent-core':
         specifier: workspace:*
         version: link:../packages/litt-agent-core
+      '@litt/models':
+        specifier: workspace:*
+        version: link:../packages/litt-models
       '@livekit/agents':
         specifier: ^1.6.2
         version: 1.6.2(@aws-sdk/credential-provider-node@3.972.66)(@livekit/rtc-node@0.13.33)(@smithy/signature-v4@5.6.4)(@types/node@20.19.43)(bufferutil@4.1.0)(typescript@5.9.3)(zod@4.4.3)
@@ -12516,6 +12523,14 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@20.19.43)(lightningcss@1.32.0)(terser@5.50.0)
 
+  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.50.0))':
+    dependencies:
+      '@vitest/spy': 2.1.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.50.0)
+
   '@vitest/pretty-format@2.1.9':
     dependencies:
       tinyrainbow: 1.2.0
@@ -18043,7 +18058,7 @@ snapshots:
   vitest@2.1.9(@types/node@22.20.1)(jsdom@25.0.1(bufferutil@4.1.0))(lightningcss@1.32.0)(terser@5.50.0):
     dependencies:
       '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@20.19.43)(lightningcss@1.32.0)(terser@5.50.0))
+      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.20.1)(lightningcss@1.32.0)(terser@5.50.0))
       '@vitest/pretty-format': 2.1.9
       '@vitest/runner': 2.1.9
       '@vitest/snapshot': 2.1.9
