@@ -13,6 +13,7 @@ import { describe, it, before } from "node:test";
 import * as assert from "node:assert/strict";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import { projectStatus, createShellExecutor } from "../index.js";
 
 let REPO_ROOT: string;
@@ -98,7 +99,7 @@ describe("projectStatus — consolidated git state", () => {
 
   it("returns isGitRepo=false for non-git directory", async () => {
     // Use a temp directory that is not a git repo
-    const tmpDir = fs.mkdtempSync(path.join(require("os").tmpdir(), "litt-test-"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "litt-test-"));
     try {
       const result = await projectStatus(SHELL, tmpDir);
       assert.equal(result.isGitRepo, false);

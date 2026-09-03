@@ -147,6 +147,7 @@ async function mountComposer(): Promise<Harness> {
     stdout: stdout as unknown as NodeJS.WriteStream,
     exitOnCtrlC: false,
     patchConsole: false,
+    interactive: true,
   });
 
   // Ink probes for kitty-keyboard support for 200ms on mount and buffers

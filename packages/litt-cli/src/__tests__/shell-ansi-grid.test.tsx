@@ -312,7 +312,7 @@ describe("shell ANSI-grid regression", () => {
       const out = makeStdout(cols, rows);
       const inst = render(
         React.createElement(LiTTShell, defaultProps(overflowScenario())),
-        { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false },
+        { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
       );
       try {
         await waitForBytes(() => out.bytes, "Act");
@@ -341,7 +341,7 @@ describe("shell ANSI-grid regression", () => {
       const out = makeStdout(cols, rows);
       const inst = render(
         React.createElement(LiTTShell, defaultProps(doneSummaryScenario())),
-        { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false },
+        { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
       );
       try {
         await waitForBytes(() => out.bytes, "COMPLETE");
@@ -366,7 +366,7 @@ describe("shell ANSI-grid regression", () => {
     const out = makeStdout(80, 24);
     const inst = render(
       React.createElement(LiTTShell, defaultProps(overflowScenario())),
-      { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false },
+      { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
     );
     try {
       // Phase 1: small

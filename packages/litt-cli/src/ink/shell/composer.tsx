@@ -32,6 +32,7 @@
 
 import React, { useCallback, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
+import * as fs from "fs";
 import { normalizeKey, type KeyInfo } from "../input-keys.js";
 import {
   applyKeyEvent, createComposerState, graphemeToCodeUnit,
@@ -56,7 +57,6 @@ function debugInput(msg: string): void {
   if (inputDebugCount >= 50) return; // cap at 50 events
   inputDebugCount++;
   try {
-    const fs = require("fs");
     const line = `[${new Date().toISOString()}] #${inputDebugCount} ${msg}\n`;
     fs.appendFileSync(INPUT_DEBUG_FILE, line);
   } catch { /* ignore — debug only */ }
