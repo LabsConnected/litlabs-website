@@ -380,6 +380,7 @@ describe("History persistence", () => {
 // ─── CommandStudioHeader Activity toggle tests ──────────────────────────────
 
 import CommandStudioHeader from "@/app/(app)/studio/components/CommandStudioHeader";
+import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 
 const HEADER_CAPS = {
   projectId: "test",
@@ -397,6 +398,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
   it("7. Activity reflects Live visibility when activityVisible is false", () => {
     render(
       <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={vi.fn()}
         activityVisible={false}
@@ -411,6 +414,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
     const onOpen = vi.fn();
     render(
       <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={onOpen}
         activityVisible={false}
@@ -423,6 +428,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
   it("8b. Activity button shows active styling when Live is visible", () => {
     render(
       <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={vi.fn()}
         activityVisible={true}
@@ -437,6 +444,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
     const onOpen = vi.fn();
     render(
       <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={onOpen}
         activityVisible={false}
@@ -452,6 +461,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
     const onOpen = vi.fn();
     render(
       <CommandStudioHeader
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
         onOpenActivityAction={onOpen}
         activityVisible={true}

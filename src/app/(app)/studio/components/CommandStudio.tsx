@@ -178,7 +178,6 @@ function CommandStudioContent() {
     runtime,
   } = useConnectionSummary();
   const runtimeState = runtime?.state ?? INITIAL_RUNTIME_STATE;
-  const projectReady = runtimeState.phase === "ready" && runtimeState.executionAvailable;
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
@@ -1294,7 +1293,6 @@ function CommandStudioContent() {
           }}
           onExportChatAction={() => conversation.exportConversation()}
           hasConversation={Boolean(conversation.selectedConversationId)}
-          projectReady={projectReady}
           runtime={runtimeState}
           runtimeLoading={runtime ? runtime.loading || capabilitiesLoading : true}
           capabilities={capabilities}
