@@ -42,7 +42,8 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
-import { hasLocalModelProvider, hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { probeLocalLane } from "../lib/local-lane.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -84,6 +85,29 @@ export function CockpitApp({
 
   // ─── Canonical ModelRuntime — ONE instance for the whole app ───
   const [modelRuntime] = useState(() => new ModelRuntime(store.state.executionTarget === "remote"));
+
+  // Local provider truth comes from a real Ollama probe, not merely
+  // the presence of an endpoint environment variable.
+  const [localModelReady, setLocalModelReady] = useState(false);
+
+  useEffect(() => {
+    if (store.state.executionTarget !== "local") {
+      setLocalModelReady(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    void probeLocalLane().then((status) => {
+      if (!cancelled) {
+        setLocalModelReady(status.available);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [store.state.executionTarget]);
 
   const controller = useCockpitController({
     session, store, approvalBridge, sessionBridge,
@@ -130,7 +154,7 @@ export function CockpitApp({
   // whether the model path is usable — "remote" never needs a local key
   // (see lib/execution-target.ts). hasOpenRouterKey() only matters in
   // "local" (developer/BYOK) mode.
-  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey() || hasLocalModelProvider();
+  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey() || localModelReady;
   const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   // Source truth: show the REAL served provider (from the last run's
   // adapter) AND where it executed — never let "REMOTE" in the header
@@ -141,8 +165,8 @@ export function CockpitApp({
     ? `${providerLabel(store.state.activeProvider)} • ${executionSuffix}`
     : store.state.executionTarget === "remote"
       ? "REMOTE (server-executed)"
-      : modelReady && !hasLocalModelProvider() ? "OpenRouter • BYOK ✓"
-    : modelReady && hasLocalModelProvider() ? "Local Ollama ✓"
+      : modelReady && !localModelReady ? "OpenRouter • BYOK ✓"
+    : modelReady && localModelReady ? "Local Ollama ✓"
     : "No provider";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
