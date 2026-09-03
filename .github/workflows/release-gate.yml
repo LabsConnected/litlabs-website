@@ -46,7 +46,7 @@ jobs:
           SOURCE_SHA="${{ steps.source.outputs.sha }}"
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
           WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
-          TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}
+          TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}"
 
           echo "Source:  $SOURCE_SHORT"
           echo "Web:     $WEB_SHA"
