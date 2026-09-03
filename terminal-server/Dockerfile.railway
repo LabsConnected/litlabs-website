@@ -35,6 +35,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 
 # Copy package.json files for the workspace packages we need
 COPY packages/litt-agent-core/package.json packages/litt-agent-core/package.json
+COPY packages/litt-models/package.json packages/litt-models/package.json
 COPY terminal-server/package.json terminal-server/package.json
 COPY terminal-server/tsconfig.json terminal-server/tsconfig.json
 COPY terminal-server/tsconfig.worker.json terminal-server/tsconfig.worker.json
@@ -45,6 +46,7 @@ COPY terminal-server/tsconfig.worker.json terminal-server/tsconfig.worker.json
 RUN pnpm install --frozen-lockfile \
     --filter terminal-server... \
     --filter @litt/agent-core... \
+    --filter @litt/models... \
     --prod=false \
     --config.ignore-scripts=false \
     --config.node-linker=isolated
@@ -63,6 +65,7 @@ WORKDIR /app
 # Copy installed node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/litt-agent-core/node_modules ./packages/litt-agent-core/node_modules
+COPY --from=deps /app/packages/litt-models/node_modules ./packages/litt-models/node_modules
 COPY --from=deps /app/terminal-server/node_modules ./terminal-server/node_modules
 # Bust builder cache to ensure source changes are picked up
 ARG BUILDER_CACHE_BUST=5
@@ -73,9 +76,13 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 
 # Copy source code for the packages we need
 COPY packages/litt-agent-core packages/litt-agent-core
+COPY packages/litt-models packages/litt-models
 COPY terminal-server terminal-server
 
-# Build @litt/agent-core first (terminal-server depends on it)
+# Build @litt/models first (agent-core depends on it)
+RUN pnpm --filter @litt/models build
+
+# Build @litt/agent-core (terminal-server depends on it)
 RUN pnpm --filter @litt/agent-core build
 
 # Build terminal-server (compiles both server and worker)
@@ -118,10 +125,12 @@ RUN mkdir -p /data/littree-workspaces
 COPY --from=builder /app/terminal-server/dist terminal-server/dist
 COPY --from=builder /app/terminal-server/node_modules terminal-server/node_modules
 COPY --from=builder /app/packages/litt-agent-core/dist packages/litt-agent-core/dist
+COPY --from=builder /app/packages/litt-models/dist packages/litt-models/dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/terminal-server/package.json terminal-server/package.json
 COPY --from=builder /app/packages/litt-agent-core/package.json packages/litt-agent-core/package.json
+COPY --from=builder /app/packages/litt-models/package.json packages/litt-models/package.json
 
 # Verify that pnpm links still resolve to the terminal server's Clerk version
 # after crossing Docker stages.
