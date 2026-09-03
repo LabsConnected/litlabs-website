@@ -183,6 +183,7 @@ alter table public.posts                enable row level security;
 alter table public.post_likes           enable row level security;
 alter table public.post_comments        enable row level security;
 alter table public.user_media           enable row level security;
+alter table public.rate_limits          enable row level security;
 
 -- ============================================
 -- Indexes for performance
