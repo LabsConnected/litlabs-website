@@ -16,6 +16,7 @@ import * as path from "path";
 import type { CommandContext, CommandResponse } from "./command-registry.js";
 import { getRuntimeState } from "./runtime.js";
 import { redactSecrets, redactEnvValues } from "./command-registry.js";
+import { resolveOllamaEndpoint } from "@litt/models";
 
 // ─── Types ────────────────────────────────────────────────────────
 
