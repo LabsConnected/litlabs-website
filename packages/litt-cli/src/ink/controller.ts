@@ -1,3 +1,4 @@
+import { hasLocalModelProvider } from "../lib/model-provider.js";
 /**
  * CockpitController — routes user input to ExecutionGateway.
  *
@@ -1953,7 +1954,12 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
 
-    if (shouldBlockModelPath(signedIn, store.state.executionTarget, store.state.localOnly)) {
+    if (shouldBlockModelPath(
+      signedIn,
+      store.state.executionTarget,
+      store.state.localOnly,
+      hasLocalModelProvider(),
+    )) {
       // ─── READ intent: always allowed (tools are local, synthesis optional) ───
       if (intent === "read" || opts?.forceRead === true) {
         // Fall through to the READ lane below — it handles no-model

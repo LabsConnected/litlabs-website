@@ -42,7 +42,7 @@ async function chatWithOllama(
   const ollamaModel = process.env.OLLAMA_MODEL;
   const explicitModel = ollamaModel ? ollamaModel.startsWith("ollama:") ? ollamaModel : "ollama:" + ollamaModel : undefined;
   const resolvedModel = explicitModel || model;
-  const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC || "http://localhost:11434";
+  const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC || process.env.OLLAMA_HOST || "http://localhost:11434";
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -395,14 +395,30 @@ export function hasProviderKey(): boolean {
  }
 
  /** True when a local LLM provider (Ollama or LM Studio) is configured.
-  * Checks for OLLAMA_BASE_URL, LiTT_URL, or NEXT_PUBLIC_LiTT_URL being set.
+  * Checks OLLAMA_BASE_URL, OLLAMA_HOST_PC, or OLLAMA_HOST — environment
+  * variables that indicate a locally-addressable Ollama endpoint.
+  *
+  * LiTT_URL and NEXT_PUBLIC_LiTT_URL are NOT proof of a credentialless local
+  * LLM; they are LiTT-specific URL settings and are excluded from this check.
   */
  export function hasLocalProviderKey(): boolean {
    return !!(
      process.env.OLLAMA_BASE_URL ||
      process.env.OLLAMA_HOST_PC ||
-     process.env.LiTT_URL ||
-     process.env.NEXT_PUBLIC_LiTT_URL
+     process.env.OLLAMA_HOST
+   );
+ }
+
+ /** True when a local model provider (Ollama/LM Studio) is available.
+  * Canonical helper with explicit precedence: OLLAMA_BASE_URL → OLLAMA_HOST_PC → OLLAMA_HOST.
+  * Use this for model routing decisions; hasLocalProviderKey() is kept as a
+  * compatibility alias.
+  */
+ export function hasLocalModelProvider(): boolean {
+   return !!(
+     process.env.OLLAMA_BASE_URL ||
+     process.env.OLLAMA_HOST_PC ||
+     process.env.OLLAMA_HOST
    );
  }
 
