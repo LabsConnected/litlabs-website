@@ -75,7 +75,9 @@ export default function CommandStudioHeader({
   busy = false,
   executionMode = "auto",
   onExecutionModeChange,
+  projectReady,
 }: {
+  projectReady?: boolean;
   branch?: string;
   onPreviewAction?: () => void;
   /** Opens LiTT -> Live (execution activity). This is an OPEN action,

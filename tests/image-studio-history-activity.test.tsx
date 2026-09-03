@@ -17,6 +17,7 @@
  *  13/14. Obsolete side-panel / activity-rail localStorage keys are gone.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -401,6 +402,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         onOpenActivityAction={vi.fn()}
         activityVisible={false}
       />,
@@ -417,6 +420,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         onOpenActivityAction={onOpen}
         activityVisible={false}
       />,
@@ -431,6 +436,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         onOpenActivityAction={vi.fn()}
         activityVisible={true}
       />,
@@ -447,6 +454,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         onOpenActivityAction={onOpen}
         activityVisible={false}
       />,
@@ -464,6 +473,8 @@ describe("CommandStudioHeader Activity (LiTT Live) open action", () => {
         runtime={INITIAL_RUNTIME_STATE}
         runtimeLoading={false}
         capabilities={HEADER_CAPS as never}
+        runtime={INITIAL_RUNTIME_STATE}
+        runtimeLoading={false}
         onOpenActivityAction={onOpen}
         activityVisible={true}
       />,
