@@ -167,7 +167,7 @@ export async function startAuthServer(options: AuthServerOptions): Promise<AuthS
     portCandidates,
   } = options;
 
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutHolder: { current: ReturnType<typeof setTimeout> | undefined } = { current: undefined };
   let settled = false;
   let closed = false;
   let resolveCallback!: (value: { code: string; state: string }) => void;
@@ -218,7 +218,7 @@ export async function startAuthServer(options: AuthServerOptions): Promise<AuthS
 
     const settle = (statusCode: number, html: string, errorToReject?: AuthError) => {
       settled = true;
-      if (timeout) clearTimeout(timeout);
+      if (timeoutHolder.current) clearTimeout(timeoutHolder.current);
       res.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
       // Respond to the browser FIRST, then resolve/reject inside res.end()
       res.end(html, () => {
@@ -272,7 +272,7 @@ export async function startAuthServer(options: AuthServerOptions): Promise<AuthS
 
   const redirectUri = `http://127.0.0.1:${actualPort}/callback`;
 
-  timeout = setTimeout(() => {
+  timeoutHolder.current = setTimeout(() => {
     if (settled) return;
     settled = true;
     rejectCallback(new AuthError("timeout", `OAuth callback timed out after ${timeoutMs}ms.`));
@@ -284,7 +284,7 @@ export async function startAuthServer(options: AuthServerOptions): Promise<AuthS
   server.on("error", () => {
     if (settled) return;
     settled = true;
-    if (timeout) clearTimeout(timeout);
+    if (timeoutHolder.current) clearTimeout(timeoutHolder.current);
     rejectCallback(new AuthError("config", "Local auth callback server failed."));
     closeListening(server);
   });
@@ -294,7 +294,7 @@ export async function startAuthServer(options: AuthServerOptions): Promise<AuthS
     redirectUri,
     waitForCallback: () => callbackPromise,
     close: () => {
-      if (timeout) clearTimeout(timeout);
+      if (timeoutHolder.current) clearTimeout(timeoutHolder.current);
       if (!settled) {
         settled = true;
         rejectCallback(new AuthError("timeout", "OAuth callback server was closed."));

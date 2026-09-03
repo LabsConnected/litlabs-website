@@ -28,6 +28,7 @@
 import React, { createContext, useContext, useCallback, useRef, useEffect } from "react";
 import { useInput, useStdin } from "ink";
 import type { EventEmitter } from "node:events";
+import * as fs from "fs";
 import { isEnter, isEscape, isRawF2, detectRawScrollKey, type KeyInfo } from "./keyboard-utils.js";
 
 // Debug instrumentation — set LITT_KEY_DEBUG=1 to trace key events to stderr.
@@ -114,7 +115,6 @@ export function OverlayKeyboardProvider({
       // Also log to file when LITT_INPUT_DEBUG is set — for first-backspace tracing
       if (process.env.LITT_INPUT_DEBUG === "1") {
         try {
-          const fs = require("fs");
           const f = process.env.LITT_INPUT_DEBUG_FILE ?? (process.platform === "android" ? "/sdcard/litt-input-debug.log" : "./litt-input-debug.log");
           const hex = Buffer.from(s, "utf8").toString("hex");
           fs.appendFileSync(f, `[${new Date().toISOString()}] RAW input=${JSON.stringify(s)} hex=${hex} topOwner=${topOwner ?? "none"}\n`);
@@ -168,7 +168,6 @@ export function OverlayKeyboardProvider({
     // Also log to file when LITT_INPUT_DEBUG is set — for first-backspace tracing
     if (process.env.LITT_INPUT_DEBUG === "1") {
       try {
-        const fs = require("fs");
         const f = process.env.LITT_INPUT_DEBUG_FILE ?? (process.platform === "android" ? "/sdcard/litt-input-debug.log" : "./litt-input-debug.log");
         fs.appendFileSync(f, `[${new Date().toISOString()}] OVERLAY useInput input=${JSON.stringify(input)} backspace=${key.backspace} ctrl=${key.ctrl} meta=${key.meta} tab=${key.tab} escape=${key.escape} topOwner=${topOwner ?? "none"}\n`);
       } catch { /* ignore */ }
