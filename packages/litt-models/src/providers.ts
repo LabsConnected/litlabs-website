@@ -5,6 +5,11 @@
  * meta-provider: if only OPENROUTER_API_KEY is set, models from Anthropic,
  * OpenAI, Google, etc. are served BY OpenRouter, not their native provider.
  * This file encodes that mapping so the registry can report SOURCE TRUTH.
+ *
+ * The modelsUrl and chatUrl for local providers (ollama/lmstudio) are
+ * resolved at runtime via the shared canonical Ollama endpoint resolver
+ * (resolveLocalLaneEndpoint). The hardcoded http://localhost:11434 values
+ * below are ONLY defaults — the resolver overrides them when env vars are set.
  */
 
 import type { CredentialInfo, CredentialResolver, CredentialSource, ProviderId } from "./types";
@@ -23,6 +28,13 @@ export interface ProviderDefinition {
   modelsUrl?: string;
   /** Base URL for chat completions (OpenAI-compatible providers). */
   chatUrl?: string;
+  /**
+   * Marks this provider's endpoint as dynamically resolved from env vars
+   * (e.g. Ollama via LITT_OLLAMA_URL). When set, callers MUST use the
+   * shared resolver instead of the static modelsUrl/chatUrl, which serve
+   * only as fallback defaults.
+   */
+  dynamicEndpoint?: "ollama";
 }
 
 /**
@@ -106,6 +118,7 @@ export const PROVIDERS: ProviderDefinition[] = [
     label: "Ollama",
     modelsUrl: "http://localhost:11434/api/tags",
     chatUrl: "http://localhost:11434/api/chat",
+    dynamicEndpoint: "ollama",
   },
   {
     id: "lmstudio",

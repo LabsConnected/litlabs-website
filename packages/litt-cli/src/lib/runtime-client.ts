@@ -39,6 +39,9 @@ export type RemoteModelStreamEvent =
   | {
       type: "done";
       model: string;
+      /** The model the provider actually served — for pinned routing this
+       *  may differ from `model` (which is the pinned configuredModel). */
+      actualServedModel?: string;
       usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number };
       timing: { ttftMs: number; generationMs: number; totalMs: number };
     }
@@ -570,8 +573,10 @@ export class RuntimeClient {
       providerHint?: string;
       /** OpenRouter fallback slug, used if server falls back to OpenRouter. */
       openRouterModelId?: string;
+      /** Routing mode — "fixed" for user-pinned models (server must not substitute). */
+      routingMode?: "auto" | "fixed";
     } = {},
-  ): Promise<{ provider: string; model: string; usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number } }> {
+  ): Promise<{ provider: string; model: string; actualServedModel?: string; usage: { total_tokens: number; prompt_tokens?: number; completion_tokens?: number } }> {
     if (!this.socket?.connected) {
       throw new Error("Remote runtime is not connected. Cannot stream a remote model completion.");
     }
@@ -586,7 +591,7 @@ export class RuntimeClient {
         }
         if (event.type === "done") {
           this.modelStreamCallbacks.delete(requestId);
-          resolve({ provider: resolvedProvider ?? event.model, model: event.model, usage: event.usage });
+          resolve({ provider: resolvedProvider ?? event.model, model: event.model, actualServedModel: event.actualServedModel, usage: event.usage });
         }
         if (event.type === "error") {
           this.modelStreamCallbacks.delete(requestId);
@@ -602,6 +607,7 @@ export class RuntimeClient {
         maxTokens: options.maxTokens,
         providerHint: options.providerHint,
         openRouterModelId: options.openRouterModelId,
+        routingMode: options.routingMode ?? "auto",
       });
     });
   }

@@ -30,6 +30,12 @@ export interface ModelRequestPayload {
   providerHint?: string;
   /** OpenRouter fallback model slug, used if server falls back to OpenRouter. */
   openRouterModelId?: string;
+  /**
+   * Routing mode from the CLI — the user's intent for model selection.
+   *   "fixed"  — user-pinned: never silently switch models, no free failover
+   *   "auto"   — automatic routing: existing failover/fallback behavior preserved
+   */
+  routingMode?: string;
 }
 
 export interface ModelRelayEventPayload {
@@ -80,6 +86,7 @@ export async function handleModelRequest(
 
   let streamProvider: string | null = null;
   let streamModel: string | null = null;
+  let streamActualModel: string | null = null;
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
@@ -95,6 +102,7 @@ export async function handleModelRequest(
         }
         if (event.type === "done") {
           streamModel = event.model;
+          streamActualModel = event.actualServedModel ?? event.model;
           promptTokens += event.usage.prompt_tokens ?? 0;
           completionTokens += event.usage.completion_tokens ?? 0;
           totalTokens += event.usage.total_tokens ?? 0;
@@ -106,6 +114,7 @@ export async function handleModelRequest(
         providerHint: payload.providerHint,
         openRouterModelId: payload.openRouterModelId,
         maxTokens: payload.maxTokens,
+        routingMode: payload.routingMode,
         signal: controller.signal,
       },
     );

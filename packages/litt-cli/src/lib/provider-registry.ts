@@ -40,6 +40,7 @@ import type { ModelChoice } from "./model-routing.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { resolveOllamaTagsUrl } from "@litt/models";
 
 // ─── Capability registry ───────────────────────────────────────────
 
@@ -101,6 +102,12 @@ export interface ModelProvider {
   altEnvKeys?: string[];
   /** Base URL for health checks */
   healthUrl?: string;
+  /**
+   * Marks this provider's endpoint as dynamically resolved from env vars.
+   * When set, the health check resolves the URL via the shared resolver
+   * instead of using the static healthUrl.
+   */
+  dynamicEndpoint?: "ollama";
 }
 
 /**
@@ -297,6 +304,7 @@ const PROVIDERS: ModelProvider[] = [
     label: "Local",
     credentialType: "local",
     healthUrl: "http://localhost:11434/api/tags",
+    dynamicEndpoint: "ollama",
   },
 ];
 
@@ -453,7 +461,14 @@ export class ProviderRegistry {
     let latencyMs: number | null = null;
     let error: string | null = null;
 
-    if (provider.healthUrl) {
+    // Resolve the health URL. For providers with dynamicEndpoint (Ollama),
+    // use the shared resolver so LITT_OLLAMA_URL / OLLAMA_BASE_URL / OLLAMA_HOST
+    // are honoured. For static providers, use the definition URL.
+    const healthUrl = provider.dynamicEndpoint === "ollama"
+      ? resolveOllamaTagsUrl((key) => process.env[key])
+      : provider.healthUrl;
+
+    if (healthUrl) {
       try {
         const start = Date.now();
         const controller = new AbortController();
@@ -465,7 +480,7 @@ export class ProviderRegistry {
           headers["Authorization"] = `Bearer ${process.env[keyEnv]}`;
         }
 
-        const response = await fetch(provider.healthUrl, {
+        const response = await fetch(healthUrl, {
           headers,
           signal: controller.signal,
         });

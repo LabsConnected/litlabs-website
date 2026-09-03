@@ -10,6 +10,7 @@
  */
 
 import type { ChatMessage } from "./types.js";
+import { resolveOllamaEndpoint } from "@litt/models";
 
 function resolveModelAndProvider(
   modelArg?: string,
@@ -39,7 +40,7 @@ async function chatWithOllama(
   messages: ChatMessage[],
   model = "llama3.2:3b",
 ): Promise<string> {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const baseUrl = resolveOllamaEndpoint((key) => process.env[key]);
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

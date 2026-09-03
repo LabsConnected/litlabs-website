@@ -61,6 +61,7 @@ import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
 import { getAuthSession } from "./lib/auth/auth-session.js";
+import { probeLocalLane } from "./lib/local-lane.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
@@ -224,6 +225,7 @@ export function requiresAuth(
   localOnly: boolean,
   localTarget: boolean,
   clerkToken: boolean,
+  hasLocalProvider = false,
 ): boolean {
   // Cockpit commands bypass the auth gate when the target is LOCAL.
   // This includes: default (no flag), --local, LITT_LOCAL_ONLY, LITT_LOCAL_MODE.
@@ -231,10 +233,20 @@ export function requiresAuth(
   // paths when signed out — the auth gate just decides whether to
   // check isSignedIn at all.
   const cockpitLocalBypass = COCKPIT_COMMANDS.has(command) && (localOnly || localTarget);
+
+  // A verified local model is credentialless. Only ASK receives this bypass,
+  // and only while targeting LOCAL. Merely selecting local mode is not enough:
+  // main() must prove the daemon is reachable and has an installed model.
+  const localModelBypass =
+    command === "ask" &&
+    localTarget &&
+    hasLocalProvider;
+
   return (
     !LOGGED_OUT_ALLOWED.has(command) &&
     !(BYOK_ALLOWED.has(command) && hasByokKey) &&
     !cockpitLocalBypass &&
+    !localModelBypass &&
     !clerkToken
   );
 }
@@ -363,7 +375,29 @@ async function main(): Promise<number> {
   // Absence of env overrides must NOT disable mandatory authentication.
   const isCockpitCommand = command === "cockpit" || command === "shell" || command === "tui";
   const localOnlyBypass = isLocalOnlyMode() && isCockpitCommand;
-  if (requiresAuth(command, hasByokKey(), isLocalOnlyMode(), isLocalTarget(), !!process.env.LITT_CLERK_TOKEN)) {
+  const byokKeyPresent = hasByokKey();
+  const localTarget = isLocalTarget();
+
+  // ASK can operate completely credential-free when a real local model lane
+  // exists. Probe only when needed; cockpit and remote commands do not pay
+  // for this localhost request.
+  const localProviderAvailable =
+    command === "ask" &&
+    localTarget &&
+    !byokKeyPresent
+      ? (await probeLocalLane()).available
+      : false;
+
+  if (
+    requiresAuth(
+      command,
+      byokKeyPresent,
+      isLocalOnlyMode(),
+      localTarget,
+      !!process.env.LITT_CLERK_TOKEN,
+      localProviderAvailable,
+    )
+  ) {
     const authSession = getAuthSession();
     const signedIn = await authSession.isSignedIn();
 

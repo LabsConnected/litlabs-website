@@ -74,6 +74,43 @@ const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const LMSTUDIO_MODELS_URL = "http://localhost:1234/v1/models";
 
+describe("installed custom Ollama models", () => {
+  it("registers verified capabilities and marks a removed model offline", async () => {
+    const r = registry({});
+    const env = envAccessorFromMap({});
+    const fetcher = scriptFetcher({
+      [OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody(["qwen3:4b-instruct"])),
+      "http://localhost:11434/api/show": okResponse({
+        capabilities: ["completion", "tools"],
+        model_info: { "qwen3.context_length": 262144 },
+      }),
+    });
+    await new ProviderDiscoveryOrchestrator(env, fetcher).refresh(r, { providers: ["ollama"] });
+    const model = r.getById("ollama:qwen3:4b-instruct")!;
+    assert.equal(model.providerModelId, "qwen3:4b-instruct");
+    assert.equal(model.availability, "online");
+    assert.equal(model.capabilities.tools, true);
+    assert.equal(model.capabilities.coding, false);
+    assert.ok(model.contextWindow <= 16384, "local context policy bounds advertised context");
+    await new ProviderDiscoveryOrchestrator(env, scriptFetcher({
+      [OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody([])),
+    })).refresh(r, { providers: ["ollama"] });
+    assert.equal(r.getById(model.canonicalId)?.availability, "offline");
+  });
+
+  for (const details of [downResponse(), okResponse({ capabilities: ["embedding"] })]) {
+    it(`does not advertise chat when details are ${details.ok ? "embedding-only" : "unavailable"}`, async () => {
+      const r = registry({});
+      const fetcher = scriptFetcher({
+        [OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody(["custom:model"])),
+        "http://localhost:11434/api/show": details,
+      });
+      await new ProviderDiscoveryOrchestrator(envAccessorFromMap({}), fetcher).refresh(r, { providers: ["ollama"] });
+      assert.equal(r.getById("ollama:custom:model"), undefined);
+    });
+  }
+});
+
 function onlyOpenRouterEnv(): Record<string, string | undefined> {
   return { OPENROUTER_API_KEY: "test-key" };
 }
@@ -350,6 +387,32 @@ describe("ProviderDiscoveryOrchestrator", () => {
     await orchestrator.refresh(r, { providers: ["ollama"] });
     assert.equal(orchestrator.healthCache.get("ollama")!.tier, "discovery-ok");
     assert.equal(orchestrator.healthCache.get("ollama")!.discoveredCount, 1);
+  });
+
+  it("local provider UP via LITT_OLLAMA_URL (LAN endpoint) → discovery-ok", async () => {
+    const LAN_OLLAMA_TAGS_URL = "http://192.168.0.77:11434/api/tags";
+    const r = registry({});
+    const orchestrator = new ProviderDiscoveryOrchestrator(
+      envAccessorFromMap({ LITT_OLLAMA_URL: "http://192.168.0.77:11434" }),
+      scriptFetcher({ [LAN_OLLAMA_TAGS_URL]: okResponse(ollamaTagsBody(["qwen3-coder:latest"])) }),
+    );
+
+    await orchestrator.refresh(r, { providers: ["ollama"] });
+    const health = orchestrator.healthCache.get("ollama")!;
+    assert.equal(health.tier, "discovery-ok");
+    assert.equal(health.discoveredCount, 1);
+  });
+
+  it("local provider DOWN via LITT_OLLAMA_URL (unreachable LAN) → down tier", async () => {
+    const r = registry({});
+    const orchestrator = new ProviderDiscoveryOrchestrator(
+      envAccessorFromMap({ LITT_OLLAMA_URL: "http://192.168.99.99:11434" }),
+      scriptFetcher({}), // no URLs registered → all fetches return down
+    );
+
+    await orchestrator.refresh(r, { providers: ["ollama"] });
+    const health = orchestrator.healthCache.get("ollama")!;
+    assert.equal(health.tier, "down");
   });
 
   it("skipDiscovery option → health check only, no model mutation", async () => {

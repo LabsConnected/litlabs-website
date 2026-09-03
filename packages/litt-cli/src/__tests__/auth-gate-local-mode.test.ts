@@ -13,7 +13,7 @@
 import { describe, it, expect } from "vitest";
 import { requiresAuth } from "../index.js";
 
-// Signature: requiresAuth(command, hasByokKey, localOnly, localTarget, clerkToken)
+// Signature: requiresAuth(command, hasByokKey, localOnly, localTarget, clerkToken, hasLocalProvider?)
 
 describe("auth gate: requiresAuth", () => {
   // ─── Logged-out allowed commands ───────────────────────────────
@@ -96,6 +96,45 @@ describe("auth gate: requiresAuth", () => {
 
   it("requires auth for ask without BYOK key", () => {
     expect(requiresAuth("ask", false, false, false, false)).toBe(true);
+  });
+
+  it("does NOT require auth for ask with a proven local model", () => {
+    expect(
+      requiresAuth(
+        "ask",
+        false,
+        false,
+        true,
+        false,
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it("still requires auth for ask with a local target but no proven local model", () => {
+    expect(
+      requiresAuth(
+        "ask",
+        false,
+        false,
+        true,
+        false,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("still requires auth for remote ask even when a local model exists", () => {
+    expect(
+      requiresAuth(
+        "ask",
+        false,
+        false,
+        false,
+        false,
+        true,
+      ),
+    ).toBe(true);
   });
 
   it("does NOT require auth for build with BYOK key", () => {

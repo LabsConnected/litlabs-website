@@ -38,6 +38,7 @@ import type {
   ToolDefinition,
 } from "@litt/agent-core";
 import { getProvider, type ProviderId } from "@litt/models";
+import { resolveLocalLaneEndpoint } from "./local-lane.js";
 import type { RoutedModel } from "./model-runtime.js";
 import {
   type NativeToolSchema,
@@ -225,6 +226,15 @@ export interface OpenRouterModelOptions {
    * Default 90_000ms. Tests inject a tiny value.
    */
   idleStallMs?: number;
+  /**
+   * Routing mode — "fixed" for user-pinned models. When pinned, the
+   * request sends `provider.allow_fallbacks: false` so OpenRouter never
+   * silently substitutes another model, and the configured model is
+   * preserved as the active model regardless of the provider-reported
+   * response model (the served model is tracked separately as
+   * actualServedModel for audit). Defaults to "auto" (existing behavior).
+   */
+  routingMode?: "auto" | "fixed";
 }
 
 /** Default stall threshold — 90s without a single stream byte. */
@@ -431,13 +441,10 @@ export class OpenRouterModelProvider implements ModelProvider {
   private readonly _profile: ModelProfile;
   private readonly _maxTokens: number;
   private readonly _idleStallMs: number;
+  /** Routing mode — "fixed" preserves the configured model (no OpenRouter fallback substitution). */
+  private readonly _routingMode: "auto" | "fixed";
   /** Native OpenAI-compatible tool schemas — null when not provided. */
   private readonly _tools: NativeToolSchema[] | null;
-  /**
-   * Reverse map: OpenAI-safe function name -> canonical LiTT tool ID.
-   * Used to translate incoming native `tool_calls` back to the canonical ID
-   * the ToolRegistry expects. Null when no tools are provided.
-   */
   private readonly _toolNameMap: OpenAiToolNameMap | null;
   /** The active model — set after the first stream() meta event. */
   private _activeModel: string | null = null;
@@ -450,6 +457,7 @@ export class OpenRouterModelProvider implements ModelProvider {
     this._profile = options.profile ?? "smart";
     this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
+    this._routingMode = options.routingMode ?? "auto";
     // Build sanitized OpenAI-safe tool schemas. toOpenAiToolSchemas throws
     // (here, in the constructor — BEFORE any API request) on collision or
     // invalid names so we never send an OpenAI-rejected tool set.
@@ -479,6 +487,11 @@ export class OpenRouterModelProvider implements ModelProvider {
   /** The active model (what the API actually used). null until first stream(). */
   get activeModel(): string | null {
     return this._activeModel;
+  }
+
+  /** Whether the model is user-pinned (routingMode === "fixed"). */
+  get isPinned(): boolean {
+    return this._routingMode === "fixed";
   }
 
   /** The profile used for resolution. */
@@ -593,6 +606,12 @@ export class OpenRouterModelProvider implements ModelProvider {
           `model=${this._model} max_tokens=${maxTokens}\n`,
         );
       }
+      const isPinned = this._routingMode === "fixed";
+      // For PINNED routing, the configured model is the contract — never
+      // overwritten by the provider-reported response model. The actual
+      // served model is tracked separately as actualServedModel for audit.
+      // For AUTO routing, the provider-reported model is the truth.
+      let actualServedModel: string | undefined;
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -606,6 +625,10 @@ export class OpenRouterModelProvider implements ModelProvider {
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
           max_tokens: maxTokens,
+          // When the user has pinned a model (FIXED), disable OpenRouter's
+          // cross-model fallback so the request always targets the exact
+          // model requested — preventing silent substitution (e.g. kimi → claude).
+          provider: isPinned ? { allow_fallbacks: false } : { allow_fallbacks: true },
           // Declare the project tools NATIVELY (OpenAI function calling).
           // The model sees real tool schemas — it no longer has to guess
           // from a prompt-only protocol (the "unable to access the tool"
@@ -679,10 +702,17 @@ export class OpenRouterModelProvider implements ModelProvider {
             accumulateToolCalls(delta?.tool_calls);
             // Non-streaming shape (some proxies return it even in stream mode).
             accumulateToolCalls(parsed.choices?.[0]?.message?.tool_calls);
-            // Capture the model the API actually used (may differ from configured
-            // when profile is "auto" and OpenRouter routed to a specific model)
+            // Capture the model the API actually used. For AUTO routing this
+            // is the source of truth (OpenRouter may route to a specific model).
+            // For FIXED/pinned routing the configured model is the contract —
+            // do NOT adopt a silently-substituted provider model. The actual
+            // served model is tracked separately for audit as actualServedModel.
             if (parsed.model) {
-              resolvedModel = parsed.model as string;
+              if (isPinned) {
+                actualServedModel = parsed.model as string;
+              } else {
+                resolvedModel = parsed.model as string;
+              }
             }
             if (parsed.usage?.total_tokens) {
               totalTokens = parsed.usage.total_tokens;
@@ -727,12 +757,15 @@ export class OpenRouterModelProvider implements ModelProvider {
         content = content ? `${content}\n${nativeBlocks}` : nativeBlocks;
       }
 
-      // activeModel is now known from runtime execution
+      // activeModel is now known from runtime execution. In FIXED mode this
+      // is the configured (pinned) model; in AUTO mode it's whatever the
+      // provider actually routed to.
       this._activeModel = resolvedModel;
 
       return {
         content,
         model: resolvedModel,
+        actualServedModel,
         provider: "openrouter",
         usage: { total_tokens: totalTokens || Math.ceil(content.length / 4) },
         timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
@@ -787,6 +820,40 @@ export class OpenRouterModelProvider implements ModelProvider {
  * Providers served by this native OpenAI-compatible adapter.
  * Each must have a `chatUrl` in PROVIDERS (from @litt/models).
  */
+/**
+ * Providers that run as a local daemon and take no credential.
+ * Kept separate from OPENAI_COMPATIBLE_NATIVE_PROVIDERS because that set
+ * is defined by "has an envKey holding the user's own API key", which is
+ * precisely what these do not have.
+ */
+export const LOCAL_DAEMON_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "ollama",
+  "lmstudio",
+]);
+
+/**
+ * The OpenAI-compatible chat endpoint for a local daemon.
+ *
+ * LM Studio's catalog chatUrl is already the compatible route. Ollama's
+ * is its native /api/chat, whose request and stream shapes differ from
+ * OpenAI's, so it is rewritten to the /v1 route the adapter speaks.
+ *
+ * Uses the shared canonical Ollama endpoint resolver so that
+ * LITT_OLLAMA_URL / OLLAMA_HOST / OLLAMA_BASE_URL are honoured consistently
+ * across the availability probe and the adapter request.
+ */
+export function openAiCompatibleLocalEndpoint(
+  providerId: ProviderId,
+  chatUrl: string | undefined,
+): string {
+  if (providerId !== "ollama") {
+    return chatUrl ?? "http://localhost:1234/v1/chat/completions";
+  }
+  // Uses the shared canonical resolver — LITT_OLLAMA_URL / OLLAMA_HOST /
+  // OLLAMA_BASE_URL are honoured consistently across probe and adapter.
+  return `${resolveLocalLaneEndpoint()}/v1/chat/completions`;
+}
+
 export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
   "xai",
@@ -802,14 +869,29 @@ export interface OpenAICompatibleModelOptions {
   providerId: ProviderId;
   /** The provider's chat completions endpoint (from PROVIDERS.chatUrl). */
   endpoint: string;
-  /** Direct API key for the provider (BYOK). Required. */
-  apiKey: string;
+  /**
+   * Direct API key for the provider (BYOK).
+   *
+   * Required for every hosted provider. Omitted ONLY for a credential-less
+   * local daemon (Ollama / LM Studio), which is identified by
+   * `credentialless: true` rather than by an empty string, so a hosted
+   * provider whose key failed to resolve still fails loudly instead of
+   * quietly sending "Bearer undefined".
+   */
+  apiKey?: string;
+  /**
+   * True for a local daemon that takes no credential. When set, no
+   * Authorization header is sent at all.
+   */
+  credentialless?: boolean;
   /** The provider-native model id (e.g. "gpt-5.6-luna"). Required. */
   model: string;
   profile?: ModelProfile;
   maxTokens?: number;
   tools?: ToolDefinition[];
   idleStallMs?: number;
+  /** Routing mode — "fixed" preserves the configured model (no cross-model substitution). */
+  routingMode?: "auto" | "fixed";
 }
 
 /**
@@ -825,11 +907,15 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
   readonly providerId: ProviderId;
   private readonly _endpoint: string;
   private readonly _apiKey: string;
+  /** True when this adapter serves a local daemon that takes no key. */
+  private readonly _credentialless: boolean;
   private readonly _model: string;
   private readonly _profile: ModelProfile;
   private readonly _maxTokens: number;
   private readonly _idleStallMs: number;
   private readonly _tools: NativeToolSchema[] | null;
+  /** Routing mode — "fixed" preserves the configured model (no substitution). */
+  private readonly _routingMode: "auto" | "fixed";
   /**
    * Reverse map: OpenAI-safe function name -> canonical LiTT tool ID.
    * Used to translate incoming native `tool_calls` back to the canonical ID
@@ -841,8 +927,9 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
   constructor(options: OpenAICompatibleModelOptions) {
     this.providerId = options.providerId;
     this._endpoint = options.endpoint;
-    this._apiKey = options.apiKey;
-    if (!this._apiKey) {
+    this._credentialless = options.credentialless === true;
+    this._apiKey = options.apiKey ?? "";
+    if (!this._apiKey && !this._credentialless) {
       throw new Error(`${options.providerId} API key is required for OpenAICompatibleModelProvider`);
     }
     this._model = options.model;
@@ -852,6 +939,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     this._profile = options.profile ?? "smart";
     this._maxTokens = resolveMaxTokens(options.maxTokens);
     this._idleStallMs = options.idleStallMs ?? DEFAULT_IDLE_STALL_MS;
+    this._routingMode = options.routingMode ?? "auto";
     // Build sanitized OpenAI-safe tool schemas. toOpenAiToolSchemas throws
     // (here, in the constructor — BEFORE any API request) on collision or
     // invalid names so we never send an OpenAI-rejected tool set.
@@ -912,10 +1000,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       }
       const response = await fetch(this._endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this._apiKey}`,
-        },
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           model: this._model,
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -952,7 +1037,12 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
 
       let content = "";
       let totalTokens = 0;
+      const isPinned = this._routingMode === "fixed";
       let resolvedModel = this._model;
+      // For PINNED routing the configured model is the contract — a
+      // provider-reported response model never overwrites it. The actual
+      // served model is tracked separately for audit.
+      let actualServedModel: string | undefined;
       const nativeToolCalls: Array<{ name: string; args: string }> = [];
       const accumulateToolCalls = (calls: unknown): void => {
         if (!Array.isArray(calls)) return;
@@ -999,7 +1089,13 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
             }
             accumulateToolCalls(delta?.tool_calls);
             accumulateToolCalls(parsed.choices?.[0]?.message?.tool_calls);
-            if (parsed.model) resolvedModel = parsed.model as string;
+            if (parsed.model) {
+              if (isPinned) {
+                actualServedModel = parsed.model as string;
+              } else {
+                resolvedModel = parsed.model as string;
+              }
+            }
             if (parsed.usage?.total_tokens) totalTokens = parsed.usage.total_tokens;
           } catch (e) {
             // Re-throw upstream provider errors so the agent loop surfaces
@@ -1038,6 +1134,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       return {
         content,
         model: resolvedModel,
+        actualServedModel,
         provider: this.providerId,
         usage: { total_tokens: totalTokens || Math.ceil(content.length / 4) },
         timing: { ttftMs: 0, generationMs: 0, totalMs: 0 },
@@ -1061,13 +1158,24 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (!def?.modelsUrl) return 0;
     try {
       const response = await fetch(def.modelsUrl, {
-        headers: { "Authorization": `Bearer ${this._apiKey}` },
+        headers: this.authHeaders(),
         signal: AbortSignal.timeout(5000),
       });
       return response.ok ? 1 : 0;
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * Request headers, with Authorization added only when this adapter
+   * actually holds a credential. A local daemon gets none — sending an
+   * empty bearer token to localhost would be noise at best and a
+   * confusing 401 at worst.
+   */
+  private authHeaders(base: Record<string, string> = {}): Record<string, string> {
+    if (this._credentialless) return base;
+    return { ...base, "Authorization": `Bearer ${this._apiKey}` };
   }
 }
 
@@ -1100,6 +1208,12 @@ export interface ResolveProviderAdapterOptions {
   maxTokens?: number;
   /** Override the stall watchdog (tests inject a tiny value). */
   idleStallMs?: number;
+  /**
+   * Routing mode — "fixed" for user-pinned models. Forwarded to the local
+   * OpenRouterModelProvider so it sends allow_fallbacks=false and preserves
+   * the configured model instead of adopting the provider-reported one.
+   */
+  routingMode?: "auto" | "fixed";
 }
 
 /**
@@ -1118,6 +1232,34 @@ export function resolveProviderAdapter(
   const idleStallMs = options.idleStallMs;
   const servedBy = routed.servedBy;
 
+  // 0. Local daemon (Ollama / LM Studio) → local adapter, no credential.
+  //
+  //    This branch has to come FIRST. Local providers have no envKey, so
+  //    every credential-based check below rejects them, and routing that
+  //    correctly selected qwen3:4b or litt-coder:3b would end at "no
+  //    provider adapter can service this model: OPENROUTER_API_KEY is not
+  //    configured" — an auth error for a lane that needs no auth.
+  if (LOCAL_DAEMON_PROVIDERS.has(servedBy)) {
+    const def = getProvider(servedBy);
+    const modelId = routed.providerModelId ?? routed.openRouterModelId;
+    if (!modelId) {
+      throw new Error(`No provider model id for ${routed.label} (servedBy ${servedBy})`);
+    }
+    return new OpenAICompatibleModelProvider({
+      providerId: servedBy,
+      // Ollama and LM Studio both expose an OpenAI-compatible route; the
+      // catalog's chatUrl is Ollama's NATIVE /api/chat, which speaks a
+      // different wire format, so derive the compatible one.
+      endpoint: openAiCompatibleLocalEndpoint(servedBy, def?.chatUrl),
+      credentialless: true,
+      model: modelId,
+      tools,
+      maxTokens,
+      idleStallMs,
+      routingMode: options.routingMode,
+    });
+  }
+
   // 1. Native OpenAI-compatible provider with a direct key → native adapter.
   if (OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)) {
     const def = getProvider(servedBy);
@@ -1135,6 +1277,7 @@ export function resolveProviderAdapter(
         tools,
         maxTokens,
         idleStallMs,
+        routingMode: options.routingMode,
       });
     }
     // Direct key missing — fall through to OpenRouter fallback below.
@@ -1169,6 +1312,7 @@ export function resolveProviderAdapter(
       tools,
       maxTokens,
       idleStallMs,
+      routingMode: options.routingMode,
     });
   }
 
