@@ -3,13 +3,14 @@
  *
  * Tests the resolveLocalLaneEndpoint() function which delegates to the
  * ONE shared resolver in @litt/models with precedence:
- *   LITT_OLLAMA_URL > OLLAMA_HOST > OLLAMA_BASE_URL > localhost default.
+ *   LITT_OLLAMA_URL > OLLAMA_HOST_PC > OLLAMA_HOST > OLLAMA_BASE_URL > localhost default.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resolveLocalLaneEndpoint, probeLocalLane, resetLocalLaneCache } from "../lib/local-lane.js";
 
 beforeEach(() => {
   delete process.env.LITT_OLLAMA_URL;
+  delete process.env.OLLAMA_HOST_PC;
   delete process.env.OLLAMA_HOST;
   delete process.env.OLLAMA_BASE_URL;
   resetLocalLaneCache();

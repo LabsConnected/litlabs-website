@@ -8,8 +8,9 @@
  *
  * Env-var precedence (highest → lowest):
  *   1. LITT_OLLAMA_URL   — LiTT canonical override (full URL or bare host:port)
- *   2. OLLAMA_HOST       — Ollama host setting (full URL or bare host:port)
- *   3. OLLAMA_BASE_URL   — compatibility alias (full URL or bare host:port)
+ *   2. OLLAMA_HOST_PC    — LiTT cross-device/LAN override (for example Termux → PC)
+ *   3. OLLAMA_HOST       — Ollama host setting (full URL or bare host:port)
+ *   4. OLLAMA_BASE_URL   — compatibility alias (full URL or bare host:port)
  *
  * Only when none of these are set does the resolver default to
  * `http://localhost:11434`.
@@ -31,6 +32,7 @@ export const DEFAULT_OLLAMA_URL = "http://localhost:11434";
  */
 export const OLLAMA_ENDPOINT_ENV_VARS = [
   "LITT_OLLAMA_URL",
+  "OLLAMA_HOST_PC",
   "OLLAMA_HOST",
   "OLLAMA_BASE_URL",
 ] as const;
