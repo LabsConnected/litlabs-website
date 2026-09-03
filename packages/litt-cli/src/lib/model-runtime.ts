@@ -94,6 +94,8 @@ export class ModelRuntime {
   private healthCache: HealthCache;
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
+  /** Cached explicit local model when OLLAMA_MODEL + OLLAMA_BASE_URL/OLLAMA_HOST_PC are set. */
+  private _explicitLocalModel: { provider: ProviderId; modelId: string } | null = null;
 
   constructor(remoteMode = false) {
     const envAccessor = envAccessorFromProcess();
@@ -108,6 +110,13 @@ export class ModelRuntime {
       undefined, // default fetcher
       this.healthCache,
     );
+    // Cache explicit local model config: when OLLAMA_MODEL is set with an Ollama endpoint,
+    // treat it as a routable local model without requiring discovery.
+    const ollamaModel = envAccessor.get("OLLAMA_MODEL");
+    const ollamaUrl = envAccessor.get("OLLAMA_BASE_URL") || envAccessor.get("OLLAMA_HOST_PC") || envAccessor.get("OLLAMA_HOST");
+    if (ollamaModel && ollamaUrl) {
+      this._explicitLocalModel = { provider: "ollama", modelId: ollamaModel };
+    }
   }
 
   /** Last refresh error — null when the last refresh succeeded. */

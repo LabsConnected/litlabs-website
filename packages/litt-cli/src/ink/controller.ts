@@ -66,6 +66,7 @@ import {
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
 import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
+import { probeLocalLane } from "../lib/local-lane.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
@@ -1953,7 +1954,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
 
-    if (shouldBlockModelPath(signedIn, store.state.executionTarget, store.state.localOnly)) {
+    // A local model counts as available only after the real Ollama
+    // endpoint responds and reports at least one installed model.
+    const localModelAvailable = store.state.executionTarget === "local"
+      ? (await probeLocalLane()).available
+      : false;
+
+    if (shouldBlockModelPath(
+      signedIn,
+      store.state.executionTarget,
+      store.state.localOnly,
+      localModelAvailable,
+    )) {
       // ─── READ intent: always allowed (tools are local, synthesis optional) ───
       if (intent === "read" || opts?.forceRead === true) {
         // Fall through to the READ lane below — it handles no-model

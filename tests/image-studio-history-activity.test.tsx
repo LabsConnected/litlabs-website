@@ -17,6 +17,7 @@
  *  13/14. Obsolete side-panel / activity-rail localStorage keys are gone.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -380,7 +381,6 @@ describe("History persistence", () => {
 // ─── CommandStudioHeader Activity toggle tests ──────────────────────────────
 
 import CommandStudioHeader from "@/app/(app)/studio/components/CommandStudioHeader";
-import { INITIAL_RUNTIME_STATE } from "@/lib/projects/runtime-state";
 
 const HEADER_CAPS = {
   projectId: "test",
