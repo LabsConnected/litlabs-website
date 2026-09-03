@@ -17,47 +17,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine target URL
-        id: target
-        run: |
-          # For PRs: test the Railway PR preview deployment (if available).
-          # For manual runs: test production.
-          # Railway PR deployment URLs follow the pattern:
-          #   https://web-pr-<number>.up.railway.app
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            PR_URL="https://web-pr-${{ github.event.pull_request.number }}.up.railway.app"
-            echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
-            echo "Testing Railway PR deployment: $PR_URL"
-          else
-            echo "url=https://www.litlabs.net" >> "$GITHUB_OUTPUT"
-            echo "Testing production: https://www.litlabs.net"
-          fi
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-      - name: Wait for deployment to be ready
-        id: wait
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace dependencies
+        run: pnpm build:workspace-deps
+
+      - name: Build production Next.js
+        run: pnpm build
+        env:
+          # Minimal env for build — Lighthouse audits the built output
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+
+      - name: Start production server
+        id: server
         run: |
-          TARGET_URL="${{ steps.target.outputs.url }}"
-          echo "Waiting for $TARGET_URL to be ready..."
+          # Start Next.js production server on port 3000
+          PORT=3000 pnpm start &
+          SERVER_PID=$!
+          echo "pid=$SERVER_PID" >> "$GITHUB_OUTPUT"
+
+          # Wait for server to be ready (require HTTP 200)
           for i in $(seq 1 30); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_URL" 2>/dev/null || echo "000")
-            if [ "$STATUS" != "000" ] && [ "$STATUS" != "502" ] && [ "$STATUS" != "503" ]; then
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
               echo "ready=true" >> "$GITHUB_OUTPUT"
-              echo "Deployment ready (HTTP $STATUS) after ${i}0 seconds"
+              echo "Server ready (HTTP 200) after ${i} seconds"
               exit 0
             fi
-            echo "Attempt $i: HTTP $STATUS, waiting 10s..."
-            sleep 10
+            echo "Attempt $i: HTTP $STATUS, waiting 1s..."
+            sleep 1
           done
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          echo "Deployment not ready after 5 minutes"
+          echo "Server not ready after 30 seconds"
 
       - name: Run Lighthouse
-        if: steps.wait.outputs.ready == 'true'
+        if: steps.server.outputs.ready == 'true'
         uses: treosh/lighthouse-ci-action@v9
         with:
           urls: |
-            ${{ steps.target.outputs.url }}
-            ${{ steps.target.outputs.url }}/studio
+            http://localhost:3000
+            http://localhost:3000/studio
           budgetPath: .github/budget.config.json
 
       - name: Upload Lighthouse reports
@@ -66,3 +78,8 @@ jobs:
         with:
           name: lighthouse-reports
           path: .lighthouseci/**/*
+
+      - name: Stop server
+        if: always() && steps.server.outputs.pid != ''
+        run: |
+          kill ${{ steps.server.outputs.pid }} 2>/dev/null || true
