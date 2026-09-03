@@ -487,13 +487,33 @@ export class ProviderDiscoveryOrchestrator {
     timeoutMs: number,
     skipDiscovery: boolean,
   ): Promise<{ health: ProviderHealthResult; discovery: DiscoveryResult | null }> {
-    if (!def.modelsUrl) {
+    // Local provider endpoints may live on another machine.
+    // Respect runtime Ollama configuration instead of always probing the
+    // catalog's localhost default (critical for Termux -> Windows Ollama).
+    let modelsUrl = def.modelsUrl;
+
+    if (providerId === "ollama") {
+      const configuredBase =
+        this.env.get("OLLAMA_BASE_URL") ||
+        this.env.get("OLLAMA_HOST_PC") ||
+        this.env.get("OLLAMA_HOST");
+
+      if (configuredBase) {
+        const normalizedBase = /^https?:\/\//i.test(configuredBase)
+          ? configuredBase
+          : `http://${configuredBase}`;
+
+        modelsUrl = `${normalizedBase.replace(/\/+$/, "")}/api/tags`;
+      }
+    }
+
+    if (!modelsUrl) {
       const health = downResult(providerId, this.resolver, "No local endpoint configured");
       this.cache.set(health);
       return { health, discovery: null };
     }
 
-    const res = await this.fetcher.fetch(def.modelsUrl, { timeoutMs });
+    const res = await this.fetcher.fetch(modelsUrl, { timeoutMs });
     if (!res.ok) {
       const health: ProviderHealthResult = {
         providerId,
@@ -531,6 +551,58 @@ export class ProviderDiscoveryOrchestrator {
     }
 
     const entries = parseLocalModels(res.json, providerId);
+
+    // Local model catalogs are inherently dynamic. Ollama users can pull
+    // arbitrary models that will never exist in LiTT's static MODEL_CATALOG.
+    // Materialize live /api/tags entries into the registry first, then run
+    // the normal catalog matching/verification pipeline.
+    const dynamicLocalModels: ModelDefinition[] = entries.map((entry) => {
+      const id = entry.id.toLowerCase();
+      const vision = /(^|[-_:])(vl|vision|llava|moondream)([-_:]|$)/i.test(id);
+      const coding = /coder|code|qwen|deepseek|granite|starcoder|codellama/i.test(id);
+      const reasoning = /qwen3|deepseek|reason|gpt-oss/i.test(id);
+      const tools = /qwen3|gpt-oss|llama3[.:_-]?[12]|mistral|granite|command-r|litt-coder/i.test(id);
+
+      return {
+        canonicalId: `${providerId}:${entry.id}`,
+        displayName: entry.name ?? entry.id,
+        provider: providerId,
+        providerModelId: entry.id,
+        capabilities: {
+          chat: true,
+          reasoning,
+          coding,
+          vision,
+          tools,
+          audio: false,
+          imageGeneration: false,
+          videoGeneration: false,
+          longContext: (entry.contextLength ?? 0) >= 64_000,
+          structuredOutput: tools,
+        },
+        speed: "normal",
+        intelligence: reasoning ? "balanced" : "light",
+        contextWindow: entry.contextLength ?? 32_768,
+        pricing: {
+          inputPer1M: 0,
+          outputPer1M: 0,
+          unit: "free",
+        },
+        availability: "unverified",
+        verified: false,
+        verifiedAt: null,
+        source: "unverified",
+        description: `Locally discovered ${providerId} model: ${entry.id}`,
+        recommendedFor: coding
+          ? ["local", "chat", "coding"]
+          : ["local", "chat"],
+        littTier: "local",
+        domain: "text",
+      };
+    });
+
+    registry.mergeDiscovered(dynamicLocalModels);
+
     const discovery = matchAgainstCatalog(registry, providerId, entries);
     applyDiscoveryToRegistry(registry, discovery);
 

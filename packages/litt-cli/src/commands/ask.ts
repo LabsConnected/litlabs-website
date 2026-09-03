@@ -1,18 +1,17 @@
-/**
- * litt ask — Ask LiTT a question about your project.
- *
- * Canonical path:
- *   User question
- *     → RuntimeSession
- *     → ExecutionGateway (identity, policy, approval)
- *     → runAgentLoop (model + tool calls)
- *     → CommandExecutor / ToolRegistry
- *     → actual execution
- *
- * When OPENROUTER_API_KEY is set, the full agent loop runs with tool
- * calling through the ExecutionGateway. When no key is available, falls
- * back to local heuristic analysis (no execution, no gateway).
- */
+/** litt ask — Ask LiTT a question about your project.
+
+Canonical path:
+  User question
+    → RuntimeSession
+    → ExecutionGateway (identity, policy, approval)
+    → runAgentLoop (model + tool calls)
+    → CommandExecutor / ToolRegistry
+    → actual execution
+
+When OPENROUTER_API_KEY is set, the full agent loop runs with tool
+calling through the ExecutionGateway. When no key is available, falls
+back to local heuristic analysis (no execution, no gateway).
+*/
 
 import {
   runAgentLoop,
@@ -25,7 +24,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasAnyProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { OpenRouterModelProvider, hasAnyProviderKey, hasLocalProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
@@ -55,12 +54,20 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
   header("LiTT Ask");
 
-  // If no API key, fall back to heuristic analysis
-  if (!hasAnyProviderKey()) {
-    warn("No provider API key set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set GROQ_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY for BYOK.${c.reset}\n`);
-    return heuristicAnalysis(question, project);
-  }
+  // If no API key AND not signed in via Clerk OAuth, fall back to heuristic analysis.
+    // After `litt login`, the user has a managed session — proceed to the full
+    // agent loop which uses server-side managed keys from the terminal server.
+    // If a local LLM provider (Ollama/LM Studio) is configured via OLLAMA_BASE_URL,
+    // also proceed to the full agent loop instead of heuristic analysis.
+    if (
+      !hasAnyProviderKey() &&
+      !(await getAuthSession().getAuthState()).signedIn &&
+      !hasLocalProviderKey()
+    ) {
+      warn("No provider API key set — using local heuristic analysis (no agent loop).");
+      console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set GROQ_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY for BYOK.${c.reset}\\n`);
+      return heuristicAnalysis(question, project);
+    }
 
   // Full agent path: RuntimeSession → ExecutionGateway → runAgentLoop
   // Use the detected project root (walks upward from cwd)
@@ -102,8 +109,11 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     process.env.OPENROUTER_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.DEEPSEEK_API_KEY ||
-    process.env.MISTRAL_API_KEY
-  );
+    process.env.MISTRAL_API_KEY ||
+    process.env.OLLAMA_BASE_URL ||
+    process.env.LiTT_URL ||
+    process.env.NEXT_PUBLIC_LiTT_URL
+  ) || hasLocalProviderKey();
   const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
   await modelRuntime.refresh();
   const routed = modelRuntime.route("auto", null, question);
@@ -111,7 +121,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     tools: tools.list(),
   });
 
-  console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+  console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}\n`);
 
   try {
     const result = await runAgentLoop(question, {
@@ -159,11 +169,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     });
 
     console.log(`\n\n${c.green}■${c.reset} Agent completed (${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`);
-
     if (result.termination === "max_rounds") {
       warn("Stopped at max rounds — agent may not have finished.");
     }
-
     return result.termination === "complete" ? 0 : 1;
   } catch (err) {
     fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
@@ -180,7 +188,6 @@ function heuristicAnalysis(question: string, project: ReturnType<typeof detectPr
   console.log();
 
   const lowerQ = question.toLowerCase();
-
   if (lowerQ.includes("build") || lowerQ.includes("compile")) {
     const scripts = (project.packageJson?.scripts ?? {}) as Record<string, string>;
     if (scripts.build) {
@@ -224,6 +231,7 @@ function heuristicAnalysis(question: string, project: ReturnType<typeof detectPr
 function label(text: string): string {
   return `${c.bold}${text.padEnd(12)}${c.reset}`;
 }
+
 function value(text: string, color?: string): string {
   return color ? `${color}${text}${c.reset}` : text;
 }

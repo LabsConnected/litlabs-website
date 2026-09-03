@@ -377,22 +377,34 @@ export function hasProviderKey(): boolean {
 }
 
 /**
- * Check if any provider key is configured (OpenRouter or a direct
- * native provider key). Used by the controller to decide whether
- * local BYOK is available as a fallback to the managed remote.
- */
-export function hasAnyProviderKey(): boolean {
-  return !!(
-    process.env.OPENROUTER_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GROQ_API_KEY ||
-    process.env.DEEPSEEK_API_KEY ||
-    process.env.MISTRAL_API_KEY
-  );
-}
+ /** True when any provider key is configured (OpenRouter or a direct
+  * native provider key). Used by the controller to decide whether
+  * local BYOK is available as a fallback to the managed remote.
+  */
+ export function hasAnyProviderKey(): boolean {
+   return !!(
+     process.env.OPENROUTER_API_KEY ||
+     process.env.OPENAI_API_KEY ||
+     process.env.ANTHROPIC_API_KEY ||
+     process.env.GOOGLE_API_KEY ||
+     process.env.GEMINI_API_KEY ||
+     process.env.GROQ_API_KEY ||
+     process.env.DEEPSEEK_API_KEY ||
+     process.env.MISTRAL_API_KEY
+   );
+ }
+
+ /** True when a local LLM provider (Ollama or LM Studio) is configured.
+  * Checks for OLLAMA_BASE_URL, LiTT_URL, or NEXT_PUBLIC_LiTT_URL being set.
+  */
+ export function hasLocalProviderKey(): boolean {
+   return !!(
+     process.env.OLLAMA_BASE_URL ||
+     process.env.OLLAMA_HOST_PC ||
+     process.env.LiTT_URL ||
+     process.env.NEXT_PUBLIC_LiTT_URL
+   );
+ }
 
 /** @deprecated Use hasProviderKey() instead. Kept for backward compat. */
 export const hasOpenRouterKey = hasProviderKey;
@@ -1117,6 +1129,41 @@ export function resolveProviderAdapter(
   const maxTokens = options.maxTokens;
   const idleStallMs = options.idleStallMs;
   const servedBy = routed.servedBy;
+
+  // Ollama is a credentialless local OpenAI-compatible provider.
+  // Resolve its runtime endpoint explicitly before the normal BYOK-key path.
+  if (servedBy === "ollama") {
+    const modelId = routed.providerModelId ?? routed.openRouterModelId;
+    if (!modelId) {
+      throw new Error(`No provider model id for ${routed.label} (servedBy ollama)`);
+    }
+
+    const configuredBase =
+      process.env.OLLAMA_BASE_URL ||
+      process.env.OLLAMA_HOST_PC ||
+      process.env.OLLAMA_HOST ||
+      "http://127.0.0.1:11434";
+
+    const normalizedBase = /^https?:\/\//i.test(configuredBase)
+      ? configuredBase
+      : `http://${configuredBase}`;
+
+    const base = normalizedBase
+      .replace(/\/+$/, "")
+      .replace(/\/v1$/i, "");
+
+    return new OpenAICompatibleModelProvider({
+      providerId: "ollama",
+      endpoint: `${base}/v1/chat/completions`,
+      // Ollama's OpenAI-compatible API does not require a real secret.
+      // A non-empty placeholder satisfies the shared adapter contract.
+      apiKey: "ollama",
+      model: modelId,
+      tools,
+      maxTokens,
+      idleStallMs,
+    });
+  }
 
   // 1. Native OpenAI-compatible provider with a direct key → native adapter.
   if (OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)) {

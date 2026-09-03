@@ -39,11 +39,14 @@ async function chatWithOllama(
   messages: ChatMessage[],
   model = "llama3.2:3b",
 ): Promise<string> {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const ollamaModel = process.env.OLLAMA_MODEL;
+  const explicitModel = ollamaModel ? ollamaModel.startsWith("ollama:") ? ollamaModel : "ollama:" + ollamaModel : undefined;
+  const resolvedModel = explicitModel || model;
+  const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC || "http://localhost:11434";
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, stream: false }),
+    body: JSON.stringify({ model: resolvedModel, messages, stream: false }),
   });
   if (!res.ok) throw new Error(`Ollama failed: ${res.status}`);
   const data = (await res.json()) as { message?: { content?: string } };

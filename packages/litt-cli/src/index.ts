@@ -253,7 +253,9 @@ function hasByokKey(): boolean {
     process.env.OPENROUTER_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.DEEPSEEK_API_KEY ||
-    process.env.MISTRAL_API_KEY
+    process.env.MISTRAL_API_KEY ||
+    process.env.OLLAMA_BASE_URL ||
+    process.env.OLLAMA_HOST_PC
   );
 }
 
