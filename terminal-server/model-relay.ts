@@ -102,7 +102,7 @@ export async function handleModelRequest(
         }
         if (event.type === "done") {
           streamModel = event.model;
-          streamActualModel = event.actualServedModel ?? event.model;
+          streamActualModel = event.model;
           promptTokens += event.usage.prompt_tokens ?? 0;
           completionTokens += event.usage.completion_tokens ?? 0;
           totalTokens += event.usage.total_tokens ?? 0;

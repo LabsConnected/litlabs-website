@@ -445,6 +445,7 @@ export interface StreamModelForRemoteClientOptions {
    */
   openRouterModelId?: string;
   maxTokens?: number;
+  routingMode?: string;
   signal?: AbortSignal;
 }
 
