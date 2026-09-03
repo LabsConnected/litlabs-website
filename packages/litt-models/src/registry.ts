@@ -49,6 +49,13 @@ export class ModelRegistry {
   setCredentialResolver(resolver: CredentialResolver): void {
     this.resolver = resolver;
   }
+  /**
+   * Inject a model definition into the registry (for explicit local model config).\
+   * Used by ModelRuntime when OLLAMA_MODEL + OLLAMA_BASE_URL/OLLAMA_HOST_PC are set.\
+   */
+  injectModel(canonicalId: string, modelDef: ModelDefinition): void {
+    this.models.set(canonicalId, modelDef);
+  }
 
   /** Get a model by canonical id. */
   getById(id: string): ModelDefinition | undefined {
