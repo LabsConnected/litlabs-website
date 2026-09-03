@@ -33,6 +33,20 @@ jobs:
         if: steps.check_token.outputs.has_token == 'true'
         run: npm install -g @railway/cli
 
+      - name: Set deployed commit metadata
+        if: steps.check_token.outputs.has_token == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          # railway up (CLI upload) does NOT inject Railway's predefined
+          # RAILWAY_GIT_COMMIT_SHA — that only happens with Railway's own
+          # GitHub integration. Set it explicitly from the GitHub commit SHA
+          # so /health, /health/ready, and /health/live report the real
+          # deployed commit instead of falling back to "dev".
+          railway variable set RAILWAY_GIT_COMMIT_SHA=${{ github.sha }} \
+            --service litlabs-terminal-server \
+            --skip-deploys
+
       - name: Deploy to Railway
         if: steps.check_token.outputs.has_token == 'true'
         env:
