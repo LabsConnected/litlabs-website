@@ -1,3 +1,5 @@
+import { resolveOllamaEndpoint } from "@litt/models";
+
 export type AIProvider = "ollama" | "openai" | "openrouter";
 
 export type ChatMessage = {
@@ -6,12 +8,10 @@ export type ChatMessage = {
 };
 
 export async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:3b") {
-  const baseUrl = process.env.LiTT_URL || process.env.NEXT_PUBLIC_LiTT_URL || "http://localhost:11434";
-  if (!baseUrl || baseUrl === "http://localhost:11434") {
-    throw new Error("Ollama backend is not configured. Set LiTT_URL to enable LiTT.");
-  }
+  const baseUrl = resolveOllamaEndpoint((key) => process.env[key]);
+  if (!baseUrl) throw new Error("Ollama backend is not configured. Set LITT_OLLAMA_URL or OLLAMA_HOST to enable LiTT.");
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
+  const res = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -22,7 +22,6 @@ export async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:
   });
 
   if (!res.ok) throw new Error(`Ollama failed: ${res.status}`);
-
   const data = await res.json();
   return data.message?.content ?? "";
 }
@@ -48,7 +47,6 @@ export async function chatWithOpenRouter(messages: ChatMessage[], model = "googl
   });
 
   if (!res.ok) throw new Error(`OpenRouter failed: ${res.status}`);
-
   const data = await res.json();
   return data.choices?.[0]?.message?.content ?? "";
 }

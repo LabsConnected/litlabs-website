@@ -9,9 +9,9 @@
  *     → CommandExecutor / ToolRegistry
  *     → actual execution
  *
- * When OPENROUTER_API_KEY is set, the full agent loop runs with tool
- * calling through the ExecutionGateway. When no key is available, falls
- * back to local heuristic analysis (no execution, no gateway).
+ * A configured provider or discovered local model runs the full agent
+ * loop through the ExecutionGateway. Explicit model overrides use the
+ * runtime's strict pinned route; unconfigured requests use heuristics.
  */
 
 import {
@@ -25,8 +25,9 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
-import { OpenRouterModelProvider, hasAnyProviderKey, resolveProviderAdapter } from "../lib/model-provider.js";
+import { hasAnyProviderKey, resolveProviderAdapter, providerLabel } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
+import { probeLocalLane } from "../lib/local-lane.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -55,10 +56,20 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
   header("LiTT Ask");
 
-  // If no API key, fall back to heuristic analysis
-  if (!hasAnyProviderKey()) {
-    warn("No provider API key set — using local heuristic analysis (no agent loop).");
-    console.log(`${c.dim}Run 'litt login' for managed keys (no API key needed), or set GROQ_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY for BYOK.${c.reset}\n`);
+  // A credential-less Ollama daemon is a real provider lane. Only drop to
+  // heuristic analysis when neither hosted/BYOK credentials nor a proven
+  // local model are available.
+  const providerConfigured = hasAnyProviderKey();
+  const localLane = providerConfigured ? null : await probeLocalLane();
+  const selectedModel = process.env.LITT_MODEL?.trim() || process.env.OPENROUTER_MODEL?.trim() || null;
+
+  if (!providerConfigured && !localLane?.available) {
+    if (selectedModel) {
+      fail(`Cannot serve selected model "${selectedModel}": ${localLane?.reason ?? "no provider available"}`);
+      return 1;
+    }
+    warn("No provider API key and no local model available — using local heuristic analysis (no agent loop).");
+    console.log(`${c.dim}Run 'litt login' for managed keys, configure a BYOK provider, or start Ollama with a local model.${c.reset}\n`);
     return heuristicAnalysis(question, project);
   }
 
@@ -80,40 +91,51 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     projectId: projectRoot,
   });
 
-  // Resolve auth + REMOTE state so the model knows who it's acting for
-  // and whether the REMOTE transport is available. Without this, the
-  // agent cannot truthfully answer "am I authenticated?" or "is REMOTE
-  // reachable?" — it would guess or say "unable to determine."
-  const authSession = getAuthSession();
-  const authState = await authSession.getAuthState();
-  const remoteUrl = getTerminalUrl();
-
-  // Route through the same ModelRuntime as the TUI — picks the best
-  // available provider (OpenAI direct, OpenRouter, Groq, etc.) and passes
-  // native tool schemas so the model can call tools.
-  // In remote mode (signed in), the server holds all provider keys.
-  // BUT: when a local BYOK key is present, use local mode so the router
-  // only selects models the CLI can actually serve locally. This prevents
-  // the router from selecting OpenAI models (LiTT defaults) when only
-  // Groq is configured locally.
-  const hasLocalKey = !!(
-    process.env.GROQ_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    process.env.OPENROUTER_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.DEEPSEEK_API_KEY ||
-    process.env.MISTRAL_API_KEY
-  );
-  const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
-  await modelRuntime.refresh();
-  const routed = modelRuntime.route("auto", null, question);
-  const model = resolveProviderAdapter(routed, {
-    tools: tools.list(),
-  });
-
-  console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
-
   try {
+    // Resolve auth + REMOTE state so the model knows who it's acting for
+    // and whether the REMOTE transport is available. Without this, the
+    // agent cannot truthfully answer "am I authenticated?" or "is REMOTE
+    // reachable?" — it would guess or say "unable to determine."
+    const authSession = getAuthSession();
+    const authState = await authSession.getAuthState();
+    const remoteUrl = getTerminalUrl();
+
+    // Route through the same ModelRuntime as the TUI — picks the best
+    // available provider (OpenAI direct, OpenRouter, Groq, etc.) and passes
+    // native tool schemas so the model can call tools.
+    // In remote mode (signed in), the server holds all provider keys.
+    // BUT: when a local BYOK key is present, use local mode so the router
+    // only selects models the CLI can actually serve locally. This prevents
+    // the router from selecting OpenAI models (LiTT defaults) when only
+    // Groq is configured locally.
+    const hasLocalKey = !!(
+      process.env.GROQ_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.MISTRAL_API_KEY
+    );
+    const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
+    await modelRuntime.refresh();
+    // Resolve native/provider IDs to catalog IDs, then let the existing
+    // strict route validate availability. Never replace a user's model.
+    const selectedId = selectedModel && (
+      modelRuntime.registry.getById(selectedModel)?.canonicalId ??
+      modelRuntime.registry.getAll().find((entry) =>
+        entry.providerModelId === selectedModel || entry.openRouterModelId === selectedModel,
+      )?.canonicalId ?? selectedModel
+    );
+    const routingMode = selectedId ? "fixed" : "auto";
+    const routed = modelRuntime.route(routingMode, selectedId, question);
+    const model = resolveProviderAdapter(routed, {
+      tools: tools.list(),
+      routingMode,
+    });
+
+    console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
+    console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+
     const result = await runAgentLoop(question, {
       model,
       tools,
@@ -159,6 +181,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     });
 
     console.log(`\n\n${c.green}■${c.reset} Agent completed (${result.rounds} rounds, ${result.toolCalls.length} tool calls, ${result.durationMs}ms)`);
+    if (model.activeModel) {
+      console.log(`${c.dim}Served by: ${providerLabel(model.providerId)} | Model: ${model.activeModel}${c.reset}`);
+    }
 
     if (result.termination === "max_rounds") {
       warn("Stopped at max rounds — agent may not have finished.");

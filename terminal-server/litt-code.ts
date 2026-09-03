@@ -1,3 +1,5 @@
+import { resolveOllamaEndpoint } from "@litt/models";
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -145,7 +147,7 @@ async function chatWithOllama(
   messages: ChatMessage[],
   model = DEFAULT_OLLAMA_MODEL,
 ): Promise<LiTTResult> {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const baseUrl = resolveOllamaEndpoint((key) => process.env[key]);
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -201,7 +203,7 @@ async function streamChatWithOllama(
   model: string,
   profile: ModelProfile,
 ): Promise<LiTTResult> {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const baseUrl = resolveOllamaEndpoint((key) => process.env[key]);
   const t0 = Date.now();
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
@@ -1039,7 +1041,7 @@ export async function askLiTTCode(prompt: string): Promise<string> {
 export async function health(): Promise<number> {
   // Try Ollama first (short timeout — it may not be running).
   try {
-    const baseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
+    const baseUrl = resolveOllamaEndpoint((key) => process.env[key]);
     const ctrl = AbortSignal.timeout(2000);
     const res = await fetch(`${baseUrl}/api/tags`, { signal: ctrl });
     if (res.ok) return Date.now() - 0;

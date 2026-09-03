@@ -179,10 +179,10 @@ async function probeEventLoop(): Promise<Omit<ProbeResult, "name" | "durationMs"
 /** Probe 6: Provider configuration — are LLM API keys set? */
 async function probeProviderConfig(): Promise<Omit<ProbeResult, "name" | "durationMs">> {
   const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
-  const hasOllama = !!process.env.OLLAMA_BASE_URL || true; // Ollama defaults to localhost
+  const hasOllama = !!resolveOllamaEndpoint((key) => process.env[key]); // Uses shared canonical resolver
   const providers: string[] = [];
   if (hasOpenRouter) providers.push("OpenRouter");
-  if (hasOllama) providers.push("Ollama(default)");
+  if (hasOllama) providers.push("Ollama");
 
   if (providers.length === 0) {
     return { status: "FAIL", reason: "No LLM provider configured" };

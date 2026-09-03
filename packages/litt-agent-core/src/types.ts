@@ -398,7 +398,14 @@ export type ModelStreamEvent =
 
 export interface ModelResult {
   content: string;
+  /** Configured/authoritative model — the model the caller asked for. For
+   * FIXED/pinned routing this is the user's pinned model and is never
+   * overwritten by the provider-reported response model. */
   model: string;
+  /** Provider-reported model that actually served the request — may differ
+   * from `model` when the provider routed/substituted. null/undefined when
+   * it matches `model` or when no provider metadata was returned. */
+  actualServedModel?: string;
   provider: string;
   usage: { total_tokens: number };
   timing: { ttftMs: number; generationMs: number; totalMs: number };

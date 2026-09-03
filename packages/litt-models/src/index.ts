@@ -36,6 +36,19 @@ export type { ProviderDefinition } from "./providers";
 
 export { MODEL_CATALOG, LITT_DEFAULTS } from "./catalog";
 
+// ─── Ollama endpoint resolver (ONE canonical source of truth) ──────
+export type { EnvGetter } from "./ollama-endpoint";
+export {
+  DEFAULT_OLLAMA_URL,
+  OLLAMA_ENDPOINT_ENV_VARS,
+  normalizeOllamaEndpoint,
+  resolveOllamaEndpoint,
+  resolveOllamaTagsUrl,
+  resolveOllamaChatUrl,
+  resolveOllamaOpenAiChatUrl,
+  ollamaEndpointSource,
+} from "./ollama-endpoint";
+
 export { ModelRegistry, shouldFallback } from "./registry";
 
 export {

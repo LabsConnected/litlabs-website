@@ -20,6 +20,9 @@
     "test": "node --test --import tsx src/__tests__/*.test.ts",
     "prepublishOnly": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@litt/models": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5",

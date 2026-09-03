@@ -27,6 +27,13 @@
  * loop (unchanged) dispatches those through the CLI's own local
  * ExecutionGateway against the user's real local project, exactly as
  * in local-provider mode.
+ *
+ * PINNING CONTRACT:
+ *   When routingMode === "fixed" (user pin), the configured model is a
+ *   contract. The server must serve that exact model. The RemoteModelProvider
+ *   preserves `this._model` as `resolvedModel` and does NOT overwrite it
+ *   from the server-reported `done` event's model field. The actual
+ *   served model is reported for audit via `actualServedModel`.
  */
 
 import type {
@@ -58,6 +65,16 @@ export interface RemoteModelProviderOptions {
   profile?: ModelProfile;
   maxTokens?: number;
   tools?: ToolDefinition[];
+  /**
+   * Routing mode from the CLI — preserved through the server round-trip
+   * so the server can enforce the pinned-model contract.
+   *   "fixed" — user-pinned: server must serve `model` exactly, no
+   *             silent substitution. The CLI also refuses to overwrite
+   *             `resolvedModel` from the server-reported model.
+   *   "auto"  — automatic routing: server failover/fallback behavior
+   *             preserved; server-reported model is honored.
+   */
+  routingMode?: "auto" | "fixed";
 }
 
 /**
@@ -89,6 +106,7 @@ export class RemoteModelProvider implements ModelProvider {
   private readonly _maxTokens: number | undefined;
   private readonly _tools: NativeToolSchema[] | null;
   private readonly _toolNameMap: OpenAiToolNameMap | null;
+  private readonly _routingMode: "auto" | "fixed";
   private _activeModel: string | null = null;
   /** The requestId of the currently in-flight (or most recent) stream() call. */
   private _currentRequestId: string | null = null;
@@ -100,6 +118,7 @@ export class RemoteModelProvider implements ModelProvider {
     this._openRouterModelId = options.openRouterModelId;
     this._profile = options.profile ?? "smart";
     this._maxTokens = options.maxTokens ?? 3000;
+    this._routingMode = options.routingMode ?? "auto";
     // Initial providerId is the CLI's routing hint — updated to the
     // server's truthful report once the meta event arrives.
     this.providerId = options.providerHint ?? "openrouter";
@@ -125,6 +144,10 @@ export class RemoteModelProvider implements ModelProvider {
     return this._profile;
   }
 
+  get isPinned(): boolean {
+    return this._routingMode === "fixed";
+  }
+
   async stream(
     messages: ChatMessage[],
     emit: (event: ModelStreamEvent) => void,
@@ -134,8 +157,13 @@ export class RemoteModelProvider implements ModelProvider {
     const remoteMessages: RemoteChatMessage[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
     let content = "";
+    // For PINNED routing, the configured model is the contract — never
+    // overwritten by the server-reported model. For AUTO routing, the
+    // server-reported model is the truth.
+    const isPinned = this._routingMode === "fixed";
     let resolvedModel = this._model;
     let resolvedProvider = this.providerId;
+    let actualServedModel: string | undefined;
     const nativeToolCalls: Array<{ name: string; args: string }> = [];
 
     const handleEvent = (event: RemoteModelStreamEvent): void => {
@@ -156,8 +184,16 @@ export class RemoteModelProvider implements ModelProvider {
           if (event.argsChunk) nativeToolCalls[event.index].args += event.argsChunk;
           break;
         case "done":
-          resolvedModel = event.model;
-          emit({ type: "done", model: event.model, usage: { total_tokens: event.usage.total_tokens }, timing: event.timing });
+          actualServedModel = event.actualServedModel;
+          if (isPinned) {
+            // PINNED: preserve the configured model as the contract.
+            // The actual served model is recorded for audit only.
+            // resolvedModel stays = this._model.
+          } else {
+            // AUTO: adopt the server-reported model as truth.
+            resolvedModel = event.model;
+          }
+          emit({ type: "done", model: resolvedModel, usage: { total_tokens: event.usage.total_tokens }, timing: event.timing });
           break;
         case "error":
           // Surfaced by the streamModel() promise rejection — nothing to
@@ -179,6 +215,7 @@ export class RemoteModelProvider implements ModelProvider {
           maxTokens: this._maxTokens,
           providerHint: this._providerHint,
           openRouterModelId: this._openRouterModelId,
+          routingMode: this._routingMode,
         },
       );
     } catch (err) {

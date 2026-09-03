@@ -25,6 +25,10 @@
 
 import { getProvider, type ProviderDefinition } from "./providers.js";
 import type { CredentialResolver, ModelDefinition, ProviderId } from "./types.js";
+import { resolveOllamaEndpoint, resolveOllamaTagsUrl } from "./ollama-endpoint.js";
+
+/** Normal context window for local models (Ollama default). */
+const LOCAL_NORMAL_CONTEXT = 16_384;
 
 // ─── Env accessor (injected, never reads process.env) ──────────────
 
@@ -63,7 +67,7 @@ export interface Fetcher {
    * Fetch a URL with an optional Authorization header and timeout.
    * Implementations must not throw on network errors — return a DOWN response.
    */
-  fetch(url: string, options: { headers?: Record<string, string>; timeoutMs?: number }): Promise<FetchResponse>;
+  fetch(url: string, options: { headers?: Record<string, string>; timeoutMs?: number; method?: "GET" | "POST"; body?: string }): Promise<FetchResponse>;
 }
 
 /**
@@ -77,7 +81,7 @@ export function createDefaultFetcher(): Fetcher {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 5000);
         const headers: Record<string, string> = { ...(options.headers ?? {}) };
-        const res = await fetch(url, { headers, signal: controller.signal });
+        const res = await fetch(url, { headers, signal: controller.signal, method: options.method, body: options.body });
         clearTimeout(timeout);
         const latencyMs = Date.now() - start;
         let json: unknown | null = null;
@@ -487,13 +491,23 @@ export class ProviderDiscoveryOrchestrator {
     timeoutMs: number,
     skipDiscovery: boolean,
   ): Promise<{ health: ProviderHealthResult; discovery: DiscoveryResult | null }> {
-    if (!def.modelsUrl) {
+    // Resolve the endpoint URL. For providers with dynamicEndpoint (Ollama),
+    // use the shared resolver so LITT_OLLAMA_URL / OLLAMA_BASE_URL / OLLAMA_HOST
+    // are honoured. For static providers (LM Studio), use the definition URL.
+    let modelsUrl: string | undefined;
+    if (def.dynamicEndpoint === "ollama") {
+      modelsUrl = resolveOllamaTagsUrl(this.env.get.bind(this.env));
+    } else {
+      modelsUrl = def.modelsUrl;
+    }
+
+    if (!modelsUrl) {
       const health = downResult(providerId, this.resolver, "No local endpoint configured");
       this.cache.set(health);
       return { health, discovery: null };
     }
 
-    const res = await this.fetcher.fetch(def.modelsUrl, { timeoutMs });
+    const res = await this.fetcher.fetch(modelsUrl, { timeoutMs });
     if (!res.ok) {
       const health: ProviderHealthResult = {
         providerId,
@@ -531,6 +545,23 @@ export class ProviderDiscoveryOrchestrator {
     }
 
     const entries = parseLocalModels(res.json, providerId);
+    if (providerId === "ollama") {
+      // Tags prove installation, not capabilities. Inspect custom models
+      // before exposing them to routing; keep curated catalog metadata.
+      const known = new Set(registry.getByProvider(providerId).map((model) => model.providerModelId));
+      const unknown = [...new Set(entries.map((entry) => entry.id))].filter((id) => !known.has(id));
+      const showUrl = `${resolveOllamaEndpoint(this.env.get.bind(this.env))}/api/show`;
+      const discovered = await Promise.all(unknown.map(async (id) => {
+        const details = await this.fetcher.fetch(showUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: id }),
+          timeoutMs,
+        });
+        return details.ok ? discoveredOllamaModel(id, details.json) : null;
+      }));
+      registry.mergeDiscovered(discovered.filter((model): model is ModelDefinition => model !== null));
+    }
     const discovery = matchAgainstCatalog(registry, providerId, entries);
     applyDiscoveryToRegistry(registry, discovery);
 
@@ -617,6 +648,36 @@ export function parseLocalModels(body: unknown, _providerId: ProviderId): Discov
     entries.push({ id: name, name });
   }
   return entries;
+}
+
+function discoveredOllamaModel(id: string, body: unknown): ModelDefinition | null {
+  if (!id.trim() || !body || typeof body !== "object") return null;
+  const details = body as { capabilities?: unknown; model_info?: unknown };
+  if (!Array.isArray(details.capabilities) || !details.capabilities.includes("completion")) return null;
+  const capabilities = new Set(details.capabilities);
+  const modelInfo = details.model_info && typeof details.model_info === "object" ? details.model_info : {};
+  const reportedContext = Object.entries(modelInfo).find(([key]) => key.endsWith(".context_length"))?.[1];
+  const contextWindow = typeof reportedContext === "number" && Number.isFinite(reportedContext) && reportedContext > 0
+    ? Math.min(reportedContext, LOCAL_NORMAL_CONTEXT)
+    : LOCAL_NORMAL_CONTEXT;
+  return {
+    canonicalId: `ollama:${id}`,
+    displayName: id,
+    provider: "ollama",
+    providerModelId: id,
+    capabilities: {
+      chat: true, reasoning: capabilities.has("thinking"), coding: false,
+      vision: capabilities.has("vision"), tools: capabilities.has("tools"),
+      audio: false, imageGeneration: false, videoGeneration: false,
+      longContext: false, structuredOutput: false,
+    },
+    speed: "normal", intelligence: "light", contextWindow,
+    availability: "online", verified: true,
+    verifiedAt: new Date().toISOString(), source: "provider-catalog",
+    description: "Installed Ollama model; capabilities verified through /api/show.",
+    recommendedFor: ["local"], domain: "text", littTier: "local",
+    maxOutputTokens: 2048,
+  };
 }
 
 function numOrUndef(v: unknown): number | undefined {
