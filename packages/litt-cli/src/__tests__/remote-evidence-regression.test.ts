@@ -339,6 +339,9 @@ describe("REMOTE inspection — deterministic evidence acquisition", () => {
   it("reports the real repository state, never a fabricated one", async () => {
     // The evidence the runtime collects must be the actual repository —
     // the same answer `git branch --show-current` gives.
+    // On GitHub Actions, the checkout is in detached HEAD (no branch name),
+    // so branch may be null. The key assertion is that the evidence is real:
+    // root and name must be non-empty strings, and isGitRepo must be true.
     const { provider } = makeRemoteProvider([{ prose: "Probably clean." }]);
 
     const result = await runAgentLoop(INSPECT_PROMPT, {
@@ -351,8 +354,16 @@ describe("REMOTE inspection — deterministic evidence acquisition", () => {
 
     const status = result.toolCalls.find((tc) => tc.toolId === PROJECT_EVIDENCE_TOOL_ID);
     expect(status).toBeDefined();
-    const data = status!.result.data as { branch?: string };
-    expect(typeof data.branch).toBe("string");
-    expect(data.branch!.length).toBeGreaterThan(0);
+    const data = status!.result.data as { branch?: string | null; root?: string; name?: string; isGitRepo?: boolean };
+    // branch is null in detached HEAD (e.g. GitHub Actions PR checkout)
+    expect(data.isGitRepo).toBe(true);
+    expect(typeof data.root).toBe("string");
+    expect(data.root!.length).toBeGreaterThan(0);
+    expect(typeof data.name).toBe("string");
+    expect(data.name!.length).toBeGreaterThan(0);
+    if (data.branch !== null) {
+      expect(typeof data.branch).toBe("string");
+      expect(data.branch!.length).toBeGreaterThan(0);
+    }
   });
 });
