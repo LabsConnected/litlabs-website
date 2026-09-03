@@ -42,7 +42,7 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
-import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { hasLocalModelProvider, hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import type { ModelChoice } from "../lib/model-routing.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -130,7 +130,7 @@ export function CockpitApp({
   // whether the model path is usable — "remote" never needs a local key
   // (see lib/execution-target.ts). hasOpenRouterKey() only matters in
   // "local" (developer/BYOK) mode.
-  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey();
+  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey() || hasLocalModelProvider();
   const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   // Source truth: show the REAL served provider (from the last run's
   // adapter) AND where it executed — never let "REMOTE" in the header
@@ -141,7 +141,9 @@ export function CockpitApp({
     ? `${providerLabel(store.state.activeProvider)} • ${executionSuffix}`
     : store.state.executionTarget === "remote"
       ? "REMOTE (server-executed)"
-      : modelReady ? "OpenRouter • BYOK ✓" : "No provider";
+      : modelReady && !hasLocalModelProvider() ? "OpenRouter • BYOK ✓"
+    : modelReady && hasLocalModelProvider() ? "Local Ollama ✓"
+    : "No provider";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
   const overlay = store.state.overlay;
