@@ -113,7 +113,7 @@ export class ModelRuntime {
     // Cache explicit local model config: when OLLAMA_MODEL is set with an Ollama endpoint,
     // treat it as a routable local model without requiring discovery.
     const ollamaModel = envAccessor.get("OLLAMA_MODEL");
-    const ollamaUrl = envAccessor.get("OLLAMA_BASE_URL") || envAccessor.get("OLLAMA_HOST_PC");
+    const ollamaUrl = envAccessor.get("OLLAMA_BASE_URL") || envAccessor.get("OLLAMA_HOST_PC") || envAccessor.get("OLLAMA_HOST");
     if (ollamaModel && ollamaUrl) {
       this._explicitLocalModel = { provider: "ollama", modelId: ollamaModel };
     }
