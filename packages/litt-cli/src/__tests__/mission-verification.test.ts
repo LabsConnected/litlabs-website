@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { RuntimeStore } from "@litt/agent-core";
+import {
+  RuntimeStore,
+  normalizeSemanticPlan,
+} from "@litt/agent-core";
 import type { VerificationGateLike, VerificationResult } from "@litt/agent-core";
 import {
   MissionVerificationGate,
@@ -793,7 +796,6 @@ describe("CASE D: WRONG EVIDENCE TYPE", () => {
 // ── CASE E: MODEL PLAN NORMALIZATION
 describe("CASE E: MODEL PLAN NORMALIZATION", () => {
   it("E. normalizeSemanticPlan infers requiredEvidence from titles", () => {
-    const { normalizeSemanticPlan } = require("@litt/agent-core");
 
     // Test "Run tests" step
     const steps1 = normalizeSemanticPlan([
