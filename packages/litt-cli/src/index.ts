@@ -27,6 +27,13 @@
  *   litt inspect    — Deep repo inspection (framework, scripts, deploy)
  *   litt ask        — Ask LiTT a question about your project
  *   litt explain    — Pipe errors/diffs and get actionable advice
+ *   litt production doctor  — Verify all production gates
+ *   litt production finish  — Orchestrate remaining production gates
+ *   litt stripe doctor      — Stripe-specific diagnostics
+ *   litt stripe repair      — Fix Stripe configuration issues
+ *   litt stripe sandbox     — Real Stripe TEST-mode E2E
+ *   litt deploy verify      — Watch deploy + verify production health
+ *   litt studio acceptance  — Pre-flight + owner browser acceptance
  *
  * Options:
  *   --remote       Dispatch through terminal-server's canonical CommandRouter
@@ -52,6 +59,13 @@ import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
 import { workspaceCommand } from "./commands/workspace.js";
+import { productionDoctorCommand } from "./commands/production-doctor.js";
+import { stripeDoctorCommand } from "./commands/stripe-doctor.js";
+import { stripeRepairCommand } from "./commands/stripe-repair.js";
+import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
+import { deployVerifyCommand } from "./commands/deploy-verify.js";
+import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
+import { productionFinishCommand } from "./commands/production-finish.js";
 import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
 import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
 import { executeCommand } from "./lib/command-execution.js";
@@ -127,6 +141,14 @@ const COMMANDS: Record<string, CommandHandler> = {
   logout: logoutCommand,
   whoami: whoamiCommand,
   workspace: workspaceCommand,
+  // Production operator commands
+  "production-doctor": productionDoctorCommand,
+  "production-finish": productionFinishCommand,
+  "stripe-doctor": stripeDoctorCommand,
+  "stripe-repair": stripeRepairCommand,
+  "stripe-sandbox": stripeSandboxCommand,
+  "deploy-verify": deployVerifyCommand,
+  "studio-acceptance": studioAcceptanceCommand,
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -155,7 +177,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
