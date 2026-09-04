@@ -1313,7 +1313,20 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // submission here; internal recursive calls (submitRef.current from
     // /inspect, /fix) are unaffected — they fire before isProcessing is
     // ever set for their own call chain.
-    if (store.state.isProcessing) return;
+    if (store.state.isProcessing) {
+      store.actions.addActivity({
+        id: `act_${Date.now()}_submit_busy`,
+        ts: Date.now(),
+        type: "info",
+        tag: "SUBMIT",
+        text: "Submit ignored: LiTT is still processing the previous request.",
+      });
+      return;
+    }
+
+    // Clear the composer only AFTER this submission is accepted.
+    // A rejected/re-entrant submit must never eat the user's draft.
+    store.actions.setComposerValue("");
     store.actions.addCommand(input);
     // A new turn returns the transcript to LIVE mode (auto-follow).
     store.actions.resetTranscriptScroll();

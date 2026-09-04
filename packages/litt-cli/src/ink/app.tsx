@@ -473,12 +473,9 @@ export function CockpitApp({
               // throws synchronously (before adding any chat message),
               // the draft is restored so the user doesn't lose their text.
               const draft = store.state.composerValue;
-              store.actions.setComposerValue("");
-              try {
-                submit(v);
-              } catch (err) {
-                // Synchronous throw before any transcript mutation —
-                // restore the draft and surface the error.
+              void submit(v).catch((err) => {
+                // submit() is async. Handle rejected promises explicitly;
+                // a synchronous try/catch cannot catch errors from it.
                 store.actions.setComposerValue(draft);
                 store.actions.addActivity({
                   id: `act_${Date.now()}_submit_err`,
@@ -487,7 +484,7 @@ export function CockpitApp({
                   tag: "SUBMIT",
                   text: `Submit failed: ${err instanceof Error ? err.message : String(err)}`,
                 });
-              }
+              });
             }}
             onNavigateHistory={store.actions.navigateHistory}
             onOpenPalette={controller.openPalette}
