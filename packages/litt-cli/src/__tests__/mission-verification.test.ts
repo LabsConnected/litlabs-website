@@ -46,7 +46,9 @@ describe("createMissionEvidenceTracker", () => {
   const MUTATION = new Set(["project.edit_file", "project.write_file", "project.run"]);
 
   it("starts read-only with no evidence", () => {
-    const tracker = createMissionEvidenceTracker(MUTATION);
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
     expect(tracker.isReadOnly()).toBe(true);
     expect(tracker.hasSuccessfulEvidence()).toBe(false);
     expect(tracker.summary()).toContain("no tool evidence");
@@ -154,6 +156,7 @@ describe("MissionVerificationGate", () => {
       store: new RuntimeStore(() => {}),
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -183,15 +186,27 @@ describe("MissionVerificationGate", () => {
     const mission0 = store.getMission();
     await store.setCurrentStep(mission0!.steps[0].id); // planning → working
 
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    tracker.recordToolCall("project.status");
+    tracker.recordToolResult(
+      "project.status",
+      true,
+      "project.status: ok",
+      mission0!.steps[0].id,
+    );
+
     const fullGate = makeFullGate();
     const gate = new MissionVerificationGate({
       fullGate,
       store,
-      isReadOnly: () => true,
-      hasSuccessfulEvidence: () => true,
-      evidenceSummary: () => "project.status: ok",
-      hasFailedEvidence: () => false,
-      failedSummary: () => "",
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
+      evidenceSummary: tracker.summary,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      failedSummary: tracker.failedSummary,
     });
     const verification = await gate.verify();
     expect(verification.proven).toBe(true);
@@ -496,6 +511,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate,
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -522,6 +538,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate,
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -544,6 +561,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate,
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -562,6 +580,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate,
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -589,6 +608,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate,
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -617,6 +637,7 @@ describe("verification scope — mission outcomes", () => {
       fullGate: makeFullGate(),
       isReadOnly: tracker.isReadOnly,
       hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
       hasFailedEvidence: tracker.hasFailedEvidence,
       evidenceSummary: tracker.summary,
       failedSummary: tracker.failedSummary,
@@ -641,5 +662,209 @@ describe("verification scope — mission outcomes", () => {
     // Already mutated — no repeat notification.
     tracker.recordToolCall("project.write_file", { path: "b.ts" });
     expect(invalidations).toBe(1);
+  });
+});
+
+// ── CASE A: MUST FAIL VERIFICATION
+describe("CASE A: MUST FAIL VERIFICATION", () => {
+  it("A. Run tests with empty requiredEvidence must NOT pass", async () => {
+    const fullGate = makeFullGate();
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    // Record branch evidence (not test_result)
+    tracker.recordToolCall("project.status");
+    tracker.recordToolResult("project.status", true, "on main, tree clean");
+
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      stepRequiredEvidence: () => ["test_result"],
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    // Should NOT be proven because test_result evidence is missing
+    expect(result.proven).toBe(false);
+    expect(result.message).toContain("Missing required evidence");
+    expect(fullGate.called()).toBe(0);
+  });
+});
+
+// ── CASE B: MUST PASS
+describe("CASE B: MUST PASS", () => {
+  it("B. Run tests with test_result evidence should pass", async () => {
+    const fullGate = makeFullGate();
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    // Record test_result evidence
+    tracker.recordToolCall("project.test");
+    tracker.recordToolResult("project.test", true, "All tests passed");
+
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      stepRequiredEvidence: () => ["test_result"],
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    // Should be proven because test_result evidence is present
+    expect(result.proven).toBe(true);
+    expect(fullGate.called()).toBe(0);
+  });
+});
+
+// ── CASE C: INSPECTION STILL WORKS
+describe("CASE C: INSPECTION STILL WORKS", () => {
+  it("C. Branch inspection should pass without test evidence", async () => {
+    const fullGate = makeFullGate();
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    // Record branch inspection evidence
+    tracker.recordToolCall("project.status");
+    tracker.recordToolResult("project.status", true, "on main, tree clean");
+
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      stepRequiredEvidence: () => [],  // No required evidence for inspection
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    // Branch inspection should still pass
+    expect(result.proven).toBe(true);
+    expect(fullGate.called()).toBe(0);
+  });
+});
+
+// ── CASE D: WRONG EVIDENCE TYPE
+describe("CASE D: WRONG EVIDENCE TYPE", () => {
+  it("D. Typecheck with test_result evidence must NOT pass", async () => {
+    const fullGate = makeFullGate();
+    const tracker = createMissionEvidenceTracker(
+      new Set(["project.edit_file", "project.write_file", "project.run"]),
+    );
+    // Record test_result evidence (wrong type for typecheck step)
+    tracker.recordToolCall("project.test");
+    tracker.recordToolResult("project.test", true, "All tests passed");
+
+    const gate = new MissionVerificationGate({
+      fullGate,
+      isReadOnly: tracker.isReadOnly,
+      hasSuccessfulEvidence: tracker.hasSuccessfulEvidence,
+      hasSuccessfulEvidenceType: tracker.hasSuccessfulEvidenceType,
+      hasFailedEvidence: tracker.hasFailedEvidence,
+      evidenceSummary: tracker.summary,
+      failedSummary: tracker.failedSummary,
+      stepRequiredEvidence: () => ["typecheck_result"],  // typecheck requires typecheck_result
+      hasFailedHealthCheck: tracker.hasFailedHealthCheck,
+      healthSummary: tracker.healthSummary,
+    });
+
+    const result = await gate.verify();
+    // Should NOT be proven because typecheck_result is missing
+    expect(result.proven).toBe(false);
+    expect(result.message).toContain("Missing required evidence");
+  });
+});
+
+// ── CASE E: MODEL PLAN NORMALIZATION
+describe("CASE E: MODEL PLAN NORMALIZATION", () => {
+  it("E. normalizeSemanticPlan infers requiredEvidence from titles", () => {
+    const { normalizeSemanticPlan } = require("@litt/agent-core");
+
+    // Test "Run tests" step
+    const steps1 = normalizeSemanticPlan([
+      { title: "Run tests", description: "Execute the test suite" }
+    ]);
+    expect(steps1[0].requiredEvidence).toEqual(["test_result"]);
+
+    // Test "Typecheck" step
+    const steps2 = normalizeSemanticPlan([
+      { title: "Typecheck", description: "Run the type checker" }
+    ]);
+    expect(steps2[0].requiredEvidence).toEqual(["typecheck_result"]);
+
+    // Test "Production build" step
+    const steps3 = normalizeSemanticPlan([
+      { title: "Production build", description: "Run the build" }
+    ]);
+    expect(steps3[0].requiredEvidence).toEqual(["build_result"]);
+
+    // Test that explicit requiredEvidence is preserved
+    const steps4 = normalizeSemanticPlan([
+      { title: "Custom step", requiredEvidence: ["diff"], description: "" }
+    ]);
+    expect(steps4[0].requiredEvidence).toEqual(["diff"]);
+  });
+});
+
+describe("inspection completion evidence isolation", () => {
+  it("does not auto-pass a later step with its own requiredEvidence", async () => {
+    const store = new RuntimeStore(() => {});
+
+    await store.createMission({
+      goal: "Inspect and then run tests",
+      mode: "act",
+      projectRoot: process.cwd(),
+      sessionId: null,
+      workspaceId: null,
+      metadata: {},
+    });
+
+    await store.addMissionStep({
+      title: "Inspect repository",
+      requiredEvidence: ["repository_status"],
+    });
+
+    await store.addMissionStep({
+      title: "Report inspection",
+      requiredEvidence: [],
+    });
+
+    await store.addMissionStep({
+      title: "Run tests",
+      requiredEvidence: ["test_result"],
+    });
+
+    const mission = store.getMission()!;
+    await store.setCurrentStep(mission.steps[0].id);
+
+    await markInspectionStepsComplete(
+      store,
+      "Repository inspection verified",
+    );
+
+    const steps = store.getMission()!.steps;
+
+    expect(steps[0].status).toBe("passed");
+    expect(steps[1].status).toBe("passed");
+
+    // Critical invariant: inspection evidence cannot satisfy or bypass
+    // a later test contract.
+    expect(steps[2].status).toBe("pending");
+    expect(steps[2].requiredEvidence).toEqual(["test_result"]);
   });
 });

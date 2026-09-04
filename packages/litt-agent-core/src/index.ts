@@ -217,6 +217,7 @@ export type {
 export {
   planMission,
   parseSemanticPlan,
+  normalizeSemanticPlan,
   fallbackPlan,
   classifyGoalDomain,
   isMutationStep,
