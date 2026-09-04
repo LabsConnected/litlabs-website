@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
+import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
 import { Terminal, Loader2 } from "lucide-react";
 
@@ -138,6 +139,9 @@ function StudioHub() {
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
       router.replace("/sign-in?redirect_url=%2Fstudio");
+    }
+    if (isLoaded && isSignedIn) {
+      track("studio_opened");
     }
   }, [isLoaded, isSignedIn, router]);
 

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { track } from "@/lib/analytics";
 import {
   PLANS,
   formatPrice,
@@ -240,13 +241,19 @@ export default function PricingClient({ founderAvailable }: { founderAvailable: 
   const [loading, setLoading] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    track("pricing_viewed");
+  }, []);
+
   const handleCheckout = useCallback(
     async (plan: PlanDefinition) => {
       if (plan.billingType === "free") return;
       if (!isSignedIn) {
+        track("signup_started", { source: "pricing", plan: plan.id });
         window.location.href = "/sign-in?redirect=/pricing";
         return;
       }
+      track("checkout_started", { plan: plan.id });
       setLoading(plan.id);
       setError(null);
       try {
