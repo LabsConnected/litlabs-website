@@ -14,8 +14,13 @@
  * Then present the owner acceptance checklist.
  */
 
-import { ok, fail, warn, header, c, exec } from "../lib/utils.js";
-import { checkProductionHealth, checkProductionSHA, PRODUCTION_DOMAIN } from "../lib/production-checks.js";
+import { ok, fail, warn, header, c } from "../lib/utils.js";
+import {
+  checkProductionHealth,
+  checkProductionSHA,
+  checkTerminalService,
+  PRODUCTION_DOMAIN,
+} from "../lib/production-checks.js";
 
 const ACCEPTANCE_STEPS = [
   "Sign in",
@@ -117,18 +122,6 @@ async function checkRoute(path: string): Promise<{ status: string; label: string
   } catch (err) {
     return { status: "fail", label: path, detail: err instanceof Error ? err.message : "unreachable" };
   }
-}
-
-function checkTerminalService(): { status: string; label: string; detail?: string } {
-  // Check the terminal server env var
-  const r = exec(`railway variables --service "@litlabs/litt-shell" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
-    return { status: "fail", label: "Terminal service", detail: "Cannot read Railway variables" };
-  }
-  if (r.stdout.includes("NEXT_PUBLIC_TERMINAL_HTTP_URL=") && r.stdout.includes("NEXT_PUBLIC_TERMINAL_WS_URL=")) {
-    return { status: "pass", label: "Terminal service", detail: "URLs configured" };
-  }
-  return { status: "fail", label: "Terminal service", detail: "Terminal URLs not configured" };
 }
 
 function printResult(result: { status: string; label: string; detail?: string }): void {
