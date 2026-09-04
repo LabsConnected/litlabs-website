@@ -35,7 +35,7 @@ import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
 import { normalizeKey, type KeyInfo } from "../input-keys.js";
 import {
-  applyKeyEvent, createComposerState, graphemeToCodeUnit,
+  applyKeyEvent, createComposerState, graphemeToCodeUnit, splitGraphemes,
   type ComposerState,
 } from "../composer-editor.js";
 import { COLORS } from "../colors.js";
@@ -110,9 +110,10 @@ export function Composer({
   const inputLocked = isBusyState(runtime) || disabled;
 
   const [caret, setCaret] = React.useState(() => {
-    // Initialize caret in grapheme coordinates
-    const graphemes = value.split(""); // fallback — fine for initial
-    return graphemes.length;
+    // Initialize caret in grapheme coordinates. A code-unit split would
+    // overshoot on a restored draft containing emoji, putting the caret
+    // past the end before the first keystroke.
+    return splitGraphemes(value).length;
   });
 
   // ─── Focus ownership — ONE authority (focus-state.ts) ────────────
@@ -129,9 +130,34 @@ export function Composer({
   const cursor = useCursorBlink(550, 700, focus.blinkEnabled, focusEpoch ?? null);
 
   const valueRef = useRef(value);
-  useEffect(() => { valueRef.current = value; }, [value]);
   const caretRef = useRef(caret);
   useEffect(() => { caretRef.current = caret; }, [caret]);
+
+  // ─── Caret reconciliation with the controlled value ───────────────
+  //
+  // `value` is owned by the parent, and the cockpit writes it from
+  // OUTSIDE this component on several paths: the submit handler clears
+  // the draft, the command palette clears it, a failed submit restores
+  // it, and attachToken/restoreSession replace it wholesale.
+  //
+  // The caret is this component's own state, so an external write used
+  // to leave it pointing at the previous offset. With the draft cleared
+  // and the caret still at, say, 5, the next Backspace decremented a
+  // past-the-end caret and changed nothing — the reported "the first
+  // Backspace after I send a message does nothing."
+  //
+  // Every edit this component makes assigns valueRef.current
+  // synchronously before calling onChange, so `value !== valueRef.current`
+  // on a render means the write came from somewhere else. That is the
+  // signal to re-home the caret at the end of the new text, which is
+  // what a programmatic set does in any editor.
+  useEffect(() => {
+    if (value === valueRef.current) return;
+    valueRef.current = value;
+    const end = splitGraphemes(value).length;
+    caretRef.current = end;
+    setCaret(end);
+  }, [value]);
   const disabledRef = useRef(disabled);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
   const scrolledRef = useRef(scrolled);

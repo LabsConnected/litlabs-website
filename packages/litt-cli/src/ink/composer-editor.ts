@@ -97,10 +97,31 @@ export function createComposerState(text = "", caret?: number): ComposerState {
 // ─── Editor operations ───────────────────────────────────────────────
 
 /**
+ * Clamp a caret into the valid range for its text.
+ *
+ * Defense in depth. The component is responsible for keeping the caret
+ * reconciled with the controlled value (see ink/shell/composer.tsx), but
+ * a caret that has drifted past the end must never be able to turn
+ * Backspace into a silent no-op — that is the exact reported failure:
+ * `{ text: "abc", caret: 9 }` would decrement the caret three times
+ * before the first character disappeared.
+ */
+export function clampCaret(state: ComposerState): ComposerState {
+  const max = splitGraphemes(state.text).length;
+  if (state.caret >= 0 && state.caret <= max) return state;
+  return { text: state.text, caret: state.caret < 0 ? 0 : max };
+}
+
+/**
  * Apply a normalized key event to the editor state.
  * Returns a NEW state (immutable — never mutates the input).
+ *
+ * The incoming caret is clamped first: every operation below is defined
+ * only for a caret inside the text, and an out-of-range one silently
+ * turns edits into no-ops instead of failing loudly.
  */
-export function applyKeyEvent(state: ComposerState, evt: NormalizedKeyEvent): ComposerState {
+export function applyKeyEvent(rawState: ComposerState, evt: NormalizedKeyEvent): ComposerState {
+  const state = clampCaret(rawState);
   switch (evt.kind) {
     case "INSERT_TEXT":
       return insertText(state, evt.text ?? "");

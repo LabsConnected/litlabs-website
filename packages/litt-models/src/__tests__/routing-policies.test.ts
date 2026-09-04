@@ -309,3 +309,83 @@ describe("no models available", () => {
     );
   });
 });
+
+// ─── providerFilter (LOCAL mode constraint) ────────────────────────
+
+describe("providerFilter restricts routing to specified providers", () => {
+  it("AUTO with providerFilter=[ollama] only selects ollama models", () => {
+    const r = registry(allDirectEnv());
+    // Mark all models online
+    for (const m of r.getAll()) {
+      r.markDiscovered(m.canonicalId, "online", "provider-catalog");
+    }
+    // Inject a fake ollama model so there's something to select
+    r.mergeDiscovered([{
+      canonicalId: "ollama:qwen3:4b-instruct",
+      displayName: "qwen3:4b-instruct",
+      provider: "ollama",
+      providerModelId: "qwen3:4b-instruct",
+      capabilities: {
+        chat: true, reasoning: false, coding: true,
+        vision: false, tools: true, audio: false,
+        imageGeneration: false, videoGeneration: false,
+        longContext: false, structuredOutput: false,
+      },
+      speed: "normal", intelligence: "light", contextWindow: 8192,
+      availability: "online", verified: true,
+      verifiedAt: new Date().toISOString(), source: "provider-catalog",
+      description: "test ollama model", recommendedFor: ["local"],
+      domain: "text", littTier: "local", maxOutputTokens: 2048,
+    }]);
+    const res = routeModel(r, { message: "hey" }, { mode: "auto", providerFilter: ["ollama"] });
+    assert.equal(res.model.provider, "ollama");
+  });
+
+  it("AUTO with providerFilter=[openai] never selects ollama", () => {
+    const r = registry(allDirectEnv());
+    for (const m of r.getAll()) {
+      r.markDiscovered(m.canonicalId, "online", "provider-catalog");
+    }
+    const res = routeModel(r, { message: "hey" }, { mode: "auto", providerFilter: ["openai"] });
+    assert.equal(res.model.provider, "openai");
+  });
+
+  it("PINNED with a model NOT in the filter falls back to AUTO (non-strict)", () => {
+    const r = registry(allDirectEnv());
+    for (const m of r.getAll()) {
+      r.markDiscovered(m.canonicalId, "online", "provider-catalog");
+    }
+    // Pin an openai model but filter to ollama only. There are no ollama
+    // models in the catalog with credentials, so the filtered pool is empty
+    // and it throws with the provider-filter error message.
+    assert.throws(
+      () => routeModel(r, { message: "hey" }, {
+        mode: "pinned",
+        pinnedModelId: "gpt-5.6-luna",
+        providerFilter: ["ollama"],
+      }),
+      /No routable models available for provider filter/,
+    );
+  });
+
+  it("providerFilter with no matching models throws a clear error", () => {
+    const r = registry(allDirectEnv());
+    for (const m of r.getAll()) {
+      r.markDiscovered(m.canonicalId, "online", "provider-catalog");
+    }
+    assert.throws(
+      () => routeModel(r, { message: "hey" }, { mode: "auto", providerFilter: ["ollama"] }),
+      /No routable models available for provider filter.*ollama/,
+    );
+  });
+
+  it("no providerFilter = all providers available (backward compat)", () => {
+    const r = registry(allDirectEnv());
+    for (const m of r.getAll()) {
+      r.markDiscovered(m.canonicalId, "online", "provider-catalog");
+    }
+    const res = routeModel(r, { message: "hey" }, { mode: "auto" });
+    // Should select from any provider — no filter applied
+    assert.ok(res.model);
+  });
+});

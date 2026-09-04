@@ -42,6 +42,14 @@ import {
   brainLabel as cliBrainLabel,
 } from "./cli-routing.js";
 
+import {
+  resolveLocalModel,
+  localRoutedModel,
+  type LocalModelResolution,
+} from "./local-model-resolution.js";
+
+import type { LocalLaneStatus } from "./local-lane.js";
+
 import type { RoutingMode } from "../ink/cockpit-store.js";
 
 // ─── Types (compatible with the old controller shape) ──────────────
@@ -94,8 +102,6 @@ export class ModelRuntime {
   private healthCache: HealthCache;
   /** Last refresh error (null when last refresh succeeded). For truthful UI. */
   private _lastRefreshError: string | null = null;
-  /** Cached explicit local model when OLLAMA_MODEL + OLLAMA_BASE_URL/OLLAMA_HOST_PC are set. */
-  private _explicitLocalModel: { provider: ProviderId; modelId: string } | null = null;
 
   constructor(remoteMode = false) {
     const envAccessor = envAccessorFromProcess();
@@ -110,13 +116,6 @@ export class ModelRuntime {
       undefined, // default fetcher
       this.healthCache,
     );
-    // Cache explicit local model config: when OLLAMA_MODEL is set with an Ollama endpoint,
-    // treat it as a routable local model without requiring discovery.
-    const ollamaModel = envAccessor.get("OLLAMA_MODEL");
-    const ollamaUrl = envAccessor.get("OLLAMA_BASE_URL") || envAccessor.get("OLLAMA_HOST_PC") || envAccessor.get("OLLAMA_HOST");
-    if (ollamaModel && ollamaUrl) {
-      this._explicitLocalModel = { provider: "ollama", modelId: ollamaModel };
-    }
   }
 
   /** Last refresh error — null when the last refresh succeeded. */
@@ -164,6 +163,63 @@ export class ModelRuntime {
       openRouterModelId: result.model.openRouterModelId,
       providerModelId: result.model.providerModelId,
     };
+  }
+
+  /**
+   * Route a LOCAL request to the local model daemon.
+   *
+   * Separate from route() on purpose. route() resolves against the cloud
+   * catalog and knows nothing about executionTarget, which is exactly how
+   * a persisted remote selection (MiniMax) stayed authoritative in LOCAL
+   * mode. This path never consults the catalog: the installed models the
+   * daemon reported are the only candidates.
+   *
+   * Throws with an actionable message when the requested model is not
+   * installed, or when the daemon has nothing to serve — a LOCAL request
+   * must never silently become a cloud one.
+   *
+   * The chosen model is also merged into the registry so the header,
+   * footer, and Model Center render its real name rather than a raw
+   * "ollama:…" id.
+   */
+  routeLocal(lane: LocalLaneStatus, requested: string | null): RoutedModel {
+    const outcome = resolveLocalModel(lane, requested);
+    if (!outcome.ok) throw new Error(outcome.error);
+    this.registerLocalModel(outcome.resolution);
+    return localRoutedModel(outcome.resolution);
+  }
+
+  /**
+   * Make a resolved local model visible to the registry, so display
+   * helpers (brainLabel, Model Center) resolve its id to a real name.
+   * Idempotent — mergeDiscovered never overwrites an existing entry.
+   */
+  registerLocalModel(resolution: LocalModelResolution): void {
+    if (this.registry.getById(resolution.canonicalId)) return;
+    this.registry.mergeDiscovered([{
+      canonicalId: resolution.canonicalId,
+      displayName: resolution.tag,
+      provider: "ollama",
+      providerModelId: resolution.tag,
+      capabilities: {
+        chat: true, reasoning: false, coding: true,
+        vision: false, tools: true, audio: false,
+        imageGeneration: false, videoGeneration: false,
+        longContext: false, structuredOutput: false,
+      },
+      speed: "normal",
+      intelligence: "light",
+      contextWindow: 8192,
+      availability: "online",
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+      source: "provider-catalog",
+      description: `Installed local model served by the Ollama daemon at ${resolution.endpoint}.`,
+      recommendedFor: ["local"],
+      domain: "text",
+      littTier: "local",
+      maxOutputTokens: 2048,
+    }]);
   }
 
   /**

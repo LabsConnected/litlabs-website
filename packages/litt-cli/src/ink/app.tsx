@@ -42,7 +42,12 @@ import { DiffViewer } from "./overlays/diff-viewer.js";
 import { WorkspacePicker } from "./overlays/workspace-picker.js";
 import { ResumePicker } from "./overlays/resume-picker.js";
 import { ShipFlow } from "./overlays/ship-flow.js";
-import { hasOpenRouterKey, providerLabel } from "../lib/model-provider.js";
+import { hasOpenRouterKey, hasAnyNativeProviderKey, providerLabel } from "../lib/model-provider.js";
+import {
+  localRoutePolicy,
+  pendingLocalBrainLabel,
+  isLocalModelId,
+} from "../lib/local-model-resolution.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import type { ModelChoice } from "../lib/model-routing.js";
@@ -150,24 +155,38 @@ export function CockpitApp({
   // Responsive layout — the shell adapts but never reflows content.
   useTerminalSize(stdout);
 
-  // executionTarget, NOT hasOpenRouterKey(), is the source of truth for
-  // whether the model path is usable — "remote" never needs a local key
-  // (see lib/execution-target.ts). hasOpenRouterKey() only matters in
-  // "local" (developer/BYOK) mode.
-  const modelReady = store.state.executionTarget === "remote" || hasOpenRouterKey() || localModelReady;
-  const brain = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
+  // executionTarget is the source of truth for whether the model path is
+  // usable. In LOCAL mode, the local daemon (Ollama/LM Studio) is the ONLY
+  // provider lane — cloud/BYOK keys are NOT considered available. In REMOTE
+  // mode, the server holds all keys and the model path is always usable.
+  const modelReady = store.state.executionTarget === "remote" || localModelReady;
+  // The brain badge must never advertise a model this session cannot
+  // call. Resolving the local model needs a probe, so until it lands a
+  // LOCAL-required session shows a neutral placeholder rather than the
+  // persisted remote selection — that stale label is what read
+  // "MiniMax M3 (Free)" in a cockpit whose only lane was Ollama.
+  const brain = pendingLocalBrainLabel(
+    localRoutePolicy({
+      executionTarget: store.state.executionTarget,
+      localOnly: store.state.localOnly,
+      signedIn,
+      requestedLocalModel: process.env.LITT_MODEL?.trim()
+        || (isLocalModelId(store.state.selectedModel) ? store.state.selectedModel : null),
+      hasCloudCredential: hasOpenRouterKey() || hasAnyNativeProviderKey(),
+    }),
+    store.state.selectedModel,
+  ) ?? modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
   // Source truth: show the REAL served provider (from the last run's
-  // adapter) AND where it executed — never let "REMOTE" in the header
-  // and "OpenRouter • BYOK" in the footer imply two different stories
-  // about where the model call actually ran.
-  const executionSuffix = store.state.executionTarget === "remote" ? "REMOTE" : "BYOK ✓";
+  // adapter) AND where it executed. In LOCAL mode, the only provider is
+  // the local daemon (Ollama/LM Studio) — never OpenRouter/BYOK. In
+  // REMOTE mode, the server executes the model call.
+  const executionSuffix = store.state.executionTarget === "remote" ? "REMOTE" : "LOCAL";
   const source = store.state.activeProvider
     ? `${providerLabel(store.state.activeProvider)} • ${executionSuffix}`
     : store.state.executionTarget === "remote"
       ? "REMOTE (server-executed)"
-      : modelReady && !localModelReady ? "OpenRouter • BYOK ✓"
-    : modelReady && localModelReady ? "Local Ollama ✓"
-    : "No provider";
+      : modelReady && localModelReady ? "Local Ollama ✓"
+    : "No local model";
 
   // ─── Overlay data (computed on open, memoized until close) ──────
   const overlay = store.state.overlay;
