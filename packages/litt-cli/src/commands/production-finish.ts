@@ -43,6 +43,22 @@ import {
   type FinishPhase,
 } from "../lib/production-run-store.js";
 
+/**
+ * Canonical repository root for production checks.
+ *
+ * This is the worktree where the website tests live. It is used as the
+ * cwd for vitest runs. The CLI package itself lives under
+ * packages/litt-cli within this root.
+ *
+ * We resolve it relative to the CLI source location so the command
+ * works regardless of where `litt` is invoked from.
+ */
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// dist/commands/production-finish.js → dist/ → litt-cli/ → packages/ → repo root
+const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..");
+
 export async function productionFinishCommand(args: string[]): Promise<number> {
   const resumeId = args.find((a) => a.startsWith("--resume="))?.split("=")[1];
   const json = args.includes("--json");
@@ -87,9 +103,9 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
 
   await runPhase(run, "operator", async () => {
     // Verify PR #131 protections are present (check for key files)
-    const leaseFile = exec("git -C E:\\LiTT\\Worktrees\\main ls-files packages/litt-cli/src/lib/worktree-lease.ts");
-    const runStoreFile = exec("git -C E:\\LiTT\\Worktrees\\main ls-files packages/litt-cli/src/lib/run-store.ts");
-    const canonicalFile = exec("git -C E:\\LiTT\\Worktrees\\main ls-files packages/litt-cli/src/lib/canonical-main.ts");
+    const leaseFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/worktree-lease.ts`);
+    const runStoreFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/run-store.ts`);
+    const canonicalFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/canonical-main.ts`);
     if (leaseFile.stdout && runStoreFile.stdout && canonicalFile.stdout) {
       return { status: "pass", detail: "PR #131 protections present" };
     }
@@ -97,12 +113,15 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
   });
 
   await runPhase(run, "studio_code", async () => {
-    // Run the key test suites
-    const r = exec("cd E:\\LiTT\\Worktrees\\main && npx vitest run tests/pricing-consistency.test.ts tests/stripe-catalog-contract.test.ts tests/approval-flow.test.ts tests/security-isolation.test.ts tests/litt-chat-path.test.ts 2>&1", { cwd: "E:\\LiTT\\Worktrees\\main" });
+    // Run the key test suites — use a longer timeout (120s) for vitest
+    const r = exec(
+      "npx vitest run tests/pricing-consistency.test.ts tests/stripe-catalog-contract.test.ts tests/approval-flow.test.ts tests/security-isolation.test.ts tests/litt-chat-path.test.ts 2>&1",
+      { cwd: REPO_ROOT, timeout: 120000 },
+    );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Key test suites pass" };
     }
-    return { status: "fail", detail: "Test suites failed" };
+    return { status: "fail", detail: `Test suites failed: ${r.stderr || r.stdout.slice(-200)}` };
   });
 
   await runPhase(run, "pricing", async () => {
@@ -180,13 +199,15 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
 
   // Sandbox checkout — TEST mode E2E
   await runPhase(run, "sandbox_checkout", async () => {
-    // This would run the actual sandbox E2E
-    // For now, verify the billing state machine tests pass
-    const r = exec("cd E:\\LiTT\\Worktrees\\main && npx vitest run src/__tests__/billing-state-machine.test.ts 2>&1", { cwd: "E:\\LiTT\\Worktrees\\main" });
+    // Verify the billing state machine tests pass — use a longer timeout (120s) for vitest
+    const r = exec(
+      "npx vitest run src/__tests__/billing-state-machine.test.ts 2>&1",
+      { cwd: REPO_ROOT, timeout: 120000 },
+    );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Billing state machine tests pass (45 tests)" };
     }
-    return { status: "fail", detail: "Billing state machine tests failed" };
+    return { status: "fail", detail: `Billing state machine tests failed: ${r.stderr || r.stdout.slice(-200)}` };
   });
 
   // Studio acceptance — owner browser acceptance
@@ -223,7 +244,7 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
   console.log(`${c.dim}  Founder      $149          ${run.steps.find((s) => s.phase === "pricing")?.status === "pass" ? c.green + "✓" : c.red + "✗"}${c.reset}`);
 
   // Production info
-  const sha = exec("git -C E:\\LiTT\\Worktrees\\main rev-parse HEAD").stdout.trim();
+  const sha = exec(`git -C "${REPO_ROOT}" rev-parse HEAD`).stdout.trim();
   console.log(`\n${c.dim}  Production${c.reset}`);
   console.log(`${c.dim}  ${sha.slice(0, 8)}${c.reset}`);
 

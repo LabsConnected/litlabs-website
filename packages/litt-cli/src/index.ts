@@ -31,9 +31,11 @@
  *   litt production finish  — Orchestrate remaining production gates
  *   litt stripe doctor      — Stripe-specific diagnostics
  *   litt stripe repair      — Fix Stripe configuration issues
- *   litt stripe sandbox     — Real Stripe TEST-mode E2E
+ *   litt stripe sandbox     — Real Stripe TEST-mode E2E (never live)
  *   litt deploy verify      — Watch deploy + verify production health
  *   litt studio acceptance  — Pre-flight + owner browser acceptance
+ *
+ *   (legacy hyphen aliases also work: litt production-doctor, etc.)
  *
  * Options:
  *   --remote       Dispatch through terminal-server's canonical CommandRouter
@@ -152,6 +154,40 @@ const COMMANDS: Record<string, CommandHandler> = {
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
+/**
+ * Nested command groups — maps a group word to its subcommands.
+ *   litt production doctor  →  production-doctor
+ *   litt production finish  →  production-finish
+ *   litt stripe doctor      →  stripe-doctor
+ *   litt stripe repair      →  stripe-repair
+ *   litt stripe sandbox     →  stripe-sandbox
+ *   litt deploy verify      →  deploy-verify
+ *   litt studio acceptance  →  studio-acceptance
+ *
+ * Backward-compatible hyphen aliases (litt production-doctor) remain
+ * registered in COMMANDS above and continue to work.
+ */
+const NESTED_COMMANDS: Record<string, Record<string, string>> = {
+  production: {
+    doctor: "production-doctor",
+    finish: "production-finish",
+  },
+  stripe: {
+    doctor: "stripe-doctor",
+    repair: "stripe-repair",
+    sandbox: "stripe-sandbox",
+  },
+  deploy: {
+    verify: "deploy-verify",
+  },
+  studio: {
+    acceptance: "studio-acceptance",
+  },
+};
+
+/** All valid nested group names (for help routing). */
+const NESTED_GROUPS = new Set(Object.keys(NESTED_COMMANDS));
+
 /** Commands that require lazy loading (heavy deps like Ink/React).
  *  `shell` is an explicit alias for the same Ink cockpit as bare `litt`. */
 const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
@@ -177,7 +213,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs", "production-doctor", "production-finish", "stripe-doctor", "stripe-repair", "stripe-sandbox", "deploy-verify", "studio-acceptance", "production", "stripe", "deploy", "studio"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -352,9 +388,53 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const command = dispatch.command!;
-  const rest = dispatch.rest;
+  let command = dispatch.command!;
+  let rest = dispatch.rest;
   const mode = dispatch.mode;
+
+  // ─── Nested command resolution ──────────────────────────────────
+  // Maps two-word commands to their canonical hyphenated handler:
+  //   litt production doctor  →  COMMANDS["production-doctor"]
+  //   litt stripe sandbox     →  COMMANDS["stripe-sandbox"]
+  //   litt deploy verify      →  COMMANDS["deploy-verify"]
+  //   litt studio acceptance  →  COMMANDS["studio-acceptance"]
+  //
+  // Also handles --help for nested groups:
+  //   litt production --help  →  printProductionHelp()
+  //   litt stripe --help      →  printStripeHelp()
+  //
+  // CRITICAL: --help MUST NEVER execute a command, start a production
+  // run, create Stripe resources, run deployment checks, or mutate
+  // persisted state.
+  if (NESTED_GROUPS.has(command)) {
+    const subcommands = NESTED_COMMANDS[command]!;
+
+    // Check for --help / -h in the rest args — show group help, never execute
+    if (rest.includes("--help") || rest.includes("-h")) {
+      printNestedHelp(command);
+      return 0;
+    }
+
+    const subcommand = rest[0];
+    if (subcommand && subcommands[subcommand]) {
+      // Rewrite to the canonical hyphenated command name
+      command = subcommands[subcommand]!;
+      rest = rest.slice(1);
+    } else if (!subcommand) {
+      // `litt production` with no subcommand — show group help
+      printNestedHelp(command);
+      return 0;
+    } else {
+      // Unknown subcommand
+      console.error(`Unknown ${command} subcommand: ${subcommand}`);
+      console.error(`Run 'litt ${command} --help' for available subcommands.`);
+      return 1;
+    }
+  } else if (rest.includes("--help") || rest.includes("-h")) {
+    // `litt <command> --help` — show main help, never execute
+    printHelp();
+    return 0;
+  }
 
   // ─── Execution target override ──────────────────────────────────
   // --local / --remote flags set the initial execution target for the
@@ -634,6 +714,49 @@ async function runRemote(
   }
 }
 
+/**
+ * Print help for a nested command group (production, stripe, deploy, studio).
+ * CRITICAL: This function only prints text — it NEVER executes a command,
+ * starts a production run, creates Stripe resources, or mutates state.
+ */
+function printNestedHelp(group: string): void {
+  const subcommands = NESTED_COMMANDS[group];
+  if (!subcommands) {
+    printHelp();
+    return;
+  }
+
+  const entries = Object.entries(subcommands);
+  const maxSub = Math.max(...entries.map(([sub]) => sub.length));
+
+  const descriptions: Record<string, string> = {
+    "production-doctor": "Verify all production gates",
+    "production-finish": "Orchestrate remaining production gates",
+    "stripe-doctor": "Stripe-specific diagnostics",
+    "stripe-repair": "Fix Stripe configuration issues",
+    "stripe-sandbox": "Real Stripe TEST-mode E2E (never live)",
+    "deploy-verify": "Watch deploy + verify production health",
+    "studio-acceptance": "Pre-flight + owner browser acceptance",
+  };
+
+  console.log(`
+LiTT ${group} — production operator
+
+Usage: litt ${group} <subcommand> [options]
+
+Subcommands:
+${entries.map(([sub, canonical]) => `  ${sub.padEnd(maxSub)}  ${descriptions[canonical] ?? ""}`).join("\n")}
+
+Options:
+  -h, --help     Show this help
+  --resume <id>  Resume a paused production run (production finish only)
+
+Examples:
+  litt ${group} --help
+${entries.map(([sub]) => `  litt ${group} ${sub}`).join("\n")}
+`);
+}
+
 function printHelp(): void {
   console.log(`
 LiTT CLI v${VERSION} — AI operating system for your terminal
@@ -668,6 +791,17 @@ Commands:
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice
+
+Production operator commands:
+  litt production doctor     Verify all production gates
+  litt production finish     Orchestrate remaining production gates
+  litt stripe doctor         Stripe-specific diagnostics
+  litt stripe repair         Fix Stripe configuration issues
+  litt stripe sandbox        Real Stripe TEST-mode E2E (never live)
+  litt deploy verify         Watch deploy + verify production health
+  litt studio acceptance     Pre-flight + owner browser acceptance
+
+  (legacy hyphen aliases also work: litt production-doctor, etc.)
 
 Options:
   -h, --help     Show this help
