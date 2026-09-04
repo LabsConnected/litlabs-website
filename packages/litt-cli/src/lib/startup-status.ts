@@ -62,6 +62,33 @@ function resolveProviderName(): string {
 }
 
 /**
+ * Resolve the EFFECTIVE provider — the one that actually serves
+ * inference for the current execution target + selected model.
+ *
+ * LOCAL + ollama: model → Ollama
+ * REMOTE + OpenAI key → OpenAI
+ * LOCAL + no ollama model → none (local/credentialless)
+ */
+function resolveEffectiveProvider(execution: string, model: string): string {
+  const isLocal = execution === "local";
+  const modelIsOllama = model.toLowerCase().startsWith("ollama:");
+  const hasOllamaEndpoint = !!(process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC);
+
+  if (isLocal && (modelIsOllama || hasOllamaEndpoint)) {
+    return "Ollama";
+  } else if (!isLocal) {
+    return process.env.OPENAI_API_KEY ? "OpenAI"
+      : process.env.GROQ_API_KEY ? "Groq"
+      : process.env.OPENROUTER_API_KEY ? "OpenRouter"
+      : process.env.ANTHROPIC_API_KEY ? "Anthropic"
+      : process.env.DEEPSEEK_API_KEY ? "DeepSeek"
+      : process.env.MISTRAL_API_KEY ? "Mistral"
+      : "none";
+  }
+  return "none";
+}
+
+/**
  * Collect the startup status (synchronous parts only).
  * Auth check is async — use collectStartupStatusAsync for the full picture.
  */
@@ -72,9 +99,12 @@ export function collectStartupStatus(cwd?: string): StartupStatus {
   const gitState = getGitState(project.rootDir);
   const execution = resolveExecutionTarget();
   const localOnly = resolveLocalOnly();
-  const provider = resolveProviderName();
   const prefs = loadModelPrefs(getDefaultPrefsPath());
   const model = prefs.selectedModel ?? "qwen3:4b-instruct";
+  // Use the EFFECTIVE provider — the one that actually serves inference
+  // for the current execution target + selected model. Not just which
+  // API key exists.
+  const provider = resolveEffectiveProvider(execution, model);
 
   const canonicalCheck = checkCanonicalMain(project.rootDir);
   const leaseCheck = checkLease(project.rootDir);

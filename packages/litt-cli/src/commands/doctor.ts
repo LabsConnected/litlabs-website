@@ -259,15 +259,56 @@ export async function doctorCommand(args: string[]): Promise<number> {
   const modelLabel = prefs.selectedModel ?? "qwen3:4b-instruct (default)";
   ok(`Model: ${modelLabel}`);
   ok(`Routing: ${prefs.routingMode}`);
-  const providerName = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC ? "Ollama"
-    : process.env.OPENAI_API_KEY ? "OpenAI"
-    : process.env.GROQ_API_KEY ? "Groq"
-    : process.env.OPENROUTER_API_KEY ? "OpenRouter"
-    : "none (local/credentialless)";
-  if (providerName === "none (local/credentialless)") {
-    warn(`Provider: ${providerName}`);
+
+  // Determine the EFFECTIVE provider — the one that actually serves
+  // inference for the current execution target + selected model.
+  // This is NOT just "which API key exists" — it's which provider
+  // the active route will use.
+  //
+  // LOCAL + ollama: model → Ollama (the local provider)
+  // REMOTE + OpenAI key → OpenAI (the remote provider)
+  // LOCAL + no ollama model → local/credentialless
+  const isLocalTarget = execTarget === "local";
+  const modelIsOllama = modelLabel.toLowerCase().startsWith("ollama:");
+  const hasOllamaEndpoint = !!(process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC);
+
+  let effectiveProvider: string;
+  if (isLocalTarget && (modelIsOllama || hasOllamaEndpoint)) {
+    effectiveProvider = "Ollama";
+  } else if (!isLocalTarget) {
+    // Remote: the provider is determined by which key is set
+    effectiveProvider = process.env.OPENAI_API_KEY ? "OpenAI"
+      : process.env.GROQ_API_KEY ? "Groq"
+      : process.env.OPENROUTER_API_KEY ? "OpenRouter"
+      : process.env.ANTHROPIC_API_KEY ? "Anthropic"
+      : process.env.DEEPSEEK_API_KEY ? "DeepSeek"
+      : process.env.MISTRAL_API_KEY ? "Mistral"
+      : "none";
   } else {
-    ok(`Provider: ${providerName}`);
+    // LOCAL without an Ollama model/endpoint
+    effectiveProvider = "none (local/credentialless)";
+  }
+
+  if (effectiveProvider === "none (local/credentialless)") {
+    warn(`Active Provider: ${effectiveProvider}`);
+  } else {
+    ok(`Active Provider: ${effectiveProvider}`);
+  }
+
+  // Report remote credentials separately — these exist but are NOT
+  // the effective provider when LOCAL is active.
+  const remoteCreds: string[] = [];
+  if (process.env.OPENAI_API_KEY) remoteCreds.push("OpenAI key: configured");
+  if (process.env.GROQ_API_KEY) remoteCreds.push("Groq key: configured");
+  if (process.env.OPENROUTER_API_KEY) remoteCreds.push("OpenRouter key: configured");
+  if (process.env.ANTHROPIC_API_KEY) remoteCreds.push("Anthropic key: configured");
+  if (process.env.DEEPSEEK_API_KEY) remoteCreds.push("DeepSeek key: configured");
+  if (process.env.MISTRAL_API_KEY) remoteCreds.push("Mistral key: configured");
+  if (remoteCreds.length > 0) {
+    console.log(`${c.dim}  Remote credentials:${c.reset}`);
+    for (const cred of remoteCreds) {
+      console.log(`${c.dim}    ${cred}${c.reset}`);
+    }
   }
 
   // Tools readiness
