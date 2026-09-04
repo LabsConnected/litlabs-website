@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { track } from "@/lib/analytics";
 import {
   ArrowRight,
   Bot,
@@ -378,8 +379,15 @@ export default function HomePageClient() {
   const router = useRouter();
 
   useEffect(() => {
+    track("homepage_view");
+  }, []);
+
+  useEffect(() => {
     if (!clerkLoaded) return;
-    if (clerkSignedIn) router.replace("/studio");
+    if (clerkSignedIn) {
+      track("returning_user");
+      router.replace("/studio");
+    }
   }, [clerkSignedIn, clerkLoaded, router]);
 
   return <LandingPage />;

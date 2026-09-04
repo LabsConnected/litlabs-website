@@ -1,5 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
 import Link from "next/link";
+import { SignupTracker } from "../SignupTracker";
 
 export default function SignUpPage() {
   return (
@@ -7,6 +8,7 @@ export default function SignUpPage() {
       className="min-h-screen flex items-center justify-center px-4"
       style={{ backgroundColor: "#0f0f14" }}
     >
+      <SignupTracker />
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-3xl mb-3">🌳</div>
