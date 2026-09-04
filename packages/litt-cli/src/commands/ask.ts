@@ -28,6 +28,13 @@ import { createRuntimeSession } from "../lib/runtime-session.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
+import {
+  localRoutePolicy,
+  resolveLocalModel,
+  localRoutedModel,
+  isLocalModelId,
+} from "../lib/local-model-resolution.js";
+import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { ok, fail, warn, header, c, detectProject } from "../lib/utils.js";
 import { resolveActiveProject } from "../lib/active-project.js";
 import type { RuntimeSession } from "../lib/runtime-session.js";
@@ -116,18 +123,43 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       process.env.DEEPSEEK_API_KEY ||
       process.env.MISTRAL_API_KEY
     );
+    const executionTarget = resolveExecutionTarget();
+    const localOnly = resolveLocalOnly();
     const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
     await modelRuntime.refresh();
-    // Resolve native/provider IDs to catalog IDs, then let the existing
-    // strict route validate availability. Never replace a user's model.
-    const selectedId = selectedModel && (
-      modelRuntime.registry.getById(selectedModel)?.canonicalId ??
-      modelRuntime.registry.getAll().find((entry) =>
-        entry.providerModelId === selectedModel || entry.openRouterModelId === selectedModel,
-      )?.canonicalId ?? selectedModel
-    );
-    const routingMode = selectedId ? "fixed" : "auto";
-    const routed = modelRuntime.route(routingMode, selectedId, question);
+
+    // Determine whether the local daemon must serve this request.
+    // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
+    // the local daemon (Ollama/LM Studio) is the ONLY provider lane.
+    // A persisted or env-selected remote model is never used in LOCAL mode.
+    const requestedLocalModel = process.env.LITT_MODEL?.trim()
+      || (isLocalModelId(selectedModel) ? selectedModel : null);
+    const policy = localRoutePolicy({
+      executionTarget,
+      localOnly,
+      signedIn: authState.signedIn,
+      requestedLocalModel,
+      hasCloudCredential: hasLocalKey,
+    });
+
+    let routed;
+    let routingMode: "auto" | "fixed";
+    if (policy.kind === "local-required") {
+      // LOCAL mode: route through the local daemon.
+      const lane = await probeLocalLane();
+      routed = modelRuntime.routeLocal(lane, requestedLocalModel);
+      routingMode = "fixed";
+    } else {
+      // REMOTE/BYOK mode: route through the cloud catalog.
+      const selectedId = selectedModel && (
+        modelRuntime.registry.getById(selectedModel)?.canonicalId ??
+        modelRuntime.registry.getAll().find((entry) =>
+          entry.providerModelId === selectedModel || entry.openRouterModelId === selectedModel,
+        )?.canonicalId ?? selectedModel
+      );
+      routingMode = selectedId ? "fixed" : "auto";
+      routed = modelRuntime.route(routingMode, selectedId, question);
+    }
     const model = resolveProviderAdapter(routed, {
       tools: tools.list(),
       routingMode,

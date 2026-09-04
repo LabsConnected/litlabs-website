@@ -66,7 +66,13 @@ import {
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
 import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
-import { probeLocalLane } from "../lib/local-lane.js";
+import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../lib/local-lane.js";
+import {
+  localRoutePolicy,
+  resolveLocalModel,
+  isLocalModelId,
+  type LocalRoutePolicy,
+} from "../lib/local-model-resolution.js";
 import { matchReadTools, executeReadTools, formatReadResultsForSynthesis, buildFullInspectionMatch, formatInspectionForSynthesis } from "../lib/read-lane.js";
 import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning, classifyMissionComplexity } from "../lib/mission-complexity.js";
@@ -154,6 +160,65 @@ function resolveModelProvider(
 }
 
 /**
+ * The model the operator named explicitly for this session.
+ *
+ * LITT_MODEL is the documented env override (the same one `litt ask`
+ * reads), and an "ollama:" canonical id is an explicit local pick made
+ * through the Model Center. An ordinary catalog selection is NOT an
+ * explicit local request — that is the persisted-MiniMax case, which
+ * LOCAL mode must be free to supersede.
+ */
+function requestedLocalModel(selectedModel: string | null): string | null {
+  const env = process.env.LITT_MODEL?.trim();
+  if (env) return env;
+  if (isLocalModelId(selectedModel)) return selectedModel;
+  return null;
+}
+
+/**
+ * Route a request, honouring executionTarget.
+ *
+ * ModelRuntime.route() resolves against the cloud catalog and has no
+ * notion of where execution happens; calling it unconditionally is what
+ * kept a persisted remote model authoritative in LOCAL mode. This
+ * wrapper asks the policy first, and sends LOCAL-required requests down
+ * the local-daemon path, where an unavailable or missing model is a
+ * clear throw rather than a quiet cloud fallback.
+ */
+function routeForTarget(
+  store: CockpitStore,
+  modelRuntime: ModelRuntime,
+  signedIn: boolean | null | undefined,
+  lane: LocalLaneStatus | null,
+  input: string,
+): RoutedModel {
+  const policy = resolveRoutePolicy(store, signedIn);
+  if (policy.kind === "local-required") {
+    if (!lane) {
+      throw new Error(
+        "LOCAL execution requires the local model daemon, but its status was not probed for this request.",
+      );
+    }
+    return modelRuntime.routeLocal(lane, requestedLocalModel(store.state.selectedModel));
+  }
+  return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
+}
+
+/** The local-vs-catalog policy for the cockpit's current state. */
+function resolveRoutePolicy(
+  store: CockpitStore,
+  signedIn: boolean | null | undefined,
+): LocalRoutePolicy {
+  return localRoutePolicy({
+    executionTarget: store.state.executionTarget,
+    localOnly: store.state.localOnly,
+    signedIn,
+    requestedLocalModel: requestedLocalModel(store.state.selectedModel),
+    hasCloudCredential: hasOpenRouterKey() || hasAnyNativeProviderKey(),
+  });
+}
+
+/**
  * Is a model provider possibly usable for this session? This is a
  * cheap up-front gate (skip the model path entirely, show a heuristic
  * fallback) — NOT the authority on whether a remote call will actually
@@ -161,14 +226,20 @@ function resolveModelProvider(
  * requires a signed-in session to launch, and REMOTE never needs a
  * local key — unavailability (disconnected transport) is surfaced as
  * an explicit error at call time via resolveModelProvider, not by
- * gating here. In "local" mode this mirrors the pre-existing contract:
- * a local provider key must actually be present.
+ * gating here. In "local" mode a credentialless local daemon counts as
+ * a real provider: requiring a KEY here is what made a signed-out
+ * cockpit with Ollama running report "no model available".
  */
-function modelExecutionAvailable(target: ExecutionTarget): boolean {
-  // A configured native provider key is sufficient on its own (policy B).
-  // Requiring only an OpenRouter key made BYOK-only setups
-  // (OPENAI_API_KEY and nothing else) read as "no model available".
-  return target === "remote" || hasOpenRouterKey() || hasAnyNativeProviderKey();
+function modelExecutionAvailable(target: ExecutionTarget, localLaneAvailable = false): boolean {
+  // In LOCAL mode, the local daemon is the ONLY provider lane.
+  // Cloud/BYOK keys do NOT make the model path available — LOCAL must
+  // never call OpenRouter or any other remote provider. If the local
+  // daemon is down, the model path is unavailable and the caller
+  // surfaces a clear LOCAL failure.
+  if (target === "local") return localLaneAvailable;
+  // REMOTE mode: the cockpit already requires a signed-in session to
+  // launch, and REMOTE never needs a local key.
+  return true;
 }
 
 /**
@@ -933,6 +1004,50 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     modelRuntime.refreshAsync();
   }, [modelRuntime]);
 
+  /**
+   * Make the SELECTED model agree with the lane that will actually serve.
+   *
+   * The persisted selection in ~/.litt/model-prefs.json is a cloud model
+   * for most operators. In LOCAL mode that selection is not merely
+   * cosmetic — brainLabel() renders it as the footer's model badge, so
+   * the cockpit read "MiniMax M3 (Free)" while the only lane it could
+   * use was a local Ollama daemon. Reconciling the selection is what
+   * makes the badge, the Model Center, and the actual route one answer
+   * instead of three.
+   *
+   * Returns the resolved local model tag, or null when the local lane
+   * is not the required one (or cannot serve).
+   */
+  const reconcileLocalModel = useCallback(async (
+    opts: { force?: boolean } = {},
+  ): Promise<string | null> => {
+    if (resolveRoutePolicy(store, signedIn).kind !== "local-required") return null;
+    if (opts.force) resetLocalLaneCache();
+    const lane = await probeLocalLane();
+    const outcome = resolveLocalModel(lane, requestedLocalModel(store.state.selectedModel));
+    if (!outcome.ok) {
+      act(store, outcome.error, "error", undefined, "LOCAL");
+      return null;
+    }
+    const { resolution } = outcome;
+    modelRuntime.registerLocalModel(resolution);
+    // FIXED so cliModeToRouteOptions honours the pick — in "auto" mode
+    // the selected id is ignored entirely and the badge would drift back.
+    if (store.state.selectedModel !== resolution.canonicalId) {
+      store.actions.updateSelectedModel(resolution.canonicalId);
+    }
+    if (store.state.routingMode !== "fixed") store.actions.updateRoutingMode("fixed");
+    store.actions.setActiveModel(resolution.tag);
+    store.actions.setActiveProvider("ollama");
+    return resolution.tag;
+  }, [store, signedIn, modelRuntime]);
+
+  // Reconcile once at startup so the footer is truthful BEFORE the first
+  // message, not only after a run has confirmed a served model.
+  useEffect(() => {
+    void reconcileLocalModel();
+  }, [reconcileLocalModel]);
+
   // Subscribe to approval bridge — when the gateway requests approval,
   // the bridge sets a pending approval and notifies us. Any open overlay
   // closes so the ApprovalUX can take the screen (approvals are never
@@ -1356,7 +1471,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         store,
         store.state.executionTarget === "remote"
           ? "Provider: REMOTE — server-executed via your LiTT account (no local key required)"
-          : `Provider: LOCAL — ${hasOpenRouterKey() ? "OpenRouter BYOK ✓" : "no key (set OPENROUTER_API_KEY)"}`,
+          : "Provider: LOCAL — local daemon (Ollama/LM Studio) is the only provider lane",
         "info",
         undefined,
         "DOCTOR",
@@ -1592,9 +1707,26 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           tag: "SWITCH",
           text: "Execution target switched to LOCAL",
         });
+        // Reconcile BEFORE reporting, so the message names the model that
+        // will actually serve. Switching the target without this left a
+        // persisted remote selection authoritative — the cockpit said
+        // LOCAL and the footer still said MiniMax.
+        //
+        // setExecutionTarget is a React state update, so store.state is
+        // still the pre-switch snapshot inside this closure; the policy
+        // is evaluated against an explicitly-local view instead.
+        const localTargetView = {
+          ...store,
+          state: { ...store.state, executionTarget: "local" as const },
+        };
+        const reconciled = resolveRoutePolicy(localTargetView, signedIn).kind === "local-required"
+          ? await reconcileLocalModel({ force: true })
+          : null;
         store.actions.addChatMessage({
           role: "assistant",
-          content: "Execution target switched to LOCAL.",
+          content: reconciled
+            ? `Execution target switched to LOCAL.\nProvider: Ollama | Model: ${reconciled}`
+            : "Execution target switched to LOCAL.",
           ts: Date.now(),
           status: "complete",
           servedModel: "system",
@@ -1956,9 +2088,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
     // A local model counts as available only after the real Ollama
     // endpoint responds and reports at least one installed model.
-    const localModelAvailable = store.state.executionTarget === "local"
-      ? (await probeLocalLane()).available
-      : false;
+    //
+    // The FULL status is kept, not just the boolean: routeForTarget()
+    // needs the installed model list to pick (and to hard-fail on) the
+    // model that will actually serve, and re-probing per call site would
+    // be three round trips for one answer.
+    const localLane: LocalLaneStatus | null = store.state.executionTarget === "local"
+      ? await probeLocalLane()
+      : null;
+    const localModelAvailable = localLane?.available ?? false;
 
     if (shouldBlockModelPath(
       signedIn,
@@ -2202,7 +2340,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
 
           // ─── Optional synthesis ───
-          if (readMatch.needsSynthesis && modelExecutionAvailable(store.state.executionTarget)) {
+          if (readMatch.needsSynthesis && modelExecutionAvailable(store.state.executionTarget, localModelAvailable)) {
             perf.mark("synthesis_start");
             // /inspect uses the comprehensive inspection synthesis prompt;
             // regular READ queries use the standard read-results format.
@@ -2210,11 +2348,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             const synthesisPrompt = opts?.forceRead === true
               ? formatInspectionForSynthesis(readResults, inspectFocus)
               : formatReadResultsForSynthesis(input, readResults);
-            const routed = modelRuntime.route(
-              store.state.routingMode,
-              store.state.selectedModel,
-              synthesisPrompt,
-            );
+            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt);
             store.actions.setActiveModel(routed.label);
             await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
@@ -2305,7 +2439,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // if intent classification is correct, but defensive).
     }
 
-    if (modelExecutionAvailable(store.state.executionTarget)) {
+    if (modelExecutionAvailable(store.state.executionTarget, localModelAvailable)) {
       // CHAT intent — casual response, no mission lifecycle.
       // CHAT uses isProcessing (not holoState) to block the composer.
       // holoState stays IDLE throughout — CHAT never enters mission
@@ -2352,7 +2486,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const gateway = session.getGateway();
           const tools = gateway.getTools();
           const agentStore = session.getStore();
-          const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, modelInput);
+          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput);
         perf.mark("route");
           // Routing trace — requested (brain/policy) vs resolved (route()).
           // The brain label is the configured policy identity; the resolved
@@ -2640,7 +2774,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           text: "Mission created",
         });
 
-        const routed = modelRuntime.route(store.state.routingMode, store.state.selectedModel, modelInput);
+        const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput);
         perf.mark("route");
         // Routing trace — requested (brain/policy) vs resolved (route()).
         const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
@@ -3347,14 +3481,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
-    // Reached only in LOCAL (developer) mode without a provider key —
+    // Reached only in LOCAL mode when the local daemon is unavailable —
     // "remote" is always modelExecutionAvailable (see above), so this
     // branch never fires for a normal signed-in customer session.
     store.actions.addActivity({
       id: `act_${Date.now()}`,
       ts: Date.now(),
       type: "info",
-      text: "LOCAL mode: set OPENROUTER_API_KEY to talk to LiTT, or unset LITT_LOCAL_MODE to use REMOTE. Use /commands for direct execution.",
+      text: "LOCAL mode: the local model daemon (Ollama/LM Studio) is not available. Start Ollama with a model installed, or use /remote for cloud execution.",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, store, onExit, approvalBridge, persistSession, openDiffViewer, newSession, runShipCommit, toggleMode]);

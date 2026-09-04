@@ -211,6 +211,16 @@ export interface RouteOptions {
    * unverified models are excluded entirely or just deprioritized.
    */
   verifiedOnly?: boolean;
+  /**
+   * Restrict routing to models whose native provider is in this set.
+   * When set, the candidate pool AND pinned/ask selections are filtered
+   * to only these providers. A pinned model whose provider is NOT in the
+   * filter is treated as unavailable (falls back to AUTO with a reason,
+   * or throws if strict). Used by the CLI to constrain LOCAL mode to
+   * local daemon providers (ollama/lmstudio) so a persisted remote model
+   * preference can never become the effective model in LOCAL mode.
+   */
+  providerFilter?: ProviderId[];
 }
 
 /**
@@ -243,8 +253,8 @@ export function routeModel(
   input: RoutingInput,
   options: RouteOptions = {},
 ): RoutingResult {
-  const available = registry.getAvailable();
-  if (available.length === 0) {
+  const allAvailable = registry.getAvailable();
+  if (allAvailable.length === 0) {
     throw new Error(
       "No routable models available — no provider credentials configured. Set OPENROUTER_API_KEY or a direct provider key.",
     );
@@ -254,6 +264,29 @@ export function routeModel(
   const preference = options.preference ?? "auto";
   const strict = options.strict ?? false;
   const verifiedOnly = options.verifiedOnly ?? false;
+  const providerFilter = options.providerFilter
+    ? new Set(options.providerFilter)
+    : null;
+
+  // Apply providerFilter: restrict the available pool to models whose
+  // native provider is in the filter set. This is the LOCAL-mode constraint
+  // that prevents a persisted remote model from becoming the effective model.
+  const available = providerFilter
+    ? allAvailable.filter((m) => providerFilter.has(m.provider))
+    : allAvailable;
+
+  if (available.length === 0) {
+    if (providerFilter) {
+      const allowed = [...providerFilter].join(", ");
+      throw new Error(
+        `No routable models available for provider filter [${allowed}]. ` +
+        `Ensure the local model daemon (Ollama/LM Studio) is running and has at least one model installed.`,
+      );
+    }
+    throw new Error(
+      "No routable models available — no provider credentials configured. Set OPENROUTER_API_KEY or a direct provider key.",
+    );
+  }
 
   // The candidate set: verified-online models are always candidates.
   // Unverified-but-routable models are candidates unless verifiedOnly.
@@ -262,37 +295,39 @@ export function routeModel(
     ? onlineModels
     : [...onlineModels, ...available.filter((m) => m.availability !== "online")];
 
-  // PINNED / ASK: respect explicit choice if routable
+  // Helper: is a model allowed by the providerFilter?
+  const isAllowed = (m: ModelDefinition | undefined): boolean =>
+    !m || !providerFilter || providerFilter.has(m.provider);
+
+  // PINNED / ASK: respect explicit choice if routable AND allowed by filter
   if (mode === "pinned" && options.pinnedModelId) {
     const pinned = registry.getById(options.pinnedModelId);
-    if (pinned && registry.isRoutable(pinned)) {
+    if (pinned && registry.isRoutable(pinned) && isAllowed(pinned)) {
       return buildResult(registry, pinned, `Pinned: ${pinned.displayName}`, classifyTask(input), null, "pinned");
     }
-    // Not routable
-    if (strict) {
+    // Not routable or filtered out
+    if (strict && isAllowed(pinned)) {
       const reason = pinned
         ? `FIXED model ${pinned.displayName} is not available (availability: ${pinned.availability})`
         : `FIXED model ${options.pinnedModelId} is not in the catalog`;
       throw new Error(reason);
     }
-    // Non-strict: fall through to AUTO with a fallback reason
+    // Non-strict or filtered: fall through to AUTO with a fallback reason
     const taskKind = classifyTask(input);
     const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
-    return buildResult(
-      registry,
-      model,
-      reason,
-      taskKind,
-      pinned ? `Pinned ${pinned.displayName} unavailable (availability: ${pinned.availability}) → AUTO fallback` : `Pinned ${options.pinnedModelId} unknown → AUTO fallback`,
-      "auto",
-    );
+    const fbReason = pinned && !isAllowed(pinned)
+      ? `Pinned ${pinned.displayName} is not a local model → LOCAL AUTO fallback`
+      : pinned
+        ? `Pinned ${pinned.displayName} unavailable (availability: ${pinned.availability}) → AUTO fallback`
+        : `Pinned ${options.pinnedModelId} unknown → AUTO fallback`;
+    return buildResult(registry, model, reason, taskKind, fbReason, "auto");
   }
   if (mode === "ask" && options.askChoice) {
     const choice = registry.getById(options.askChoice);
-    if (choice && registry.isRoutable(choice)) {
+    if (choice && registry.isRoutable(choice) && isAllowed(choice)) {
       return buildResult(registry, choice, `User choice: ${choice.displayName}`, classifyTask(input), null, "ask");
     }
-    if (strict) {
+    if (strict && isAllowed(choice)) {
       const reason = choice
         ? `ASK model ${choice.displayName} is not available (availability: ${choice.availability})`
         : `ASK model ${options.askChoice} is not in the catalog`;
@@ -300,14 +335,12 @@ export function routeModel(
     }
     const taskKind = classifyTask(input);
     const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
-    return buildResult(
-      registry,
-      model,
-      reason,
-      taskKind,
-      choice ? `ASK ${choice.displayName} unavailable (availability: ${choice.availability}) → AUTO fallback` : `ASK ${options.askChoice} unknown → AUTO fallback`,
-      "auto",
-    );
+    const fbReason = choice && !isAllowed(choice)
+      ? `ASK ${choice.displayName} is not a local model → LOCAL AUTO fallback`
+      : choice
+        ? `ASK ${choice.displayName} unavailable (availability: ${choice.availability}) → AUTO fallback`
+        : `ASK ${options.askChoice} unknown → AUTO fallback`;
+    return buildResult(registry, model, reason, taskKind, fbReason, "auto");
   }
 
   // AUTO (or fallback from a non-routable pin/ask)
