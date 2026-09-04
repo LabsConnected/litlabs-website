@@ -13,10 +13,8 @@
  *   - Each check has a stable string ID for resumable state
  */
 
-import { exec } from "./utils.js";
+import { exec, detectProject, resolveProjectCwd } from "./utils.js";
 import { redactEnvValue, redact } from "./secret-redaction.js";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 // ─── Types ─────────────────────────────────────────────────────────────
 
@@ -47,14 +45,15 @@ export const HEALTH_ENDPOINT = "/api/health";
 export const WEBHOOK_URL = "https://www.litlabs.net/api/stripe/webhook";
 
 /**
- * Canonical repository root for git checks.
+ * Resolve the project LiTT was actually invoked against.
  *
- * Resolved relative to the CLI source location so checks work regardless
- * of where `litt` is invoked from. dist/lib/production-checks.js → dist/
- * → packages/litt-cli/ → repo root.
+ * Never derive this from the CLI binary location: a globally installed
+ * CLI or a CLI built in another worktree must still operate on the user's
+ * active project.
  */
-const __dirname = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..");
+export function getProductionRepoRoot(): string {
+  return detectProject(resolveProjectCwd()).rootDir;
+}
 
 export const EXPECTED_PRICES = {
   creator: { amount: 1500, currency: "usd", interval: "month", mode: "recurring" },
@@ -78,7 +77,7 @@ export const EXPECTED_WEBHOOK_EVENTS = [
 // ─── Git Checks ────────────────────────────────────────────────────────
 
 export function checkGitMain(): CheckResult {
-  const branch = exec(`git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD`);
+  const branch = exec(`git -C "${getProductionRepoRoot()}" rev-parse --abbrev-ref HEAD`);
   if (branch.exitCode !== 0) {
     return { id: "git.branch", label: "Git branch", status: "fail", detail: "Cannot determine branch" };
   }
@@ -90,7 +89,7 @@ export function checkGitMain(): CheckResult {
 }
 
 export function checkGitClean(): CheckResult {
-  const status = exec(`git -C "${REPO_ROOT}" status --porcelain`);
+  const status = exec(`git -C "${getProductionRepoRoot()}" status --porcelain`);
   if (status.exitCode !== 0) {
     return { id: "git.clean", label: "Working tree", status: "fail", detail: "Cannot determine git status" };
   }
@@ -102,8 +101,8 @@ export function checkGitClean(): CheckResult {
 }
 
 export function checkGitSynced(): CheckResult {
-  const local = exec(`git -C "${REPO_ROOT}" rev-parse HEAD`);
-  const remote = exec(`git -C "${REPO_ROOT}" rev-parse origin/main`);
+  const local = exec(`git -C "${getProductionRepoRoot()}" rev-parse HEAD`);
+  const remote = exec(`git -C "${getProductionRepoRoot()}" rev-parse origin/main`);
   if (local.exitCode !== 0 || remote.exitCode !== 0) {
     return { id: "git.synced", label: "origin/main sync", status: "fail", detail: "Cannot compare HEAD with origin/main" };
   }
@@ -115,7 +114,7 @@ export function checkGitSynced(): CheckResult {
     label: "origin/main sync",
     status: "fail",
     detail: `local ${local.stdout.trim().slice(0, 8)} ≠ origin ${remote.stdout.trim().slice(0, 8)}`,
-    fix: `Run: git -C "${REPO_ROOT}" pull --ff-only origin main`,
+    fix: `Run: git -C "${getProductionRepoRoot()}" pull --ff-only origin main`,
   };
 }
 
@@ -236,7 +235,7 @@ export async function checkProductionSHA(expectedSHA?: string): Promise<CheckRes
     if (!deployedSHA) {
       return { id: "prod.sha", label: "Production SHA", status: "warn", detail: "SHA not reported" };
     }
-    const expected = expectedSHA ?? exec(`git -C "${REPO_ROOT}" rev-parse HEAD`).stdout.trim();
+    const expected = expectedSHA ?? exec(`git -C "${getProductionRepoRoot()}" rev-parse HEAD`).stdout.trim();
     if (shasEqual(deployedSHA, expected)) {
       return { id: "prod.sha", label: "Production SHA", status: "pass", detail: normalizeSHA(deployedSHA)!.slice(0, 8) };
     }

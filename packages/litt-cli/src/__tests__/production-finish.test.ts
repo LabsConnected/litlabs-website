@@ -47,13 +47,19 @@ vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   return {
     ...actual,
-    homedir: () => "/tmp/litt-test-home",
+    homedir: () => path.join(
+  process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? process.cwd(),
+  "litt-test-home",
+),
   };
 });
 
 // Ensure test directory exists and is clean
 beforeEach(() => {
-  const dir = path.join("/tmp/litt-test-home", ".litt", "production-runs");
+  const dir = path.join(path.join(
+  process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? process.cwd(),
+  "litt-test-home",
+), ".litt", "production-runs");
   fs.mkdirSync(dir, { recursive: true });
   // Clean any existing test runs
   for (const f of fs.readdirSync(dir)) {
@@ -62,7 +68,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const dir = path.join("/tmp/litt-test-home", ".litt", "production-runs");
+  const dir = path.join(path.join(
+  process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? process.cwd(),
+  "litt-test-home",
+), ".litt", "production-runs");
   if (fs.existsSync(dir)) {
     for (const f of fs.readdirSync(dir)) {
       if (f.endsWith(".json")) fs.unlinkSync(path.join(dir, f));
@@ -213,7 +222,10 @@ describe("Production-finish run store", () => {
         resumeAction: "Resume",
       }, `Key: ${fakeSecret}`);
 
-      const runPath = path.join("/tmp/litt-test-home", ".litt", "production-runs", `${run.id}.json`);
+      const runPath = path.join(path.join(
+  process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? process.cwd(),
+  "litt-test-home",
+), ".litt", "production-runs", `${run.id}.json`);
       const content = fs.readFileSync(runPath, "utf-8");
       expect(content).not.toContain(fakeSecret);
       expect(content).toContain("sk_***");
@@ -223,7 +235,10 @@ describe("Production-finish run store", () => {
   describe("deleteRun()", () => {
     it("removes the run file", () => {
       const run = createRun();
-      const runPath = path.join("/tmp/litt-test-home", ".litt", "production-runs", `${run.id}.json`);
+      const runPath = path.join(path.join(
+  process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? process.cwd(),
+  "litt-test-home",
+), ".litt", "production-runs", `${run.id}.json`);
       expect(fs.existsSync(runPath)).toBe(true);
       deleteRun(run.id);
       expect(fs.existsSync(runPath)).toBe(false);

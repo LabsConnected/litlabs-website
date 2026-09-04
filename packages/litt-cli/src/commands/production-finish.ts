@@ -20,6 +20,7 @@
 
 import { ok, fail, warn, header, c, exec } from "../lib/utils.js";
 import {
+  getProductionRepoRoot,
   runAllChecks,
   summarizeChecks,
   checkWebhookSecret,
@@ -44,22 +45,15 @@ import {
 } from "../lib/production-run-store.js";
 
 /**
- * Canonical repository root for production checks.
+ * Production checks run against the project LiTT was invoked for.
  *
- * This is the worktree where the website tests live. It is used as the
- * cwd for vitest runs. The CLI package itself lives under
- * packages/litt-cli within this root.
- *
- * We resolve it relative to the CLI source location so the command
- * works regardless of where `litt` is invoked from.
+ * The active project root comes from the shared project resolver rather
+ * than the CLI installation path, so installed/global CLIs and binaries
+ * built in another worktree operate on the caller's project.
  */
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-const __dirname = dirname(fileURLToPath(import.meta.url));
-// dist/commands/production-finish.js → dist/ → litt-cli/ → packages/ → repo root
-const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..");
 
 export async function productionFinishCommand(args: string[]): Promise<number> {
+  const repoRoot = getProductionRepoRoot();
   const resumeId = args.find((a) => a.startsWith("--resume="))?.split("=")[1];
   const json = args.includes("--json");
 
@@ -103,9 +97,9 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
 
   await runPhase(run, "operator", async () => {
     // Verify PR #131 protections are present (check for key files)
-    const leaseFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/worktree-lease.ts`);
-    const runStoreFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/run-store.ts`);
-    const canonicalFile = exec(`git -C "${REPO_ROOT}" ls-files packages/litt-cli/src/lib/canonical-main.ts`);
+    const leaseFile = exec(`git -C "${repoRoot}" ls-files packages/litt-cli/src/lib/worktree-lease.ts`);
+    const runStoreFile = exec(`git -C "${repoRoot}" ls-files packages/litt-cli/src/lib/run-store.ts`);
+    const canonicalFile = exec(`git -C "${repoRoot}" ls-files packages/litt-cli/src/lib/canonical-main.ts`);
     if (leaseFile.stdout && runStoreFile.stdout && canonicalFile.stdout) {
       return { status: "pass", detail: "PR #131 protections present" };
     }
@@ -116,7 +110,7 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
     // Run the key test suites — use a longer timeout (120s) for vitest
     const r = exec(
       "npx vitest run tests/pricing-consistency.test.ts tests/stripe-catalog-contract.test.ts tests/approval-flow.test.ts tests/security-isolation.test.ts tests/litt-chat-path.test.ts 2>&1",
-      { cwd: REPO_ROOT, timeout: 120000 },
+      { cwd: repoRoot, timeout: 120000 },
     );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Key test suites pass" };
@@ -202,7 +196,7 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
     // Verify the billing state machine tests pass — use a longer timeout (120s) for vitest
     const r = exec(
       "npx vitest run src/__tests__/billing-state-machine.test.ts 2>&1",
-      { cwd: REPO_ROOT, timeout: 120000 },
+      { cwd: repoRoot, timeout: 120000 },
     );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Billing state machine tests pass (45 tests)" };
@@ -244,7 +238,7 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
   console.log(`${c.dim}  Founder      $149          ${run.steps.find((s) => s.phase === "pricing")?.status === "pass" ? c.green + "✓" : c.red + "✗"}${c.reset}`);
 
   // Production info
-  const sha = exec(`git -C "${REPO_ROOT}" rev-parse HEAD`).stdout.trim();
+  const sha = exec(`git -C "${repoRoot}" rev-parse HEAD`).stdout.trim();
   console.log(`\n${c.dim}  Production${c.reset}`);
   console.log(`${c.dim}  ${sha.slice(0, 8)}${c.reset}`);
 
