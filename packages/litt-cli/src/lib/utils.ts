@@ -50,18 +50,27 @@ export function value(text: string, color = c.reset): string {
   return `${color}${text}${c.reset}`;
 }
 
-export function exec(cmd: string, options: { cwd?: string } = {}): { stdout: string; stderr: string; exitCode: number } {
+export function exec(cmd: string, options: { cwd?: string; timeout?: number } = {}): { stdout: string; stderr: string; exitCode: number } {
   try {
     const stdout = execSync(cmd, {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
-      timeout: 15000,
+      timeout: options.timeout ?? 15000,
       cwd: options.cwd,
+      maxBuffer: 10 * 1024 * 1024,
       shell: process.platform === "win32" ? "powershell.exe" : undefined,
     });
     return { stdout: stdout.trim(), stderr: "", exitCode: 0 };
   } catch (error: unknown) {
-    const e = error as { stdout?: string; stderr?: string; status?: number };
+    const e = error as { stdout?: string; stderr?: string; status?: number; signal?: string };
+    // On timeout, execSync throws with signal "SIGTERM"
+    if (e.signal === "SIGTERM") {
+      return {
+        stdout: (e.stdout ?? "").toString().trim(),
+        stderr: "Command timed out",
+        exitCode: 124,
+      };
+    }
     return {
       stdout: (e.stdout ?? "").toString().trim(),
       stderr: (e.stderr ?? "").toString().trim(),

@@ -15,6 +15,8 @@
 
 import { exec } from "./utils.js";
 import { redactEnvValue, redact } from "./secret-redaction.js";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ─── Types ─────────────────────────────────────────────────────────────
 
@@ -44,6 +46,16 @@ export const PRODUCTION_DOMAIN = "https://www.litlabs.net";
 export const HEALTH_ENDPOINT = "/api/health";
 export const WEBHOOK_URL = "https://www.litlabs.net/api/stripe/webhook";
 
+/**
+ * Canonical repository root for git checks.
+ *
+ * Resolved relative to the CLI source location so checks work regardless
+ * of where `litt` is invoked from. dist/lib/production-checks.js → dist/
+ * → packages/litt-cli/ → repo root.
+ */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..");
+
 export const EXPECTED_PRICES = {
   creator: { amount: 1500, currency: "usd", interval: "month", mode: "recurring" },
   pro: { amount: 3900, currency: "usd", interval: "month", mode: "recurring" },
@@ -66,7 +78,7 @@ export const EXPECTED_WEBHOOK_EVENTS = [
 // ─── Git Checks ────────────────────────────────────────────────────────
 
 export function checkGitMain(): CheckResult {
-  const branch = exec("git -C E:\\LiTT\\Worktrees\\main rev-parse --abbrev-ref HEAD");
+  const branch = exec(`git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD`);
   if (branch.exitCode !== 0) {
     return { id: "git.branch", label: "Git branch", status: "fail", detail: "Cannot determine branch" };
   }
@@ -78,7 +90,7 @@ export function checkGitMain(): CheckResult {
 }
 
 export function checkGitClean(): CheckResult {
-  const status = exec("git -C E:\\LiTT\\Worktrees\\main status --porcelain");
+  const status = exec(`git -C "${REPO_ROOT}" status --porcelain`);
   if (status.exitCode !== 0) {
     return { id: "git.clean", label: "Working tree", status: "fail", detail: "Cannot determine git status" };
   }
@@ -90,8 +102,8 @@ export function checkGitClean(): CheckResult {
 }
 
 export function checkGitSynced(): CheckResult {
-  const local = exec("git -C E:\\LiTT\\Worktrees\\main rev-parse HEAD");
-  const remote = exec("git -C E:\\LiTT\\Worktrees\\main rev-parse origin/main");
+  const local = exec(`git -C "${REPO_ROOT}" rev-parse HEAD`);
+  const remote = exec(`git -C "${REPO_ROOT}" rev-parse origin/main`);
   if (local.exitCode !== 0 || remote.exitCode !== 0) {
     return { id: "git.synced", label: "origin/main sync", status: "fail", detail: "Cannot compare HEAD with origin/main" };
   }
@@ -103,7 +115,7 @@ export function checkGitSynced(): CheckResult {
     label: "origin/main sync",
     status: "fail",
     detail: `local ${local.stdout.trim().slice(0, 8)} ≠ origin ${remote.stdout.trim().slice(0, 8)}`,
-    fix: "Run: git -C E:\\LiTT\\Worktrees\\main pull --ff-only origin main",
+    fix: `Run: git -C "${REPO_ROOT}" pull --ff-only origin main`,
   };
 }
 
@@ -172,6 +184,45 @@ export async function checkProductionHealth(): Promise<CheckResult> {
   }
 }
 
+/**
+ * Normalize a git SHA for comparison.
+ *
+ * Git SHAs can be full (40 chars) or abbreviated (7-40 chars). Two SHAs
+ * are equivalent if one is a prefix of the other and both are at least
+ * 7 chars long (git's minimum abbreviation length).
+ *
+ * This handles the common case where the health endpoint reports a short
+ * SHA (e.g. "28e87432") but `git rev-parse HEAD` returns the full 40-char
+ * SHA. Without normalization, `deployedSHA === expected` fails even when
+ * they refer to the same commit.
+ *
+ * @returns lowercase trimmed SHA, or undefined if invalid
+ */
+export function normalizeSHA(sha: string | undefined): string | undefined {
+  if (!sha) return undefined;
+  const normalized = sha.trim().toLowerCase();
+  // Git SHAs are hex strings of 7-40 characters
+  if (!/^[0-9a-f]{7,40}$/.test(normalized)) return undefined;
+  return normalized;
+}
+
+/**
+ * Compare two git SHAs for equivalence.
+ *
+ * Two SHAs are equivalent if:
+ *   - both normalize to valid hex strings, AND
+ *   - one is a prefix of the other (handles short vs full SHA)
+ *
+ * @returns true if the SHAs refer to the same commit
+ */
+export function shasEqual(a: string | undefined, b: string | undefined): boolean {
+  const na = normalizeSHA(a);
+  const nb = normalizeSHA(b);
+  if (!na || !nb) return false;
+  // Short vs full: one is a prefix of the other
+  return na.startsWith(nb) || nb.startsWith(na);
+}
+
 export async function checkProductionSHA(expectedSHA?: string): Promise<CheckResult> {
   try {
     const response = await fetch(`${PRODUCTION_DOMAIN}${HEALTH_ENDPOINT}`, {
@@ -185,15 +236,15 @@ export async function checkProductionSHA(expectedSHA?: string): Promise<CheckRes
     if (!deployedSHA) {
       return { id: "prod.sha", label: "Production SHA", status: "warn", detail: "SHA not reported" };
     }
-    const expected = expectedSHA ?? exec("git -C E:\\LiTT\\Worktrees\\main rev-parse HEAD").stdout.trim();
-    if (deployedSHA === expected) {
-      return { id: "prod.sha", label: "Production SHA", status: "pass", detail: deployedSHA.slice(0, 8) };
+    const expected = expectedSHA ?? exec(`git -C "${REPO_ROOT}" rev-parse HEAD`).stdout.trim();
+    if (shasEqual(deployedSHA, expected)) {
+      return { id: "prod.sha", label: "Production SHA", status: "pass", detail: normalizeSHA(deployedSHA)!.slice(0, 8) };
     }
     return {
       id: "prod.sha",
       label: "Production SHA",
       status: "warn",
-      detail: `deployed ${deployedSHA.slice(0, 8)} ≠ expected ${expected.slice(0, 8)}`,
+      detail: `deployed ${normalizeSHA(deployedSHA)!.slice(0, 8)} ≠ expected ${normalizeSHA(expected)!.slice(0, 8)}`,
       fix: "Run: litt deploy verify",
     };
   } catch (err) {
@@ -377,6 +428,77 @@ export function checkStripePrices(): CheckResult[] {
   return results;
 }
 
+// ─── Terminal & Studio Checks ──────────────────────────────────────────
+
+/**
+ * Check that the terminal service is configured on Railway.
+ *
+ * Canonical resolution (from src/lib/terminal-url.ts):
+ *   1. TERMINAL_PUBLIC_URL            — canonical env var (preferred)
+ *   2. NEXT_PUBLIC_TERMINAL_WS_URL    — browser-side WebSocket URL
+ *   3. NEXT_PUBLIC_TERMINAL_HTTP_URL  — browser-side HTTP fallback
+ *   4. Legacy hardcoded production URL (fallback, not configuration)
+ *
+ * A pass requires at least one env var to be set with a non-empty value.
+ */
+export function checkTerminalService(): CheckResult {
+  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
+  if (r.exitCode !== 0) {
+    return { id: "terminal.service", label: "Terminal service", status: "fail", detail: "Cannot read Railway variables" };
+  }
+  const lines = r.stdout.split("\n");
+  const hasValue = (key: string): boolean => {
+    const line = lines.find((l) => l.startsWith(`${key}=`));
+    return !!line && line.length > key.length + 1;
+  };
+  const hasCanonical = hasValue("TERMINAL_PUBLIC_URL");
+  const hasWsUrl = hasValue("NEXT_PUBLIC_TERMINAL_WS_URL");
+  const hasHttpUrl = hasValue("NEXT_PUBLIC_TERMINAL_HTTP_URL");
+  if (hasCanonical || hasWsUrl || hasHttpUrl) {
+    const source = hasCanonical ? "TERMINAL_PUBLIC_URL" : hasWsUrl ? "NEXT_PUBLIC_TERMINAL_WS_URL" : "NEXT_PUBLIC_TERMINAL_HTTP_URL";
+    return { id: "terminal.service", label: "Terminal service", status: "pass", detail: `URLs configured (${source})` };
+  }
+  return {
+    id: "terminal.service",
+    label: "Terminal service",
+    status: "fail",
+    detail: "Terminal URLs not configured",
+    fix: "Set TERMINAL_PUBLIC_URL (or NEXT_PUBLIC_TERMINAL_WS_URL) in Railway production",
+  };
+}
+
+/**
+ * Check Studio prerequisites — env vars and build artifacts.
+ */
+export function checkStudioPrerequisites(): CheckResult {
+  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
+  if (r.exitCode !== 0) {
+    return { id: "studio.prereqs", label: "Studio prerequisites", status: "fail", detail: "Cannot read Railway variables" };
+  }
+  const lines = r.stdout.split("\n");
+  const hasValue = (key: string): boolean => {
+    const line = lines.find((l) => l.startsWith(`${key}=`));
+    return !!line && line.length > key.length + 1;
+  };
+  const hasClerk = hasValue("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY") || hasValue("CLERK_SECRET_KEY");
+  const hasSupabase = hasValue("NEXT_PUBLIC_SUPABASE_URL") || hasValue("SUPABASE_URL");
+  const hasStripe = hasValue("STRIPE_SECRET_KEY");
+  const missing: string[] = [];
+  if (!hasClerk) missing.push("Clerk");
+  if (!hasSupabase) missing.push("Supabase");
+  if (!hasStripe) missing.push("Stripe");
+  if (missing.length === 0) {
+    return { id: "studio.prereqs", label: "Studio prerequisites", status: "pass", detail: "Clerk, Supabase, Stripe configured" };
+  }
+  return {
+    id: "studio.prereqs",
+    label: "Studio prerequisites",
+    status: "fail",
+    detail: `Missing: ${missing.join(", ")}`,
+    fix: `Set ${missing.join(", ")} env vars in Railway production`,
+  };
+}
+
 // ─── Aggregation ───────────────────────────────────────────────────────
 
 /**
@@ -416,6 +538,18 @@ export async function runAllChecks(): Promise<CheckGroup[]> {
       checkWebhookEndpoint(),
       ...checkStripePrices(),
     ],
+  });
+
+  // Terminal
+  groups.push({
+    name: "Terminal",
+    results: [checkTerminalService()],
+  });
+
+  // Studio
+  groups.push({
+    name: "Studio",
+    results: [checkStudioPrerequisites()],
   });
 
   return groups;
