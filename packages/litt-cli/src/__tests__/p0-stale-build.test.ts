@@ -98,7 +98,9 @@ describe("P0-9: Stale Build Detection", () => {
       writeBuildMeta(sha, "0.1.0", distDir);
       const check = checkStaleBuild(tmpDir);
       expect(check.stale).toBe(false);
-      expect(check.status).toBe("fresh");
+      // Status is "fresh" when launcher is found, "no-launcher" when not
+      // (both are non-stale). CI environments may not have `litt` installed.
+      expect(["fresh", "no-launcher"]).toContain(check.status);
       expect(check.sourceSha).toBe(sha);
       expect(check.builtSha).toBe(sha);
     });
