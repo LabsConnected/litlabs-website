@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Eye, Loader2, Monitor, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check } from "lucide-react";
+import { ExternalLink, Eye, Loader2, Monitor, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 type PreviewState = "loading" | "not_prepared" | "starting" | "ready" | "stale" | "offline" | "failed" | "restarting";
@@ -204,6 +204,30 @@ export default function StudioPreviewPanel({
     }
   }, [previewUrl]);
 
+  const stopPreview = async () => {
+    if (!projectId) return;
+    setState("loading");
+    setError(null);
+    try {
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/preview`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: await authHeaders(),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as PreviewPayload | null;
+        throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview stop failed (${response.status})`);
+      }
+      setState("not_prepared");
+      setPreviewUrl(null);
+      setError(null);
+      setLogs([]);
+    } catch (stopError) {
+      setState("failed");
+      setError(stopError instanceof Error ? stopError.message : "Preview stop failed");
+    }
+  };
+
   const handleHardRefresh = useCallback(() => {
     // Force iframe reload by incrementing frameKey, then re-check status
     setFrameKey((v) => v + 1);
@@ -290,6 +314,19 @@ export default function StudioPreviewPanel({
             data-testid="preview-restart"
           >
             <RotateCcw size={12} />
+          </button>
+        )}
+        {/* Stop dev server */}
+        {isLive && (
+          <button
+            type="button"
+            onClick={() => void stopPreview()}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            aria-label="Stop preview"
+            title="Stop preview runtime"
+            data-testid="preview-stop"
+          >
+            <Square size={12} />
           </button>
         )}
         {/* Copy URL */}

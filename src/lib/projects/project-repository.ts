@@ -426,28 +426,16 @@ export async function ensureCanonicalStudioProject(
   }
 
   if (!legacyRow) {
-    // Project doesn't exist in either table — check if it exists at all
-    // (different user_id or not found) to give a better diagnostic
-    const { data: anyRow } = await supabaseAdmin
-      .from(LEGACY_TABLE)
-      .select("id, user_id")
-      .eq("id", projectId)
-      .maybeSingle();
-    if (anyRow && anyRow.user_id !== userId) {
-      studioLog("ensureCanonical:ownership_mismatch", {
-        projectId,
-        userId,
-        errorClass: `Project owned by ${anyRow.user_id}, not ${userId}`,
-      });
-      throw new Error(`[ensureCanonical] project owned by ${anyRow.user_id}, not ${userId}`);
-    } else {
-      studioLog("ensureCanonical:not_found", {
-        projectId,
-        userId,
-        errorClass: "Project not found in studio_projects or legacy projects table",
-      });
-      throw new Error('[ensureCanonical] project not found in studio_projects or legacy table');
-    }
+    // Project doesn't exist in the user's owned rows. Don't do a cross-user
+    // lookup — that would leak another user's ID in error messages/logs.
+    // Return a generic "not found" that doesn't distinguish "owned by someone
+    // else" from "doesn't exist" (same as getProject's behavior).
+    studioLog("ensureCanonical:not_found", {
+      projectId,
+      userId,
+      errorClass: "Project not found in studio_projects or legacy projects table",
+    });
+    throw new Error('[ensureCanonical] project not found in studio_projects or legacy table');
   }
 
   const legacy = legacyRow as LegacyProjectRow;

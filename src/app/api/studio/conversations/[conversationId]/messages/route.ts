@@ -269,10 +269,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // 7.5.5. Harvest user preferences (non-blocking, best-effort).
   // Extracts name, city, timezone from natural conversation. Dedupe is handled
   // by persistMemory's dedupe_key — no duplicate writes for the same info.
+  // Wrapped in try/catch to prevent unhandled rejections from leaking.
   if (conversation.projectId) {
-    void harvestUserPreferences(resolvedMessage, userId, conversation.projectId, {
+    harvestUserPreferences(resolvedMessage, userId, conversation.projectId, {
       agentSlug,
       conversationId: conversation.id,
+    }).catch(() => {
+      // Best-effort — preference harvesting failure must not break the chat
     });
   }
 
@@ -302,8 +305,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
     }
 
-    // Persist memory for tool results too
-    void persistMemory(
+    // Persist memory for tool results too (best-effort, no unhandled rejection)
+    persistMemory(
       `User: ${message}\nLiTT: ${toolResult.text}`,
       userId,
       conversation.projectId,
@@ -314,7 +317,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         conversationId: conversation.id,
         memoryType: "conversation_summary",
       },
-    );
+    ).catch(() => {
+      // Best-effort — memory persistence failure must not break the chat
+    });
 
     studioLog("message:sent", {
       conversationId: conversation.id,
@@ -431,8 +436,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   if (useV2) {
     try {
       v2Transport = await createWorkspaceTransport(conversation.projectId!, userId);
-    } catch (_err) {
-      // Transport creation failed — fall back to V1
+    } catch (transportErr) {
+      // Transport creation failed — fall back to V1 with visible logging
+      // so operators can detect workspace issues (not silently swallowed).
+      studioLog("message:v2_transport_failed", {
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        userId,
+        errorClass: transportErr instanceof Error ? transportErr.message : "unknown",
+      });
       v1Result = await runAgentLoop(resolvedMessage, conversation.projectId ?? "", prompt);
       finalPrompt = v1Result.enrichedPrompt;
     }
@@ -635,15 +647,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
               : 0;
-            void settleRun(agentRunId, {
+            settleRun(agentRunId, {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: "completed",
-            }, reservedCredits, reservationId);
+            }, reservedCredits, reservationId).catch(() => {
+              // Best-effort settlement — must not leak unhandled rejection
+            });
           }
 
-          void persistMemory(
+          persistMemory(
             `User: ${message}\n${agentDisplayName}: ${assistantText}`,
             userId,
             conversation.projectId,
@@ -654,7 +668,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               conversationId: conversation.id,
               memoryType: "conversation_summary",
             },
-          );
+          ).catch(() => {
+            // Best-effort memory persistence — must not leak unhandled rejection
+          });
 
           studioLog("message:sent", {
             conversationId: conversation.id,
@@ -730,15 +746,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
               : 0;
-            void settleRun(agentRunId, {
+            settleRun(agentRunId, {
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: "completed",
-            }, reservedCredits, reservationId);
+            }, reservedCredits, reservationId).catch(() => {
+              // Best-effort settlement — must not leak unhandled rejection
+            });
           }
 
-          void persistMemory(
+          persistMemory(
             `User: ${message}\n${agentDisplayName}: ${assistantText}`,
             userId,
             conversation.projectId,
@@ -749,7 +767,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               conversationId: conversation.id,
               memoryType: "conversation_summary",
             },
-          );
+          ).catch(() => {
+            // Best-effort memory persistence — must not leak unhandled rejection
+          });
 
           studioLog("message:sent", {
             conversationId: conversation.id,
@@ -782,13 +802,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       } catch (err) {
         await updateMessageStatus(assistantMessage.id, userId, "failed");
         if (agentRunId) {
-          void settleRun(agentRunId, {
+          settleRun(agentRunId, {
             inputTokens: 0,
             outputTokens: 0,
             actualCredits: 0,
             status: "failed",
             error: err instanceof Error ? err.message : "LLM provider unavailable",
-          }, reservedCredits, reservationId);
+          }, reservedCredits, reservationId).catch(() => {
+            // Best-effort settlement on failure — must not leak unhandled rejection
+          });
         }
         const errorMsg = err instanceof Error ? err.message : "LLM provider unavailable";
         studioLog("message:failed", {
