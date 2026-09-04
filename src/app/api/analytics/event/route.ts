@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
     // Validate and sanitize — reject anything with > 50 events or unknown event names
     const validEvents = events.filter(
-      (e: any) =>
+      (e: Record<string, unknown>) =>
         e &&
         typeof e.event === "string" &&
         typeof e.ts === "number" &&
