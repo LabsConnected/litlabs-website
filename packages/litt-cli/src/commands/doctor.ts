@@ -191,7 +191,7 @@ export async function doctorCommand(args: string[]): Promise<number> {
       : process.env.OPENROUTER_API_KEY
         ? value("OpenRouter (key set)", c.green)
         : value("not configured", c.yellow);
-  console.log(`${label("Model Provider:")} ${providerStatus}`);
+  console.log(`${label("Remote Provider Key:")} ${providerStatus}`);
   console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
 
   // ─── P0-8: Hardened doctor checks ───────────────────────────────
