@@ -22,7 +22,13 @@ import {
   checkStudioPrerequisites,
   type CheckResult,
 } from "../lib/production-checks.js";
+import { type EnvVarMap } from "../lib/railway-env.js";
 import { exec } from "../lib/utils.js";
+
+/** Build an EnvVarMap (ReadonlyMap<string,string>) from a plain object. */
+function mapFrom(obj: Record<string, string>): EnvVarMap {
+  return new Map(Object.entries(obj));
+}
 
 // Mock exec to avoid real Railway/git/stripe calls
 vi.mock("../lib/utils.js", () => ({
@@ -35,9 +41,6 @@ vi.mock("../lib/utils.js", () => ({
     green: "", red: "", yellow: "", dim: "", bold: "", reset: "", gray: "",
   },
 }));
-
-// Get the mocked exec
-const mockedExec = vi.mocked(exec);
 
 // ─── Defect #3: SHA normalization ──────────────────────────────────────
 
@@ -122,136 +125,109 @@ describe("Defect #3: SHA normalization/comparison", () => {
 });
 
 // ─── Defect #7: Terminal config check ──────────────────────────────────
+//
+// Migrated from exec-mocked human-readable Railway CLI output to the
+// public EnvVarMap test seam: checkTerminalService(envMap) accepts an
+// explicit env-var map (or null for Railway read failure), so tests
+// no longer depend on the old human-readable parsing boundary.
 
 describe("Defect #7: Terminal config check accepts TERMINAL_PUBLIC_URL", () => {
-  beforeEach(() => {
-    mockedExec.mockReset();
-  });
-
   it("PASS: TERMINAL_PUBLIC_URL set (canonical env var)", () => {
-    mockedExec.mockReturnValue({
-      stdout: "TERMINAL_PUBLIC_URL=https://terminal.example.com\nOTHER_VAR=foo",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      TERMINAL_PUBLIC_URL: "https://terminal.example.com",
+      OTHER_VAR: "foo",
+    }));
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("TERMINAL_PUBLIC_URL");
   });
 
   it("PASS: NEXT_PUBLIC_TERMINAL_WS_URL set (fallback)", () => {
-    mockedExec.mockReturnValue({
-      stdout: "NEXT_PUBLIC_TERMINAL_WS_URL=wss://terminal.example.com\nOTHER=foo",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      NEXT_PUBLIC_TERMINAL_WS_URL: "wss://terminal.example.com",
+      OTHER: "foo",
+    }));
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("NEXT_PUBLIC_TERMINAL_WS_URL");
   });
 
   it("PASS: NEXT_PUBLIC_TERMINAL_HTTP_URL set (fallback)", () => {
-    mockedExec.mockReturnValue({
-      stdout: "NEXT_PUBLIC_TERMINAL_HTTP_URL=https://terminal.example.com\nOTHER=foo",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      NEXT_PUBLIC_TERMINAL_HTTP_URL: "https://terminal.example.com",
+      OTHER: "foo",
+    }));
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("NEXT_PUBLIC_TERMINAL_HTTP_URL");
   });
 
   it("FAIL: no terminal env vars set", () => {
-    mockedExec.mockReturnValue({
-      stdout: "OTHER_VAR=foo\nANOTHER=bar",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      OTHER_VAR: "foo",
+      ANOTHER: "bar",
+    }));
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("not configured");
   });
 
   it("FAIL: empty TERMINAL_PUBLIC_URL value", () => {
-    mockedExec.mockReturnValue({
-      stdout: "TERMINAL_PUBLIC_URL=\nOTHER=foo",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      TERMINAL_PUBLIC_URL: "",
+      OTHER: "foo",
+    }));
     expect(result.status).toBe("fail");
   });
 
-  it("FAIL: cannot read Railway variables", () => {
-    mockedExec.mockReturnValue({
-      stdout: "",
-      stderr: "Error: not authenticated",
-      exitCode: 1,
-    });
-    const result = checkTerminalService();
+  it("FAIL: cannot read Railway variables (null env map)", () => {
+    const result = checkTerminalService(null);
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("Cannot read Railway");
   });
 
   it("PASS: prefers TERMINAL_PUBLIC_URL over fallbacks", () => {
-    mockedExec.mockReturnValue({
-      stdout: "TERMINAL_PUBLIC_URL=https://terminal.example.com\nNEXT_PUBLIC_TERMINAL_WS_URL=wss://terminal.example.com",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkTerminalService();
+    const result = checkTerminalService(mapFrom({
+      TERMINAL_PUBLIC_URL: "https://terminal.example.com",
+      NEXT_PUBLIC_TERMINAL_WS_URL: "wss://terminal.example.com",
+    }));
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("TERMINAL_PUBLIC_URL");
   });
 });
 
 // ─── Defect #8: Studio prerequisites check ─────────────────────────────
+//
+// Migrated from exec-mocked human-readable Railway CLI output to the
+// public EnvVarMap test seam: checkStudioPrerequisites(envMap) accepts
+// an explicit env-var map (or null for Railway read failure).
 
 describe("Defect #8: Studio prerequisites check", () => {
-  beforeEach(() => {
-    mockedExec.mockReset();
-  });
-
   it("PASS: Clerk, Supabase, Stripe all configured", () => {
-    mockedExec.mockReturnValue({
-      stdout: "CLERK_SECRET_KEY=sk_test_fake\nNEXT_PUBLIC_SUPABASE_URL=https://example.com\nSTRIPE_SECRET_KEY=sk_test_fake",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkStudioPrerequisites();
+    const result = checkStudioPrerequisites(mapFrom({
+      CLERK_SECRET_KEY: "sk_test_fake_test_value",
+      NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+      STRIPE_SECRET_KEY: "sk_live_fake_test_value",
+    }));
     expect(result.status).toBe("pass");
   });
 
   it("FAIL: missing Stripe", () => {
-    mockedExec.mockReturnValue({
-      stdout: "CLERK_SECRET_KEY=sk_test_fake\nNEXT_PUBLIC_SUPABASE_URL=https://example.com",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkStudioPrerequisites();
+    const result = checkStudioPrerequisites(mapFrom({
+      CLERK_SECRET_KEY: "sk_test_fake_test_value",
+      NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+    }));
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("Stripe");
   });
 
   it("FAIL: missing Clerk and Supabase", () => {
-    mockedExec.mockReturnValue({
-      stdout: "STRIPE_SECRET_KEY=sk_test_fake",
-      stderr: "",
-      exitCode: 0,
-    });
-    const result = checkStudioPrerequisites();
+    const result = checkStudioPrerequisites(mapFrom({
+      STRIPE_SECRET_KEY: "sk_live_fake_test_value",
+    }));
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("Clerk");
     expect(result.detail).toContain("Supabase");
   });
 
-  it("FAIL: cannot read Railway variables", () => {
-    mockedExec.mockReturnValue({
-      stdout: "",
-      stderr: "Error",
-      exitCode: 1,
-    });
-    const result = checkStudioPrerequisites();
+  it("FAIL: cannot read Railway variables (null env map)", () => {
+    const result = checkStudioPrerequisites(null);
     expect(result.status).toBe("fail");
   });
 });

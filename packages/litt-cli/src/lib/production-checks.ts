@@ -15,6 +15,16 @@
 
 import { exec, detectProject, resolveProjectCwd } from "./utils.js";
 import { redactEnvValue, redact } from "./secret-redaction.js";
+import {
+  getRailwayEnvVars,
+  hasNonEmpty,
+  hasAnyNonEmpty,
+  hasNonEmptyWithPrefix,
+  type EnvVarMap,
+  type ExecFn,
+  RAILWAY_PRODUCTION_SERVICE,
+  RAILWAY_PRODUCTION_ENVIRONMENT,
+} from "./railway-env.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────
 
@@ -37,9 +47,18 @@ export interface CheckGroup {
 // ─── Constants ─────────────────────────────────────────────────────────
 
 export const RAILWAY_PROJECT_ID = "3d5b8abe-088c-4a6c-9b34-7054829247c9";
-export const RAILWAY_SERVICE_ID = "0fbedda0-0053-481c-9e4f-a3ea8100eb16";
+/**
+ * The Railway service that hosts the production web app env vars.
+ *
+ * This is the "cli" service — NOT "@litlabs/litt-shell" (a different service
+ * that does not carry Stripe/Clerk/Supabase/Terminal config). Inspecting the
+ * wrong service was the root cause of false "NOT SET" reports.
+ *
+ * Service ID confirmed via `railway service list --environment production --json`.
+ */
+export const RAILWAY_SERVICE_ID = "f71b9a86-cd1e-4c5a-ba00-b4efc0b6e119";
 export const RAILWAY_ENVIRONMENT_ID = "56de816e-3904-4b35-9dde-031303a6d5cb";
-export const RAILWAY_SERVICE_NAME = "@litlabs/litt-shell";
+export const RAILWAY_SERVICE_NAME = RAILWAY_PRODUCTION_SERVICE;
 export const PRODUCTION_DOMAIN = "https://www.litlabs.net";
 export const HEALTH_ENDPOINT = "/api/health";
 export const WEBHOOK_URL = "https://www.litlabs.net/api/stripe/webhook";
@@ -275,24 +294,33 @@ export function checkStripeAuth(): CheckResult {
 }
 
 /**
- * Check Railway env vars for Stripe key presence.
- * Never prints values — only presence/absence.
+ * Check Railway env vars for the Stripe secret key.
+ *
+ * Contract: STRIPE_SECRET_KEY must exist and be non-empty.
+ * Detects live vs test mode via prefix (sk_live_ / sk_test_) without
+ * revealing the value.
+ *
+ * Never prints values — only presence/absence and mode.
+ *
+ * @param envMap  Optional pre-fetched env map (for tests). If omitted, fetches
+ *                from the canonical "cli" service via JSON.
+ * @param execFn  Optional exec override (for tests).
  */
-export function checkStripeSecretKey(): CheckResult {
-  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
+export function checkStripeSecretKey(
+  envMap?: EnvVarMap | null,
+  execFn?: ExecFn,
+): CheckResult {
+  const vars = envMap !== undefined ? envMap : getRailwayEnvVars({ execFn }).vars;
+  if (vars === null) {
     return { id: "stripe.secret", label: "Stripe secret key", status: "fail", detail: "Cannot read Railway variables" };
   }
-  const output = redact(r.stdout);
-  if (output.includes("STRIPE_SECRET_KEY=sk_")) {
-    // Check if it's a live or test key (without revealing the value)
-    const line = r.stdout.split("\n").find((l) => l.startsWith("STRIPE_SECRET_KEY="));
-    if (line?.includes("sk_live_")) {
-      return { id: "stripe.secret", label: "Stripe secret key", status: "pass", detail: "SET (live mode)" };
-    }
-    if (line?.includes("sk_test_")) {
-      return { id: "stripe.secret", label: "Stripe secret key", status: "warn", detail: "SET (test mode — should be live for production)" };
-    }
+  if (hasNonEmptyWithPrefix(vars, "STRIPE_SECRET_KEY", "sk_live_")) {
+    return { id: "stripe.secret", label: "Stripe secret key", status: "pass", detail: "SET (live mode)" };
+  }
+  if (hasNonEmptyWithPrefix(vars, "STRIPE_SECRET_KEY", "sk_test_")) {
+    return { id: "stripe.secret", label: "Stripe secret key", status: "warn", detail: "SET (test mode — should be live for production)" };
+  }
+  if (hasNonEmpty(vars, "STRIPE_SECRET_KEY")) {
     return { id: "stripe.secret", label: "Stripe secret key", status: "pass", detail: "SET" };
   }
   return {
@@ -300,16 +328,25 @@ export function checkStripeSecretKey(): CheckResult {
     label: "Stripe secret key",
     status: "fail",
     detail: "NOT SET",
-    fix: "Set STRIPE_SECRET_KEY in Railway production environment",
+    fix: "Set STRIPE_SECRET_KEY in Railway production environment (cli service)",
   };
 }
 
-export function checkStripePublishableKey(): CheckResult {
-  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
+/**
+ * Check Railway env vars for the Stripe publishable key.
+ *
+ * Contract: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY must exist and be non-empty.
+ * Never prints values.
+ */
+export function checkStripePublishableKey(
+  envMap?: EnvVarMap | null,
+  execFn?: ExecFn,
+): CheckResult {
+  const vars = envMap !== undefined ? envMap : getRailwayEnvVars({ execFn }).vars;
+  if (vars === null) {
     return { id: "stripe.pk", label: "Stripe publishable key", status: "fail", detail: "Cannot read Railway variables" };
   }
-  if (r.stdout.includes("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_")) {
+  if (hasNonEmpty(vars, "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY")) {
     return { id: "stripe.pk", label: "Stripe publishable key", status: "pass", detail: "SET" };
   }
   return {
@@ -317,16 +354,25 @@ export function checkStripePublishableKey(): CheckResult {
     label: "Stripe publishable key",
     status: "fail",
     detail: "NOT SET",
-    fix: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Railway",
+    fix: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Railway (cli service)",
   };
 }
 
-export function checkWebhookSecret(): CheckResult {
-  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
+/**
+ * Check Railway env vars for the Stripe webhook signing secret.
+ *
+ * Contract: STRIPE_WEBHOOK_SECRET must exist and be non-empty.
+ * Never prints values.
+ */
+export function checkWebhookSecret(
+  envMap?: EnvVarMap | null,
+  execFn?: ExecFn,
+): CheckResult {
+  const vars = envMap !== undefined ? envMap : getRailwayEnvVars({ execFn }).vars;
+  if (vars === null) {
     return { id: "stripe.whsec", label: "Webhook signing secret", status: "fail", detail: "Cannot read Railway variables" };
   }
-  if (r.stdout.includes("STRIPE_WEBHOOK_SECRET=whsec_")) {
+  if (hasNonEmpty(vars, "STRIPE_WEBHOOK_SECRET")) {
     return { id: "stripe.whsec", label: "Webhook signing secret", status: "pass", detail: "SET" };
   }
   return {
@@ -334,7 +380,7 @@ export function checkWebhookSecret(): CheckResult {
     label: "Webhook signing secret",
     status: "fail",
     detail: "NOT SET",
-    fix: "Reveal signing secret in Stripe Dashboard → Webhooks, then set STRIPE_WEBHOOK_SECRET in Railway",
+    fix: "Reveal signing secret in Stripe Dashboard → Webhooks, then set STRIPE_WEBHOOK_SECRET in Railway (cli service)",
   };
 }
 
@@ -432,29 +478,28 @@ export function checkStripePrices(): CheckResult[] {
 /**
  * Check that the terminal service is configured on Railway.
  *
- * Canonical resolution (from src/lib/terminal-url.ts):
+ * Canonical resolution contract (OR fallback — any one satisfies):
  *   1. TERMINAL_PUBLIC_URL            — canonical env var (preferred)
  *   2. NEXT_PUBLIC_TERMINAL_WS_URL    — browser-side WebSocket URL
  *   3. NEXT_PUBLIC_TERMINAL_HTTP_URL  — browser-side HTTP fallback
- *   4. Legacy hardcoded production URL (fallback, not configuration)
  *
  * A pass requires at least one env var to be set with a non-empty value.
+ * Never prints values.
  */
-export function checkTerminalService(): CheckResult {
-  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
+export function checkTerminalService(
+  envMap?: EnvVarMap | null,
+  execFn?: ExecFn,
+): CheckResult {
+  const vars = envMap !== undefined ? envMap : getRailwayEnvVars({ execFn }).vars;
+  if (vars === null) {
     return { id: "terminal.service", label: "Terminal service", status: "fail", detail: "Cannot read Railway variables" };
   }
-  const lines = r.stdout.split("\n");
-  const hasValue = (key: string): boolean => {
-    const line = lines.find((l) => l.startsWith(`${key}=`));
-    return !!line && line.length > key.length + 1;
-  };
-  const hasCanonical = hasValue("TERMINAL_PUBLIC_URL");
-  const hasWsUrl = hasValue("NEXT_PUBLIC_TERMINAL_WS_URL");
-  const hasHttpUrl = hasValue("NEXT_PUBLIC_TERMINAL_HTTP_URL");
-  if (hasCanonical || hasWsUrl || hasHttpUrl) {
-    const source = hasCanonical ? "TERMINAL_PUBLIC_URL" : hasWsUrl ? "NEXT_PUBLIC_TERMINAL_WS_URL" : "NEXT_PUBLIC_TERMINAL_HTTP_URL";
+  const source = hasAnyNonEmpty(vars, [
+    "TERMINAL_PUBLIC_URL",
+    "NEXT_PUBLIC_TERMINAL_WS_URL",
+    "NEXT_PUBLIC_TERMINAL_HTTP_URL",
+  ]);
+  if (source) {
     return { id: "terminal.service", label: "Terminal service", status: "pass", detail: `URLs configured (${source})` };
   }
   return {
@@ -462,26 +507,33 @@ export function checkTerminalService(): CheckResult {
     label: "Terminal service",
     status: "fail",
     detail: "Terminal URLs not configured",
-    fix: "Set TERMINAL_PUBLIC_URL (or NEXT_PUBLIC_TERMINAL_WS_URL) in Railway production",
+    fix: "Set TERMINAL_PUBLIC_URL (or NEXT_PUBLIC_TERMINAL_WS_URL / NEXT_PUBLIC_TERMINAL_HTTP_URL) in Railway production (cli service)",
   };
 }
 
 /**
- * Check Studio prerequisites — env vars and build artifacts.
+ * Check Studio prerequisites — env vars for Clerk, Supabase, Stripe.
+ *
+ * Contracts (OR fallback per service):
+ *   - Clerk:    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY OR CLERK_SECRET_KEY
+ *   - Supabase: NEXT_PUBLIC_SUPABASE_URL OR SUPABASE_URL
+ *   - Stripe:   STRIPE_SECRET_KEY
+ *
+ * Each must be present and non-empty. Reports only the missing services
+ * (never values). A single missing service fails ONLY that service's check,
+ * not the others.
  */
-export function checkStudioPrerequisites(): CheckResult {
-  const r = exec(`railway variables --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
+export function checkStudioPrerequisites(
+  envMap?: EnvVarMap | null,
+  execFn?: ExecFn,
+): CheckResult {
+  const vars = envMap !== undefined ? envMap : getRailwayEnvVars({ execFn }).vars;
+  if (vars === null) {
     return { id: "studio.prereqs", label: "Studio prerequisites", status: "fail", detail: "Cannot read Railway variables" };
   }
-  const lines = r.stdout.split("\n");
-  const hasValue = (key: string): boolean => {
-    const line = lines.find((l) => l.startsWith(`${key}=`));
-    return !!line && line.length > key.length + 1;
-  };
-  const hasClerk = hasValue("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY") || hasValue("CLERK_SECRET_KEY");
-  const hasSupabase = hasValue("NEXT_PUBLIC_SUPABASE_URL") || hasValue("SUPABASE_URL");
-  const hasStripe = hasValue("STRIPE_SECRET_KEY");
+  const hasClerk = hasAnyNonEmpty(vars, ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"]) !== null;
+  const hasSupabase = hasAnyNonEmpty(vars, ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_URL"]) !== null;
+  const hasStripe = hasNonEmpty(vars, "STRIPE_SECRET_KEY");
   const missing: string[] = [];
   if (!hasClerk) missing.push("Clerk");
   if (!hasSupabase) missing.push("Supabase");
@@ -494,7 +546,7 @@ export function checkStudioPrerequisites(): CheckResult {
     label: "Studio prerequisites",
     status: "fail",
     detail: `Missing: ${missing.join(", ")}`,
-    fix: `Set ${missing.join(", ")} env vars in Railway production`,
+    fix: `Set ${missing.join(", ")} env vars in Railway production (cli service)`,
   };
 }
 
