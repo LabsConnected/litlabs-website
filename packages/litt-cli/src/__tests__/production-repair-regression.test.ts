@@ -374,14 +374,14 @@ describe("Defect #5 & #6: exec supports custom timeout", () => {
     expect(src).not.toContain("cd E:\\LiTT\\Worktrees\\main && npx vitest");
   });
 
-  it("production-checks uses REPO_ROOT (not hardcoded path)", async () => {
+  it("production-checks resolves active project root (not hardcoded path)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
       path.resolve(__dirname, "..", "lib", "production-checks.ts"),
       "utf-8",
     );
-    expect(src).toContain("REPO_ROOT");
+    expect(src).toContain("getProductionRepoRoot");
     expect(src).not.toContain("git -C E:\\LiTT\\Worktrees\\main");
   });
 });
