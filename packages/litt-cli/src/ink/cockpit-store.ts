@@ -22,6 +22,7 @@ import {
   getDefaultPrefsPath,
   type ModelPrefs,
 } from "../lib/provider-registry.js";
+import { reconcileActivity } from "./activity-reconciler.js";
 
 export type CockpitPanel = "runtime" | "terminal" | "memory" | "agent" | "model" | "gateway" | "credentials";
 
@@ -502,7 +503,11 @@ export function useCockpitStore() {
     const bounded: ActivityEntry = entry.fullText && entry.fullText.length > MAX_FULLTEXT
       ? { ...entry, fullText: entry.fullText.slice(0, MAX_FULLTEXT) + "\n…[truncated]" }
       : entry;
-    setActivityLog((prev) => [...prev.slice(-200), bounded]);
+    // P0-3: Reconcile by logical key (runId+stepId / runId+toolCallId)
+    // so one logical activity = one row. Updates mutate the existing
+    // row instead of appending duplicates. This fixes the observed
+    // duplicate "Inspecting / Inspecting" feed.
+    setActivityLog((prev) => reconcileActivity(prev.slice(-200), bounded));
   }, []);
 
   // ─── Persisted model prefs ───────────────────────────────────────

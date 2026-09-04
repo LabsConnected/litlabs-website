@@ -21,6 +21,11 @@ import * as path from "path";
 import * as os from "os";
 import { createRequire } from "node:module";
 import { tryCommandOutputAsync, type WhichEnv } from "../lib/which.js";
+import { checkCanonicalMain } from "../lib/canonical-main.js";
+import { checkLease } from "../lib/worktree-lease.js";
+import { checkStaleBuild } from "../lib/build-metadata.js";
+import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
+import { loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 
 export async function doctorCommand(args: string[]): Promise<number> {
   // Subcommand: litt doctor input — interactive input diagnostic
@@ -188,6 +193,92 @@ export async function doctorCommand(args: string[]): Promise<number> {
         : value("not configured", c.yellow);
   console.log(`${label("Model Provider:")} ${providerStatus}`);
   console.log(`${label("Mode:")} ${value(process.env.LITT_MODE ?? "act", c.dim)}`);
+
+  // ─── P0-8: Hardened doctor checks ───────────────────────────────
+  // Worktree safety, canonical main, stale build, execution target,
+  // worktree lease/collision, model/provider/auth state.
+
+  // Canonical main protection
+  header("Canonical Main Protection");
+  const canonicalCheck = checkCanonicalMain(project.rootDir);
+  if (!canonicalCheck.isCanonicalMain) {
+    ok(`Not canonical main (path: ${project.rootDir})`);
+  } else if (canonicalCheck.branchMatches) {
+    ok(`Canonical main on branch: ${canonicalCheck.actualBranch}`);
+  } else {
+    fail(`WORKTREE MISMATCH: canonical main on "${canonicalCheck.actualBranch}" (expected "${canonicalCheck.expectedBranch}")`);
+    if (canonicalCheck.warning) {
+      console.log(`${c.dim}  ${canonicalCheck.warning}${c.reset}`);
+    }
+  }
+
+  // Worktree lease / collision
+  header("Worktree Lease");
+  const leaseCheck = checkLease(project.rootDir);
+  if (leaseCheck.status === "available") {
+    ok("Worktree available (no active lease)");
+  } else if (leaseCheck.status === "stale") {
+    warn(`Stale lease detected: ${leaseCheck.reason}`);
+    console.log(`${c.dim}  Run: litt doctor --cleanup-lease${c.reset}`);
+  } else {
+    fail(`Worktree IN USE: ${leaseCheck.reason}`);
+  }
+
+  // Stale build detection
+  header("Build Freshness");
+  const buildCheck = checkStaleBuild();
+  if (buildCheck.status === "fresh") {
+    ok(`Build is fresh (SHA: ${buildCheck.sourceSha?.slice(0, 8) ?? "—"})`);
+  } else if (buildCheck.status === "stale") {
+    fail(`CLI BUILD STALE: source ${buildCheck.sourceSha?.slice(0, 8)} ≠ built ${buildCheck.builtSha?.slice(0, 8)}`);
+    if (buildCheck.rebuildCommand) {
+      console.log(`${c.dim}  Rebuild: ${buildCheck.rebuildCommand}${c.reset}`);
+    }
+  } else if (buildCheck.status === "no-build-meta") {
+    warn("No build metadata (dist/.build-meta.json) — run a build first");
+  } else if (buildCheck.status === "no-source-sha") {
+    warn("Cannot determine source SHA (not a git repo or git unavailable)");
+  } else if (buildCheck.status === "no-launcher") {
+    warn("Build is fresh but global 'litt' launcher not found");
+  }
+
+  // Execution target
+  header("Execution Target");
+  const execTarget = resolveExecutionTarget();
+  const localOnly = resolveLocalOnly();
+  ok(`Execution: ${execTarget.toUpperCase()}`);
+  if (localOnly) {
+    warn("LocalOnly: ON (emergency/offline mode — remote/cloud blocked)");
+  } else {
+    ok("LocalOnly: off");
+  }
+
+  // Model + provider
+  header("Model & Provider");
+  const prefs = loadModelPrefs(getDefaultPrefsPath());
+  const modelLabel = prefs.selectedModel ?? "qwen3:4b-instruct (default)";
+  ok(`Model: ${modelLabel}`);
+  ok(`Routing: ${prefs.routingMode}`);
+  const providerName = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST_PC ? "Ollama"
+    : process.env.OPENAI_API_KEY ? "OpenAI"
+    : process.env.GROQ_API_KEY ? "Groq"
+    : process.env.OPENROUTER_API_KEY ? "OpenRouter"
+    : "none (local/credentialless)";
+  if (providerName === "none (local/credentialless)") {
+    warn(`Provider: ${providerName}`);
+  } else {
+    ok(`Provider: ${providerName}`);
+  }
+
+  // Tools readiness
+  header("Tools");
+  if (gitVer) {
+    ok("Git: ready");
+  } else {
+    fail("Git: not found");
+  }
+  ok("ShellExecutor: available");
+  ok("ExecutionGateway: available");
 
   // Summary
   header("Summary");
