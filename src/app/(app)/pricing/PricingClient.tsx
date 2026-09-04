@@ -8,7 +8,6 @@ import { track } from "@/lib/analytics";
 import {
   PLANS,
   formatPrice,
-  formatPriceMonthly,
   type PlanDefinition,
   type PlanId,
 } from "@/config/plans";
@@ -55,7 +54,7 @@ const CARD_PLANS: CardPlan[] = [
     label: "Best for creators",
     price: formatPrice(PLANS.creator_beta.default_price),
     suffix: "/month",
-    futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
+    futurePrice: "Beta pricing — cancel anytime",
     description: PLANS.creator_beta.description,
     credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
     creditLabel: "AI credits monthly",
@@ -71,7 +70,7 @@ const CARD_PLANS: CardPlan[] = [
     label: "For serious builders",
     price: formatPrice(PLANS.pro_builder_beta.default_price),
     suffix: "/month",
-    futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
+    futurePrice: "Beta pricing — cancel anytime",
     description: PLANS.pro_builder_beta.description,
     credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
     creditLabel: "AI credits monthly",
