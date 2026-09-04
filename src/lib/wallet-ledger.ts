@@ -131,6 +131,12 @@ export async function adjustWalletBalance(params: {
   return {
     balance,
     previousBalance: before.total,
-    replayed: isDebit ? row.success === false && balance === before.total : row.granted === false,
+    // For debits: debit_credits returns success=true even on idempotent replay,
+    // but the balance doesn't change. Detect replay by checking if the debit
+    // was a no-op (balance unchanged AND success=true AND amount > 0).
+    // For grants: grant_credits returns granted=false on replay.
+    replayed: isDebit
+      ? row.success === true && balance === before.total && Math.abs(params.amount) > 0
+      : row.granted === false,
   };
 }

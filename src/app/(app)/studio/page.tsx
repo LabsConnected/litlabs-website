@@ -133,9 +133,10 @@ function StudioHub() {
     setRetryKey((k) => k + 1);
   }, []);
 
-  // Defense-in-depth: middleware already redirects signed-out users
-  // to /sign-in before this page renders. This client-side guard
-  // handles session expiry while the page is open.
+  // The proxy (src/proxy.ts, Next.js 16's renamed middleware) redirects
+  // signed-out users to /sign-in at the server level before this page renders.
+  // This client-side guard handles session expiry while the page is open
+  // (the server redirect only fires on initial navigation, not mid-session).
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
       router.replace("/sign-in?redirect_url=%2Fstudio");

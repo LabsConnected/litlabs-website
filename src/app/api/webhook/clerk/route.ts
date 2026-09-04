@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateUser } from "@/lib/user-db";
 import { anonymizeUser } from "@/lib/user-deletion";
 import { getAdminSupabase } from "@/lib/supabase-admin";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { Webhook } from "svix";
 
 /**
@@ -76,8 +77,54 @@ export async function POST(req: NextRequest) {
           ? `${first_name} ${last_name}`
           : first_name || email.split("@")[0];
 
-      await getOrCreateUser(id, email, name);
-      // User event processed
+      const { isNew } = await getOrCreateUser(id, email, name);
+
+      // Grant the starter 500 LiTTBits to NEW users via the canonical
+      // credit_ledger. This is idempotent (grant_credits RPC deduplicates
+      // by idempotency_key = "starter:{userId}"), so even if the webhook
+      // fires twice or getCreditBalances also tries to grant, the second
+      // call is a no-op. Without this, a new user who goes straight to a
+      // marketplace agent chat (without first loading /api/wallet) would
+      // see 0 BITS and be blocked — the lazy grant in getCreditBalances
+      // only fires on wallet read.
+      if (isNew && eventType === "user.created") {
+        try {
+          const admin = getSupabaseAdmin();
+          if (admin) {
+            // Look up the internal user ID (clerk_id → users.id)
+            const { data: userRow } = await admin
+              .from("users")
+              .select("id")
+              .eq("clerk_id", id)
+              .single();
+            if (userRow?.id) {
+              // Pre-check to avoid an unnecessary RPC round-trip
+              const { data: existingGrant } = await admin
+                .from("credit_ledger")
+                .select("id")
+                .eq("user_id", userRow.id)
+                .eq("idempotency_key", `starter:${userRow.id}`)
+                .limit(1)
+                .maybeSingle();
+              if (!existingGrant) {
+                await admin.rpc("grant_credits", {
+                  p_user_id: userRow.id,
+                  p_amount: 500,
+                  p_category: "subscription_grant",
+                  p_balance_bucket: "monthly",
+                  p_description: "Starter one-time grant — 500 LiTTBits (webhook)",
+                  p_idempotency_key: `starter:${userRow.id}`,
+                  p_reference_type: "starter_plan",
+                  p_reference_id: "one_time",
+                });
+              }
+            }
+          }
+        } catch {
+          // Starter grant failed — the lazy grant in getCreditBalances
+          // will retry on the next wallet read. Don't fail the webhook.
+        }
+      }
     }
 
     if (eventType === "user.deleted") {
