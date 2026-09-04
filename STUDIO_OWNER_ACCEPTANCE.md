@@ -1,147 +1,225 @@
-# Studio Owner Acceptance Script — Larry
+# LiTT Studio Owner Acceptance Script — Larry
 
-This is the shortest browser flow to prove the Studio customer journey end-to-end.
 Run this in an authenticated browser session at https://www.litlabs.net.
 
 **You do not need to share any credentials, cookies, or tokens with anyone.
 Just run this flow yourself and report the results.**
 
----
-
-## Pre-flight (30 seconds)
-
-1. Open https://www.litlabs.net/studio in your browser
-2. Confirm you are signed in (Clerk should show your account)
-3. Open browser DevTools → Network tab (to observe API calls)
-4. Open browser DevTools → Console tab (to observe errors)
-
-**Expected:** Studio loads without a blank screen. No infinite spinner.
-If you see "Studio couldn't finish connecting" after 8 seconds, that's a P0 fail.
+Do not start until production is serving the PR #133 merge SHA
+(Devin will confirm this before handing you the script).
 
 ---
 
-## Step 1 — Enter Studio and select/create a project (15 seconds)
+## Pre-flight
 
-1. If you already have a project, skip to step 2
-2. If not, click "New Project" → choose "Blank" → name it "acceptance-test"
-3. Wait for the workspace to provision (status should show "ready")
-
-**Expected:** Project appears in the sidebar. Workspace status shows ready.
-**Evidence to capture:** Screenshot of the project name + workspace status.
+1. Open https://www.litlabs.net in your browser
+2. Open DevTools → Network tab and Console tab
 
 ---
 
-## Step 2 — Ask Myko (30 seconds)
+## Step 1 — Sign in
 
-1. In the Studio chat composer, type exactly:
-   ```
-   Reply with exactly STUDIO_MYKO_OK
-   ```
-2. Press Enter (or click Send)
-3. Wait for the response
+**ACTION:** Sign in with your Clerk account.
 
-**Expected:** Myko responds with `STUDIO_MYKO_OK` (or close to it).
-**Evidence to capture:** Screenshot of the prompt + response.
-**If it fails:** Note the error message. Check Network tab for the
-`/api/studio/conversations/[id]/messages` call — what status code?
-What error in the SSE stream?
+**EXPECTED:** You are signed in. No error page.
+
+**IF FAILED:** Screenshot the error page or Clerk error message.
 
 ---
 
-## Step 3 — Read a file (10 seconds)
+## Step 2 — Create a fresh acceptance project
 
-1. In the file explorer, click any file (e.g. `package.json` or `README.md`)
-2. Confirm the file contents render in the editor panel
+**ACTION:** Create a new project named `owner-acceptance`. Choose Blank.
 
-**Expected:** File contents appear.
-**Evidence to capture:** Screenshot of the file tree + editor.
+**EXPECTED:** Project appears in the sidebar. Workspace provisions.
 
----
-
-## Step 4 — Write a file with approval (30 seconds)
-
-1. In the chat, type:
-   ```
-   Create a file called studio-acceptance.txt with the content: LARRY_ACCEPTANCE_OK
-   ```
-2. Wait for the approval card to appear
-3. Click "Approve"
-4. Confirm the file appears in the file tree
-
-**Expected:** Approval card appears. After approval, `studio-acceptance.txt`
-appears in the file tree with the content `LARRY_ACCEPTANCE_OK`.
-**Evidence to capture:** Screenshot of the approval card + screenshot of the
-file in the tree.
+**IF FAILED:** Screenshot the project creation screen + any error.
 
 ---
 
-## Step 5 — Run the terminal (20 seconds)
+## Step 3 — Open LiTT Studio
 
-1. Open the terminal panel in Studio
-2. Type `pwd` and press Enter
-3. Type `node -v` and press Enter
+**ACTION:** Navigate to https://www.litlabs.net/studio
 
-**Expected:** `pwd` shows the project workspace path. `node -v` shows a version.
-**Evidence to capture:** Screenshot of the terminal with both outputs.
+**EXPECTED:** Studio reaches Ready (no infinite spinner, no blank screen).
+If it takes more than 8 seconds you should see a Retry button.
 
----
-
-## Step 6 — Start preview (30 seconds)
-
-1. Click the "Start Preview" button
-2. Wait for the preview to become "ready" (status indicator turns green)
-3. Confirm a preview URL appears
-4. Click the preview URL to open it in a new tab
-
-**Expected:** Preview starts, becomes ready, URL opens.
-**Evidence to capture:** Screenshot of the ready status + preview URL.
-**If it fails:** Note the error. Check Network tab for the
-`/api/studio-projects/[id]/preview` call.
+**IF FAILED:** Screenshot whatever screen you see (spinner, blank, error).
 
 ---
 
-## Step 7 — Stop preview (10 seconds)
+## Step 4 — Ask LiTT
 
-1. Click the "Stop" button (added in this PR)
-2. Confirm the preview status changes to "stopped" or "offline"
+**ACTION:** In the Studio chat composer, type exactly:
 
-**Expected:** Preview stops. Status shows stopped/offline.
-**Evidence to capture:** Screenshot of the stopped status.
+```
+Reply exactly OWNER_STUDIO_OK
+```
 
----
+Press Enter.
 
-## Step 8 — Restart preview (15 seconds)
+**EXPECTED:** LiTT responds with `OWNER_STUDIO_OK`.
 
-1. Click "Start Preview" again
-2. Confirm it becomes ready again
-
-**Expected:** Preview restarts and becomes ready.
-**Evidence to capture:** Screenshot of the ready status again.
+**IF FAILED:** Screenshot the chat. Copy any error text from the response.
+Note the Network tab status code for `/api/studio/conversations/.../messages`.
 
 ---
 
-## Step 9 — Persistence after refresh (15 seconds)
+## Step 5 — Read a project file
 
-1. Refresh the browser page (F5 or Ctrl+R)
-2. Confirm the same project is selected
-3. Confirm the same conversation is visible with all messages
-4. Confirm `studio-acceptance.txt` is still in the file tree
-5. Confirm the preview is still running (or shows the correct state)
+**ACTION:** In the file explorer, click any file (e.g. `package.json`).
 
-**Expected:** Everything persists. No blank screen. No lost conversation.
-**Evidence to capture:** Screenshot after refresh showing project + chat + files.
+**EXPECTED:** File contents render in the editor panel.
+
+**IF FAILED:** Screenshot the file explorer + editor area.
 
 ---
 
-## Step 10 — Sign out and sign back in (30 seconds)
+## Step 6 — Write a harmless acceptance file
 
-1. Sign out (Clerk user menu → Sign out)
-2. Sign back in
-3. Navigate to /studio
-4. Confirm the same project, conversation, and files are still there
+**ACTION:** In the chat, type:
 
-**Expected:** Everything persists across sign-out/sign-in.
-**Evidence to capture:** Screenshot after sign-in showing project + chat + files.
+```
+Create a file called owner-acceptance.txt with the content: OWNER_ACCEPTANCE_OK
+```
+
+**EXPECTED:** An approval card appears asking you to approve the file write.
+
+**IF FAILED:** Screenshot the chat. Note whether an approval card appeared at all.
+
+---
+
+## Step 7 — Approve the file write
+
+**ACTION:** Click Approve on the approval card.
+
+**EXPECTED:** The file `owner-acceptance.txt` appears in the file tree.
+Open it and confirm the content is `OWNER_ACCEPTANCE_OK`.
+
+**IF FAILED:** Screenshot the approval card + file tree after approval.
+
+---
+
+## Step 8 — Trigger another safe approval and DENY
+
+**ACTION:** In the chat, type:
+
+```
+Create a file called deny-test.txt with the content: SHOULD_NOT_EXIST
+```
+
+When the approval card appears, click Deny.
+
+**EXPECTED:** `deny-test.txt` does NOT appear in the file tree.
+LiTT acknowledges the denial.
+
+**IF FAILED:** Screenshot the file tree showing whether deny-test.txt exists.
+
+---
+
+## Step 9 — Open Terminal
+
+**ACTION:** Open the terminal panel in Studio.
+
+**EXPECTED:** Terminal connects. You see a shell prompt.
+
+**IF FAILED:** Screenshot the terminal panel. Note any error message.
+
+---
+
+## Step 10 — Run a harmless command
+
+**ACTION:** In the terminal, type `pwd` and press Enter. Then type `node -v`.
+
+**EXPECTED:** `pwd` shows the project workspace path. `node -v` shows a version.
+
+**IF FAILED:** Screenshot the terminal output (or lack of output).
+
+---
+
+## Step 11 — Start Preview
+
+**ACTION:** Click the Start Preview button.
+
+**EXPECTED:** Preview status changes to starting, then ready.
+A preview URL appears.
+
+**IF FAILED:** Screenshot the preview panel. Note the status and any error.
+Check Network tab for `/api/studio-projects/.../preview` status code.
+
+---
+
+## Step 12 — Confirm actual rendered content
+
+**ACTION:** Click the preview URL to open it in a new tab.
+
+**EXPECTED:** The dev server renders actual content (not an error page).
+
+**IF FAILED:** Screenshot the preview tab. Copy the URL. Note any error page.
+
+---
+
+## Step 13 — Stop Preview
+
+**ACTION:** Click the Stop button.
+
+**EXPECTED:** Preview status changes to stopped or offline.
+
+**IF FAILED:** Screenshot the preview panel after clicking Stop.
+
+---
+
+## Step 14 — Restart Preview
+
+**ACTION:** Click Start Preview again.
+
+**EXPECTED:** Preview restarts and becomes ready again.
+
+**IF FAILED:** Screenshot the preview panel.
+
+---
+
+## Step 15 — Refresh browser
+
+**ACTION:** Press F5 (or Ctrl+R) to refresh the page.
+
+**EXPECTED:** Same project is selected. Same conversation is visible with
+all messages. `owner-acceptance.txt` is still in the file tree.
+Preview shows the correct state.
+
+**IF FAILED:** Screenshot what you see after refresh. Note what is missing.
+
+---
+
+## Step 16 — Sign out
+
+**ACTION:** Sign out via the Clerk user menu.
+
+**EXPECTED:** You are redirected to the sign-in page.
+
+**IF FAILED:** Screenshot whatever screen you see.
+
+---
+
+## Step 17 — Sign back in
+
+**ACTION:** Sign in again with the same account.
+
+**EXPECTED:** You are signed in.
+
+**IF FAILED:** Screenshot the error.
+
+---
+
+## Step 18 — Confirm project still exists
+
+**ACTION:** Navigate to https://www.litlabs.net/studio
+
+**EXPECTED:** The same `owner-acceptance` project is visible.
+The same conversation is visible with all messages.
+`owner-acceptance.txt` is still in the file tree.
+
+**IF FAILED:** Screenshot the Studio. Note what is missing.
 
 ---
 
@@ -149,28 +227,35 @@ file in the tree.
 
 For each step, report one of:
 - **PASS** — worked as expected
-- **FAIL** — include the error message and screenshot
+- **FAIL** — include the screenshot and error text
 - **BLOCKED** — include what blocked you
 
 | Step | Status | Notes |
 |------|--------|-------|
-| Pre-flight | | |
-| 1. Project | | |
-| 2. Myko | | |
-| 3. Read file | | |
-| 4. Write + approve | | |
-| 5. Terminal | | |
-| 6. Start preview | | |
-| 7. Stop preview | | |
-| 8. Restart preview | | |
-| 9. Refresh persistence | | |
-| 10. Sign-out/in persistence | | |
+| 1. Sign in | | |
+| 2. Create project | | |
+| 3. Open Studio | | |
+| 4. Ask LiTT | | |
+| 5. Read file | | |
+| 6. Write file (approval) | | |
+| 7. Approve | | |
+| 8. Deny | | |
+| 9. Open Terminal | | |
+| 10. Run command | | |
+| 11. Start Preview | | |
+| 12. Confirm content | | |
+| 13. Stop Preview | | |
+| 14. Restart Preview | | |
+| 15. Refresh | | |
+| 16. Sign out | | |
+| 17. Sign back in | | |
+| 18. Confirm persistence | | |
 
-**Overall verdict:** Studio is ready for real customers only if ALL steps PASS.
+**Overall verdict:** LiTT Studio is ready for real customers only if ALL steps PASS.
 
 ---
 
-## What this PR already fixed (code-level)
+## What PR #133 already fixed (code-level)
 
 These root causes were found and fixed through source inspection and automated
 tests — no browser session needed:
@@ -184,7 +269,6 @@ tests — no browser session needed:
 5. **wallet-ledger replayed flag** — incorrect for idempotent debit replays; fixed
 6. **Cross-user ID leak** — `ensureCanonicalStudioProject` diagnostic query removed
 7. **Proxy.ts auth gate** — verified Next.js 16 proxy.ts protects all Studio routes
-8. **73 regression tests** covering middleware, BITS, approvals, security, Myko path
 
 ## What only Larry can verify
 

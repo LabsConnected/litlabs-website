@@ -1,7 +1,7 @@
 /**
- * Myko chat path regression tests.
+ * LiTT chat path regression tests.
  *
- * Verifies fixes for the Myko audit findings:
+ * Verifies fixes for the chat path audit findings:
  * 1. No floating promises (void settleRun, void persistMemory, void harvestUserPreferences)
  * 2. V2 transport failure is logged (not silently swallowed)
  * 3. Structured logging uses studioLog (not console.log)
@@ -19,7 +19,7 @@ function readSrc(rel: string): string {
 const MESSAGES_ROUTE = "src/app/api/studio/conversations/[conversationId]/messages/route.ts";
 const LOGGER_PATH = "src/lib/studio/logger.ts";
 
-describe("Myko chat — no floating promises", () => {
+describe("LiTT chat — no floating promises", () => {
   it("does not use 'void settleRun' (must use .catch() instead)", () => {
     const content = readSrc(MESSAGES_ROUTE);
     expect(content).not.toContain("void settleRun");
@@ -56,7 +56,7 @@ describe("Myko chat — no floating promises", () => {
   });
 });
 
-describe("Myko chat — V2 transport failure logging", () => {
+describe("LiTT chat — V2 transport failure logging", () => {
   it("logs V2 transport failure with studioLog (not silently swallowed)", () => {
     const content = readSrc(MESSAGES_ROUTE);
     expect(content).toContain("message:v2_transport_failed");
@@ -64,7 +64,7 @@ describe("Myko chat — V2 transport failure logging", () => {
   });
 });
 
-describe("Myko chat — structured logging", () => {
+describe("LiTT chat — structured logging", () => {
   it("uses studioLog for structured logging (not console.log)", () => {
     const content = readSrc(MESSAGES_ROUTE);
     expect(content).toContain('import { studioLog }');
@@ -90,7 +90,7 @@ describe("Myko chat — structured logging", () => {
   });
 });
 
-describe("Myko chat — SSE stream lifecycle", () => {
+describe("LiTT chat — SSE stream lifecycle", () => {
   it("SSE stream closes in finally block", () => {
     const content = readSrc(MESSAGES_ROUTE);
     // The finally block must close the controller
@@ -110,7 +110,7 @@ describe("Myko chat — SSE stream lifecycle", () => {
   });
 });
 
-describe("Myko chat — auth and idempotency", () => {
+describe("LiTT chat — auth and idempotency", () => {
   it("requires clientRequestId for idempotency", () => {
     const content = readSrc(MESSAGES_ROUTE);
     expect(content).toContain("clientRequestId");
