@@ -43,6 +43,7 @@ import { checkCommand } from "./commands/check.js";
 import { testCommand } from "./commands/test.js";
 import { buildCommand } from "./commands/build.js";
 import { runCommand } from "./commands/run.js";
+import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
 import { explainCommand } from "./commands/explain.js";
@@ -117,6 +118,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   test: testCommand,
   build: buildCommand,
   run: runCommand,
+  runs: runsCommand,
   inspect: inspectCommand,
   ask: askCommand,
   explain: explainCommand,
@@ -153,7 +155,7 @@ const LAZY_COMMANDS = new Set(["cockpit", "shell", "tui"]);
  * features remain auth-gated at the provider level (resolveModelProvider
  * and awaitRemoteReady enforce this at call time, not at the gate).
  */
-const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help"]);
+const LOGGED_OUT_ALLOWED = new Set(["login", "logout", "whoami", "workspace", "doctor", "version", "help", "runs"]);
 
 /**
  * LITT_LOCAL_ONLY=1 or LITT_LOCAL_MODE=1 lets the cockpit launch
@@ -639,6 +641,8 @@ Commands:
   test       Run tests (via @litt/agent-core)
   build      Run build (via @litt/agent-core)
   run        Run arbitrary command through hardened CommandExecutor (streaming + cancel)
+             Also: litt run <id> | litt run result <id> | litt run logs <id>
+  runs       List recent persisted runs (P0-5 result recovery)
   inspect    Deep repo inspection (framework, scripts, deploy)
   ask        Ask LiTT a question about your project
   explain    Pipe errors/diffs and get actionable advice

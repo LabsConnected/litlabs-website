@@ -11,7 +11,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/write-build-meta.mjs",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
