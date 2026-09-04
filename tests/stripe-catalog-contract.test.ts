@@ -15,19 +15,19 @@ import {
 // (which requires Supabase and Stripe integration tests).
 
 describe("Stripe catalog — verified plan products", () => {
-  it("Creator Beta: $7/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(700);
+  it("Creator Beta: $15/month recurring", () => {
+    expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(1500);
     expect(VERIFIED_STRIPE_PLANS.creator_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe("STRIPE_PRICE_CREATOR_BETA");
-    expect(PLANS.creator_beta.monthlyPriceCents).toBe(700);
+    expect(PLANS.creator_beta.monthlyPriceCents).toBe(1500);
     expect(PLANS.creator_beta.billingType).toBe("subscription");
   });
 
-  it("Pro Builder Beta: $19/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(1900);
+  it("Pro Builder Beta: $39/month recurring", () => {
+    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(3900);
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.envVar).toBe("STRIPE_PRICE_PRO_BUILDER_BETA");
-    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(1900);
+    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
     expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
   });
 
@@ -108,9 +108,9 @@ describe("Creator Beta entitlement contract", () => {
     expect(PLAN_CONTRACTS.creator_beta.creditGrantFrequency).toBe("per_billing_cycle");
   });
 
-  it("standard future price is $15/month", () => {
-    expect(PLANS.creator_beta.standardPriceCents).toBe(1500);
-    expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBe(1500);
+  it("standard future price is null (no tiered pricing)", () => {
+    expect(PLANS.creator_beta.standardPriceCents).toBeNull();
+    expect(PLAN_CONTRACTS.creator_beta.standardPriceCents).toBeNull();
   });
 
   it("has 5 active project limit", () => {
@@ -130,9 +130,9 @@ describe("Pro Builder Beta entitlement contract", () => {
     expect(PLAN_CONTRACTS.pro_builder_beta.creditGrantFrequency).toBe("per_billing_cycle");
   });
 
-  it("standard future price is $39/month", () => {
-    expect(PLANS.pro_builder_beta.standardPriceCents).toBe(3900);
-    expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBe(3900);
+  it("standard future price is null (no tiered pricing)", () => {
+    expect(PLANS.pro_builder_beta.standardPriceCents).toBeNull();
+    expect(PLAN_CONTRACTS.pro_builder_beta.standardPriceCents).toBeNull();
   });
 
   it("has 25 active project limit", () => {
