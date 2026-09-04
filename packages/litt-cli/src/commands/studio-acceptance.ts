@@ -14,8 +14,13 @@
  * Then present the owner acceptance checklist.
  */
 
-import { ok, fail, warn, header, c, exec } from "../lib/utils.js";
-import { checkProductionHealth, checkProductionSHA, PRODUCTION_DOMAIN } from "../lib/production-checks.js";
+import { ok, fail, warn, header, c } from "../lib/utils.js";
+import {
+  checkProductionHealth,
+  checkProductionSHA,
+  checkTerminalService,
+  PRODUCTION_DOMAIN,
+} from "../lib/production-checks.js";
 
 const ACCEPTANCE_STEPS = [
   "Sign in",
@@ -117,35 +122,6 @@ async function checkRoute(path: string): Promise<{ status: string; label: string
   } catch (err) {
     return { status: "fail", label: path, detail: err instanceof Error ? err.message : "unreachable" };
   }
-}
-
-function checkTerminalService(): { status: string; label: string; detail?: string } {
-  // Check the terminal server env vars on Railway.
-  // Canonical resolution (from src/lib/terminal-url.ts):
-  //   1. TERMINAL_PUBLIC_URL            — canonical env var (preferred)
-  //   2. NEXT_PUBLIC_TERMINAL_WS_URL    — browser-side WebSocket URL
-  //   3. NEXT_PUBLIC_TERMINAL_HTTP_URL  — browser-side HTTP fallback
-  //   4. Legacy hardcoded production URL (always available as fallback)
-  //
-  // A pass requires at least one of the three env vars to be set.
-  // The legacy hardcoded URL is a fallback, not a configuration — we
-  // don't report "pass" based on a hardcoded value.
-  const r = exec(`railway variables --service "@litlabs/litt-shell" --environment production 2>&1`);
-  if (r.exitCode !== 0) {
-    return { status: "fail", label: "Terminal service", detail: "Cannot read Railway variables" };
-  }
-  const hasCanonical = r.stdout.includes("TERMINAL_PUBLIC_URL=") && !r.stdout.match(/TERMINAL_PUBLIC_URL=\s*$/);
-  const hasWsUrl = r.stdout.includes("NEXT_PUBLIC_TERMINAL_WS_URL=") && !r.stdout.match(/NEXT_PUBLIC_TERMINAL_WS_URL=\s*$/);
-  const hasHttpUrl = r.stdout.includes("NEXT_PUBLIC_TERMINAL_HTTP_URL=") && !r.stdout.match(/NEXT_PUBLIC_TERMINAL_HTTP_URL=\s*$/);
-  if (hasCanonical || hasWsUrl || hasHttpUrl) {
-    const source = hasCanonical ? "TERMINAL_PUBLIC_URL" : hasWsUrl ? "NEXT_PUBLIC_TERMINAL_WS_URL" : "NEXT_PUBLIC_TERMINAL_HTTP_URL";
-    return { status: "pass", label: "Terminal service", detail: `URLs configured (${source})` };
-  }
-  return {
-    status: "fail",
-    label: "Terminal service",
-    detail: "Terminal URLs not configured",
-  };
 }
 
 function printResult(result: { status: string; label: string; detail?: string }): void {
