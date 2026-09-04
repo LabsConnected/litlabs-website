@@ -19,11 +19,12 @@
  * repair/revalidation loop then works unchanged for both kinds.
  */
 
-import { classifyCommand } from "@litt/agent-core";
+import { classifyCommand, toolToEvidenceType } from "@litt/agent-core";
 import type {
   VerificationGateLike,
   VerificationResult,
   CheckResult,
+  EvidenceType,
   RuntimeStore,
   RuntimeEventEmitter,
 } from "@litt/agent-core";
@@ -157,6 +158,19 @@ export interface MissionVerificationGateOptions {
   isReadOnly: () => boolean;
   /** True when at least one read-only tool produced a successful result. */
   hasSuccessfulEvidence: () => boolean;
+  /**
+   * Canonical typed-evidence lookup. Required whenever a mission step
+   * declares requiredEvidence. stepId scopes evidence to the active step.
+   */
+  hasSuccessfulEvidenceType?: (
+    type: EvidenceType,
+    stepId?: string | null,
+  ) => boolean;
+  /**
+   * Required evidence for the step being verified.
+   * When omitted, the gate reads it from the active RuntimeStore step.
+   */
+  stepRequiredEvidence?: () => readonly EvidenceType[];
   /** True when at least one read-only tool FAILED. When true, the
    *  evidence gate must NOT prove the mission complete — a failed
    *  objective means the user's request was only partially fulfilled. */
@@ -184,6 +198,12 @@ export class MissionVerificationGate implements VerificationGateLike {
   private readonly _emitter: RuntimeEventEmitter | null;
   private readonly _isReadOnly: () => boolean;
   private readonly _hasSuccessfulEvidence: () => boolean;
+  private readonly _hasSuccessfulEvidenceType:
+    | ((type: EvidenceType, stepId?: string | null) => boolean)
+    | null;
+  private readonly _stepRequiredEvidence:
+    | (() => readonly EvidenceType[])
+    | null;
   private readonly _hasFailedEvidence: () => boolean;
   private readonly _evidenceSummary: () => string;
   private readonly _failedSummary: () => string;
@@ -197,6 +217,10 @@ export class MissionVerificationGate implements VerificationGateLike {
     this._emitter = options.emitter ?? null;
     this._isReadOnly = options.isReadOnly;
     this._hasSuccessfulEvidence = options.hasSuccessfulEvidence;
+    this._hasSuccessfulEvidenceType =
+      options.hasSuccessfulEvidenceType ?? null;
+    this._stepRequiredEvidence =
+      options.stepRequiredEvidence ?? null;
     this._hasFailedEvidence = options.hasFailedEvidence;
     this._evidenceSummary = options.evidenceSummary;
     this._failedSummary = options.failedSummary;
@@ -232,6 +256,34 @@ export class MissionVerificationGate implements VerificationGateLike {
     const hasSuccess = this._hasSuccessfulEvidence();
     const hasFailures = this._hasFailedEvidence();
     const summary = this._evidenceSummary();
+
+    // Resolve the exact step whose contract is being verified.
+    //
+    // Tests and specialized callers may explicitly provide
+    // stepRequiredEvidence. In the real runtime, the canonical store is
+    // authoritative and supplies the active working/verifying step.
+    const mission = this._store?.getMission();
+    const activeStep = mission?.steps.find(
+      (step) =>
+        step.status === "working" ||
+        step.status === "verifying",
+    ) ?? null;
+
+    const requiredEvidence = this._stepRequiredEvidence
+      ? [...this._stepRequiredEvidence()]
+      : [...(activeStep?.requiredEvidence ?? [])];
+
+    const evidenceStepId = activeStep?.id ?? null;
+
+    // Fail closed: if a step declares requiredEvidence but no typed
+    // evidence checker exists, every declared type remains missing.
+    const missingRequiredEvidence = requiredEvidence.filter(
+      (type) =>
+        !this._hasSuccessfulEvidenceType?.(
+          type,
+          evidenceStepId,
+        ),
+    );
     const failedSummary = this._failedSummary();
     const healthFailed = this._hasFailedHealthCheck();
     const healthSummary = this._healthSummary();
@@ -240,13 +292,26 @@ export class MissionVerificationGate implements VerificationGateLike {
     // OBJECTIVE. An optional health check the model volunteered — a
     // test suite nobody asked about — is reported, never fatal: a red
     // suite does not make "you are on main, tree clean" untrue.
-    const proven = hasSuccess && !hasFailures;
+    // A typed evidence contract is stronger than generic "some tool
+    // succeeded". When requiredEvidence exists, ALL declared types must
+    // have successful evidence. Without a typed contract, preserve the
+    // existing inspection rule.
+    const positiveEvidence =
+      requiredEvidence.length > 0
+        ? missingRequiredEvidence.length === 0
+        : hasSuccess;
+
+    const proven = positiveEvidence && !hasFailures;
 
     this._emit("verification_start", { runId, checks: ["evidence"] }, runId);
     if (this._store) this._store.setPhase("verifying");
 
     let message: string;
-    if (proven && healthFailed) {
+    if (missingRequiredEvidence.length > 0) {
+      message =
+        `Missing required evidence: ${missingRequiredEvidence.join(", ")}. ` +
+        `Collected: ${summary}`;
+    } else if (proven && healthFailed) {
       // Requirement: never silently redefine an inspection mission as
       // "project fully healthy". Report both facts, separately.
       message =
@@ -355,11 +420,24 @@ export interface MissionEvidenceTracker {
    */
   recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void;
   /** Call on every agent_tool_result. */
-  recordToolResult(toolId: string, success: boolean, message: string): void;
+  recordToolResult(
+    toolId: string,
+    success: boolean,
+    message: string,
+    stepId?: string | null,
+  ): void;
   /** True when the mission mutated the project. */
   isReadOnly(): boolean;
   /** True when at least one OBJECTIVE tool result succeeded. */
   hasSuccessfulEvidence(): boolean;
+  /**
+   * True when successful evidence of the requested canonical type exists.
+   * When stepId is supplied, evidence MUST belong to that exact step.
+   */
+  hasSuccessfulEvidenceType(
+    type: EvidenceType,
+    stepId?: string | null,
+  ): boolean;
   /** True when at least one OBJECTIVE tool result FAILED. */
   hasFailedEvidence(): boolean;
   /** True when an optional project-health check failed. */
@@ -396,15 +474,29 @@ export async function markInspectionStepsComplete(
 ): Promise<void> {
   const mission = store.getMission();
   if (!mission) return;
+
+  // The evidence gate verified the current semantic step.
+  // Later steps with their own requiredEvidence MUST NOT be
+  // auto-passed by inspection completion.
+  const verifiedStepId = mission.currentStepId;
+
   for (const step of mission.steps) {
-    if (step.status === "pending" || step.status === "failed") {
-      // pending/failed → passed is not a valid step transition; the
-      // state machine requires going through working first.
-      await store.updateMissionStepStatus(step.id, "working", {
-        verificationPassed: true,
-        verificationEvidence: reason,
-      }).catch(() => {});
+    const hasOwnEvidenceContract =
+      Array.isArray(step.requiredEvidence) &&
+      step.requiredEvidence.length > 0;
+
+    if (hasOwnEvidenceContract && step.id !== verifiedStepId) {
+      continue;
     }
+
+    if (step.status === "pending" || step.status === "failed") {
+      // Transition first without stamping verification twice.
+      await store.updateMissionStepStatus(
+        step.id,
+        "working",
+      ).catch(() => {});
+    }
+
     if (step.status === "working" || step.status === "verifying") {
       await store.updateMissionStepStatus(step.id, "passed", {
         verificationPassed: true,
@@ -438,7 +530,14 @@ export function createMissionEvidenceTracker(
   // A tool is an optional health check only if its CALL said so; the
   // result event carries no inputs, so remember the classification.
   const healthTools = new Set<string>();
-  const results: { toolId: string; success: boolean; message: string; health: boolean }[] = [];
+  const results: {
+    toolId: string;
+    evidenceType: EvidenceType;
+    stepId: string | null;
+    success: boolean;
+    message: string;
+    health: boolean;
+  }[] = [];
 
   return {
     recordToolCall(toolId: string, inputs?: Record<string, unknown> | null): void {
@@ -448,9 +547,16 @@ export function createMissionEvidenceTracker(
         onMutation?.();
       }
     },
-    recordToolResult(toolId: string, success: boolean, message: string): void {
+    recordToolResult(
+      toolId: string,
+      success: boolean,
+      message: string,
+      stepId?: string | null,
+    ): void {
       results.push({
         toolId,
+        evidenceType: toolToEvidenceType(toolId),
+        stepId: stepId ?? null,
         success,
         message: message.slice(0, 200),
         health: healthTools.has(toolId),
@@ -462,6 +568,17 @@ export function createMissionEvidenceTracker(
     },
     hasSuccessfulEvidence(): boolean {
       return results.some((r) => r.success && !r.health);
+    },
+    hasSuccessfulEvidenceType(
+      type: EvidenceType,
+      stepId?: string | null,
+    ): boolean {
+      return results.some(
+        (r) =>
+          r.success &&
+          r.evidenceType === type &&
+          (stepId == null || r.stepId === stepId),
+      );
     },
     hasFailedEvidence(): boolean {
       return results.some((r) => !r.success && !r.health);

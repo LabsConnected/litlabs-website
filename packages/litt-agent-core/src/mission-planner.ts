@@ -188,6 +188,51 @@ export function parseSemanticPlan(text: string): SemanticStepSpec[] | null {
   return steps.length > 0 ? steps : null;
 }
 
+/** Normalize a semantic plan by inferring requiredEvidence from step titles
+ * when the model omitted it. This enforces the mission truth contract:
+ *   - "Run tests"        → requiredEvidence: ["test_result"]
+ *   - "Typecheck"       → requiredEvidence: ["typecheck_result"]
+ *   - "Production build"→ requiredEvidence: ["build_result"]
+ *
+ * This runs after parseSemanticPlan so that explicitly provided
+ * requiredEvidence is preserved, and only undefined values are filled in.
+ */
+export function normalizeSemanticPlan(steps: SemanticStepSpec[]): SemanticStepSpec[] {
+  return steps.map((step) => {
+    // Explicit model/planner contracts always win.
+    if (step.requiredEvidence !== undefined) {
+      return step;
+    }
+
+    const title = step.title.toLowerCase();
+    const inferred: EvidenceType[] = [];
+
+    const add = (type: EvidenceType) => {
+      if (!inferred.includes(type)) inferred.push(type);
+    };
+
+    // Infer only evidence types with canonical runtime producers.
+    // Do not use generic words such as "run" or "production":
+    // "run build" must not accidentally become test_result.
+    if (/\btype[ -]?check\b/.test(title)) {
+      add("typecheck_result");
+    }
+
+    if (/\btests?\b|\btesting\b/.test(title)) {
+      add("test_result");
+    }
+
+    if (/\bbuild\b/.test(title)) {
+      add("build_result");
+    }
+
+    return {
+      ...step,
+      requiredEvidence: inferred.length > 0 ? inferred : undefined,
+    };
+  });
+}
+
 // ─── Fallback plan ─────────────────────────────────────────────────
 
 /**
@@ -473,8 +518,11 @@ export async function planMission(
   }
 
   // 2. Persist each step on the canonical mission
+  // Normalize requiredEvidence for any steps the model omitted.
+  const normalizedSteps = normalizeSemanticPlan(plan.steps);
+
   const steps: MissionStep[] = [];
-  for (const spec of plan.steps) {
+  for (const spec of normalizedSteps) {
     const step = await options.store.addMissionStep({
       title: spec.title,
       description: spec.description,
@@ -762,7 +810,10 @@ export function isStepEvidenceSatisfied(
   if (!step.requiredEvidence || step.requiredEvidence.length === 0) return false;
   for (const requiredType of step.requiredEvidence) {
     const found = evidence.some(
-      (e) => e.type === requiredType && e.success === true,
+      (e) =>
+        e.stepId === step.id &&
+        e.type === requiredType &&
+        e.success === true,
     );
     if (!found) return false;
   }

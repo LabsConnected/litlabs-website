@@ -3040,6 +3040,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             emitter: (event) => session.emitAgentEvent(event),
             isReadOnly: evidenceTracker.isReadOnly,
             hasSuccessfulEvidence: evidenceTracker.hasSuccessfulEvidence,
+        hasSuccessfulEvidenceType: evidenceTracker.hasSuccessfulEvidenceType,
             hasFailedEvidence: evidenceTracker.hasFailedEvidence,
             evidenceSummary: evidenceTracker.summary,
             failedSummary: evidenceTracker.failedSummary,
@@ -3149,7 +3150,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               const durationMs = (event.data as { durationMs?: number }).durationMs;
 
               // Record the truthful outcome for the evidence gate.
-              evidenceTracker.recordToolResult(toolId, success, message);
+              evidenceTracker.recordToolResult(toolId, success, message, currentStepId);
 
               // Record evidence on the current step — tools contribute
               // evidence to the step, they do NOT define the step.
@@ -3157,14 +3158,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               // requiredEvidence can be checked.
               if (currentStepId) {
                 const evidenceType = toolToEvidenceType(toolId);
-                agentStore.addMissionEvidence({
+                const evidenceRecorded = agentStore.addMissionEvidence({
                   stepId: currentStepId,
                   type: evidenceType,
                   source: toolName,
                   summary: message.slice(0, 200),
                   success,
                   metadata: { durationMs, toolName, toolId },
-                }).catch(() => {});
+                });
 
                 // Update the action record with the truthful result.
                 // This transitions the record from "pending" to
@@ -3182,6 +3183,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
                 // A failed tool marks the current step as failed.
                 if (!success) {
+                  evidenceRecorded.catch(() => {});
                   agentStore.updateMissionStepStatus(
                     currentStepId,
                     "failed",
@@ -3198,14 +3200,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
                   // This is the REAL semantic progression: steps
                   // advance when their evidence contract is met, not
                   // on every tool success.
-                  progressMissionStepAfterTool(agentStore, {
-                    success: true,
-                    toolId,
-                  }).then((advanced) => {
-                    if (advanced?.openedStepId) {
-                      currentStepId = advanced.openedStepId;
-                    }
-                  }).catch(() => {});
+                  // Evidence must be durably recorded before semantic
+                  // progression checks the step's evidence contract.
+                  evidenceRecorded
+                    .then(() =>
+                      progressMissionStepAfterTool(agentStore, {
+                        success: true,
+                        toolId,
+                      }),
+                    )
+                    .then((advanced) => {
+                      if (advanced?.openedStepId) {
+                        currentStepId = advanced.openedStepId;
+                      }
+                    })
+                    .catch(() => {});
                 }
               }
             } else if (event.subtype === "model_escalated") {
