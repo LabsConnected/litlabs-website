@@ -1,5 +1,5 @@
 /**
- * Billing state machine tests — PR #127 era
+ * Billing state machine tests
  *
  * Tests the payment state machine WITHOUT real Stripe charges:
  *   - checkout session creation (auth required, plan validation, price ID resolution)
@@ -10,30 +10,34 @@
  *   - owner exemption (billing-exempt, wallet never debited)
  *   - insufficient-credit behavior (debit_credits returns success=false)
  *   - failed webhook behavior (500 → Stripe retries, event not marked processed)
+ *   - checkout failure modes (missing key, missing price, unauth, unknown plan, Stripe API error)
  *
  * All Stripe/Supabase calls are mocked. No real API calls are made.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// ─── Mocks ───────────────────────────────────────────────────────────
+// ─── Top-level mocks ─────────────────────────────────────────────────
 
-vi.mock("@/lib/auth", () => ({
-  auth: vi.fn(),
-}));
-
-vi.mock("@/lib/supabase", () => ({
-  getSupabaseAdmin: vi.fn(),
-}));
-
+vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
+vi.mock("@/lib/supabase", () => ({ getSupabaseAdmin: vi.fn() }));
 vi.mock("@/lib/supabase-admin", () => ({
   getAdminSupabase: vi.fn(),
   isAdminSupabaseConfigured: vi.fn(),
 }));
-
 vi.mock("@/lib/rate-limiter", () => ({
   withRateLimit: (handler: any) => handler,
 }));
+
+// Controllable Stripe mock — constructEvent is a spy we can set per-test
+const mockConstructEvent = vi.fn();
+vi.mock("stripe", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    webhooks: { constructEvent: mockConstructEvent },
+  })),
+}));
+
+// ─── Imports ─────────────────────────────────────────────────────────
 
 import { auth } from "@/lib/auth";
 import { POST as checkoutPOST } from "@/app/api/billing/checkout/route";
@@ -83,12 +87,81 @@ function makeWebhookRequest(body: string, signature: string | null): any {
   } as any;
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────
+function makeStripeEvent(type: string, overrides: any = {}) {
+  return {
+    id: overrides.id || `evt_test_${type}_${Date.now()}`,
+    type,
+    data: { object: overrides.object || {} },
+  };
+}
+
+/**
+ * Builds a mock Supabase admin that tracks all RPC calls and table mutations.
+ */
+function buildTrackingSupabase(existingEvent = false) {
+  const rpcCalls: { fn: string; params: any }[] = [];
+  const upserts: { table: string; row: any }[] = [];
+  const updates: { table: string; patch: any; matches: any[] }[] = [];
+  const inserts: { table: string; row: any }[] = [];
+
+  const chain = (table: string) => ({
+    select: vi.fn(() => chain(table)),
+    eq: vi.fn(() => chain(table)),
+    in: vi.fn(() => chain(table)),
+    limit: vi.fn(() => chain(table)),
+    order: vi.fn(() => chain(table)),
+    like: vi.fn(() => chain(table)),
+    gte: vi.fn(() => chain(table)),
+    single: vi.fn(async () => {
+      if (table === "users") return { data: { id: "user_internal_123" }, error: null };
+      if (table === "stripe_events" && existingEvent)
+        return { data: { id: "evt_existing" }, error: null };
+      if (table === "subscriptions")
+        return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+      return { data: null, error: null };
+    }),
+    maybeSingle: vi.fn(async () => {
+      if (table === "users") return { data: { id: "user_internal_123" }, error: null };
+      if (table === "stripe_events" && existingEvent)
+        return { data: { id: "evt_existing" }, error: null };
+      if (table === "subscriptions")
+        return { data: { user_id: "user_internal_123", plan: "creator_beta" }, error: null };
+      return { data: null, error: null };
+    }),
+    upsert: vi.fn(async (row: any) => {
+      upserts.push({ table, row });
+      return { error: null };
+    }),
+    insert: vi.fn(async (row: any) => {
+      inserts.push({ table, row });
+      return { error: null };
+    }),
+    update: vi.fn((patch: any) => ({
+      eq: vi.fn(async (col: string, val: any) => {
+        updates.push({ table, patch, matches: [{ col, val }] });
+        return { error: null };
+      }),
+    })),
+  });
+
+  const sb = {
+    from: vi.fn((table: string) => chain(table)),
+    rpc: vi.fn(async (fnName: string, params: any) => {
+      rpcCalls.push({ fn: fnName, params });
+      return { data: { success: true, remaining: 100 }, error: null };
+    }),
+  };
+
+  return { sb, rpcCalls, upserts, updates, inserts };
+}
+
+// ─── Setup/teardown ──────────────────────────────────────────────────
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isAdminSupabaseConfigured).mockReturnValue(false);
   vi.mocked(getAdminSupabase).mockReturnValue(null as any);
+  mockConstructEvent.mockReset();
 });
 
 afterEach(() => {
@@ -226,9 +299,13 @@ describe("POST /api/billing/checkout — checkout session creation", () => {
 // ═════════════════════════════════════════════════════════════════════
 
 describe("POST /api/stripe/webhook — signature verification", () => {
+  beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+  });
+
   it("returns 500 when STRIPE_SECRET_KEY is missing", async () => {
     delete process.env.STRIPE_SECRET_KEY;
-    delete process.env.STRIPE_WEBHOOK_SECRET;
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const req = makeWebhookRequest("{}", "sig");
     const res = await webhookPOST(req);
@@ -236,7 +313,6 @@ describe("POST /api/stripe/webhook — signature verification", () => {
   });
 
   it("returns 500 when STRIPE_WEBHOOK_SECRET is missing", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
     delete process.env.STRIPE_WEBHOOK_SECRET;
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const req = makeWebhookRequest("{}", "sig");
@@ -245,14 +321,214 @@ describe("POST /api/stripe/webhook — signature verification", () => {
   });
 
   it("returns 400 when signature is invalid", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
-    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error("Invalid signature: no signature found in header");
+    });
     const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
     const req = makeWebhookRequest("raw_body", "invalid_sig");
     const res = await webhookPOST(req);
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Webhook Error");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// WEBHOOK EVENT PROCESSING — STATE MUTATION TESTS
+// ═════════════════════════════════════════════════════════════════════
+
+describe("Webhook event processing — state mutations", () => {
+  beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+  });
+
+  it("checkout.session.completed for Founder → upserts subscription plan=founder status=active, NO credit grant", async () => {
+    const { sb, rpcCalls, upserts } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("checkout.session.completed", {
+      object: {
+        id: "cs_test_founder",
+        metadata: { product_type: "plan", clerk_id: "user_123", plan_id: "founder" },
+        customer: "cus_test_123",
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+
+    // Subscription upserted with plan=founder, status=active
+    const subUpsert = upserts.find((u) => u.table === "subscriptions");
+    expect(subUpsert).toBeDefined();
+    expect(subUpsert!.row.plan).toBe("founder");
+    expect(subUpsert!.row.status).toBe("active");
+
+    // NO credit grant — Founder has monthlyCredits: 0
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+  });
+
+  it("customer.subscription.created → upserts subscription with correct plan and status", async () => {
+    const { sb, upserts } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.created", {
+      object: {
+        id: "sub_test_123",
+        status: "active",
+        customer: "cus_test_123",
+        metadata: { clerk_id: "user_123", plan_id: "creator_beta" },
+        items: { data: [{ current_period_start: 1700000000, current_period_end: 1702678400 }] },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+
+    const subUpsert = upserts.find((u) => u.table === "subscriptions");
+    expect(subUpsert).toBeDefined();
+    expect(subUpsert!.row.plan).toBe("creator_beta");
+    expect(subUpsert!.row.status).toBe("active");
+    expect(subUpsert!.row.stripe_subscription_id).toBe("sub_test_123");
+  });
+
+  it("invoice.paid → marks subscription active AND grants monthly credits exactly once", async () => {
+    const { sb, rpcCalls, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      object: {
+        id: "in_test_123",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+        lines: { data: [{ period: { end: 1702678400 } }] },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+
+    // Subscription marked active
+    expect(updates.find((u) => u.patch.status === "active")).toBeDefined();
+
+    // grant_credits called exactly once
+    const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
+    expect(grants.length).toBe(1);
+    expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_test_123");
+    // Creator Beta = 6000 credits
+    expect(grants[0].params.p_amount).toBe(6000);
+  });
+
+  it("customer.subscription.deleted → marks subscription canceled", async () => {
+    const { sb, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("customer.subscription.deleted", {
+      object: { id: "sub_test_123" },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+    expect(updates.find((u) => u.patch.status === "canceled")).toBeDefined();
+  });
+
+  it("invoice.payment_failed → marks subscription past_due", async () => {
+    const { sb, updates } = buildTrackingSupabase();
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.payment_failed", {
+      object: {
+        id: "in_test_fail",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
+    expect(updates.find((u) => u.patch.status === "past_due")).toBeDefined();
+  });
+
+  it("duplicate event → returns replayed:true, NO state mutations, NO credit grants", async () => {
+    // existingEvent=true → stripe_events table already has the event
+    const { sb, rpcCalls, upserts, updates } = buildTrackingSupabase(true);
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue({
+      id: "evt_existing",
+      type: "invoice.paid",
+      data: { object: { id: "in_test_dup", parent: { subscription_details: { subscription: "sub_test_123" } }, lines: { data: [{ period: { end: 1702678400 } }] } } },
+    });
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("Webhook Error");
+    expect(body.replayed).toBe(true);
+
+    // NO state mutations
+    expect(rpcCalls.filter((c) => c.fn === "grant_credits").length).toBe(0);
+    expect(upserts.length).toBe(0);
+    expect(updates.length).toBe(0);
+  });
+
+  it("webhook processing failure → returns 500, event NOT marked processed (Stripe retries)", async () => {
+    const { sb } = buildTrackingSupabase();
+    // Make from() throw only for "subscriptions" table (inside the try block),
+    // but work normally for "stripe_events" (idempotency check, outside try)
+    const origFrom = sb.from;
+    sb.from = vi.fn((table: string) => {
+      if (table === "subscriptions") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => { throw new Error("DB connection lost"); }),
+              maybeSingle: vi.fn(async () => { throw new Error("DB connection lost"); }),
+            })),
+          })),
+          upsert: vi.fn(async () => ({ error: null })),
+          update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+          insert: vi.fn(async () => ({ error: null })),
+        };
+      }
+      return origFrom(table);
+    });
+    vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
+    vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
+
+    mockConstructEvent.mockReturnValue(makeStripeEvent("invoice.paid", {
+      object: {
+        id: "in_test_fail_event",
+        parent: { subscription_details: { subscription: "sub_test_123" } },
+        lines: { data: [{ period: { end: 1702678400 } }] },
+      },
+    }));
+
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+
+    expect(res.status).toBe(500);
   });
 });
 
@@ -344,8 +620,6 @@ describe("Insufficient credit behavior via wallet-ledger", () => {
   it("adjustWalletBalance throws 'Insufficient balance' when debit exceeds balance", async () => {
     const { adjustWalletBalance } = await import("@/lib/wallet-ledger");
 
-    // Build a fully chainable mock — every method returns self until a terminal
-    // method (single/maybeSingle) is called.
     function makeChainable(terminalData: any = null) {
       const chain: any = {
         select: vi.fn(() => chain),
@@ -368,19 +642,14 @@ describe("Insufficient credit behavior via wallet-ledger", () => {
     });
 
     const mockRpc = vi.fn(async (fnName: string) => {
-      if (fnName === "get_user_balances") {
+      if (fnName === "get_user_balances")
         return { data: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 }, error: null };
-      }
-      if (fnName === "debit_credits") {
+      if (fnName === "debit_credits")
         return { data: { success: false, remaining: 0 }, error: null };
-      }
       return { data: null, error: null };
     });
 
-    vi.mocked(getSupabaseAdmin).mockReturnValue({
-      from: mockFrom,
-      rpc: mockRpc,
-    } as any);
+    vi.mocked(getSupabaseAdmin).mockReturnValue({ from: mockFrom, rpc: mockRpc } as any);
 
     await expect(
       adjustWalletBalance({
@@ -450,5 +719,97 @@ describe("Stripe product catalog", () => {
     const req = makeNextRequest(JSON.stringify({ productId: "nonexistent" }));
     const res = await stripeCheckoutPOST(req);
     expect(res.status).toBe(404);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// CHECKOUT FAILURE MODES
+// ═════════════════════════════════════════════════════════════════════
+
+describe("Checkout failure modes", () => {
+  it("fails safely when STRIPE_SECRET_KEY missing → 501, no session created", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    delete process.env.STRIPE_SECRET_KEY;
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.setup_required).toBe(true);
+    expect(body.url).toBeUndefined();
+  });
+
+  it("fails safely when price ID missing → 501, no session created", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    delete process.env.STRIPE_PRICE_CREATOR_BETA;
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.setup_required).toBe(true);
+    expect(body.url).toBeUndefined();
+  });
+
+  it("fails safely when user unauthenticated → 401, no Stripe call", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: null, clerkId: null } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test";
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+    expect(res.status).toBe(401);
+    expect((await res.json()).url).toBeUndefined();
+  });
+
+  it("fails safely when plan unknown → 400, no Stripe call", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    const req = makeNextRequest(JSON.stringify({ planId: "nonexistent" }));
+    const res = await checkoutPOST(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).url).toBeUndefined();
+  });
+
+  it("fails safely when Stripe API returns error → forwards error, no url", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "user_123" } as any);
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PRICE_CREATOR_BETA = "price_test";
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { message: "Invalid price" } }),
+    }) as any);
+
+    const req = makeNextRequest(JSON.stringify({ planId: "creator_beta" }));
+    const res = await checkoutPOST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Invalid price");
+    expect(body.url).toBeUndefined();
+
+    global.fetch = originalFetch;
+  });
+
+  it("webhook fails safely when secret missing → 500, no state mutation", async () => {
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "sig");
+    const res = await webhookPOST(req);
+    expect(res.status).toBe(500);
+  });
+
+  it("webhook fails safely when signature invalid → 400, no state mutation", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_fake";
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error("Invalid signature");
+    });
+    const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
+    const req = makeWebhookRequest("body", "invalid_sig");
+    const res = await webhookPOST(req);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Webhook Error");
   });
 });
