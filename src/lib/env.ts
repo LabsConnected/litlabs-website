@@ -22,7 +22,16 @@ const productionSchema = z.object({
   CLERK_WEBHOOK_SECRET: z.string().min(1, "CLERK_WEBHOOK_SECRET is required in production"),
   STRIPE_SECRET_KEY: z.string().min(1, "STRIPE_SECRET_KEY is required in production"),
   STRIPE_WEBHOOK_SECRET: z.string().min(1, "STRIPE_WEBHOOK_SECRET is required in production"),
-  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().min(1, "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is required in production"),
+  // NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is intentionally NOT required here.
+  // Checkout uses a server-created Stripe Checkout Session redirect
+  // (window.location.href = session.url) — see PricingClient.tsx and
+  // api/billing/checkout, api/stripe/checkout. There is no Stripe.js/Elements
+  // usage anywhere in the client bundle, so no code path ever reads the
+  // publishable key. Listing it here made preflight/health checks report a
+  // false "missing required var" on any environment that doesn't happen to
+  // have it set, even though checkout works fine without it. It remains
+  // available as an optional var (optionalIntegrationSchema below) in case
+  // an embedded Elements flow is added later.
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters in production"),
 });
 

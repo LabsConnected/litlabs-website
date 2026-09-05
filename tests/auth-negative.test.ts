@@ -111,7 +111,10 @@ describe("Environment validation", () => {
     expect(missing).toContain("CLERK_WEBHOOK_SECRET");
     expect(missing).toContain("STRIPE_SECRET_KEY");
     expect(missing).toContain("STRIPE_WEBHOOK_SECRET");
-    expect(missing).toContain("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY");
+    // NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is intentionally NOT required:
+    // checkout uses a server-created Checkout Session redirect, never
+    // Stripe.js/Elements, so nothing ever reads this key client-side.
+    expect(missing).not.toContain("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY");
     expect(missing).toContain("AUTH_SECRET");
   });
 
