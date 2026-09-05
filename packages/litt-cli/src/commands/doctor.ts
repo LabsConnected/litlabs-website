@@ -26,6 +26,8 @@ import { checkLease } from "../lib/worktree-lease.js";
 import { checkStaleBuild } from "../lib/build-metadata.js";
 import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-target.js";
 import { loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
+import { probeLocalLane } from "../lib/local-lane.js";
+import { REMOTE_LITT_LABEL } from "@litt/models";
 
 export async function doctorCommand(args: string[]): Promise<number> {
   // Subcommand: litt doctor input — interactive input diagnostic
@@ -308,6 +310,24 @@ export async function doctorCommand(args: string[]): Promise<number> {
     console.log(`${c.dim}  Remote credentials:${c.reset}`);
     for (const cred of remoteCreds) {
       console.log(`${c.dim}    ${cred}${c.reset}`);
+    }
+  }
+
+  // Ollama route — which network tier (local / LAN / Tailscale) is
+  // actually serving LOCAL mode right now, probed live. REMOTE mode
+  // doesn't touch Ollama at all, so it just reports the remote lane.
+  header("Ollama Route");
+  if (execTarget === "remote") {
+    ok(`Active route: ${REMOTE_LITT_LABEL}`);
+  } else {
+    const lane = await probeLocalLane({ force: true });
+    if (lane.available) {
+      ok(`Active route: ${lane.routeLabel} (${lane.endpoint})`);
+      console.log(`${c.dim}  Models: ${lane.models.join(", ")}${c.reset}`);
+    } else {
+      fail(`Active route: none — ${lane.reason ?? "Ollama unreachable"}`);
+      console.log(`${c.dim}  Tried, in priority order: this device's own Ollama, then OLLAMA_LAN_URL, then OLLAMA_TAILSCALE_URL.${c.reset}`);
+      console.log(`${c.dim}  Set OLLAMA_LAN_URL to your PC's LAN address and OLLAMA_TAILSCALE_URL to its Tailscale hostname so LiTT can reach it from anywhere.${c.reset}`);
     }
   }
 

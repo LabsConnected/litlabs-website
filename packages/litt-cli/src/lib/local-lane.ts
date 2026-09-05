@@ -1,6 +1,6 @@
 /**
- * Local model lane — is there a model on THIS machine that can serve a
- * request right now?
+ * Local model lane — is there a model on THIS machine (or the PC it can
+ * reach) that can serve a request right now?
  *
  * The capability gate must never guess at this. "Ollama is probably
  * running" is exactly the kind of assumption that produces a cockpit
@@ -9,24 +9,33 @@
  * sitting there ready the whole time.
  *
  * So availability is a fact obtained by asking: GET /api/tags against the
- * configured Ollama endpoint, with a short timeout, and only "the daemon
- * answered AND listed at least one model" counts as available.
+ * Ollama endpoint, with a short timeout, and only "the daemon answered AND
+ * listed at least one model" counts as available. Since "the Ollama
+ * endpoint" is no longer a single fixed address — the PC may be reachable
+ * on localhost, the home LAN, or only via Tailscale depending on where
+ * this device is — the probe tries candidates in that priority order via
+ * @litt/models' probeOllamaRoute() and reports which one actually
+ * answered (LOCAL OLLAMA / LAN OLLAMA / TAILSCALE OLLAMA).
  *
  * The probe is cached briefly. A cockpit asks this on every submit, and a
- * per-keystroke HTTP request to localhost is waste; a few seconds of
- * staleness is not, because a model daemon appearing or disappearing
- * mid-second is not a case worth optimising for.
+ * per-keystroke HTTP request is waste; a few seconds of staleness is not,
+ * because a model daemon appearing or disappearing mid-second, or the
+ * phone hopping networks mid-second, is not a case worth optimising for.
  */
 
 import {
   resolveOllamaEndpoint,
   ollamaEndpointSource,
+  probeOllamaRoute,
+  OLLAMA_ROUTE_LABELS,
+  type OllamaRouteTier,
+  type OllamaRouteCandidate,
 } from "@litt/models";
 
 /** How long a probe result stays fresh. */
 const PROBE_CACHE_MS = 10_000;
 
-/** How long to wait for the local daemon before declaring it absent. */
+/** Per-candidate timeout — the probe may try up to three hosts. */
 const PROBE_TIMEOUT_MS = 1_500;
 
 export interface LocalLaneStatus {
@@ -34,23 +43,35 @@ export interface LocalLaneStatus {
   available: boolean;
   /** Model tags the daemon reported, e.g. ["qwen3:4b", "litt-coder:3b"]. */
   models: string[];
-  /** The endpoint that was probed. */
+  /** The endpoint that answered (or the highest-priority one tried, if none did). */
   endpoint: string;
   /**
    * Why the lane is unavailable. null when it IS available.
    * Never contains credentials — the local lane has none.
    */
   reason: string | null;
+  /**
+   * Which network tier answered: "local" | "lan" | "tailscale", or null
+   * when unavailable. Optional so existing literals built without it
+   * (tests, fixtures) keep type-checking.
+   */
+  route?: OllamaRouteTier | null;
+  /** Display label for the active route: "LOCAL OLLAMA" / "LAN OLLAMA" / "TAILSCALE OLLAMA". */
+  routeLabel?: string;
 }
 
 export interface ProbeLocalLaneOptions {
-  /** Override the endpoint (defaults to LITT_OLLAMA_URL or localhost). */
+  /**
+   * Force a single specific endpoint, skipping local/LAN/Tailscale
+   * candidate resolution entirely. Used by tests and any caller that
+   * already knows exactly where to look.
+   */
   endpoint?: string;
   /** Injected fetch, for tests. */
   fetchImpl?: typeof fetch;
   /** Skip the cache and probe again. */
   force?: boolean;
-  /** Timeout in ms. */
+  /** Per-candidate timeout in ms. */
   timeoutMs?: number;
 }
 
@@ -62,17 +83,23 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 
 /**
- * The Ollama base URL, honouring LITT_OLLAMA_URL / OLLAMA_HOST_PC /
- * OLLAMA_HOST / OLLAMA_BASE_URL via the shared canonical resolver in @litt/models.
+ * The Ollama endpoint to use for an actual request.
  *
- * Re-exported for callers that need the resolved endpoint without probing.
+ * Returns the endpoint the most recent successful probeLocalLane() found
+ * reachable — LOCAL, LAN, or Tailscale, whichever answered — so a request
+ * always lands on the same host the availability check just proved is
+ * alive. Before any probe has run, falls back to the static single-shot
+ * resolver (LITT_OLLAMA_URL / OLLAMA_HOST_PC / OLLAMA_HOST /
+ * OLLAMA_BASE_URL / localhost) from @litt/models.
  */
 export function resolveLocalLaneEndpoint(): string {
+  if (cache?.status.available) return cache.status.endpoint;
   return resolveOllamaEndpoint((key) => process.env[key]);
 }
 
 /**
- * Diagnostic: which env var was honoured for the current endpoint?
+ * Diagnostic: which env var was honoured for the current STATIC endpoint
+ * (ignores any live probe result)?
  * Returns "LITT_OLLAMA_URL", "OLLAMA_HOST_PC", "OLLAMA_HOST",
  * "OLLAMA_BASE_URL", "override", or "default".
  */
@@ -80,69 +107,83 @@ export function localLaneEndpointSource(): string {
   return ollamaEndpointSource((key) => process.env[key]);
 }
 
-const UNAVAILABLE = (endpoint: string, reason: string): LocalLaneStatus => ({
-  available: false,
-  models: [],
-  endpoint,
-  reason,
-});
-
 /**
  * Probe the local model lane.
  *
+ * With no explicit `options.endpoint`, tries candidates in priority
+ * order — this machine's own Ollama, the home LAN, then Tailscale — via
+ * @litt/models' probeOllamaRoute(), and reports which one answered.
+ *
  * Never throws: an unreachable daemon is a normal, expected answer, not
- * an error condition. Callers get `available: false` and a reason.
+ * an error condition. Callers get `available: false` and an actionable
+ * reason (which routes were tried and why each failed).
  */
 export async function probeLocalLane(
   options: ProbeLocalLaneOptions = {},
 ): Promise<LocalLaneStatus> {
-  const endpoint = options.endpoint ?? resolveLocalLaneEndpoint();
+  const forcedEndpoint = options.endpoint;
 
-  if (!options.force && cache && Date.now() - cache.at < PROBE_CACHE_MS && cache.status.endpoint === endpoint) {
+  if (
+    !options.force &&
+    cache &&
+    Date.now() - cache.at < PROBE_CACHE_MS &&
+    (forcedEndpoint === undefined || cache.status.endpoint === forcedEndpoint)
+  ) {
     return cache.status;
   }
 
-  const doFetch = options.fetchImpl ?? fetch;
-  let status: LocalLaneStatus;
+  const candidates: OllamaRouteCandidate[] | undefined = forcedEndpoint
+    ? [{ tier: "local", label: OLLAMA_ROUTE_LABELS.local, endpoint: forcedEndpoint }]
+    : undefined;
 
-  try {
-    const response = await doFetch(`${endpoint}/api/tags`, {
-      signal: AbortSignal.timeout(options.timeoutMs ?? PROBE_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      status = UNAVAILABLE(endpoint, `local model daemon returned HTTP ${response.status}`);
-    } else {
-      const body = (await response.json()) as unknown;
-      const models = parseModelTags(body);
-      status = models.length > 0
-        ? { available: true, models, endpoint, reason: null }
-        : UNAVAILABLE(endpoint, "local model daemon is running but has no models installed");
-    }
-  } catch (error) {
-    status = UNAVAILABLE(
-      endpoint,
-      `local model daemon not reachable at ${endpoint} (${error instanceof Error ? error.message : String(error)})`,
-    );
-  }
+  const result = await probeOllamaRoute({
+    candidates,
+    fetchImpl: options.fetchImpl,
+    timeoutMs: options.timeoutMs ?? PROBE_TIMEOUT_MS,
+  });
+
+  const status: LocalLaneStatus = result.ok
+    ? {
+        available: true,
+        models: result.models,
+        endpoint: result.endpoint as string,
+        reason: null,
+        route: result.tier,
+        routeLabel: result.label,
+      }
+    : {
+        available: false,
+        models: [],
+        endpoint: forcedEndpoint ?? result.attempts[0]?.endpoint ?? "http://localhost:11434",
+        reason: singleCandidateReason(result.attempts) ?? result.reason,
+        route: null,
+        routeLabel: "",
+      };
 
   cache = { at: Date.now(), status };
   return status;
 }
 
-/** Extract model tags from an Ollama /api/tags body. */
-function parseModelTags(body: unknown): string[] {
-  if (!body || typeof body !== "object") return [];
-  const models = (body as { models?: unknown }).models;
-  if (!Array.isArray(models)) return [];
-
-  const tags: string[] = [];
-  for (const entry of models) {
-    if (!entry || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-    const tag = record.model ?? record.name;
-    if (typeof tag === "string" && tag) tags.push(tag);
+/**
+ * When exactly one endpoint was tried — no LAN/Tailscale tier configured,
+ * the common case for a plain local install — report the failure in the
+ * original single-endpoint wording ("local model daemon not reachable at
+ * ...") instead of the multi-route diagnostic. Existing callers and error
+ * strings depend on this exact phrasing. Once more than one route is
+ * configured, the richer multi-route reason from probeOllamaRoute (which
+ * names every tier tried) takes over.
+ */
+function singleCandidateReason(attempts: { endpoint: string; error: string | null }[]): string | null {
+  if (attempts.length !== 1) return null;
+  const [attempt] = attempts;
+  if (!attempt.error) return null;
+  if (attempt.error.startsWith("HTTP ")) {
+    return `local model daemon returned ${attempt.error}`;
   }
-  return tags;
+  if (attempt.error === "reachable but no models installed") {
+    return "local model daemon is running but has no models installed";
+  }
+  return `local model daemon not reachable at ${attempt.endpoint} (${attempt.error})`;
 }
 
 /**
