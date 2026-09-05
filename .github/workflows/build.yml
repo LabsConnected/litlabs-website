@@ -15,6 +15,54 @@ permissions:
   contents: read
 
 jobs:
+  terminal-server-tests:
+    name: Terminal Server Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+
+      - name: Install native build toolchain (node-pty compiles from source on Linux)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Install dependencies (native build scripts enabled for node-pty)
+        # The root .npmrc sets ignore-scripts=true repo-wide as a supply-chain
+        # safety default. node-pty ships no linux-x64 prebuild (see
+        # terminal-server/Dockerfile.railway, which needs the same override
+        # for the production image) — it falls back to `node-gyp rebuild` in
+        # its install script, which never runs under that default. Scoping
+        # the override to just this job's terminal-server dependency subgraph
+        # keeps the main build job's install fully script-locked.
+        run: |
+          pnpm install --frozen-lockfile \
+            --filter terminal-server... \
+            --filter @litt/agent-core... \
+            --filter @litt/models... \
+            --config.ignore-scripts=false
+        env:
+          CI: true
+
+      - name: Build @litt/models
+        run: pnpm --filter @litt/models build
+
+      - name: Build @litt/agent-core
+        run: pnpm --filter @litt/agent-core build
+
+      - name: Test terminal-server
+        run: pnpm --filter terminal-server test
+        env:
+          CI: true
+
   build:
     name: Build and Type Check
     runs-on: ubuntu-latest
