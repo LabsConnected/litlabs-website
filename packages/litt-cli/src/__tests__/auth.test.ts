@@ -1240,12 +1240,20 @@ function makeFakeDeps(options: FakeDepsOptions = {}) {
 
 describe("Browser Launcher", () => {
   it("isTermux returns false on non-Termux platforms", async () => {
-    // On Windows/macOS/Linux desktop, TERMUX_VERSION is not set
+    // On Windows/macOS/Linux desktop, neither TERMUX_VERSION nor a Termux
+    // PREFIX is set. Both signals must be cleared here — otherwise this
+    // test is only accurate when run on a non-Termux CI machine, and
+    // fails (incorrectly reporting a bug) when actually run on a real
+    // Termux device, where PREFIX=/data/data/com.termux/files/usr is set
+    // by the shell regardless of TERMUX_VERSION.
     const origTermux = process.env.TERMUX_VERSION;
+    const origPrefix = process.env.PREFIX;
     delete process.env.TERMUX_VERSION;
+    delete process.env.PREFIX;
     const { isTermux } = await import("../lib/auth/browser-launcher.js");
     expect(isTermux()).toBe(false);
     if (origTermux) process.env.TERMUX_VERSION = origTermux;
+    if (origPrefix) process.env.PREFIX = origPrefix;
   });
 
   it("openBrowser does not throw on any platform", async () => {
@@ -1355,10 +1363,31 @@ describe("Browser Launcher — platform selection", () => {
     Object.defineProperty(process, "platform", { value: p, configurable: true });
   }
 
+  // openBrowser() checks the real (unmocked) isTermux() before platform,
+  // so these "desktop" tests are only deterministic when both Termux
+  // signals are cleared. Without this, running the suite on an actual
+  // Termux device (TERMUX_VERSION unset but PREFIX still pointing at
+  // /com.termux/) makes isTermux() truthfully report Termux, routing
+  // every "macOS"/"Linux"/"Windows" case into the Termux branch instead
+  // and producing spurious failures unrelated to any real bug. Tests
+  // that specifically exercise the Termux branch set TERMUX_VERSION
+  // themselves and restore it in their own try/finally.
+  let origTermuxVersion: string | undefined;
+  let origPrefix: string | undefined;
+
+  beforeEach(() => {
+    origTermuxVersion = process.env.TERMUX_VERSION;
+    origPrefix = process.env.PREFIX;
+    delete process.env.TERMUX_VERSION;
+    delete process.env.PREFIX;
+  });
+
   afterEach(() => {
     if (origPlatform) {
       Object.defineProperty(process, "platform", origPlatform);
     }
+    if (origTermuxVersion !== undefined) process.env.TERMUX_VERSION = origTermuxVersion;
+    if (origPrefix !== undefined) process.env.PREFIX = origPrefix;
   });
 
   it("Windows path uses exec (not spawn) for cmd.exe start builtin", async () => {
@@ -1618,8 +1647,24 @@ describe("No Secrets in CLI Default Config", () => {
 describe("Browser Launcher — no real process launches", () => {
   const origPlatform = Object.getOwnPropertyDescriptor(process, "platform");
 
+  // See the matching comment in "platform selection" above: openBrowser()
+  // checks the real isTermux() before platform, so these win32/darwin/linux
+  // cases are only deterministic with both Termux signals cleared —
+  // otherwise they fail when run on an actual Termux device.
+  let origTermuxVersion: string | undefined;
+  let origPrefix: string | undefined;
+
+  beforeEach(() => {
+    origTermuxVersion = process.env.TERMUX_VERSION;
+    origPrefix = process.env.PREFIX;
+    delete process.env.TERMUX_VERSION;
+    delete process.env.PREFIX;
+  });
+
   afterEach(() => {
     if (origPlatform) Object.defineProperty(process, "platform", origPlatform);
+    if (origTermuxVersion !== undefined) process.env.TERMUX_VERSION = origTermuxVersion;
+    if (origPrefix !== undefined) process.env.PREFIX = origPrefix;
   });
 
   it("detects that this process is an automated test run", async () => {
