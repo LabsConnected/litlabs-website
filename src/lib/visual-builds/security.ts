@@ -1,7 +1,6 @@
 import { createHash } from "crypto";
 import { lookup } from "dns/promises";
 import net from "net";
-import sharp from "sharp";
 import { AssetInspectionSchema, type AssetInspection } from "./types";
 
 export const DEFAULT_VISUAL_ASSET_ALLOWLIST = [
@@ -323,6 +322,12 @@ export async function inspectAssetBuffer(
 
   let metadata;
   try {
+    // Loaded dynamically: sharp ships platform-specific native bindings that
+    // aren't prebuilt for every architecture (e.g. Android/Termux arm64). A
+    // static import throws at module-evaluation time on those platforms,
+    // crashing every caller of this module even when they never inspect an
+    // image. Deferring the import keeps that failure scoped to this call.
+    const { default: sharp } = await import("sharp");
     metadata = await sharp(bytes).metadata();
   } catch {
     metadata = null;
