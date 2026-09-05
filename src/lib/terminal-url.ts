@@ -41,8 +41,9 @@ export function getTerminalServerUrl(): string {
     return process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL.replace(/\/$/, "");
   }
 
-  // 4. Legacy hardcoded production URL
-  return "https://terminal-server-production-68ac.up.railway.app";
+  // 4. Legacy hardcoded production URL — must match the Railway service
+  // deploy-terminal.yml actually deploys to (litlabs-terminal-server).
+  return "https://litlabs-terminal-server-production-0be1.up.railway.app";
 }
 
 /**

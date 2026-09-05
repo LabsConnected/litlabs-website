@@ -287,10 +287,11 @@ export function buildPreviewProxyUrl(workspaceId: string): string {
   const candidate = `${base}/preview/${encodeURIComponent(workspaceId)}${tokenParam}`;
 
   // Some deployed terminal-server domains do not serve the Studio preview
-  // proxy at the origin root. The known working Railway domain is
-  // `terminal-server-production-68ac.up.railway.app`; other known domains
-  // are variants of the same service. Use the explicit preview host when
-  // available so the iframe can actually load the proxied workspace.
+  // proxy at the origin root. The canonical Railway domain is
+  // `litlabs-terminal-server-production-0be1.up.railway.app` (see
+  // deploy-terminal.yml); other known domains are variants of the same
+  // service. Use the explicit preview host when available so the iframe
+  // can actually load the proxied workspace.
   const previewHost = process.env.PREVIEW_PROXY_HOST?.trim();
   if (previewHost) {
     return `https://${previewHost}/preview/${encodeURIComponent(workspaceId)}${tokenParam}`;

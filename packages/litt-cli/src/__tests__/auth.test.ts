@@ -953,7 +953,7 @@ describe("Auth Config", () => {
   it("uses default terminal URL when LITT_TERMINAL_URL not set", () => {
     delete process.env.LITT_TERMINAL_URL;
     expect(getTerminalUrl()).toBe(DEFAULT_TERMINAL_URL);
-    expect(getTerminalUrl()).toBe("https://terminal-server-production-68ac.up.railway.app");
+    expect(getTerminalUrl()).toBe("https://litlabs-terminal-server-production-0be1.up.railway.app");
   });
 
   it("hasAuthConfig returns true with no env vars (safe defaults)", () => {
