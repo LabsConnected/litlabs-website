@@ -28,6 +28,8 @@ import { checkLease } from "./worktree-lease.js";
 import { loadModelPrefs, getDefaultPrefsPath } from "./provider-registry.js";
 import { getAuthSession } from "./auth/auth-session.js";
 import { checkStaleBuild } from "./build-metadata.js";
+import { probeLocalLane } from "./local-lane.js";
+import { REMOTE_LITT_LABEL } from "@litt/models";
 
 /** The structured startup status. */
 export interface StartupStatus {
@@ -47,6 +49,13 @@ export interface StartupStatus {
   worktreeLeaseStatus: "available" | "in-use" | "stale";
   canonicalMainWarning: string | null;
   staleBuildWarning: string | null;
+  /**
+   * The active Ollama/LiTT route label: "LOCAL OLLAMA" / "LAN OLLAMA" /
+   * "TAILSCALE OLLAMA" / "REMOTE LITT", or null when unresolved (unknown,
+   * or LOCAL with no Ollama reachable on any tier). Only populated by
+   * collectStartupStatusAsync() — it requires a network probe.
+   */
+  ollamaRoute: string | null;
 }
 
 /** Resolve the provider name from env/config. */
@@ -137,11 +146,13 @@ export function collectStartupStatus(cwd?: string): StartupStatus {
     worktreeLeaseStatus: leaseCheck.status,
     canonicalMainWarning: canonicalCheck.warning,
     staleBuildWarning,
+    ollamaRoute: null, // set by collectStartupStatusAsync — requires a network probe
   };
 }
 
 /**
- * Collect the full startup status including async auth check.
+ * Collect the full startup status including async auth check and the
+ * live Ollama route (which network tier is actually serving LOCAL mode).
  */
 export async function collectStartupStatusAsync(cwd?: string): Promise<StartupStatus> {
   const status = collectStartupStatus(cwd);
@@ -151,6 +162,18 @@ export async function collectStartupStatusAsync(cwd?: string): Promise<StartupSt
   } catch {
     status.authSignedIn = false;
   }
+
+  try {
+    if (status.execution === "LOCAL") {
+      const lane = await probeLocalLane();
+      status.ollamaRoute = lane.available ? lane.routeLabel ?? null : null;
+    } else {
+      status.ollamaRoute = REMOTE_LITT_LABEL;
+    }
+  } catch {
+    status.ollamaRoute = null;
+  }
+
   return status;
 }
 
@@ -170,6 +193,9 @@ export function formatStartupStatus(status: StartupStatus): string {
     lines.push(`${label("LocalOnly:")} ${value("ON (emergency/offline mode)", c.yellow)}`);
   }
   lines.push(`${label("Provider:")} ${status.provider === "none" ? value("none", c.yellow) : value(status.provider, c.green)}`);
+  if (status.ollamaRoute) {
+    lines.push(`${label("Route:")} ${value(status.ollamaRoute, c.green)}`);
+  }
   lines.push(`${label("Model:")} ${value(status.model, c.dim)}`);
   lines.push(`${label("Auth:")} ${status.authSignedIn === null ? value("unknown", c.dim) : status.authSignedIn ? value("signed in", c.green) : value("signed out", c.yellow)}`);
   lines.push(`${label("Tools:")} ${status.toolsReady ? value("ready", c.green) : value("not ready", c.red)}`);

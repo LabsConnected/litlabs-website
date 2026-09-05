@@ -49,6 +49,22 @@ export {
   ollamaEndpointSource,
 } from "./ollama-endpoint";
 
+// ─── Multi-endpoint Ollama route probing (local → LAN → Tailscale) ─
+export type {
+  OllamaRouteTier,
+  OllamaRouteCandidate,
+  OllamaRouteAttempt,
+  OllamaRouteResult,
+  ProbeOllamaRouteOptions,
+} from "./ollama-route";
+export {
+  OLLAMA_ROUTE_LABELS,
+  REMOTE_LITT_LABEL,
+  OLLAMA_ROUTE_ENV_VARS,
+  resolveOllamaRouteCandidates,
+  probeOllamaRoute,
+} from "./ollama-route";
+
 export { ModelRegistry, shouldFallback } from "./registry";
 
 export {
