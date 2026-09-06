@@ -9,7 +9,7 @@
  *   - Retrieves variables with:  railway variable list --service <svc> --environment <env> --json
  *   - Parses the JSON structurally (never line-splitting human-readable text).
  *   - Never prints or returns secret VALUES to callers — only presence/absence.
- *   - Uses the canonical Railway production service explicitly ("cli").
+ *   - Uses the canonical Railway production service explicitly ("web").
  *
  * The Railway `variable list --json` output is a flat JSON object:
  *   { "KEY": "value", "OTHER_KEY": "value", ... }
@@ -21,24 +21,41 @@ import { exec } from "./utils.js";
 // ─── Canonical Railway context ─────────────────────────────────────────
 
 /**
- * The Railway service that hosts the production web app (litlabs-website).
+ * The Railway service that serves production traffic for www.litlabs.net.
  *
  * This is the service whose env vars we inspect for Stripe/Clerk/Supabase/
- * Terminal configuration. It MUST be "cli" — NOT "@litlabs/litt-shell",
- * "terminal-server", "@litt/agent-core", or any other service.
+ * Terminal configuration.
  *
- * The old code inspected "@litlabs/litt-shell", which is a different service
- * that does not carry the production web env vars, causing false "NOT SET"
- * reports for variables that are genuinely set on "cli".
+ * Do not change these constants from a service *name* alone — names in this
+ * account are actively misleading. The authority is domain ownership: the
+ * production service is whichever service holds the `www.litlabs.net` custom
+ * domain, confirmed with:
+ *
+ *   railway domain list --project <id> --environment production --service <name>
+ *
+ * History, because this has now been wrong twice. The original code inspected
+ * "@litlabs/litt-shell". That was corrected to "cli" — still wrong. Both live
+ * in the "litlabs-website" project, which despite its name serves no
+ * production traffic; `cli` reported `[env-preflight] FAILED … degraded mode`
+ * on its own boot while the real site was healthy. Production is the service
+ * literally named "web", in the project named "litlabs-terminal-server",
+ * which has held www.litlabs.net since 2026-08-19.
+ *
+ * checkProductionServiceDomain() in production-checks.ts asserts this at
+ * runtime so a future rename or migration surfaces as a failed check rather
+ * than as silent "NOT SET" reports about a machine nobody is using.
  */
-export const RAILWAY_PRODUCTION_SERVICE = "cli";
+export const RAILWAY_PRODUCTION_SERVICE = "web";
 export const RAILWAY_PRODUCTION_ENVIRONMENT = "production";
 /**
- * The Railway project ID for litlabs-website. Passed explicitly to
- * `railway variable list --project` so the command works from any cwd
- * without requiring a linked project (worktrees are not linked).
+ * The Railway project ID that owns the production web service. Passed
+ * explicitly to `railway variable list --project` so the command works from
+ * any cwd without requiring a linked project (worktrees are not linked).
+ *
+ * Project name is "litlabs-terminal-server" — historical, and unrelated to
+ * what it now hosts. See RAILWAY_PRODUCTION_SERVICE above.
  */
-export const RAILWAY_PRODUCTION_PROJECT_ID = "3d5b8abe-088c-4a6c-9b34-7054829247c9";
+export const RAILWAY_PRODUCTION_PROJECT_ID = "69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5";
 
 // ─── Types ─────────────────────────────────────────────────────────────
 
@@ -76,9 +93,9 @@ export type ExecFn = (
  * could be printed — callers use hasNonEmpty/hasAnyNonEmpty which only
  * return booleans.
  *
- * @param options.service      Railway service name (default: "cli")
+ * @param options.service      Railway service name (default: "web")
  * @param options.environment  Railway environment (default: "production")
- * @param options.project      Railway project ID (default: canonical litlabs-website)
+ * @param options.project      Railway project ID (default: canonical litlabs-terminal-server)
  * @param options.execFn       Injectable exec for tests
  */
 export function getRailwayEnvVars(options: {
