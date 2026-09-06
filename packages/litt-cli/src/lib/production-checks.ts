@@ -140,7 +140,7 @@ export function checkGitSynced(): CheckResult {
 // ─── Railway Checks ────────────────────────────────────────────────────
 
 export function checkRailwayAuth(): CheckResult {
-  const r = exec("railway whoami 2>&1");
+  const r = exec("railway whoami");
   if (r.exitCode === 0 && r.stdout.trim().length > 0) {
     return { id: "railway.auth", label: "Railway auth", status: "pass", detail: r.stdout.trim() };
   }
@@ -148,7 +148,7 @@ export function checkRailwayAuth(): CheckResult {
 }
 
 export function checkRailwayProject(): CheckResult {
-  const r = exec(`railway project list --json 2>&1`);
+  const r = exec(`railway project list --json`);
   if (r.exitCode !== 0) {
     return { id: "railway.project", label: "Railway project", status: "fail", detail: "Cannot list projects" };
   }
@@ -282,7 +282,7 @@ export async function checkProductionSHA(expectedSHA?: string): Promise<CheckRes
  * Uses whatever Stripe CLI profile is configured.
  */
 export function checkStripeAuth(): CheckResult {
-  const r = exec("stripe config --list 2>&1");
+  const r = exec("stripe config --list");
   if (r.exitCode === 0 && r.stdout.length > 0) {
     // Check if the key has expired
     if (r.stdout.includes("expired")) {
@@ -384,23 +384,74 @@ export function checkWebhookSecret(
   };
 }
 
+/** A live webhook endpoint as returned by `stripe webhook_endpoints list`. */
+interface StripeWebhookEndpoint {
+  id?: string;
+  url?: string;
+  status?: string;
+  livemode?: boolean;
+  enabled_events?: string[];
+}
+
 /**
- * Check the live webhook endpoint exists and has the right events.
+ * Check the live webhook endpoint exists, is unique, and has the right events.
+ *
+ * Parses the JSON structurally rather than searching the raw text. Text search
+ * could not attribute events to a specific endpoint — events present on ANY
+ * endpoint satisfied the check — and it could not see the failure mode that
+ * actually bit us: two enabled endpoints on the same URL. Railway holds one
+ * signing secret, so a duplicate means every event is delivered twice and one
+ * copy fails signature verification.
  */
-export function checkWebhookEndpoint(): CheckResult {
-  const r = exec("stripe webhook_endpoints list --live 2>&1");
+export function checkWebhookEndpoint(execFn?: ExecFn): CheckResult {
+  const run = execFn ?? exec;
+  const r = run("stripe webhook_endpoints list --live");
   if (r.exitCode !== 0) {
     return { id: "stripe.webhook", label: "Webhook endpoint", status: "fail", detail: "Cannot list webhook endpoints" };
   }
-  if (!r.stdout.includes(WEBHOOK_URL)) {
-    return { id: "stripe.webhook", label: "Webhook endpoint", status: "fail", detail: "Endpoint not found", fix: `Create webhook endpoint for ${WEBHOOK_URL}` };
+
+  let endpoints: StripeWebhookEndpoint[];
+  try {
+    const parsed = JSON.parse(r.stdout) as { data?: StripeWebhookEndpoint[] };
+    endpoints = parsed.data ?? [];
+  } catch {
+    return { id: "stripe.webhook", label: "Webhook endpoint", status: "fail", detail: "Cannot parse webhook endpoint list" };
   }
-  // Check enabled events
-  const hasAllEvents = EXPECTED_WEBHOOK_EVENTS.every((evt) => r.stdout.includes(evt));
-  if (hasAllEvents) {
-    return { id: "stripe.webhook", label: "Webhook endpoint", status: "pass", detail: `${EXPECTED_WEBHOOK_EVENTS.length} events configured` };
+
+  const enabled = endpoints.filter(
+    (e) => e.url === WEBHOOK_URL && e.livemode === true && e.status === "enabled",
+  );
+
+  if (enabled.length === 0) {
+    return {
+      id: "stripe.webhook",
+      label: "Webhook endpoint",
+      status: "fail",
+      detail: "Endpoint not found",
+      fix: `Create webhook endpoint for ${WEBHOOK_URL}`,
+    };
   }
-  const missing = EXPECTED_WEBHOOK_EVENTS.filter((evt) => !r.stdout.includes(evt));
+
+  if (enabled.length > 1) {
+    return {
+      id: "stripe.webhook",
+      label: "Webhook endpoint",
+      status: "fail",
+      detail: `${enabled.length} enabled endpoints share ${WEBHOOK_URL} — only one signing secret is configured, so deliveries from the others fail signature verification`,
+      fix: `Disable all but one: ${enabled.slice(1).map((e) => e.id).join(", ")}`,
+    };
+  }
+
+  const events = new Set(enabled[0].enabled_events ?? []);
+  const missing = EXPECTED_WEBHOOK_EVENTS.filter((evt) => !events.has(evt));
+  if (missing.length === 0) {
+    return {
+      id: "stripe.webhook",
+      label: "Webhook endpoint",
+      status: "pass",
+      detail: `${EXPECTED_WEBHOOK_EVENTS.length} events configured`,
+    };
+  }
   return {
     id: "stripe.webhook",
     label: "Webhook endpoint",
@@ -417,7 +468,7 @@ export function checkStripePrices(): CheckResult[] {
   const results: CheckResult[] = [];
 
   // Creator
-  const creatorR = exec("stripe prices retrieve price_1U36qFJ53kgx4fp5avhUOuBH --live 2>&1");
+  const creatorR = exec("stripe prices retrieve price_1U36qFJ53kgx4fp5avhUOuBH --live");
   if (creatorR.exitCode === 0) {
     try {
       const p = JSON.parse(creatorR.stdout);
@@ -435,7 +486,7 @@ export function checkStripePrices(): CheckResult[] {
   }
 
   // Pro
-  const proR = exec("stripe prices retrieve price_1U36qFJ53kgx4fp52s6oy53l --live 2>&1");
+  const proR = exec("stripe prices retrieve price_1U36qFJ53kgx4fp52s6oy53l --live");
   if (proR.exitCode === 0) {
     try {
       const p = JSON.parse(proR.stdout);
@@ -453,7 +504,7 @@ export function checkStripePrices(): CheckResult[] {
   }
 
   // Founder
-  const founderR = exec("stripe prices retrieve price_1U066EJ53kgx4fp5ZLKsk6wp --live 2>&1");
+  const founderR = exec("stripe prices retrieve price_1U066EJ53kgx4fp5ZLKsk6wp --live");
   if (founderR.exitCode === 0) {
     try {
       const p = JSON.parse(founderR.stdout);

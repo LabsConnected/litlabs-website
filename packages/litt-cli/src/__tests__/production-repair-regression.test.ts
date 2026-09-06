@@ -262,6 +262,31 @@ describe("Defect #4: stripe-sandbox.ts does not use --test flag", () => {
     expect(src).toContain("livemode === true");
     expect(src).toContain("LIVE mode");
   });
+
+  it("uses Stripe's current recurring interval flag", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "..", "commands", "stripe-sandbox.ts"),
+      "utf-8",
+    );
+    expect(src).toContain('"--recurring.interval"');
+    expect(src).not.toContain('priceArgs.push("--recurring",');
+  });
+
+  it("creates checkout line items with current Stripe parameters and fails closed", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "..", "commands", "stripe-sandbox.ts"),
+      "utf-8",
+    );
+    expect(src).toContain('line_items[0][price]');
+    expect(src).toContain('line_items[0][quantity]');
+    expect(src).not.toContain('`--price ${priceId} `');
+    expect(src).toContain("if (!allCheckoutsOk)");
+    expect(src).toContain('fail("TEST checkout session verification failed")');
+  });
 });
 
 // ─── Defect #1 & #2: Nested command interface and help contract ────────
