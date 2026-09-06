@@ -36,7 +36,7 @@ export async function deployVerifyCommand(args: string[]): Promise<number> {
   // Trigger redeploy if requested
   if (triggerRedeploy) {
     console.log(`\n${c.dim}Triggering redeploy from source...${c.reset}`);
-    const r = exec(`railway deployment redeploy --service "${RAILWAY_SERVICE_NAME}" --environment production --from-source --yes 2>&1`);
+    const r = exec(`railway deployment redeploy --service "${RAILWAY_SERVICE_NAME}" --environment production --from-source --yes`);
     if (r.exitCode !== 0) {
       fail(`Failed to trigger redeploy: ${redact(r.stderr)}`);
       return 1;
@@ -49,7 +49,7 @@ export async function deployVerifyCommand(args: string[]): Promise<number> {
 
   let lastStatus = "";
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-    const r = exec(`railway deployment list --service "${RAILWAY_SERVICE_NAME}" --environment production 2>&1`);
+    const r = exec(`railway deployment list --service "${RAILWAY_SERVICE_NAME}" --environment production`);
     if (r.exitCode !== 0) {
       warn("Cannot fetch deployment list, retrying...");
       await sleep(POLL_INTERVAL_MS);

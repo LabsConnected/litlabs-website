@@ -97,7 +97,7 @@ export async function stripeRepairCommand(args: string[]): Promise<number> {
 }
 
 function extractEndpointId(): string | null {
-  const r = exec("stripe webhook_endpoints list --live 2>&1");
+  const r = exec("stripe webhook_endpoints list --live");
   if (r.exitCode !== 0) return null;
   // Look for we_... ID near our URL
   const lines = r.stdout.split("\n");

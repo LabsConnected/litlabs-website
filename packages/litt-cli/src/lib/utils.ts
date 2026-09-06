@@ -2,7 +2,7 @@
  * Shared CLI utilities — colored output, exec, project detection.
  */
 
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,33 +50,73 @@ export function value(text: string, color = c.reset): string {
   return `${color}${text}${c.reset}`;
 }
 
-export function exec(cmd: string, options: { cwd?: string; timeout?: number } = {}): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    const stdout = execSync(cmd, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: options.timeout ?? 15000,
-      cwd: options.cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      shell: process.platform === "win32" ? "powershell.exe" : undefined,
-    });
-    return { stdout: stdout.trim(), stderr: "", exitCode: 0 };
-  } catch (error: unknown) {
-    const e = error as { stdout?: string; stderr?: string; status?: number; signal?: string };
-    // On timeout, execSync throws with signal "SIGTERM"
-    if (e.signal === "SIGTERM") {
-      return {
-        stdout: (e.stdout ?? "").toString().trim(),
-        stderr: "Command timed out",
-        exitCode: 124,
-      };
-    }
-    return {
-      stdout: (e.stdout ?? "").toString().trim(),
-      stderr: (e.stderr ?? "").toString().trim(),
-      exitCode: e.status ?? 1,
-    };
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  /**
+   * stdout and stderr concatenated, for callers that want the interleaved
+   * view a shell `2>&1` used to give them (test runners, build logs).
+   * Never parse JSON from this — use `stdout`.
+   */
+  combined: string;
+  exitCode: number;
+}
+
+/**
+ * Run a command and capture its output.
+ *
+ * Uses spawnSync rather than execSync so a non-zero exit is a returned status
+ * instead of a thrown exception, and so stdout and stderr stay separate.
+ *
+ * Callers must NOT append `2>&1` to the command string. On Windows the shell
+ * is powershell.exe, which converts a native command's redirected stderr into
+ * a NativeCommandError — that makes a perfectly successful command (the Stripe
+ * CLI writing a banner to stderr, say) exit non-zero, and it also splices that
+ * stderr text into stdout where it corrupts JSON.parse(). Read `stderr` or
+ * `combined` instead.
+ */
+export function exec(cmd: string, options: { cwd?: string; timeout?: number } = {}): ExecResult {
+  const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: options.timeout ?? 15000,
+    cwd: options.cwd,
+    maxBuffer: 10 * 1024 * 1024,
+    windowsHide: true,
+  };
+
+  // On Windows, invoke powershell.exe explicitly rather than via spawnSync's
+  // `shell` option. PowerShell exits 0/1 on its own success, discarding the
+  // native command's real exit code, so we re-raise $LASTEXITCODE. -NoProfile
+  // also keeps the user's profile from injecting output into stdout.
+  const r = process.platform === "win32"
+    ? spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `${cmd}\nif ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }`,
+        ],
+        spawnOptions,
+      )
+    : spawnSync(cmd, { ...spawnOptions, shell: true });
+
+  const stdout = (r.stdout ?? "").toString().trim();
+  const stderr = (r.stderr ?? "").toString().trim();
+  const combined = [stdout, stderr].filter(Boolean).join("\n");
+
+  // On timeout, spawnSync reports the kill signal rather than an exit status.
+  if (r.signal === "SIGTERM") {
+    return { stdout, stderr: "Command timed out", combined, exitCode: 124 };
   }
+
+  // Spawn failed outright (command not found, cwd missing, …).
+  if (r.error) {
+    return { stdout, stderr: stderr || r.error.message, combined, exitCode: 127 };
+  }
+
+  return { stdout, stderr, combined, exitCode: r.status ?? 1 };
 }
 
 export function hasCommand(cmd: string): boolean {

@@ -109,13 +109,13 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
   await runPhase(run, "studio_code", async () => {
     // Run the key test suites — use a longer timeout (120s) for vitest
     const r = exec(
-      "npx vitest run tests/pricing-consistency.test.ts tests/stripe-catalog-contract.test.ts tests/approval-flow.test.ts tests/security-isolation.test.ts tests/litt-chat-path.test.ts 2>&1",
+      "npx vitest run tests/pricing-consistency.test.ts tests/stripe-catalog-contract.test.ts tests/approval-flow.test.ts tests/security-isolation.test.ts tests/litt-chat-path.test.ts",
       { cwd: repoRoot, timeout: 120000 },
     );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Key test suites pass" };
     }
-    return { status: "fail", detail: `Test suites failed: ${r.stderr || r.stdout.slice(-200)}` };
+    return { status: "fail", detail: `Test suites failed: ${r.combined.slice(-200)}` };
   });
 
   await runPhase(run, "pricing", async () => {
@@ -145,7 +145,7 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
     if (secretCheck.status === "pass") {
       // Key is set — but we can't verify if it was rotated via API
       // Check if the key is functional by making a test API call
-      const testR = exec("stripe customers list --limit 1 --live 2>&1");
+      const testR = exec("stripe customers list --limit 1 --live");
       if (testR.exitCode === 0) {
         return { status: "pass", detail: "Stripe API functional with current key" };
       }
@@ -195,13 +195,13 @@ export async function productionFinishCommand(args: string[]): Promise<number> {
   await runPhase(run, "sandbox_checkout", async () => {
     // Verify the billing state machine tests pass — use a longer timeout (120s) for vitest
     const r = exec(
-      "npx vitest run src/__tests__/billing-state-machine.test.ts 2>&1",
+      "npx vitest run src/__tests__/billing-state-machine.test.ts",
       { cwd: repoRoot, timeout: 120000 },
     );
     if (r.exitCode === 0) {
       return { status: "pass", detail: "Billing state machine tests pass (45 tests)" };
     }
-    return { status: "fail", detail: `Billing state machine tests failed: ${r.stderr || r.stdout.slice(-200)}` };
+    return { status: "fail", detail: `Billing state machine tests failed: ${r.combined.slice(-200)}` };
   });
 
   // Studio acceptance — owner browser acceptance

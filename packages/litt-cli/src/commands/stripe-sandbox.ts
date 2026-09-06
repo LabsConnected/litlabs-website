@@ -40,7 +40,7 @@ export async function stripeSandboxCommand(args: string[]): Promise<number> {
   // Stripe CLI defaults to test mode; --live opts into live mode.
   // This command NEVER passes --live.
   console.log(`${c.dim}Verifying TEST mode...${c.reset}`);
-  const testCheck = exec("stripe customers list --limit 1 2>&1");
+  const testCheck = exec("stripe customers list --limit 1");
   if (testCheck.exitCode !== 0) {
     fail("Cannot reach Stripe API. Run: stripe login");
     return 1;
@@ -51,7 +51,7 @@ export async function stripeSandboxCommand(args: string[]): Promise<number> {
   // If --live were accidentally passed, we'd see live customers.
   // We verify by checking that a test-mode product creation returns
   // livemode: false in the next step.
-  const configR = exec("stripe config --list 2>&1");
+  const configR = exec("stripe config --list");
   // Warn if only live keys are configured (still safe — CLI defaults
   // to test mode, but the user should be aware)
   // Construct sensitive prefixes dynamically to avoid literal patterns
@@ -94,13 +94,20 @@ export async function stripeSandboxCommand(args: string[]): Promise<number> {
 
   // Step 3: Create test checkout sessions
   console.log(`\n${c.dim}Creating TEST checkout sessions...${c.reset}`);
+  let allCheckoutsOk = true;
   for (const [plan, product] of Object.entries(products)) {
     const session = createTestCheckout(product.priceId, plan);
     if (session) {
       ok(`${plan}: checkout session created — ${session}`);
     } else {
       fail(`${plan}: checkout session creation failed`);
+      allCheckoutsOk = false;
     }
+  }
+
+  if (!allCheckoutsOk) {
+    fail("TEST checkout session verification failed");
+    return 1;
   }
 
   // Step 4: Summary
@@ -128,18 +135,28 @@ async function ensureTestProducts(): Promise<Record<string, TestProduct> | null>
 
   for (const [plan, name] of Object.entries(TEST_PRODUCT_NAMES)) {
     // Check if product already exists (test mode is the default — no --live flag)
-    const listR = exec("stripe products list --limit 100 2>&1");
-    const existing = listR.stdout.split("\n").find((l) => l.includes(name));
+    const listR = exec("stripe products list --limit 100");
     let productId: string | null = null;
-
-    if (existing) {
-      const match = existing.match(/prod_[A-Za-z0-9]+/);
-      productId = match?.[0] ?? null;
+    try {
+      const productList = JSON.parse(listR.stdout) as {
+        data?: Array<{ id?: string; name?: string; active?: boolean; livemode?: boolean }>;
+      };
+      const existing = productList.data?.find(
+        (product) => product.name === name && product.active !== false,
+      );
+      if (existing?.livemode === true) {
+        fail(`${name}: existing product is in LIVE mode — aborting sandbox`);
+        return null;
+      }
+      productId = existing?.id ?? null;
+    } catch {
+      fail(`Failed to parse product list for ${name}`);
+      return null;
     }
 
     if (!productId) {
       // Create product (test mode is the default — no --live flag)
-      const createR = exec(`stripe products create --name "${name}" 2>&1`);
+      const createR = exec(`stripe products create --name "${name}"`);
       if (createR.exitCode !== 0) {
         fail(`Failed to create ${name}: ${redact(createR.stderr)}`);
         return null;
@@ -158,9 +175,51 @@ async function ensureTestProducts(): Promise<Record<string, TestProduct> | null>
       }
     }
 
+    if (!productId) {
+      fail(`Stripe did not return a product ID for ${name}`);
+      return null;
+    }
+
     // Create or find price for this product (test mode is the default)
     const priceConfig = TEST_PRICES[plan as keyof typeof TEST_PRICES];
     const isRecurring = "interval" in priceConfig;
+
+    const pricesR = exec(`stripe prices list --product=${productId} --active=true --limit=100`);
+    if (pricesR.exitCode !== 0) {
+      fail(`Failed to list prices for ${name}: ${redact(pricesR.stderr)}`);
+      return null;
+    }
+    try {
+      const priceList = JSON.parse(pricesR.stdout) as {
+        data?: Array<{
+          id?: string;
+          active?: boolean;
+          currency?: string;
+          livemode?: boolean;
+          type?: string;
+          unit_amount?: number;
+          recurring?: { interval?: string } | null;
+        }>;
+      };
+      const existingPrice = priceList.data?.find((price) =>
+        price.active === true &&
+        price.livemode === false &&
+        price.currency === priceConfig.currency &&
+        price.unit_amount === priceConfig.amount &&
+        (isRecurring
+          ? price.type === "recurring" &&
+            price.recurring?.interval === (priceConfig as { interval: string }).interval
+          : price.type === "one_time"),
+      );
+      if (existingPrice?.id) {
+        result[plan] = { productId, priceId: existingPrice.id };
+        ok(`${plan}: product ${productId} + price ${existingPrice.id}`);
+        continue;
+      }
+    } catch {
+      fail(`Failed to parse prices for ${name}`);
+      return null;
+    }
 
     const priceArgs = [
       "stripe", "prices", "create",
@@ -169,7 +228,7 @@ async function ensureTestProducts(): Promise<Record<string, TestProduct> | null>
       "--unit-amount", String(priceConfig.amount),
     ];
     if (isRecurring) {
-      priceArgs.push("--recurring", (priceConfig as { interval: string }).interval);
+      priceArgs.push("--recurring.interval", (priceConfig as { interval: string }).interval);
     }
 
     const priceR = exec(priceArgs.join(" "));
@@ -198,7 +257,7 @@ async function ensureTestProducts(): Promise<Record<string, TestProduct> | null>
 
 function verifyTestPrice(priceId: string, plan: string): string | null {
   // Test mode is the default — no --live flag
-  const r = exec(`stripe prices retrieve ${priceId} 2>&1`);
+  const r = exec(`stripe prices retrieve ${priceId}`);
   if (r.exitCode !== 0) return null;
   try {
     const p = JSON.parse(r.stdout);
@@ -222,11 +281,11 @@ function createTestCheckout(priceId: string, plan: string): string | null {
   // Test mode is the default — no --live flag
   const r = exec(
     `stripe checkout sessions create ` +
-    `--price ${priceId} ` +
-    `--mode ${"interval" in TEST_PRICES[plan as keyof typeof TEST_PRICES] ? "subscription" : "payment"} ` +
-    `--success-url "https://www.litlabs.net/billing/success?test=1" ` +
-    `--cancel-url "https://www.litlabs.net/pricing?test=1" ` +
-    `2>&1`,
+    `-d "line_items[0][price]=${priceId}" ` +
+    `-d "line_items[0][quantity]=1" ` +
+    `--mode=${"interval" in TEST_PRICES[plan as keyof typeof TEST_PRICES] ? "subscription" : "payment"} ` +
+    `--success-url="https://www.litlabs.net/billing/success?test=1" ` +
+    `--cancel-url="https://www.litlabs.net/pricing?test=1"`,
   );
   if (r.exitCode !== 0) return null;
   try {
@@ -245,28 +304,31 @@ function createTestCheckout(priceId: string, plan: string): string | null {
 function cleanupTestProducts(json: boolean): number {
   console.log(`${c.dim}Cleaning up TEST products...${c.reset}`);
   // Test mode is the default — no --live flag
-  const r = exec("stripe products list --limit 100 2>&1");
+  const r = exec("stripe products list --limit 100");
   if (r.exitCode !== 0) {
     fail("Cannot list TEST products");
     return 1;
   }
 
   let cleaned = 0;
-  for (const [plan, name] of Object.entries(TEST_PRODUCT_NAMES)) {
-    const lines = r.stdout.split("\n");
-    for (const line of lines) {
-      if (line.includes(name)) {
-        const match = line.match(/prod_[A-Za-z0-9]+/);
-        if (match) {
-          // Test mode is the default — no --live flag
-          const delR = exec(`stripe products update ${match[0]} --active=false 2>&1`);
-          if (delR.exitCode === 0) {
-            ok(`Archived: ${name}`);
-            cleaned++;
-          }
+  try {
+    const productList = JSON.parse(r.stdout) as {
+      data?: Array<{ id?: string; name?: string; livemode?: boolean }>;
+    };
+    const testNames = new Set(Object.values(TEST_PRODUCT_NAMES));
+    for (const product of productList.data ?? []) {
+      if (product.id && product.livemode === false && product.name && testNames.has(product.name)) {
+        // Test mode is the default — no --live flag
+        const delR = exec(`stripe products update ${product.id} --active=false`);
+        if (delR.exitCode === 0) {
+          ok(`Archived: ${product.name}`);
+          cleaned++;
         }
       }
     }
+  } catch {
+    fail("Cannot parse TEST products");
+    return 1;
   }
 
   console.log(`\n${c.dim}Cleaned up ${cleaned} TEST products${c.reset}`);
