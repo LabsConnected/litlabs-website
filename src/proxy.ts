@@ -260,6 +260,29 @@ const isProtectedRoute = createRouteMatcher([
   "/litt-terminal(.*)",
   "/runtime-test(.*)",
   "/order(.*)",
+  // OAuth consent — must be authenticated; signed-out users redirect
+  // to /sign-in with the full OAuth consent URL preserved as redirect_url
+  "/oauth-consent",
+  "/projects(.*)",
+  "/wallet(.*)",
+  "/deployments(.*)",
+  "/settings(.*)",
+  "/profile(.*)",
+  "/admin(.*)",
+  "/owner(.*)",
+  "/library(.*)",
+  "/memories(.*)",
+  "/flow(.*)",
+  "/code(.*)",
+  "/agent-chat(.*)",
+  "/ai-builder(.*)",
+  "/builder(.*)",
+  "/chat(.*)",
+  "/generate(.*)",
+  "/litt(.*)",
+  "/litt-terminal(.*)",
+  "/runtime-test(.*)",
+  "/order(.*)",
   // Protected API routes
   "/api/user-agents(.*)",
   "/api/conversations(.*)",
@@ -344,7 +367,7 @@ function setCacheHeaders(response: NextResponse, pathname: string): NextResponse
     response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
   }
 
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) {
+  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/oauth-consent")) {
     response.headers.set("Cache-Control", "no-store, must-revalidate");
   }
 

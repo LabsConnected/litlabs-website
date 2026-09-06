@@ -50,10 +50,14 @@ export class AuthSession {
   get auth(): ClerkCliAuth {
     if (!this._auth) {
       const { issuer, clientId } = resolveAuthConfig();
+      // LITT_AUTH_TIMEOUT_MS overrides the default 120s callback timeout.
+      // Useful when the user needs more time to complete sign-in + consent.
+      const timeoutMs = Number.parseInt(process.env.LITT_AUTH_TIMEOUT_MS ?? "", 10) || undefined;
       this._auth = new ClerkCliAuth({
         issuer,
         clientId,
         ...(this._storageOverride ? { storage: this._storageOverride } : {}),
+        ...(timeoutMs ? { timeoutMs } : {}),
       });
     }
     return this._auth;
