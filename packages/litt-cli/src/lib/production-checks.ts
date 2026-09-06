@@ -24,6 +24,7 @@ import {
   type ExecFn,
   RAILWAY_PRODUCTION_SERVICE,
   RAILWAY_PRODUCTION_ENVIRONMENT,
+  RAILWAY_PRODUCTION_PROJECT_ID,
 } from "./railway-env.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────
@@ -46,18 +47,22 @@ export interface CheckGroup {
 
 // ─── Constants ─────────────────────────────────────────────────────────
 
-export const RAILWAY_PROJECT_ID = "3d5b8abe-088c-4a6c-9b34-7054829247c9";
+export const RAILWAY_PROJECT_ID = RAILWAY_PRODUCTION_PROJECT_ID;
 /**
- * The Railway service that hosts the production web app env vars.
+ * The Railway service that serves production traffic for www.litlabs.net.
  *
- * This is the "cli" service — NOT "@litlabs/litt-shell" (a different service
- * that does not carry Stripe/Clerk/Supabase/Terminal config). Inspecting the
- * wrong service was the root cause of false "NOT SET" reports.
+ * This is the "web" service in the "litlabs-terminal-server" project — NOT
+ * "cli" and NOT "@litlabs/litt-shell", both of which live in the
+ * "litlabs-website" project and serve no production traffic. Inspecting the
+ * wrong service produced false "NOT SET" reports for variables that are
+ * genuinely set on the machine users actually hit.
  *
- * Service ID confirmed via `railway service list --environment production --json`.
+ * Authority is domain ownership, not service name. See the note on
+ * RAILWAY_PRODUCTION_SERVICE in railway-env.ts, and
+ * checkProductionServiceDomain() below, which asserts it at runtime.
  */
-export const RAILWAY_SERVICE_ID = "f71b9a86-cd1e-4c5a-ba00-b4efc0b6e119";
-export const RAILWAY_ENVIRONMENT_ID = "56de816e-3904-4b35-9dde-031303a6d5cb";
+export const RAILWAY_SERVICE_ID = "a8a05220-e5ed-48f6-969d-1f82957341de";
+export const RAILWAY_ENVIRONMENT_ID = "41f9b3f4-c783-4288-a6d3-077b4e55858f";
 export const RAILWAY_SERVICE_NAME = RAILWAY_PRODUCTION_SERVICE;
 export const PRODUCTION_DOMAIN = "https://www.litlabs.net";
 export const HEALTH_ENDPOINT = "/api/health";
@@ -153,9 +158,107 @@ export function checkRailwayProject(): CheckResult {
     return { id: "railway.project", label: "Railway project", status: "fail", detail: "Cannot list projects" };
   }
   if (r.stdout.includes(RAILWAY_PROJECT_ID)) {
-    return { id: "railway.project", label: "Railway project", status: "pass", detail: "litlabs-website" };
+    return { id: "railway.project", label: "Railway project", status: "pass", detail: "litlabs-terminal-server" };
   }
   return { id: "railway.project", label: "Railway project", status: "fail", detail: "Project not found" };
+}
+
+/**
+ * The production custom domain (host only, no scheme) that the production
+ * service MUST own. This is the source of truth for "which service is
+ * production" — service names in this account are misleading, but domain
+ * ownership is not. See RAILWAY_PRODUCTION_SERVICE in railway-env.ts.
+ */
+export const PRODUCTION_HOST = "www.litlabs.net";
+
+/** Shape of a single entry in `railway domain list --json` output. */
+interface RailwayDomain {
+  domain?: string;
+  type?: string;
+  syncStatus?: string;
+}
+
+/**
+ * Assert at runtime that the configured production service owns the
+ * production custom domain (www.litlabs.net).
+ *
+ * This is the domain-ownership check that prevents a future rename or
+ * migration from silently turning the production doctor into a "NOT SET"
+ * reporter about a machine nobody is using. The authority for "which
+ * service is production" is domain ownership, not the service name — names
+ * in this Railway account have been wrong twice already.
+ *
+ * Runs:
+ *   railway domain list --service <svc> --environment <env> --project <id> --json
+ *
+ * Pass: a custom domain equal to PRODUCTION_HOST is present and ACTIVE.
+ * Fail: command failed, output unparseable, or the domain is absent/inactive.
+ *
+ * @param execFn  Optional exec override (for tests).
+ */
+export function checkProductionServiceDomain(execFn?: ExecFn): CheckResult {
+  const run = execFn ?? exec;
+  const cmd =
+    `railway domain list --service "${RAILWAY_SERVICE_NAME}"` +
+    ` --environment "${RAILWAY_ENVIRONMENT_ID}"` +
+    ` --project "${RAILWAY_PROJECT_ID}" --json`;
+  const r = run(cmd);
+  if (r.exitCode !== 0) {
+    return {
+      id: "railway.domain",
+      label: "Production domain ownership",
+      status: "fail",
+      detail: "Cannot list service domains",
+      fix: `Run: railway domain list --service "${RAILWAY_SERVICE_NAME}" --environment "${RAILWAY_ENVIRONMENT_ID}" --project "${RAILWAY_PROJECT_ID}"`,
+    };
+  }
+
+  let domains: RailwayDomain[];
+  try {
+    const parsed = JSON.parse(r.stdout.trim()) as { domains?: RailwayDomain[] };
+    domains = parsed.domains ?? [];
+  } catch {
+    return {
+      id: "railway.domain",
+      label: "Production domain ownership",
+      status: "fail",
+      detail: "Cannot parse domain list",
+    };
+  }
+
+  const owned = domains.find(
+    (d) =>
+      d.domain === PRODUCTION_HOST &&
+      d.type === "custom" &&
+      d.syncStatus === "ACTIVE",
+  );
+  if (owned) {
+    return {
+      id: "railway.domain",
+      label: "Production domain ownership",
+      status: "pass",
+      detail: `${PRODUCTION_HOST} on ${RAILWAY_SERVICE_NAME} (${RAILWAY_SERVICE_ID.slice(0, 8)})`,
+    };
+  }
+  // Distinguish "domain on a different service" from "domain missing entirely"
+  // so the operator knows whether to re-point DNS or re-link the service.
+  const presentButWrong = domains.find((d) => d.domain === PRODUCTION_HOST);
+  if (presentButWrong) {
+    return {
+      id: "railway.domain",
+      label: "Production domain ownership",
+      status: "fail",
+      detail: `${PRODUCTION_HOST} exists but is type=${presentButWrong.type ?? "?"} sync=${presentButWrong.syncStatus ?? "?"} — expected custom/ACTIVE on ${RAILWAY_SERVICE_NAME}`,
+      fix: `Confirm the domain is attached to the "${RAILWAY_SERVICE_NAME}" service (id ${RAILWAY_SERVICE_ID}) in the production environment`,
+    };
+  }
+  return {
+    id: "railway.domain",
+    label: "Production domain ownership",
+    status: "fail",
+    detail: `${PRODUCTION_HOST} not found on ${RAILWAY_SERVICE_NAME}`,
+    fix: `Attach ${PRODUCTION_HOST} as a custom domain to the "${RAILWAY_SERVICE_NAME}" service in Railway`,
+  };
 }
 
 // ─── Production Health Check ───────────────────────────────────────────
@@ -303,7 +406,7 @@ export function checkStripeAuth(): CheckResult {
  * Never prints values — only presence/absence and mode.
  *
  * @param envMap  Optional pre-fetched env map (for tests). If omitted, fetches
- *                from the canonical "cli" service via JSON.
+ *                from the canonical "web" service via JSON.
  * @param execFn  Optional exec override (for tests).
  */
 export function checkStripeSecretKey(
@@ -328,7 +431,7 @@ export function checkStripeSecretKey(
     label: "Stripe secret key",
     status: "fail",
     detail: "NOT SET",
-    fix: "Set STRIPE_SECRET_KEY in Railway production environment (cli service)",
+    fix: "Set STRIPE_SECRET_KEY in Railway production environment (web service)",
   };
 }
 
@@ -354,7 +457,7 @@ export function checkStripePublishableKey(
     label: "Stripe publishable key",
     status: "fail",
     detail: "NOT SET",
-    fix: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Railway (cli service)",
+    fix: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Railway (web service)",
   };
 }
 
@@ -380,7 +483,7 @@ export function checkWebhookSecret(
     label: "Webhook signing secret",
     status: "fail",
     detail: "NOT SET",
-    fix: "Reveal signing secret in Stripe Dashboard → Webhooks, then set STRIPE_WEBHOOK_SECRET in Railway (cli service)",
+    fix: "Reveal signing secret in Stripe Dashboard → Webhooks, then set STRIPE_WEBHOOK_SECRET in Railway (web service)",
   };
 }
 
@@ -558,7 +661,7 @@ export function checkTerminalService(
     label: "Terminal service",
     status: "fail",
     detail: "Terminal URLs not configured",
-    fix: "Set TERMINAL_PUBLIC_URL (or NEXT_PUBLIC_TERMINAL_WS_URL / NEXT_PUBLIC_TERMINAL_HTTP_URL) in Railway production (cli service)",
+    fix: "Set TERMINAL_PUBLIC_URL (or NEXT_PUBLIC_TERMINAL_WS_URL / NEXT_PUBLIC_TERMINAL_HTTP_URL) in Railway production (web service)",
   };
 }
 
@@ -597,7 +700,7 @@ export function checkStudioPrerequisites(
     label: "Studio prerequisites",
     status: "fail",
     detail: `Missing: ${missing.join(", ")}`,
-    fix: `Set ${missing.join(", ")} env vars in Railway production (cli service)`,
+    fix: `Set ${missing.join(", ")} env vars in Railway production (web service)`,
   };
 }
 
@@ -620,7 +723,7 @@ export async function runAllChecks(): Promise<CheckGroup[]> {
   // Railway
   groups.push({
     name: "Railway",
-    results: [checkRailwayAuth(), checkRailwayProject()],
+    results: [checkRailwayAuth(), checkRailwayProject(), checkProductionServiceDomain()],
   });
 
   // Production

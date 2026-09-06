@@ -3,7 +3,10 @@
  *
  * Proves the production-operator env detection is fixed:
  *   - Uses JSON-based `railway variable list --json` (structural parse)
- *   - Inspects the canonical "cli" service (NOT "@litlabs/litt-shell")
+ *   - Inspects the canonical "web" service in the "litlabs-terminal-server"
+ *     project — the service that owns the www.litlabs.net custom domain.
+ *     NOT "cli" or "@litlabs/litt-shell" (both in "litlabs-website", which
+ *     serves no production traffic).
  *   - Applies the correct OR-fallback contracts for each service
  *   - Never prints secret values
  *   - Wrong Railway service cannot create false positives
@@ -18,6 +21,12 @@ import {
   checkWebhookSecret,
   checkTerminalService,
   checkStudioPrerequisites,
+  checkProductionServiceDomain,
+  RAILWAY_PROJECT_ID,
+  RAILWAY_SERVICE_ID,
+  RAILWAY_ENVIRONMENT_ID,
+  RAILWAY_SERVICE_NAME,
+  PRODUCTION_DOMAIN,
 } from "../lib/production-checks.js";
 import {
   getRailwayEnvVars,
@@ -26,6 +35,7 @@ import {
   hasNonEmptyWithPrefix,
   RAILWAY_PRODUCTION_SERVICE,
   RAILWAY_PRODUCTION_ENVIRONMENT,
+  RAILWAY_PRODUCTION_PROJECT_ID,
   type EnvVarMap,
   type ExecFn,
 } from "../lib/railway-env.js";
@@ -63,17 +73,18 @@ function failingExec(): ExecFn {
 }
 
 /**
- * The PROVEN real state on Railway service "cli", environment "production".
- * Used to prove the fix reports truthfully against the real configuration.
+ * The PROVEN real state on Railway service "web" (litlabs-terminal-server
+ * project), environment "production". Used to prove the fix reports
+ * truthfully against the real configuration.
  */
-const REAL_CLI_ENV: Record<string, string> = {
+const REAL_WEB_ENV: Record<string, string> = {
   STRIPE_SECRET_KEY: SK_LIVE + "FAKEFAKEFAKEFAKEFAKEFAKEFAKE",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_clerk_fake",
   CLERK_SECRET_KEY: "sk_test_clerk_secret_fake",
   NEXT_PUBLIC_SUPABASE_URL: "https://rokbfvuoqildggnhappy.supabase.co",
   NEXT_PUBLIC_TERMINAL_WS_URL: "wss://terminal.example.com",
   NEXT_PUBLIC_TERMINAL_HTTP_URL: "https://terminal.example.com",
-  // Genuinely missing on real cli service:
+  // Genuinely missing on real web service:
   // NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
   // STRIPE_WEBHOOK_SECRET
 };
@@ -367,16 +378,16 @@ describe("Empty values fail every contract", () => {
 // ─── 10. Wrong Railway service cannot create false positives ───────────
 
 describe("Wrong Railway service cannot create false positives", () => {
-  it("getRailwayEnvVars targets the 'cli' service by default", () => {
+  it("getRailwayEnvVars targets the 'web' service by default", () => {
     let capturedCmd = "";
     const spy: ExecFn = (cmd) => {
       capturedCmd = cmd;
       return { stdout: "{}", stderr: "", exitCode: 0 };
     };
     getRailwayEnvVars({ execFn: spy });
-    expect(capturedCmd).toContain('--service "cli"');
+    expect(capturedCmd).toContain('--service "web"');
     expect(capturedCmd).not.toContain("@litlabs/litt-shell");
-    expect(capturedCmd).not.toContain("terminal-server");
+    expect(capturedCmd).not.toContain('--service "cli"');
   });
 
   it("getRailwayEnvVars targets the 'production' environment by default", () => {
@@ -397,7 +408,7 @@ describe("Wrong Railway service cannot create false positives", () => {
     };
     getRailwayEnvVars({ execFn: spy });
     expect(capturedCmd).toContain("--project");
-    expect(capturedCmd).toContain("3d5b8abe-088c-4a6c-9b34-7054829247c9");
+    expect(capturedCmd).toContain("69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5");
   });
 
   it("uses --json (structural, not human-readable)", () => {
@@ -450,53 +461,53 @@ describe("Wrong Railway service cannot create false positives", () => {
     expect(checkTerminalService(wrongServiceVars).status).toBe("fail");
   });
 
-  it("the canonical constants are 'cli' and 'production'", () => {
-    expect(RAILWAY_PRODUCTION_SERVICE).toBe("cli");
+  it("the canonical constants are 'web' and 'production'", () => {
+    expect(RAILWAY_PRODUCTION_SERVICE).toBe("web");
     expect(RAILWAY_PRODUCTION_ENVIRONMENT).toBe("production");
   });
 });
 
-// ─── Real-state proof: the PROVEN cli env ──────────────────────────────
+// ─── Real-state proof: the PROVEN web env ──────────────────────────────
 
-describe("PROVEN real state on Railway service 'cli'", () => {
+describe("PROVEN real state on Railway service 'web'", () => {
   // Real state: SET = STRIPE_SECRET_KEY, Clerk, Supabase, Terminal URLs
   // MISSING = NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET
 
   it("STRIPE_SECRET_KEY is reported SET (not falsely NOT SET)", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+    const vars = mapFrom(REAL_WEB_ENV);
     const result = checkStripeSecretKey(vars);
     expect(result.status).toBe("pass");
     expect(result.detail).not.toContain("NOT SET");
   });
 
   it("Terminal URLs are reported configured (not falsely missing)", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+    const vars = mapFrom(REAL_WEB_ENV);
     const result = checkTerminalService(vars);
     expect(result.status).toBe("pass");
   });
 
   it("Studio prerequisites pass (Clerk, Supabase, Stripe all present)", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+    const vars = mapFrom(REAL_WEB_ENV);
     const result = checkStudioPrerequisites(vars);
     expect(result.status).toBe("pass");
   });
 
   it("publishable key is genuinely FAIL (truly missing)", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+    const vars = mapFrom(REAL_WEB_ENV);
     const result = checkStripePublishableKey(vars);
     expect(result.status).toBe("fail");
   });
 
   it("webhook secret is genuinely FAIL (truly missing)", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+    const vars = mapFrom(REAL_WEB_ENV);
     const result = checkWebhookSecret(vars);
     expect(result.status).toBe("fail");
   });
 
   it("end-to-end via fake exec: getRailwayEnvVars + checks report truthfully", () => {
-    const result = getRailwayEnvVars({ execFn: fakeExecReturning(REAL_CLI_ENV) });
+    const result = getRailwayEnvVars({ execFn: fakeExecReturning(REAL_WEB_ENV) });
     expect(result.vars).not.toBeNull();
-    expect(result.service).toBe("cli");
+    expect(result.service).toBe("web");
     expect(checkStripeSecretKey(result.vars).status).toBe("pass");
     expect(checkTerminalService(result.vars).status).toBe("pass");
     expect(checkStudioPrerequisites(result.vars).status).toBe("pass");
@@ -508,8 +519,8 @@ describe("PROVEN real state on Railway service 'cli'", () => {
 // ─── Secret safety: no secret values in any check output ───────────────
 
 describe("No secret values leak from any check", () => {
-  it("all check details are secret-free across the real cli env", () => {
-    const vars = mapFrom(REAL_CLI_ENV);
+  it("all check details are secret-free across the real web env", () => {
+    const vars = mapFrom(REAL_WEB_ENV);
     const results = [
       checkStripeSecretKey(vars),
       checkStripePublishableKey(vars),
@@ -546,5 +557,189 @@ describe("railway-env helpers", () => {
     expect(hasNonEmptyWithPrefix(vars, "KEY", "sk_live_")).toBe(true);
     expect(hasNonEmptyWithPrefix(vars, "KEY", "sk_test_")).toBe(false);
     expect(hasNonEmptyWithPrefix(vars, "MISSING", "sk_live_")).toBe(false);
+  });
+});
+
+// ─── Production authority: targets the www.litlabs.net service ─────────
+//
+// This is the regression that has now been wrong twice. The original code
+// inspected "@litlabs/litt-shell". That was corrected to "cli" — still
+// wrong. Both live in the "litlabs-website" project, which despite its
+// name serves no production traffic. Production is the "web" service in
+// the "litlabs-terminal-server" project, which owns www.litlabs.net.
+//
+// These tests prove the production doctor targets THAT service, by:
+//   1. Asserting the canonical constants point at web / terminal-server.
+//   2. Asserting getRailwayEnvVars inspects web, not cli.
+//   3. Asserting checkProductionServiceDomain passes when web owns the
+//      domain and fails when a different service (cli) is inspected.
+//   4. Asserting the domain-ownership command targets the web service IDs.
+
+describe("Production authority: targets the www.litlabs.net service", () => {
+  // The OLD, wrong values that must NEVER be the production target again.
+  const OLD_CLI_SERVICE_ID = "f71b9a86-cd1e-4c5a-ba00-b4efc0b6e119";
+  const OLD_LITLABS_WEBSITE_PROJECT_ID = "3d5b8abe-088c-4a6c-9b34-7054829247c9";
+  const OLD_LITLABS_WEBSITE_ENV_ID = "56de816e-3904-4b35-9dde-031303a6d5cb";
+
+  it("canonical service is 'web', NOT 'cli' or '@litlabs/litt-shell'", () => {
+    expect(RAILWAY_PRODUCTION_SERVICE).toBe("web");
+    expect(RAILWAY_PRODUCTION_SERVICE).not.toBe("cli");
+    expect(RAILWAY_PRODUCTION_SERVICE).not.toBe("@litlabs/litt-shell");
+    expect(RAILWAY_SERVICE_NAME).toBe("web");
+  });
+
+  it("canonical project is litlabs-terminal-server, NOT litlabs-website", () => {
+    expect(RAILWAY_PRODUCTION_PROJECT_ID).toBe(RAILWAY_PROJECT_ID);
+    expect(RAILWAY_PROJECT_ID).not.toBe(OLD_LITLABS_WEBSITE_PROJECT_ID);
+    // The terminal-server project ID, confirmed via Railway MCP.
+    expect(RAILWAY_PROJECT_ID).toBe("69a241af-cd1b-4cf1-baff-f5a6a5a5d7d5");
+  });
+
+  it("canonical service/environment IDs are the web/production ones", () => {
+    expect(RAILWAY_SERVICE_ID).toBe("a8a05220-e5ed-48f6-969d-1f82957341de");
+    expect(RAILWAY_SERVICE_ID).not.toBe(OLD_CLI_SERVICE_ID);
+    expect(RAILWAY_ENVIRONMENT_ID).toBe("41f9b3f4-c783-4288-a6d3-077b4e55858f");
+    expect(RAILWAY_ENVIRONMENT_ID).not.toBe(OLD_LITLABS_WEBSITE_ENV_ID);
+  });
+
+  it("PRODUCTION_DOMAIN is www.litlabs.net", () => {
+    expect(PRODUCTION_DOMAIN).toBe("https://www.litlabs.net");
+  });
+
+  it("getRailwayEnvVars inspects the web service, not cli", () => {
+    let capturedCmd = "";
+    const spy: ExecFn = (cmd) => {
+      capturedCmd = cmd;
+      return { stdout: "{}", stderr: "", exitCode: 0 };
+    };
+    getRailwayEnvVars({ execFn: spy });
+    expect(capturedCmd).toContain('--service "web"');
+    expect(capturedCmd).not.toContain('--service "cli"');
+    expect(capturedCmd).not.toContain(OLD_CLI_SERVICE_ID);
+    expect(capturedCmd).toContain(RAILWAY_PRODUCTION_PROJECT_ID);
+    expect(capturedCmd).not.toContain(OLD_LITLABS_WEBSITE_PROJECT_ID);
+  });
+
+  // --- checkProductionServiceDomain: the runtime domain-ownership assertion ---
+
+  /** Real `railway domain list --json` output for the web service (production). */
+  const WEB_DOMAINS_JSON = JSON.stringify({
+    domains: [
+      {
+        id: "36f604ba-01ae-4c7c-b7d1-c95d585be4f2",
+        domain: "web-production-d3a22.up.railway.app",
+        type: "service",
+        targetPort: null,
+        syncStatus: "ACTIVE",
+        createdAt: "2026-08-19T17:01:35.678+00:00",
+        updatedAt: "2026-08-19T17:01:35.952+00:00",
+      },
+      {
+        id: "e395e71d-dceb-4277-adb2-94015d2d7b39",
+        domain: "www.litlabs.net",
+        type: "custom",
+        targetPort: null,
+        syncStatus: "ACTIVE",
+        createdAt: "2026-08-19T19:10:57.606+00:00",
+        updatedAt: "2026-08-19T19:21:19.169+00:00",
+      },
+    ],
+  });
+
+  it("checkProductionServiceDomain PASSES when web owns www.litlabs.net (custom/ACTIVE)", () => {
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: WEB_DOMAINS_JSON, stderr: "", exitCode: 0 }),
+    );
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("www.litlabs.net");
+    expect(result.detail).toContain("web");
+  });
+
+  it("checkProductionServiceDomain targets the web service IDs in the command", () => {
+    let capturedCmd = "";
+    const spy: ExecFn = (cmd) => {
+      capturedCmd = cmd;
+      return { stdout: WEB_DOMAINS_JSON, stderr: "", exitCode: 0 };
+    };
+    checkProductionServiceDomain(spy);
+    expect(capturedCmd).toContain('--service "web"');
+    expect(capturedCmd).toContain(RAILWAY_ENVIRONMENT_ID);
+    expect(capturedCmd).toContain(RAILWAY_PROJECT_ID);
+    expect(capturedCmd).not.toContain(OLD_CLI_SERVICE_ID);
+    expect(capturedCmd).not.toContain(OLD_LITLABS_WEBSITE_PROJECT_ID);
+    expect(capturedCmd).toContain("--json");
+  });
+
+  it("checkProductionServiceDomain FAILS when the domain is on a different service (cli)", () => {
+    // Simulate the OLD wrong state: the cli service's domain list does NOT
+    // contain www.litlabs.net. The check must fail, proving the doctor
+    // would have caught the old misconfiguration.
+    const cliDomainsJson = JSON.stringify({
+      domains: [
+        {
+          id: "00000000-0000-0000-0000-000000000001",
+          domain: "cli-production.up.railway.app",
+          type: "service",
+          syncStatus: "ACTIVE",
+        },
+      ],
+    });
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: cliDomainsJson, stderr: "", exitCode: 0 }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("www.litlabs.net");
+    expect(result.detail).toContain("not found");
+  });
+
+  it("checkProductionServiceDomain FAILS when domain exists but is not custom/ACTIVE", () => {
+    const degradedJson = JSON.stringify({
+      domains: [
+        {
+          id: "e395e71d-dceb-4277-adb2-94015d2d7b39",
+          domain: "www.litlabs.net",
+          type: "service",
+          syncStatus: "PENDING",
+        },
+      ],
+    });
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: degradedJson, stderr: "", exitCode: 0 }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("type=service");
+    expect(result.detail).toContain("sync=PENDING");
+  });
+
+  it("checkProductionServiceDomain FAILS when railway command fails", () => {
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: "", stderr: "Error: not authenticated", exitCode: 1 }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("Cannot list");
+  });
+
+  it("checkProductionServiceDomain FAILS on unparseable output", () => {
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: "not json at all", stderr: "", exitCode: 0 }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("Cannot parse");
+  });
+
+  it("checkProductionServiceDomain FAILS on empty domains array", () => {
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: JSON.stringify({ domains: [] }), stderr: "", exitCode: 0 }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("not found");
+  });
+
+  it("checkProductionServiceDomain never leaks secret values", () => {
+    const result = checkProductionServiceDomain(
+      () => ({ stdout: WEB_DOMAINS_JSON, stderr: "", exitCode: 0 }),
+    );
+    expect(containsSecret(result.detail ?? "")).toBe(false);
+    expect(containsSecret(result.fix ?? "")).toBe(false);
   });
 });
