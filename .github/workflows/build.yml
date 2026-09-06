@@ -142,6 +142,34 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
 
+      - name: Playwright real Clerk auth against production (blocking)
+        # Regression coverage for docs/qa/production-login-recovery-20260902.md
+        # and the recurrence on 2026-09-05: a present-but-invalid
+        # CLERK_SECRET_KEY broke production sign-in while every other check
+        # (env presence, health endpoint) stayed green, because every other
+        # Playwright step here runs with PLAYWRIGHT_AUTH_DISABLED=true —
+        # bypassing Clerk entirely instead of exercising it.
+        #
+        # This step deliberately does NOT set PLAYWRIGHT_AUTH_DISABLED, and
+        # points at the live production site (SMOKE_TEST_URL) rather than a
+        # locally built server, so it exercises the actual Clerk backend
+        # handshake end-to-end: @clerk/testing signs in a real test user
+        # (CLERK_TEST_USER_A_EMAIL/B_EMAIL, already-provisioned Clerk test
+        # accounts) via clerk.signIn(), then auth.setup.ts itself asserts the
+        # resulting session is accepted by a real protected API route
+        # (GET /api/studio-projects must not be 401). If CLERK_SECRET_KEY is
+        # ever reverted/invalid again, this fails here within minutes of the
+        # push instead of surfacing as a user-reported production outage.
+        run: pnpm exec playwright test --project=auth-setup
+        env:
+          CI: true
+          PLAYWRIGHT_TEST: true
+          SMOKE_TEST_URL: https://www.litlabs.net
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
+
       - name: Playwright visual regression (non-blocking)
         run: |
           pnpm exec playwright test --project=visual-regression || true
