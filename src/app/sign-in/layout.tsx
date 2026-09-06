@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function NoIndexLayout({
+export default function SignInLayout({
   children,
 }: {
   children: React.ReactNode;
