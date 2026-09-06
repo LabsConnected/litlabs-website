@@ -19,7 +19,7 @@ const terminalUrl = () => {
     : ws?.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") || "";
   return raw && !raw.includes("localhost")
     ? raw
-    : "https://terminal-server-production-68ac.up.railway.app";
+    : "https://litlabs-terminal-server-production-0be1.up.railway.app";
 };
 
 export default function SystemTopologyPanel({ compact = false, terminalHttpUrl }: { compact?: boolean; terminalHttpUrl?: string }) {

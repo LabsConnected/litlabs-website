@@ -49,12 +49,21 @@ const DEFAULT_CLERK_OAUTH_CLIENT_ID = "YWeGjVVwoNnX4RTY";
 /**
  * Default production terminal-server URL.
  *
- * This is the public Railway deployment of litlabs-terminal-server.
+ * This MUST match the Railway service that .github/workflows/deploy-terminal.yml
+ * actually deploys to and release-gate.yml health-checks (service name
+ * `litlabs-terminal-server`). It previously pointed at
+ * terminal-server-production-68ac, a separate Railway service that
+ * stopped receiving deploys — every CLI install with no LITT_TERMINAL_URL
+ * override was silently talking to a backend frozen weeks behind
+ * production. Verify with `curl <url>/health` and compare the reported
+ * `commit` against `git rev-parse --short HEAD` on main before ever
+ * changing this again.
+ *
  * REMOTE runtime state is only TRUE after a successful connection —
  * the mere existence of this URL does NOT mean the runtime is
  * connected. Use isRemoteAvailable() to check actual connectivity.
  */
-const DEFAULT_TERMINAL_URL = "https://terminal-server-production-68ac.up.railway.app";
+const DEFAULT_TERMINAL_URL = "https://litlabs-terminal-server-production-0be1.up.railway.app";
 
 export interface ResolvedAuthConfig {
   issuer: string;

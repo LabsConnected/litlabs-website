@@ -15,6 +15,54 @@ permissions:
   contents: read
 
 jobs:
+  terminal-server-tests:
+    name: Terminal Server Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+
+      - name: Install native build toolchain (node-pty compiles from source on Linux)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Install dependencies (native build scripts enabled for node-pty)
+        # The root .npmrc sets ignore-scripts=true repo-wide as a supply-chain
+        # safety default. node-pty ships no linux-x64 prebuild (see
+        # terminal-server/Dockerfile.railway, which needs the same override
+        # for the production image) — it falls back to `node-gyp rebuild` in
+        # its install script, which never runs under that default. Scoping
+        # the override to just this job's terminal-server dependency subgraph
+        # keeps the main build job's install fully script-locked.
+        run: |
+          pnpm install --frozen-lockfile \
+            --filter terminal-server... \
+            --filter @litt/agent-core... \
+            --filter @litt/models... \
+            --config.ignore-scripts=false
+        env:
+          CI: true
+
+      - name: Build @litt/models
+        run: pnpm --filter @litt/models build
+
+      - name: Build @litt/agent-core
+        run: pnpm --filter @litt/agent-core build
+
+      - name: Test terminal-server
+        run: pnpm --filter terminal-server test
+        env:
+          CI: true
+
   build:
     name: Build and Type Check
     runs-on: ubuntu-latest
@@ -93,6 +141,47 @@ jobs:
           PLAYWRIGHT_AUTH_DISABLED: true
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+
+      - name: Playwright real Clerk auth against production (non-blocking pending Cloudflare/testing-token investigation)
+        # Regression coverage for docs/qa/production-login-recovery-20260902.md
+        # and the recurrence on 2026-09-05: a present-but-invalid
+        # CLERK_SECRET_KEY broke production sign-in while every other check
+        # (env presence, health endpoint) stayed green, because every other
+        # Playwright step here runs with PLAYWRIGHT_AUTH_DISABLED=true —
+        # bypassing Clerk entirely instead of exercising it.
+        #
+        # This step deliberately does NOT set PLAYWRIGHT_AUTH_DISABLED, and
+        # points at the live production site (SMOKE_TEST_URL) rather than a
+        # locally built server, so it exercises the actual Clerk backend
+        # handshake end-to-end: @clerk/testing signs in a real test user
+        # (CLERK_TEST_USER_A_EMAIL/B_EMAIL, already-provisioned Clerk test
+        # accounts) via clerk.signIn(), then auth.setup.ts itself asserts the
+        # resulting session is accepted by a real protected API route
+        # (GET /api/studio-projects must not be 401).
+        #
+        # NON-BLOCKING for now: first real run against production failed with
+        # "Clerk: Failed to sign in: This ticket is invalid" — the backend
+        # calls (find user, mint a sign-in token) succeed; the *client-side*
+        # signIn.create({strategy:"ticket"}) call rejects the resulting
+        # token. This is @clerk/testing's server-minted-ticket bypass
+        # mechanism interacting with Cloudflare in front of the custom
+        # clerk.litlabs.net domain — not a real end-user auth path (normal
+        # users sign in via password/email-code, never via a testing-minted
+        # ticket) and not the CLERK_SECRET_KEY failure this was written to
+        # catch (that class of failure is already caught, blocking, by the
+        # "Clerk auth check" in /api/health + release-gate.yml, verified
+        # working end-to-end). Promote back to blocking once the
+        # Cloudflare/testing-token interaction is root-caused.
+        run: pnpm exec playwright test --project=auth-setup
+        continue-on-error: true
+        env:
+          CI: true
+          PLAYWRIGHT_TEST: true
+          SMOKE_TEST_URL: https://www.litlabs.net
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_TEST_USER_A_EMAIL: ${{ secrets.CLERK_TEST_USER_A_EMAIL }}
+          CLERK_TEST_USER_B_EMAIL: ${{ secrets.CLERK_TEST_USER_B_EMAIL }}
 
       - name: Playwright visual regression (non-blocking)
         run: |
