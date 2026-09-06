@@ -1,7 +1,47 @@
 import { SignIn } from "@clerk/nextjs";
 import Link from "next/link";
 
-export default function SignInPage() {
+interface SignInPageProps {
+  searchParams?: { [key: string]: string | string[] | undefined };
+}
+
+/**
+ * Render Clerk's SignIn component for the application domain.
+ *
+ * The OAuth flow (and other Clerk-originated redirects) passes the
+ * post-sign-in destination in the `redirect_url` query parameter, which
+ * can be a full URL (e.g. `https://www.litlabs.net/oauth-consent?...`).
+ *
+ * To ensure the user is sent back to the correct OAuth consent route
+ * after signing in, we read `redirect_url`, validate it points to a
+ * trusted litlabs.net host, and pass the path+query to Clerk's
+ * `forceRedirectUrl` prop. If no valid `redirect_url` is provided, the
+ * user is sent to `/studio`.
+ */
+function toRelativeRedirect(redirectUrl: string | string[] | undefined): string {
+  if (!redirectUrl || typeof redirectUrl !== "string") {
+    return "/studio";
+  }
+
+  try {
+    const url = new URL(redirectUrl);
+    const allowedHosts = ["litlabs.net", "www.litlabs.net", "localhost", "127.0.0.1"];
+    if (!allowedHosts.includes(url.hostname)) {
+      return "/studio";
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    // Not a full URL — allow relative paths (e.g. "/oauth-consent")
+    if (redirectUrl.startsWith("/")) {
+      return redirectUrl;
+    }
+    return "/studio";
+  }
+}
+
+export default function SignInPage({ searchParams }: SignInPageProps) {
+  const redirectUrl = toRelativeRedirect(searchParams?.redirect_url);
+
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
@@ -26,7 +66,7 @@ export default function SignInPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignIn
-            fallbackRedirectUrl="/studio"
+            forceRedirectUrl={redirectUrl}
             signUpUrl="/sign-up"
             appearance={{
               elements: {
