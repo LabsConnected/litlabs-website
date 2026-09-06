@@ -8,6 +8,7 @@ import {
   ReactNode,
   useCallback,
 } from "react";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 interface WalletContextType {
   balance: number;
@@ -37,6 +38,7 @@ function isSameDay(a: string | null | undefined, b: Date): boolean {
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
+  const { isLoaded, isSignedIn } = useClerkAuth();
   const [balance, setBalance] = useState(0);
   const [claimed, setClaimed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -105,6 +107,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     // so a failed first load showed balance 0 instead of "Credit balance
     // unavailable." — the refresh callback already handles 401 (graceful
     // sign-out, not an error) vs 500/network (isError=true) correctly.
+    //
+    // Only fetch when Clerk has loaded AND reports the user as signed in.
+    // Firing /api/wallet before auth initialization (or for anonymous
+    // visitors) generated spurious 401s on every page load because
+    // WalletProvider mounts in the (marketing) layout on public pages.
+    if (!isLoaded || !isSignedIn) {
+      setIsLoading(false);
+      setBalance(0);
+      setClaimed(false);
+      setIsError(false);
+      setBillingExempt(false);
+      setDisplayBalance(undefined);
+      return;
+    }
     void refresh();
     const id = setInterval(() => {
       if (!document.hidden) refresh();
@@ -112,7 +128,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => {
       clearInterval(id);
     };
-  }, [refresh]);
+  }, [refresh, isLoaded, isSignedIn]);
 
   return (
     <WalletContext.Provider

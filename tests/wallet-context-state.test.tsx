@@ -13,6 +13,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act } from "@testing-library/react";
 import * as React from "react";
 
+// WalletContext now gates /api/wallet on Clerk auth state (isLoaded && isSignedIn).
+// These tests exercise the wallet fetch path, so mock the auth hook as signed in.
+vi.mock("@/hooks/useClerkAuth", () => ({
+  useClerkAuth: () => ({
+    isLoaded: true,
+    isSignedIn: true,
+    userId: "test-user-id",
+    sessionClaims: undefined,
+    getToken: async () => null,
+    signOut: async () => {},
+  }),
+}));
+
 function makeFetchMock(response: {
   ok: boolean;
   status?: number;

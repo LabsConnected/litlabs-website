@@ -130,7 +130,7 @@ export default defineConfig({
     // security, accessibility, error states, API health
     {
       name: "public-chromium",
-      testMatch: /public-routes|public-critical|error-states|security|site-audit|navigation|terminal/,
+      testMatch: /public-routes|public-critical|error-states|security|site-audit|navigation|terminal|auth-gating/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: { cookies: [], origins: [] },
