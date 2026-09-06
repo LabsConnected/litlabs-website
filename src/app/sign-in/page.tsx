@@ -1,7 +1,24 @@
-import { SignIn } from "@clerk/nextjs";
-import Link from "next/link";
+"use client";
 
-export default function SignInPage() {
+import { SignIn, useSearchParams } from "@clerk/nextjs";
+import Link from "next/link";
+import { Suspense } from "react";
+
+/**
+ * Clerk's OAuth authorize endpoint redirects unauthenticated users to this
+ * page with a `redirect_url` query parameter pointing back to the OAuth flow
+ * (e.g. https://clerk.litlabs.net/oauth/authorize?...). Without preserving
+ * that parameter, the <SignIn> component redirects to /studio after success
+ * and the OAuth flow never completes.
+ *
+ * We read `redirect_url` and pass it to `forceRedirectUrl` so that after
+ * successful sign-in, the browser returns to the OAuth authorize endpoint,
+ * which now sees an active session and proceeds to /oauth-consent.
+ */
+function SignInContent() {
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get("redirect_url") || "/studio";
+
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
@@ -26,6 +43,7 @@ export default function SignInPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignIn
+            forceRedirectUrl={redirectUrl}
             signUpUrl="/sign-up"
             appearance={{
               elements: {
@@ -85,5 +103,13 @@ export default function SignInPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" style={{ backgroundColor: "#0f0f14" }} />}>
+      <SignInContent />
+    </Suspense>
   );
 }
