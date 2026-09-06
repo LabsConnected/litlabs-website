@@ -1,9 +1,8 @@
+"use client";
+
 import { SignIn } from "@clerk/nextjs";
 import Link from "next/link";
-
-interface SignInPageProps {
-  searchParams?: { [key: string]: string | string[] | undefined };
-}
+import { useSearchParams } from "next/navigation";
 
 /**
  * Render Clerk's SignIn component for the application domain.
@@ -18,8 +17,8 @@ interface SignInPageProps {
  * `forceRedirectUrl` prop. If no valid `redirect_url` is provided, the
  * user is sent to `/studio`.
  */
-function toRelativeRedirect(redirectUrl: string | string[] | undefined): string {
-  if (!redirectUrl || typeof redirectUrl !== "string") {
+function toRelativeRedirect(redirectUrl: string | null): string {
+  if (!redirectUrl) {
     return "/studio";
   }
 
@@ -39,8 +38,9 @@ function toRelativeRedirect(redirectUrl: string | string[] | undefined): string 
   }
 }
 
-export default function SignInPage({ searchParams }: SignInPageProps) {
-  const redirectUrl = toRelativeRedirect(searchParams?.redirect_url);
+export default function SignInPage() {
+  const searchParams = useSearchParams();
+  const redirectUrl = toRelativeRedirect(searchParams.get("redirect_url"));
 
   return (
     <div
