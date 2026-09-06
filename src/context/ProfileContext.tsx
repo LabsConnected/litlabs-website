@@ -162,9 +162,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     accountImageUrl,
   ]);
 
-  // Load from API on mount
+  // Load from API on mount — only when authenticated.
+  // ProfileProvider mounts in the (marketing) layout on public pages, so
+  // gating on accountUserId avoids firing /api/settings/profile (GET) for
+  // anonymous visitors and before Clerk has finished initializing.
   useEffect(() => {
     if (initialLoadDone.current) return;
+    if (!accountUserId) return;
     initialLoadDone.current = true;
 
     fetch("/api/settings/profile")
@@ -188,12 +192,25 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         // API unavailable — keep localStorage data
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [accountUserId]);
+
+  // When auth has resolved and there is no user, mark loading done so the
+  // profile context is not stuck in a perpetual loading state for
+  // anonymous visitors (the API load effect above never fires for them).
+  useEffect(() => {
+    if (accountLoaded && !accountUserId) setLoading(false);
+  }, [accountLoaded, accountUserId]);
 
   // Save to localStorage on change + debounce API sync
   useEffect(() => {
     if (!hydrated) return;
     saveLocal(profile);
+
+    // Only sync to the server when authenticated. Without this gate the
+    // debounced POST /api/settings/profile fired for anonymous visitors
+    // (and before Clerk init) because ProfileProvider mounts on public
+    // pages via the (marketing) layout.
+    if (!accountUserId) return;
 
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
@@ -210,7 +227,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
-  }, [profile, mounted, hydrated]);
+  }, [profile, mounted, hydrated, accountUserId]);
 
   const updateProfile = useCallback((updates: Partial<UserProfile>) => {
     setProfile((prev) => ({ ...prev, ...updates }));
