@@ -1,6 +1,7 @@
 "use client";
 
-import { SignIn, useSearchParams } from "@clerk/nextjs";
+import { SignIn } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
 
