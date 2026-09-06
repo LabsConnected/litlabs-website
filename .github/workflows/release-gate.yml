@@ -30,6 +30,17 @@ jobs:
           DEPLOYED_SHA=$(echo "$RESPONSE" | jq -r '.checks.build.detail // "unknown"')
           echo "deployed_sha=$DEPLOYED_SHA" >> $GITHUB_OUTPUT
           echo "Web deployed SHA: $DEPLOYED_SHA"
+          # Auth check: /api/health makes a real Clerk backend call (not just
+          # "is CLERK_SECRET_KEY set") — see docs/qa/production-login-recovery-20260902.md,
+          # where a present-but-invalid key passed every presence check while
+          # sign-in was completely broken. Surface it here so this scheduled
+          # gate catches a reverted/invalid production secret within 30
+          # minutes instead of waiting for a user report.
+          AUTH_STATUS=$(echo "$RESPONSE" | jq -r '.checks.auth.status // "unknown"')
+          AUTH_DETAIL=$(echo "$RESPONSE" | jq -r '.checks.auth.detail // ""')
+          echo "auth_status=$AUTH_STATUS" >> $GITHUB_OUTPUT
+          echo "auth_detail=$AUTH_DETAIL" >> $GITHUB_OUTPUT
+          echo "Web Clerk auth check: $AUTH_STATUS ${AUTH_DETAIL:+($AUTH_DETAIL)}"
 
       - name: Check terminal-server health endpoint
         id: terminal
@@ -47,12 +58,24 @@ jobs:
           SOURCE_SHORT="${SOURCE_SHA:0:8}"
           WEB_SHA="${{ steps.web.outputs.deployed_sha }}"
           TERMINAL_SHA="${{ steps.terminal.outputs.deployed_sha }}"
+          AUTH_STATUS="${{ steps.web.outputs.auth_status }}"
+          AUTH_DETAIL="${{ steps.web.outputs.auth_detail }}"
 
           echo "Source:  $SOURCE_SHORT"
           echo "Web:     $WEB_SHA"
           echo "Terminal: $TERMINAL_SHA"
+          echo "Auth:    $AUTH_STATUS"
 
           FAIL=0
+
+          if [ "$AUTH_STATUS" = "unknown" ]; then
+            echo "⚠️  Web health endpoint did not report a Clerk auth check (got: unknown) — this build predates the check, not a failure by itself"
+          elif [ "$AUTH_STATUS" != "ok" ]; then
+            echo "❌ Clerk auth check failed: $AUTH_STATUS — ${AUTH_DETAIL:-no detail}"
+            FAIL=1
+          else
+            echo "✅ Clerk backend accepted the production secret key"
+          fi
 
           if [ "$WEB_SHA" = "unknown" ] || [ "$WEB_SHA" = "dev" ]; then
             echo "⚠️  Web health endpoint did not report a real SHA (got: $WEB_SHA)"
