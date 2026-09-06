@@ -118,7 +118,7 @@ export function LandingHeroV3() {
               </div>
             </div>
 
-            <div className="relative aspect-[1.15/1] min-h-[500px] overflow-hidden sm:aspect-[1.32/1] sm:min-h-0">
+            <div className="relative aspect-[0.75/1] overflow-hidden sm:aspect-[1.32/1]">
               <Image
                 src="/brand/litt-agent-hero-v2.png"
                 alt="LiTT, the LiTTree AI operator, working inside a neon digital workspace"
