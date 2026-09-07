@@ -440,15 +440,31 @@ const innerMiddleware = useClerkMiddleware
 
 // ─── Clerk Frontend API proxy with Cloudflare header stripping ─────
 //
-// The Clerk domain is registered as `litlabs.net` (proxy_url =
-// https://litlabs.net/__clerk) in the Clerk Dashboard. The production app
-// is served at `www.litlabs.net` via a Cloudflare Worker that forwards to
-// Railway.
+// The Clerk Dashboard's registered proxy_url is https://litlabs.net/__clerk
+// (the apex domain), but the production app is canonically served at
+// `www.litlabs.net` via a Cloudflare Worker that forwards to Railway.
 //
-// When the Cloudflare Worker fetches from Railway, it passes Cloudflare
-// infrastructure headers (cf-connecting-ip, cf-ray, etc.) through to the
-// Next.js app. If handleClerkProxy() forwards these headers to
-// clerk.litlabs.net (which is also on Cloudflare's edge), Cloudflare
+// clerkFrontendApiProxy() builds the `Clerk-Proxy-Url` header (and rewrites
+// any `Location` header Clerk's real FAPI returns, e.g. resolving
+// @clerk/clerk-js@6 -> @clerk/clerk-js@6.31.0) from whatever we set as
+// x-forwarded-host. Previously this was HARDCODED to the apex "litlabs.net"
+// regardless of which domain the browser actually requested. That forced
+// every Clerk-JS asset/version redirect to point at the apex, which then
+// bounced back to www via Cloudflare's own apex->www canonicalization —
+// a self-inflicted www -> litlabs.net -> www redirect cycle on every
+// /__clerk request, which broke <SignIn/> rendering in production.
+//
+// The fix: derive x-forwarded-host from the browser's ACTUAL incoming
+// Host header, restricted to an explicit allowlist of hosts we know are
+// legitimate for this app (never trust an arbitrary client-supplied host
+// unchecked — Host/X-Forwarded-Host can be attacker-controlled if the
+// request reaches Railway directly, bypassing Cloudflare). A request that
+// doesn't match the allowlist falls back to the canonical production host.
+//
+// When the Cloudflare Worker fetches from Railway, it also passes
+// Cloudflare infrastructure headers (cf-connecting-ip, cf-ray, etc.)
+// through to the Next.js app. If handleClerkProxy() forwards these headers
+// to clerk.litlabs.net (which is also on Cloudflare's edge), Cloudflare
 // detects a Cloudflare-to-Cloudflare loop and returns Error 1000
 // ("DNS points to prohibited IP").
 //
@@ -461,8 +477,41 @@ const innerMiddleware = useClerkMiddleware
 // host, accept, content-type, or other standard HTTP headers that Clerk
 // needs to function.
 
-const CLERK_PROXY_HOST = "litlabs.net";
+/**
+ * Hosts this app is legitimately served from in production. The Clerk
+ * proxy's x-forwarded-host is restricted to this set — an incoming
+ * request's Host header is never trusted unchecked.
+ */
+const CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION: readonly string[] = [
+  "www.litlabs.net",
+  "litlabs.net",
+];
+
+/** Additional hosts allowed only outside deployed production (local dev). */
+const CLERK_PROXY_ALLOWED_HOSTS_DEV: readonly string[] = [
+  "localhost:3001",
+  "127.0.0.1:3001",
+];
+
+/** Canonical fallback host used when the incoming Host header is not recognized. */
+const CLERK_PROXY_CANONICAL_HOST = "www.litlabs.net";
+
 const CLERK_FAPI_URL = "https://clerk.litlabs.net";
+
+/**
+ * Resolves the host to forward to Clerk's proxy as x-forwarded-host, from
+ * the browser's actual incoming Host header, restricted to an explicit
+ * allowlist. Never passes an arbitrary/unrecognized Host straight through —
+ * falls back to the canonical production host instead.
+ */
+export function resolveClerkProxyHost(req: NextRequest): string {
+  const requestHost = req.headers.get("host") ?? "";
+  const allowedHosts = isDeployed()
+    ? CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION
+    : [...CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION, ...CLERK_PROXY_ALLOWED_HOSTS_DEV];
+
+  return allowedHosts.includes(requestHost) ? requestHost : CLERK_PROXY_CANONICAL_HOST;
+}
 
 /**
  * Cloudflare infrastructure headers that must NOT be forwarded to
@@ -491,7 +540,10 @@ const CLOUDFLARE_HOP_HEADERS: readonly string[] = [
  *
  * Strips cf-* and related infrastructure headers that cause Error 1000
  * when forwarded to clerk.litlabs.net (Cloudflare loop detection).
- * Rewrites x-forwarded-host to match the registered Clerk proxy domain.
+ * Sets x-forwarded-host to the browser's actual (allowlisted) host so
+ * Clerk-Proxy-Url — and any redirect Location Clerk rewrites through it —
+ * matches the domain the browser is really on, instead of forcing every
+ * request onto a different host and bouncing back.
  */
 async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> {
   if (!req.nextUrl.pathname.startsWith("/__clerk")) return null;
@@ -505,8 +557,10 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
     requestHeaders.delete(header);
   }
 
-  // Rewrite x-forwarded-host so Clerk-Proxy-Url matches the registered domain
-  requestHeaders.set("x-forwarded-host", CLERK_PROXY_HOST);
+  // Set x-forwarded-host to the browser's actual (allowlisted) host so
+  // Clerk-Proxy-Url resolves to the domain actually serving the request,
+  // not a different host that then needs to redirect back.
+  requestHeaders.set("x-forwarded-host", resolveClerkProxyHost(req));
 
   const proxyReq = new NextRequest(req, { headers: requestHeaders });
 
