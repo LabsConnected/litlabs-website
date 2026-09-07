@@ -50,7 +50,7 @@ import {
 } from "../ink/observability-project.js";
 import { estimateExtraContentHeight, estimateResultBlockHeight } from "../ink/shell/transcript.js";
 import { layoutTranscript, computeViewport } from "../ink/scroll-model.js";
-import type { CanonicalMissionProjection, MissionState } from "../ink/cockpit-store.js";
+import type { CanonicalMissionProjection, MissionState, ActivityEntry } from "../ink/cockpit-store.js";
 import type { ChatMessage } from "../ink/cockpit-store.js";
 import type { ExecutionTarget } from "../lib/execution-target.js";
 
@@ -359,19 +359,18 @@ describe("narrow 55-col rendering", () => {
     expect(total).toBe((2 + 1) * 2);
   });
 
-  it("estimateExtraContentHeight at narrow width reserves the compact heights", () => {
-    const store = new ToolProgressStore();
-    store.startMission();
-    store.startTool("tc_1", "project.check", "check");
-    store.completeTool("tc_1", true, "ok", 100);
-    const tp = store.snapshot();
+  it("estimateExtraContentHeight at narrow width reserves the compact activity feed", () => {
+    const events: ActivityEntry[] = [
+      { id: "e1", ts: T0, type: "tool.started", text: "vitest", tag: "TEST" },
+      { id: "e2", ts: T0 + 1, type: "tool.stdout", text: "No type errors found.", stream: "stdout" },
+      { id: "e3", ts: T0 + 2, type: "tool.completed", text: "vitest · 3200ms", tag: "PASS" },
+    ];
     const h = estimateExtraContentHeight(
-      tp, null, [], false,
+      null, null, events, false,
       "RUNNING", false, null, "local", NARROW,
     );
-    // thinking(1 header + 3 steps) + marginTop(1) + toolResults(3) + marginTop(1)
-    // = 4 + 1 + 3 + 1 = 9
-    expect(h).toBe(9);
+    // compact activity feed: 3 event lines + one marginTop above the feed.
+    expect(h).toBe(4);
   });
 });
 
@@ -387,19 +386,15 @@ describe("scroll behavior while blocks update", () => {
     const messages = [userMsg(0), asstMsg(1), userMsg(2), asstMsg(3)];
     const layout = layoutTranscript(messages, WIDTH);
 
-    const store = new ToolProgressStore();
-    store.startMission();
-    store.startTool("tc_1", "project.check", "check");
-    store.completeTool("tc_1", true, "ok", 100);
-    const tp = store.snapshot();
-    const cm = canonicalMission([
-      { title: "Typecheck", status: "passed" },
-      { title: "Tests", status: "working" },
-    ]);
+    const events: ActivityEntry[] = [
+      { id: "e1", ts: T0, type: "tool.started", text: "project.check", tag: "VERIFY" },
+      { id: "e2", ts: T0 + 1, type: "tool.stdout", text: "ok", stream: "stdout" },
+      { id: "e3", ts: T0 + 2, type: "tool.completed", text: "project.check · 100ms", tag: "PASS" },
+    ];
 
     const extra = estimateExtraContentHeight(
-      tp, null, [], false,
-      "RUNNING", false, cm, "local", WIDTH,
+      null, null, events, false,
+      "RUNNING", false, null, "local", WIDTH,
     );
     expect(extra).toBeGreaterThan(0);
 
@@ -413,12 +408,12 @@ describe("scroll behavior while blocks update", () => {
   it("scrolled mode reserves 0 extra (blocks are live-mode only)", () => {
     // The shell passes anchor !== null → extraHeight = 0. Simulate that
     // contract: the estimate with the same inputs is only used in live mode.
-    const store = new ToolProgressStore();
-    store.startMission();
-    store.startTool("tc_1", "project.check", "check");
-    const tp = store.snapshot();
+    const events: ActivityEntry[] = [
+      { id: "e1", ts: T0, type: "tool.started", text: "project.check", tag: "VERIFY" },
+      { id: "e2", ts: T0 + 1, type: "tool.completed", text: "project.check · 100ms", tag: "PASS" },
+    ];
     const liveExtra = estimateExtraContentHeight(
-      tp, null, [], false, "RUNNING", false, null, "local", WIDTH,
+      null, null, events, false, "RUNNING", false, null, "local", WIDTH,
     );
     expect(liveExtra).toBeGreaterThan(0);
     // In scrolled mode the shell forces 0 (the contract under test).
@@ -427,14 +422,14 @@ describe("scroll behavior while blocks update", () => {
   });
 
   it("extra content alone exceeding the region forces natural flow (fits=false)", () => {
-    // Pathological: many tool entries + terminal mission + summary.
-    const store = new ToolProgressStore();
-    store.startMission();
-    for (let i = 0; i < 12; i++) {
-      store.startTool(`tc_${i}`, "project.check", "check");
-      store.completeTool(`tc_${i}`, true, "ok", 100);
-    }
-    const tp = store.snapshot();
+    // Pathological: many activity entries + terminal mission + summary.
+    const events: ActivityEntry[] = Array.from({ length: 12 }, (_, i) => ({
+      id: `e${i}`,
+      ts: T0 + i,
+      type: i % 2 === 0 ? "tool.started" : "tool.completed",
+      text: `check ${i}`,
+      tag: i % 2 === 0 ? "VERIFY" : "PASS",
+    }));
     const m = missionState({
       state: "COMPLETE",
       endedAt: T0 + 1000,
@@ -446,7 +441,7 @@ describe("scroll behavior while blocks update", () => {
       missionDeltaFiles: ["a.ts"],
     });
     const extra = estimateExtraContentHeight(
-      tp, m, [], false, "IDLE", false, null, "local", WIDTH,
+      null, m, events, false, "IDLE", false, null, "local", WIDTH,
     );
     // When extra >= contentRows, the shell forces fits=false (natural flow).
     // We only assert the estimate is large; the shell's fits=false branch is

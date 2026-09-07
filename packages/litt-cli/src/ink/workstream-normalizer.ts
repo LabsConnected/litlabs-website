@@ -56,6 +56,12 @@ const TOOL_KIND_MAP: Record<string, WorkstreamKind> = {
   execute: "command",
   exec: "command",
   shell: "command",
+  bash: "command",
+  "project.run": "command",
+  "project.check": "command",
+  "project.test": "command",
+  "project.status": "command",
+  "project.diff": "command",
 
   // Testing
   run_tests: "test",
