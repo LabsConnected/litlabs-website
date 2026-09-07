@@ -99,7 +99,7 @@ export class ClerkCliAuth {
 
   // ─── Login ──────────────────────────────────────────────────────
 
-  async login(options?: { prompt?: string }): Promise<LoginResult> {
+  async login(options?: { prompt?: string; browser?: string }): Promise<LoginResult> {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
     const state = generateState();
@@ -126,7 +126,11 @@ export class ClerkCliAuth {
       }
 
       // Open the browser (or print URL for manual open)
-      await (this.config.openBrowser ?? openBrowser)(authorizeUrl.toString());
+      if (this.config.openBrowser) {
+        await this.config.openBrowser(authorizeUrl.toString());
+      } else {
+        await openBrowser(authorizeUrl.toString(), undefined, options?.browser);
+      }
 
       // Wait for the callback (browser redirect → 127.0.0.1:{port}/callback)
       const { code } = await server.waitForCallback();
