@@ -198,7 +198,13 @@ const nextConfig: NextConfig = {
               "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
-              "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev https://clerk.litlabs.net",
+              // http://127.0.0.1:* allows the LiTT CLI's OAuth consent redirect:
+              // Clerk's /v1/me/oauth/consent 303s to the CLI's ephemeral loopback
+              // callback (RFC 8252 SS7.3). Browsers enforce form-action against the
+              // final redirect target, not just the form's immediate POST target, so
+              // without this the browser silently drops the redirect and the CLI
+              // callback server never receives the authorization code.
+              "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev https://clerk.litlabs.net http://127.0.0.1:*",
               "upgrade-insecure-requests",
             ].join("; "),
           },
