@@ -119,22 +119,31 @@ export function activityColor(tag: string): string {
     case "THINK":
     case "ROUTE":
     case "READ":
+    case "SEARCH":
     case "EDIT":
     case "RUN":
+    case "BUILD":
+    case "TEST":
+    case "VERIFY":
+    case "GIT":
+    case "MISSION":
+    case "STEP":
       return COLORS.working;
     case "PASS":
-    case "VERIFY":
     case "DONE":
       return COLORS.success;
     case "FAIL":
     case "ERROR":
       return COLORS.error;
     case "WARN":
+    case "RETRY":
+    case "STOP":
       return COLORS.warning;
     case "APPROVAL":
       return COLORS.gold;
     case "CHAT":
     case "INFO":
+    case "LiTT":
       return COLORS.brand;
     default:
       return COLORS.secondary;
