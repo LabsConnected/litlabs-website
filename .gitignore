@@ -160,6 +160,13 @@ package-lock.json
 AGENTS.md
 .todo.md
 PR_BODY_V12.txt
+# Scratch PR descriptions — the PR body belongs on the PR, not in the repo
+PR_BODY_*.txt
+
+# Production QA evidence: keep the written reports, drop the raw captures.
+# DOM dumps and screenshots of a live site are large and have no reuse value.
+artifacts/production-qa/**/dom/
+artifacts/production-qa/**/screenshots/
 
 # Local-only libraries and reference dirs (not part of this repo's source)
 litlabs/
