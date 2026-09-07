@@ -560,7 +560,61 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
     proxyPath: "/__clerk",
     fapiUrl: CLERK_FAPI_URL,
   });
-  return response as unknown as NextResponse;
+  const nextResponse = response as unknown as NextResponse;
+
+  // Rewrite redirect Location headers so they point to www.litlabs.net
+  // (the canonical application domain the browser is actually on) instead
+  // of the apex litlabs.net. See rewriteClerkProxyLocation() for the
+  // full root-cause explanation.
+  rewriteClerkProxyLocation(nextResponse);
+
+  return nextResponse;
+}
+
+/**
+ * Rewrite the Location header on 3xx redirect responses from the Clerk
+ * proxy so the host is www.litlabs.net instead of the apex litlabs.net.
+ *
+ * Root cause of the production sign-in failure (2026-09-07):
+ *
+ * Clerk's FAPI resolves version ranges (e.g. @clerk/clerk-js@6) to exact
+ * versions (e.g. @6.31.0) via a 307 redirect. Because handleClerkProxy
+ * sets x-forwarded-host to the Dashboard-registered canonical host
+ * (litlabs.net — required for Clerk-Proxy-Url validation), Clerk builds
+ * the Location URL using that host. The browser then follows the
+ * redirect to litlabs.net (apex), which Cloudflare 301-redirects to
+ * www.litlabs.net.
+ *
+ * That Cloudflare 301 response does NOT include Access-Control-Allow-Origin.
+ * The Clerk JS and Clerk UI <script> tags use crossorigin="anonymous",
+ * so the browser enforces CORS on every response in the redirect chain.
+ * The 301 fails the CORS check → the script load is blocked → Clerk JS
+ * never initializes → the <SignIn> component never renders (the shell
+ * and loading bar appear, but the actual auth controls never show).
+ *
+ * Fix: rewrite the Location header on 3xx responses from the Clerk proxy
+ * to use www.litlabs.net. This keeps the redirect same-origin (www→www),
+ * avoiding the Cloudflare apex→www 301 entirely. Clerk-Proxy-Url still
+ * uses the canonical apex identity (set in handleClerkProxy), so Clerk's
+ * proxy validation is unaffected — only the browser-facing redirect
+ * target changes.
+ *
+ * This function is exported for direct unit testing.
+ */
+export function rewriteClerkProxyLocation(response: NextResponse): void {
+  const status = response.status;
+  if (status < 300 || status >= 400) return;
+
+  const location = response.headers.get("location");
+  if (!location) return;
+
+  const rewritten = location.replace(
+    /^(https?:\/\/)litlabs\.net(\/)/i,
+    "$1www.litlabs.net$2",
+  );
+  if (rewritten !== location) {
+    response.headers.set("location", rewritten);
+  }
 }
 
 // ─── Dev proxy header fix ──────────────────────────────────────────
