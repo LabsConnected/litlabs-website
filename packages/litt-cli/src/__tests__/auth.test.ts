@@ -1488,6 +1488,46 @@ describe("Browser Launcher — platform selection", () => {
     expect(fake.logs.join(String.fromCharCode(10))).toContain("Could not open browser automatically");
     expect(fake.logs.join(String.fromCharCode(10))).toContain("https://example.com/auth");
   });
+
+  it("Windows path honors browser override (e.g. chrome)", async () => {
+    setPlatform("win32");
+    const { openBrowser, describeLaunch, buildWindowsStartCommand } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
+
+    await expect(openBrowser("https://example.com/auth", fake.deps, "chrome")).resolves.toBeUndefined();
+
+    expect(fake.execCalls).toEqual([`start "" "chrome" "https://example.com/auth"`]);
+    expect(buildWindowsStartCommand("https://example.com/auth", "chrome")).toBe(`start "" "chrome" "https://example.com/auth"`);
+    expect(describeLaunch("https://example.com/auth", "win32", "chrome")).toMatchObject({
+      kind: "windows",
+      command: `start "" "chrome" "https://example.com/auth"`,
+      usesShell: true,
+    });
+  });
+
+  it("Linux and macOS path honors browser override or LITT_BROWSER env var", async () => {
+    setPlatform("linux");
+    const { openBrowser, describeLaunch } = await import("../lib/auth/browser-launcher.js");
+    const fake = makeFakeDeps();
+
+    await expect(openBrowser("https://example.com/auth", fake.deps, "google-chrome")).resolves.toBeUndefined();
+    expect(fake.spawnCalls).toEqual([["google-chrome", ["https://example.com/auth"]]]);
+
+    setPlatform("darwin");
+    const fakeMac = makeFakeDeps();
+    process.env.LITT_BROWSER = "Google Chrome";
+    try {
+      await expect(openBrowser("https://example.com/auth", fakeMac.deps)).resolves.toBeUndefined();
+      expect(fakeMac.spawnCalls).toEqual([["open", ["-a", "Google Chrome", "https://example.com/auth"]]]);
+      expect(describeLaunch("https://example.com/auth", "darwin")).toMatchObject({
+        kind: "macos",
+        command: "open",
+        args: ["-a", "Google Chrome", "https://example.com/auth"],
+      });
+    } finally {
+      delete process.env.LITT_BROWSER;
+    }
+  });
 });
 
 // ─── Safe Production Defaults — Auth Gate ─────────────────────────

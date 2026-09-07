@@ -201,7 +201,7 @@ export class AuthSession {
   }
 
   /** Login via OAuth PKCE flow. */
-  async login(options?: { prompt?: string }): Promise<LoginResult> {
+  async login(options?: { prompt?: string; browser?: string }): Promise<LoginResult> {
     const result = await this.auth.login(options);
     // Invalidate cache
     this._cachedState = null;

@@ -25,6 +25,20 @@ export async function loginCommand(args: string[]): Promise<number> {
   // so the user is forced through the sign-in screen even with an active session.
   const force = args.includes("--force");
 
+  // --browser <name>: override the browser to open (e.g. chrome, brave, edge)
+  let browser: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--browser" && i + 1 < args.length) {
+      browser = args[i + 1];
+      i++;
+    } else if (args[i]?.startsWith("--browser=")) {
+      browser = args[i].slice("--browser=".length);
+    }
+  }
+  if (!browser && process.env.LITT_BROWSER) {
+    browser = process.env.LITT_BROWSER;
+  }
+
   // Auth is always configured — the CLI ships safe production defaults
   // for the Clerk issuer, OAuth client_id, and terminal-server URL.
   // Env overrides (LITT_CLERK_ISSUER, LITT_CLERK_OAUTH_CLIENT_ID) are
@@ -45,11 +59,14 @@ export async function loginCommand(args: string[]): Promise<number> {
     }
   }
 
-  console.log(`  Opening ${issuer} in your browser...`);
+  console.log(`  Opening ${issuer} in your browser${browser ? ` (${browser})` : ""}...`);
   console.log();
 
   try {
-    const result = await session.login(force ? { prompt: "login" } : undefined);
+    const result = await session.login({
+      prompt: force ? "login" : undefined,
+      browser,
+    });
     const email = result.user.email ?? result.user.name ?? result.user.sub;
     ok(`Signed in as ${email}`);
 
