@@ -105,6 +105,7 @@ export function reconcileActivity(
       fullText: entry.fullText ?? updated[existingIdx].fullText,
       stream: entry.stream ?? updated[existingIdx].stream,
       semantic: entry.semantic ?? updated[existingIdx].semantic,
+      tag: entry.tag ?? updated[existingIdx].tag,
     };
     return updated;
   }

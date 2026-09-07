@@ -103,13 +103,19 @@ describe("colors", () => {
       expect(activityColor("THINK")).toBe(COLORS.working);
       expect(activityColor("ROUTE")).toBe(COLORS.working);
       expect(activityColor("READ")).toBe(COLORS.working);
+      expect(activityColor("SEARCH")).toBe(COLORS.working);
       expect(activityColor("EDIT")).toBe(COLORS.working);
       expect(activityColor("RUN")).toBe(COLORS.working);
+      expect(activityColor("TEST")).toBe(COLORS.working);
+      expect(activityColor("BUILD")).toBe(COLORS.working);
+      expect(activityColor("VERIFY")).toBe(COLORS.working);
+      expect(activityColor("GIT")).toBe(COLORS.working);
+      expect(activityColor("MISSION")).toBe(COLORS.working);
+      expect(activityColor("STEP")).toBe(COLORS.working);
     });
 
     it("success tags → green", () => {
       expect(activityColor("PASS")).toBe(COLORS.success);
-      expect(activityColor("VERIFY")).toBe(COLORS.success);
       expect(activityColor("DONE")).toBe(COLORS.success);
     });
 
