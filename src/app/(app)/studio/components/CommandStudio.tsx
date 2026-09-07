@@ -40,7 +40,7 @@ import AssetsPanel from "./context/AssetsPanel";
 import { StudioContextProvider } from "../context/StudioContext";
 import { deriveCreator, deriveWorkspaceStage } from "../context/derive-studio-context";
 import { StudioCreatorHost } from "./creators/StudioCreatorHost";
-import { useViewportTier } from "../hooks/useViewportTier";
+import { useViewportTier, useDesktopSplit } from "../hooks/useViewportTier";
 import StudioOperatorBar from "./shell/StudioOperatorBar";
 import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
@@ -329,6 +329,7 @@ function CommandStudioContent() {
   // null until the first client measurement (SSR-safe — see hook docs).
   const viewportTier = useViewportTier();
   const isMobileLitt = viewportTier === "mobile";
+  const isDesktopSplit = useDesktopSplit();
   const [mobileLittOpen, setMobileLittOpen] = useState(false);
 
   // LiTT panel defaults to EXPANDED on all desktop tiers (laptop + desktop).
@@ -1564,7 +1565,10 @@ function CommandStudioContent() {
                 On desktop: [workspace-content flex-1] [ResizeHandle] [Preview fixed-width]
                 On mobile: [workspace-content flex-1] only — Preview is a workspace tab. */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <div
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                data-testid="studio-center-workspace"
+              >
                 {isPlan ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <StudioPlanSurface
@@ -1594,13 +1598,13 @@ function CommandStudioContent() {
                     />
                   </div>
                 ) : isPreview ? (
-                  /* Phase 1: On desktop, the Preview tab shows the Plan surface
+                  /* On desktop split (>=1280px), the Preview tab shows the Plan surface
                      (conversation) in the center — the actual live Preview is
-                     permanently rendered in the right column below. On mobile,
-                     the Preview tab still shows StudioPreviewPanel in the center
-                     (preserving existing mobile behavior). */
+                     permanently rendered in the right column below. Below 1280px
+                     (compact laptop/tablet/mobile), the Preview tab shows StudioPreviewPanel
+                     in the center workspace. */
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                    {isMobileLitt ? (
+                    {!isDesktopSplit ? (
                       <StudioPreviewPanel
                         projectId={capabilities.projectId}
                         projectName={capabilities.projectName}
@@ -1648,15 +1652,12 @@ function CommandStudioContent() {
                 )}
               </div>
 
-              {/* Permanent Live Preview — RIGHT column (desktop only).
-                  Phase 1: promoted from a center workspace tab to a permanent
-                  right-side column. Always rendered on desktop regardless of
-                  which workspace tab is selected. Reuses the existing real
-                  StudioPreviewPanel (iframe, device modes, refresh, restart,
-                  maximize, logs, open-external, truthful runtime states).
-                  Not rendered on mobile — mobile keeps Preview as a workspace
-                  tab (preserving existing behavior). */}
-              {viewportTier !== null && !isMobileLitt && (
+              {/* Permanent Live Preview — RIGHT column (desktop split >=1280px only).
+                  Promoted from a center workspace tab to a permanent right-side column
+                  on large displays (>=1280px). Always rendered on desktop split regardless
+                  of which workspace tab is selected. Below 1280px, Preview is accessed
+                  via the workspace tab to give the center workspace maximum room. */}
+              {viewportTier !== null && isDesktopSplit && (
                 <>
                   <ResizeHandle
                     onDragStart={previewResize.onDragStart}
@@ -1667,9 +1668,11 @@ function CommandStudioContent() {
                     testId="preview-resize-handle"
                   />
                   <div
-                    className="flex min-h-0 shrink-0 flex-col overflow-hidden border-l"
+                    className="flex min-h-0 flex-col overflow-hidden border-l"
                     style={{
-                      width: previewResize.width,
+                      width: `clamp(280px, ${previewResize.width}px, min(1200px, 26.5vw))`,
+                      minWidth: 260,
+                      maxWidth: "38vw",
                       borderColor: "var(--studio-border)",
                       backgroundColor: "var(--studio-card)",
                     }}

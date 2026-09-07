@@ -51,3 +51,21 @@ export function useViewportTier(): ViewportTier | null {
 
   return tier;
 }
+
+const DESKTOP_SPLIT_QUERY = "(min-width: 1280px)";
+
+export function useDesktopSplit(): boolean {
+  const [isDesktopSplit, setIsDesktopSplit] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia(DESKTOP_SPLIT_QUERY);
+    setIsDesktopSplit(mql.matches);
+
+    const update = () => setIsDesktopSplit(mql.matches);
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+
+  return isDesktopSplit;
+}
+
