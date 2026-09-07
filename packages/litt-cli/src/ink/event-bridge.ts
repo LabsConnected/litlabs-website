@@ -36,6 +36,7 @@ function makeEntry(
   event: LifecycleEvent,
   stream?: "stdout" | "stderr",
   fullText?: string,
+  tag?: string,
 ): ActivityEntry {
   return {
     id: `act_${++entryCounter}`,
@@ -46,6 +47,7 @@ function makeEntry(
     text,
     fullText: fullText ?? text,
     stream,
+    tag,
   };
 }
 
@@ -77,13 +79,35 @@ export function missionStepText(data: Record<string, unknown>): string {
 }
 
 function toolLabel(data: Record<string, unknown>): string {
-  const tool = data.tool;
-  if (typeof tool === "string" && tool.length > 0) return tool;
-  const label = data.label;
-  if (typeof label === "string" && label.length > 0) return label;
-  const command = data.command;
-  if (typeof command === "string" && command.length > 0) return command;
-  return "tool";
+  const toolName = String(data.tool ?? data.toolId ?? data.label ?? data.command ?? "");
+  if (toolName.length === 0) return "tool";
+  return humanizeToolLabel(toolName, data);
+}
+
+function toolTag(data: Record<string, unknown>): string | undefined {
+  const toolName = String(data.tool ?? data.toolId ?? data.label ?? data.command ?? "");
+  if (toolName.length === 0) return undefined;
+  const kind = toolKind(toolName);
+  switch (kind) {
+    case "inspect": return "READ";
+    case "edit": return "EDIT";
+    case "command": return "RUN";
+    case "test": return "TEST";
+    case "verify": return "VERIFY";
+    case "reason": return "THINK";
+    case "warning": return "WARN";
+    case "retry": return "RETRY";
+    case "failure": return "FAIL";
+    case "success": return "PASS";
+    case "tool":
+    default: return undefined;
+  }
+}
+
+function resultMessage(data: Record<string, unknown>): string | undefined {
+  const msg = data.message ?? data.output ?? data.error ?? data.result;
+  if (typeof msg === "string" && msg.length > 0) return msg;
+  return undefined;
 }
 
 function holoFromEvent(event: LifecycleEvent): HoloState | null {
@@ -180,11 +204,11 @@ export function useEventBridge(
 
     switch (event.type) {
       case "run.started":
-        entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event);
+        entry = makeEntry("run.started", `${event.data.command ?? "command"}`, event, undefined, undefined, "RUN");
         store.actions.setCurrentRunId(event.runId);
         break;
       case "tool.started":
-        entry = makeEntry("tool.started", toolLabel(event.data), event);
+        entry = makeEntry("tool.started", toolLabel(event.data), event, undefined, undefined, toolTag(event.data) ?? "RUN");
         break;
       case "tool.stdout": {
         const chunk = String(event.data.chunk ?? "");
@@ -197,16 +221,16 @@ export function useEventBridge(
         break;
       }
       case "tool.completed":
-        entry = makeEntry("tool.completed", `${toolLabel(event.data)} · ${event.data.durationMs ?? 0}ms`, event);
+        entry = makeEntry("tool.completed", `${toolLabel(event.data)} · ${event.data.durationMs ?? 0}ms`, event, undefined, resultMessage(event.data), "PASS");
         break;
       case "tool.failed":
-        entry = makeEntry("tool.failed", `${toolLabel(event.data)} — ${event.data.error ?? "error"}`, event);
+        entry = makeEntry("tool.failed", `${toolLabel(event.data)} — ${event.data.error ?? "error"}`, event, undefined, resultMessage(event.data), "FAIL");
         break;
       case "tool.cancelled":
-        entry = makeEntry("tool.cancelled", `${toolLabel(event.data)}`, event);
+        entry = makeEntry("tool.cancelled", `${toolLabel(event.data)}`, event, undefined, resultMessage(event.data), "FAIL");
         break;
       case "tool.timeout":
-        entry = makeEntry("tool.timeout", `${toolLabel(event.data)} · ${event.data.timeoutMs ?? 0}ms`, event);
+        entry = makeEntry("tool.timeout", `${toolLabel(event.data)} · ${event.data.timeoutMs ?? 0}ms`, event, undefined, resultMessage(event.data), "FAIL");
         break;
       case "run.completed": {
         const status = event.data.status as string ?? "unknown";
@@ -215,6 +239,9 @@ export function useEventBridge(
           status === "success" ? "run.completed" : "run.failed",
           `${status} · ${seconds}s`,
           event,
+          undefined,
+          resultMessage(event.data),
+          status === "success" ? "DONE" : "FAIL",
         );
         store.actions.setCurrentRunId(null);
         break;
@@ -229,7 +256,7 @@ export function useEventBridge(
         // mission ID is debug detail (/status, /activity) — never the feed.
         entry = makeEntry("mission.created", event.data.goal
           ? `Mission: ${String(event.data.goal).slice(0, 80)}`
-          : "Mission created", event);
+          : "Mission created", event, undefined, undefined, "MISSION");
         // Project canonical mission into cockpit
         store.actions.setCanonicalMission({
           id: (event.data.missionId as string) ?? "",
@@ -244,36 +271,36 @@ export function useEventBridge(
         });
         break;
       case "mission.started":
-        entry = makeEntry("mission.started", "Mission started", event);
+        entry = makeEntry("mission.started", "Mission started", event, undefined, undefined, "MISSION");
         break;
       case "mission.step_created":
-        entry = makeEntry("mission.step_created", `Step: ${event.data.title ?? event.data.stepId ?? ""}`, event);
+        entry = makeEntry("mission.step_created", `Step: ${event.data.title ?? event.data.stepId ?? ""}`, event, undefined, undefined, "STEP");
         break;
       case "mission.step_started":
         // Icon-free text: the transcript renderer owns the semantic glyph
         // (semanticOf() → SEMANTIC_GLYPH). Baking "→" here caused the
         // observed `→ → Run static validation` duplicate-marker bug.
-        entry = makeEntry("mission.step_started", missionStepText(event.data), event);
+        entry = makeEntry("mission.step_started", missionStepText(event.data), event, undefined, undefined, "STEP");
         break;
       case "mission.step_passed":
         // Icon-free text — renderer prepends ✓ via SEMANTIC_GLYPH.success.
-        entry = makeEntry("mission.step_passed", missionStepText(event.data), event);
+        entry = makeEntry("mission.step_passed", missionStepText(event.data), event, undefined, undefined, "PASS");
         break;
       case "mission.step_failed":
         // Icon-free text — renderer prepends × via SEMANTIC_GLYPH.failed.
-        entry = makeEntry("mission.step_failed", missionStepText(event.data), event);
+        entry = makeEntry("mission.step_failed", missionStepText(event.data), event, undefined, undefined, "FAIL");
         break;
       case "mission.verifying":
-        entry = makeEntry("mission.verifying", "Verifying mission", event);
+        entry = makeEntry("mission.verifying", "Verifying mission", event, undefined, undefined, "VERIFY");
         break;
       case "mission.completed":
-        entry = makeEntry("mission.completed", `Mission COMPLETE: ${event.data.completionReason ?? ""}`, event);
+        entry = makeEntry("mission.completed", `Mission COMPLETE: ${event.data.completionReason ?? ""}`, event, undefined, undefined, "DONE");
         break;
       case "mission.failed":
-        entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event);
+        entry = makeEntry("mission.failed", `Mission FAILED: ${event.data.failureReason ?? ""}`, event, undefined, undefined, "FAIL");
         break;
       case "mission.restored":
-        entry = makeEntry("mission.restored", "Mission restored", event);
+        entry = makeEntry("mission.restored", "Mission restored", event, undefined, undefined, "MISSION");
         break;
       default:
         return;
