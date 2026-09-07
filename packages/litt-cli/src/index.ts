@@ -810,6 +810,7 @@ Options:
   --mode <mode>  Permission mode: plan, act, or auto (default: act)
   --cwd <path>   Project working directory (use when a launcher chdir'd elsewhere)
   --workspace <id>  Workspace ID for --remote (selects which project workspace to use)
+  --browser <name>  Browser to use for auth login (e.g. chrome, brave, edge)
   --tui          Redundant — bare 'litt' already launches the cockpit (kept for compat)
 
 Examples:
