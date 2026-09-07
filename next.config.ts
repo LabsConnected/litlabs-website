@@ -198,7 +198,7 @@ const nextConfig: NextConfig = {
               "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
-              "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev",
+              "form-action 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://api.clerk.com https://js.clerk.dev https://clerk.litlabs.net",
               "upgrade-insecure-requests",
             ].join("; "),
           },
