@@ -440,33 +440,18 @@ const innerMiddleware = useClerkMiddleware
 
 // ─── Clerk Frontend API proxy with Cloudflare header stripping ─────
 //
-// The Clerk Dashboard's registered proxy_url is https://litlabs.net/__clerk
-// (the apex domain) — confirmed authoritatively via
-// https://clerk.litlabs.net/.well-known/openid-configuration, whose
-// `issuer` is "https://litlabs.net/__clerk". The production app is
-// canonically served at `www.litlabs.net` via a Cloudflare Worker that
-// forwards to Railway, and Cloudflare 301-redirects any apex request to
-// `www` before it ever reaches this app — so in production this app ALWAYS
-// sees Host: www.litlabs.net, never the apex, on every request.
+// Production is canonically served from https://www.litlabs.net.
+// Clerk's Frontend API proxy must therefore be registered as:
 //
-// clerkFrontendApiProxy() builds the `Clerk-Proxy-Url` header it sends to
-// Clerk's real FAPI from whatever we set as x-forwarded-host. Clerk
-// validates that header on proxied requests — most strictly on
-// /v1/client/handshake (which sets session cookies) — against the EXACT
-// registered proxy_url. It does not care what domain the browser's address
-// bar shows; Clerk-Proxy-Url is a FIXED identity, not something that
-// should track the incoming request.
+//   https://www.litlabs.net/__clerk
 //
-// A prior fix here mistakenly derived x-forwarded-host from the browser's
-// visible Host header (allowlisting both www.litlabs.net and litlabs.net).
-// Since production requests are always on www, that made Clerk-Proxy-Url
-// always "https://www.litlabs.net/__clerk" — which does NOT match the
-// registered "https://litlabs.net/__clerk" — so Clerk rejected every
-// /v1/client/handshake call with { code: "host_invalid" }, breaking
-// sign-in. Confirmed directly: hitting this app with Host: www.litlabs.net
-// (bypassing Cloudflare) reproduces host_invalid; the fix is to always
-// assert the fixed, Dashboard-registered apex identity, never a value
-// derived from the request.
+// Clerk validates Clerk-Proxy-Url against the Dashboard-registered
+// proxy_url, especially on /v1/client/handshake. The proxy identity is
+// fixed and must not be derived from the incoming Host header.
+//
+// The apex https://litlabs.net redirects to www and must not be used as
+// the Clerk proxy identity. Keeping Clerk on www avoids cross-origin
+// apex→www redirects inside Clerk authentication and OAuth consent flows.
 //
 // When the Cloudflare Worker fetches from Railway, it also passes
 // Cloudflare infrastructure headers (cf-connecting-ip, cf-ray, etc.)
@@ -490,7 +475,7 @@ const innerMiddleware = useClerkMiddleware
  * https://clerk.litlabs.net/.well-known/openid-configuration. It is a
  * fixed identity — never derive this from the incoming request.
  */
-const CLERK_PROXY_CANONICAL_HOST = "litlabs.net";
+const CLERK_PROXY_CANONICAL_HOST = "www.litlabs.net";
 
 const CLERK_FAPI_URL = "https://clerk.litlabs.net";
 
@@ -595,7 +580,7 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
  * Fix: rewrite the Location header on 3xx responses from the Clerk proxy
  * to use www.litlabs.net. This keeps the redirect same-origin (www→www),
  * avoiding the Cloudflare apex→www 301 entirely. Clerk-Proxy-Url still
- * uses the canonical apex identity (set in handleClerkProxy), so Clerk's
+ * uses the canonical www identity (set in handleClerkProxy), so Clerk's
  * proxy validation is unaffected — only the browser-facing redirect
  * target changes.
  *

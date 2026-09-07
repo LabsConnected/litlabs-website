@@ -109,30 +109,16 @@ describe("Clerk proxy Cloudflare header stripping", () => {
 });
 
 // ─── Regression test: Clerk-Proxy-Url must be a FIXED identity ─────────────
-// ─── matching Clerk's registered proxy_url, never the request's Host ───────
 //
-// Clerk's Dashboard has exactly one registered proxy_url for this instance:
-// https://litlabs.net/__clerk (the apex) — confirmed authoritatively via
-// https://clerk.litlabs.net/.well-known/openid-configuration, whose
-// `issuer` is "https://litlabs.net/__clerk". Clerk validates the
-// Clerk-Proxy-Url header it receives against this EXACT value, most
-// strictly on /v1/client/handshake (which sets session cookies) — it does
-// not care what domain the browser's address bar shows.
+// Production Clerk proxy identity:
 //
-// A prior version of this fix derived x-forwarded-host from the browser's
-// incoming Host header (allowlisting both www.litlabs.net and the apex).
-// Since Cloudflare 301-redirects the apex to www before any request
-// reaches this app, every real production request has Host:
-// www.litlabs.net — so that version ALWAYS sent
-// "https://www.litlabs.net/__clerk" as Clerk-Proxy-Url, which does not
-// match the registered "https://litlabs.net/__clerk". Confirmed directly:
-// hitting the app with Host: www.litlabs.net returned
-// { code: "host_invalid" } from Clerk's real backend on
-// /v1/client/handshake, breaking sign-in.
+//   https://www.litlabs.net/__clerk
 //
-// The fix: resolveClerkProxyHost() always returns the fixed canonical
-// host, regardless of the incoming request — proven below for every host
-// a browser could legitimately (or illegitimately) present.
+// The application is canonical on www.litlabs.net. resolveClerkProxyHost()
+// therefore always returns www.litlabs.net regardless of the incoming Host.
+// This prevents an arbitrary Host header or the redirecting apex domain from
+// changing the Clerk-Proxy-Url identity sent upstream.
+//
 describe("resolveClerkProxyHost", () => {
   function requestWithHost(host?: string): NextRequest {
     return new NextRequest("https://example.com/__clerk/v1/client", {
@@ -140,38 +126,34 @@ describe("resolveClerkProxyHost", () => {
     });
   }
 
-  it("always resolves to the Dashboard-registered canonical apex host", () => {
+  it("always resolves to the Dashboard-registered canonical www host", () => {
     expect(resolveClerkProxyHost(requestWithHost("www.litlabs.net"))).toBe(
-      "litlabs.net",
+      "www.litlabs.net",
     );
   });
 
-  it("a request on www.litlabs.net is never sent to Clerk as www.litlabs.net", () => {
-    // This is the exact regression: Clerk-Proxy-Url must match the
-    // registered proxy_url even when the browser is on www.
-    const resolved = resolveClerkProxyHost(requestWithHost("www.litlabs.net"));
-    expect(resolved).not.toBe("www.litlabs.net");
-  });
-
-  it("a request on the apex litlabs.net also resolves to the canonical host", () => {
+  it("an apex request still resolves to the canonical www host", () => {
     expect(resolveClerkProxyHost(requestWithHost("litlabs.net"))).toBe(
-      "litlabs.net",
+      "www.litlabs.net",
     );
   });
 
-  it("an unrecognized/arbitrary Host header does not change the resolved identity", () => {
-    // resolveClerkProxyHost never reflects client-supplied input — the
-    // Host header is not trusted or inspected for this decision at all.
+  it("an arbitrary Host header cannot change the canonical proxy identity", () => {
     expect(
       resolveClerkProxyHost(requestWithHost("attacker.example.com")),
-    ).toBe("litlabs.net");
+    ).toBe("www.litlabs.net");
+
     expect(
-      resolveClerkProxyHost(requestWithHost("some-service.up.railway.app")),
-    ).toBe("litlabs.net");
+      resolveClerkProxyHost(
+        requestWithHost("some-service.up.railway.app"),
+      ),
+    ).toBe("www.litlabs.net");
   });
 
-  it("a missing Host header does not change the resolved identity", () => {
-    expect(resolveClerkProxyHost(requestWithHost())).toBe("litlabs.net");
+  it("a missing Host header does not change the canonical identity", () => {
+    expect(resolveClerkProxyHost(requestWithHost())).toBe(
+      "www.litlabs.net",
+    );
   });
 });
 
