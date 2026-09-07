@@ -64,8 +64,9 @@ export default function LiTTPanel({
     <aside
       className="hidden h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out lg:flex"
       style={{
-        width: collapsed ? 64 : expandedWidth,
-        maxWidth: collapsed ? 64 : "40vw",
+        width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, min(640px, 26vw))`,
+        minWidth: collapsed ? 64 : 280,
+        maxWidth: collapsed ? 64 : "36vw",
         backgroundColor: "var(--studio-surface)",
         borderRight: "1px solid var(--studio-border)",
         backdropFilter: "blur(12px)",
