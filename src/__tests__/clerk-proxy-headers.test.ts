@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { NextRequest } from "next/server";
-import { resolveClerkProxyHost } from "@/proxy";
+import { NextRequest, NextResponse } from "next/server";
+import { resolveClerkProxyHost, rewriteClerkProxyLocation } from "@/proxy";
 
 // ─── Regression test: Cloudflare hop headers must NOT reach Clerk upstream ──
 //
@@ -172,5 +172,119 @@ describe("resolveClerkProxyHost", () => {
 
   it("a missing Host header does not change the resolved identity", () => {
     expect(resolveClerkProxyHost(requestWithHost())).toBe("litlabs.net");
+  });
+});
+
+// ─── Regression test: Clerk proxy redirect Location must use www, not apex ──
+//
+// Root cause of the 2026-09-07 production sign-in failure:
+//
+// Clerk's FAPI resolves version ranges (@clerk/clerk-js@6 → @6.31.0) via
+// 307 redirects. Because x-forwarded-host is set to the canonical apex
+// (litlabs.net — required for Clerk-Proxy-Url validation), Clerk builds
+// the Location URL with that host. The browser follows to litlabs.net
+// (apex), Cloudflare 301-redirects to www.litlabs.net, but that 301
+// lacks Access-Control-Allow-Origin. The Clerk JS <script> uses
+// crossorigin="anonymous", so the browser enforces CORS on every
+// response in the chain — the 301 fails CORS → script blocked →
+// SignIn never renders.
+//
+// rewriteClerkProxyLocation() fixes this by rewriting the Location header
+// on 3xx responses from www-facing to use www.litlabs.net, keeping the
+// redirect same-origin and avoiding the Cloudflare apex→www 301.
+describe("rewriteClerkProxyLocation", () => {
+  function redirectResponse(location: string, status = 307): NextResponse {
+    return NextResponse.redirect(new URL(location), status) as NextResponse;
+  }
+
+  it("rewrites a 307 Location from litlabs.net to www.litlabs.net", () => {
+    const res = redirectResponse(
+      "https://litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(
+      "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
+  });
+
+  it("rewrites a 301 Location from litlabs.net to www.litlabs.net", () => {
+    const res = redirectResponse(
+      "https://litlabs.net/__clerk/npm/@clerk/ui@1.32.1/dist/ui.browser.js",
+      301,
+    );
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(
+      "https://www.litlabs.net/__clerk/npm/@clerk/ui@1.32.1/dist/ui.browser.js",
+    );
+  });
+
+  it("does not double-rewrite a Location already on www.litlabs.net", () => {
+    const original =
+      "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js";
+    const res = redirectResponse(original);
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(original);
+  });
+
+  it("does not modify a 200 response (no redirect)", () => {
+    const res = NextResponse.json({ ok: true }) as NextResponse;
+    const before = res.headers.get("content-type");
+    rewriteClerkProxyLocation(res);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe(before);
+  });
+
+  it("does not rewrite a Location pointing to an unrelated domain", () => {
+    const original = "https://clerk.litlabs.net/v1/client/handshake";
+    const res = redirectResponse(original);
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(original);
+  });
+
+  it("does not rewrite a Location pointing to a subdomain of litlabs.net", () => {
+    // Only the exact apex "litlabs.net" should be rewritten, not
+    // "clerk.litlabs.net" or "accounts.litlabs.net".
+    const original = "https://clerk.litlabs.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
+    const res = redirectResponse(original);
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(original);
+  });
+
+  it("preserves the path and query string when rewriting", () => {
+    const res = redirectResponse(
+      "https://litlabs.net/__clerk/v1/client?foo=bar&baz=qux",
+    );
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(
+      "https://www.litlabs.net/__clerk/v1/client?foo=bar&baz=qux",
+    );
+  });
+
+  it("handles http scheme (not just https)", () => {
+    const res = redirectResponse(
+      "http://litlabs.net/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+    );
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe(
+      "http://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+    );
+  });
+
+  it("does not rewrite a Location without a path (bare host)", () => {
+    // A bare "https://litlabs.net" without trailing slash should not
+    // be rewritten — the regex requires a trailing slash to avoid
+    // matching subdomains or paths that happen to start with "litlabs.net".
+    const original = "https://litlabs.net";
+    const res = redirectResponse(original + "/sign-in"); // has a path, so WILL rewrite
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBe("https://www.litlabs.net/sign-in");
+  });
+
+  it("is a no-op on a 3xx response with no Location header", () => {
+    // NextResponse.next() with status 304 — no Location header
+    const res = NextResponse.next({ status: 304 }) as NextResponse;
+    rewriteClerkProxyLocation(res);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(304);
   });
 });
