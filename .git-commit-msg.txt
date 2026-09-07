@@ -1,11 +1,30 @@
-feat: connect all workspace integrations + fix OpenRouter probe model
+Clerk/OAuth cleanup: retire accounts.litlabs.net, add release guard
 
-- Connect GitHub repo: LabsConnected/litlabs-website (legacy project updated to connected)
-- Connect Vercel project: prj_EnE4JStJUENM89PWov574Y9q7mTy → litlabs.net
-- Connect Supabase project: rokbfvuoqildggnhappy → LiTTree Lab Studios DB
-- Insert integration_accounts for Vercel + Supabase
-- Insert integration_projects linking repo to Vercel project (status: ready, sync: synced)
-- Fix OpenRouter probe: use openai/gpt-oss-20b:free (verified working, was 404)
+Consolidates Clerk OAuth configuration around a single canonical setup:
+
+CANONICAL:
+- OAuth client_id: YWeGjVVwoNnX4RTY (PKCE public client, no secret)
+- Clerk FAPI / OAuth issuer: https://clerk.litlabs.net
+- OIDC issuer (from .well-known): https://litlabs.net/__clerk
+- OAuth consent: https://www.litlabs.net/oauth-consent
+- Sign-in: https://www.litlabs.net/sign-in (preserves redirect_url)
+- ClerkProvider: direct FAPI, no proxy (proxyUrl empty)
+
+RETIRED:
+- accounts.litlabs.net (old Account Portal) — no longer used for consent
+- The sign-in page rewrites any accounts.litlabs.net redirect_url to
+  www.litlabs.net as a defensive shim until the Clerk Dashboard is updated
+
+CHANGES:
+- oauth-consent/page.tsx: update comment, remove retired domain reference
+- inspect-consent-state.mjs: update response filter to www.litlabs.net
+- Add tests/auth-domain-release-guard.test.ts: fails if retired domains
+  leak into production source (with allowlist for the defensive rewrite)
+- Add debug/trace scripts for OAuth flow verification
+
+The Clerk Dashboard OAuth client's consent URL must still be updated
+from accounts.litlabs.net/oauth-consent to www.litlabs.net/oauth-consent
+(requires Dashboard access — no API for this setting).
 
 Generated with [Devin](https://devin.ai)
 
