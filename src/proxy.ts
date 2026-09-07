@@ -441,25 +441,32 @@ const innerMiddleware = useClerkMiddleware
 // ─── Clerk Frontend API proxy with Cloudflare header stripping ─────
 //
 // The Clerk Dashboard's registered proxy_url is https://litlabs.net/__clerk
-// (the apex domain), but the production app is canonically served at
-// `www.litlabs.net` via a Cloudflare Worker that forwards to Railway.
+// (the apex domain) — confirmed authoritatively via
+// https://clerk.litlabs.net/.well-known/openid-configuration, whose
+// `issuer` is "https://litlabs.net/__clerk". The production app is
+// canonically served at `www.litlabs.net` via a Cloudflare Worker that
+// forwards to Railway, and Cloudflare 301-redirects any apex request to
+// `www` before it ever reaches this app — so in production this app ALWAYS
+// sees Host: www.litlabs.net, never the apex, on every request.
 //
-// clerkFrontendApiProxy() builds the `Clerk-Proxy-Url` header (and rewrites
-// any `Location` header Clerk's real FAPI returns, e.g. resolving
-// @clerk/clerk-js@6 -> @clerk/clerk-js@6.31.0) from whatever we set as
-// x-forwarded-host. Previously this was HARDCODED to the apex "litlabs.net"
-// regardless of which domain the browser actually requested. That forced
-// every Clerk-JS asset/version redirect to point at the apex, which then
-// bounced back to www via Cloudflare's own apex->www canonicalization —
-// a self-inflicted www -> litlabs.net -> www redirect cycle on every
-// /__clerk request, which broke <SignIn/> rendering in production.
+// clerkFrontendApiProxy() builds the `Clerk-Proxy-Url` header it sends to
+// Clerk's real FAPI from whatever we set as x-forwarded-host. Clerk
+// validates that header on proxied requests — most strictly on
+// /v1/client/handshake (which sets session cookies) — against the EXACT
+// registered proxy_url. It does not care what domain the browser's address
+// bar shows; Clerk-Proxy-Url is a FIXED identity, not something that
+// should track the incoming request.
 //
-// The fix: derive x-forwarded-host from the browser's ACTUAL incoming
-// Host header, restricted to an explicit allowlist of hosts we know are
-// legitimate for this app (never trust an arbitrary client-supplied host
-// unchecked — Host/X-Forwarded-Host can be attacker-controlled if the
-// request reaches Railway directly, bypassing Cloudflare). A request that
-// doesn't match the allowlist falls back to the canonical production host.
+// A prior fix here mistakenly derived x-forwarded-host from the browser's
+// visible Host header (allowlisting both www.litlabs.net and litlabs.net).
+// Since production requests are always on www, that made Clerk-Proxy-Url
+// always "https://www.litlabs.net/__clerk" — which does NOT match the
+// registered "https://litlabs.net/__clerk" — so Clerk rejected every
+// /v1/client/handshake call with { code: "host_invalid" }, breaking
+// sign-in. Confirmed directly: hitting this app with Host: www.litlabs.net
+// (bypassing Cloudflare) reproduces host_invalid; the fix is to always
+// assert the fixed, Dashboard-registered apex identity, never a value
+// derived from the request.
 //
 // When the Cloudflare Worker fetches from Railway, it also passes
 // Cloudflare infrastructure headers (cf-connecting-ip, cf-ray, etc.)
@@ -478,39 +485,25 @@ const innerMiddleware = useClerkMiddleware
 // needs to function.
 
 /**
- * Hosts this app is legitimately served from in production. The Clerk
- * proxy's x-forwarded-host is restricted to this set — an incoming
- * request's Host header is never trusted unchecked.
+ * The Clerk Dashboard's registered proxy_url for this instance, host-only
+ * (no scheme/path). This MUST equal the `issuer` host reported at
+ * https://clerk.litlabs.net/.well-known/openid-configuration. It is a
+ * fixed identity — never derive this from the incoming request.
  */
-const CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION: readonly string[] = [
-  "www.litlabs.net",
-  "litlabs.net",
-];
-
-/** Additional hosts allowed only outside deployed production (local dev). */
-const CLERK_PROXY_ALLOWED_HOSTS_DEV: readonly string[] = [
-  "localhost:3001",
-  "127.0.0.1:3001",
-];
-
-/** Canonical fallback host used when the incoming Host header is not recognized. */
-const CLERK_PROXY_CANONICAL_HOST = "www.litlabs.net";
+const CLERK_PROXY_CANONICAL_HOST = "litlabs.net";
 
 const CLERK_FAPI_URL = "https://clerk.litlabs.net";
 
 /**
- * Resolves the host to forward to Clerk's proxy as x-forwarded-host, from
- * the browser's actual incoming Host header, restricted to an explicit
- * allowlist. Never passes an arbitrary/unrecognized Host straight through —
- * falls back to the canonical production host instead.
+ * Resolves the host to forward to Clerk's proxy as x-forwarded-host.
+ * Always the fixed, Dashboard-registered canonical host — Clerk validates
+ * Clerk-Proxy-Url against its exact registered proxy_url (most strictly on
+ * /v1/client/handshake), so this must never vary with the incoming
+ * request's Host header, regardless of which legitimate domain
+ * (www.litlabs.net or the apex) the browser actually used.
  */
-export function resolveClerkProxyHost(req: NextRequest): string {
-  const requestHost = req.headers.get("host") ?? "";
-  const allowedHosts = isDeployed()
-    ? CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION
-    : [...CLERK_PROXY_ALLOWED_HOSTS_PRODUCTION, ...CLERK_PROXY_ALLOWED_HOSTS_DEV];
-
-  return allowedHosts.includes(requestHost) ? requestHost : CLERK_PROXY_CANONICAL_HOST;
+export function resolveClerkProxyHost(_req: NextRequest): string {
+  return CLERK_PROXY_CANONICAL_HOST;
 }
 
 /**
@@ -540,10 +533,9 @@ const CLOUDFLARE_HOP_HEADERS: readonly string[] = [
  *
  * Strips cf-* and related infrastructure headers that cause Error 1000
  * when forwarded to clerk.litlabs.net (Cloudflare loop detection).
- * Sets x-forwarded-host to the browser's actual (allowlisted) host so
- * Clerk-Proxy-Url — and any redirect Location Clerk rewrites through it —
- * matches the domain the browser is really on, instead of forcing every
- * request onto a different host and bouncing back.
+ * Sets x-forwarded-host to the fixed, Dashboard-registered canonical host
+ * so Clerk-Proxy-Url always matches Clerk's registered proxy_url, never
+ * the (possibly different) domain the browser happens to be on.
  */
 async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> {
   if (!req.nextUrl.pathname.startsWith("/__clerk")) return null;
@@ -557,9 +549,8 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
     requestHeaders.delete(header);
   }
 
-  // Set x-forwarded-host to the browser's actual (allowlisted) host so
-  // Clerk-Proxy-Url resolves to the domain actually serving the request,
-  // not a different host that then needs to redirect back.
+  // Set x-forwarded-host to the fixed canonical proxy identity so
+  // Clerk-Proxy-Url matches Clerk's registered proxy_url exactly.
   requestHeaders.set("x-forwarded-host", resolveClerkProxyHost(req));
 
   const proxyReq = new NextRequest(req, { headers: requestHeaders });

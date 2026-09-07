@@ -15,7 +15,8 @@ import { resolveClerkProxyHost } from "@/proxy";
 // 3. The CLOUDFLARE_HOP_HEADERS list covers all known Cloudflare infrastructure headers
 //
 // x-forwarded-host resolution (resolveClerkProxyHost) is covered separately
-// below — it must reflect the browser's actual host, not a hardcoded domain.
+// below — it must always be the fixed, Dashboard-registered canonical
+// host, never derived from the browser's Host header.
 
 // We test the header stripping logic directly since handleClerkProxy() calls
 // clerkFrontendApiProxy() which requires a real Clerk setup. The header
@@ -107,58 +108,69 @@ describe("Clerk proxy Cloudflare header stripping", () => {
   });
 });
 
-// ─── Regression test: Clerk proxy host must track the real request, ────────
-// ─── never a hardcoded apex domain ──────────────────────────────────────────
+// ─── Regression test: Clerk-Proxy-Url must be a FIXED identity ─────────────
+// ─── matching Clerk's registered proxy_url, never the request's Host ───────
 //
-// Root cause of the www -> litlabs.net -> www redirect cycle that broke
-// <SignIn/> rendering in production: x-forwarded-host was hardcoded to the
-// apex "litlabs.net" for every /__clerk request, regardless of which domain
-// the browser actually used. clerkFrontendApiProxy() builds Clerk-Proxy-Url
-// (and rewrites any Location header Clerk's FAPI returns, e.g. resolving
-// @clerk/clerk-js@6 -> a pinned version) from that header — so a browser on
-// www.litlabs.net had every Clerk asset/version redirect forced onto the
-// apex, which Cloudflare's own canonicalization then bounced back to www.
+// Clerk's Dashboard has exactly one registered proxy_url for this instance:
+// https://litlabs.net/__clerk (the apex) — confirmed authoritatively via
+// https://clerk.litlabs.net/.well-known/openid-configuration, whose
+// `issuer` is "https://litlabs.net/__clerk". Clerk validates the
+// Clerk-Proxy-Url header it receives against this EXACT value, most
+// strictly on /v1/client/handshake (which sets session cookies) — it does
+// not care what domain the browser's address bar shows.
 //
-// resolveClerkProxyHost() fixes this by deriving x-forwarded-host from the
-// browser's actual incoming Host header, restricted to an explicit
-// allowlist (an arbitrary client-supplied Host is never trusted directly).
+// A prior version of this fix derived x-forwarded-host from the browser's
+// incoming Host header (allowlisting both www.litlabs.net and the apex).
+// Since Cloudflare 301-redirects the apex to www before any request
+// reaches this app, every real production request has Host:
+// www.litlabs.net — so that version ALWAYS sent
+// "https://www.litlabs.net/__clerk" as Clerk-Proxy-Url, which does not
+// match the registered "https://litlabs.net/__clerk". Confirmed directly:
+// hitting the app with Host: www.litlabs.net returned
+// { code: "host_invalid" } from Clerk's real backend on
+// /v1/client/handshake, breaking sign-in.
+//
+// The fix: resolveClerkProxyHost() always returns the fixed canonical
+// host, regardless of the incoming request — proven below for every host
+// a browser could legitimately (or illegitimately) present.
 describe("resolveClerkProxyHost", () => {
-  function requestWithHost(host: string): NextRequest {
+  function requestWithHost(host?: string): NextRequest {
     return new NextRequest("https://example.com/__clerk/v1/client", {
-      headers: { host },
+      headers: host ? { host } : {},
     });
   }
 
-  it("a request on www.litlabs.net resolves to www.litlabs.net, not the apex", () => {
+  it("always resolves to the Dashboard-registered canonical apex host", () => {
     expect(resolveClerkProxyHost(requestWithHost("www.litlabs.net"))).toBe(
-      "www.litlabs.net",
+      "litlabs.net",
     );
   });
 
-  it("a request on www.litlabs.net can never be rewritten to the apex domain", () => {
+  it("a request on www.litlabs.net is never sent to Clerk as www.litlabs.net", () => {
+    // This is the exact regression: Clerk-Proxy-Url must match the
+    // registered proxy_url even when the browser is on www.
     const resolved = resolveClerkProxyHost(requestWithHost("www.litlabs.net"));
-    expect(resolved).not.toBe("litlabs.net");
+    expect(resolved).not.toBe("www.litlabs.net");
   });
 
-  it("a request on the apex litlabs.net resolves to litlabs.net", () => {
+  it("a request on the apex litlabs.net also resolves to the canonical host", () => {
     expect(resolveClerkProxyHost(requestWithHost("litlabs.net"))).toBe(
       "litlabs.net",
     );
   });
 
-  it("an unrecognized/arbitrary Host header falls back to the canonical production host", () => {
-    // Guards against trusting a spoofed Host header (e.g. a request that
-    // reaches Railway directly via *.up.railway.app, bypassing Cloudflare).
+  it("an unrecognized/arbitrary Host header does not change the resolved identity", () => {
+    // resolveClerkProxyHost never reflects client-supplied input — the
+    // Host header is not trusted or inspected for this decision at all.
     expect(
       resolveClerkProxyHost(requestWithHost("attacker.example.com")),
-    ).toBe("www.litlabs.net");
+    ).toBe("litlabs.net");
     expect(
       resolveClerkProxyHost(requestWithHost("some-service.up.railway.app")),
-    ).toBe("www.litlabs.net");
+    ).toBe("litlabs.net");
   });
 
-  it("a missing Host header falls back to the canonical production host", () => {
-    const req = new NextRequest("https://example.com/__clerk/v1/client");
-    expect(resolveClerkProxyHost(req)).toBe("www.litlabs.net");
+  it("a missing Host header does not change the resolved identity", () => {
+    expect(resolveClerkProxyHost(requestWithHost())).toBe("litlabs.net");
   });
 });
