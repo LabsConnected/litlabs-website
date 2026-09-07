@@ -1374,12 +1374,21 @@ describe("Browser Launcher — platform selection", () => {
   // themselves and restore it in their own try/finally.
   let origTermuxVersion: string | undefined;
   let origPrefix: string | undefined;
+  let origWslDistro: string | undefined;
+  let origWslInterop: string | undefined;
+  let origWslEnv: string | undefined;
 
   beforeEach(() => {
     origTermuxVersion = process.env.TERMUX_VERSION;
     origPrefix = process.env.PREFIX;
+    origWslDistro = process.env.WSL_DISTRO_NAME;
+    origWslInterop = process.env.WSL_INTEROP;
+    origWslEnv = process.env.WSL_ENV;
     delete process.env.TERMUX_VERSION;
     delete process.env.PREFIX;
+    delete process.env.WSL_DISTRO_NAME;
+    delete process.env.WSL_INTEROP;
+    delete process.env.WSL_ENV;
   });
 
   afterEach(() => {
@@ -1388,6 +1397,12 @@ describe("Browser Launcher — platform selection", () => {
     }
     if (origTermuxVersion !== undefined) process.env.TERMUX_VERSION = origTermuxVersion;
     if (origPrefix !== undefined) process.env.PREFIX = origPrefix;
+    if (origWslDistro !== undefined) process.env.WSL_DISTRO_NAME = origWslDistro;
+    else delete process.env.WSL_DISTRO_NAME;
+    if (origWslInterop !== undefined) process.env.WSL_INTEROP = origWslInterop;
+    else delete process.env.WSL_INTEROP;
+    if (origWslEnv !== undefined) process.env.WSL_ENV = origWslEnv;
+    else delete process.env.WSL_ENV;
   });
 
   it("Windows path uses exec (not spawn) for cmd.exe start builtin", async () => {
