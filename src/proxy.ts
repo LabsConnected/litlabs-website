@@ -560,15 +560,13 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
     proxyPath: "/__clerk",
     fapiUrl: CLERK_FAPI_URL,
   });
-  const nextResponse = response as unknown as NextResponse;
 
-  // Rewrite redirect Location headers so they point to www.litlabs.net
-  // (the canonical application domain the browser is actually on) instead
-  // of the apex litlabs.net. See rewriteClerkProxyLocation() for the
+  // clerkFrontendApiProxy() returns a Response from fetch(), whose
+  // headers are IMMUTABLE in the Fetch API spec. We cannot mutate the
+  // Location header in-place — we must construct a new Response with
+  // the rewritten headers. See rewriteClerkProxyLocation() for the
   // full root-cause explanation.
-  rewriteClerkProxyLocation(nextResponse);
-
-  return nextResponse;
+  return rewriteClerkProxyLocation(response as unknown as NextResponse);
 }
 
 /**
@@ -599,22 +597,43 @@ async function handleClerkProxy(req: NextRequest): Promise<NextResponse | null> 
  * proxy validation is unaffected — only the browser-facing redirect
  * target changes.
  *
+ * IMPORTANT: clerkFrontendApiProxy() returns a Response from fetch().
+ * Fetch API Response headers are IMMUTABLE — calling headers.set()
+ * silently fails (or throws in strict environments). This function
+ * creates a NEW NextResponse with copied + rewritten headers instead of
+ * mutating the original.
+ *
  * This function is exported for direct unit testing.
  */
-export function rewriteClerkProxyLocation(response: NextResponse): void {
+export function rewriteClerkProxyLocation(
+  response: NextResponse,
+): NextResponse {
   const status = response.status;
-  if (status < 300 || status >= 400) return;
+  // Non-redirect responses pass through unchanged.
+  if (status < 300 || status >= 400) return response;
 
   const location = response.headers.get("location");
-  if (!location) return;
+  if (!location) return response;
 
   const rewritten = location.replace(
     /^(https?:\/\/)litlabs\.net(\/)/i,
     "$1www.litlabs.net$2",
   );
-  if (rewritten !== location) {
-    response.headers.set("location", rewritten);
-  }
+  // No rewrite needed — return original.
+  if (rewritten === location) return response;
+
+  // Build a new response with all headers copied + Location rewritten.
+  // We can't mutate the original (fetch Response headers are immutable).
+  const newHeaders = new Headers(response.headers);
+  newHeaders.set("location", rewritten);
+
+  // Preserve the body (redirects typically have none, but be safe).
+  // init.body is used for streaming/cloning, status + headers are explicit.
+  return new NextResponse(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
 }
 
 // ─── Dev proxy header fix ──────────────────────────────────────────

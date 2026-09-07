@@ -189,9 +189,13 @@ describe("resolveClerkProxyHost", () => {
 // response in the chain — the 301 fails CORS → script blocked →
 // SignIn never renders.
 //
-// rewriteClerkProxyLocation() fixes this by rewriting the Location header
-// on 3xx responses from www-facing to use www.litlabs.net, keeping the
+// rewriteClerkProxyLocation() fixes this by returning a NEW NextResponse
+// with the Location header rewritten to www.litlabs.net, keeping the
 // redirect same-origin and avoiding the Cloudflare apex→www 301.
+//
+// IMPORTANT: clerkFrontendApiProxy() returns a fetch() Response whose
+// headers are IMMUTABLE. The function must return a new Response, not
+// mutate the original — the "immutable headers" test below enforces this.
 describe("rewriteClerkProxyLocation", () => {
   function redirectResponse(location: string, status = 307): NextResponse {
     return NextResponse.redirect(new URL(location), status) as NextResponse;
@@ -201,8 +205,8 @@ describe("rewriteClerkProxyLocation", () => {
     const res = redirectResponse(
       "https://litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
     );
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(
       "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
     );
   });
@@ -212,8 +216,8 @@ describe("rewriteClerkProxyLocation", () => {
       "https://litlabs.net/__clerk/npm/@clerk/ui@1.32.1/dist/ui.browser.js",
       301,
     );
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(
       "https://www.litlabs.net/__clerk/npm/@clerk/ui@1.32.1/dist/ui.browser.js",
     );
   });
@@ -222,23 +226,23 @@ describe("rewriteClerkProxyLocation", () => {
     const original =
       "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js";
     const res = redirectResponse(original);
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(original);
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(original);
   });
 
   it("does not modify a 200 response (no redirect)", () => {
     const res = NextResponse.json({ ok: true }) as NextResponse;
     const before = res.headers.get("content-type");
-    rewriteClerkProxyLocation(res);
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe(before);
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.status).toBe(200);
+    expect(out.headers.get("content-type")).toBe(before);
   });
 
   it("does not rewrite a Location pointing to an unrelated domain", () => {
     const original = "https://clerk.litlabs.net/v1/client/handshake";
     const res = redirectResponse(original);
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(original);
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(original);
   });
 
   it("does not rewrite a Location pointing to a subdomain of litlabs.net", () => {
@@ -246,16 +250,16 @@ describe("rewriteClerkProxyLocation", () => {
     // "clerk.litlabs.net" or "accounts.litlabs.net".
     const original = "https://clerk.litlabs.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
     const res = redirectResponse(original);
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(original);
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(original);
   });
 
   it("preserves the path and query string when rewriting", () => {
     const res = redirectResponse(
       "https://litlabs.net/__clerk/v1/client?foo=bar&baz=qux",
     );
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(
       "https://www.litlabs.net/__clerk/v1/client?foo=bar&baz=qux",
     );
   });
@@ -264,8 +268,8 @@ describe("rewriteClerkProxyLocation", () => {
     const res = redirectResponse(
       "http://litlabs.net/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
     );
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe(
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe(
       "http://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
     );
   });
@@ -276,15 +280,49 @@ describe("rewriteClerkProxyLocation", () => {
     // matching subdomains or paths that happen to start with "litlabs.net".
     const original = "https://litlabs.net";
     const res = redirectResponse(original + "/sign-in"); // has a path, so WILL rewrite
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBe("https://www.litlabs.net/sign-in");
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBe("https://www.litlabs.net/sign-in");
   });
 
   it("is a no-op on a 3xx response with no Location header", () => {
     // NextResponse.next() with status 304 — no Location header
     const res = NextResponse.next({ status: 304 }) as NextResponse;
-    rewriteClerkProxyLocation(res);
-    expect(res.headers.get("location")).toBeNull();
-    expect(res.status).toBe(304);
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("location")).toBeNull();
+    expect(out.status).toBe(304);
+  });
+
+  it("returns a NEW response object (fetch Response headers are immutable)", () => {
+    // clerkFrontendApiProxy() returns a fetch() Response whose headers
+    // are immutable. rewriteClerkProxyLocation must return a NEW Response
+    // with the rewritten header, not try to mutate the original.
+    const res = redirectResponse(
+      "https://litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
+    const originalLocation = res.headers.get("location");
+    const out = rewriteClerkProxyLocation(res);
+
+    // The returned response must have the rewritten Location
+    expect(out.headers.get("location")).toBe(
+      "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
+    // The original response's Location should be unchanged (immutable)
+    // — this proves we created a new response rather than mutating.
+    expect(res.headers.get("location")).toBe(originalLocation);
+    // The returned object should be a different instance
+    expect(out).not.toBe(res);
+  });
+
+  it("preserves other headers (e.g. Access-Control-Allow-Origin) when rewriting", () => {
+    // The rewrite must not drop CORS headers from the Clerk proxy response.
+    const res = redirectResponse(
+      "https://litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
+    res.headers.set("access-control-allow-origin", "*");
+    const out = rewriteClerkProxyLocation(res);
+    expect(out.headers.get("access-control-allow-origin")).toBe("*");
+    expect(out.headers.get("location")).toBe(
+      "https://www.litlabs.net/__clerk/npm/@clerk/clerk-js@6.31.0/dist/clerk.browser.js",
+    );
   });
 });
