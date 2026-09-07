@@ -617,9 +617,11 @@ function redirectNakedToWww(req: NextRequest): NextResponse | null {
 
   // Only redirect auth-related pages; the rest of the site can be
   // canonicalized by Cloudflare/global redirect rules later.
-  if (req.nextUrl.pathname !== "/sign-in" && req.nextUrl.pathname !== "/oauth-consent") {
-    return null;
-  }
+  const isSignInRoute =
+    req.nextUrl.pathname === "/sign-in" ||
+    req.nextUrl.pathname.startsWith("/sign-in/");
+  const isOAuthConsentRoute = req.nextUrl.pathname === "/oauth-consent";
+  if (!isSignInRoute && !isOAuthConsentRoute) return null;
 
   const redirectUrl = new URL(req.nextUrl.pathname + req.nextUrl.search, `https://www.litlabs.net`);
   // Preserve the full query string (e.g. redirect_url) on the canonical host
