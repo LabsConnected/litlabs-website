@@ -18,6 +18,7 @@ const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
   "/sign-up",
+  "/oauth-consent",
   "/privacy",
   "/terms",
   "/cookies",

@@ -151,6 +151,10 @@ export default function RootLayout({
           signUpUrl="/sign-up"
           signInFallbackRedirectUrl="/studio"
           signUpFallbackRedirectUrl="/studio"
+          localization={{
+            signIn: { start: { title: "Sign in to LiTT" } },
+            signUp: { start: { title: "Create your LiTT account" } },
+          }}
           appearance={{
             variables: {
               colorPrimary: "#a970ff",

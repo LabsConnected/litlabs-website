@@ -35,7 +35,7 @@ function SignInContent() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4"
+      className="min-h-dvh flex items-center justify-center px-4 py-8"
       style={{ backgroundColor: "#0f0f14" }}
     >
       <div className="w-full max-w-sm">
@@ -45,7 +45,7 @@ function SignInContent() {
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
           >
-            LiTTree LabStudios
+            LiTT
           </h1>
           <p className="text-xs opacity-70" style={{ color: "#94a3b8" }}>
             Sign in to your AI workspace
@@ -61,6 +61,8 @@ function SignInContent() {
             signUpUrl="/sign-up"
             appearance={{
               elements: {
+                rootBox: { width: "100%" },
+                cardBox: { width: "100%", maxWidth: "100%" },
                 formButtonPrimary: {
                   backgroundColor: "#6366f1",
                   color: "#fff",
@@ -122,7 +124,7 @@ function SignInContent() {
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen" style={{ backgroundColor: "#0f0f14" }} />}>
+    <Suspense fallback={<div className="min-h-dvh" style={{ backgroundColor: "#0f0f14" }} />}>
       <SignInContent />
     </Suspense>
   );
