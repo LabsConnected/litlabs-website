@@ -18,7 +18,20 @@ import { Suspense } from "react";
  */
 function SignInContent() {
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect_url") || "/studio";
+  let redirectUrl = searchParams.get("redirect_url") || "/studio";
+
+  // Clerk Dashboard may still point the OAuth consent URL to the old
+  // Account Portal domain (accounts.litlabs.net). After sign-in on
+  // www.litlabs.net, redirecting to accounts.litlabs.net loses the
+  // session cookie and creates an infinite sign-in loop. Rewrite any
+  // accounts.litlabs.net redirect to www.litlabs.net so the consent
+  // page sees the active session.
+  if (redirectUrl.includes("accounts.litlabs.net")) {
+    redirectUrl = redirectUrl.replace(
+      /https?:\/\/accounts\.litlabs\.net/g,
+      "https://www.litlabs.net",
+    );
+  }
 
   return (
     <div
