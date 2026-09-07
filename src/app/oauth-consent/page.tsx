@@ -2,11 +2,12 @@ import { OAuthConsent, Show } from "@clerk/nextjs";
 import type { Metadata } from "next";
 
 /**
- * Custom OAuth consent page.
+ * Custom OAuth consent page — CANONICAL consent endpoint for LiTT CLI OAuth.
  *
  * Hosts Clerk's prebuilt <OAuthConsent/> component on the application
- * domain (www.litlabs.net) instead of relying on the Account Portal
- * (accounts.litlabs.net) to recognize the user's session.
+ * domain (www.litlabs.net) so the user's session cookie is present.
+ * The old Account Portal domain is retired — the Clerk
+ * Dashboard OAuth client must point its consent URL here.
  *
  * The component reads OAuth parameters (client_id, scope, redirect_uri,
  * state, code_challenge, code_challenge_method) from the current URL's
