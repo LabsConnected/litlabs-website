@@ -22,7 +22,7 @@
  */
 
 import { createCredentialStore } from "./credential-store.js";
-import { openBrowser } from "./browser-launcher.js";
+import { isTermux, openBrowser } from "./browser-launcher.js";
 import { generateCodeChallenge, generateCodeVerifier, generateState } from "./pkce.js";
 import {
   exchangeCodeForTokens,
@@ -65,6 +65,10 @@ function storageError(operation: string, error: unknown): AuthError {
   return new AuthError("storage", `Failed to ${operation}: ${detail}`);
 }
 
+export function defaultCredentialStorageKind(): StorageKind {
+  return isTermux() ? "file" : "keychain";
+}
+
 export class ClerkCliAuth {
   private readonly config: Required<Omit<ClerkCliAuthConfig, "openBrowser" | "storage">> & {
     storage: CredentialStore;
@@ -79,7 +83,7 @@ export class ClerkCliAuth {
     const storage =
       typeof config.storage === "object" && config.storage !== null
         ? config.storage
-        : createCredentialStore((config.storage as StorageKind) ?? "keychain", {
+        : createCredentialStore((config.storage as StorageKind) ?? defaultCredentialStorageKind(), {
             environment,
             keychainService: config.keychainService,
           });
