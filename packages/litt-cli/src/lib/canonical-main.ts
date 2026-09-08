@@ -22,11 +22,15 @@
  * Pure functions — no React, no Ink, no side effects. Testable in node.
  */
 
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { readHeadStateFromGitDir, type GitHeadState } from "./git-state.js";
 
-/** Default canonical main worktree path. */
-export const DEFAULT_CANONICAL_MAIN_PATH = "E:\\LiTT\\Worktrees\\main";
+/** Default canonical main worktree path for the current platform. */
+export const DEFAULT_CANONICAL_MAIN_PATH =
+  process.platform === "win32"
+    ? "E:\\LiTT\\Worktrees\\main"
+    : resolve(homedir(), "litt-canonical");
 
 /** Default expected branch on canonical main. */
 export const DEFAULT_CANONICAL_BRANCH = "main";
@@ -43,8 +47,12 @@ export function getCanonicalBranch(): string {
 
 /** Check if a given path is the canonical main worktree. */
 export function isCanonicalMainPath(cwd: string): boolean {
+  const candidate = resolve(cwd);
   const canonical = getCanonicalMainPath();
-  return resolve(cwd).toLowerCase() === canonical.toLowerCase();
+
+  return process.platform === "win32"
+    ? candidate.toLowerCase() === canonical.toLowerCase()
+    : candidate === canonical;
 }
 
 /** The result of checking canonical main state. */
