@@ -48,6 +48,28 @@ afterEach(() => {
 });
 
 describe("P0-1: Canonical Main Protection", () => {
+  describe("platform default", () => {
+    it("uses the platform canonical-main path when no env override is set", () => {
+      const previous = process.env.LITT_CANONICAL_MAIN;
+      delete process.env.LITT_CANONICAL_MAIN;
+
+      try {
+        const expected =
+          process.platform === "win32"
+            ? path.resolve("E:\\LiTT\\Worktrees\\main")
+            : path.resolve(os.homedir(), "litt-canonical");
+
+        expect(getCanonicalMainPath()).toBe(expected);
+      } finally {
+        if (previous === undefined) {
+          delete process.env.LITT_CANONICAL_MAIN;
+        } else {
+          process.env.LITT_CANONICAL_MAIN = previous;
+        }
+      }
+    });
+  });
+
   describe("isCanonicalMainPath", () => {
     it("returns true for the canonical main path", () => {
       expect(isCanonicalMainPath(canonicalPath)).toBe(true);
