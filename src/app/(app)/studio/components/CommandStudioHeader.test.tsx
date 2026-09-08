@@ -95,6 +95,24 @@ describe("CommandStudioHeader — truthful status", () => {
     mockProviderHealth = {};
   });
 
+  it("keeps branding and advanced tools behind one secondary control", () => {
+    const onOpenTools = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        onOpenToolsAction={onOpenTools}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    expect(screen.getByTestId("studio-brand")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /open advanced tools/i }));
+    expect(onOpenTools).toHaveBeenCalledTimes(1);
+  });
+
   it("reports checking while runtime is loading", () => {
     render(
       <CommandStudioHeader

@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Eye, Loader2, Monitor, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ExternalLink, Eye, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Tablet, Copy, Check, Square, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 type PreviewState = "loading" | "not_prepared" | "starting" | "ready" | "stale" | "offline" | "failed" | "restarting";
 type DeviceMode = "desktop" | "tablet" | "mobile";
+
+export interface PreviewSelection {
+  label: string;
+  selector: string;
+  tagName: string;
+}
 
 const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: string }> = {
   desktop: { w: 0, h: 0, label: "1280 × 720" },
@@ -36,6 +42,45 @@ interface PreviewPayload {
   port?: unknown;
 }
 
+function describePreviewElement(element: HTMLElement): string {
+  const explicitLabel = element.getAttribute("aria-label") || element.getAttribute("data-testid") || element.getAttribute("role");
+  if (explicitLabel) return explicitLabel.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  const semanticLabels: Record<string, string> = {
+    nav: "Navigation",
+    header: "Header",
+    main: "Main content",
+    footer: "Footer",
+    form: "Form",
+    button: "Button",
+    a: "Link",
+    img: "Image",
+    h1: "Heading",
+    h2: "Heading",
+    section: "Section",
+  };
+  if (semanticLabels[element.tagName.toLowerCase()]) return semanticLabels[element.tagName.toLowerCase()];
+  const text = element.textContent?.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 42) : element.tagName.toLowerCase();
+}
+
+function selectorForPreviewElement(element: HTMLElement): string {
+  if (element.id) return `#${element.id}`;
+  const testId = element.getAttribute("data-testid");
+  if (testId) return `[data-testid=\"${testId}\"]`;
+  const parts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current.tagName.toLowerCase() !== "body" && parts.length < 4) {
+    const tag = current.tagName.toLowerCase();
+    const currentTagName = current.tagName;
+    const parent: HTMLElement | null = current.parentElement;
+    const siblings: Element[] = parent ? Array.from(parent.children).filter((child: Element) => child.tagName === currentTagName) : [];
+    const index = siblings.indexOf(current) + 1;
+    parts.unshift(`${tag}${siblings.length > 1 ? `:nth-of-type(${index})` : ""}`);
+    current = parent;
+  }
+  return parts.join(" > ") || element.tagName.toLowerCase();
+}
+
 function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | null): { state: PreviewState; url: string | null; error: string | null } {
   const runtimeStatus = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : "stopped";
   const url = typeof payload.previewUrl === "string" && payload.previewUrl ? payload.previewUrl : null;
@@ -57,6 +102,7 @@ export default function StudioPreviewPanel({
   branch,
   workspaceStatus,
   refreshKey = 0,
+  onSelectionChange,
 }: {
   projectId: string | null;
   projectName: string | null;
@@ -64,6 +110,7 @@ export default function StudioPreviewPanel({
   branch: string | null;
   workspaceStatus: string | null;
   refreshKey?: number;
+  onSelectionChange?: (selection: PreviewSelection | null) => void;
 }) {
   const { getToken } = useClerkAuth();
   const [state, setState] = useState<PreviewState>(projectId ? "loading" : "not_prepared");
@@ -78,6 +125,84 @@ export default function StudioPreviewPanel({
   const [logsOpen, setLogsOpen] = useState(false);
   const [iframeFailed, setIframeFailed] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(true);
+  const [selectedElement, setSelectedElement] = useState<PreviewSelection | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const selectionCleanupRef = useRef<(() => void) | null>(null);
+  const selectedElementRef = useRef<PreviewSelection | null>(null);
+  const selectedNodeRef = useRef<HTMLElement | null>(null);
+  const selectedNodeStyleRef = useRef<{ outline: string; outlineOffset: string; boxShadow: string } | null>(null);
+
+  const clearSelection = useCallback((notify = true) => {
+    if (!selectedNodeRef.current && !selectedElementRef.current) return;
+    if (selectedNodeRef.current && selectedNodeStyleRef.current) {
+      selectedNodeRef.current.style.outline = selectedNodeStyleRef.current.outline;
+      selectedNodeRef.current.style.outlineOffset = selectedNodeStyleRef.current.outlineOffset;
+      selectedNodeRef.current.style.boxShadow = selectedNodeStyleRef.current.boxShadow;
+    }
+    selectedNodeRef.current = null;
+    selectedNodeStyleRef.current = null;
+    selectedElementRef.current = null;
+    setSelectedElement(null);
+    if (notify) onSelectionChange?.(null);
+  }, [onSelectionChange]);
+
+  const attachSelection = useCallback(() => {
+    selectionCleanupRef.current?.();
+    selectionCleanupRef.current = null;
+    if (!selectionMode) return;
+    let documentInFrame: Document | null = null;
+    try {
+      documentInFrame = iframeRef.current?.contentDocument ?? null;
+    } catch {
+      setSelectionError("Element selection is unavailable for this preview.");
+      return;
+    }
+    if (!documentInFrame) {
+      setSelectionError("Element selection is unavailable for this preview.");
+      return;
+    }
+    setSelectionError(null);
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const element = (target.closest("nav,header,main,section,footer,form,button,a,[role]") ?? target) as HTMLElement;
+      event.preventDefault();
+      event.stopPropagation();
+      clearSelection(false);
+      selectedNodeRef.current = element;
+      selectedNodeStyleRef.current = {
+        outline: element.style.outline,
+        outlineOffset: element.style.outlineOffset,
+        boxShadow: element.style.boxShadow,
+      };
+      element.style.outline = "2px solid #9b4dff";
+      element.style.outlineOffset = "2px";
+      element.style.boxShadow = "0 0 0 4px rgba(155,77,255,0.16)";
+      const nextSelection: PreviewSelection = {
+        label: describePreviewElement(element),
+        selector: selectorForPreviewElement(element),
+        tagName: element.tagName.toLowerCase(),
+      };
+      selectedElementRef.current = nextSelection;
+      setSelectedElement(nextSelection);
+      onSelectionChange?.(nextSelection);
+    };
+    documentInFrame.addEventListener("click", handleClick, true);
+    selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
+  }, [clearSelection, onSelectionChange, selectionMode]);
+
+  const handleIframeLoad = useCallback(() => {
+    setIframeFailed(false);
+    clearSelection(false);
+    window.setTimeout(attachSelection, 0);
+  }, [attachSelection, clearSelection]);
+
+  useEffect(() => () => {
+    selectionCleanupRef.current?.();
+    clearSelection(false);
+  }, [clearSelection]);
 
   const authHeaders = useCallback(async (): Promise<HeadersInit> => {
     const token = await getToken?.();
@@ -89,6 +214,7 @@ export default function StudioPreviewPanel({
       setState("not_prepared");
       setPreviewUrl(null);
       setError(null);
+      clearSelection(false);
       return;
     }
     if (stale) setState((current) => current === "ready" ? "stale" : current);
@@ -121,7 +247,7 @@ export default function StudioPreviewPanel({
       setState("offline");
       setError(loadError instanceof Error ? loadError.message : "Preview status is unavailable");
     }
-  }, [authHeaders, projectId, workspaceStatus]);
+  }, [authHeaders, clearSelection, projectId, workspaceStatus]);
 
   useEffect(() => {
     void loadStatus();
@@ -277,7 +403,7 @@ export default function StudioPreviewPanel({
                 key={mode}
                 type="button"
                 onClick={() => setDeviceMode(mode)}
-                className="grid h-6 w-6 place-items-center rounded-md transition"
+                className="grid min-h-9 min-w-9 place-items-center rounded-md transition"
                 style={{
                   backgroundColor: deviceMode === mode ? "rgba(114,242,56,0.12)" : "transparent",
                   color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-muted)",
@@ -291,6 +417,29 @@ export default function StudioPreviewPanel({
             ))}
           </div>
         )}
+        {/* Lightweight visual selection — the preview remains the source of truth. */}
+        {isLive && (
+          <button
+            type="button"
+            onClick={() => {
+              setSelectionMode((enabled) => {
+                if (enabled) clearSelection();
+                return !enabled;
+              });
+            }}
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            style={{
+              backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
+              color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
+            }}
+            aria-label={selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
+            aria-pressed={selectionMode}
+            title={selectionMode ? "Element selection on" : "Select an element in the preview"}
+            data-testid="preview-select"
+          >
+            <MousePointer2 size={13} className="pointer-events-none" />
+          </button>
+        )}
         {/* Refresh — hard reload iframe + re-check status */}
         <button
           type="button"
@@ -301,19 +450,19 @@ export default function StudioPreviewPanel({
           title="Refresh preview (Ctrl+R)"
           data-testid="preview-refresh"
         >
-          <RefreshCw size={12} className={state === "stale" ? "animate-spin" : ""} />
+          <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
         {/* Restart dev server */}
         {(isLive || state === "failed") && (
           <button
             type="button"
             onClick={() => void preparePreview()}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Restart preview"
             title="Restart preview runtime"
             data-testid="preview-restart"
           >
-            <RotateCcw size={12} />
+            <RotateCcw size={12} className="pointer-events-none" />
           </button>
         )}
         {/* Stop dev server */}
@@ -321,12 +470,12 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void stopPreview()}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Stop preview"
             title="Stop preview runtime"
             data-testid="preview-stop"
           >
-            <Square size={12} />
+            <Square size={12} className="pointer-events-none" />
           </button>
         )}
         {/* Copy URL */}
@@ -334,12 +483,12 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label="Copy preview URL"
             title="Copy preview URL"
             data-testid="preview-copy-url"
           >
-            {urlCopied ? <Check size={12} style={{ color: "#48EE38" }} /> : <Copy size={12} />}
+            {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
         {/* Maximize */}
@@ -347,7 +496,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => setMaximized((v) => !v)}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
             aria-label={maximized ? "Exit fullscreen" : "Maximize preview"}
             title={maximized ? "Exit fullscreen" : "Maximize"}
             data-testid="preview-maximize"
@@ -356,6 +505,34 @@ export default function StudioPreviewPanel({
           </button>
         )}
       </div>
+      {selectedElement && (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(155,77,255,0.06)" }}
+          role="status"
+          aria-live="polite"
+          data-testid="preview-selection"
+        >
+          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
+            Selected: <strong style={{ color: "#c4b5fd" }}>{selectedElement.label}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => clearSelection()}
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+            aria-label="Clear selected preview element"
+            title="Clear selection"
+          >
+            <X size={12} className="pointer-events-none" />
+          </button>
+        </div>
+      )}
+      {selectionError && selectionMode && (
+        <div className="shrink-0 border-b px-2.5 py-1 text-[9px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }} role="status">
+          {selectionError}
+        </div>
+      )}
 
       {/* Preview surface */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
@@ -363,6 +540,7 @@ export default function StudioPreviewPanel({
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
             <iframe
               key={frameKey}
+              ref={iframeRef}
               title={`${projectName ?? "Project"} preview`}
               src={displayUrl}
               className="border-0 bg-white transition-all duration-200"
@@ -374,7 +552,7 @@ export default function StudioPreviewPanel({
                 boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
               }}
               sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
-              onLoad={() => setIframeFailed(false)}
+              onLoad={handleIframeLoad}
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
             />
@@ -405,7 +583,7 @@ export default function StudioPreviewPanel({
                 style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
                 data-testid="preview-prepare"
               >
-                <RotateCcw size={11} />
+                <RotateCcw size={11} className="pointer-events-none" />
                 {state === "failed" ? "Restart preview" : "Prepare preview"}
               </button>
             )}
@@ -447,7 +625,7 @@ export default function StudioPreviewPanel({
               aria-label="Open preview in new tab"
               data-testid="preview-open-external"
             >
-              <ExternalLink size={10} />
+              <ExternalLink size={10} className="pointer-events-none" />
               Open
             </button>
           )}

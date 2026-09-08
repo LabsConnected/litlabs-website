@@ -61,6 +61,8 @@ export default function CommandStudioHeader({
   activityVisible = false,
   onOpenTerminalAction,
   onOpenInspectorAction,
+  onOpenToolsAction,
+  toolsVisible = false,
   onProjectSelectAction,
   onClearChatAction,
   onNewChatAction,
@@ -89,6 +91,8 @@ export default function CommandStudioHeader({
   activityVisible?: boolean;
   onOpenTerminalAction?: () => void;
   onOpenInspectorAction?: () => void;
+  onOpenToolsAction?: () => void;
+  toolsVisible?: boolean;
   onProjectSelectAction?: (projectId: string) => void;
   onClearChatAction?: () => void;
   onNewChatAction?: () => void;
@@ -202,8 +206,16 @@ export default function CommandStudioHeader({
       }}
       data-testid="studio-header"
     >
-      {/* Brand logo removed — AppShell sidebar already establishes brand identity.
-          Studio header focuses on project, branch, workspace status, and actions. */}
+      <div className="flex shrink-0 items-center gap-2 pr-1 sm:pr-2" data-testid="studio-brand">
+        <div
+          className="grid h-7 w-7 place-items-center rounded-lg"
+          style={{ background: "linear-gradient(135deg, rgba(155,77,255,0.3), rgba(114,242,56,0.12))", border: "1px solid rgba(155,77,255,0.35)" }}
+          aria-hidden="true"
+        >
+          <span className="text-[11px] font-black" style={{ color: "var(--litt-primary)" }}>L</span>
+        </div>
+        <span className="hidden text-[12px] font-black tracking-tight text-white sm:inline">LiTT <span style={{ color: "var(--litt-primary)" }}>Studio</span></span>
+      </div>
 
       <StudioProjectPicker
         projectId={capabilities.projectId}
@@ -321,7 +333,7 @@ export default function CommandStudioHeader({
       {/* Notifications — wired to /api/notifications/count */}
       <Link
         href="/dashboard"
-        className="relative grid h-8 w-8 sm:h-7 sm:w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        className="relative grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-secondary)" }}
         aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
         title="Notifications"
@@ -358,13 +370,20 @@ export default function CommandStudioHeader({
 
       <button
         type="button"
-        onClick={onOpenInspectorAction}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md border transition-all hover:bg-white/5 active:scale-95"
-        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
-        title="Workspace inspector"
-        aria-label="Open workspace inspector"
+        onClick={onOpenToolsAction ?? onOpenInspectorAction}
+        className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[10px] font-bold transition-all hover:bg-white/5 active:scale-95"
+        style={{
+          borderColor: toolsVisible ? "rgba(155,77,255,0.45)" : "var(--studio-border)",
+          color: toolsVisible ? "#c4b5fd" : "var(--text-secondary)",
+          backgroundColor: toolsVisible ? "rgba(155,77,255,0.12)" : "var(--studio-surface)",
+        }}
+        title="Open advanced tools"
+        aria-label={toolsVisible ? "Close advanced tools" : "Open advanced tools"}
+        aria-pressed={toolsVisible}
+        data-testid="studio-tools-toggle"
       >
         <PanelRightOpen size={13} className="pointer-events-none" />
+        <span className="hidden lg:inline">Tools</span>
       </button>
 
       {/* Activity — opens LiTT -> Live. This is an OPEN action: clicking
@@ -403,7 +422,7 @@ export default function CommandStudioHeader({
         ref={overflowTriggerRef}
         type="button"
         onClick={() => setOverflowOpen((v) => !v)}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
+        className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md transition-all hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
         aria-label="More actions"
         aria-expanded={Boolean(overflowOpen)}

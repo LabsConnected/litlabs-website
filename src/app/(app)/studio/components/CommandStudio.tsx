@@ -46,6 +46,7 @@ import ResizeHandle from "./shell/ResizeHandle";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { useExecutionStore } from "../stores/useExecutionStore";
 import { StudioActivityPanel, StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
+import type { PreviewSelection } from "./StudioPreviewPanel";
 import StudioProjectFiles from "./StudioProjectFiles";
 import { MediaUtilityDock } from "@/components/media/MediaUtilityDock";
 import {
@@ -212,6 +213,12 @@ function CommandStudioContent() {
   const [littMode, setLittMode] = useState<LiTTMode>(initial.littMode ?? "auto");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(() => (
+    initial.destination !== "studio"
+      || (initial.mode !== "work" && initial.mode !== "preview")
+  ));
+  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
+  const [completion, setCompletion] = useState<{ filesChanged: number; previewUpdated: boolean; repaired: boolean } | null>(null);
 
   // Safety: clear any stuck body styles from resize handles that didn't
   // clean up properly. This is the #1 cause of "can't type in text fields"
@@ -436,6 +443,7 @@ function CommandStudioContent() {
   // nothing visible at all on mobile (the desktop rail isn't rendered
   // there, so toggling littCollapsed had no visible effect).
   const handleOpenActivity = useCallback(() => {
+    setAdvancedToolsOpen(true);
     setLittActiveTab("live");
     if (isMobileLitt) {
       setMobileLittOpen(true);
@@ -470,11 +478,25 @@ function CommandStudioContent() {
   // ensure open), never a toggle-closed. Only the drawer's own close
   // button and the Files workspace-tab button (which has explicit
   // toggle semantics) close the drawer.
+  const handleOpenAdvancedTools = useCallback(() => {
+    setAdvancedToolsOpen(true);
+    setContextDrawerTab("inspector");
+    setContextDrawerOpen(true);
+  }, []);
+  const handleCloseAdvancedTools = useCallback(() => {
+    setAdvancedToolsOpen(false);
+    setContextDrawerOpen(false);
+    setDestination("studio");
+    setStudioMode("preview");
+    setWorkSurface("conversation");
+  }, []);
   const handleOpenContextFiles = useCallback(() => {
+    setAdvancedToolsOpen(true);
     setContextDrawerTab("files");
     setContextDrawerOpen(true);
   }, []);
   const handleOpenContextInspector = useCallback(() => {
+    setAdvancedToolsOpen(true);
     setContextDrawerTab("inspector");
     setContextDrawerOpen(true);
   }, []);
@@ -545,6 +567,7 @@ function CommandStudioContent() {
   // handleRouteTool must be declared before useStudioConversation so the
   // conversation controller can reference it without a TDZ error.
   const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
+    setAdvancedToolsOpen(true);
     if (tool === "camera") {
       setCameraDock((v) => ({ ...v, open: true }));
       return;
@@ -594,6 +617,7 @@ function CommandStudioContent() {
     },
     serverProjectId: capabilities.projectId,
     cameraState: { active: cameraDock.open, status: cameraStatus },
+    previewSelection,
   });
 
   const launchpadState = useMemo(
@@ -710,6 +734,7 @@ function CommandStudioContent() {
   useEffect(() => {
     const isBusy = conversation.busy || creatingProject;
     if (isBusy && !prevBusyRef.current) {
+      setAdvancedToolsOpen(true);
       setContextDrawerTab("work");
       setContextDrawerOpen(true);
     }
@@ -757,8 +782,23 @@ function CommandStudioContent() {
     // when needed. Do not block first-time users at the composer boundary.
     try {
       const result = await conversation.send(value, attachments);
-      if (result?.accepted && !capabilities.projectId) {
-        await refreshCapabilities();
+      if (result?.accepted) {
+        const execution = useExecutionStore.getState();
+        const filesChanged = execution.changesSummary
+          ? execution.changesSummary.added + execution.changesSummary.modified + execution.changesSummary.deleted
+          : 0;
+        const repaired = execution.events.some((event) => event.type === "repair_attempt");
+        if (filesChanged > 0 && capabilities.projectId) {
+          setWorkspaceRevision((revision) => revision + 1);
+          window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "assistant" } }));
+        }
+        setCompletion({ filesChanged, previewUpdated: Boolean(capabilities.projectId), repaired });
+        setAdvancedToolsOpen(false);
+        setContextDrawerOpen(false);
+        setLittActiveTab("chat");
+        if (!capabilities.projectId) {
+          await refreshCapabilities();
+        }
       }
       return result;
     } catch (err) {
@@ -871,6 +911,7 @@ function CommandStudioContent() {
     setStudioMode("preview");
   }, []);
   const handleOpenTerminal = useCallback(() => {
+    setAdvancedToolsOpen(true);
     setDestination("studio");
     setStudioMode("work");
     setWorkSurface("conversation");
@@ -924,12 +965,22 @@ function CommandStudioContent() {
     }
   }, [capabilities.projectId, handleOpenTerminal, refreshCapabilities]);
 
+  const handleUndoCompletion = useCallback(async () => {
+    await handleRollback();
+    setCompletion(null);
+    if (capabilities.projectId) {
+      setWorkspaceRevision((revision) => revision + 1);
+      window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId: capabilities.projectId, source: "rollback" } }));
+    }
+  }, [capabilities.projectId, handleRollback]);
+
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
     repo: capabilities.repositoryName ?? undefined,
     branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
-  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+    selectedElement: previewSelection?.label,
+  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, previewSelection?.label, searchParams]);
 
   // P0.13: Select a conversation from the empty state's Recent Chats section.
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -1080,6 +1131,11 @@ function CommandStudioContent() {
   const isCode = destination === "studio" && studioMode === "code";
   const isPreview = destination === "studio" && studioMode === "preview";
   const isMedia = destination === "studio" && studioMode === "media";
+  const hasAdvancedSurface = destination !== "studio"
+    || (studioMode !== "work" && studioMode !== "preview")
+    || workSurface === "builder";
+  const showAdvancedWorkspace = advancedToolsOpen && hasAdvancedSurface;
+  const showDefaultChatPreview = !showAdvancedWorkspace;
 
   // Primary workspace tabs — canonical Ultra Vision stages.
   // Plan | Canvas | Code | Preview | Media
@@ -1114,6 +1170,14 @@ function CommandStudioContent() {
         launchpadState={launchpadState}
         displayName={profileDisplayName}
         onFirstMissionAction={handleFirstMissionAction}
+        completion={completion}
+        onDismissCompletion={() => setCompletion(null)}
+        onUndoCompletion={handleUndoCompletion}
+        onContinueCompletion={() => {
+          const textarea = document.querySelector<HTMLTextAreaElement>("[data-testid='studio-command-composer'] textarea");
+          textarea?.focus();
+          setCompletion(null);
+        }}
       />
       {(conversation.requiresReauth || conversation.sendError || projectCreateError) && (
         <div
@@ -1174,6 +1238,7 @@ function CommandStudioContent() {
         onToggleLive={() => setLivePanelOpen((v) => !v)}
         liveActive={livePanelOpen && liveSession.isLive}
         contextLine={contextLine}
+        onClearSelectedElement={() => setPreviewSelection(null)}
         executionMode={executionMode}
         onExecutionModeChange={setExecutionMode}
         littMode={littMode}
@@ -1284,6 +1349,8 @@ function CommandStudioContent() {
           activityVisible={activityVisible}
           onOpenTerminalAction={handleOpenTerminal}
           onOpenInspectorAction={handleOpenContextInspector}
+          onOpenToolsAction={() => advancedToolsOpen ? handleCloseAdvancedTools() : handleOpenAdvancedTools()}
+          toolsVisible={advancedToolsOpen}
           onProjectSelectAction={handleSelectProject}
           onClearChatAction={conversation.clear}
           onNewChatAction={() => { void conversation.createConversation(); }}
@@ -1296,6 +1363,8 @@ function CommandStudioContent() {
           hasConversation={Boolean(conversation.selectedConversationId)}
           runtime={runtimeState}
           runtimeLoading={runtime ? runtime.loading || capabilitiesLoading : true}
+          mutationActionsAllowed={launchpadState.mutationActionsAllowed}
+          projectReady={runtimeState.phase === "ready" && runtimeState.executionAvailable}
           capabilities={capabilities}
           busy={conversation.busy}
           executionMode={executionMode}
@@ -1447,7 +1516,7 @@ function CommandStudioContent() {
                 selecting "Preview" shows the Plan surface (conversation) in
                 the center while the live Preview remains on the right. */}
             <div
-              className="glass-shell flex shrink-0 items-center gap-0.5 border-b px-2"
+              className={`glass-shell ${advancedToolsOpen ? "flex" : "hidden"} shrink-0 items-center gap-0.5 border-b px-2`}
               style={{
                 height: 36,
                 backgroundColor: "rgba(13,9,22,0.85)",
@@ -1569,7 +1638,17 @@ function CommandStudioContent() {
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                 data-testid="studio-center-workspace"
               >
-                {isPlan ? (
+                {showDefaultChatPreview ? (
+                  <StudioPreviewPanel
+                    projectId={capabilities.projectId}
+                    projectName={capabilities.projectName}
+                    repositoryName={capabilities.repositoryName}
+                    branch={capabilities.activeBranch}
+                    workspaceStatus={capabilities.workspaceStatus ?? null}
+                    refreshKey={workspaceRevision}
+                    onSelectionChange={setPreviewSelection}
+                  />
+                ) : isPlan ? (
                   <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                     <StudioPlanSurface
                       capabilities={capabilities}
@@ -1657,7 +1736,7 @@ function CommandStudioContent() {
                   on large displays (>=1280px). Always rendered on desktop split regardless
                   of which workspace tab is selected. Below 1280px, Preview is accessed
                   via the workspace tab to give the center workspace maximum room. */}
-              {viewportTier !== null && isDesktopSplit && (
+              {viewportTier !== null && advancedToolsOpen && isDesktopSplit && (
                 <>
                   <ResizeHandle
                     onDragStart={previewResize.onDragStart}
@@ -1691,7 +1770,8 @@ function CommandStudioContent() {
               )}
             </div>
 
-            {/* Bottom drawer — collapsed by default, sits above composer */}
+            {/* Advanced execution drawer — hidden until Tools is opened. */}
+            {advancedToolsOpen && (
             <StudioDrawer
               open={drawerOpen}
               onToggle={() => setDrawerOpen((v) => !v)}
@@ -1720,6 +1800,7 @@ function CommandStudioContent() {
                 />
               )}
             </StudioDrawer>
+            )}
           </main>
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
@@ -2044,6 +2125,10 @@ function StudioWorkSurface({
   launchpadState,
   displayName,
   onFirstMissionAction,
+  completion,
+  onDismissCompletion,
+  onUndoCompletion,
+  onContinueCompletion,
 }: {
   messages: import("../stores/useStudioAgentStore").ChatMessage[];
   busy: boolean;
@@ -2056,6 +2141,10 @@ function StudioWorkSurface({
   launchpadState: FirstMissionLaunchpadState;
   displayName?: string | null;
   onFirstMissionAction: (action: FirstMissionActionId) => void;
+  completion?: { filesChanged: number; previewUpdated: boolean; repaired: boolean } | null;
+  onDismissCompletion?: () => void;
+  onUndoCompletion?: () => void;
+  onContinueCompletion?: () => void;
 }) {
   // P0.14-15: Only show empty state when messages are truly empty AND
   // conversations have finished loading from the server. During loading,
@@ -2107,6 +2196,10 @@ function StudioWorkSurface({
           activeAgentId={activeAgentId}
           onRouteToolAction={onRouteToolAction}
           onRegenerateAction={onRegenerateAction}
+          completion={completion}
+          onDismissCompletion={onDismissCompletion}
+          onUndoCompletion={onUndoCompletion}
+          onContinueCompletion={onContinueCompletion}
         />
       )}
     </div>

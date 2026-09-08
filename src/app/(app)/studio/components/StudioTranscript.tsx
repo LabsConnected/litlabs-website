@@ -247,12 +247,20 @@ export default function StudioTranscript({
   activeAgentId,
   onRouteToolAction,
   onRegenerateAction,
+  completion,
+  onDismissCompletion,
+  onUndoCompletion,
+  onContinueCompletion,
 }: {
   messages: ChatMessage[];
   busy: boolean;
   activeAgentId: AgentId;
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRegenerateAction?: () => void;
+  completion?: { filesChanged: number; previewUpdated: boolean; repaired: boolean } | null;
+  onDismissCompletion?: () => void;
+  onUndoCompletion?: () => void;
+  onContinueCompletion?: () => void;
 }) {
   const { speakText } = useVoiceSession();
   const ptyUsable = useTerminalStore((s) => s.isUsable());
@@ -583,6 +591,32 @@ export default function StudioTranscript({
                   style={{ backgroundColor: agentColor, animationDelay: `${i * 150}ms` }}
                 />
               ))}
+            </div>
+          </div>
+        )}
+        {completion && !busy && (
+          <div
+            className="mx-auto w-full max-w-[88%] rounded-xl border px-3 py-2.5"
+            style={{ borderColor: "rgba(114,242,56,0.22)", backgroundColor: "rgba(114,242,56,0.05)" }}
+            data-testid="studio-completion"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--litt-primary)" }}>
+              <IconCheck size={13} />
+              Done
+              {completion.repaired && <span className="font-normal" style={{ color: "#e3b341" }}>· recovered automatically</span>}
+            </div>
+            <div className="mt-1 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              {completion.filesChanged > 0 ? `${completion.filesChanged} file${completion.filesChanged === 1 ? "" : "s"} changed` : "No files changed"}
+              {completion.previewUpdated ? " · Preview updated" : " · Ready for the next request"}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" onClick={onDismissCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "var(--text-secondary)" }}>Keep</button>
+              {onUndoCompletion && completion.filesChanged > 0 && (
+                <button type="button" onClick={onUndoCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "#fca5a5" }}>Undo</button>
+              )}
+              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "rgba(155,77,255,0.14)", color: "#c4b5fd" }}>Continue</button>
             </div>
           </div>
         )}
