@@ -196,6 +196,7 @@ export default function CommandStudioHeader({
         : "#e3b341";
 
   return (
+    <>
     <header
       className="glass-shell flex shrink-0 items-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap border-b px-3 sm:px-4"
       style={{
@@ -458,6 +459,28 @@ export default function CommandStudioHeader({
       {/* Clerk UserButton removed — account/profile/settings are now accessed
           through the unified AppShell sidebar (Wallet, Settings, Profile). */}
     </header>
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 border-b px-3 py-1 text-[9px] leading-tight"
+        style={{
+          borderColor: "rgba(155,77,255,0.1)",
+          backgroundColor: "rgba(13,9,22,0.72)",
+          color: "var(--text-muted)",
+        }}
+        data-testid="execution-mode-guide"
+        role="note"
+        aria-label="Execution mode guidance"
+      >
+        <span data-active={executionMode === "plan"} style={{ color: executionMode === "plan" ? "#60a5fa" : "var(--text-muted)" }}>
+          <strong>PLAN:</strong> inspect and explain; do not change files
+        </span>
+        <span data-active={executionMode === "act"} style={{ color: executionMode === "act" ? "var(--spark-primary)" : "var(--text-muted)" }}>
+          <strong>ACT:</strong> make changes; approvals may be required
+        </span>
+        <span data-active={executionMode === "auto"} style={{ color: executionMode === "auto" ? "var(--litt-primary)" : "var(--text-muted)" }}>
+          <strong>AUTO:</strong> LiTT chooses when to plan and when to act
+        </span>
+      </div>
+    </>
   );
 }
 

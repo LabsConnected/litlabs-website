@@ -98,7 +98,7 @@ describe("StudioPreviewPanel", () => {
 
     await waitFor(() => {
       expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ label: "Navigation", tagName: "nav" }));
-      expect(screen.getByTestId("preview-selection")).toHaveTextContent("Selected: Navigation");
+      expect(screen.getByTestId("preview-selection").textContent).toContain("Selected: Navigation");
     });
   });
 });

@@ -113,6 +113,23 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(onOpenTools).toHaveBeenCalledTimes(1);
   });
 
+  it("shows visible guidance for all execution modes", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onOpenActivityAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    const guide = screen.getByTestId("execution-mode-guide");
+    expect(guide.textContent).toContain("PLAN: inspect and explain; do not change files");
+    expect(guide.textContent).toContain("ACT: make changes; approvals may be required");
+    expect(guide.textContent).toContain("AUTO: LiTT chooses when to plan and when to act");
+  });
+
   it("reports checking while runtime is loading", () => {
     render(
       <CommandStudioHeader

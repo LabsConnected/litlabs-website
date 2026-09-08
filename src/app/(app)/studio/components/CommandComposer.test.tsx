@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 
 // Mock the voice session context before importing the composer.
 const startVoice = vi.fn();
@@ -205,6 +206,28 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(input.className).toContain("w-full");
     expect(input.className).toContain("flex-none");
     expect(input.parentElement?.className).toContain("flex-wrap");
+  });
+
+  it("keeps workspace context, input, and send control reachable on narrow sheets", () => {
+    render(
+      <CommandComposer
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        contextLine={{ workspace: "Private LiTT workspace — created when you send", repo: "owner/a-very-long-project-name", branch: "main" }}
+        busy={false}
+      />,
+    );
+
+    const context = screen.getByTestId("studio-workspace-context");
+    const input = screen.getByRole("textbox", { name: /message input/i });
+    input.focus();
+
+    expect(context.textContent).toContain("Private LiTT workspace");
+    expect(context.className).toContain("flex-wrap");
+    expect(context.className).toContain("max-w-full");
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
   });
 
   it("shows the active model picker without an execution-mode dropdown", () => {

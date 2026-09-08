@@ -37,17 +37,20 @@ export default function LiTTMobileSheet({
     <>
       <button
         type="button"
-        className="fixed inset-0 z-[10020] bg-black/55"
+        className="fixed inset-x-0 top-0 z-[10020] bg-black/55"
+        style={{ bottom: "calc(62px + env(safe-area-inset-bottom))" }}
         onClick={onClose}
         aria-label="Close LiTT"
         tabIndex={-1}
       />
       <div
-        className="fixed inset-x-0 bottom-0 z-[10021] flex max-h-[88dvh] flex-col overflow-hidden rounded-t-2xl border-t"
+        className="fixed inset-x-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden rounded-t-2xl border-t"
         style={{
+          bottom: "calc(62px + env(safe-area-inset-bottom))",
+          height: "min(88dvh, calc(100dvh - 62px - env(safe-area-inset-bottom)))",
+          maxHeight: "calc(100dvh - 62px - env(safe-area-inset-bottom))",
           backgroundColor: "var(--studio-surface)",
           borderColor: "var(--studio-border)",
-          paddingBottom: "env(safe-area-inset-bottom)",
         }}
         data-testid="litt-mobile-sheet"
         role="dialog"
@@ -114,9 +117,9 @@ export default function LiTTMobileSheet({
           </button>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden"
+            className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
             style={{
               visibility: activeTab === "chat" ? "visible" : "hidden",
               pointerEvents: activeTab === "chat" ? "auto" : "none",
@@ -127,7 +130,7 @@ export default function LiTTMobileSheet({
             {chatContent}
           </div>
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden"
+            className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
             style={{
               visibility: activeTab === "live" ? "visible" : "hidden",
               pointerEvents: activeTab === "live" ? "auto" : "none",

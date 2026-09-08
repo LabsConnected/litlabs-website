@@ -976,11 +976,12 @@ function CommandStudioContent() {
 
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
+    workspace: capabilities.projectName ?? "Private LiTT workspace — created when you send",
     repo: capabilities.repositoryName ?? undefined,
     branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
     selectedElement: previewSelection?.label,
-  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, previewSelection?.label, searchParams]);
+  }), [capabilities.activeBranch, capabilities.projectName, capabilities.repositoryName, capabilities.writeAccess, previewSelection?.label, searchParams]);
 
   // P0.13: Select a conversation from the empty state's Recent Chats section.
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -1924,7 +1925,7 @@ function CommandStudioContent() {
               color: "var(--litt-primary)",
               backdropFilter: "blur(12px)",
             }}
-            aria-label="Open LiTT"
+            aria-label="Ask LiTT to build"
             data-testid="litt-mobile-trigger"
           >
             <span
@@ -1936,7 +1937,7 @@ function CommandStudioContent() {
             >
               L
             </span>
-            LiTT
+            Ask LiTT to build
           </button>
         )}
         {isMobileLitt && mobileLittOpen && (
@@ -1968,6 +1969,7 @@ function CommandStudioContent() {
               Canvas
             </span>
             <button
+              type="button"
               onClick={() => setCanvasOpen(false)}
               className="grid h-7 w-7 place-items-center rounded-lg hover:bg-white/8"
               style={{ color: "var(--text-muted)" }}
@@ -2152,7 +2154,7 @@ function StudioWorkSurface({
   const isEmpty = messages.length === 0 && !loading;
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       style={{
         background: "linear-gradient(180deg, var(--studio-surface) 0%, rgba(13,9,22,0.96) 100%)",
       }}
