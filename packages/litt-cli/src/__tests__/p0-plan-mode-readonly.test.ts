@@ -14,51 +14,57 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { guardPlanModeMutation } from "../lib/canonical-main.js";
+import { guardPlanModeMutation, getCanonicalMainPath } from "../lib/canonical-main.js";
+
+// Use the platform's actual canonical main path rather than a hardcoded
+// Windows path, so these tests exercise the real canonical-main match on
+// every platform (see p0-canonical-main.test.ts for the platform-default
+// contract itself).
+const CANONICAL_MAIN = getCanonicalMainPath();
 
 describe("P0-6: PLAN Mode Read-Only Enforcement", () => {
   describe("guardPlanModeMutation — canonical main", () => {
     it("denies write in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "write");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "write");
       expect(guard.allowed).toBe(false);
       expect(guard.reason).toContain("PLAN mode");
       expect(guard.reason).toContain("write");
     });
 
     it("denies delete in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "delete");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "delete");
       expect(guard.allowed).toBe(false);
     });
 
     it("denies branch-switch in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "branch-switch");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "branch-switch");
       expect(guard.allowed).toBe(false);
     });
 
     it("denies commit in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "commit");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "commit");
       expect(guard.allowed).toBe(false);
     });
 
     it("denies push in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "push");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "push");
       expect(guard.allowed).toBe(false);
     });
 
     it("denies deploy in PLAN mode on canonical main", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "deploy");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "deploy");
       expect(guard.allowed).toBe(false);
     });
   });
 
   describe("guardPlanModeMutation — ACT mode allows mutations", () => {
     it("allows write in ACT mode", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "act", "write");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "act", "write");
       expect(guard.allowed).toBe(true);
     });
 
     it("allows commit in ACT mode", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "act", "commit");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "act", "commit");
       expect(guard.allowed).toBe(true);
     });
   });
@@ -72,7 +78,7 @@ describe("P0-6: PLAN Mode Read-Only Enforcement", () => {
     it("PLAN mode does not block read operations (no guard needed)", () => {
       // The guard only blocks mutations. Read operations are not mutations.
       // This test documents that the guard is a no-op for non-mutation operations.
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "write");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "write");
       // The guard blocks "write" — but "read" is not an operation the guard handles.
       // Read operations pass through the execution gateway's risk classification
       // as non-mutating and are allowed in all modes.
@@ -83,17 +89,17 @@ describe("P0-6: PLAN Mode Read-Only Enforcement", () => {
 
   describe("PLAN mode mutation denial reason is clear", () => {
     it("includes PLAN mode in the reason", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "commit");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "commit");
       expect(guard.reason).toContain("PLAN mode");
     });
 
     it("includes the operation type in the reason", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "push");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "push");
       expect(guard.reason).toContain("push");
     });
 
     it("includes read-only in the reason", () => {
-      const guard = guardPlanModeMutation("E:\\LiTT\\Worktrees\\main", "plan", "deploy");
+      const guard = guardPlanModeMutation(CANONICAL_MAIN, "plan", "deploy");
       expect(guard.reason).toContain("read-only");
     });
   });
