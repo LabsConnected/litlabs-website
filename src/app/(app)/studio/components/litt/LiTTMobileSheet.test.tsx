@@ -38,6 +38,30 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
   });
 
+  it("keeps the sheet above the mobile nav with a bounded viewport height", () => {
+    renderSheet({
+      chatContent: (
+        <div data-testid="chat-content-with-composer">
+          <textarea aria-label="Message input" />
+          <button type="button">Send message</button>
+        </div>
+      ),
+    });
+
+    const sheet = screen.getByTestId("litt-mobile-sheet");
+    const chatPanel = screen.getByTestId("litt-mobile-chat-panel");
+    const input = screen.getByRole("textbox", { name: /message input/i });
+    input.focus();
+
+    expect(sheet).toHaveStyle({
+      bottom: "calc(62px + env(safe-area-inset-bottom))",
+      height: "min(88dvh, calc(100dvh - 62px - env(safe-area-inset-bottom)))",
+    });
+    expect(chatPanel.className).toContain("min-w-0");
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByRole("button", { name: /send message/i })).toBeVisible();
+  });
+
   it("clicking close calls onClose", () => {
     const { onClose } = renderSheet();
     fireEvent.click(screen.getByTestId("litt-mobile-sheet-close"));

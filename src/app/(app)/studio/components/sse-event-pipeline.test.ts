@@ -210,6 +210,14 @@ describe("SSE event pipeline — full LiTT task simulation", () => {
     expect(state.phase).toBe("done");
   });
 
+  it("counts workspace file mutations for completion feedback", () => {
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.write" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.write", success: true, summary: "Updated hero.tsx" });
+    feedSSEEventToExecutionStore({ type: "tool_execution", toolId: "files.read", success: true, summary: "Read package.json" });
+
+    expect(useExecutionStore.getState().changesSummary).toEqual({ added: 0, modified: 1, deleted: 0 });
+  });
+
   it("simulates: model failure → fallback → recovery", () => {
     const feed = feedSSEEventToExecutionStore;
 

@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import StudioPreviewPanel from "./StudioPreviewPanel";
 
+const { mockGetToken } = vi.hoisted(() => ({ mockGetToken: vi.fn().mockResolvedValue("test-token") }));
+
 vi.mock("@/hooks/useClerkAuth", () => ({
-  useClerkAuth: () => ({ getToken: vi.fn().mockResolvedValue("test-token") }),
+  useClerkAuth: () => ({ getToken: mockGetToken }),
 }));
 
 describe("StudioPreviewPanel", () => {
@@ -74,5 +77,28 @@ describe("StudioPreviewPanel", () => {
 
     await screen.findByText("Preview not started");
     expect(screen.queryByTestId("preview-stop")).toBeNull();
+  });
+
+  it("captures a preview element as context for the next request", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ runtimeStatus: "ready", previewUrl: "/api/studio-projects/project-1/preview/proxy", runtimeError: null }), { status: 200 }));
+    const onSelectionChange = vi.fn();
+    render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" onSelectionChange={onSelectionChange} />);
+
+    const iframe = (await screen.findByTitle("Demo preview")) as HTMLIFrameElement;
+    const frameDocument = document;
+    Object.defineProperty(iframe, "contentDocument", { configurable: true, value: frameDocument });
+    const nav = frameDocument.createElement("nav");
+    nav.setAttribute("aria-label", "Navigation");
+    frameDocument.body.appendChild(nav);
+
+    fireEvent.load(iframe);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(nav);
+    nav.remove();
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ label: "Navigation", tagName: "nav" }));
+      expect(screen.getByTestId("preview-selection").textContent).toContain("Selected: Navigation");
+    });
   });
 });

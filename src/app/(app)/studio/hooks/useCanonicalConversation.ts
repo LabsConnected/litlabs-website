@@ -118,6 +118,7 @@ export function useCanonicalConversation({
   onRunHealthChecks,
   serverProjectId,
   cameraState,
+  previewSelection,
 }: {
   onRouteToolAction?: (tool: StudioTool, command?: string) => void;
   onRouteInspectorAction?: (tab: InspectorTab) => void;
@@ -126,6 +127,8 @@ export function useCanonicalConversation({
   serverProjectId?: string | null;
   /** Camera dock state — passed to the LLM so it knows camera is available */
   cameraState?: { active: boolean; status: string };
+  /** Element selected in the live preview, used as context for the next request. */
+  previewSelection?: { label: string; selector: string; tagName: string } | null;
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendErrorState] = useState<string | null>(null);
@@ -178,6 +181,8 @@ export function useCanonicalConversation({
   const isSyncingFromUrl = useRef(false);
   const activeAgentIdRef = useRef(activeAgentId);
   useEffect(() => { activeAgentIdRef.current = activeAgentId; }, [activeAgentId]);
+  const previewSelectionRef = useRef(previewSelection);
+  useEffect(() => { previewSelectionRef.current = previewSelection; }, [previewSelection]);
 
   // Ref to read current searchParams inside loadConversations without
   // depending on it — prevents the loadConversations → syncUrl →
@@ -770,6 +775,7 @@ export function useCanonicalConversation({
             model: selectedModel.model,
             images: attachments,
             runtimeContext,
+            previewSelection: previewSelectionRef.current ?? undefined,
           }),
           signal: controller.signal,
         });

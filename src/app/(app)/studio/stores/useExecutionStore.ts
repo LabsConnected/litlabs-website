@@ -148,6 +148,15 @@ function mapPhase(phase: string, step: number): ExecutionPhase {
 }
 
 /** Generate a human-readable summary for a tool */
+function isMutationTool(toolId: string): boolean {
+  return toolId === "edit_file"
+    || toolId === "files.write"
+    || toolId === "files.create"
+    || toolId === "files.delete"
+    || toolId === "files.rename"
+    || toolId === "workspace.write";
+}
+
 function toolSummary(toolId: string, rawSummary?: string): string {
   if (rawSummary && rawSummary !== toolId) return rawSummary;
   // Friendly defaults
@@ -237,7 +246,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
 
       // Track changes for edit_file
       let changesSummary = state.changesSummary;
-      if (event.type === "tool_result" && event.toolId === "edit_file" && event.success) {
+      if (event.type === "tool_result" && event.toolId && isMutationTool(event.toolId) && event.success) {
         changesSummary = {
           added: (changesSummary?.added ?? 0),
           modified: (changesSummary?.modified ?? 0) + 1,

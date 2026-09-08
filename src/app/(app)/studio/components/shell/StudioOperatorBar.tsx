@@ -103,7 +103,7 @@ export default function StudioOperatorBar({
       {/* File changes (only when real data exists) */}
       {fileCount > 0 && (
         <span className="hidden sm:inline" style={{ color: "var(--text-muted)" }}>
-          · {fileCount} file{fileCount === 1 ? "" : "s"}
+          · Saved · {fileCount} file{fileCount === 1 ? "" : "s"}
         </span>
       )}
 
