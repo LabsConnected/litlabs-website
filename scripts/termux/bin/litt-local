@@ -1,0 +1,93 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+source "$HOME/.config/litt/termux.env"
+
+# Prefer the Git project/worktree from which litt-local was invoked.
+# Explicit LITT_RUN_REPO still wins; canonical LITT_REPO is the fallback.
+CALLER_REPO="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+RUN_REPO="${LITT_RUN_REPO:-${CALLER_REPO:-$LITT_REPO}}"
+
+cd "$RUN_REPO" || {
+  echo "❌ LiTT repository missing: $RUN_REPO"
+  exit 1
+}
+
+BRANCH="$(git branch --show-current)"
+
+# LiTT may be launched from canonical main for local use/testing.
+# Code changes must still be made in a feature branch/worktree.
+if [ "$BRANCH" = "main" ]; then
+  LITT_WORK_MODE="CANONICAL / RUN"
+else
+  LITT_WORK_MODE="FEATURE / DEV"
+fi
+
+if curl --max-time 2 -fsS "$LITT_OLLAMA_LAN/api/tags" >/dev/null 2>&1; then
+  OLLAMA="$LITT_OLLAMA_LAN"
+  CONNECTION="LAN"
+elif curl --max-time 3 -fsS "$LITT_OLLAMA_TAILSCALE/api/tags" >/dev/null 2>&1; then
+  OLLAMA="$LITT_OLLAMA_TAILSCALE"
+  CONNECTION="TAILSCALE"
+else
+  echo "❌ Ollama PC is unreachable."
+  echo
+  echo "LAN:"
+  echo "  $LITT_OLLAMA_LAN"
+  echo
+  echo "Tailscale:"
+  echo "  $LITT_OLLAMA_TAILSCALE"
+  exit 1
+fi
+
+export LITT_LOCAL_MODE=1
+export OLLAMA_HOST_PC="$OLLAMA"
+export OLLAMA_HOST="$OLLAMA"
+
+echo
+echo "◬ LiTT LOCAL"
+echo "────────────────────────────────────────"
+echo "Repo:    $RUN_REPO"
+echo "Branch:  $BRANCH"
+echo "Ollama:  $OLLAMA ($CONNECTION)"
+echo "Model:   $LITT_LOCAL_MODEL"
+echo "Git:     $(git status --porcelain | wc -l | tr -d ' ') changed file(s)"
+echo "────────────────────────────────────────"
+echo
+
+MODEL_LOADED="$(
+  curl --max-time 3 -fsS "$OLLAMA/api/ps" 2>/dev/null |
+    jq -r --arg model "$LITT_LOCAL_MODEL" \
+      '[.models[]? | select(.name == $model or .model == $model)] | length' \
+      2>/dev/null || echo 0
+)"
+
+if [ "$MODEL_LOADED" = "0" ]; then
+  echo "🔥 Warming $LITT_LOCAL_MODEL..."
+
+  curl --max-time 30 -fsS "$OLLAMA/api/chat" \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\":\"$LITT_LOCAL_MODEL\",
+      \"stream\":false,
+      \"keep_alive\":\"30m\",
+      \"options\":{
+        \"num_ctx\":4096,
+        \"num_predict\":1,
+        \"temperature\":0
+      },
+      \"messages\":[
+        {\"role\":\"user\",\"content\":\".\"}
+      ]
+    }" >/dev/null || {
+      echo "⚠️ Model warm-up did not finish, starting LiTT anyway."
+    }
+else
+  echo "✅ $LITT_LOCAL_MODEL already warm"
+fi
+
+echo
+echo "🚀 Starting LiTT..."
+echo
+
+exec pnpm exec tsx packages/litt-cli/src/index.ts "$@"

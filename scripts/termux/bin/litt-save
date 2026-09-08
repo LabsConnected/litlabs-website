@@ -1,0 +1,75 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+source "$HOME/.config/litt/termux.env"
+
+if [ "$#" -lt 1 ]; then
+  echo 'Usage: litt-save "commit message"'
+  exit 1
+fi
+
+MESSAGE="$*"
+
+# Operate on the Git worktree the user is currently inside.
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "❌ Not inside a Git worktree."
+  exit 1
+}
+
+cd "$REPO"
+
+BRANCH="$(git branch --show-current)"
+
+if [ -z "$BRANCH" ]; then
+  echo "❌ Detached HEAD. Refusing to commit."
+  exit 1
+fi
+
+if [ "$BRANCH" = "main" ]; then
+  echo "❌ Direct commits to main are blocked by litt-save."
+  exit 1
+fi
+
+if [ -z "$(git status --porcelain)" ]; then
+  echo "✅ Nothing to save. Git is already clean."
+  echo "Branch: $BRANCH"
+  echo "Repo:   $REPO"
+  exit 0
+fi
+
+echo "===== WORKTREE ====="
+echo "Repo:   $REPO"
+echo "Branch: $BRANCH"
+
+echo
+echo "===== DIFF CHECK ====="
+git diff --check
+
+echo
+echo "===== TYPE CHECK ====="
+pnpm type-check
+
+echo
+echo "===== SAFETY PATCH ====="
+BACKUP="$HOME/litt-before-save-$(date +%Y%m%d-%H%M%S).patch"
+git diff --binary > "$BACKUP"
+echo "Saved: $BACKUP"
+
+echo
+echo "===== CHANGES ====="
+git status --short
+
+echo
+echo "===== COMMIT ====="
+git add -A
+git diff --cached --check
+git commit -m "$MESSAGE"
+
+echo
+echo "===== PUSH ====="
+git push -u origin "$BRANCH"
+
+echo
+echo "✅ SAVED"
+git log -1 --oneline
+git status -sb

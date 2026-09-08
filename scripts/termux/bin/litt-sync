@@ -1,0 +1,54 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "❌ Not inside a Git worktree."
+  exit 1
+}
+
+cd "$REPO"
+
+BRANCH="$(git branch --show-current)"
+
+if [ -z "$BRANCH" ]; then
+  echo "❌ Detached HEAD. Refusing to sync."
+  exit 1
+fi
+
+if [ "$BRANCH" = "main" ]; then
+  echo "❌ main is the canonical reference."
+  echo "Use a feature worktree for development."
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "❌ Working tree is dirty."
+  echo "Save or stash your work before syncing."
+  git status --short
+  exit 1
+fi
+
+echo "===== WORKTREE ====="
+echo "Repo:   $REPO"
+echo "Branch: $BRANCH"
+
+echo
+echo "===== FETCH ====="
+git fetch origin --prune
+
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  echo
+  echo "===== UPDATE CURRENT BRANCH ====="
+  git pull --ff-only origin "$BRANCH"
+else
+  echo
+  echo "ℹ️ No remote branch yet: origin/$BRANCH"
+  echo "Nothing to pull."
+fi
+
+echo
+echo "===== STATUS ====="
+git status -sb
+
+echo
+echo "✅ Branch synchronized."

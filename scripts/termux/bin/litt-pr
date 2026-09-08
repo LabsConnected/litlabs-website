@@ -1,0 +1,61 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "❌ Not inside a Git worktree."
+  exit 1
+}
+
+cd "$REPO"
+
+BRANCH="$(git branch --show-current)"
+
+if [ -z "$BRANCH" ]; then
+  echo "❌ Detached HEAD. Refusing to create PR."
+  exit 1
+fi
+
+if [ "$BRANCH" = "main" ]; then
+  echo "❌ Cannot create a PR from canonical main."
+  exit 1
+fi
+
+echo "===== WORKTREE ====="
+echo "Repo:   $REPO"
+echo "Branch: $BRANCH"
+
+echo
+echo "===== PUSH ====="
+git push -u origin "$BRANCH"
+
+REPO_SLUG="$(
+  gh repo view --json nameWithOwner --jq '.nameWithOwner'
+)"
+
+EXISTING="$(
+  gh pr list \
+    --repo "$REPO_SLUG" \
+    --head "$BRANCH" \
+    --state open \
+    --json url \
+    --jq '.[0].url // empty'
+)"
+
+if [ -n "$EXISTING" ]; then
+  echo
+  echo "✅ PR already exists:"
+  echo "$EXISTING"
+  exit 0
+fi
+
+echo
+echo "===== CREATE PR ====="
+
+gh pr create \
+  --repo "$REPO_SLUG" \
+  --base main \
+  --head "$BRANCH" \
+  --fill
+
+echo
+echo "✅ Pull request created."
