@@ -9,7 +9,7 @@
 providers = []
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake", "bash", "git", "curl"]
+nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake", "bash", "git", "curl"]
 aptPkgs = ["python3", "make", "g++", "bash", "git", "curl"]
 
 [phases.install]
