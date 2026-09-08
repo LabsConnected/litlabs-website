@@ -926,10 +926,11 @@ function CommandStudioContent() {
 
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
+    workspace: capabilities.projectName ?? "Private LiTT workspace — created when you send",
     repo: capabilities.repositoryName ?? undefined,
     branch: capabilities.activeBranch ?? (typeof window !== "undefined" ? (searchParams.get("branch") ?? undefined) : undefined),
     permissionMode: capabilities.writeAccess ? "Writes allowed" : "Writes require approval",
-  }), [capabilities.activeBranch, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
+  }), [capabilities.activeBranch, capabilities.projectName, capabilities.repositoryName, capabilities.writeAccess, searchParams]);
 
   // P0.13: Select a conversation from the empty state's Recent Chats section.
   const handleSelectConversation = useCallback((conversationId: string) => {
@@ -1843,7 +1844,7 @@ function CommandStudioContent() {
               color: "var(--litt-primary)",
               backdropFilter: "blur(12px)",
             }}
-            aria-label="Open LiTT"
+            aria-label="Ask LiTT to build"
             data-testid="litt-mobile-trigger"
           >
             <span
@@ -1855,7 +1856,7 @@ function CommandStudioContent() {
             >
               L
             </span>
-            LiTT
+            Ask LiTT to build
           </button>
         )}
         {isMobileLitt && mobileLittOpen && (
